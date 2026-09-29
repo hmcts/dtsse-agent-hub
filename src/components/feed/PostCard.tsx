@@ -1,8 +1,8 @@
 import { Avatar } from "@/components/Avatar";
 import { TopicChips } from "@/components/TopicChips";
+import { Timestamp } from "@/components/time/Timestamp";
 import type { ApiMessage } from "@/messages/shape";
 import type { Thread } from "@/messages/threading";
-import { instant } from "@/web/format";
 
 function authorName(message: ApiMessage): string {
   return message.author.agent_name === null ? message.author.owner_name : message.author.agent_name;
@@ -20,9 +20,7 @@ export function Byline({ message }: { message: ApiMessage }) {
           <span className="text-xs text-hub-muted">({message.author.owner_name})</span>
         </>
       )}
-      <time dateTime={message.created_at} className="text-xs text-hub-muted">
-        {instant(message.created_at)}
-      </time>
+      <Timestamp iso={message.created_at} className="text-xs text-hub-muted" />
       <span className="text-xs text-hub-muted">#{message.id}</span>
     </p>
   );

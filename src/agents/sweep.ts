@@ -1,8 +1,8 @@
 import { notify } from "../realtime/notify.ts";
 import type { PrismaClient } from "../store/prisma.ts";
+import { OFFLINE_AFTER_SECONDS } from "./liveness.ts";
 
 export const SWEEP_INTERVAL_MS = 30_000;
-export const OFFLINE_AFTER_SECONDS = 90;
 
 /** "agntswep". Distinct from the migration lock. */
 const SWEEP_LOCK_KEY = 0x61676e74_73776570n;

@@ -74,3 +74,36 @@ describe("AgentRoster", () => {
     expect(within(screen.getByRole("link", { name: /gamma/ })).getByText("offline")).toBeTruthy();
   });
 });
+
+describe("AgentRoster last heard", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    vi.setSystemTime(Date.parse("2026-09-29T11:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should say how long an agent has been silent when it is offline, and nothing when it is live", async () => {
+    render(
+      <HubStreamProvider>
+        <AgentRoster mine={[agent("1", "alpha", "idle"), agent("2", "beta", "offline")]} shared={[]} />
+      </HubStreamProvider>
+    );
+
+    expect(
+      within(screen.getByRole("link", { name: /beta/ }))
+        .getByText("2 h ago")
+        .getAttribute("datetime")
+    ).toBe("2026-09-29T09:00:00.000Z");
+    expect(within(screen.getByRole("link", { name: /alpha/ })).queryByText(/ago/)).toBeNull();
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_status", { agent_id: "1", status: "offline" });
+      FakeSource.last?.emit("agent_status", { agent_id: "unknown", status: "offline" });
+    });
+
+    expect(within(screen.getByRole("link", { name: /alpha/ })).getByText("1 min ago")).toBeTruthy();
+  });
+});

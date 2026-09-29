@@ -5,9 +5,9 @@ import { DevBadge } from "@/components/DevBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { PaneBody, PaneHeader } from "@/components/Pane";
 import { Section } from "@/components/Section";
+import { Timestamp } from "@/components/time/Timestamp";
 import { requireViewer } from "@/viewer/current";
 import { access } from "@/web/data";
-import { instant } from "@/web/format";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +67,9 @@ export default async function AccessPage() {
                 <li key={grant.person.oid} className="flex flex-wrap items-center gap-3 py-2 text-sm">
                   <Person person={grant.person} />
                   <span className="rounded-md border border-hub-line px-1 text-xs uppercase text-hub-text">{grant.level}</span>
-                  <span className="text-xs text-hub-muted">since {instant(grant.createdAt)}</span>
+                  <span className="text-xs text-hub-muted">
+                    since <Timestamp iso={grant.createdAt} />
+                  </span>
                   <ActionForm action={revokeAccess} label={`Revoke ${grant.person.name}`} className="ml-auto">
                     <input type="hidden" name="grantee" value={grant.person.oid} />
                     <button type="submit" className="text-xs text-red-300 hover:text-red-200">
