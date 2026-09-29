@@ -1,4 +1,4 @@
-import type { Match } from "@/messages/feed";
+import type { Match, PostScope } from "@/messages/feed";
 import { sessionEnded } from "./session.ts";
 
 /**
@@ -23,14 +23,16 @@ export interface HubHandlers {
 }
 
 export interface StreamWatch {
-  topics: readonly string[];
+  topics: PostScope;
   match: Match;
   agent: string | null;
 }
 
 export function streamUrl(watch: StreamWatch): string {
   const query = new URLSearchParams();
-  if (watch.topics.length > 0) {
+  if (watch.topics === "everything") {
+    query.set("everything", "1");
+  } else if (watch.topics.length > 0) {
     query.set("topics", watch.topics.join(","));
     query.set("mode", watch.match);
   }

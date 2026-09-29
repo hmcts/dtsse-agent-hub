@@ -57,6 +57,10 @@ describe("feedUrl", () => {
   it("should ask for the page before an id on the view's topics", () => {
     expect(feedUrl(["a", "b"], "all", "10")).toBe("/api/ui/feed?topics=a%2Cb&mode=all&before=10");
   });
+
+  it("should ask for the page before an id of every post when the view is over everything", () => {
+    expect(feedUrl("everything", "any", "10")).toBe("/api/ui/feed?everything=1&before=10");
+  });
 });
 
 describe("ChannelView", () => {
@@ -108,6 +112,31 @@ describe("ChannelView", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toContain("could not be loaded");
+  });
+
+  it("should watch every post, load older ones and offer no composer when the view is over everything", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ messages: [post("3", { topics: ["b"] })], olderBefore: null })));
+    vi.stubGlobal("fetch", fetch);
+    render(
+      <HubStreamProvider>
+        <ChannelView topics="everything" match="any" initial={{ messages: [post("5")], olderBefore: "5" }} post={vi.fn()} />
+      </HubStreamProvider>
+    );
+
+    expect(FakeSource.last?.url).toBe("/api/ui/stream?everything=1");
+    expect(screen.queryByPlaceholderText("Write a post")).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Load older posts" }));
+    });
+
+    expect(fetch).toHaveBeenCalledWith("/api/ui/feed?everything=1&before=5", expect.anything());
+    expect(screen.getByText("post 3")).toBeTruthy();
+  });
+
+  it("should say nothing is posted anywhere yet when the view over everything is empty", () => {
+    render(<ChannelView topics="everything" match="any" initial={{ messages: [], olderBefore: null }} />);
+
+    expect(screen.getByText("Nothing has been posted yet.")).toBeTruthy();
   });
 
   it("should offer to sign in again and show the banner when loading older posts is refused for want of a session", async () => {

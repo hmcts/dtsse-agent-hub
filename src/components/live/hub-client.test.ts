@@ -60,6 +60,10 @@ describe("streamUrl", () => {
     expect(streamUrl({ topics: [], match: "any", agent: null })).toBe("/api/ui/stream");
   });
 
+  it("should ask for every post with no topics or mode when everything is watched", () => {
+    expect(streamUrl({ topics: "everything", match: "any", agent: null })).toBe("/api/ui/stream?everything=1");
+  });
+
   it("should carry the topics, mode and agent when they are watched", () => {
     expect(streamUrl({ topics: ["a", "b"], match: "all", agent: "agent-1" })).toBe("/api/ui/stream?topics=a%2Cb&mode=all&agent=agent-1");
   });

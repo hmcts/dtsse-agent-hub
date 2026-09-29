@@ -140,6 +140,30 @@ describe("/api/ui/stream", () => {
     expect((await stream(request("bob", "/api/ui/stream?topics=not%20a%20topic"))).status).toBe(400);
   });
 
+  it("should send every post on any topic and no direct message when the viewer watches everything", async () => {
+    // The pod's shared post loader keeps posts by id for a few seconds, and the reset restarts ids.
+    await prisma.$executeRaw`SELECT setval('message_id_seq', 1000)`;
+    const carol = await watch("carol", "everything=1");
+
+    await createPost(prisma, { author: { oid: ALICE.oid, agentId: alicesAgent }, topics: ["pcs-api"], title: null, body: "one topic", inReplyTo: null });
+    await createDirect(prisma, { author: { oid: ALICE.oid, agentId: null }, targetAgentId: alicesAgent, inReplyTo: null, body: "direct" });
+    await createPost(prisma, { author: { oid: BOB.oid, agentId: null }, topics: ["ccd", "database"], title: null, body: "other topics", inReplyTo: null });
+
+    expect((await carol.named("post", 2)).map((frame) => JSON.parse(frame.data!).message.body)).toEqual(["one topic", "other topics"]);
+    await carol.drain();
+    expect(carol.received.filter((frame) => frame.event !== undefined).map((frame) => frame.event)).toEqual(["post", "post"]);
+  });
+
+  it.each([
+    ["everything is not 1", "everything=yes"],
+    ["everything and topics are both asked for", "everything=1&topics=pcs-api"]
+  ])("should refuse to watch every post when %s", async (_label, query) => {
+    const response = await stream(request("bob", `/api/ui/stream?${query}`));
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/everything/);
+  });
+
   it("should forward a resync to every open stream when the listener reconnects", async () => {
     const bob = await watch("bob", "");
 
@@ -165,7 +189,26 @@ describe("/api/ui/feed", () => {
     expect(second.olderBefore).toBeNull();
   });
 
+  it("should page back through every post on any topic, skipping directs, when everything is asked for", async () => {
+    for (let index = 1; index <= 35; index += 1) {
+      await createPost(prisma, { author: { oid: ALICE.oid, agentId: null }, topics: [`t${index % 3}`], title: null, body: `post ${index}`, inReplyTo: null });
+      await createDirect(prisma, { author: { oid: ALICE.oid, agentId: null }, targetAgentId: alicesAgent, inReplyTo: null, body: `direct ${index}` });
+    }
+
+    const first = await (await feed(request("carol", "/api/ui/feed?everything=1"))).json();
+    const second = await (await feed(request("carol", `/api/ui/feed?everything=1&before=${first.olderBefore}`))).json();
+
+    expect(first.messages).toHaveLength(30);
+    expect(first.messages[0].body).toBe("post 6");
+    expect(first.messages.at(-1).body).toBe("post 35");
+    expect(first.olderBefore).toBe(first.messages[0].id);
+    expect(second.messages.map((message: { body: string }) => message.body)).toEqual(["post 1", "post 2", "post 3", "post 4", "post 5"]);
+    expect(second.olderBefore).toBeNull();
+  });
+
   it("should refuse a malformed request", async () => {
+    expect((await feed(request("bob", "/api/ui/feed?everything=1&topics=a"))).status).toBe(400);
+    expect((await feed(request("bob", "/api/ui/feed?everything=0"))).status).toBe(400);
     expect((await feed(request("bob", "/api/ui/feed?topics=a&before=x"))).status).toBe(400);
     expect((await feed(request("bob", "/api/ui/feed?topics=A%20B"))).status).toBe(400);
   });

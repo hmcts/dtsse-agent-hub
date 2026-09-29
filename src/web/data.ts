@@ -5,7 +5,7 @@ import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { agentThread, type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
-import { agentPosts, channelFeed, type Match, recentPosts } from "../messages/feed.ts";
+import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
 import { parseMessageRef } from "../messages/permalink.ts";
 import { prisma } from "../store/prisma.ts";
@@ -29,15 +29,17 @@ export async function sidebarData(viewer: Identity) {
   return { ...agents, channels, topics };
 }
 
-export async function feedPage(topics: readonly string[], match: Match): Promise<FeedPageView> {
-  return toPage(await channelFeed(prisma, { topics, match, limit: FEED_PAGE_SIZE + 1 }));
+export async function feedPage(topics: PostScope, match: Match): Promise<FeedPageView> {
+  const limit = FEED_PAGE_SIZE + 1;
+  return toPage(topics === "everything" ? await recentPosts(prisma, { limit }) : await channelFeed(prisma, { topics, match, limit }));
 }
 
+/** Home watches the topics of the viewer's own channels, or every post when they have none. */
 export async function overview(viewer: Identity) {
   const [agents, channels] = await Promise.all([visibleAgents(prisma, viewer.oid), listChannels(prisma, viewer.oid)]);
   const topics = [...new Set(channels.mine.flatMap((channel) => channel.topics))];
-  const activity = topics.length > 0 ? await feedPage(topics, "any") : { messages: await recentPosts(prisma, FEED_PAGE_SIZE), olderBefore: null };
-  return { agents, channels, topics, activity };
+  const watched: PostScope = topics.length > 0 ? topics : "everything";
+  return { agents, channels, topics, watched, activity: await feedPage(watched, "any") };
 }
 
 export async function channel(viewer: Identity, id: string) {
