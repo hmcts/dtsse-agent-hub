@@ -1,6 +1,6 @@
 import "server-only";
 import { grantsGiven, grantsReceived } from "../access/views.ts";
-import { agentView, visibleAgents } from "../agents/views.ts";
+import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { agentThread } from "../messages/direct-thread.ts";
 import { agentPosts, channelFeed, type Match, recentPosts } from "../messages/feed.ts";
@@ -41,13 +41,15 @@ export async function channel(viewer: Identity, id: string) {
   return await findChannel(prisma, viewer.oid, id);
 }
 
-export async function agentPage(viewer: Identity, id: string) {
-  const view = await agentView(prisma, viewer.oid, id);
-  if (view === undefined) {
-    return undefined;
-  }
-  const [thread, posts] = await Promise.all([agentThread(prisma, viewer.oid, id, view.grants), agentPosts(prisma, id, 20)]);
-  return { ...view, thread, posts };
+/** The agent and the viewer's access to it, or `undefined` for the not-found the page answers. */
+export async function agentPage(viewer: Identity, id: string): Promise<AgentView | undefined> {
+  return await agentView(prisma, viewer.oid, id);
+}
+
+/** The rest of an agent's page, which it streams in once `agentPage` has decided the viewer may see the agent. */
+export async function agentActivity(viewer: Identity, view: AgentView) {
+  const [thread, posts] = await Promise.all([agentThread(prisma, viewer.oid, view.agent.id, view.grants), agentPosts(prisma, view.agent.id, 20)]);
+  return { thread, posts };
 }
 
 export async function topics(prefix: string) {
