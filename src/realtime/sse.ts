@@ -10,6 +10,21 @@ export const SSE_HEADERS: Record<string, string> = {
 
 export const PING_INTERVAL_MS = 15_000;
 
+/**
+ * A stream is closed after at most an hour, so a half-open connection gives its slot back and connections rebalance
+ * across pods. The jitter
+ * spreads the reconnects of streams that opened together, such as after a deploy.
+ */
+export const MAX_STREAM_LIFETIME_MS = 60 * 60_000;
+export const STREAM_LIFETIME_JITTER_MS = 5 * 60_000;
+
+/** The reconnect delay a client is told to use when the server ends a stream that reached its lifetime. */
+export const RECONNECT_AFTER_MS = 1_000;
+
+export function streamLifetimeMs(random: () => number = Math.random): number {
+  return MAX_STREAM_LIFETIME_MS - Math.floor(random() * STREAM_LIFETIME_JITTER_MS);
+}
+
 export interface SseFrame {
   id?: string;
   event?: string;
@@ -43,6 +58,11 @@ export function sseComment(text: string): string {
   return `: ${singleLine("comment", text)}\n\n`;
 }
 
+/** Sets how long the client waits before reconnecting after this stream ends. */
+export function sseRetry(ms: number): string {
+  return `retry: ${Math.max(0, Math.floor(ms))}\n\n`;
+}
+
 export type Send = (frame: string) => void;
 
 /** Runs when the stream opens. Returns what to run when it closes. */
@@ -51,18 +71,29 @@ export type OnOpen = (send: Send) => (() => void) | Promise<() => void>;
 export interface StreamOptions {
   signal: AbortSignal;
   onOpen: OnOpen;
+  /** Runs exactly once when the stream closes for any reason, including before or while `onOpen` runs. */
+  onClose?: () => void;
   pingIntervalMs?: number;
+  maxLifetimeMs?: number;
 }
 
 /**
- * A byte stream that sends `: ping` every interval until the client goes away, then runs the cleanup `onOpen`
- * returned exactly once, whether the request was aborted or the reader cancelled.
+ * A byte stream that sends `: ping` every interval until the client goes away or the stream reaches its lifetime,
+ * then runs the cleanup `onOpen` returned exactly once, whether the request was aborted, the reader cancelled or the
+ * server ended it. At the lifetime the client is told to reconnect promptly, and the stream closes cleanly.
  */
-export function openSseStream({ signal, onOpen, pingIntervalMs = PING_INTERVAL_MS }: StreamOptions): ReadableStream<Uint8Array> {
+export function openSseStream({
+  signal,
+  onOpen,
+  onClose,
+  pingIntervalMs = PING_INTERVAL_MS,
+  maxLifetimeMs = streamLifetimeMs()
+}: StreamOptions): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let closed = false;
   let cleanup: (() => void) | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let lifetime: ReturnType<typeof setTimeout> | undefined;
   let controllerRef: ReadableStreamDefaultController<Uint8Array> | undefined;
 
   function close(): void {
@@ -73,7 +104,11 @@ export function openSseStream({ signal, onOpen, pingIntervalMs = PING_INTERVAL_M
     if (timer !== undefined) {
       clearInterval(timer);
     }
+    if (lifetime !== undefined) {
+      clearTimeout(lifetime);
+    }
     signal.removeEventListener("abort", close);
+    onClose?.();
     cleanup?.();
     try {
       controllerRef?.close();
@@ -101,6 +136,11 @@ export function openSseStream({ signal, onOpen, pingIntervalMs = PING_INTERVAL_M
         return;
       }
       signal.addEventListener("abort", close);
+      lifetime = setTimeout(() => {
+        send(sseRetry(RECONNECT_AFTER_MS));
+        send(sseComment("lifetime reached"));
+        close();
+      }, maxLifetimeMs);
       // An initial comment so the client and every proxy on the way see the response begin immediately.
       send(sseComment("connected"));
       let opened: () => void;
