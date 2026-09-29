@@ -19,7 +19,6 @@ export const EXPIRE_BATCH = 200;
 const SWEEP_LOCK_KEY = 0x61676e74_73776570n;
 
 export interface SweepOptions {
-  offlineAfterSeconds?: number;
   expireAfterSeconds?: number;
   expireBatch?: number;
 }
@@ -32,7 +31,7 @@ export interface SweepResult {
 }
 
 /**
- * Marks every agent silent for longer than `offlineAfterSeconds` offline, and announces each; then expires a batch
+ * Marks every agent silent for longer than `OFFLINE_AFTER_SECONDS` offline, and announces each; then expires a batch
  * of the deliveries queued for agents offline longer than `expireAfterSeconds`.
  *
  * `pg_try_advisory_xact_lock` so only one pod sweeps per tick, without queueing the others behind it. The
@@ -42,7 +41,7 @@ export interface SweepResult {
  * `undefined` means another pod held the lock.
  */
 export async function sweepOffline(prisma: PrismaClient, options: SweepOptions = {}): Promise<SweepResult | undefined> {
-  const { offlineAfterSeconds = OFFLINE_AFTER_SECONDS, expireAfterSeconds = EXPIRE_AFTER_SECONDS, expireBatch = EXPIRE_BATCH } = options;
+  const { expireAfterSeconds = EXPIRE_AFTER_SECONDS, expireBatch = EXPIRE_BATCH } = options;
   return await prisma.$transaction(async (tx) => {
     const [lock] = await tx.$queryRaw<{ locked: boolean }[]>`SELECT pg_try_advisory_xact_lock(${SWEEP_LOCK_KEY}) AS locked`;
     if (lock?.locked !== true) {
@@ -50,7 +49,7 @@ export async function sweepOffline(prisma: PrismaClient, options: SweepOptions =
     }
     const swept = await tx.$queryRaw<{ id: string; owner_oid: string }[]>`
       UPDATE agent SET status = 'offline'
-       WHERE status <> 'offline' AND last_heartbeat_at < now() - make_interval(secs => ${offlineAfterSeconds}::double precision)
+       WHERE status <> 'offline' AND last_heartbeat_at < now() - make_interval(secs => ${OFFLINE_AFTER_SECONDS}::double precision)
       RETURNING id::text AS id, owner_oid
     `;
     for (const agent of swept) {
@@ -75,11 +74,8 @@ export function startOfflineSweep(prisma: PrismaClient, intervalMs: number = SWE
     running = true;
     sweepOffline(prisma)
       .then((result) => {
-        if (result !== undefined && result.offline.length > 0) {
-          console.info(`marked ${result.offline.length} silent agent${result.offline.length === 1 ? "" : "s"} offline`);
-        }
-        if (result !== undefined && result.expired > 0) {
-          console.info(`expired ${result.expired} deliver${result.expired === 1 ? "y" : "ies"} queued for long-offline agents`);
+        if (result !== undefined && (result.offline.length > 0 || result.expired > 0)) {
+          console.info(`offline sweep: ${result.offline.length} silent agents marked offline, ${result.expired} queued deliveries expired`);
         }
       })
       .catch((error: unknown) => {

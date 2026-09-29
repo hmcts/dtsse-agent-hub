@@ -1,9 +1,10 @@
 import type pg from "pg";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { heartbeat } from "../../src/agents/store.ts";
-import { sweepOffline } from "../../src/agents/sweep.ts";
+import { startOfflineSweep, sweepOffline } from "../../src/agents/sweep.ts";
 import { ackDelivery, createDirect, queuedDeliveries } from "../../src/messages/store.ts";
 import { decodeEvent, HUB_CHANNEL, type NotifiedEvent } from "../../src/realtime/events.ts";
+import type { PrismaClient } from "../../src/store/prisma.ts";
 import { connect, insertAgent, person, prisma, resetDatabase } from "./database.ts";
 
 const ALICE = person("alice");
@@ -149,5 +150,68 @@ describe("delivery expiry", () => {
     expect(await queuedDeliveries(prisma, gone)).toEqual([]);
     expect(await ackDelivery(prisma, gone, BigInt(messageId))).toBe(true);
     expect(await stateOf(messageId, gone)).toBe("expired");
+  });
+});
+
+async function until(check: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) {
+      throw new Error("timed out waiting for the sweeper");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+describe("startOfflineSweep", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("should log what a tick changed, and nothing for a tick that changed nothing or stood down", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const stale = await insertAgent(ALICE, "stale", { lastHeartbeatAt: secondsAgo(120) });
+    const gone = await insertAgent(BOB, "gone", { status: "offline", lastHeartbeatAt: secondsAgo(DAY_SECONDS + 60) });
+    await createDirect(prisma, { author: { oid: ALICE.oid, agentId: stale }, targetAgentId: gone, inReplyTo: null, body: "hello" });
+    const transaction = vi.spyOn(prisma, "$transaction");
+    const other = await connect();
+    const sweeper = startOfflineSweep(prisma, 10);
+    try {
+      await other.query("BEGIN");
+      await other.query("SELECT pg_advisory_xact_lock($1)", [0x61676e74_73776570n.toString()]);
+      await until(() => transaction.mock.calls.length >= 2);
+      expect(info).not.toHaveBeenCalled();
+
+      await other.query("COMMIT");
+      await until(() => info.mock.calls.length > 0);
+      const calls = transaction.mock.calls.length;
+      await until(() => transaction.mock.calls.length >= calls + 2);
+
+      expect(info.mock.calls).toEqual([["offline sweep: 1 silent agents marked offline, 1 queued deliveries expired"]]);
+    } finally {
+      sweeper.stop();
+      await other.end();
+    }
+  });
+
+  it("should warn when a tick fails, and skip ticks while one is still running", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const failures: unknown[] = [new Error("database gone"), "not an error"];
+    let started = 0;
+    const failing = {
+      $transaction: () => {
+        const failure = failures[started++ % failures.length];
+        return new Promise((_, reject) => setTimeout(() => reject(failure), 50));
+      }
+    } as unknown as PrismaClient;
+    const sweeper = startOfflineSweep(failing, 5);
+    try {
+      await until(() => warn.mock.calls.length >= 2);
+    } finally {
+      sweeper.stop();
+    }
+
+    expect(warn.mock.calls.slice(0, 2)).toEqual([["the offline sweep failed: database gone"], ["the offline sweep failed: not an error"]]);
+    expect(started).toBeLessThanOrEqual(warn.mock.calls.length + 1);
   });
 });
