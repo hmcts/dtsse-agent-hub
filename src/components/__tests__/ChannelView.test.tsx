@@ -3,7 +3,8 @@
  */
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChannelView, feedUrl } from "@/components/feed/ChannelView";
+import { arrivalOf, ChannelView, feedUrl } from "@/components/feed/ChannelView";
+import { ANNOUNCE_AFTER_MS } from "@/components/live/Announcer";
 import { HubStreamProvider } from "@/components/live/HubStream";
 import { SessionEndedBanner } from "@/components/live/SessionEnded";
 import type { ApiMessage } from "@/messages/shape";
@@ -162,5 +163,107 @@ describe("ChannelView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
 
     expect(screen.queryByText("Replying to #1")).toBeNull();
+  });
+});
+
+describe("arrivalOf", () => {
+  it("should name the agent and the post's topics when an agent posts", () => {
+    expect(arrivalOf(post("1", { topics: ["a", "b"] }))).toBe("New post from @pcs on #a, #b");
+  });
+
+  it("should name the person when they posted from the UI with no topics", () => {
+    expect(arrivalOf(post("1", { topics: [], author: { type: "user", agent_id: null, agent_name: null, owner_name: "Alice", owner_email: null } }))).toBe(
+      "New post from Alice"
+    );
+  });
+});
+
+describe("ChannelView announcements", () => {
+  function arrivals(): string {
+    return screen.getByTestId("arrivals").textContent ?? "";
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should keep the feed itself out of the live region when rendering", () => {
+    render(<ChannelView topics={["a"]} match="any" initial={{ messages: [post("1")], olderBefore: null }} />);
+
+    expect(screen.getByRole("list", { name: "Posts" }).getAttribute("aria-live")).toBeNull();
+    expect(screen.getByTestId("arrivals").getAttribute("aria-live")).toBe("polite");
+    expect(arrivals()).toBe("");
+  });
+
+  it("should announce a live post by its author and topic when one arrives", async () => {
+    render(
+      <HubStreamProvider>
+        <ChannelView topics={["a"]} match="any" initial={{ messages: [post("1")], olderBefore: null }} />
+      </HubStreamProvider>
+    );
+
+    await act(async () => {
+      FakeSource.last?.emit("post", { message: post("2") });
+    });
+    expect(arrivals()).toBe("");
+    act(() => {
+      vi.advanceTimersByTime(ANNOUNCE_AFTER_MS);
+    });
+
+    expect(arrivals()).toBe("New post from @pcs on #a");
+  });
+
+  it("should announce a count when several posts arrive together, and ignore one already shown", async () => {
+    render(
+      <HubStreamProvider>
+        <ChannelView topics={["a"]} match="any" initial={{ messages: [post("1")], olderBefore: null }} />
+      </HubStreamProvider>
+    );
+
+    await act(async () => {
+      FakeSource.last?.emit("post", { message: post("1") });
+      FakeSource.last?.emit("post", { message: post("2") });
+      FakeSource.last?.emit("post", { message: post("3") });
+      FakeSource.last?.emit("post", { message: post("4") });
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANNOUNCE_AFTER_MS);
+    });
+
+    expect(arrivals()).toBe("3 new posts");
+  });
+
+  it("should announce nothing when older posts are loaded", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ messages: [post("3"), post("4")], olderBefore: null })))
+    );
+    render(<ChannelView topics={["a"]} match="any" initial={{ messages: [post("5")], olderBefore: "5" }} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Load older posts" }));
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANNOUNCE_AFTER_MS);
+    });
+
+    expect(screen.getByText("post 3")).toBeTruthy();
+    expect(arrivals()).toBe("");
+  });
+});
+
+describe("ChannelView reply cancelling", () => {
+  it("should leave reply mode and focus the post's reply button when Escape is pressed in the composer", () => {
+    render(<ChannelView topics={["a"]} match="any" initial={{ messages: [post("1")], olderBefore: null }} post={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reply to post 1" }));
+    fireEvent.keyDown(screen.getByPlaceholderText("Write a post"), { key: "Escape" });
+
+    expect(screen.queryByText("Replying to #1")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Reply to post 1" }));
   });
 });

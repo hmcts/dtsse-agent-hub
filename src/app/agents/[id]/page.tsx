@@ -2,34 +2,21 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import type { AgentView } from "@/agents/views";
 import { sendDirect } from "@/app/_actions/direct";
+import { AgentAbout } from "@/components/agents/AgentAbout";
 import { DirectThread } from "@/components/agents/DirectThread";
-import { LastHeard } from "@/components/agents/LastHeard";
 import { LiveStatus } from "@/components/agents/LiveStatus";
-import { DevBadge } from "@/components/DevBadge";
 import { PostBody } from "@/components/feed/PostCard";
 import { PaneHeader } from "@/components/Pane";
 import { SkeletonFeed, SkeletonRows } from "@/components/Skeleton";
-import { Timestamp } from "@/components/time/Timestamp";
 import { requireViewer } from "@/viewer/current";
 import { agentActivity, agentPage } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
-const ACCESS_LABEL = { owner: "You own this agent", write: "You have write access", read: "You have read access" } as const;
-
-function Detail({ term, children }: { term: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs font-bold text-hub-muted">{term}</dt>
-      <dd className="break-all font-mono text-[13px] text-hub-text">{children}</dd>
-    </div>
-  );
-}
-
 type Activity = ReturnType<typeof agentActivity>;
 
-async function Thread({ activity, agentId, agentName, access }: { activity: Activity; agentId: string; agentName: string; access: AgentView["access"] }) {
-  return <DirectThread agentId={agentId} agentName={agentName} access={access} initial={(await activity).thread} send={sendDirect} />;
+async function Thread({ activity, agent, access }: { activity: Activity; agent: AgentView["agent"]; access: AgentView["access"] }) {
+  return <DirectThread agentId={agent.id} agentName={agent.name} status={agent.status} access={access} initial={(await activity).thread} send={sendDirect} />;
 }
 
 async function LatestPosts({ activity }: { activity: Activity }) {
@@ -61,6 +48,18 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
   }
   const { agent, access } = page;
   const activity = agentActivity(viewer, page);
+  const about = (
+    <AgentAbout
+      agent={agent}
+      access={access}
+      ownedByViewer={agent.owner.oid === viewer.oid}
+      latestPosts={
+        <Suspense fallback={<SkeletonRows rows={3} />}>
+          <LatestPosts activity={activity} />
+        </Suspense>
+      }
+    />
+  );
 
   return (
     <>
@@ -78,43 +77,21 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
           </span>
         }
       />
-      <div className="flex min-h-0 flex-1">
-        <section aria-labelledby="direct-heading" className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <details className="max-h-[50vh] shrink-0 overflow-y-auto border-b border-hub-line lg:hidden">
+          <summary className="cursor-pointer px-4 py-2 text-[13px] font-bold text-hub-link hover:bg-hub-raised">About this agent</summary>
+          {about}
+        </details>
+        <section aria-labelledby="direct-heading" className="flex min-h-0 min-w-0 flex-1 flex-col">
           <h2 id="direct-heading" className="sr-only">
             Direct messages
           </h2>
           <Suspense fallback={<SkeletonFeed rows={6} />}>
-            <Thread activity={activity} agentId={agent.id} agentName={agent.name} access={access} />
+            <Thread activity={activity} agent={agent} access={access} />
           </Suspense>
         </section>
         <aside aria-label="About this agent" className="hidden w-80 shrink-0 overflow-y-auto border-l border-hub-line lg:block">
-          <div className="space-y-3 border-b border-hub-line px-4 py-4">
-            <h2 className="text-[15px] font-bold text-white">About</h2>
-            <p className="text-[13px] text-hub-text">
-              Owned by {agent.owner.oid === viewer.oid ? "you" : agent.owner.name}
-              <DevBadge tid={agent.owner.tid} />
-              <br />
-              <span className="text-hub-muted">{ACCESS_LABEL[access]}</span>
-            </p>
-            <dl className="space-y-2.5">
-              <Detail term="Repository">{agent.repo ?? "unknown"}</Detail>
-              <Detail term="Branch">{agent.branch ?? "unknown"}</Detail>
-              <Detail term="Working directory">{agent.cwd ?? "unknown"}</Detail>
-              <Detail term="Host">{agent.host ?? "unknown"}</Detail>
-              <Detail term="Last heartbeat">
-                <LastHeard agentId={agent.id} status={agent.status} lastHeartbeatAt={agent.lastHeartbeatAt} />
-              </Detail>
-              <Detail term="Registered">
-                <Timestamp iso={agent.createdAt} />
-              </Detail>
-            </dl>
-          </div>
-          <div className="px-4 py-4">
-            <h2 className="pb-2 text-[15px] font-bold text-white">Latest posts</h2>
-            <Suspense fallback={<SkeletonRows rows={3} />}>
-              <LatestPosts activity={activity} />
-            </Suspense>
-          </div>
+          {about}
         </aside>
       </div>
     </>

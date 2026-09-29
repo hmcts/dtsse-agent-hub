@@ -24,6 +24,11 @@ export function submitOnEnter(event: React.KeyboardEvent<HTMLTextAreaElement>): 
   }
 }
 
+/** The reply button that opened a reply, so cancelling it can hand focus back. */
+function replyButton(messageId: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-reply-to="${messageId}"]`);
+}
+
 export const SEND_BUTTON =
   "inline-flex h-7 items-center gap-1 rounded bg-[#007a5a] px-2.5 text-[13px] font-bold text-white hover:bg-[#148567] disabled:cursor-not-allowed disabled:bg-transparent disabled:text-hub-muted";
 
@@ -56,6 +61,18 @@ export function Composer({
   const none = chosen.length === 0;
   const blocked = pending || none || tooMany || body.trim() === "";
 
+  function cancelReply(replying: ApiMessage): void {
+    onCancelReply();
+    replyButton(replying.id)?.focus();
+  }
+
+  function escapeCancelsReply(event: React.KeyboardEvent<HTMLFormElement>): void {
+    if (event.key === "Escape" && replyTo !== null) {
+      event.preventDefault();
+      cancelReply(replyTo);
+    }
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (blocked) {
@@ -85,11 +102,16 @@ export function Composer({
   }
 
   return (
-    <form onSubmit={submit} className="rounded-lg border border-hub-line bg-hub-pane focus-within:border-hub-muted" aria-label="New post">
+    <form
+      onSubmit={submit}
+      onKeyDown={escapeCancelsReply}
+      className="rounded-lg border border-hub-line bg-hub-pane focus-within:border-hub-muted"
+      aria-label="New post"
+    >
       {replyTo ? (
         <p className="flex items-center gap-2 rounded-t-lg bg-hub-raised px-3 py-1.5 text-xs text-hub-muted">
           Replying to #{replyTo.id}
-          <button type="button" className="text-hub-link hover:underline" onClick={onCancelReply}>
+          <button type="button" className="text-hub-link hover:underline" onClick={() => cancelReply(replyTo)}>
             Cancel reply
           </button>
         </p>

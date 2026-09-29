@@ -89,3 +89,15 @@ export function age(iso: string, now: number): string {
   }
   return days < 7 ? `${days} days ago` : instant(iso, now);
 }
+
+function plural(amount: number, unit: string): string {
+  return `${amount} ${unit}${amount === 1 ? "" : "s"}`;
+}
+
+/** A length of time in the largest of hours, minutes and seconds that divides it exactly: "24 hours", "90 seconds". */
+export function duration(seconds: number): string {
+  if (seconds % 3600 === 0) {
+    return plural(seconds / 3600, "hour");
+  }
+  return seconds % 60 === 0 ? plural(seconds / 60, "minute") : plural(seconds, "second");
+}

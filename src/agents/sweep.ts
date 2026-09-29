@@ -1,16 +1,9 @@
 import { expireDeliveries } from "../messages/store.ts";
 import { notify } from "../realtime/notify.ts";
 import type { PrismaClient } from "../store/prisma.ts";
-import { OFFLINE_AFTER_SECONDS } from "./liveness.ts";
+import { EXPIRE_AFTER_SECONDS, OFFLINE_AFTER_SECONDS } from "./liveness.ts";
 
 export const SWEEP_INTERVAL_MS = 30_000;
-
-/**
- * How long a direct message waits for an offline agent before it is marked `expired`. Every session registers a
- * new agent, so a message to one that has ended would otherwise stay queued for good; a day is long enough for a
- * laptop left asleep overnight to come back and still receive it.
- */
-export const EXPIRE_AFTER_SECONDS = 24 * 60 * 60;
 
 /** Deliveries expired per sweep, so a backlog drains over a few ticks rather than in one long transaction. */
 export const EXPIRE_BATCH = 200;

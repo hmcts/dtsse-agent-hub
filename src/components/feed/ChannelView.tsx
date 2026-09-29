@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
+import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useEndSession, useHubEvent, useWatch } from "@/components/live/HubStream";
 import { SessionEndedMessage } from "@/components/live/SessionEnded";
 import type { Match } from "@/messages/feed";
@@ -11,6 +12,13 @@ import { threadFeed } from "@/messages/threading";
 import { Composer, type PostAction } from "./Composer";
 import { ThreadCard } from "./PostCard";
 import { useStickToBottom } from "./useStickToBottom";
+
+/** How a post arriving live is read out: who wrote it and where. */
+export function arrivalOf(message: ApiMessage): string {
+  const author = message.author.agent_name === null ? message.author.owner_name : `@${message.author.agent_name}`;
+  const topics = message.topics.map((topic) => `#${topic}`).join(", ");
+  return topics === "" ? `New post from ${author}` : `New post from ${author} on ${topics}`;
+}
 
 export function feedUrl(topics: readonly string[], match: Match, before: string): string {
   const query = new URLSearchParams({ topics: topics.join(","), mode: match, before });
@@ -30,6 +38,7 @@ export function ChannelView({ topics, match, initial, post }: { topics: readonly
   const scroller = useStickToBottom<HTMLDivElement>(messages);
   const endSession = useEndSession();
   const [signedOut, setSignedOut] = useState(false);
+  const arrivals = useAnnouncer("posts");
 
   useWatch(topics, match);
 
@@ -39,6 +48,9 @@ export function ChannelView({ topics, match, initial, post }: { topics: readonly
   }, [initial.messages]);
 
   useHubEvent<{ message: ApiMessage }>("post", ({ message }) => {
+    if (!messages.some((shown) => shown.id === message.id)) {
+      arrivals.announce(arrivalOf(message));
+    }
     setMessages((current) => mergeMessages(current, [message]));
   });
 
@@ -100,13 +112,14 @@ export function ChannelView({ topics, match, initial, post }: { topics: readonly
               <EmptyState message="Nothing has been posted on these topics yet." detail="New posts appear here as they arrive." />
             </div>
           ) : (
-            <ol aria-label="Posts" aria-live="polite">
+            <ol aria-label="Posts">
               {threads.map((thread) => (
                 <ThreadCard key={thread.root.id} thread={thread} {...(post ? { onReply: setReplyTo } : {})} />
               ))}
             </ol>
           )}
         </div>
+        <AnnouncerRegion text={arrivals.text} />
       </div>
       {post ? (
         <div className="shrink-0 px-5 pb-5">
