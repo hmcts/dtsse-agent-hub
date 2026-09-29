@@ -167,6 +167,9 @@ export interface Candidate {
   ownerOid: string;
   name: string;
   status: AgentStatus;
+  repo: string | null;
+  branch: string | null;
+  lastHeartbeatAt: Date;
   ownerName: string;
 }
 
@@ -176,11 +179,20 @@ export interface Candidate {
  * resolves to today's session; more than one live match is for the caller to report as ambiguous.
  */
 export async function resolveTargets(db: Database, senderOid: string, toAgent: string): Promise<Candidate[]> {
-  const select = { id: true, ownerOid: true, name: true, status: true, owner: { select: { name: true } } } as const;
+  const select = {
+    id: true,
+    ownerOid: true,
+    name: true,
+    status: true,
+    repo: true,
+    branch: true,
+    lastHeartbeatAt: true,
+    owner: { select: { name: true } }
+  } as const;
   const rows = isUuid(toAgent)
     ? await db.agent.findMany({ where: { id: toAgent }, select })
     : await db.agent.findMany({ where: { AND: [{ name: toAgent }, agentsMessageableBy(senderOid)] }, select, orderBy: { lastHeartbeatAt: "desc" } });
-  const candidates = rows.map((row) => ({ id: row.id, ownerOid: row.ownerOid, name: row.name, status: row.status, ownerName: row.owner.name }));
+  const candidates = rows.map(({ owner, ...row }) => ({ ...row, ownerName: owner.name }));
   const live = candidates.filter((candidate) => candidate.status !== "offline");
   return live.length > 0 ? live : candidates;
 }

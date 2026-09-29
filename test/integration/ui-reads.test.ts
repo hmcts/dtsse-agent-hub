@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { saveChannel } from "../../src/channels/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import type { Identity } from "../../src/users/identity.ts";
-import { agentPage, channel, overview, sidebarData } from "../../src/web/data.ts";
+import { agentActivity, agentPage, channel, overview, sidebarData } from "../../src/web/data.ts";
 import { insertAgent, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 
 const ALICE = { oid: "oid-alice", name: "Alice", email: "alice@example.com" };
@@ -91,16 +91,16 @@ describe("agentPage", () => {
     });
     await createPost(prisma, { author: { oid: ALICE.oid, agentId: alicesAgent }, topics: ["a"], title: null, body: "a post", inReplyTo: null });
 
-    const owner = await agentPage(viewer(ALICE), alicesAgent);
-    const grantee = await agentPage(viewer(BOB), alicesAgent);
+    const owner = await agentActivity(viewer(ALICE), (await agentPage(viewer(ALICE), alicesAgent))!);
+    const grantee = await agentActivity(viewer(BOB), (await agentPage(viewer(BOB), alicesAgent))!);
 
-    expect(owner?.thread.map((message) => [message.body, message.delivery])).toEqual([
+    expect(owner.thread.map((message) => [message.body, message.delivery])).toEqual([
       ["to it", "queued"],
       ["to carol's agent", "queued"],
       ["reply to alice", null]
     ]);
-    expect(grantee?.thread.map((message) => message.body)).toEqual(["to it", "reply to alice"]);
-    expect(grantee?.posts.map((message) => message.body)).toEqual(["a post"]);
+    expect(grantee.thread.map((message) => message.body)).toEqual(["to it", "reply to alice"]);
+    expect(grantee.posts.map((message) => message.body)).toEqual(["a post"]);
   });
 });
 
