@@ -61,10 +61,6 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
   return row ?? undefined;
 }
 
-/**
- * Records a heartbeat, and announces the status when it changed. An agent the sweep marked offline comes back
- * with its next heartbeat.
- */
 /** Locks the agent's row for the rest of the transaction, and reads what a status change is compared against. */
 async function lockAgent(db: Database, agentId: string): Promise<{ status: AgentStatus; ownerOid: string } | undefined> {
   const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string }[]>`

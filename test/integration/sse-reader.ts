@@ -1,3 +1,5 @@
+import type { ApiMessage } from "../../src/messages/shape.ts";
+
 export interface Frame {
   id?: string;
   event?: string;
@@ -45,7 +47,7 @@ export function frames(response: Response) {
   return {
     received,
     /** Resolves with every `direct` event once there are `count` of them. */
-    async directs(count: number, timeoutMs = 5000): Promise<{ id: string; message: any }[]> {
+    async directs(count: number, timeoutMs = 5000): Promise<{ id: string; message: ApiMessage }[]> {
       const deadline = Date.now() + timeoutMs;
       const directs = () => received.filter((frame) => frame.event === "direct");
       while (directs().length < count) {

@@ -1,8 +1,5 @@
 import type { Database } from "../store/prisma.ts";
-
-function byCodePoint(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
+import { byCodePoint } from "./slug.ts";
 
 export async function subscriptions(db: Database, agentId: string): Promise<string[]> {
   const rows = await db.subscription.findMany({ where: { agentId }, select: { topic: { select: { slug: true } } } });

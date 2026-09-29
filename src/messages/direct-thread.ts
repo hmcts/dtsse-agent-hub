@@ -65,11 +65,6 @@ export async function loadThreadMessage(db: Database, id: bigint): Promise<Loade
   return row === null ? undefined : toLoaded(row);
 }
 
-/** Whether a direct message belongs in `agentId`'s thread. */
-export function inThread(agentId: string, message: { targetAgentId: string | null; authorAgentId: string | null }): boolean {
-  return message.targetAgentId === agentId || message.authorAgentId === agentId;
-}
-
 export const THREAD_LIMIT = 100;
 
 /** The latest direct messages in the agent's thread that the viewer may read, oldest first. */

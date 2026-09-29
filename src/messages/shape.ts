@@ -1,3 +1,5 @@
+import { byCodePoint } from "../topics/slug.ts";
+
 /** The `Message` type of the agent API contract (`docs/agent-api.md`), and the one place it is built. */
 
 export interface ApiMessage {
@@ -30,10 +32,6 @@ export interface MessageRow {
   authorAgent: { id: string; name: string } | null;
   author: { name: string; email: string | null };
   topics: { topic: { slug: string } }[];
-}
-
-function byCodePoint(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 export function toApiMessage(row: MessageRow): ApiMessage {

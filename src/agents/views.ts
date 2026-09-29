@@ -2,6 +2,7 @@ import { agentsVisibleTo, grantsHeldBy } from "../access/load.ts";
 import { type AgentAccess, agentAccess, type Grant } from "../access/rules.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import type { Database } from "../store/prisma.ts";
+import { byCodePoint } from "../topics/slug.ts";
 import { isUuid } from "./store.ts";
 
 /** Agents as the web UI lists and shows them: only those the viewer may see, which `agentsVisibleTo` decides. */
@@ -20,7 +21,6 @@ export interface AgentDetail extends AgentCard {
   cwd: string | null;
   host: string | null;
   createdAt: string;
-  endedAt: string | null;
 }
 
 const CARD = {
@@ -60,9 +60,7 @@ export const MAX_SIDEBAR_AGENTS = 100;
 /** Live agents first, then the most recently heard from. */
 export function byLiveness<A extends { status: AgentStatus; lastHeartbeatAt: string }>(agents: readonly A[]): A[] {
   const rank = (agent: A) => (agent.status === "offline" ? 1 : 0);
-  return [...agents].sort(
-    (left, right) => rank(left) - rank(right) || (right.lastHeartbeatAt < left.lastHeartbeatAt ? -1 : right.lastHeartbeatAt > left.lastHeartbeatAt ? 1 : 0)
-  );
+  return [...agents].sort((left, right) => rank(left) - rank(right) || byCodePoint(right.lastHeartbeatAt, left.lastHeartbeatAt));
 }
 
 /** The viewer's own agents, and those shared with them through a grant. */
@@ -90,7 +88,7 @@ export async function agentView(db: Database, viewerOid: string, id: string): Pr
   }
   const row = await db.agent.findUnique({
     where: { id },
-    select: { ...CARD, ownerOid: true, cwd: true, host: true, createdAt: true, endedAt: true }
+    select: { ...CARD, ownerOid: true, cwd: true, host: true, createdAt: true }
   });
   if (row === null) {
     return undefined;
@@ -101,7 +99,7 @@ export async function agentView(db: Database, viewerOid: string, id: string): Pr
     return undefined;
   }
   return {
-    agent: { ...toCard(row), cwd: row.cwd, host: row.host, createdAt: row.createdAt.toISOString(), endedAt: row.endedAt?.toISOString() ?? null },
+    agent: { ...toCard(row), cwd: row.cwd, host: row.host, createdAt: row.createdAt.toISOString() },
     access,
     grants
   };

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { MAX_BODY } from "../messages/limits.ts";
 import { errorResponse, HttpError, json, MAX_REQUEST_BYTES, noContent, parse, parseLimit, parseMessageId, readJson } from "./http.ts";
-import { cursorBody, directBody, heartbeatBody, MAX_BODY, MAX_REQUEST_TOPICS, postBody, registerBody, topicsBody } from "./schemas.ts";
+import { cursorBody, directBody, heartbeatBody, MAX_REQUEST_TOPICS, postBody, registerBody, topicsBody } from "./schemas.ts";
 
 function request(body: string): Request {
   return new Request("https://agent-hub.example/api/agent/register", { method: "POST", body });
@@ -180,6 +181,10 @@ describe("cursorBody", () => {
   it("should refuse a negative cursor", () => {
     expect(() => parse(cursorBody, { cursor: -1 })).toThrow(/cursor/);
   });
+
+  it("should refuse a cursor when it is past the bigint range", () => {
+    expect(() => parse(cursorBody, { cursor: "9223372036854775808" })).toThrow(/cursor/);
+  });
 });
 
 describe("postBody", () => {
@@ -189,6 +194,10 @@ describe("postBody", () => {
 
   it("should read in_reply_to as a bigint", () => {
     expect(parse(postBody, { topics: ["a"], body: "b", in_reply_to: "5" }).in_reply_to).toBe(5n);
+  });
+
+  it("should refuse in_reply_to when it is past the bigint range", () => {
+    expect(() => parse(postBody, { topics: ["a"], body: "b", in_reply_to: "9223372036854775808" })).toThrow(/in_reply_to/);
   });
 
   it("should refuse the topics when there are more raw entries than the cap, even if they would de-duplicate", () => {

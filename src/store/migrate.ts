@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
+import { byCodePoint } from "../topics/slug.ts";
 import { resolveDatabaseUrl } from "./database-url.ts";
 
 /**
@@ -86,7 +87,7 @@ async function readMigrations(directory: string): Promise<Migration[]> {
   const names = entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
-    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    .sort(byCodePoint);
 
   const migrations: Migration[] = [];
   for (const name of names) {
