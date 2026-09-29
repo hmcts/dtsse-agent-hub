@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { MessageLink } from "@/components/feed/MessageLink";
 import { type Block, type Inline, type ListBlock, parseMarkup } from "@/messages/markup";
 
 function renderInline(nodes: Inline[]): ReactNode[] {
@@ -20,6 +21,8 @@ function renderInline(nodes: Inline[]): ReactNode[] {
         );
       case "emphasis":
         return <em key={index}>{renderInline(node.children)}</em>;
+      case "message":
+        return <MessageLink key={index} id={node.id} />;
     }
     return (
       <a key={index} href={node.href} target="_blank" rel="noopener noreferrer" className="text-hub-link underline hover:no-underline">

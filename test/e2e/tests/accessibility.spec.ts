@@ -40,6 +40,26 @@ test.describe("accessibility @nightly", () => {
     await audit(page, path);
   });
 
+  test("should raise no WCAG A or AA violations on a message page with a reference in its body @nightly @a11y", async ({ page }) => {
+    const topic = unique("e2e");
+    await page.goto(`/topics/${topic}`);
+    await page.getByPlaceholder("Write a post").fill("A message page check");
+    await page.getByRole("button", { name: "Post" }).click();
+    const first = page.getByRole("list", { name: "Posts" }).locator("[data-message-id]").first();
+    await expect(first).toBeVisible();
+    const id = await first.getAttribute("data-message-id");
+
+    await page.getByPlaceholder("Write a post").fill(`Following up on #${id}`);
+    await page.getByRole("button", { name: "Post" }).click();
+    await expect(page.locator(`a[href="/m/${id}"]`)).toHaveCount(2);
+
+    await audit(page, `/m/${id}`);
+  });
+
+  test("should raise no WCAG A or AA violations on a missing message page @nightly @a11y", async ({ page }) => {
+    await audit(page, "/m/9223372036854775807", 404);
+  });
+
   test("should raise no WCAG A or AA violations on an agent page @nightly @a11y", async ({ page, request }) => {
     const agent = await registerAgent(request, PERSONA, unique("agent"));
     test.skip(agent === undefined, "this deployment checks real agent tokens, so the suite cannot register an agent");
