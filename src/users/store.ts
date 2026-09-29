@@ -21,3 +21,17 @@ export async function upsertUser(db: Database, identity: Identity): Promise<void
          OR "user".email IS DISTINCT FROM EXCLUDED.email
   `;
 }
+
+export interface KnownUser {
+  oid: string;
+  name: string;
+  email: string | null;
+  tid: string;
+}
+
+/** Everyone the hub knows at this address, matched without regard to case. Entra does not promise one per address. */
+export async function usersByEmail(db: Database, email: string): Promise<KnownUser[]> {
+  return await db.$queryRaw<KnownUser[]>`
+    SELECT oid, name, email, tid FROM "user" WHERE lower(email) = lower(${email.trim()}) ORDER BY oid
+  `;
+}

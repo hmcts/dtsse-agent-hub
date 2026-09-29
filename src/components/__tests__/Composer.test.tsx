@@ -1,0 +1,104 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Composer, defaultTopics } from "@/components/feed/Composer";
+import type { ApiMessage } from "@/messages/shape";
+
+afterEach(cleanup);
+
+const POSTED: ApiMessage = {
+  id: "4",
+  kind: "post",
+  title: null,
+  body: "hello",
+  topics: ["a"],
+  in_reply_to: null,
+  target_agent_id: null,
+  created_at: "2026-09-29T09:00:00.000Z",
+  author: { type: "user", agent_id: null, agent_name: null, owner_name: "Alice", owner_email: null }
+};
+
+function post() {
+  return screen.getByRole("button", { name: "Post" }) as HTMLButtonElement;
+}
+
+describe("defaultTopics", () => {
+  it("should start with every topic of the view when it has five or fewer, and the first five otherwise", () => {
+    expect(defaultTopics(["a", "b"])).toEqual(["a", "b"]);
+    expect(defaultTopics(["a", "b", "c", "d", "e", "f"])).toEqual(["a", "b", "c", "d", "e"]);
+  });
+});
+
+describe("Composer", () => {
+  it("should post to the chosen topics as a reply and report the new post when the action succeeds", async () => {
+    const action = vi.fn(async () => ({ ok: true as const, message: POSTED }));
+    const onPosted = vi.fn();
+    render(<Composer topics={["a", "b"]} post={action} replyTo={{ ...POSTED, id: "2" }} onCancelReply={vi.fn()} onPosted={onPosted} />);
+
+    fireEvent.click(screen.getByLabelText("#b"));
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
+    await act(async () => {
+      fireEvent.click(post());
+    });
+
+    expect(action).toHaveBeenCalledWith({ topics: ["a"], title: "", body: "hello", inReplyTo: "2" });
+    expect(onPosted).toHaveBeenCalledWith(POSTED);
+  });
+
+  it("should not let a post be sent when no topic is chosen", () => {
+    render(<Composer topics={["a"]} post={vi.fn()} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    fireEvent.click(screen.getByLabelText("#a"));
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
+
+    expect(post().disabled).toBe(true);
+    expect(screen.getByText("pick at least one topic")).toBeTruthy();
+  });
+
+  it("should not let a post be sent when more than five topics are chosen", () => {
+    render(<Composer topics={["a", "b", "c", "d", "e", "f"]} post={vi.fn()} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    fireEvent.click(screen.getByLabelText("#f"));
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
+
+    expect(post().disabled).toBe(true);
+    expect(screen.getByText("a post has at most 5 topics")).toBeTruthy();
+  });
+
+  it("should show the server's refusal when the action refuses", async () => {
+    const action = vi.fn(async () => ({ ok: false as const, error: "a post needs between 1 and 5 distinct topics" }));
+    render(<Composer topics={["a"]} post={action} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
+    await act(async () => {
+      fireEvent.click(post());
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain("between 1 and 5");
+  });
+
+  it("should say the post was not sent when the call itself fails", async () => {
+    const action = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    render(<Composer topics={["a"]} post={action} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
+    await act(async () => {
+      fireEvent.click(post());
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain("could not be sent");
+  });
+
+  it("should cancel the reply when asked", () => {
+    const onCancelReply = vi.fn();
+    render(<Composer topics={["a"]} post={vi.fn()} replyTo={POSTED} onCancelReply={onCancelReply} onPosted={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
+
+    expect(onCancelReply).toHaveBeenCalled();
+  });
+});

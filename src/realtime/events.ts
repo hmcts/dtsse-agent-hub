@@ -9,10 +9,14 @@ export const HUB_CHANNEL = "hub_events";
 
 export type AgentStatus = "busy" | "idle" | "offline";
 
+export type DeliveredState = "delivered" | "expired";
+
 export type HubEvent =
   | { type: "post"; message_id: string }
   | { type: "direct"; message_id: string; target_agent_id: string | null; author_agent_id: string | null }
   | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus }
+  /** A direct message's delivery to its target agent left `queued`, so a UI thread showing it can update. */
+  | { type: "delivery"; message_id: string; agent_id: string; state: DeliveredState }
   /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
@@ -34,6 +38,7 @@ function isOptionalId(value: unknown): value is string | null {
 }
 
 const STATUSES: readonly string[] = ["busy", "idle", "offline"];
+const DELIVERED_STATES: readonly string[] = ["delivered", "expired"];
 
 /** The event a NOTIFY payload carries, or `undefined` for anything this version does not understand. */
 export function decodeEvent(payload: string | undefined): NotifiedEvent | undefined {
@@ -60,6 +65,10 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
     case "agent_status":
       return isId(event.agent_id) && isId(event.owner_oid) && typeof event.status === "string" && STATUSES.includes(event.status)
         ? { type: "agent_status", agent_id: event.agent_id, owner_oid: event.owner_oid, status: event.status as AgentStatus }
+        : undefined;
+    case "delivery":
+      return isId(event.message_id) && isId(event.agent_id) && typeof event.state === "string" && DELIVERED_STATES.includes(event.state)
+        ? { type: "delivery", message_id: event.message_id, agent_id: event.agent_id, state: event.state as DeliveredState }
         : undefined;
     default:
       return undefined;

@@ -81,10 +81,41 @@ withPipeline(type, product, component) {
   }
 
   onPR() {
+    env.E2E_TEST_SCOPE = '@smoke'
     env.TEST_URL = "https://dtsse-agent-hub-pr-${CHANGE_ID}.preview.platform.hmcts.net"
+
+    before('functionalTest:preview') {
+      sh 'rm -rf playwright-report test-results'
+    }
+    afterAlways('smoketest:preview') {
+      archivePlaywrightReport('Smoke Test Report')
+    }
+    afterAlways('functionalTest:preview') {
+      archivePlaywrightReport('Functional Test Report')
+    }
   }
 
   onMaster() {
+    env.E2E_TEST_SCOPE = '@regression'
     env.TEST_URL = "https://dtsse-agent-hub.aat.platform.hmcts.net"
+
+    afterAlways('functionalTest:aat') {
+      archivePlaywrightReport('Functional Test Report')
+    }
+  }
+}
+
+def archivePlaywrightReport(String reportName) {
+  try {
+    publishHTML([
+      allowMissing: true,
+      alwaysLinkToLastBuild: true,
+      keepAll: true,
+      reportDir: 'playwright-report',
+      reportFiles: 'index.html',
+      reportName: reportName
+    ])
+  } catch (Error e) {
+    unstable(message: "${STAGE_NAME} is unstable: " + e.toString())
   }
 }

@@ -1,0 +1,57 @@
+import type { NextRequest } from "next/server";
+import { grantsHeldBy } from "@/access/load";
+import { canViewAgent } from "@/access/rules";
+import { errorResponse } from "@/agent-api/http";
+import { findAgent, isUuid } from "@/agents/store";
+import { parseMatch, viewTopics } from "@/channels/rules";
+import { loadThreadMessage } from "@/messages/direct-thread";
+import { loadMessage } from "@/messages/store";
+import { realtime } from "@/realtime/process";
+import { openSseStream, SSE_HEADERS } from "@/realtime/sse";
+import { uiStream } from "@/realtime/ui-stream";
+import { prisma } from "@/store/prisma";
+import { uiViewer } from "../request";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/**
+ * Live updates for one browser tab. `?topics=a,b&mode=any|all` watches posts, `?agent=<id>` an agent's thread;
+ * agent status changes the viewer may see are always sent. An agent the viewer cannot see is refused as missing.
+ */
+export async function GET(request: NextRequest): Promise<Response> {
+  const viewer = await uiViewer(request);
+  if (viewer instanceof Response) {
+    return viewer;
+  }
+  const query = request.nextUrl.searchParams;
+  const { topics, invalid } = viewTopics(query.getAll("topics"));
+  if (invalid.length > 0) {
+    return errorResponse(400, `not topics: ${invalid.join(", ")}`);
+  }
+
+  const agentId = query.get("agent");
+  let agent = null;
+  if (agentId !== null) {
+    const found = isUuid(agentId) ? await findAgent(prisma, agentId) : undefined;
+    if (found === undefined || !canViewAgent(viewer.oid, found, await grantsHeldBy(prisma, viewer.oid))) {
+      return errorResponse(404, "no such agent");
+    }
+    agent = { id: found.id, ownerOid: found.ownerOid };
+  }
+
+  const body = openSseStream({
+    signal: request.signal,
+    onOpen: uiStream(
+      { topics, match: parseMatch(query.get("mode")), agent },
+      {
+        hub: realtime().hub,
+        viewerOid: viewer.oid,
+        grants: () => grantsHeldBy(prisma, viewer.oid),
+        post: (id) => loadMessage(prisma, id),
+        direct: (id) => loadThreadMessage(prisma, id)
+      }
+    )
+  });
+  return new Response(body, { headers: SSE_HEADERS });
+}

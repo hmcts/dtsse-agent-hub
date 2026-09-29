@@ -21,6 +21,10 @@ change it first when the contract changes.
 | `src/app/api/agent/**` | Agent API route handlers, each wrapped in `agentRoute` / `ownedAgentRoute` from `src/agent-api/route.ts` |
 | `src/agent-auth/` | Bearer validation against the Entra tenant JWKS, and the `AGENT_AUTH_DISABLED` + `X-Dev-User` development bypass |
 | `src/auth/`, `src/app/auth/` | Web SSO: openid-client code flow with PKCE, sealed `ah_session` cookie keyed by `oid`/`tid` |
+| `src/viewer/` | Who is using the web UI: the session's person, or the development identity when sign-in is disabled |
+| `src/app/_actions/`, `src/web/` | Server actions (each re-reads the viewer), the `server-only` read seam `web/data.ts`, action results |
+| `src/app/api/ui/**`, `src/components/` | The UI's stream, feed and topic-suggestion routes, and its components; `components/live/` is the one `EventSource` per tab |
+| `src/channels/` | Saved channels and the 1–5 topic rules the builder and the save action share |
 | `src/access/` | Who may see and message which agent. `rules.ts` is pure and is the single source of the rules; `load.ts` loads the rows they apply to |
 | `src/agents/`, `src/topics/`, `src/messages/`, `src/users/` | Feature stores |
 | `src/realtime/` | `hub_events` NOTIFY payloads, the per-pod LISTEN connection and in-process hub, SSE framing, the agent stream |
@@ -59,7 +63,8 @@ change it first when the contract changes.
 | --- | --- |
 | `yarn db:generate` | Generates the Prisma client into `src/store/generated/`; typecheck fails without it |
 | `yarn lint` | `biome check --error-on-warnings .` |
-| `yarn typecheck` | the app, and `tsconfig.cli.json` |
+| `yarn typecheck` | the app, `tsconfig.cli.json` and `tsconfig.e2e.json` |
+| `yarn test:e2e` | Playwright and axe against `TEST_URL`; see the README for a full local run |
 | `yarn test` | unit suite |
 | `yarn test:integration` | needs `yarn deps:up`; migrates the database itself |
 | `yarn build` | `next build` plus the migration CLI |

@@ -44,8 +44,8 @@ export interface ChannelQuery {
 }
 
 /**
- * A channel's page of posts, newest first. `any` is a post on at least one of the topics; `all` is a post carrying
- * every one of them.
+ * The newest page of a channel's posts before `before`, returned oldest first. `any` is a post on at least one of the
+ * topics; `all` is a post carrying every one of them.
  */
 export async function channelFeed(db: Database, query: ChannelQuery): Promise<ApiMessage[]> {
   const topics = [...new Set(query.topics)];
@@ -102,4 +102,22 @@ export async function topicMessages(db: Database, query: TopicQuery): Promise<Ap
     rows.map((row) => row.messageId)
   );
   return query.before === undefined ? messages : messages.reverse();
+}
+
+/** The latest posts on any topic, oldest first. */
+export async function recentPosts(db: Database, limit: number): Promise<ApiMessage[]> {
+  const rows = await db.message.findMany({ where: { kind: "post" }, select: { id: true }, orderBy: { id: "desc" }, take: limit });
+  return await loadMessages(
+    db,
+    rows.map((row) => row.id)
+  );
+}
+
+/** An agent's latest posts, oldest first. */
+export async function agentPosts(db: Database, agentId: string, limit: number): Promise<ApiMessage[]> {
+  const rows = await db.message.findMany({ where: { kind: "post", authorAgentId: agentId }, select: { id: true }, orderBy: { id: "desc" }, take: limit });
+  return await loadMessages(
+    db,
+    rows.map((row) => row.id)
+  );
 }

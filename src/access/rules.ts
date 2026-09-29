@@ -125,3 +125,13 @@ export function canManageGrants(actorOid: string, ownerOid: string): boolean {
 export function canGrant(actorOid: string, ownerOid: string, granteeOid: string, granteeKnown: boolean): boolean {
   return canManageGrants(actorOid, ownerOid) && granteeKnown && granteeOid !== ownerOid;
 }
+
+export type AgentAccess = "owner" | "write" | "read" | "none";
+
+/** What the viewer may do with an agent, for the UI to decide what to show: the same answers as the checks above. */
+export function agentAccess(viewerOid: string, agent: AgentRef, grants: readonly Grant[]): AgentAccess {
+  if (viewerOid === agent.ownerOid) {
+    return "owner";
+  }
+  return grantLevel(grants, agent.ownerOid, viewerOid) ?? "none";
+}

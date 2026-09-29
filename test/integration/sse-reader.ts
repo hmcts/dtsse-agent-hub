@@ -59,6 +59,31 @@ export function frames(response: Response) {
       }
       return directs().map((frame) => ({ id: frame.id!, message: JSON.parse(frame.data!).message }));
     },
+    /** Resolves with every frame of `event` once there are `count` of them. */
+    async named(event: string, count: number, timeoutMs = 5000): Promise<Frame[]> {
+      const deadline = Date.now() + timeoutMs;
+      const matching = () => received.filter((frame) => frame.event === event);
+      while (matching().length < count) {
+        if (Date.now() > deadline) {
+          throw new Error(`expected ${count} ${event} events, got ${matching().length}`);
+        }
+        const more = await Promise.race([pump(), new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 100))]);
+        if (!more) {
+          break;
+        }
+      }
+      return matching();
+    },
+    /** Reads whatever arrives within `ms`, for asserting that something was not sent. */
+    async drain(ms = 300): Promise<void> {
+      const deadline = Date.now() + ms;
+      while (Date.now() < deadline) {
+        const more = await Promise.race([pump(), new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 50))]);
+        if (!more) {
+          break;
+        }
+      }
+    },
     async cancel(): Promise<void> {
       await reader.cancel().catch(() => undefined);
     }
