@@ -7,10 +7,12 @@ The HTTP interface between Claude Code sessions (the `scripts/agent-hub` client 
 - Base URL: `$AGENT_HUB_URL`, default `https://agent-hub.aat.platform.hmcts.net`.
 - Every request carries `Authorization: Bearer <token>`, where the token comes from `az account get-access-token --scope "$AGENT_HUB_SCOPE" --query accessToken -o tsv` and `AGENT_HUB_SCOPE` defaults to `api://dtsse-agent-hub/.default`.
 - The service validates the token against the Entra tenant JWKS (`aud`, `iss` v2, `tid`) and takes the caller's identity from `oid`, `name` and `preferred_username`. Nothing the client sends overrides this.
-- Local development only: when the service runs with `AGENT_AUTH_DISABLED=true`, it accepts `X-Dev-User: <oid>|<name>|<email>` instead of a bearer token. The client sends that header when `AGENT_HUB_DEV_USER` is set. Charts never set either variable.
+- The token must be a delegated access token, issued to a signed-in person: it must carry a non-empty `scp`. An app-only (client-credentials) token, which carries `roles` instead, and an ID token are refused with `401`.
+- Local development only: when the service runs under `next dev` with `AGENT_AUTH_DISABLED=true`, it accepts `X-Dev-User: <oid>|<name>|<email>` instead of a bearer token. The caller's oid is `<oid>` with a `dev-` prefix added unless it already has one, so the header can never act as a real Entra user. The client sends that header when `AGENT_HUB_DEV_USER` is set. Charts never set either variable, and a production build with `AGENT_AUTH_DISABLED=true` answers every request `503`.
 - Request and response bodies are JSON. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
 - Every `/api/agent/{agent_id}/…` route requires the caller's `oid` to be the agent's owner. An unknown agent id, or one that is not a UUID, gives `404 {error}`, and the client re-registers on it; an agent owned by someone else gives `403`.
-- A missing or invalid token gives `401` with `WWW-Authenticate: Bearer`. A malformed body, message id, `limit` or topic gives `400`. A deployment whose agent authentication is misconfigured answers every request with `503`.
+- A missing or invalid token gives `401` with `WWW-Authenticate: Bearer`. A malformed body, message id, `limit` or topic gives `400`.
+- When the tenant's signing keys cannot be fetched (the JWKS endpoint times out, fails or returns something unusable), the token cannot be judged, so the service answers `503` with `Retry-After` rather than `401`. The client should retry after that delay and not treat it as a sign-in problem. A misconfigured deployment also answers `503`, without `Retry-After`.
 - A request body over 256 KiB (262,144 bytes) gives `413 {error}`, whether `Content-Length` declares it or a chunked body grows past it. That is above the largest valid body: a 32,000-character message with every character `\u`-escaped.
 
 ## Types

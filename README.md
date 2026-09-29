@@ -65,7 +65,8 @@ fixed development identity, `dev-anonymous` in tenant `dev`, and the header says
 cookie makes a browser act as `dev-<slug>` instead, which is how the Playwright suite tests grants between two
 people. Development identities are never GUIDs, so they cannot be mistaken for, or act as, a real Entra user; the UI
 marks their agents `dev`. With `AGENT_AUTH_DISABLED=true`, an agent registered with
-`X-Dev-User: dev-<slug>|…` belongs to that persona.
+`X-Dev-User: dev-<slug>|…` belongs to that persona. The agent API adds the `dev-` prefix to any `X-Dev-User` oid
+that lacks it, so `X-Dev-User: 1|…` is the persona `dev-1`.
 
 To use the UI as yourself without Entra sign-in, for example to see the agents your `az` token registered, also set
 `AUTH_DEV_USER=<oid>|<name>|<email>`. It is read only when `AUTH_DISABLED=true`, overrides the persona cookie, and
@@ -85,17 +86,19 @@ AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev    # http://localhost:3000
 pending migrations before it starts Next, so pulling a new migration needs no extra step.
 
 With `AGENT_AUTH_DISABLED=true` the agent API takes the caller from an `X-Dev-User: <oid>|<name>|<email>` header
-instead of a bearer token. Point the workspace client at it with:
+instead of a bearer token. It works under `next dev` only: a production build, `yarn start` included, refuses it
+with `503`. Point the workspace client at it with:
 
 ```bash
 export AGENT_HUB_URL=http://localhost:3000
 export AGENT_HUB_DEV_USER='dev-anonymous|Anonymous (sign-in disabled)|anonymous@dev.invalid'
 ```
 
-The header's oid is used as it is, so `dev-anonymous` is the signed-out viewer's own oid and the agent appears
-under "Your agents". The name and email match the viewer's too, because registering overwrites them on the `user`
-row. To own the agent as a persona instead, send `dev-<slug>|Dev <slug> (sign-in disabled)|<slug>@dev.invalid` and
-set the `ah_dev_persona=<slug>` cookie.
+The service prefixes the header's oid with `dev-` unless it already has it, so it can never be a real person's
+oid. `dev-anonymous` is the signed-out viewer's own oid, so the agent appears under "Your agents". The name and email
+match the viewer's too, because registering overwrites them on the `user` row. To own the agent as a persona
+instead, send `dev-<slug>|Dev <slug> (sign-in disabled)|<slug>@dev.invalid` and set the `ah_dev_persona=<slug>`
+cookie.
 
 Or by hand:
 
@@ -133,11 +136,11 @@ yarn typecheck
 The Playwright suite (`test/e2e/`) runs against `TEST_URL`, default `http://localhost:3000`, with sign-in disabled.
 The pipeline selects by tag: `@smoke` on a preview, `@regression` on AAT, `@nightly` (the axe pass over every
 route) from `Jenkinsfile_nightly`. The specs that need an agent register one through the agent API and skip where
-agent tokens are checked, which is every deployment; run them fully locally:
+agent tokens are checked, which is every deployment; run them fully locally against `next dev`, since a production
+build refuses `AGENT_AUTH_DISABLED`:
 
 ```bash
-yarn build && cp -r .next/static .next/standalone/.next/
-AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn start &
+AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev &
 yarn test:e2e
 ```
 
