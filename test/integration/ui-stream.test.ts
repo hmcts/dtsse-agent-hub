@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { revokeGrant, setGrant } from "../../src/access/load.ts";
 import { heartbeat } from "../../src/agents/store.ts";
 import { GET as feed } from "../../src/app/api/ui/feed/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
@@ -100,6 +101,31 @@ describe("/api/ui/stream", () => {
     await bob.drain(500);
 
     expect(bob.received.filter((frame) => frame.event !== undefined)).toEqual([]);
+  });
+
+  it("should resync and stop sending an agent's thread and status when a grant already read is revoked", async () => {
+    const bob = await watch("bob", `agent=${alicesAgent}`);
+    await heartbeat(prisma, alicesAgent, "busy", null);
+    await bob.named("agent_status", 1);
+
+    await revokeGrant(prisma, ALICE.oid, BOB.oid);
+    await heartbeat(prisma, alicesAgent, "idle", null);
+    await createDirect(prisma, { author: { oid: ALICE.oid, agentId: null }, targetAgentId: alicesAgent, inReplyTo: null, body: "secret" });
+    await bob.drain(500);
+
+    expect(bob.received.filter((frame) => frame.event !== undefined).map((frame) => frame.event)).toEqual(["agent_status", "resync"]);
+  });
+
+  it("should resync and start sending an agent's status when the viewer is granted access", async () => {
+    const carol = await watch("carol", "");
+    await heartbeat(prisma, alicesAgent, "busy", null);
+    await carol.drain(300);
+
+    await setGrant(prisma, ALICE.oid, CAROL.oid, "read");
+    await heartbeat(prisma, alicesAgent, "idle", null);
+    await carol.named("agent_status", 1);
+
+    expect(carol.received.filter((frame) => frame.event !== undefined).map((frame) => frame.event)).toEqual(["resync", "agent_status"]);
   });
 
   it("should refuse to watch an agent the viewer cannot see, as missing", async () => {
