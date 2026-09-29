@@ -76,6 +76,7 @@ describe("postToTopics", () => {
     ["an empty body", { topics: ["a"], body: "  " }, "write something"],
     ["a reply to nothing", { topics: ["a"], body: "x", inReplyTo: "999" }, "in_reply_to"],
     ["a malformed reply id", { topics: ["a"], body: "x", inReplyTo: "abc" }, "not a post"],
+    ["a reply id past the bigint range", { topics: ["a"], body: "x", inReplyTo: "9223372036854775808" }, "not a post"],
     ["a title that is too long", { topics: ["a"], body: "x", title: "t".repeat(301) }, "at most 300"],
     ["a body that is too long", { topics: ["a"], body: "b".repeat(32_001) }, "at most 32000"]
   ])("should refuse %s and write nothing", async (_label, input, error) => {

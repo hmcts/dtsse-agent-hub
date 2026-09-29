@@ -1,5 +1,5 @@
 import type { Match } from "../messages/feed.ts";
-import { InvalidTopics, MAX_POST_TOPICS, MIN_POST_TOPICS, normaliseSlug } from "../topics/slug.ts";
+import { InvalidTopics, MAX_POST_TOPICS, MIN_POST_TOPICS, normaliseSlug, normaliseSlugs } from "../topics/slug.ts";
 
 /**
  * What makes a channel, and what makes a topic set in a URL. Shared by the channel builder, which checks as the
@@ -30,23 +30,19 @@ export function parseMatch(value: unknown): Match {
   return value === "all" ? "all" : "any";
 }
 
-/** Normalises every slug, dropping duplicates in first-seen order, and reports the first one that is not a slug. */
+/** `normaliseSlugs`, with its refusal as the message to show rather than thrown. */
 function topicList(values: unknown): { topics: string[]; error?: string } {
   if (!Array.isArray(values)) {
     return { topics: [], error: "pick at least one topic" };
   }
-  const topics: string[] = [];
-  for (const value of values) {
-    try {
-      const slug = normaliseSlug(value);
-      if (!topics.includes(slug)) {
-        topics.push(slug);
-      }
-    } catch (error) {
-      return { topics, error: error instanceof InvalidTopics ? error.message : String(error) };
+  try {
+    return { topics: normaliseSlugs(values) };
+  } catch (error) {
+    if (error instanceof InvalidTopics) {
+      return { topics: [], error: error.message };
     }
+    throw error;
   }
-  return { topics };
 }
 
 export function checkChannel(input: { name: unknown; topics: unknown; match: unknown; shared: unknown }): ChannelCheck {

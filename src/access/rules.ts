@@ -48,14 +48,6 @@ export function grantLevel(grants: readonly Grant[], ownerOid: string, granteeOi
   return level;
 }
 
-export function canReadTopics(): boolean {
-  return true;
-}
-
-export function canPostToTopics(): boolean {
-  return true;
-}
-
 export function canViewAgent(viewerOid: string, agent: AgentRef, grants: readonly Grant[]): boolean {
   return viewerOid === agent.ownerOid || grantLevel(grants, agent.ownerOid, viewerOid) !== undefined;
 }

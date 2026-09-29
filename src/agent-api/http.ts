@@ -1,4 +1,5 @@
 import type { ZodTypeAny, z } from "zod";
+import { messageIdOf } from "../messages/limits.ts";
 
 /** A refusal with the status and JSON body the contract gives it: `{"error": "<message>"}` plus any extras. */
 export class HttpError extends Error {
@@ -89,16 +90,11 @@ export function parse<S extends ZodTypeAny>(schema: S, value: unknown): z.output
   throw new HttpError(400, field === "" ? (issue?.message ?? "invalid request") : `${field}: ${issue?.message}`);
 }
 
-const DIGITS = /^\d{1,19}$/;
-
-/** A message id from a path or query: a non-negative bigint written in decimal. */
+/** A message id from a path or query, or a 400 that names the parameter. */
 export function parseMessageId(value: string | null | undefined, name = "id"): bigint {
-  if (value === null || value === undefined || !DIGITS.test(value)) {
+  const id = value === null || value === undefined ? undefined : messageIdOf(value);
+  if (id === undefined) {
     throw new HttpError(400, `${name} must be a message id`);
-  }
-  const id = BigInt(value);
-  if (id > 9_223_372_036_854_775_807n) {
-    throw new HttpError(400, `${name} is out of range`);
   }
   return id;
 }

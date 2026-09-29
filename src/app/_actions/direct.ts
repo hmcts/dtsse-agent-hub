@@ -1,7 +1,7 @@
 "use server";
 
-import { MAX_BODY } from "@/agent-api/schemas";
 import { loadThreadMessage, type ThreadMessage } from "@/messages/direct-thread";
+import { MAX_BODY } from "@/messages/limits";
 import { directAsPerson } from "@/messages/send";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";

@@ -1,15 +1,12 @@
 "use server";
 
-import { MAX_BODY } from "@/agent-api/schemas";
+import { MAX_BODY, MAX_TITLE, messageIdOf } from "@/messages/limits";
 import { postAs } from "@/messages/send";
 import type { ApiMessage } from "@/messages/shape";
 import { prisma } from "@/store/prisma";
 import { postTopics } from "@/topics/slug";
 import { requireViewer } from "@/viewer/current";
 import { type ActionResult, runAction, text } from "@/web/action";
-
-const MAX_TITLE = 300;
-const MESSAGE_ID = /^\d{1,19}$/;
 
 /**
  * Posts to topics as the signed-in person: a human post, so `author_agent_id` is null. Every value is re-checked
@@ -36,14 +33,11 @@ export async function postToTopics(input: {
       return { ok: false, error: `a title is at most ${MAX_TITLE} characters` };
     }
     const reply = text(input.inReplyTo);
-    if (reply !== "" && !MESSAGE_ID.test(reply)) {
+    const inReplyTo = reply === "" ? null : messageIdOf(reply);
+    if (inReplyTo === undefined) {
       return { ok: false, error: "that is not a post to reply to" };
     }
-    const message = await postAs(
-      prisma,
-      { oid: viewer.oid, agentId: null },
-      { topics, title: title === "" ? null : title, body, inReplyTo: reply === "" ? null : BigInt(reply) }
-    );
+    const message = await postAs(prisma, { oid: viewer.oid, agentId: null }, { topics, title: title === "" ? null : title, body, inReplyTo });
     return { ok: true, message };
   });
 }

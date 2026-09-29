@@ -8,6 +8,7 @@ import { GET as agents } from "../../src/app/api/agent/agents/route.ts";
 import { GET as messages } from "../../src/app/api/agent/messages/[id]/route.ts";
 import { createDirect } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
+import { byCodePoint } from "../../src/topics/slug.ts";
 import { insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
@@ -82,7 +83,7 @@ describe("direct messages", () => {
     expect(response.status).toBe(409);
     const body = await jsonOf(response);
     expect(body.error).toMatch(/more than one/);
-    expect(body.candidates.map((candidate: { id: string }) => candidate.id).sort()).toEqual([first, second].sort());
+    expect(body.candidates.map((candidate: { id: string }) => candidate.id).sort(byCodePoint)).toEqual([first, second].sort(byCodePoint));
     expect(body.candidates[0]).toMatchObject({ name: "twin", owner_name: ALICE.name });
     expect(body.candidates.find((candidate: { id: string }) => candidate.id === second)).toEqual({
       id: second,
