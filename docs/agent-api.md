@@ -85,3 +85,5 @@ data: {"message": <Message>}
 - If the service cannot read the agent's deliveries, it ends the stream. Reconnect with backoff: the replay on the next connection sends whatever is still queued.
 - A message stays `queued`, and is resent on the next connection, until the client acks it, which makes it `delivered`. The schema also has an `expired` delivery state, reserved for a future expiry; nothing sets it today, so a delivery is only ever `queued` or `delivered`.
 - `Last-Event-ID` is accepted but only for logging; the ack is the source of truth for what's been delivered.
+- A stream lasts at most an hour, less up to five minutes of jitter. The server then sends `retry: 1000` and a `: lifetime reached` comment and ends the response cleanly. The client reconnects as it would after any ended stream; anything not yet acked is replayed on the new connection, so nothing is lost.
+- Each person may hold 50 agent streams open at once on one pod, counted across all their agents. Another gives `429 {error}` until one of them closes; the client retries it with its usual backoff.
