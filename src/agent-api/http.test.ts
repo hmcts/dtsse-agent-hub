@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { errorResponse, HttpError, json, noContent, parse, parseLimit, parseMessageId, readJson } from "./http.ts";
-import { cursorBody, directBody, heartbeatBody, postBody, registerBody } from "./schemas.ts";
+import { errorResponse, HttpError, json, MAX_REQUEST_BYTES, noContent, parse, parseLimit, parseMessageId, readJson } from "./http.ts";
+import { cursorBody, directBody, heartbeatBody, MAX_BODY, MAX_REQUEST_TOPICS, postBody, registerBody, topicsBody } from "./schemas.ts";
 
 function request(body: string): Request {
   return new Request("https://agent-hub.example/api/agent/register", { method: "POST", body });
@@ -47,6 +47,61 @@ describe("readJson", () => {
 
   it("should refuse a body that is not JSON with a 400", async () => {
     await expect(readJson(request("{"))).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("should refuse with a 413 when the declared content length is over the cap", async () => {
+    const small = new Request("https://agent-hub.example/api/agent/register", {
+      method: "POST",
+      body: "{}",
+      headers: { "content-length": String(MAX_REQUEST_BYTES + 1) }
+    });
+
+    await expect(readJson(small)).rejects.toMatchObject({ status: 413 });
+  });
+
+  it("should refuse with a 413 when a chunked body with no content length grows past the cap", async () => {
+    const chunk = new Uint8Array(64 * 1024).fill(0x20);
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += 1;
+        controller.enqueue(chunk);
+        if (sent > 8) {
+          controller.close();
+        }
+      }
+    });
+    const chunked = new Request("https://agent-hub.example/api/agent/register", { method: "POST", body: stream, duplex: "half" } as RequestInit);
+
+    expect(chunked.headers.get("content-length")).toBeNull();
+    await expect(readJson(chunked)).rejects.toMatchObject({ status: 413 });
+    expect(sent).toBeLessThan(9);
+  });
+
+  it("should accept a maximal message body written entirely as escaped multibyte text when it is under the cap", async () => {
+    const text = "é".repeat(MAX_BODY);
+    const escaped = JSON.stringify({ topics: ["a"], body: text }).replaceAll("é", "\\u00e9");
+
+    expect(new TextEncoder().encode(escaped).byteLength).toBeLessThanOrEqual(MAX_REQUEST_BYTES);
+    expect(await readJson(request(escaped))).toEqual({ topics: ["a"], body: text });
+  });
+
+  it("should decode multibyte characters split across chunks when the body is streamed", async () => {
+    const bytes = new TextEncoder().encode('{"body":"€"}');
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, 11));
+        controller.enqueue(bytes.slice(11));
+        controller.close();
+      }
+    });
+    const split = new Request("https://agent-hub.example/api/agent/register", { method: "POST", body: stream, duplex: "half" } as RequestInit);
+
+    expect(await readJson(split)).toEqual({ body: "€" });
+  });
+
+  it("should read an empty object when the request has no body", async () => {
+    expect(await readJson(new Request("https://agent-hub.example/api/agent/register", { method: "POST" }))).toEqual({});
   });
 });
 
@@ -135,6 +190,10 @@ describe("postBody", () => {
   it("should read in_reply_to as a bigint", () => {
     expect(parse(postBody, { topics: ["a"], body: "b", in_reply_to: "5" }).in_reply_to).toBe(5n);
   });
+
+  it("should refuse the topics when there are more raw entries than the cap, even if they would de-duplicate", () => {
+    expect(() => parse(postBody, { topics: Array.from({ length: MAX_REQUEST_TOPICS + 1 }, () => "a"), body: "b" })).toThrow(/topics/);
+  });
 });
 
 describe("directBody", () => {
@@ -148,5 +207,17 @@ describe("directBody", () => {
     ["both", { to_agent: "bob", reply_to_message: "7", body: "hi" }]
   ])("should refuse %s", (_label, body) => {
     expect(() => parse(directBody, body)).toThrow(/exactly one/);
+  });
+});
+
+describe("topicsBody", () => {
+  it("should accept the topics when there are exactly the maximum", () => {
+    expect(parse(topicsBody, { topics: Array.from({ length: MAX_REQUEST_TOPICS }, (_, i) => `t${i}`) }).topics).toHaveLength(MAX_REQUEST_TOPICS);
+  });
+
+  it("should refuse with a message naming the field when there are more topics than the cap", () => {
+    const topics = Array.from({ length: MAX_REQUEST_TOPICS + 1 }, (_, i) => `t${i}`);
+
+    expect(() => parse(topicsBody, { topics })).toThrow(/^topics: at most 100 topics per request$/);
   });
 });
