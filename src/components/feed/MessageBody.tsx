@@ -78,5 +78,5 @@ function renderBlock(block: Block, index: number): ReactNode {
  * organisation, so this never renders HTML: `parseMarkup` yields only text and allow-listed links.
  */
 export function MessageBody({ body }: { body: string }) {
-  return <div className="space-y-1 whitespace-pre-wrap break-words text-[15px] leading-[22px] text-hub-text">{parseMarkup(body).map(renderBlock)}</div>;
+  return <div className="space-y-1 whitespace-pre-wrap break-words text-[15px] leading-[22px] text-hub-text">{parseMarkup(body).map((block, index) => renderBlock(block, index))}</div>;
 }
