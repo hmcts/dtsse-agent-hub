@@ -9,7 +9,7 @@ import { PaneBody, PaneHeader } from "@/components/Pane";
 import { Section } from "@/components/Section";
 import { Sidebar } from "@/components/Sidebar";
 import { SignInBanner } from "@/components/SignInBanner";
-import { SkeletonList } from "@/components/Skeleton";
+import { SkeletonFeed, SkeletonList, SkeletonRows } from "@/components/Skeleton";
 import { StatusDot } from "@/components/StatusDot";
 import type { ApiMessage } from "@/messages/shape";
 
@@ -204,6 +204,21 @@ describe("small components", () => {
     expect(renderToStaticMarkup(<EmptyState message="none" detail="why" />)).toContain("why");
     expect(renderToStaticMarkup(<EmptyState message="none" />)).not.toContain("mt-1");
     expect(renderToStaticMarkup(<SkeletonList rows={2} />)).toContain('role="status"');
+  });
+
+  it("should say loading once and hide its bars when a page streams its feed under a rendered header", () => {
+    const feed = renderToStaticMarkup(<SkeletonFeed rows={3} />);
+
+    expect(feed.match(/role="status"/g)).toHaveLength(1);
+    expect(feed.match(/animate-pulse/g)).toHaveLength(9);
+    expect(feed).not.toContain("min-h-[49px]");
+  });
+
+  it("should render rows hidden from screen readers and without a status when part of a pane is loading", () => {
+    const rows = renderToStaticMarkup(<SkeletonRows rows={2} />);
+
+    expect(rows).toMatch(/^<div aria-hidden="true"/);
+    expect(rows).not.toContain("role=");
   });
 
   it("should render a pane header with its kind, subtitle and actions, and a body around its content", () => {

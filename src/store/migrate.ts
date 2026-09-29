@@ -41,7 +41,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Retries only the errors of a database that is still starting; any answer from Postgres itself is final. */
+/** 57P03 is Postgres's cannot_connect_now: up, but still starting, recovering or shutting down. */
+const STARTING_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT", "57P03"]);
+
+/** Whether a connect failure is one of a database that is still starting. Any other answer from Postgres is final. */
+export function isStartingError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  if (typeof code === "string" && STARTING_CODES.has(code)) {
+    return true;
+  }
+  // pg raises this with no code when the server closes the socket mid-handshake, as a restarting server does.
+  return typeof message === "string" && message.includes("Connection terminated unexpectedly");
+}
+
+/** Retries only the errors `isStartingError` accepts, until the deadline. */
 async function connectWhenReady(connectionString: string, pause: (ms: number) => Promise<void>): Promise<pg.Client> {
   const deadline = Date.now() + CONNECT_TIMEOUT_MS;
 
@@ -52,9 +68,7 @@ async function connectWhenReady(connectionString: string, pause: (ms: number) =>
       return client;
     } catch (error) {
       await client.end().catch(() => undefined);
-      const code = (error as { code?: string }).code;
-      const starting = code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "EAI_AGAIN";
-      if (!starting || Date.now() >= deadline) {
+      if (!isStartingError(error) || Date.now() >= deadline) {
         throw error;
       }
       console.info(`waiting for the database: ${error instanceof Error ? error.message : String(error)}`);
@@ -82,11 +96,24 @@ async function readMigrations(directory: string): Promise<Migration[]> {
   return migrations;
 }
 
-async function applied(client: pg.ClientBase): Promise<Set<string>> {
-  const { rows } = await client.query<{ migration_name: string }>(
-    `SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`
+/** The checksum recorded for each applied migration, by name. */
+async function applied(client: pg.ClientBase): Promise<Map<string, string>> {
+  const { rows } = await client.query<{ migration_name: string; checksum: string }>(
+    `SELECT migration_name, checksum FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`
   );
-  return new Set(rows.map((row) => row.migration_name));
+  return new Map(rows.map((row) => [row.migration_name, row.checksum]));
+}
+
+/** An edited applied migration never reruns, so the schema would silently disagree with its source. */
+function assertUnchanged(migrations: readonly Migration[], done: ReadonlyMap<string, string>): void {
+  for (const migration of migrations) {
+    const recorded = done.get(migration.name);
+    if (recorded !== undefined && recorded !== migration.checksum) {
+      throw new Error(
+        `migration ${migration.name} has changed since it was applied: the ledger records checksum ${recorded}, the file's is ${migration.checksum}. Restore the file and make the change in a new migration.`
+      );
+    }
+  }
 }
 
 /** Applies every pending migration, each in its own transaction, and returns the names applied. */
@@ -98,6 +125,7 @@ export async function migrate(directory: string = migrationsDirectory(), pause: 
     await client.query("SELECT pg_advisory_lock($1)", [LOCK_KEY.toString()]);
     await client.query(LEDGER);
     const done = await applied(client);
+    assertUnchanged(migrations, done);
     const pending = migrations.filter((migration) => !done.has(migration.name));
 
     for (const migration of pending) {
