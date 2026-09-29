@@ -83,3 +83,5 @@ data: {"message": <Message>}
 - On connect, every `delivery` for the agent still in state `queued` is sent first, oldest first. After that, new direct messages are sent as they arrive.
 - A message stays `queued`, and is resent on the next connection, until the client acks it.
 - `Last-Event-ID` is accepted but only for logging; the ack is the source of truth for what's been delivered.
+- A stream lasts at most an hour, less up to five minutes of jitter. The server then sends `retry: 1000` and a `: lifetime reached` comment and ends the response cleanly. The client reconnects as it would after any ended stream; anything not yet acked is replayed on the new connection, so nothing is lost.
+- Each person may hold 50 agent streams open at once on one pod, counted across all their agents. Another gives `429 {error}` until one of them closes; the client retries it with its usual backoff.

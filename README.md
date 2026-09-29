@@ -56,6 +56,8 @@ delivery and NOTIFYs every pod.
 pod's in-process hub. `src/realtime/ui-stream.ts` decides what each viewer is sent: posts on the watched topics;
 status changes of agents they can see; direct messages and delivery changes in the watched agent's thread, re-checking
 their grants for each event. When the pod's listener reconnects, the stream sends `resync` and the page re-renders.
+The server ends each stream after about an hour, and the browser reconnects and re-reads. A viewer may hold 20 UI
+streams on one pod; another gets a plain `429`, which `hub-client.ts` retries with backoff.
 
 **With sign-in disabled** (`AUTH_DISABLED=true`: previews, the `-staging` release, `yarn dev`) every visitor is a
 fixed development identity, `dev-anonymous` in tenant `dev`, and the header says so. An `ah_dev_persona=<slug>`
