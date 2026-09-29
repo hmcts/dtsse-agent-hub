@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { connectHub, type HubClientDependencies, type HubEventType, retryDelay, streamUrl } from "./hub-client.ts";
 
 class FakeSource {
@@ -120,5 +120,54 @@ describe("connectHub", () => {
 
     expect(timers[0]!.cleared).toBe(true);
     expect(sources).toHaveLength(1);
+  });
+});
+
+describe("connectHub in the browser", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function browser() {
+    const opened: FakeSource[] = [];
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      class extends FakeSource {
+        constructor(url: string) {
+          super(url);
+          opened.push(this);
+        }
+      }
+    );
+    return opened;
+  }
+
+  it("should open an EventSource and reopen it after the backoff when the browser gives up", () => {
+    const opened = browser();
+    connectHub("/api/ui/stream", () => undefined);
+
+    opened[0]!.readyState = 2;
+    opened[0]!.emit("error");
+    vi.advanceTimersByTime(999);
+    expect(opened).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+
+    expect(opened.map((source) => source.url)).toEqual(["/api/ui/stream", "/api/ui/stream"]);
+  });
+
+  it("should cancel the pending reopen when it is stopped during the backoff", () => {
+    const opened = browser();
+    const stop = connectHub("/api/ui/stream", () => undefined);
+    opened[0]!.readyState = 2;
+    opened[0]!.emit("error");
+
+    expect(vi.getTimerCount()).toBe(1);
+
+    stop();
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(opened[0]!.closed).toBe(true);
   });
 });

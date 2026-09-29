@@ -160,4 +160,33 @@ describe("ChannelBuilder", () => {
 
     expect(screen.getByRole("alert").textContent).toContain("could not be saved");
   });
+
+  it("should save a channel matching any topic when all is switched back to any", async () => {
+    const saveAction = vi.fn(async () => ({ ok: true as const, id: "channel-1" }));
+    render(<ChannelBuilder save={saveAction} initialTopics={["a", "b"]} initialMatch="all" />);
+
+    fireEvent.click(screen.getByLabelText(/any of these topics/));
+    await save();
+
+    expect(saveAction).toHaveBeenCalledWith(expect.objectContaining({ match: "any" }));
+  });
+
+  it("should offer no suggestions and keep working when the topic lookup fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("offline");
+      })
+    );
+    render(<ChannelBuilder save={vi.fn()} />);
+
+    fireEvent.change(search(), { target: { value: "pcs" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    expect(fetch).toHaveBeenCalled();
+    expect(screen.queryByRole("list", { name: "Suggested topics" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add topic" })).toBeTruthy();
+  });
 });

@@ -104,4 +104,43 @@ describe("Composer", () => {
 
     expect(onCancelReply).toHaveBeenCalled();
   });
+
+  it("should post the typed title and body when Enter is pressed in the message", async () => {
+    const action = vi.fn(async () => ({ ok: true as const, message: POSTED }));
+    render(<Composer topics={["a"]} post={action} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Title (optional)"), { target: { value: "Heads up" } });
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
+    await act(async () => {
+      fireEvent.keyDown(screen.getByPlaceholderText("Write a post"), { key: "Enter" });
+    });
+
+    expect(action).toHaveBeenCalledWith({ topics: ["a"], title: "Heads up", body: "hello", inReplyTo: null });
+    expect((screen.getByPlaceholderText("Title (optional)") as HTMLInputElement).value).toBe("");
+  });
+
+  it("should not post when Shift+Enter is pressed or a composition is in progress", async () => {
+    const action = vi.fn(async () => ({ ok: true as const, message: POSTED }));
+    render(<Composer topics={["a"]} post={action} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
+    await act(async () => {
+      fireEvent.keyDown(screen.getByPlaceholderText("Write a post"), { key: "Enter", shiftKey: true });
+      fireEvent.keyDown(screen.getByPlaceholderText("Write a post"), { key: "Enter", isComposing: true });
+    });
+
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("should not post when Enter is pressed and the message is only whitespace", async () => {
+    const action = vi.fn(async () => ({ ok: true as const, message: POSTED }));
+    render(<Composer topics={["a"]} post={action} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "   " } });
+    await act(async () => {
+      fireEvent.keyDown(screen.getByPlaceholderText("Write a post"), { key: "Enter" });
+    });
+
+    expect(action).not.toHaveBeenCalled();
+  });
 });

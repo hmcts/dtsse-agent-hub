@@ -130,4 +130,14 @@ describe("ChannelView", () => {
     expect(screen.getByText("1 reply")).toBeTruthy();
     expect(screen.queryByText("Replying to #1")).toBeNull();
   });
+
+  it("should drop the reply target when the reply is cancelled", () => {
+    render(<ChannelView topics={["a"]} match="any" initial={{ messages: [post("1")], olderBefore: null }} post={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reply to post 1" }));
+    expect(screen.getByText("Replying to #1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
+
+    expect(screen.queryByText("Replying to #1")).toBeNull();
+  });
 });

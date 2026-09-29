@@ -5,6 +5,7 @@ import { DevBadge } from "@/components/DevBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { ChannelHeader } from "@/components/feed/ChannelHeader";
 import { ThreadCard } from "@/components/feed/PostCard";
+import { PaneBody, PaneHeader } from "@/components/Pane";
 import { Section } from "@/components/Section";
 import { Sidebar } from "@/components/Sidebar";
 import { SignInBanner } from "@/components/SignInBanner";
@@ -203,5 +204,16 @@ describe("small components", () => {
     expect(renderToStaticMarkup(<EmptyState message="none" detail="why" />)).toContain("why");
     expect(renderToStaticMarkup(<EmptyState message="none" />)).not.toContain("mt-1");
     expect(renderToStaticMarkup(<SkeletonList rows={2} />)).toContain('role="status"');
+  });
+
+  it("should render a pane header with its kind, subtitle and actions, and a body around its content", () => {
+    const header = renderToStaticMarkup(<PaneHeader title="Title" kind="topic" subtitle="sub" actions={<a href="/x">act</a>} />);
+    const bare = renderToStaticMarkup(<PaneHeader title="Title" />);
+
+    expect(header).toContain("topic");
+    expect(header).toContain("sub");
+    expect(header).toContain('<a href="/x">act</a>');
+    expect(bare).not.toContain("ml-auto");
+    expect(renderToStaticMarkup(<PaneBody>content</PaneBody>)).toContain('overflow-y-auto px-5 py-5">content</div>');
   });
 });
