@@ -46,12 +46,16 @@ export interface NewPost {
 /**
  * Writes a post, creating any topic it names for the first time and stamping each topic's `last_message_at`. The
  * topic-count trigger checks the count at commit, and the NOTIFY is delivered only on commit.
+ *
+ * The upsert locks each topic row until commit, so the rows are taken in slug order under the "C" collation whatever order the caller
+ * named them in: two posts naming the same topics in opposite orders would otherwise deadlock.
  */
 export async function createPost(prisma: PrismaClient, post: NewPost): Promise<ApiMessage> {
   const id = await prisma.$transaction(async (tx) => {
     const topics = await tx.$queryRaw<{ id: number }[]>`
       INSERT INTO topic (slug, last_message_at)
-      SELECT unnest(${[...post.topics]}::text[]), now()
+      SELECT slug, now() FROM unnest(${[...post.topics]}::text[]) AS slug
+      ORDER BY slug COLLATE "C"
       ON CONFLICT (slug) DO UPDATE SET last_message_at = EXCLUDED.last_message_at
       RETURNING id
     `;
