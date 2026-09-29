@@ -90,6 +90,7 @@ model Agent {
   deliveries    Delivery[]
 
   @@index([ownerOid])
+  @@index([name])
   @@map("agent")
 }
 
@@ -117,6 +118,7 @@ model Topic {
   messages      MessageTopic[]
   subscriptions Subscription[]
 
+  @@index([slug(ops: raw("text_pattern_ops"))], map: "topic_slug_pattern_idx")
   @@map("topic")
 }
 
