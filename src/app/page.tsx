@@ -1,16 +1,31 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { LiveStatus } from "@/components/agents/LiveStatus";
 import { DevBadge } from "@/components/DevBadge";
 import { ChannelView } from "@/components/feed/ChannelView";
 import { PANE_ACTION, PaneHeader } from "@/components/Pane";
+import { SkeletonList } from "@/components/Skeleton";
+import type { Identity } from "@/users/identity";
 import { requireViewer } from "@/viewer/current";
 import { overview } from "@/web/data";
 import { instant } from "@/web/format";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * A root `loading.tsx` would wrap every route below it, and turn their not-found 404s into streamed 200s, so the
+ * home page streams under its own boundary.
+ */
 export default async function HomePage() {
   const viewer = await requireViewer();
+  return (
+    <Suspense fallback={<SkeletonList rows={8} />}>
+      <Overview viewer={viewer} />
+    </Suspense>
+  );
+}
+
+async function Overview({ viewer }: { viewer: Identity }) {
   const { agents, topics, activity } = await overview(viewer);
   const all = [...agents.mine, ...agents.shared];
 
