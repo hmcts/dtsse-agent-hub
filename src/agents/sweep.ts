@@ -1,14 +1,38 @@
+import { expireDeliveries } from "../messages/store.ts";
 import { notify } from "../realtime/notify.ts";
 import type { PrismaClient } from "../store/prisma.ts";
 import { OFFLINE_AFTER_SECONDS } from "./liveness.ts";
 
 export const SWEEP_INTERVAL_MS = 30_000;
 
+/**
+ * How long a direct message waits for an offline agent before it is marked `expired`. Every session registers a
+ * new agent, so a message to one that has ended would otherwise stay queued for good; a day is long enough for a
+ * laptop left asleep overnight to come back and still receive it.
+ */
+export const EXPIRE_AFTER_SECONDS = 24 * 60 * 60;
+
+/** Deliveries expired per sweep, so a backlog drains over a few ticks rather than in one long transaction. */
+export const EXPIRE_BATCH = 200;
+
 /** "agntswep". Distinct from the migration lock. */
 const SWEEP_LOCK_KEY = 0x61676e74_73776570n;
 
+export interface SweepOptions {
+  expireAfterSeconds?: number;
+  expireBatch?: number;
+}
+
+export interface SweepResult {
+  /** The agents marked offline. */
+  offline: string[];
+  /** How many deliveries were expired. */
+  expired: number;
+}
+
 /**
- * Marks every agent silent for longer than `offlineAfterSeconds` offline, and announces each.
+ * Marks every agent silent for longer than `OFFLINE_AFTER_SECONDS` offline, and announces each; then expires a batch
+ * of the deliveries queued for agents offline longer than `expireAfterSeconds`.
  *
  * `pg_try_advisory_xact_lock` so only one pod sweeps per tick, without queueing the others behind it. The
  * transaction-scoped form because the lock must be released with the transaction on the pooled connection it was
@@ -16,7 +40,8 @@ const SWEEP_LOCK_KEY = 0x61676e74_73776570n;
  *
  * `undefined` means another pod held the lock.
  */
-export async function sweepOffline(prisma: PrismaClient, offlineAfterSeconds: number = OFFLINE_AFTER_SECONDS): Promise<string[] | undefined> {
+export async function sweepOffline(prisma: PrismaClient, options: SweepOptions = {}): Promise<SweepResult | undefined> {
+  const { expireAfterSeconds = EXPIRE_AFTER_SECONDS, expireBatch = EXPIRE_BATCH } = options;
   return await prisma.$transaction(async (tx) => {
     const [lock] = await tx.$queryRaw<{ locked: boolean }[]>`SELECT pg_try_advisory_xact_lock(${SWEEP_LOCK_KEY}) AS locked`;
     if (lock?.locked !== true) {
@@ -24,13 +49,14 @@ export async function sweepOffline(prisma: PrismaClient, offlineAfterSeconds: nu
     }
     const swept = await tx.$queryRaw<{ id: string; owner_oid: string }[]>`
       UPDATE agent SET status = 'offline'
-       WHERE status <> 'offline' AND last_heartbeat_at < now() - make_interval(secs => ${offlineAfterSeconds}::double precision)
+       WHERE status <> 'offline' AND last_heartbeat_at < now() - make_interval(secs => ${OFFLINE_AFTER_SECONDS}::double precision)
       RETURNING id::text AS id, owner_oid
     `;
     for (const agent of swept) {
       await notify(tx, { type: "agent_status", agent_id: agent.id, owner_oid: agent.owner_oid, status: "offline" });
     }
-    return swept.map((agent) => agent.id);
+    const expired = await expireDeliveries(tx, expireAfterSeconds, expireBatch);
+    return { offline: swept.map((agent) => agent.id), expired };
   });
 }
 
@@ -47,9 +73,9 @@ export function startOfflineSweep(prisma: PrismaClient, intervalMs: number = SWE
     }
     running = true;
     sweepOffline(prisma)
-      .then((swept) => {
-        if (swept !== undefined && swept.length > 0) {
-          console.info(`marked ${swept.length} silent agent${swept.length === 1 ? "" : "s"} offline`);
+      .then((result) => {
+        if (result !== undefined && (result.offline.length > 0 || result.expired > 0)) {
+          console.info(`offline sweep: ${result.offline.length} silent agents marked offline, ${result.expired} queued deliveries expired`);
         }
       })
       .catch((error: unknown) => {

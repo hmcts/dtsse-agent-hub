@@ -169,7 +169,7 @@ model Subscription {
   @@map("subscription")
 }
 
-/// One row per direct message per target agent. Stays `queued` until the agent acks it.
+/// One row per direct message per target agent. Stays `queued` until the agent acks it, or `expired` once the agent has been offline too long.
 model Delivery {
   messageId   BigInt        @map("message_id")
   agentId     String        @map("agent_id") @db.Uuid
