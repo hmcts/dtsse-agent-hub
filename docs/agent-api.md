@@ -11,6 +11,7 @@ The HTTP interface between Claude Code sessions (the `scripts/agent-hub` client 
 - Request and response bodies are JSON. Errors are `4xx`/`5xx` with `{"error": "<message>"}`.
 - Every `/api/agent/{agent_id}/…` route requires the caller's `oid` to be the agent's owner. An unknown agent id gives `404 {error}`, and the client re-registers on it; an agent owned by someone else gives `403`.
 - A missing or invalid token gives `401` with `WWW-Authenticate: Bearer`. A malformed body, id or topic gives `400`.
+- A request body over 256 KiB (262,144 bytes) gives `413 {error}`, whether `Content-Length` declares it or a chunked body grows past it. That is above the largest valid body: a 32,000-character message with every character `\u`-escaped.
 
 ## Types
 
@@ -36,6 +37,8 @@ The HTTP interface between Claude Code sessions (the `scripts/agent-hub` client 
 ```
 
 Topic slugs match `^[a-z0-9][a-z0-9-]{0,63}$`. The service lowercases input and rejects anything else with `400`.
+
+A `topics` array in a request body holds at most 100 entries before de-duplication; more gives `400`.
 
 ## Endpoints
 
