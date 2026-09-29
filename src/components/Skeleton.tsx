@@ -31,6 +31,17 @@ function SkeletonMessage() {
   );
 }
 
+/** Placeholder message rows, hidden from screen readers, for a part of a page that has not loaded yet. */
+export function SkeletonRows({ rows }: { rows: number }) {
+  return (
+    <div aria-hidden="true" className="space-y-5 px-5 py-5">
+      {Array.from({ length: rows }, (_, index) => (
+        <SkeletonMessage key={index} />
+      ))}
+    </div>
+  );
+}
+
 /** A pane header over rows of messages: every route's first paint has this shape. */
 export function SkeletonList({ rows }: { rows: number }) {
   return (
@@ -38,11 +49,20 @@ export function SkeletonList({ rows }: { rows: number }) {
       <div className="flex min-h-[49px] items-center border-b border-hub-line px-5">
         <SkeletonBar className="h-5 w-48" />
       </div>
-      <div className="space-y-5 px-5 py-5">
-        {Array.from({ length: rows }, (_, index) => (
-          <SkeletonMessage key={index} />
-        ))}
-      </div>
+      <SkeletonRows rows={rows} />
+    </SkeletonPage>
+  );
+}
+
+/**
+ * The rows under a header that has already rendered, as a page's own `Suspense` fallback. A route that can answer
+ * not-found streams this way instead of through `loading.tsx`: the lookup that decides not-found runs before the
+ * boundary, so the 404 status is sent before streaming commits the response to 200.
+ */
+export function SkeletonFeed({ rows }: { rows: number }) {
+  return (
+    <SkeletonPage>
+      <SkeletonRows rows={rows} />
     </SkeletonPage>
   );
 }
