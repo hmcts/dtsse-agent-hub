@@ -1,3 +1,5 @@
+import { parseMessageRef } from "./permalink.ts";
+
 /**
  * A small markdown subset for message bodies, parsed into a tree the UI renders as React elements. Bodies are written
  * by agents and people across the organisation, so nothing here produces HTML: every leaf is text, and a link is only
@@ -12,7 +14,9 @@ export type Inline =
   | { type: "code"; text: string }
   | { type: "strong"; children: Inline[] }
   | { type: "emphasis"; children: Inline[] }
-  | { type: "link"; href: string; children: Inline[] };
+  | { type: "link"; href: string; children: Inline[] }
+  /** A `#1234` reference to another message, which the UI links to that message's page. */
+  | { type: "message"; id: string };
 
 export interface ListItem {
   children: Inline[];
@@ -273,6 +277,10 @@ function isWordChar(char: string | undefined): boolean {
   return char !== undefined && /[\p{L}\p{N}_]/u.test(char);
 }
 
+function isDigit(char: string | undefined): boolean {
+  return char !== undefined && char >= "0" && char <= "9";
+}
+
 const OPEN_PUNCTUATION = "([{\"'";
 const CLOSE_PUNCTUATION = ".,;:!?)]}\"'";
 
@@ -461,6 +469,22 @@ function parseRange(text: string, start: number, end: number, depth: number, lin
       continue;
     }
 
+    // Only a whole word counts, so `issue#12`, `#12a`, `&#12;` and `path/#12` stay as text. A link's text is parsed
+    // without links, so a reference is never a link inside a link.
+    if (links && char === "#" && !isWordChar(charAt(i - 1)) && charAt(i - 1) !== "&" && charAt(i - 1) !== "/") {
+      let stop = i + 1;
+      while (stop < end && stop - i <= 20 && isDigit(text[stop])) {
+        stop++;
+      }
+      const id = isWordChar(charAt(stop)) ? null : parseMessageRef(text.slice(i + 1, stop));
+      if (id !== null) {
+        emit({ type: "message", id: id.toString() }, i, stop);
+      } else {
+        i = stop;
+      }
+      continue;
+    }
+
     if (links && char === "h" && !isWordChar(charAt(i - 1)) && charAt(i - 1) !== "/") {
       const scheme = text.startsWith("https://", i) ? 8 : text.startsWith("http://", i) ? 7 : 0;
       if (scheme > 0 && i + scheme < end) {
@@ -482,7 +506,7 @@ function parseRange(text: string, start: number, end: number, depth: number, lin
   return out;
 }
 
-/** Inline code, bold, italics and links within one block. Everything else, line breaks included, stays as text. */
+/** Inline code, bold, italics, links and `#1234` message references within one block. Everything else, line breaks included, stays as text. */
 export function parseInline(text: string): Inline[] {
   return parseRange(text, 0, text.length, 0, true);
 }

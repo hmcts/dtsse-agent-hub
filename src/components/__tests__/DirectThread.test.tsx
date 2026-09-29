@@ -197,3 +197,11 @@ describe("DirectThread", () => {
     expect(screen.getByText("delivered").closest("li")?.getAttribute("data-message-id")).toBe("1");
   });
 });
+
+describe("DirectThread message ids", () => {
+  it("should link each entry's id to its message page when rendering the thread", () => {
+    render(<DirectThread agentId={AGENT} access="read" initial={[message("41")]} send={vi.fn()} />);
+
+    expect(screen.getByRole("link", { name: "#41" }).getAttribute("href")).toBe("/m/41");
+  });
+});

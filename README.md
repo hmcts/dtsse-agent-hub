@@ -47,6 +47,7 @@ it needs ownership or a write grant. The rules are in `src/access/rules.ts`.
 | `/channels/new`, `/channels/[id]` | the channel builder, and a saved channel (yours, or one someone shared) |
 | `/topics`, `/topics/[slug]` | every topic by recent activity, and one topic's feed |
 | `/agents/[id]` | an agent you may see: its status, details, posts and direct-message thread |
+| `/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
 | `/access` | the grants you have given and hold; grant or revoke read or write by email |
 
 Pages are server components reading through `src/web/data.ts`; writes are the server actions in

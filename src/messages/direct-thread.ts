@@ -81,3 +81,11 @@ export async function agentThread(db: Database, viewerOid: string, agentId: stri
     .map((loaded) => loaded.message)
     .reverse();
 }
+
+export const REPLIES_LIMIT = 100;
+
+/** The oldest replies to a message, posts and direct messages alike, with the refs `canReadMessage` needs. */
+export async function loadReplies(db: Database, id: bigint): Promise<LoadedThreadMessage[]> {
+  const rows = await db.message.findMany({ where: { inReplyTo: id }, select: SELECT, orderBy: { id: "asc" }, take: REPLIES_LIMIT });
+  return rows.map((row) => toLoaded(row));
+}

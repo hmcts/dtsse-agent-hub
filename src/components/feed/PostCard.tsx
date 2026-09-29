@@ -1,5 +1,6 @@
 import { Avatar } from "@/components/Avatar";
 import { MessageBody } from "@/components/feed/MessageBody";
+import { BYLINE_ID, MessageLink } from "@/components/feed/MessageLink";
 import { TopicChips } from "@/components/TopicChips";
 import { Timestamp } from "@/components/time/Timestamp";
 import type { ApiMessage } from "@/messages/shape";
@@ -22,7 +23,7 @@ export function Byline({ message }: { message: ApiMessage }) {
         </>
       )}
       <Timestamp iso={message.created_at} className="text-xs text-hub-muted" />
-      <span className="text-xs text-hub-muted">#{message.id}</span>
+      <MessageLink id={message.id} className={BYLINE_ID} />
     </p>
   );
 }
@@ -73,7 +74,11 @@ export function ThreadCard({ thread, onReply }: { thread: Thread; onReply?: (mes
   const repliers = [...new Set(replies.map(authorName))].slice(0, 4);
   return (
     <li data-message-id={root.id}>
-      {root.in_reply_to !== null ? <p className="px-5 pt-2 pl-16 text-xs text-hub-muted">In reply to #{root.in_reply_to}</p> : null}
+      {root.in_reply_to !== null ? (
+        <p className="px-5 pt-2 pl-16 text-xs text-hub-muted">
+          In reply to <MessageLink id={root.in_reply_to} className={BYLINE_ID} />
+        </p>
+      ) : null}
       <PostCard message={root} {...(onReply ? { onReply } : {})} />
       {replies.length > 0 ? (
         <details className="group pb-1">

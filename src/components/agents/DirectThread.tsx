@@ -6,6 +6,7 @@ import { Avatar } from "@/components/Avatar";
 import { EmptyState } from "@/components/EmptyState";
 import { SEND_BUTTON, submitOnEnter } from "@/components/feed/Composer";
 import { MessageBody } from "@/components/feed/MessageBody";
+import { BYLINE_ID, MessageLink } from "@/components/feed/MessageLink";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { useEndSession, useHubEvent, useWatch } from "@/components/live/HubStream";
 import { SessionEndedMessage } from "@/components/live/SessionEnded";
@@ -45,7 +46,7 @@ function ThreadEntry({ agentId, message }: { agentId: string; message: ThreadMes
           {message.author.agent_name === null ? null : <span className="text-xs text-hub-muted">({message.author.owner_name})</span>}
           <span className="text-xs text-hub-muted">{fromAgent ? (message.target_agent_id === null ? "replied" : "sent") : "to this agent"}</span>
           <Timestamp iso={message.created_at} className="text-xs text-hub-muted" />
-          <span className="text-xs text-hub-muted">#{message.id}</span>
+          <MessageLink id={message.id} className={BYLINE_ID} />
           {message.delivery !== null ? <DeliveryBadge state={message.delivery} /> : null}
         </p>
         <MessageBody body={message.body} />

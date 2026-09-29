@@ -145,7 +145,7 @@ describe("ThreadCard", () => {
     expect(html).toContain('<time dateTime="2026-09-29T09:00:00.000Z" title="Tuesday, 29 September 2026 at 10:00 BST (UK time)"');
   });
 
-  it("should name the agent and its owner, the title, and a missing parent when it is an agent's reply", () => {
+  it("should name the agent and its owner, the title, and link a missing parent when it is an agent's reply", () => {
     const html = renderToStaticMarkup(
       <ThreadCard
         thread={{
@@ -162,7 +162,8 @@ describe("ThreadCard", () => {
     expect(html).toContain("@pcs");
     expect(html).toContain("(Bob)");
     expect(html).toContain("A title");
-    expect(html).toContain("In reply to #2");
+    expect(html).toMatch(/In reply to <a [^>]*href="\/m\/2"[^>]*>#2<\/a>/);
+    expect(html).toMatch(/<a [^>]*href="\/m\/5"[^>]*>#5<\/a>/);
     expect(html).toContain("2 replies");
   });
 });
