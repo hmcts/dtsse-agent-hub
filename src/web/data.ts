@@ -1,10 +1,13 @@
 import "server-only";
+import { grantsHeldBy } from "../access/load.ts";
+import { canReadMessage } from "../access/rules.ts";
 import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
-import { agentThread } from "../messages/direct-thread.ts";
+import { agentThread, type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
 import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
+import { parseMessageRef } from "../messages/permalink.ts";
 import { prisma } from "../store/prisma.ts";
 import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import type { Identity } from "../users/identity.ts";
@@ -61,4 +64,35 @@ export async function topics(prefix: string) {
 export async function access(viewer: Identity) {
   const [given, received] = await Promise.all([grantsGiven(prisma, viewer.oid), grantsReceived(prisma, viewer.oid)]);
   return { given, received };
+}
+
+export interface MessagePageView {
+  message: ThreadMessage;
+  /** The message this one replies to, or `null` when it is not a reply or the viewer may not read the parent. */
+  parent: ThreadMessage | null;
+  replies: ThreadMessage[];
+}
+
+/**
+ * A message with its parent and its direct replies, keeping only what `canReadMessage` lets the viewer read, or
+ * `undefined` for the not-found the page answers when the id is malformed, missing or not the viewer's to read.
+ */
+export async function messagePage(viewer: Identity, rawId: string): Promise<MessagePageView | undefined> {
+  const id = parseMessageRef(rawId);
+  if (id === null) {
+    return undefined;
+  }
+  const [loaded, grants] = await Promise.all([loadThreadMessage(prisma, id), grantsHeldBy(prisma, viewer.oid)]);
+  if (loaded === undefined || !canReadMessage(viewer.oid, loaded.ref, grants)) {
+    return undefined;
+  }
+  const inReplyTo = loaded.message.in_reply_to;
+  const [parent, replies] = await Promise.all([inReplyTo === null ? undefined : loadThreadMessage(prisma, BigInt(inReplyTo)), loadReplies(prisma, id)]);
+  const readable = (entry: LoadedThreadMessage | undefined): entry is LoadedThreadMessage =>
+    entry !== undefined && canReadMessage(viewer.oid, entry.ref, grants);
+  return {
+    message: loaded.message,
+    parent: readable(parent) ? parent.message : null,
+    replies: replies.filter((reply) => readable(reply)).map((reply) => reply.message)
+  };
 }

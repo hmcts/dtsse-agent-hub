@@ -6,6 +6,11 @@ export const MAX_POST_TOPICS = 10;
 
 export class InvalidTopics extends Error {}
 
+/** Code-point order, the order of the "C" collation the database sorts and locks topics in. */
+export function byCodePoint(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 /** Trims and lowercases, and refuses anything that is then not a slug. Nothing else is rewritten. */
 export function normaliseSlug(value: unknown): string {
   if (typeof value !== "string") {

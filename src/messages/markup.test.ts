@@ -6,10 +6,18 @@ const code = (value: string): Inline => ({ type: "code", text: value });
 const strong = (...children: Inline[]): Inline => ({ type: "strong", children });
 const em = (...children: Inline[]): Inline => ({ type: "emphasis", children });
 const link = (href: string, ...children: Inline[]): Inline => ({ type: "link", href, children });
+const ref = (id: string): Inline => ({ type: "message", id });
 const paragraph = (...children: Inline[]): Block => ({ type: "paragraph", children });
 
 function flatten(nodes: Inline[]): string {
-  return nodes.map((node) => (node.type === "text" || node.type === "code" ? node.text : flatten(node.children))).join("");
+  return nodes
+    .map((node) => {
+      if (node.type === "message") {
+        return `#${node.id}`;
+      }
+      return node.type === "text" || node.type === "code" ? node.text : flatten(node.children);
+    })
+    .join("");
 }
 
 function links(nodes: Inline[]): string[] {
@@ -17,7 +25,7 @@ function links(nodes: Inline[]): string[] {
     if (node.type === "link") {
       return [node.href, ...links(node.children)];
     }
-    return node.type === "text" || node.type === "code" ? [] : links(node.children);
+    return node.type === "text" || node.type === "code" || node.type === "message" ? [] : links(node.children);
   });
 }
 
@@ -184,6 +192,40 @@ describe("parseInline", () => {
     expect(parseInline("a [b")).toEqual([text("a [b")]);
   });
 
+  it("should parse a message reference when #digits stands as a whole word", () => {
+    expect(parseInline("see #1234")).toEqual([text("see "), ref("1234")]);
+    expect(parseInline("#1 and #22, (#333). #4!")).toEqual([ref("1"), text(" and "), ref("22"), text(", ("), ref("333"), text("). "), ref("4"), text("!")]);
+    expect(parseInline("**#5** _#6_")).toEqual([strong(ref("5")), text(" "), em(ref("6"))]);
+    expect(parseInline("#9223372036854775807")).toEqual([ref("9223372036854775807")]);
+    expect(parseInline("line\n#7")).toEqual([text("line\n"), ref("7")]);
+  });
+
+  it("should leave #digits as text when it is part of a word, zero-padded, out of range or not digits", () => {
+    for (const plain of [
+      "issue#12",
+      "#12a",
+      "#12_x",
+      "&#12;",
+      "path/#12",
+      "#007",
+      "#0",
+      "#9223372036854775808",
+      "#123456789012345678901234",
+      "# 12",
+      "#",
+      "#abc",
+      "C#1"
+    ]) {
+      expect(parseInline(plain)).toEqual([text(plain)]);
+    }
+  });
+
+  it("should not parse a message reference when it sits inside code, a URL or a link's text", () => {
+    expect(parseInline("`#12`")).toEqual([code("#12")]);
+    expect(parseInline("https://example.com/page#12")).toEqual([link("https://example.com/page#12", text("https://example.com/page#12"))]);
+    expect(parseInline("[#12](https://example.com)")).toEqual([link("https://example.com/", text("#12"))]);
+  });
+
   it("should never produce a link to a disallowed scheme when given hostile inputs", () => {
     const hostile = [
       "[a](javascript:alert(1))[b](https://ok.test)",
@@ -248,7 +290,7 @@ describe("parseMarkup", () => {
   });
 
   it("should not parse a heading when the hashes are not followed by a space", () => {
-    expect(parseMarkup("#123 is fixed\n####### seven")).toEqual([paragraph(text("#123 is fixed\n####### seven"))]);
+    expect(parseMarkup("#123 is fixed\n####### seven")).toEqual([paragraph(ref("123"), text(" is fixed\n####### seven"))]);
   });
 
   it("should parse bullet and numbered lists and keep their start number", () => {
@@ -392,6 +434,8 @@ describe("parseMarkup on hostile and huge inputs", () => {
     "fence openers": "```\n".repeat(LIMIT / 4),
     "blank lines between items": "- a\n\n\n".repeat(LIMIT / 7),
     "mixed markers": "*_`[**__``((]])".repeat(LIMIT / 15),
+    "message references": "#1 ".repeat(LIMIT / 3),
+    "long digit runs": `#${"9".repeat(LIMIT - 1)}`,
     "nested emphasis": "**_*".repeat(LIMIT / 8) + "*_**".repeat(LIMIT / 8)
   };
 

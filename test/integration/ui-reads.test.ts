@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { saveChannel } from "../../src/channels/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import type { Identity } from "../../src/users/identity.ts";
-import { agentActivity, agentPage, channel, overview, sidebarData } from "../../src/web/data.ts";
+import { agentActivity, agentPage, channel, messagePage, overview, sidebarData } from "../../src/web/data.ts";
 import { insertAgent, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 
 const ALICE = { oid: "oid-alice", name: "Alice", email: "alice@example.com" };
@@ -129,5 +129,64 @@ describe("overview", () => {
     expect(activity.messages).toHaveLength(30);
     expect(activity.messages[0]!.body).toBe("post 2");
     expect(activity.olderBefore).toBe(activity.messages[0]!.id);
+  });
+});
+
+describe("messagePage", () => {
+  const post = (author: Person, body: string, inReplyTo: string | null = null) =>
+    createPost(prisma, {
+      author: { oid: author.oid, agentId: null },
+      topics: ["a"],
+      title: null,
+      body,
+      inReplyTo: inReplyTo === null ? null : BigInt(inReplyTo)
+    });
+
+  it("should show a post with its parent and only the replies the viewer may read", async () => {
+    const parent = await post(ALICE, "the question");
+    const root = await post(CAROL, "an answer", parent.id);
+    await post(ALICE, "a public reply", root.id);
+    await createDirect(prisma, { author: { oid: CAROL.oid, agentId: null }, targetAgentId: carolsAgent, inReplyTo: BigInt(root.id), body: "a private reply" });
+    await post(ALICE, "unrelated");
+
+    const bob = await messagePage(viewer(BOB), root.id);
+    const carol = await messagePage(viewer(CAROL), root.id);
+
+    expect(bob?.message.body).toBe("an answer");
+    expect(bob?.parent?.body).toBe("the question");
+    expect(bob?.replies.map((reply) => reply.body)).toEqual(["a public reply"]);
+    expect(carol?.replies.map((reply) => [reply.body, reply.delivery])).toEqual([
+      ["a public reply", null],
+      ["a private reply", "queued"]
+    ]);
+    expect((await messagePage(viewer(BOB), parent.id))?.parent).toBeNull();
+  });
+
+  it("should show a direct message to those who may read it and to nobody else", async () => {
+    const direct = await createDirect(prisma, { author: { oid: ALICE.oid, agentId: null }, targetAgentId: alicesAgent, inReplyTo: null, body: "private" });
+    const hidden = await createDirect(prisma, { author: { oid: CAROL.oid, agentId: null }, targetAgentId: carolsAgent, inReplyTo: null, body: "carol's" });
+
+    expect((await messagePage(viewer(ALICE), direct.id))?.message.body).toBe("private");
+    expect((await messagePage(viewer(BOB), direct.id))?.message.body).toBe("private");
+    expect(await messagePage(viewer(BOB), hidden.id)).toBeUndefined();
+    expect(await messagePage(viewer(ALICE), hidden.id)).toBeUndefined();
+    expect((await messagePage(viewer(CAROL), hidden.id))?.message.kind).toBe("direct");
+  });
+
+  it("should leave out a parent the viewer may not read when a readable post replies to it", async () => {
+    const hidden = await createDirect(prisma, { author: { oid: CAROL.oid, agentId: null }, targetAgentId: carolsAgent, inReplyTo: null, body: "carol's" });
+    const reply = await post(CAROL, "public follow-up", hidden.id);
+
+    const bob = await messagePage(viewer(BOB), reply.id);
+
+    expect(bob?.message.in_reply_to).toBe(hidden.id);
+    expect(bob?.parent).toBeNull();
+    expect((await messagePage(viewer(CAROL), reply.id))?.parent?.body).toBe("carol's");
+  });
+
+  it("should answer not-found when the id is malformed, out of range or has no message", async () => {
+    for (const id of ["abc", "0", "007", "-1", "9223372036854775808", "999999"]) {
+      expect(await messagePage(viewer(ALICE), id)).toBeUndefined();
+    }
   });
 });

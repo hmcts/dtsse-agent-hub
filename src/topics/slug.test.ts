@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { InvalidTopics, normaliseSlug, normaliseSlugs, postTopics } from "./slug.ts";
+import { byCodePoint, InvalidTopics, normaliseSlug, normaliseSlugs, postTopics } from "./slug.ts";
+
+describe("byCodePoint", () => {
+  it("should order by code point when case and accents would sort differently by locale", () => {
+    expect(["b", "é", "B", "a", "a"].sort(byCodePoint)).toEqual(["B", "a", "a", "b", "é"]);
+  });
+});
 
 describe("normaliseSlug", () => {
   it.each([

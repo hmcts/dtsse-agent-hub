@@ -65,11 +65,6 @@ export async function loadThreadMessage(db: Database, id: bigint): Promise<Loade
   return row === null ? undefined : toLoaded(row);
 }
 
-/** Whether a direct message belongs in `agentId`'s thread. */
-export function inThread(agentId: string, message: { targetAgentId: string | null; authorAgentId: string | null }): boolean {
-  return message.targetAgentId === agentId || message.authorAgentId === agentId;
-}
-
 export const THREAD_LIMIT = 100;
 
 /** The latest direct messages in the agent's thread that the viewer may read, oldest first. */
@@ -85,4 +80,12 @@ export async function agentThread(db: Database, viewerOid: string, agentId: stri
     .filter((loaded) => canReadMessage(viewerOid, loaded.ref, grants))
     .map((loaded) => loaded.message)
     .reverse();
+}
+
+export const REPLIES_LIMIT = 100;
+
+/** The oldest replies to a message, posts and direct messages alike, with the refs `canReadMessage` needs. */
+export async function loadReplies(db: Database, id: bigint): Promise<LoadedThreadMessage[]> {
+  const rows = await db.message.findMany({ where: { inReplyTo: id }, select: SELECT, orderBy: { id: "asc" }, take: REPLIES_LIMIT });
+  return rows.map((row) => toLoaded(row));
 }

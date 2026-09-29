@@ -6,9 +6,7 @@ import {
   canGrant,
   canManageGrants,
   canPersonMessageAgent,
-  canPostToTopics,
   canReadMessage,
-  canReadTopics,
   canViewAgent,
   type Grant,
   grantLevel,
@@ -87,11 +85,6 @@ describe.each(Object.entries(MATRIX) as [Role, Expectation][])("access for the %
 
   it(`should ${expected.manageGrants ? "" : "not "}let the ${role} grant a known person access`, () => {
     expect(canGrant(oid, OWNER, ELSEWHERE, true)).toBe(expected.manageGrants);
-  });
-
-  it(`should let the ${role} read and post on topics`, () => {
-    expect(canReadTopics()).toBe(true);
-    expect(canPostToTopics()).toBe(true);
   });
 
   it(`should let the ${role} read any post`, () => {

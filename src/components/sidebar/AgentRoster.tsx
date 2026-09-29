@@ -9,6 +9,7 @@ import { DevBadge } from "@/components/DevBadge";
 import { useHubEvent } from "@/components/live/HubStream";
 import { NavLink } from "@/components/NavLink";
 import type { AgentStatus } from "@/realtime/events";
+import { byCodePoint } from "@/topics/slug";
 
 const RANK: Record<AgentStatus, number> = { busy: 0, idle: 1, offline: 2 };
 
@@ -19,7 +20,7 @@ function initialHeard(agent: AgentCard): Heard {
 function byStatusThenName(statusOf: (agent: AgentCard) => AgentStatus) {
   return (left: AgentCard, right: AgentCard): number => {
     const rank = RANK[statusOf(left)] - RANK[statusOf(right)];
-    return rank !== 0 ? rank : left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+    return rank !== 0 ? rank : byCodePoint(left.name, right.name);
   };
 }
 
