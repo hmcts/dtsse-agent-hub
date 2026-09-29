@@ -55,10 +55,10 @@ withPipeline(type, product, component) {
         -e POSTGRES_DB=agent_hub -e POSTGRES_USER=hmcts -e POSTGRES_HOST_AUTH_METHOD=trust \
         -d ${postgresImage}
       for attempt in \$(seq 1 30); do
-        docker exec ${postgresContainer} pg_isready -U hmcts -d agent_hub && break
+        docker exec ${postgresContainer} pg_isready -h 127.0.0.1 -U hmcts -d agent_hub && break
         sleep 2
       done
-      docker exec ${postgresContainer} pg_isready -U hmcts -d agent_hub
+      docker exec ${postgresContainer} pg_isready -h 127.0.0.1 -U hmcts -d agent_hub
     """, label: 'Start the integration-test Postgres'
 
     // `docker port` prints one line per binding (IPv4 and IPv6).
