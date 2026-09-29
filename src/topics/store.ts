@@ -9,13 +9,24 @@ export async function subscriptions(db: Database, agentId: string): Promise<stri
   return rows.map((row) => row.topic.slug).sort(byCodePoint);
 }
 
-/** Subscribes to each topic, creating those nobody has posted on yet. Returns the whole set. */
+/**
+ * Subscribes to each topic, creating those nobody has posted on yet. Returns the whole set.
+ *
+ * A row another transaction has inserted but not committed makes this one wait for it, so both inserts take their rows
+ * in slug order under the "C" collation, the order `createPost` locks topics in; an order the caller chose could deadlock.
+ */
 export async function subscribe(db: Database, agentId: string, slugs: readonly string[]): Promise<string[]> {
   if (slugs.length > 0) {
-    await db.$executeRaw`INSERT INTO topic (slug) SELECT unnest(${[...slugs]}::text[]) ON CONFLICT (slug) DO NOTHING`;
+    await db.$executeRaw`
+      INSERT INTO topic (slug)
+      SELECT slug FROM unnest(${[...slugs]}::text[]) AS slug
+      ORDER BY slug COLLATE "C"
+      ON CONFLICT (slug) DO NOTHING
+    `;
     await db.$executeRaw`
       INSERT INTO subscription (agent_id, topic_id)
       SELECT ${agentId}::uuid, id FROM topic WHERE slug = ANY(${[...slugs]}::text[])
+      ORDER BY slug COLLATE "C"
       ON CONFLICT DO NOTHING
     `;
   }

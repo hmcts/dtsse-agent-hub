@@ -62,7 +62,15 @@ export async function directAsAgent(prisma: PrismaClient, sender: AgentRef, requ
   }
   if (candidates.length > 1) {
     throw new HttpError(409, `more than one agent you may message is called "${request.toAgent}"; send its id instead`, {
-      candidates: candidates.map((candidate) => ({ id: candidate.id, name: candidate.name, owner_name: candidate.ownerName }))
+      candidates: candidates.map((candidate) => ({
+        id: candidate.id,
+        name: candidate.name,
+        status: candidate.status,
+        repo: candidate.repo,
+        branch: candidate.branch,
+        last_heartbeat_at: candidate.lastHeartbeatAt.toISOString(),
+        owner_name: candidate.ownerName
+      }))
     });
   }
   const target = candidates[0]!;
