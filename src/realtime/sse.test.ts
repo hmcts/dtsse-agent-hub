@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type Fail,
   MAX_STREAM_LIFETIME_MS,
   openSseStream,
   PING_INTERVAL_MS,
@@ -194,6 +195,58 @@ describe("openSseStream", () => {
 
     expect(await readAll(stream)).toBe(": connected\n\n");
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("no database"));
+  });
+
+  it("should end the stream, log why, and run onClose and the cleanup once, with no ping or lifetime timer left, when onOpen fails it later", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const abort = new AbortController();
+    const cleanup = vi.fn();
+    const onClose = vi.fn();
+    let fail: Fail = () => undefined;
+    const stream = openSseStream({
+      signal: abort.signal,
+      onOpen: (_send, given) => {
+        fail = given;
+        return cleanup;
+      },
+      onClose,
+      pingIntervalMs: 1000,
+      maxLifetimeMs: 3000
+    });
+    const text = readAll(stream);
+    await flush();
+
+    fail(new Error("replay failed"));
+    fail(new Error("again"));
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(await text).toBe(": connected\n\n");
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(console.warn).toHaveBeenCalledOnce();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("replay failed"));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("should run onClose and the cleanup once when onOpen fails the stream before returning it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const abort = new AbortController();
+    const cleanup = vi.fn();
+    const onClose = vi.fn();
+    const stream = openSseStream({
+      signal: abort.signal,
+      onOpen: (_send, fail) => {
+        fail("not listening");
+        return cleanup;
+      },
+      onClose
+    });
+
+    expect(await readAll(stream)).toBe(": connected\n\n");
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("not listening"));
   });
 
   it("should tell the client to reconnect and close cleanly when the stream reaches its lifetime", async () => {

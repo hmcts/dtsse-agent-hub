@@ -1,7 +1,7 @@
-import { createLocalJWKSet, exportJWK, generateKeyPair, type JWTPayload, SignJWT } from "jose";
+import { createLocalJWKSet, errors, exportJWK, generateKeyPair, type JWTPayload, type JWTVerifyGetKey, SignJWT } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
 import { type AgentAuthSettings, agentAuthSettings } from "./settings.ts";
-import { AgentAuthFailed, tenantKeys, verifyAgentToken } from "./token.ts";
+import { AgentAuthFailed, AgentAuthUnavailable, tenantKeys, verifyAgentToken } from "./token.ts";
 
 const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
 const CLIENT_ID = "11111111-2222-3333-4444-555555555555";
@@ -22,7 +22,8 @@ const CLAIMS = {
   oid: "a1b2c3d4-0000-0000-0000-000000000001",
   tid: TENANT,
   name: "Alice Smith",
-  preferred_username: "alice.smith@justice.gov.uk"
+  preferred_username: "alice.smith@justice.gov.uk",
+  scp: "user_impersonation"
 };
 
 async function token(
@@ -90,6 +91,35 @@ describe("verifyAgentToken", () => {
 
   it("should refuse something that is not a token", async () => {
     await expect(verifyAgentToken("not-a-jwt", SETTINGS, keys)).rejects.toThrow(AgentAuthFailed);
+  });
+
+  it.each([
+    ["an app-only token, which carries roles instead", { scp: undefined, roles: ["Agent.ReadWrite"] }],
+    ["an ID token, which has no scp", { scp: undefined }],
+    ["a token whose scp is empty", { scp: "" }],
+    ["a token whose scp is not a string", { scp: ["user_impersonation"] }]
+  ])("should refuse %s", async (_label, overrides) => {
+    await expect(verifyAgentToken(await token(overrides), SETTINGS, keys)).rejects.toThrow(/scp/);
+  });
+
+  it.each([
+    ["the key set fetch times out", new errors.JWKSTimeout()],
+    ["the network fails", new TypeError("fetch failed")],
+    ["the endpoint does not answer 200", new errors.JOSEError("Expected 200 OK from the JSON Web Key Set HTTP response")],
+    ["the key set is malformed", new errors.JWKSInvalid("JSON Web Key Set malformed")]
+  ])("should report the keys as unavailable rather than the token as bad when %s", async (_label, failure) => {
+    const failing: JWTVerifyGetKey = async () => {
+      throw failure;
+    };
+
+    await expect(verifyAgentToken(await token(), SETTINGS, failing)).rejects.toThrow(AgentAuthUnavailable);
+  });
+
+  it("should still refuse the token when the key set has no key it names", async () => {
+    const rejection = verifyAgentToken(await token({}, { kid: "unpublished" }), SETTINGS, keys);
+
+    await expect(rejection).rejects.toThrow(AgentAuthFailed);
+    await expect(rejection).rejects.not.toThrow(AgentAuthUnavailable);
   });
 
   it("should fall back to the email claim and then the oid for display when name is missing", async () => {

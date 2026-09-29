@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { loadSecrets } from "./platform/secrets.ts";
+import { startRealtime } from "./realtime/start.ts";
 
 type Platform = typeof import("@hmcts-cft/cloud-native-platform");
 
@@ -12,6 +13,7 @@ function platform(): Platform {
 export async function register(): Promise<void> {
   await readSecrets();
   startMonitoring();
+  await startRealtime();
   await startSweeping();
 }
 

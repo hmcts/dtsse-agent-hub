@@ -23,7 +23,7 @@ export interface Person {
 }
 
 export function person(handle: string): Person {
-  return { oid: `oid-${handle}`, name: `${handle[0]!.toUpperCase()}${handle.slice(1)} Tester`, email: `${handle}@example.com` };
+  return { oid: `dev-${handle}`, name: `${handle[0]!.toUpperCase()}${handle.slice(1)} Tester`, email: `${handle}@example.com` };
 }
 
 export function devUser(who: Person): string {

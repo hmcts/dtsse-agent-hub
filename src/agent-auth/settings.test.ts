@@ -40,6 +40,18 @@ describe("agentAuthDisabled", () => {
   ])("should read %j as %s, so only the exact string disables validation", (env, expected) => {
     expect(agentAuthDisabled(env)).toBe(expected);
   });
+
+  it("should refuse to disable validation when NODE_ENV is production, as it is in the runtime image", () => {
+    expect(() => agentAuthDisabled({ AGENT_AUTH_DISABLED: "true", NODE_ENV: "production" })).toThrow(AgentAuthConfigurationError);
+  });
+
+  it("should allow the bypass under next dev", () => {
+    expect(agentAuthDisabled({ AGENT_AUTH_DISABLED: "true", NODE_ENV: "development" })).toBe(true);
+  });
+
+  it("should leave validation on in production when the bypass is not asked for", () => {
+    expect(agentAuthDisabled({ NODE_ENV: "production" })).toBe(false);
+  });
 });
 
 describe("jwksUrl", () => {

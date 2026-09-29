@@ -19,10 +19,15 @@ export class AgentAuthConfigurationError extends Error {}
 
 /**
  * Local development only. The contract lets a client send `X-Dev-User` instead of a bearer token when the service
- * runs with this set; no chart sets it.
+ * runs with this set; no chart sets it. Every production build refuses it, the runtime image included, so a
+ * deployment that sets it by mistake answers every agent request 503 rather than trusting a header anyone can send.
  */
 export function agentAuthDisabled(env: Environment = process.env): boolean {
-  return env.AGENT_AUTH_DISABLED === "true";
+  const disabled = env.AGENT_AUTH_DISABLED === "true";
+  if (disabled && env.NODE_ENV === "production") {
+    throw new AgentAuthConfigurationError("AGENT_AUTH_DISABLED is set on a production build; it is for next dev only");
+  }
+  return disabled;
 }
 
 export function agentAuthSettings(env: Environment = process.env): AgentAuthSettings {

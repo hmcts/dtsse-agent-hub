@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 /** `Last-Event-ID` is accepted for the log only: acks, not the stream position, decide what is resent. */
 export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request }) => {
-  const { hub } = realtime();
+  const { hub, listener } = realtime();
   const lastEventId = request.headers.get("last-event-id");
   if (lastEventId !== null) {
     console.info(`agent ${agent.id} reconnected after event ${lastEventId.slice(0, 32)}`);
@@ -26,6 +26,7 @@ export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
     onClose: release,
     onOpen: agentStream(agent.id, {
       hub,
+      ready: listener.ready,
       queued: () => queuedDeliveries(prisma, agent.id),
       queuedOne: (messageId) => queuedDelivery(prisma, agent.id, messageId)
     })

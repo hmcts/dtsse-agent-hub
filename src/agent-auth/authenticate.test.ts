@@ -2,6 +2,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { authenticateAgent } from "./authenticate.ts";
 import { parseDevUser } from "./dev.ts";
+import { AgentAuthConfigurationError } from "./settings.ts";
 import { AgentAuthFailed } from "./token.ts";
 
 const TENANT = "a-tenant";
@@ -16,6 +17,12 @@ describe("authenticateAgent", () => {
       name: "Dev Person",
       email: "dev@example.com"
     });
+  });
+
+  it("should refuse the development header when agent auth is disabled on a production build", async () => {
+    const headers = new Headers({ "x-dev-user": "dev-oid|Dev Person" });
+
+    await expect(authenticateAgent(headers, { AGENT_AUTH_DISABLED: "true", NODE_ENV: "production" })).rejects.toThrow(AgentAuthConfigurationError);
   });
 
   it("should refuse a request with no X-Dev-User when agent auth is disabled, rather than invent a caller", async () => {
@@ -35,7 +42,7 @@ describe("authenticateAgent", () => {
   it("should verify a bearer token when agent auth is enabled", async () => {
     const pair = await generateKeyPair("RS256");
     const keys = createLocalJWKSet({ keys: [{ ...(await exportJWK(pair.publicKey)), kid: "k", alg: "RS256" }] });
-    const jwt = await new SignJWT({ oid: "an-oid", tid: TENANT, name: "A" })
+    const jwt = await new SignJWT({ oid: "an-oid", tid: TENANT, name: "A", scp: "user_impersonation" })
       .setProtectedHeader({ alg: "RS256", kid: "k" })
       .setIssuer(`https://login.microsoftonline.com/${TENANT}/v2.0`)
       .setAudience("api://dtsse-agent-hub")
@@ -50,7 +57,15 @@ describe("authenticateAgent", () => {
 
 describe("parseDevUser", () => {
   it("should accept an identity without an email", () => {
-    expect(parseDevUser("oid|Name")).toEqual({ oid: "oid", tid: "dev", name: "Name" });
+    expect(parseDevUser("dev-oid|Name")).toEqual({ oid: "dev-oid", tid: "dev", name: "Name" });
+  });
+
+  it("should prefix the oid with dev- when it does not already have it, so the header cannot name a real person", () => {
+    expect(parseDevUser("a1b2c3d4-0000-0000-0000-000000000001|Name")?.oid).toBe("dev-a1b2c3d4-0000-0000-0000-000000000001");
+  });
+
+  it("should keep a dev- oid as it is when it names a UI persona", () => {
+    expect(parseDevUser("dev-alice|Dev alice (sign-in disabled)|alice@dev.invalid")?.oid).toBe("dev-alice");
   });
 
   it.each([

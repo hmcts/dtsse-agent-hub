@@ -33,7 +33,7 @@ function direct(id: string, ref: Partial<MessageRef> = {}): LoadedThreadMessage 
   };
 }
 
-function sources(grants: Grant[], messages: { posts?: ApiMessage[]; directs?: LoadedThreadMessage[] } = {}): Omit<UiStreamSources, "hub"> {
+function sources(grants: Grant[], messages: { posts?: ApiMessage[]; directs?: LoadedThreadMessage[] } = {}): Omit<UiStreamSources, "hub" | "listener"> {
   return {
     viewerOid: VIEWER,
     grants: async () => grants,
@@ -41,6 +41,8 @@ function sources(grants: Grant[], messages: { posts?: ApiMessage[]; directs?: Lo
     direct: async (id) => messages.directs?.find((loaded) => loaded.message.id === id.toString())
   };
 }
+
+const LISTENING = { ready: async () => undefined, connected: () => true };
 
 const READ: Grant[] = [{ ownerOid: OWNER, granteeOid: VIEWER, level: "read" }];
 const TOPICS: UiWatch = { topics: ["pcs-api", "database"], match: "any", agent: null };
@@ -268,7 +270,7 @@ describe("uiStream", () => {
     const shared = sharedLoads(load, { ttlMs: 10_000 });
     const tabs = Array.from({ length: 5 }, () => {
       const frames: string[] = [];
-      const close = uiStream(TOPICS, { hub, ...sources([]), post: shared })((frame) => frames.push(frame)) as () => void;
+      const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), post: shared })((frame) => frames.push(frame), vi.fn()) as () => void;
       return { frames, close };
     });
 
@@ -287,7 +289,7 @@ describe("uiStream", () => {
     const hub = createEventHub();
     const grants = vi.fn(async () => READ);
     const frames: string[] = [];
-    const close = uiStream(TOPICS, { hub, ...sources([]), grants })((frame) => frames.push(frame)) as () => void;
+    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), grants })((frame) => frames.push(frame), vi.fn()) as () => void;
 
     hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "busy" });
     hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "idle" });
@@ -303,7 +305,7 @@ describe("uiStream", () => {
     const hub = createEventHub();
     const grants = vi.fn<() => Promise<Grant[]>>().mockResolvedValueOnce(READ).mockResolvedValueOnce([]);
     const frames: string[] = [];
-    const close = uiStream(TOPICS, { hub, ...sources([]), grants })((frame) => frames.push(frame)) as () => void;
+    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), grants })((frame) => frames.push(frame), vi.fn()) as () => void;
 
     hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "busy" });
     hub.publish({ type: "grant", owner_oid: OWNER, grantee_oid: VIEWER });
@@ -320,7 +322,7 @@ describe("uiStream", () => {
     const hub = createEventHub();
     const grants = vi.fn(async () => READ);
     const frames: string[] = [];
-    const close = uiStream(TOPICS, { hub, ...sources([]), grants })((frame) => frames.push(frame)) as () => void;
+    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), grants })((frame) => frames.push(frame), vi.fn()) as () => void;
 
     hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "busy" });
     hub.publish({ type: "grant", owner_oid: OWNER, grantee_oid: STRANGER });
@@ -343,6 +345,7 @@ describe("uiStream", () => {
     const loaded = sources([], { posts: [post("1", ["pcs-api"]), post("2", ["pcs-api"])] });
     const close = uiStream(TOPICS, {
       hub,
+      listener: LISTENING,
       ...loaded,
       post: async (id) => {
         if (id === 1n) {
@@ -350,7 +353,7 @@ describe("uiStream", () => {
         }
         return loaded.post(id);
       }
-    })((frame) => frames.push(frame)) as () => void;
+    })((frame) => frames.push(frame), vi.fn()) as () => void;
 
     hub.publish({ type: "post", message_id: "1" });
     hub.publish({ type: "post", message_id: "2" });
@@ -367,7 +370,10 @@ describe("uiStream", () => {
   it("should stop sending and unsubscribe when it closes", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    const close = uiStream(TOPICS, { hub, ...sources([], { posts: [post("1", ["pcs-api"])] }) })((frame) => frames.push(frame)) as () => void;
+    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([], { posts: [post("1", ["pcs-api"])] }) })(
+      (frame) => frames.push(frame),
+      vi.fn()
+    ) as () => void;
 
     close();
     hub.publish({ type: "post", message_id: "1" });
@@ -383,11 +389,12 @@ describe("uiStream", () => {
     const frames: string[] = [];
     const close = uiStream(TOPICS, {
       hub,
+      listener: LISTENING,
       ...sources([]),
       post: async () => {
         throw new Error("database gone");
       }
-    })((frame) => frames.push(frame)) as () => void;
+    })((frame) => frames.push(frame), vi.fn()) as () => void;
 
     hub.publish({ type: "post", message_id: "1" });
     hub.publish({ type: "resync" });
@@ -398,5 +405,39 @@ describe("uiStream", () => {
     expect(frames).toEqual(["event: resync\ndata: {}\n\n"]);
     close();
     warn.mockRestore();
+  });
+
+  it("should send a resync, ahead of later events, once LISTEN becomes active when it opened before it was", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    let listening: () => void = () => undefined;
+    const listener = { ready: () => new Promise<void>((resolve) => (listening = resolve)), connected: () => false };
+    const close = uiStream(TOPICS, { hub, listener, ...sources([], { posts: [post("1", ["pcs-api"])] }) })(
+      (frame) => frames.push(frame),
+      vi.fn()
+    ) as () => void;
+    await settle();
+    expect(frames).toEqual([]);
+
+    listening();
+    hub.publish({ type: "post", message_id: "1" });
+    await settle();
+
+    expect(frames.map((frame) => frame.split("\n")[0])).toEqual(["event: resync", "id: 1"]);
+    close();
+  });
+
+  it("should not send the startup resync when it closed before LISTEN became active", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    let listening: () => void = () => undefined;
+    const listener = { ready: () => new Promise<void>((resolve) => (listening = resolve)), connected: () => false };
+    const close = uiStream(TOPICS, { hub, listener, ...sources([]) })((frame) => frames.push(frame), vi.fn()) as () => void;
+
+    close();
+    listening();
+    await settle();
+
+    expect(frames).toEqual([]);
   });
 });
