@@ -6,7 +6,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer, defaultTopics } from "@/components/feed/Composer";
 import type { ApiMessage } from "@/messages/shape";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+function sessionAnswers(status: number) {
+  const fetch = vi.fn(async () => new Response(null, { status }));
+  vi.stubGlobal("fetch", fetch);
+  return fetch;
+}
 
 const POSTED: ApiMessage = {
   id: "4",
@@ -94,6 +103,42 @@ describe("Composer", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toContain("could not be sent");
+  });
+
+  it("should say the post was not sent when the call fails and the session is still good", async () => {
+    sessionAnswers(204);
+    const action = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    render(<Composer topics={["a"]} post={action} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
+    await act(async () => {
+      fireEvent.click(post());
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain("could not be sent");
+    expect(screen.queryByText(/session has ended/)).toBeNull();
+  });
+
+  it("should offer to sign in again, back to this page, when the call fails because the session has ended", async () => {
+    sessionAnswers(401);
+    window.history.pushState({}, "", "/c?topics=a&mode=any");
+    const action = vi.fn(async () => {
+      throw new Error("An unexpected response was received from the server.");
+    });
+    render(<Composer topics={["a"]} post={action} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
+    await act(async () => {
+      fireEvent.click(post());
+    });
+
+    expect(screen.getByRole("status").textContent).toContain("Your session has ended");
+    const href = new URL(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href") ?? "", "https://agent-hub.example");
+    expect(href.pathname).toBe("/auth/login");
+    expect(href.searchParams.get("redirect")).toBe("/c?topics=a&mode=any");
+    window.history.pushState({}, "", "/");
   });
 
   it("should cancel the reply when asked", () => {

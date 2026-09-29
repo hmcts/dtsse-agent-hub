@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
-import { useHubEvent, useWatch } from "@/components/live/HubStream";
+import { useEndSession, useHubEvent, useWatch } from "@/components/live/HubStream";
+import { SessionEndedMessage } from "@/components/live/SessionEnded";
 import type { Match } from "@/messages/feed";
 import { type FeedPageView, mergeMessages } from "@/messages/pagination";
 import type { ApiMessage } from "@/messages/shape";
@@ -27,6 +28,8 @@ export function ChannelView({ topics, match, initial, post }: { topics: readonly
   const [error, setError] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<ApiMessage | null>(null);
   const scroller = useStickToBottom<HTMLDivElement>(messages);
+  const endSession = useEndSession();
+  const [signedOut, setSignedOut] = useState(false);
 
   useWatch(topics, match);
 
@@ -47,6 +50,11 @@ export function ChannelView({ topics, match, initial, post }: { topics: readonly
     setError(null);
     try {
       const response = await fetch(feedUrl(topics, match, olderBefore), { headers: { accept: "application/json" } });
+      if (response.status === 401) {
+        setSignedOut(true);
+        endSession();
+        return;
+      }
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -76,7 +84,11 @@ export function ChannelView({ topics, match, initial, post }: { topics: readonly
               >
                 {loading ? "Loading" : "Load older posts"}
               </button>
-              {error ? (
+              {signedOut ? (
+                <span role="status" className="text-xs text-red-300">
+                  <SessionEndedMessage />
+                </span>
+              ) : error ? (
                 <span role="alert" className="text-xs text-red-300">
                   {error}
                 </span>

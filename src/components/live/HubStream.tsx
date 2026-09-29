@@ -1,18 +1,23 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { connectHub, type HubEventType, type HubListener, type StreamWatch, streamUrl } from "./hub-client";
 
 /**
  * One live connection per tab, shared by the sidebar and the page. The page says what it is showing with
  * `useWatch`; the sidebar's agent statuses arrive whatever it watches. A `resync` re-renders the server components,
  * so anything missed while disconnected is read again.
+ *
+ * Once the session has ended, found by the stream or by any request the page makes, the stream stays closed and
+ * `useSessionEnded` says so.
  */
 
 interface HubContextValue {
   subscribe: (listener: HubListener) => () => void;
   watch: (watch: StreamWatch | null) => void;
+  ended: boolean;
+  endSession: () => void;
 }
 
 const NOTHING: StreamWatch = { topics: [], match: "any", agent: null };
@@ -23,18 +28,26 @@ export function HubStreamProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const listeners = useRef(new Set<HubListener>());
   const [watched, setWatched] = useState<StreamWatch>(NOTHING);
+  const [ended, setEnded] = useState(false);
   const url = streamUrl(watched);
+  const endSession = useCallback(() => setEnded(true), []);
 
   useEffect(() => {
-    return connectHub(url, (type, data) => {
-      if (type === "resync") {
-        router.refresh();
-      }
-      for (const listener of [...listeners.current]) {
-        listener(type, data);
-      }
+    if (ended) {
+      return;
+    }
+    return connectHub(url, {
+      event: (type, data) => {
+        if (type === "resync") {
+          router.refresh();
+        }
+        for (const listener of [...listeners.current]) {
+          listener(type, data);
+        }
+      },
+      signedOut: endSession
     });
-  }, [url, router]);
+  }, [url, router, ended, endSession]);
 
   const value = useMemo<HubContextValue>(
     () => ({
@@ -44,9 +57,11 @@ export function HubStreamProvider({ children }: { children: React.ReactNode }) {
           listeners.current.delete(listener);
         };
       },
-      watch: (next) => setWatched(next ?? NOTHING)
+      watch: (next) => setWatched(next ?? NOTHING),
+      ended,
+      endSession
     }),
-    []
+    [ended, endSession]
   );
 
   return <HubContext.Provider value={value}>{children}</HubContext.Provider>;
@@ -82,3 +97,18 @@ export function useHubEvent<T>(type: HubEventType, handler: (data: T) => void): 
     });
   }, [context, type]);
 }
+
+/** Whether the tab has found that the person has to sign in again. */
+export function useSessionEnded(): boolean {
+  return useContext(HubContext)?.ended ?? false;
+}
+
+/**
+ * What a component that was answered 401 calls, so the stream stops and the banner shows. The component shows its
+ * own message beside what failed as well.
+ */
+export function useEndSession(): () => void {
+  return useContext(HubContext)?.endSession ?? ignore;
+}
+
+function ignore(): void {}

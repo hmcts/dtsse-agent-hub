@@ -62,6 +62,21 @@ describe("proxy sign-in guard", () => {
     expect((await proxy(ask("/api/agent/register"))).status).toBe(200);
   });
 
+  it.each([
+    "/api/ui/stream?topics=a",
+    "/api/ui/feed?topics=a&before=5",
+    "/api/ui/topics?prefix=p",
+    "/api/ui/session"
+  ])("should let %s through to its own 401 rather than redirect a fetch or EventSource to sign in when there is no session", async (path) => {
+    expect((await proxy(ask(path))).status).toBe(200);
+  });
+
+  it("should let a UI request through to its own 401 when the session has expired", async () => {
+    const cookie = await sealSession(PERSON, "a-different-secret-entirely");
+
+    expect((await proxy(ask("/api/ui/session", { [SESSION_COOKIE]: cookie }))).status).toBe(200);
+  });
+
   it("should send a person to sign in when the session secret is missing entirely", async () => {
     vi.stubEnv("SESSION_SECRET", "");
 

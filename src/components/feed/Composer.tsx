@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useEndSession } from "@/components/live/HubStream";
+import { SessionEndedMessage } from "@/components/live/SessionEnded";
+import { sessionEnded } from "@/components/live/session";
 import { SendIcon } from "@/components/sidebar/icons";
 import type { ApiMessage } from "@/messages/shape";
 import { MAX_POST_TOPICS } from "@/topics/slug";
@@ -46,6 +49,8 @@ export function Composer({
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const endSession = useEndSession();
+  const [signedOut, setSignedOut] = useState(false);
 
   const tooMany = chosen.length > MAX_POST_TOPICS;
   const none = chosen.length === 0;
@@ -68,7 +73,12 @@ export function Composer({
         setError(result.error);
       }
     } catch {
-      setError("the post could not be sent; check your connection and try again");
+      if (await sessionEnded()) {
+        setSignedOut(true);
+        endSession();
+      } else {
+        setError("the post could not be sent; check your connection and try again");
+      }
     } finally {
       setPending(false);
     }
@@ -126,7 +136,11 @@ export function Composer({
         </fieldset>
         {none ? <span className="text-xs text-amber-300">pick at least one topic</span> : null}
         {tooMany ? <span className="text-xs text-amber-300">a post has at most {MAX_POST_TOPICS} topics</span> : null}
-        {error ? (
+        {signedOut ? (
+          <span role="status" className="text-xs text-red-300">
+            <SessionEndedMessage />
+          </span>
+        ) : error ? (
           <span role="alert" className="text-xs text-red-300">
             {error}
           </span>
