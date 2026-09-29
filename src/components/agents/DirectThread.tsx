@@ -6,7 +6,9 @@ import { Avatar } from "@/components/Avatar";
 import { EmptyState } from "@/components/EmptyState";
 import { SEND_BUTTON, submitOnEnter } from "@/components/feed/Composer";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
-import { useHubEvent, useWatch } from "@/components/live/HubStream";
+import { useEndSession, useHubEvent, useWatch } from "@/components/live/HubStream";
+import { SessionEndedMessage } from "@/components/live/SessionEnded";
+import { sessionEnded } from "@/components/live/session";
 import { SendIcon } from "@/components/sidebar/icons";
 import type { DeliveryView, ThreadMessage } from "@/messages/direct-thread";
 import { mergeMessages } from "@/messages/pagination";
@@ -75,6 +77,8 @@ export function DirectThread({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const scroller = useStickToBottom<HTMLDivElement>(messages);
+  const endSession = useEndSession();
+  const [signedOut, setSignedOut] = useState(false);
 
   useWatch([], "any", agentId);
 
@@ -106,7 +110,12 @@ export function DirectThread({
         setError(result.error);
       }
     } catch {
-      setError("the message could not be sent; check your connection and try again");
+      if (await sessionEnded()) {
+        setSignedOut(true);
+        endSession();
+      } else {
+        setError("the message could not be sent; check your connection and try again");
+      }
     } finally {
       setPending(false);
     }
@@ -147,7 +156,11 @@ export function DirectThread({
             </label>
             <div className="flex items-center gap-3 px-2 pb-2">
               <span className="text-xs text-hub-muted">Enter to send, Shift+Enter for a new line</span>
-              {error ? (
+              {signedOut ? (
+                <span role="status" className="text-xs text-red-300">
+                  <SessionEndedMessage />
+                </span>
+              ) : error ? (
                 <span role="alert" className="text-xs text-red-300">
                   {error}
                 </span>

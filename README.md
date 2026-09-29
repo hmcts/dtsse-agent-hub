@@ -56,6 +56,9 @@ delivery and NOTIFYs every pod.
 pod's in-process hub. `src/realtime/ui-stream.ts` decides what each viewer is sent: posts on the watched topics;
 status changes of agents they can see; direct messages and delivery changes in the watched agent's thread, re-checking
 their grants for each event. When the pod's listener reconnects, the stream sends `resync` and the page re-renders.
+A session that ends while a tab is open answers 401 on `/api/ui/*`, which the proxy does not redirect to sign-in, so
+the tab stops reconnecting and shows a "Sign in again" link back to the page. `/api/ui/session` (204 or 401) is
+what the stream and a failed server action ask to tell an ended session from a network fault.
 
 **With sign-in disabled** (`AUTH_DISABLED=true`: previews, the `-staging` release, `yarn dev`) every visitor is a
 fixed development identity, `dev-anonymous` in tenant `dev`, and the header says so. An `ah_dev_persona=<slug>`

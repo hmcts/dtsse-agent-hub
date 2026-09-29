@@ -28,7 +28,16 @@ describe("exempt", () => {
     expect(exempt("/api/agent/0f8a/stream")).toBe(true);
   });
 
-  it.each(["/", "/c", "/agents/0f8a", "/api/ui/stream"])("should require a session for %s", (path) => {
+  it.each([
+    "/api/ui/stream",
+    "/api/ui/feed",
+    "/api/ui/topics",
+    "/api/ui/session"
+  ])("should leave %s to answer 401 itself, because fetch and EventSource cannot act on a redirect to sign in", (path) => {
+    expect(exempt(path)).toBe(true);
+  });
+
+  it.each(["/", "/c", "/agents/0f8a", "/access"])("should require a session for %s", (path) => {
     expect(exempt(path)).toBe(false);
   });
 
@@ -38,7 +47,9 @@ describe("exempt", () => {
     "/authors",
     "/_nextdoor",
     "/authentication",
-    "/api/agents"
+    "/api/agents",
+    "/api/ui",
+    "/api/uix/stream"
   ])("should not exempt %s, which merely begins the same way as an exempt path", (path) => {
     expect(exempt(path)).toBe(false);
   });

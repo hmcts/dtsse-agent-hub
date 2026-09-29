@@ -2,6 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useEndSession } from "@/components/live/HubStream";
+import { SessionEndedMessage } from "@/components/live/SessionEnded";
+import { sessionEnded } from "@/components/live/session";
 import type { ActionResult } from "@/web/action";
 
 export type FormAction = (form: FormData) => Promise<ActionResult<object & { granted?: string }>>;
@@ -11,6 +14,8 @@ export function ActionForm({ action, label, className, children }: { action: For
   const router = useRouter();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, setPending] = useState(false);
+  const endSession = useEndSession();
+  const [signedOut, setSignedOut] = useState(false);
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -27,7 +32,12 @@ export function ActionForm({ action, label, className, children }: { action: For
         setMessage({ ok: false, text: result.error });
       }
     } catch {
-      setMessage({ ok: false, text: "that could not be done; try again" });
+      if (await sessionEnded()) {
+        setSignedOut(true);
+        endSession();
+      } else {
+        setMessage({ ok: false, text: "that could not be done; try again" });
+      }
     } finally {
       setPending(false);
     }
@@ -36,7 +46,11 @@ export function ActionForm({ action, label, className, children }: { action: For
   return (
     <form onSubmit={submit} aria-label={label} aria-busy={pending} className={className}>
       {children}
-      {message ? (
+      {signedOut ? (
+        <p role="status" className="text-xs text-red-300">
+          <SessionEndedMessage />
+        </p>
+      ) : message ? (
         <p role={message.ok ? "status" : "alert"} className={`text-xs ${message.ok ? "text-green-300" : "text-red-300"}`}>
           {message.text}
         </p>

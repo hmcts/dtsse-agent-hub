@@ -1,11 +1,12 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveStatus } from "@/components/agents/LiveStatus";
 import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
-import { HubStreamProvider, useWatch } from "@/components/live/HubStream";
+import { HubStreamProvider, useEndSession, useWatch } from "@/components/live/HubStream";
+import { SessionEndedBanner } from "@/components/live/SessionEnded";
 
 const refresh = vi.fn();
 
@@ -34,6 +35,15 @@ class FakeSource {
 
 function current(): FakeSource {
   return FakeSource.all.filter((source) => !source.closed).at(-1)!;
+}
+
+function EndsSession() {
+  const endSession = useEndSession();
+  return (
+    <button type="button" onClick={endSession}>
+      end
+    </button>
+  );
 }
 
 function Watching({ agent }: { agent: string }) {
@@ -108,6 +118,59 @@ describe("HubStreamProvider", () => {
     });
 
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("should stop the stream and show the signed-out banner when the stream fails because the session has ended", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 }))
+    );
+    render(
+      <HubStreamProvider>
+        <SessionEndedBanner />
+      </HubStreamProvider>
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(async () => {
+      current().readyState = 2;
+      current().emit("error");
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain("Your session has ended");
+    expect(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href")).toBe("/auth/login?redirect=%2F");
+    expect(FakeSource.all).toHaveLength(1);
+    expect(FakeSource.all[0]!.closed).toBe(true);
+  });
+
+  it("should close the stream and show the banner when a component reports that the session has ended", async () => {
+    render(
+      <HubStreamProvider>
+        <SessionEndedBanner />
+        <EndsSession />
+      </HubStreamProvider>
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "end" }));
+    });
+
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(FakeSource.all.every((source) => source.closed)).toBe(true);
+  });
+
+  it("should show no banner and ignore a reported ended session outside the provider", () => {
+    render(
+      <>
+        <SessionEndedBanner />
+        <EndsSession />
+      </>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "end" }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("should do nothing when a live component is rendered outside the provider", () => {
