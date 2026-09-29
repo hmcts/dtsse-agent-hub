@@ -76,7 +76,7 @@ describe("direct messages", () => {
     const first = await insertAgent(ALICE, "twin");
     expect(await jsonOf(await send(ALICE, alicesAgent, { to_agent: "twin", body: "x" }))).toMatchObject({ message: { target_agent_id: first } });
 
-    const second = await insertAgent(ALICE, "twin");
+    const second = await insertAgent(ALICE, "twin", { status: "busy", repo: "pcs-api", branch: "HDPI-1", lastHeartbeatAt: new Date("2026-09-29T10:00:00Z") });
     const response = await send(ALICE, alicesAgent, { to_agent: "twin", body: "x" });
 
     expect(response.status).toBe(409);
@@ -84,6 +84,16 @@ describe("direct messages", () => {
     expect(body.error).toMatch(/more than one/);
     expect(body.candidates.map((candidate: { id: string }) => candidate.id).sort()).toEqual([first, second].sort());
     expect(body.candidates[0]).toMatchObject({ name: "twin", owner_name: ALICE.name });
+    expect(body.candidates.find((candidate: { id: string }) => candidate.id === second)).toEqual({
+      id: second,
+      name: "twin",
+      status: "busy",
+      repo: "pcs-api",
+      branch: "HDPI-1",
+      last_heartbeat_at: "2026-09-29T10:00:00.000Z",
+      owner_name: ALICE.name
+    });
+    expect(body.candidates.find((candidate: { id: string }) => candidate.id === first)).toMatchObject({ status: "idle", repo: null, branch: null });
   });
 
   it("should route a reply to a received direct message back to its author, even without the reverse grant", async () => {
