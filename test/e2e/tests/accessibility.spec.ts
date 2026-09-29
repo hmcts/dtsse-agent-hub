@@ -29,7 +29,11 @@ test.describe("accessibility @nightly", () => {
   test("should raise no WCAG A or AA violations on a saved channel with posts @nightly @a11y", async ({ page }) => {
     const topic = unique("e2e");
     const path = await buildChannel(page, `A11y ${topic}`, [topic]);
-    await page.getByPlaceholder("Write a post").fill("An accessibility check post");
+    await page
+      .getByPlaceholder("Write a post")
+      .fill(
+        '# An accessibility check post\n\nWith `code`, **bold**, _italics_ and https://example.com\n\n- a list item\n\n```ts\nconst line = "long enough to scroll";\n```'
+      );
     await page.getByRole("button", { name: "Post" }).click();
     await expect(page.getByRole("list", { name: "Posts" })).toBeVisible();
 
