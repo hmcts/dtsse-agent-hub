@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { type Heard, onStatus } from "@/agents/liveness";
 import type { AgentCard } from "@/agents/views";
 import { Avatar } from "@/components/Avatar";
+import { HeardAge } from "@/components/agents/LastHeard";
 import { DevBadge } from "@/components/DevBadge";
 import { useHubEvent } from "@/components/live/HubStream";
 import { NavLink } from "@/components/NavLink";
@@ -10,14 +12,19 @@ import type { AgentStatus } from "@/realtime/events";
 
 const RANK: Record<AgentStatus, number> = { busy: 0, idle: 1, offline: 2 };
 
-function byStatusThenName(statuses: Record<string, AgentStatus>) {
+function initialHeard(agent: AgentCard): Heard {
+  return { status: agent.status, at: new Date(agent.lastHeartbeatAt).getTime() };
+}
+
+function byStatusThenName(statusOf: (agent: AgentCard) => AgentStatus) {
   return (left: AgentCard, right: AgentCard): number => {
-    const rank = RANK[statuses[left.id] ?? left.status] - RANK[statuses[right.id] ?? right.status];
+    const rank = RANK[statusOf(left)] - RANK[statusOf(right)];
     return rank !== 0 ? rank : left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
   };
 }
 
-function Row({ agent, status, showOwner }: { agent: AgentCard; status: AgentStatus; showOwner: boolean }) {
+function Row({ agent, heard, showOwner }: { agent: AgentCard; heard: Heard; showOwner: boolean }) {
+  const { status } = heard;
   const offline = status === "offline";
   return (
     <li>
@@ -34,10 +41,20 @@ function Row({ agent, status, showOwner }: { agent: AgentCard; status: AgentStat
         </span>
         <span className="truncate">{agent.name}</span>
         <span className="sr-only">{status}</span>
-        {showOwner ? (
-          <span className="ml-auto truncate text-xs text-hub-muted">
-            {agent.owner.name}
-            <DevBadge tid={agent.owner.tid} />
+        {showOwner || offline ? (
+          <span className="ml-auto flex min-w-0 items-baseline gap-1.5 text-xs text-hub-muted">
+            {showOwner ? (
+              <span className="truncate">
+                {agent.owner.name}
+                <DevBadge tid={agent.owner.tid} />
+              </span>
+            ) : null}
+            {offline ? (
+              <span className="shrink-0 whitespace-nowrap">
+                <span className="sr-only">, last heard </span>
+                <HeardAge heard={heard} />
+              </span>
+            ) : null}
           </span>
         ) : null}
       </NavLink>
@@ -47,18 +64,24 @@ function Row({ agent, status, showOwner }: { agent: AgentCard; status: AgentStat
 
 /**
  * The viewer's agents and those shared with them, connected ones first. Statuses follow the stream, so an agent
- * that goes offline sinks below those still working.
+ * that goes offline sinks below those still working, and says how long it has been silent.
  */
 export function AgentRoster({ mine, shared }: { mine: AgentCard[]; shared: AgentCard[] }) {
-  const [statuses, setStatuses] = useState<Record<string, AgentStatus>>({});
+  const [heard, setHeard] = useState<Record<string, Heard>>({});
+  const all = [...mine.map((agent) => ({ agent, shared: false })), ...shared.map((agent) => ({ agent, shared: true }))];
+  const heardOf = (agent: AgentCard): Heard => heard[agent.id] ?? initialHeard(agent);
+
   useHubEvent<{ agent_id: string; status: AgentStatus }>("agent_status", ({ agent_id, status }) => {
-    setStatuses((current) => ({ ...current, [agent_id]: status }));
+    const known = all.find(({ agent }) => agent.id === agent_id)?.agent;
+    if (known === undefined) {
+      return;
+    }
+    setHeard((current) => ({ ...current, [agent_id]: onStatus(current[agent_id] ?? initialHeard(known), status, Date.now()) }));
   });
 
-  const all = [...mine.map((agent) => ({ agent, shared: false })), ...shared.map((agent) => ({ agent, shared: true }))];
-  const order = byStatusThenName(statuses);
+  const order = byStatusThenName((agent) => heardOf(agent).status);
   all.sort((left, right) => order(left.agent, right.agent));
-  const connected = all.filter(({ agent }) => (statuses[agent.id] ?? agent.status) !== "offline").length;
+  const connected = all.filter(({ agent }) => heardOf(agent).status !== "offline").length;
 
   return (
     <section aria-labelledby="sidebar-agents" className="max-h-[45%] shrink-0 overflow-y-auto border-t border-hub-line py-3">
@@ -71,7 +94,7 @@ export function AgentRoster({ mine, shared }: { mine: AgentCard[]; shared: Agent
       {all.length > 0 ? (
         <ul aria-label="Agents">
           {all.map(({ agent, shared: isShared }) => (
-            <Row key={agent.id} agent={agent} status={statuses[agent.id] ?? agent.status} showOwner={isShared} />
+            <Row key={agent.id} agent={agent} heard={heardOf(agent)} showOwner={isShared} />
           ))}
         </ul>
       ) : null}

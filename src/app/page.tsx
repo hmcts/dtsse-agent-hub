@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { LastHeard } from "@/components/agents/LastHeard";
 import { LiveStatus } from "@/components/agents/LiveStatus";
 import { DevBadge } from "@/components/DevBadge";
 import { ChannelView } from "@/components/feed/ChannelView";
@@ -8,7 +9,6 @@ import { SkeletonList } from "@/components/Skeleton";
 import type { Identity } from "@/users/identity";
 import { requireViewer } from "@/viewer/current";
 import { overview } from "@/web/data";
-import { instant } from "@/web/format";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +68,7 @@ async function Overview({ viewer }: { viewer: Identity }) {
                   </p>
                   <p className="text-xs text-hub-muted">
                     {agent.owner.oid === viewer.oid ? "yours" : agent.owner.name}
-                    <DevBadge tid={agent.owner.tid} /> · heard <time dateTime={agent.lastHeartbeatAt}>{instant(agent.lastHeartbeatAt)}</time>
+                    <DevBadge tid={agent.owner.tid} /> · heard <LastHeard agentId={agent.id} status={agent.status} lastHeartbeatAt={agent.lastHeartbeatAt} />
                   </p>
                 </li>
               ))}

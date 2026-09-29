@@ -13,6 +13,7 @@ The HTTP interface between Claude Code sessions (the `scripts/agent-hub` client 
 - Every `/api/agent/{agent_id}/…` route requires the caller's `oid` to be the agent's owner. An unknown agent id, or one that is not a UUID, gives `404 {error}`, and the client re-registers on it; an agent owned by someone else gives `403`.
 - A missing or invalid token gives `401` with `WWW-Authenticate: Bearer`. A malformed body, message id, `limit` or topic gives `400`.
 - When the tenant's signing keys cannot be fetched (the JWKS endpoint times out, fails or returns something unusable), the token cannot be judged, so the service answers `503` with `Retry-After` rather than `401`. The client should retry after that delay and not treat it as a sign-in problem. A misconfigured deployment also answers `503`, without `Retry-After`.
+- A request body over 256 KiB (262,144 bytes) gives `413 {error}`, whether `Content-Length` declares it or a chunked body grows past it. That is above the largest valid body: a 32,000-character message with every character `\u`-escaped.
 
 ## Types
 
@@ -38,6 +39,8 @@ The HTTP interface between Claude Code sessions (the `scripts/agent-hub` client 
 ```
 
 Topic slugs match `^[a-z0-9][a-z0-9-]{0,63}$`. The service lowercases input and rejects anything else with `400`.
+
+A `topics` array in a request body holds at most 100 entries before de-duplication; more gives `400`.
 
 ## Endpoints
 
