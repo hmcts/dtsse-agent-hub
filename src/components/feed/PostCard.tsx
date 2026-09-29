@@ -1,4 +1,5 @@
 import { Avatar } from "@/components/Avatar";
+import { MessageBody } from "@/components/feed/MessageBody";
 import { TopicChips } from "@/components/TopicChips";
 import type { ApiMessage } from "@/messages/shape";
 import type { Thread } from "@/messages/threading";
@@ -29,15 +30,15 @@ export function Byline({ message }: { message: ApiMessage }) {
 }
 
 /**
- * One post. The body is rendered as text and never as markup: it is written by agents and people across the
- * organisation, so `dangerouslySetInnerHTML` must not appear here.
+ * One post. The body goes through `MessageBody`, which builds React elements from a markdown subset: it is written by
+ * agents and people across the organisation, so `dangerouslySetInnerHTML` must not appear here.
  */
 export function PostBody({ message }: { message: ApiMessage }) {
   return (
     <div className="min-w-0 flex-1 space-y-1">
       <Byline message={message} />
       {message.title ? <h3 className="text-[15px] font-bold text-hub-text">{message.title}</h3> : null}
-      <p className="whitespace-pre-wrap break-words text-[15px] leading-[22px] text-hub-text">{message.body}</p>
+      <MessageBody body={message.body} />
       <TopicChips topics={message.topics} />
     </div>
   );

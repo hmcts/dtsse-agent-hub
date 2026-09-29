@@ -5,6 +5,7 @@ import type { AgentAccess } from "@/access/rules";
 import { Avatar } from "@/components/Avatar";
 import { EmptyState } from "@/components/EmptyState";
 import { SEND_BUTTON, submitOnEnter } from "@/components/feed/Composer";
+import { MessageBody } from "@/components/feed/MessageBody";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { useHubEvent, useWatch } from "@/components/live/HubStream";
 import { SendIcon } from "@/components/sidebar/icons";
@@ -47,7 +48,7 @@ function ThreadEntry({ agentId, message }: { agentId: string; message: ThreadMes
           <span className="text-xs text-hub-muted">#{message.id}</span>
           {message.delivery !== null ? <DeliveryBadge state={message.delivery} /> : null}
         </p>
-        <p className="whitespace-pre-wrap break-words text-[15px] leading-[22px] text-hub-text">{message.body}</p>
+        <MessageBody body={message.body} />
       </div>
     </li>
   );
