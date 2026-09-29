@@ -7,6 +7,7 @@ import { parseMatch, viewTopics } from "@/channels/rules";
 import { loadThreadMessage } from "@/messages/direct-thread";
 import { realtime } from "@/realtime/process";
 import { openSseStream, SSE_HEADERS } from "@/realtime/sse";
+import { streamLimits } from "@/realtime/stream-slots";
 import { sharedPostLoader, uiStream } from "@/realtime/ui-stream";
 import { prisma } from "@/store/prisma";
 import { uiViewer } from "../request";
@@ -17,6 +18,7 @@ export const dynamic = "force-dynamic";
 /**
  * Live updates for one browser tab. `?topics=a,b&mode=any|all` watches posts, `?agent=<id>` an agent's thread;
  * agent status changes the viewer may see are always sent. An agent the viewer cannot see is refused as missing.
+ * A viewer already holding their limit of streams on this pod is refused with 429, which the client backs off from.
  */
 export async function GET(request: NextRequest): Promise<Response> {
   const viewer = await uiViewer(request);
@@ -39,8 +41,13 @@ export async function GET(request: NextRequest): Promise<Response> {
     agent = { id: found.id, ownerOid: found.ownerOid };
   }
 
+  const release = streamLimits().ui.take(viewer.oid);
+  if (release === undefined) {
+    return new Response("too many open streams", { status: 429 });
+  }
   const body = openSseStream({
     signal: request.signal,
+    onClose: release,
     onOpen: uiStream(
       { topics, match: parseMatch(query.get("mode")), agent },
       {
