@@ -1,6 +1,6 @@
 import { authenticateAgent } from "../agent-auth/authenticate.ts";
 import { AgentAuthConfigurationError } from "../agent-auth/settings.ts";
-import { AgentAuthFailed } from "../agent-auth/token.ts";
+import { AgentAuthFailed, AgentAuthUnavailable } from "../agent-auth/token.ts";
 import { type AgentRow, findAgent, isUuid } from "../agents/store.ts";
 import { prisma } from "../store/prisma.ts";
 import { InvalidTopics } from "../topics/slug.ts";
@@ -25,6 +25,8 @@ export interface OwnedAgentRequest<P> extends AgentRequest<P> {
 
 type Context<P> = { params: Promise<P> };
 
+const KEYS_RETRY_AFTER_SECONDS = 10;
+
 function refusal(error: unknown): Response {
   if (error instanceof HttpError) {
     return errorResponse(error.status, error.message, error.extra);
@@ -34,6 +36,10 @@ function refusal(error: unknown): Response {
   }
   if (error instanceof AgentAuthFailed) {
     return errorResponse(401, error.message, {}, { "www-authenticate": 'Bearer realm="dtsse-agent-hub"' });
+  }
+  if (error instanceof AgentAuthUnavailable) {
+    console.error(`agent authentication is unavailable: ${error.message}`);
+    return errorResponse(503, "agent tokens cannot be checked right now; retry shortly", {}, { "retry-after": String(KEYS_RETRY_AFTER_SECONDS) });
   }
   if (error instanceof AgentAuthConfigurationError) {
     console.error(`agent authentication is misconfigured: ${error.message}`);
