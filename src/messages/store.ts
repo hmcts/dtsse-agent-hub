@@ -45,7 +45,7 @@ export interface NewPost {
 
 /**
  * Writes a post, creating any topic it names for the first time and stamping each topic's `last_message_at`. The
- * topic-count trigger checks the 1–5 rule at commit, and the NOTIFY is delivered only on commit.
+ * topic-count trigger checks the count at commit, and the NOTIFY is delivered only on commit.
  */
 export async function createPost(prisma: PrismaClient, post: NewPost): Promise<ApiMessage> {
   const id = await prisma.$transaction(async (tx) => {

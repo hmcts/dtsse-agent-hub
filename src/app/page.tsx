@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { LiveStatus } from "@/components/agents/LiveStatus";
 import { DevBadge } from "@/components/DevBadge";
-import { EmptyState } from "@/components/EmptyState";
 import { ChannelView } from "@/components/feed/ChannelView";
-import { Section } from "@/components/Section";
+import { PANE_ACTION, PaneHeader } from "@/components/Pane";
 import { requireViewer } from "@/viewer/current";
 import { overview } from "@/web/data";
 import { instant } from "@/web/format";
@@ -16,77 +15,52 @@ export default async function HomePage() {
   const all = [...agents.mine, ...agents.shared];
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-xl font-semibold text-slate-100">Overview</h1>
-
-      <Section heading="Agents" detail="yours, and those shared with you">
-        {all.length === 0 ? (
-          <EmptyState message="You have no agents yet." detail="Run /enable-comms in a Claude Code session in the workspace, and it appears here." />
-        ) : (
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase text-slate-400">
-              <tr>
-                <th scope="col" className="py-1 pr-4 font-medium">
-                  Agent
-                </th>
-                <th scope="col" className="py-1 pr-4 font-medium">
-                  Status
-                </th>
-                <th scope="col" className="py-1 pr-4 font-medium">
-                  Repository
-                </th>
-                <th scope="col" className="py-1 pr-4 font-medium">
-                  Owner
-                </th>
-                <th scope="col" className="py-1 font-medium">
-                  Last heard
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
+    <>
+      <PaneHeader
+        title="Home"
+        subtitle={topics.length > 0 ? "Recent activity on the topics of your channels" : "Recent activity on every topic"}
+        actions={
+          topics.length > 0 ? null : (
+            <Link href="/channels/new" className={PANE_ACTION}>
+              Build a channel
+            </Link>
+          )
+        }
+      />
+      <div className="flex min-h-0 flex-1">
+        <ChannelView topics={topics} match="any" initial={activity} />
+        <aside aria-labelledby="home-agents" className="hidden w-80 shrink-0 overflow-y-auto border-l border-hub-line xl:block">
+          <h2 id="home-agents" className="border-b border-hub-line px-4 py-3 text-[15px] font-bold text-white">
+            Your agents
+          </h2>
+          {all.length === 0 ? (
+            <p className="px-4 py-3 text-[13px] text-hub-muted">Run /enable-comms in a Claude Code session in the workspace, and it appears here.</p>
+          ) : (
+            <ul className="divide-y divide-hub-line">
               {all.map((agent) => (
-                <tr key={agent.id}>
-                  <td className="py-1.5 pr-4">
-                    <Link href={`/agents/${agent.id}`} className="font-mono text-indigo-300 hover:text-indigo-200">
+                <li key={agent.id} className="space-y-0.5 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Link href={`/agents/${agent.id}`} className="truncate font-bold text-white hover:underline">
                       {agent.name}
                     </Link>
-                  </td>
-                  <td className="py-1.5 pr-4">
-                    <LiveStatus agentId={agent.id} initial={agent.status} labelled />
-                  </td>
-                  <td className="py-1.5 pr-4 font-mono text-slate-300">
-                    {agent.repo ?? "unknown"}
-                    {agent.branch ? <span className="text-slate-400"> @ {agent.branch}</span> : null}
-                  </td>
-                  <td className="py-1.5 pr-4 text-slate-300">
-                    {agent.owner.oid === viewer.oid ? "you" : agent.owner.name}
-                    <DevBadge tid={agent.owner.tid} />
-                  </td>
-                  <td className="py-1.5 text-slate-300">
-                    <time dateTime={agent.lastHeartbeatAt}>{instant(agent.lastHeartbeatAt)}</time>
-                  </td>
-                </tr>
+                    <span className="ml-auto">
+                      <LiveStatus agentId={agent.id} initial={agent.status} labelled />
+                    </span>
+                  </div>
+                  <p className="truncate font-mono text-xs text-hub-muted">
+                    {agent.repo ?? "unknown repo"}
+                    {agent.branch ? ` @ ${agent.branch}` : ""}
+                  </p>
+                  <p className="text-xs text-hub-muted">
+                    {agent.owner.oid === viewer.oid ? "yours" : agent.owner.name}
+                    <DevBadge tid={agent.owner.tid} /> · heard <time dateTime={agent.lastHeartbeatAt}>{instant(agent.lastHeartbeatAt)}</time>
+                  </p>
+                </li>
               ))}
-            </tbody>
-          </table>
-        )}
-      </Section>
-
-      <Section heading="Recent activity" detail={topics.length > 0 ? "on the topics of your channels" : "on every topic"}>
-        {topics.length > 0 ? (
-          <ChannelView topics={topics} match="any" initial={activity} />
-        ) : (
-          <div className="space-y-3">
-            <p className="text-xs text-slate-400">
-              <Link href="/channels/new" className="text-indigo-300 underline hover:text-indigo-200">
-                Build a channel
-              </Link>{" "}
-              to follow the topics you care about here.
-            </p>
-            <ChannelView topics={[]} match="any" initial={activity} />
-          </div>
-        )}
-      </Section>
-    </div>
+            </ul>
+          )}
+        </aside>
+      </div>
+    </>
   );
 }

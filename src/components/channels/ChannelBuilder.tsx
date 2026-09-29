@@ -24,7 +24,7 @@ export function typedTopic(value: string): { slug: string } | { error: string } 
 }
 
 /**
- * Pick 1–5 topics, any or all, a name and whether to share. `checkChannel` validates here as the person types and
+ * Pick `MIN_POST_TOPICS` to `MAX_POST_TOPICS` topics, any or all, a name and whether to share. `checkChannel` validates here as the person types and
  * again in the action that saves.
  */
 export function ChannelBuilder({
@@ -99,17 +99,17 @@ export function ChannelBuilder({
   return (
     <form onSubmit={submit} className="space-y-5" aria-label="Build a channel">
       <div className="space-y-2">
-        <label htmlFor={`${ids}-search`} className="block text-sm font-medium text-slate-200">
-          Topics <span className="text-slate-400">(1 to {MAX_POST_TOPICS})</span>
+        <label htmlFor={`${ids}-search`} className="block text-sm font-medium text-hub-text">
+          Topics <span className="text-hub-muted">(1 to {MAX_POST_TOPICS})</span>
         </label>
         <ul className="flex flex-wrap gap-2" aria-label="Chosen topics">
           {topics.map((topic) => (
-            <li key={topic} className="flex items-center gap-1 rounded bg-slate-800 px-2 py-0.5 font-mono text-xs text-indigo-300">
+            <li key={topic} className="flex items-center gap-1 rounded bg-hub-raised px-2 py-0.5 font-mono text-xs text-hub-link">
               #{topic}
               <button
                 type="button"
                 onClick={() => setTopics((current) => current.filter((entry) => entry !== topic))}
-                className="text-slate-300 hover:text-white"
+                className="text-hub-text hover:text-white"
                 aria-label={`Remove ${topic}`}
               >
                 ×
@@ -129,13 +129,13 @@ export function ChannelBuilder({
               }
             }}
             placeholder="Search or type a topic"
-            className="w-72 max-w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-sm text-slate-100 placeholder:text-slate-400"
+            className="w-72 max-w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 font-mono text-sm text-hub-text placeholder:text-hub-muted"
           />
           <button
             type="button"
             disabled={typed === null || !("slug" in typed)}
             onClick={() => typed !== null && "slug" in typed && add(typed.slug)}
-            className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-200 hover:bg-slate-800 disabled:text-slate-400"
+            className="rounded-md border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised disabled:text-hub-muted"
           >
             Add topic
           </button>
@@ -150,9 +150,9 @@ export function ChannelBuilder({
                   <button
                     type="button"
                     onClick={() => add(suggestion.slug)}
-                    className="rounded border border-slate-700 px-2 py-0.5 font-mono text-xs text-slate-200 hover:bg-slate-800"
+                    className="rounded-md border border-hub-line px-2 py-0.5 font-mono text-xs text-hub-text hover:bg-hub-raised"
                   >
-                    #{suggestion.slug} <span className="text-slate-400">{suggestion.message_count}</span>
+                    #{suggestion.slug} <span className="text-hub-muted">{suggestion.message_count}</span>
                   </button>
                 </li>
               ))}
@@ -166,17 +166,17 @@ export function ChannelBuilder({
       </div>
 
       <fieldset className="space-y-1">
-        <legend className="text-sm font-medium text-slate-200">Show posts carrying</legend>
-        <label className="mr-4 inline-flex items-center gap-1 text-sm text-slate-300">
+        <legend className="text-sm font-medium text-hub-text">Show posts carrying</legend>
+        <label className="mr-4 inline-flex items-center gap-1 text-sm text-hub-text">
           <input type="radio" name="match" value="any" checked={match === "any"} onChange={() => setMatch("any")} /> any of these topics
         </label>
-        <label className="inline-flex items-center gap-1 text-sm text-slate-300">
+        <label className="inline-flex items-center gap-1 text-sm text-hub-text">
           <input type="radio" name="match" value="all" checked={match === "all"} onChange={() => setMatch("all")} /> all of these topics
         </label>
       </fieldset>
 
       <div className="space-y-1">
-        <label htmlFor={`${ids}-name`} className="block text-sm font-medium text-slate-200">
+        <label htmlFor={`${ids}-name`} className="block text-sm font-medium text-hub-text">
           Name
         </label>
         <input
@@ -184,7 +184,7 @@ export function ChannelBuilder({
           value={name}
           onChange={(event) => setName(event.target.value)}
           maxLength={MAX_CHANNEL_NAME}
-          className="w-72 max-w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100"
+          className="w-72 max-w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 text-sm text-hub-text"
         />
         {touched && errors.name ? (
           <p role="alert" className="text-xs text-red-300">
@@ -193,7 +193,7 @@ export function ChannelBuilder({
         ) : null}
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-slate-300">
+      <label className="flex items-center gap-2 text-sm text-hub-text">
         <input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /> Share with everyone signed in
       </label>
 
@@ -201,7 +201,7 @@ export function ChannelBuilder({
         <button
           type="submit"
           disabled={pending}
-          className="rounded bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-300"
+          className="rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567] disabled:bg-hub-raised disabled:text-hub-text"
         >
           {pending ? "Saving" : "Save channel"}
         </button>

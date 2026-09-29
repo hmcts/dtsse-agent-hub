@@ -4,20 +4,20 @@ import { checkChannel, MAX_CHANNEL_NAME, MAX_VIEW_TOPICS, parseMatch, viewHref, 
 const VALID = { name: "PCS database", topics: ["pcs-api", "database"], match: "all", shared: true };
 
 describe("checkChannel", () => {
-  it("should accept a named channel of one to five topics, normalising the topics, when it is valid", () => {
+  it("should accept a named channel of one to ten topics, normalising the topics, when it is valid", () => {
     expect(checkChannel({ ...VALID, topics: [" PCS-API ", "database", "pcs-api"] })).toEqual({
       ok: true,
       channel: { name: "PCS database", topics: ["pcs-api", "database"], match: "all", shared: true }
     });
   });
 
-  it("should accept five topics when that is the most allowed", () => {
-    expect(checkChannel({ ...VALID, topics: ["a", "b", "c", "d", "e"] }).ok).toBe(true);
+  it("should accept ten topics when that is the most allowed", () => {
+    expect(checkChannel({ ...VALID, topics: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"] }).ok).toBe(true);
   });
 
   it.each([
-    ["no topics", [], "between 1 and 5 topics, and this one has 0"],
-    ["six topics", ["a", "b", "c", "d", "e", "f"], "this one has 6"],
+    ["no topics", [], "between 1 and 10 topics, and this one has 0"],
+    ["eleven topics", ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"], "this one has 11"],
     ["a topic with a space", ["pcs api"], "is not a topic"],
     ["a topic starting with a hyphen", ["-pcs"], "is not a topic"],
     ["a topic of 65 characters", ["a".repeat(65)], "is not a topic"],

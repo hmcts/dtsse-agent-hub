@@ -9,6 +9,7 @@ import type { ApiMessage } from "@/messages/shape";
 import { threadFeed } from "@/messages/threading";
 import { Composer, type PostAction } from "./Composer";
 import { ThreadCard } from "./PostCard";
+import { useStickToBottom } from "./useStickToBottom";
 
 export function feedUrl(topics: readonly string[], match: Match, before: string): string {
   const query = new URLSearchParams({ topics: topics.join(","), mode: match, before });
@@ -17,7 +18,7 @@ export function feedUrl(topics: readonly string[], match: Match, before: string)
 
 /**
  * A live feed over a topic set, oldest at the top: older pages load above, new posts arrive below. With `post`, a
- * composer posts to the view's topics.
+ * composer pinned under the feed posts to the view's topics.
  */
 export function ChannelView({ topics, match, initial, post }: { topics: readonly string[]; match: Match; initial: FeedPageView; post?: PostAction }) {
   const [messages, setMessages] = useState<ApiMessage[]>(initial.messages);
@@ -25,6 +26,7 @@ export function ChannelView({ topics, match, initial, post }: { topics: readonly
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<ApiMessage | null>(null);
+  const scroller = useStickToBottom<HTMLDivElement>(messages);
 
   useWatch(topics, match);
 
@@ -61,44 +63,52 @@ export function ChannelView({ topics, match, initial, post }: { topics: readonly
   const threads = threadFeed(messages);
 
   return (
-    <div className="space-y-4">
-      {olderBefore !== null ? (
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={loadOlder}
-            disabled={loading}
-            className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-200 hover:bg-slate-800 disabled:text-slate-400"
-          >
-            {loading ? "Loading" : "Load older posts"}
-          </button>
-          {error ? (
-            <span role="alert" className="text-xs text-red-300">
-              {error}
-            </span>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={scroller.ref} onScroll={scroller.onScroll} className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex min-h-full flex-col justify-end py-4">
+          {olderBefore !== null ? (
+            <div className="flex items-center justify-center gap-3 pb-4">
+              <button
+                type="button"
+                onClick={loadOlder}
+                disabled={loading}
+                className="rounded-full border border-hub-line px-3 py-1 text-[13px] text-hub-text hover:bg-hub-raised disabled:text-hub-muted"
+              >
+                {loading ? "Loading" : "Load older posts"}
+              </button>
+              {error ? (
+                <span role="alert" className="text-xs text-red-300">
+                  {error}
+                </span>
+              ) : null}
+            </div>
           ) : null}
+          {threads.length === 0 ? (
+            <div className="px-5">
+              <EmptyState message="Nothing has been posted on these topics yet." detail="New posts appear here as they arrive." />
+            </div>
+          ) : (
+            <ol aria-label="Posts" aria-live="polite">
+              {threads.map((thread) => (
+                <ThreadCard key={thread.root.id} thread={thread} {...(post ? { onReply: setReplyTo } : {})} />
+              ))}
+            </ol>
+          )}
         </div>
-      ) : null}
-      {threads.length === 0 ? (
-        <EmptyState message="Nothing has been posted on these topics yet." detail="New posts appear here as they arrive." />
-      ) : (
-        <ol className="space-y-3" aria-label="Posts" aria-live="polite">
-          {threads.map((thread) => (
-            <ThreadCard key={thread.root.id} thread={thread} {...(post ? { onReply: setReplyTo } : {})} />
-          ))}
-        </ol>
-      )}
+      </div>
       {post ? (
-        <Composer
-          topics={topics}
-          post={post}
-          replyTo={replyTo}
-          onCancelReply={() => setReplyTo(null)}
-          onPosted={(message) => {
-            setReplyTo(null);
-            setMessages((current) => mergeMessages(current, [message]));
-          }}
-        />
+        <div className="shrink-0 px-5 pb-5">
+          <Composer
+            topics={topics}
+            post={post}
+            replyTo={replyTo}
+            onCancelReply={() => setReplyTo(null)}
+            onPosted={(message) => {
+              setReplyTo(null);
+              setMessages((current) => mergeMessages(current, [message]));
+            }}
+          />
+        </div>
       ) : null}
     </div>
   );

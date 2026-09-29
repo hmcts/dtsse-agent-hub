@@ -2,8 +2,12 @@
 
 import { useEffect, useState } from "react";
 import type { AgentAccess } from "@/access/rules";
+import { Avatar } from "@/components/Avatar";
 import { EmptyState } from "@/components/EmptyState";
+import { SEND_BUTTON, submitOnEnter } from "@/components/feed/Composer";
+import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { useHubEvent, useWatch } from "@/components/live/HubStream";
+import { SendIcon } from "@/components/sidebar/icons";
 import type { DeliveryView, ThreadMessage } from "@/messages/direct-thread";
 import { mergeMessages } from "@/messages/pagination";
 import type { ActionResult } from "@/web/action";
@@ -14,7 +18,7 @@ export type SendAction = (input: { agentId: string; body: string }) => Promise<A
 const DELIVERY_STYLE: Record<DeliveryView, string> = {
   queued: "border-amber-700 text-amber-300",
   delivered: "border-green-800 text-green-300",
-  expired: "border-slate-600 text-slate-300"
+  expired: "border-hub-line text-hub-muted"
 };
 
 /** Only an owner or a write grantee may message an agent; `canPersonMessageAgent` decides the same on the server. */
@@ -28,17 +32,23 @@ function DeliveryBadge({ state }: { state: DeliveryView }) {
 
 function ThreadEntry({ agentId, message }: { agentId: string; message: ThreadMessage }) {
   const fromAgent = message.author.agent_id === agentId;
-  const who = message.author.agent_name === null ? message.author.owner_name : `@${message.author.agent_name} (${message.author.owner_name})`;
+  const name = message.author.agent_name === null ? message.author.owner_name : `@${message.author.agent_name}`;
   return (
-    <li className={`rounded-lg border p-3 ${fromAgent ? "border-slate-800 bg-slate-900" : "border-indigo-900 bg-indigo-950/40"}`} data-message-id={message.id}>
-      <p className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-        <span className="font-semibold text-slate-200">{who}</span>
-        <span>{fromAgent ? (message.target_agent_id === null ? "replied" : "sent") : "to this agent"}</span>
-        <time dateTime={message.created_at}>{instant(message.created_at)}</time>
-        <span>#{message.id}</span>
-        {message.delivery !== null ? <DeliveryBadge state={message.delivery} /> : null}
-      </p>
-      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-200">{message.body}</p>
+    <li className="flex gap-2 px-5 py-2 hover:bg-hub-raised" data-message-id={message.id}>
+      <Avatar name={name} />
+      <div className="min-w-0 flex-1">
+        <p className="flex flex-wrap items-baseline gap-x-2 leading-5">
+          <span className="text-[15px] font-bold text-white">{name}</span>
+          {message.author.agent_name === null ? null : <span className="text-xs text-hub-muted">({message.author.owner_name})</span>}
+          <span className="text-xs text-hub-muted">{fromAgent ? (message.target_agent_id === null ? "replied" : "sent") : "to this agent"}</span>
+          <time dateTime={message.created_at} className="text-xs text-hub-muted">
+            {instant(message.created_at)}
+          </time>
+          <span className="text-xs text-hub-muted">#{message.id}</span>
+          {message.delivery !== null ? <DeliveryBadge state={message.delivery} /> : null}
+        </p>
+        <p className="whitespace-pre-wrap break-words text-[15px] leading-[22px] text-hub-text">{message.body}</p>
+      </div>
     </li>
   );
 }
@@ -49,11 +59,13 @@ function ThreadEntry({ agentId, message }: { agentId: string; message: ThreadMes
  */
 export function DirectThread({
   agentId,
+  agentName,
   access,
   initial,
   send
 }: {
   agentId: string;
+  agentName?: string;
   access: Exclude<AgentAccess, "none">;
   initial: ThreadMessage[];
   send: SendAction;
@@ -62,6 +74,7 @@ export function DirectThread({
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const scroller = useStickToBottom<HTMLDivElement>(messages);
 
   useWatch([], "any", agentId);
 
@@ -79,6 +92,9 @@ export function DirectThread({
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (pending || body.trim() === "") {
+      return;
+    }
     setPending(true);
     setError(null);
     try {
@@ -97,49 +113,57 @@ export function DirectThread({
   }
 
   return (
-    <div className="space-y-3">
-      {messages.length === 0 ? (
-        <EmptyState message="No direct messages with this agent yet." />
-      ) : (
-        <ol className="space-y-2" aria-label="Direct messages" aria-live="polite">
-          {messages.map((message) => (
-            <ThreadEntry key={message.id} agentId={agentId} message={message} />
-          ))}
-        </ol>
-      )}
-      {mayMessage(access) ? (
-        <form onSubmit={submit} className="space-y-2" aria-label="Message this agent">
-          <label className="block">
-            <span className="text-sm text-slate-300">Message this agent</span>
-            <textarea
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-              required
-              rows={3}
-              maxLength={32_000}
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100"
-            />
-          </label>
-          <div className="flex items-center gap-3">
-            <button
-              type="submit"
-              disabled={pending || body.trim() === ""}
-              className="rounded bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
-            >
-              {pending ? "Sending" : "Send"}
-            </button>
-            {error ? (
-              <span role="alert" className="text-xs text-red-300">
-                {error}
-              </span>
-            ) : null}
-          </div>
-        </form>
-      ) : (
-        <p className="text-xs text-slate-400" data-testid="read-only-thread">
-          You have read access to this agent. Its owner can grant you write access to message it.
-        </p>
-      )}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={scroller.ref} onScroll={scroller.onScroll} className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex min-h-full flex-col justify-end py-4">
+          {messages.length === 0 ? (
+            <div className="px-5">
+              <EmptyState message="No direct messages with this agent yet." />
+            </div>
+          ) : (
+            <ol aria-label="Direct messages" aria-live="polite">
+              {messages.map((message) => (
+                <ThreadEntry key={message.id} agentId={agentId} message={message} />
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+      <div className="shrink-0 px-5 pb-5">
+        {mayMessage(access) ? (
+          <form onSubmit={submit} className="rounded-lg border border-hub-line bg-hub-pane focus-within:border-hub-muted" aria-label="Message this agent">
+            <label className="block">
+              <span className="sr-only">Message this agent</span>
+              <textarea
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                onKeyDown={submitOnEnter}
+                required
+                rows={2}
+                maxLength={32_000}
+                placeholder={agentName ? `Message @${agentName}` : "Message this agent"}
+                className="block max-h-60 w-full resize-y bg-transparent px-3 pt-2.5 pb-1 text-[15px] text-hub-text placeholder:text-hub-muted focus:outline-none"
+              />
+            </label>
+            <div className="flex items-center gap-3 px-2 pb-2">
+              <span className="text-xs text-hub-muted">Enter to send, Shift+Enter for a new line</span>
+              {error ? (
+                <span role="alert" className="text-xs text-red-300">
+                  {error}
+                </span>
+              ) : null}
+              <button type="submit" disabled={pending || body.trim() === ""} className={`ml-auto ${SEND_BUTTON}`}>
+                <SendIcon />
+                <span className="sr-only">{pending ? "Sending" : "Send"}</span>
+              </button>
+            </div>
+          </form>
+        ) : (
+          <p className="rounded-lg border border-hub-line px-3 py-3 text-[13px] text-hub-muted" data-testid="read-only-thread">
+            You have read access to this agent. Its owner can grant you write access to message it.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

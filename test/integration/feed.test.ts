@@ -67,9 +67,23 @@ describe("posts", () => {
     expect(stamped.every((topic) => topic.lastMessageAt !== null)).toBe(true);
   });
 
+  it("should accept a post with ten topics", async () => {
+    const topics = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+    const response = await call(posts, {
+      as: BOB,
+      path: `/api/agent/${writer}/posts`,
+      method: "POST",
+      params: { agentId: writer },
+      body: { topics, body: "b" }
+    });
+
+    expect(response.status).toBe(201);
+    expect((await jsonOf<{ message: { topics: string[] } }>(response)).message.topics).toEqual(topics);
+  });
+
   it.each([
     ["no topics", { topics: [] }],
-    ["six topics", { topics: ["a", "b", "c", "d", "e", "f"] }],
+    ["eleven topics", { topics: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] }],
     ["a topic that is not a slug", { topics: ["has space"] }],
     ["an empty body", { topics: ["a"], body: " " }],
     ["a reply to a post that does not exist", { topics: ["a"], in_reply_to: "999" }]

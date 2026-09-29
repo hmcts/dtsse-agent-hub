@@ -72,18 +72,18 @@ describe("ChannelBuilder", () => {
     await save();
 
     expect(saveAction).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toContain("between 1 and 5 topics");
+    expect(screen.getByRole("alert").textContent).toContain("between 1 and 10 topics");
   });
 
-  it("should refuse to save when six topics are chosen", async () => {
+  it("should refuse to save when eleven topics are chosen", async () => {
     const saveAction = vi.fn();
-    render(<ChannelBuilder save={saveAction} initialTopics={["a", "b", "c", "d", "e"]} />);
+    render(<ChannelBuilder save={saveAction} initialTopics={["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]} />);
 
-    addTyped("f");
+    addTyped("k");
     await save();
 
     expect(saveAction).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toContain("this one has 6");
+    expect(screen.getByRole("alert").textContent).toContain("this one has 11");
   });
 
   it("should refuse to save without a name", async () => {

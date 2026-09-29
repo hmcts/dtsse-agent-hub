@@ -57,3 +57,27 @@ export async function listTopics(db: Database, prefix: string, limit: number): P
     last_message_at: row.last_message_at?.toISOString() ?? null
   }));
 }
+
+export const ACTIVE_WINDOW_DAYS = 7;
+
+/**
+ * The topics with the most posts in the last `ACTIVE_WINDOW_DAYS`, busiest first, ties broken by the latest post. A
+ * topic with no posts in the window is left out, however many it had before.
+ */
+export async function mostActiveTopics(db: Database, limit: number): Promise<TopicSummary[]> {
+  const rows = await db.$queryRaw<{ slug: string; message_count: bigint; last_message_at: Date | null }[]>`
+    SELECT t.slug, count(*) AS message_count, t.last_message_at
+    FROM topic t
+    JOIN message_topic mt ON mt.topic_id = t.id
+    JOIN message m ON m.id = mt.message_id
+    WHERE m.kind = 'post' AND m.created_at > now() - make_interval(days => ${ACTIVE_WINDOW_DAYS}::int)
+    GROUP BY t.id
+    ORDER BY count(*) DESC, t.last_message_at DESC NULLS LAST, t.slug
+    LIMIT ${limit}
+  `;
+  return rows.map((row) => ({
+    slug: row.slug,
+    message_count: Number(row.message_count),
+    last_message_at: row.last_message_at?.toISOString() ?? null
+  }));
+}

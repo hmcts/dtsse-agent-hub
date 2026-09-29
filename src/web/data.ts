@@ -6,7 +6,7 @@ import { agentThread } from "../messages/direct-thread.ts";
 import { agentPosts, channelFeed, type Match, recentPosts } from "../messages/feed.ts";
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
 import { prisma } from "../store/prisma.ts";
-import { listTopics } from "../topics/store.ts";
+import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import type { Identity } from "../users/identity.ts";
 
 /**
@@ -21,7 +21,7 @@ export async function sidebarData(viewer: Identity) {
   const [agents, channels, topics] = await Promise.all([
     visibleAgents(prisma, viewer.oid),
     listChannels(prisma, viewer.oid),
-    listTopics(prisma, "", SIDEBAR_TOPICS)
+    mostActiveTopics(prisma, SIDEBAR_TOPICS)
   ]);
   return { ...agents, channels, topics };
 }

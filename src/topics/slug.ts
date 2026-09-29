@@ -2,7 +2,7 @@
 export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const MIN_POST_TOPICS = 1;
-export const MAX_POST_TOPICS = 5;
+export const MAX_POST_TOPICS = 10;
 
 export class InvalidTopics extends Error {}
 
@@ -26,7 +26,7 @@ export function normaliseSlugs(values: unknown): string[] {
   return [...new Set(values.map(normaliseSlug))];
 }
 
-/** The topics of a post: 1–5 distinct slugs after normalisation. */
+/** The topics of a post: `MIN_POST_TOPICS` to `MAX_POST_TOPICS` distinct slugs after normalisation. */
 export function postTopics(values: unknown): string[] {
   const slugs = normaliseSlugs(values);
   if (slugs.length < MIN_POST_TOPICS || slugs.length > MAX_POST_TOPICS) {

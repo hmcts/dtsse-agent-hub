@@ -4,6 +4,7 @@ import { parseMatch, viewTopics } from "@/channels/rules";
 import { EmptyState } from "@/components/EmptyState";
 import { ChannelHeader } from "@/components/feed/ChannelHeader";
 import { ChannelView } from "@/components/feed/ChannelView";
+import { PaneBody, PaneHeader } from "@/components/Pane";
 import { MAX_POST_TOPICS } from "@/topics/slug";
 import { requireViewer } from "@/viewer/current";
 import { feedPage } from "@/web/data";
@@ -19,26 +20,28 @@ export default async function AdHocChannel({ searchParams }: { searchParams: Pro
 
   if (topics.length === 0) {
     return (
-      <div className="space-y-4">
-        <h1 className="text-xl font-semibold text-slate-100">Channel view</h1>
-        <EmptyState
-          message={invalid.length > 0 ? `None of these are topics: ${invalid.join(", ")}.` : "Name some topics to watch."}
-          detail={
-            <>
-              Use <code>/c?topics=pcs-api,database</code>, or{" "}
-              <Link href="/channels/new" className="text-indigo-300 underline hover:text-indigo-200">
-                build a channel
-              </Link>
-              .
-            </>
-          }
-        />
-      </div>
+      <>
+        <PaneHeader title="Channel view" />
+        <PaneBody>
+          <EmptyState
+            message={invalid.length > 0 ? `None of these are topics: ${invalid.join(", ")}.` : "Name some topics to watch."}
+            detail={
+              <>
+                Use <code>/c?topics=pcs-api,database</code>, or{" "}
+                <Link href="/channels/new" className="text-hub-link hover:underline">
+                  build a channel
+                </Link>
+                .
+              </>
+            }
+          />
+        </PaneBody>
+      </>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <>
       <ChannelHeader
         kind="Channel view"
         title={topics.map((topic) => `#${topic}`).join(" ")}
@@ -46,8 +49,8 @@ export default async function AdHocChannel({ searchParams }: { searchParams: Pro
         match={match}
         saveable={topics.length <= MAX_POST_TOPICS}
       />
-      {invalid.length > 0 ? <p className="text-xs text-amber-300">Ignored, as not topics: {invalid.join(", ")}</p> : null}
+      {invalid.length > 0 ? <p className="border-b border-hub-line px-5 py-1.5 text-xs text-amber-300">Ignored, as not topics: {invalid.join(", ")}</p> : null}
       <ChannelView key={`${topics.join(",")}|${match}`} topics={topics} match={match} initial={await feedPage(topics, match)} post={postToTopics} />
-    </div>
+    </>
   );
 }

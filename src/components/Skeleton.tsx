@@ -1,16 +1,14 @@
-import { Panel } from "@/components/Section";
-
 /**
  * The bones of a page for each route's `loading.tsx`. One `role="status"` says loading in words; the bars are
  * hidden from screen readers.
  */
 export function SkeletonPage({ children }: { children: React.ReactNode }) {
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-0 flex-1 flex-col">
       <p role="status" className="sr-only">
         Loading
       </p>
-      <div aria-hidden="true" className="space-y-6">
+      <div aria-hidden="true" className="flex min-h-0 flex-1 flex-col">
         {children}
       </div>
     </div>
@@ -18,31 +16,33 @@ export function SkeletonPage({ children }: { children: React.ReactNode }) {
 }
 
 export function SkeletonBar({ className }: { className: string }) {
-  return <div className={`animate-pulse rounded bg-slate-800 ${className}`} />;
+  return <div className={`animate-pulse rounded bg-hub-raised ${className}`} />;
 }
 
-export function SkeletonSection({ rows }: { rows: number }) {
+function SkeletonMessage() {
   return (
-    <Panel>
-      <div className="flex items-baseline gap-x-3 border-b border-slate-800 px-4 py-3">
-        <SkeletonBar className="h-4 w-32" />
-        <SkeletonBar className="h-3 w-40" />
+    <div className="flex gap-2">
+      <SkeletonBar className="h-9 w-9 shrink-0 rounded-md" />
+      <div className="flex-1 space-y-2">
+        <SkeletonBar className="h-3.5 w-40" />
+        <SkeletonBar className="h-3.5 w-full" />
       </div>
-      <div className="space-y-3 p-4">
-        {Array.from({ length: rows }, (_, index) => (
-          <SkeletonBar key={index} className="h-4 w-full" />
-        ))}
-      </div>
-    </Panel>
+    </div>
   );
 }
 
-/** A page heading over one section: every route's first paint has this shape. */
+/** A pane header over rows of messages: every route's first paint has this shape. */
 export function SkeletonList({ rows }: { rows: number }) {
   return (
     <SkeletonPage>
-      <SkeletonBar className="h-7 w-64 max-w-full" />
-      <SkeletonSection rows={rows} />
+      <div className="flex min-h-[49px] items-center border-b border-hub-line px-5">
+        <SkeletonBar className="h-5 w-48" />
+      </div>
+      <div className="space-y-5 px-5 py-5">
+        {Array.from({ length: rows }, (_, index) => (
+          <SkeletonMessage key={index} />
+        ))}
+      </div>
     </SkeletonPage>
   );
 }

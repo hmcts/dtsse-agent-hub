@@ -32,7 +32,7 @@ test.describe("channels @regression", () => {
     const topics = [unique("e2e"), unique("e2e")];
     await page.goto(`/c?topics=${topics.join(",")}&mode=all`);
 
-    await page.getByRole("link", { name: "Save this view as a channel" }).click();
+    await page.getByRole("link", { name: "Save as channel" }).click();
 
     for (const topic of topics) {
       await expect(page.getByRole("button", { name: `Remove ${topic}` })).toBeVisible();

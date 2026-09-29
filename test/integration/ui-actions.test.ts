@@ -70,8 +70,8 @@ describe("postToTopics", () => {
   });
 
   it.each([
-    ["no topics", { topics: [], body: "x" }, "between 1 and 5"],
-    ["six topics", { topics: ["a", "b", "c", "d", "e", "f"], body: "x" }, "between 1 and 5"],
+    ["no topics", { topics: [], body: "x" }, "between 1 and 10"],
+    ["eleven topics", { topics: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"], body: "x" }, "between 1 and 10"],
     ["a bad slug", { topics: ["no spaces"], body: "x" }, "is not a topic"],
     ["an empty body", { topics: ["a"], body: "  " }, "write something"],
     ["a reply to nothing", { topics: ["a"], body: "x", inReplyTo: "999" }, "in_reply_to"],
@@ -216,9 +216,9 @@ describe("createChannel and removeChannel", () => {
   });
 
   it("should refuse an invalid channel and save nothing", async () => {
-    const result = await createChannel({ name: "", topics: ["a", "b", "c", "d", "e", "f"], match: "any", shared: false });
+    const result = await createChannel({ name: "", topics: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"], match: "any", shared: false });
 
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("give the channel a name; a channel has between 1 and 5 topics") });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("give the channel a name; a channel has between 1 and 10 topics") });
     expect(await prisma.channel.count()).toBe(0);
   });
 

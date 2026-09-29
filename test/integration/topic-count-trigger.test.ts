@@ -17,7 +17,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDatabase();
   await insertUser(AUTHOR);
-  await client.query(`INSERT INTO topic (slug) SELECT 't' || n FROM generate_series(1, 6) n`);
+  await client.query(`INSERT INTO topic (slug) SELECT 't' || n FROM generate_series(1, 11) n`);
 });
 
 afterEach(async () => {
@@ -36,12 +36,12 @@ async function write(kind: "post" | "direct", topics: number): Promise<void> {
 }
 
 describe("the topic-count constraint trigger", () => {
-  it.each([1, 5])("should accept a post with %i topics inserted in the same transaction", async (count) => {
+  it.each([1, 10])("should accept a post with %i topics inserted in the same transaction", async (count) => {
     await expect(write("post", count)).resolves.toBeUndefined();
   });
 
-  it.each([0, 6])("should refuse a post with %i topics at commit", async (count) => {
-    await expect(write("post", count)).rejects.toThrow(/a post needs between 1 and 5/);
+  it.each([0, 11])("should refuse a post with %i topics at commit", async (count) => {
+    await expect(write("post", count)).rejects.toThrow(/a post needs between 1 and 10/);
     expect((await client.query("SELECT 1 FROM message")).rowCount).toBe(0);
   });
 
@@ -59,12 +59,12 @@ describe("the topic-count constraint trigger", () => {
     await expect(client.query("DELETE FROM message_topic")).rejects.toThrow(/has 0 topics/);
   });
 
-  it("should refuse adding a sixth topic to an existing post", async () => {
-    await write("post", 5);
+  it("should refuse adding an eleventh topic to an existing post", async () => {
+    await write("post", 10);
 
     await expect(
-      client.query(`INSERT INTO message_topic (message_id, topic_id) SELECT m.id, t.id FROM message m, topic t WHERE t.slug = 't6'`)
-    ).rejects.toThrow(/has 6 topics/);
+      client.query(`INSERT INTO message_topic (message_id, topic_id) SELECT m.id, t.id FROM message m, topic t WHERE t.slug = 't11'`)
+    ).rejects.toThrow(/has 11 topics/);
   });
 
   it("should refuse turning a direct message into a post with no topics", async () => {

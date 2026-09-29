@@ -57,19 +57,19 @@ describe("postTopics", () => {
     expect(postTopics(["pcs-api"])).toEqual(["pcs-api"]);
   });
 
-  it("should accept five topics", () => {
-    expect(postTopics(["a", "b", "c", "d", "e"])).toEqual(["a", "b", "c", "d", "e"]);
+  it("should accept ten topics", () => {
+    expect(postTopics(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"])).toEqual(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
   });
 
   it("should refuse a post with no topics", () => {
-    expect(() => postTopics([])).toThrow(/between 1 and 5/);
+    expect(() => postTopics([])).toThrow(/between 1 and 10/);
   });
 
-  it("should refuse a post with six distinct topics", () => {
-    expect(() => postTopics(["a", "b", "c", "d", "e", "f"])).toThrow(/has 6/);
+  it("should refuse a post with eleven distinct topics", () => {
+    expect(() => postTopics(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"])).toThrow(/has 11/);
   });
 
-  it("should count topics after duplicates are dropped when six entries name five topics", () => {
-    expect(postTopics(["a", "b", "c", "d", "e", "A"])).toHaveLength(5);
+  it("should count topics after duplicates are dropped when eleven entries name ten topics", () => {
+    expect(postTopics(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "A"])).toHaveLength(10);
   });
 });

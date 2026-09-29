@@ -1,10 +1,11 @@
-import Link from "next/link";
 import type { AgentCard } from "@/agents/views";
 import type { ChannelSummary } from "@/channels/store";
-import { LiveStatus } from "@/components/agents/LiveStatus";
 import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
-import { DevBadge } from "@/components/DevBadge";
+import { NavLink } from "@/components/NavLink";
+import { AgentRoster } from "@/components/sidebar/AgentRoster";
+import { CaretIcon, HashIcon, HomeIcon, KeyIcon, PlusIcon, StackIcon } from "@/components/sidebar/icons";
 import type { TopicSummary } from "@/topics/store";
+import type { Identity } from "@/users/identity";
 
 export interface SidebarData {
   mine: AgentCard[];
@@ -13,95 +14,114 @@ export interface SidebarData {
   topics: TopicSummary[];
 }
 
-function Heading({ children }: { children: React.ReactNode }) {
-  return <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{children}</h2>;
-}
-
-function AgentList({ agents, label, empty, showOwner }: { agents: AgentCard[]; label: string; empty: string; showOwner: boolean }) {
+function Group({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1">
-      <Heading>{label}</Heading>
-      {agents.length === 0 ? (
-        <p className="px-2 text-xs text-slate-400">{empty}</p>
-      ) : (
-        <ul aria-label={label}>
-          {agents.map((agent) => (
-            <li key={agent.id}>
-              <Link href={`/agents/${agent.id}`} className="flex items-center gap-2 rounded px-2 py-1 text-sm text-slate-200 hover:bg-slate-800">
-                <LiveStatus agentId={agent.id} initial={agent.status} />
-                <span className="truncate font-mono">{agent.name}</span>
-                {showOwner ? (
-                  <span className="ml-auto truncate text-xs text-slate-400">
-                    {agent.owner.name}
-                    <DevBadge tid={agent.owner.tid} />
-                  </span>
-                ) : null}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <details open className="group">
+      <summary className="mx-2 flex h-7 cursor-pointer list-none items-center gap-2 rounded-md px-3 text-[15px] text-hub-muted hover:bg-hub-hover [&::-webkit-details-marker]:hidden">
+        <CaretIcon />
+        <h2 className="font-normal">{label}</h2>
+      </summary>
+      <div className="mt-0.5">{children}</div>
+    </details>
   );
 }
 
-/** Agents the viewer can see, their channels and the shared ones, and the most recently active topics. */
-export function Sidebar({ data }: { data: SidebarData }) {
+function Hint({ children }: { children: React.ReactNode }) {
+  return <p className="px-5 py-1 text-xs text-hub-muted">{children}</p>;
+}
+
+/**
+ * The left rail, as in Slack: the workspace and who is signed in, saved channels, the busiest topics this week, and
+ * the viewer's agents pinned to the bottom.
+ */
+export function Sidebar({ data, viewer, signInDisabled }: { data: SidebarData; viewer: Identity; signInDisabled: boolean }) {
   const channels = [...data.channels.mine, ...data.channels.shared];
   return (
-    <aside aria-label="Sidebar" className="w-64 shrink-0 space-y-6 border-r border-slate-800 bg-slate-900/60 px-2 py-4">
+    <aside aria-label="Sidebar" className="flex w-64 shrink-0 flex-col border-r border-hub-line bg-hub-rail">
       <NewAgentWatcher known={[...data.mine, ...data.shared].map((agent) => agent.id)} />
-      <AgentList agents={data.mine} label="My agents" empty="None yet. Run /enable-comms in a Claude Code session." showOwner={false} />
-      <AgentList agents={data.shared} label="Shared with me" empty="Nobody has granted you access." showOwner />
-
-      <div className="space-y-1">
-        <Heading>Channels</Heading>
-        {channels.length === 0 ? (
-          <p className="px-2 text-xs text-slate-400">No saved channels.</p>
-        ) : (
-          <ul aria-label="Channels">
-            {channels.map((channel) => (
-              <li key={channel.id}>
-                <Link href={`/channels/${channel.id}`} className="flex items-center gap-2 rounded px-2 py-1 text-sm text-slate-200 hover:bg-slate-800">
-                  <span className="truncate">{channel.name}</span>
-                  {channel.shared ? <span className="ml-auto text-[10px] uppercase text-slate-400">shared</span> : null}
-                </Link>
-              </li>
-            ))}
-          </ul>
+      <div className="flex min-h-[49px] items-center gap-2 border-b border-hub-line px-4">
+        <div className="min-w-0">
+          <p className="truncate text-lg font-bold text-white">Agent Hub</p>
+          <p className="truncate text-xs text-hub-muted">{viewer.name}</p>
+        </div>
+        {signInDisabled ? null : (
+          <a href="/auth/logout" className="ml-auto shrink-0 rounded px-2 py-1 text-xs text-hub-muted hover:bg-hub-hover hover:text-white">
+            Sign out
+          </a>
         )}
-        <Link href="/channels/new" className="block px-2 text-xs text-indigo-300 hover:text-indigo-200">
-          + New channel
-        </Link>
       </div>
 
-      <div className="space-y-1">
-        <Heading>Topics</Heading>
-        <form action="/topics" method="get" role="search" className="px-2">
-          <label htmlFor="sidebar-topic-search" className="sr-only">
-            Search topics
-          </label>
-          <input
-            id="sidebar-topic-search"
-            name="q"
-            placeholder="Search topics"
-            className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 placeholder:text-slate-400"
-          />
-        </form>
-        <ul aria-label="Active topics">
-          {data.topics.map((topic) => (
-            <li key={topic.slug}>
-              <Link href={`/topics/${topic.slug}`} className="flex items-center gap-2 rounded px-2 py-1 font-mono text-sm text-slate-200 hover:bg-slate-800">
-                <span className="truncate">#{topic.slug}</span>
-                <span className="ml-auto text-xs text-slate-400">{topic.message_count}</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-        <Link href="/topics" className="block px-2 text-xs text-indigo-300 hover:text-indigo-200">
-          All topics
-        </Link>
-      </div>
+      <nav aria-label="Main" className="min-h-0 flex-1 space-y-4 overflow-y-auto py-3">
+        <div className="space-y-0.5">
+          <NavLink href="/">
+            <HomeIcon />
+            Home
+          </NavLink>
+          <NavLink href="/access">
+            <KeyIcon />
+            Access
+          </NavLink>
+          <form action="/topics" method="get" role="search" className="px-2 pt-2">
+            <label htmlFor="sidebar-topic-search" className="sr-only">
+              Search topics
+            </label>
+            <input
+              id="sidebar-topic-search"
+              name="q"
+              placeholder="Search topics"
+              className="w-full rounded-md border border-hub-line bg-hub-pane px-3 py-1 text-[13px] text-hub-text placeholder:text-hub-muted focus:border-hub-link focus:outline-none"
+            />
+          </form>
+        </div>
+
+        <Group label="Channels">
+          {channels.length === 0 ? (
+            <Hint>No saved channels.</Hint>
+          ) : (
+            <ul aria-label="Channels" className="space-y-0.5">
+              {channels.map((channel) => (
+                <li key={channel.id}>
+                  <NavLink href={`/channels/${channel.id}`}>
+                    <StackIcon />
+                    <span className="truncate">{channel.name}</span>
+                    {channel.shared ? <span className="ml-auto text-[10px] uppercase tracking-wide">shared</span> : null}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          )}
+          <NavLink href="/channels/new">
+            <PlusIcon />
+            Add a channel
+          </NavLink>
+        </Group>
+
+        <Group label="Topics">
+          {data.topics.length === 0 ? (
+            <Hint>No posts this week.</Hint>
+          ) : (
+            <ul aria-label="Most active topics" className="space-y-0.5">
+              {data.topics.map((topic) => (
+                <li key={topic.slug}>
+                  <NavLink href={`/topics/${topic.slug}`}>
+                    <HashIcon />
+                    <span className="truncate">{topic.slug}</span>
+                    <span className="ml-auto text-xs" title={`${topic.message_count} posts this week`}>
+                      {topic.message_count}
+                    </span>
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          )}
+          <NavLink href="/topics">
+            <PlusIcon />
+            Browse all topics
+          </NavLink>
+        </Group>
+      </nav>
+
+      <AgentRoster mine={data.mine} shared={data.shared} />
     </aside>
   );
 }

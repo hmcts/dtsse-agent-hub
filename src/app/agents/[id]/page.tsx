@@ -3,10 +3,8 @@ import { sendDirect } from "@/app/_actions/direct";
 import { DirectThread } from "@/components/agents/DirectThread";
 import { LiveStatus } from "@/components/agents/LiveStatus";
 import { DevBadge } from "@/components/DevBadge";
-import { EmptyState } from "@/components/EmptyState";
-import { ThreadCard } from "@/components/feed/PostCard";
-import { Section } from "@/components/Section";
-import { threadFeed } from "@/messages/threading";
+import { PostBody } from "@/components/feed/PostCard";
+import { PaneHeader } from "@/components/Pane";
 import { requireViewer } from "@/viewer/current";
 import { agentPage } from "@/web/data";
 import { instant } from "@/web/format";
@@ -18,8 +16,8 @@ const ACCESS_LABEL = { owner: "You own this agent", write: "You have write acces
 function Detail({ term, children }: { term: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-slate-400">{term}</dt>
-      <dd className="font-mono text-sm text-slate-200 break-all">{children}</dd>
+      <dt className="text-xs font-bold text-hub-muted">{term}</dt>
+      <dd className="break-all font-mono text-[13px] text-hub-text">{children}</dd>
     </div>
   );
 }
@@ -35,46 +33,66 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
   const { agent, access, thread, posts } = page;
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-3 rounded-lg border border-slate-800 bg-slate-900 p-4">
-        <p className="text-xs uppercase tracking-wide text-slate-400">Agent</p>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-mono text-xl font-semibold text-slate-100">{agent.name}</h1>
-          <LiveStatus agentId={agent.id} initial={agent.status} labelled />
-        </div>
-        <p className="text-sm text-slate-300">
-          Owned by {agent.owner.oid === viewer.oid ? "you" : agent.owner.name}
-          <DevBadge tid={agent.owner.tid} /> · {ACCESS_LABEL[access]}
-        </p>
-        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Detail term="Repository">{agent.repo ?? "unknown"}</Detail>
-          <Detail term="Branch">{agent.branch ?? "unknown"}</Detail>
-          <Detail term="Working directory">{agent.cwd ?? "unknown"}</Detail>
-          <Detail term="Host">{agent.host ?? "unknown"}</Detail>
-          <Detail term="Last heartbeat">
-            <time dateTime={agent.lastHeartbeatAt}>{instant(agent.lastHeartbeatAt)}</time>
-          </Detail>
-          <Detail term="Registered">
-            <time dateTime={agent.createdAt}>{instant(agent.createdAt)}</time>
-          </Detail>
-        </dl>
-      </header>
-
-      <Section heading="Direct messages" detail="both directions, with delivery state">
-        <DirectThread agentId={agent.id} access={access} initial={thread} send={sendDirect} />
-      </Section>
-
-      <Section heading="Posts" detail="its latest posts on any topic">
-        {posts.length === 0 ? (
-          <EmptyState message="This agent has not posted." />
-        ) : (
-          <ol className="space-y-3">
-            {threadFeed(posts).map((entry) => (
-              <ThreadCard key={entry.root.id} thread={entry} />
-            ))}
-          </ol>
-        )}
-      </Section>
-    </div>
+    <>
+      <PaneHeader
+        title={agent.name}
+        kind="Agent"
+        subtitle={
+          <span className="flex flex-wrap items-center gap-x-2">
+            <LiveStatus agentId={agent.id} initial={agent.status} labelled />
+            <span>·</span>
+            <span className="font-mono">
+              {agent.repo ?? "unknown repo"}
+              {agent.branch ? ` @ ${agent.branch}` : ""}
+            </span>
+          </span>
+        }
+      />
+      <div className="flex min-h-0 flex-1">
+        <section aria-labelledby="direct-heading" className="flex min-w-0 flex-1 flex-col">
+          <h2 id="direct-heading" className="sr-only">
+            Direct messages
+          </h2>
+          <DirectThread agentId={agent.id} agentName={agent.name} access={access} initial={thread} send={sendDirect} />
+        </section>
+        <aside aria-label="About this agent" className="hidden w-80 shrink-0 overflow-y-auto border-l border-hub-line lg:block">
+          <div className="space-y-3 border-b border-hub-line px-4 py-4">
+            <h2 className="text-[15px] font-bold text-white">About</h2>
+            <p className="text-[13px] text-hub-text">
+              Owned by {agent.owner.oid === viewer.oid ? "you" : agent.owner.name}
+              <DevBadge tid={agent.owner.tid} />
+              <br />
+              <span className="text-hub-muted">{ACCESS_LABEL[access]}</span>
+            </p>
+            <dl className="space-y-2.5">
+              <Detail term="Repository">{agent.repo ?? "unknown"}</Detail>
+              <Detail term="Branch">{agent.branch ?? "unknown"}</Detail>
+              <Detail term="Working directory">{agent.cwd ?? "unknown"}</Detail>
+              <Detail term="Host">{agent.host ?? "unknown"}</Detail>
+              <Detail term="Last heartbeat">
+                <time dateTime={agent.lastHeartbeatAt}>{instant(agent.lastHeartbeatAt)}</time>
+              </Detail>
+              <Detail term="Registered">
+                <time dateTime={agent.createdAt}>{instant(agent.createdAt)}</time>
+              </Detail>
+            </dl>
+          </div>
+          <div className="px-4 py-4">
+            <h2 className="pb-2 text-[15px] font-bold text-white">Latest posts</h2>
+            {posts.length === 0 ? (
+              <p className="text-[13px] text-hub-muted">This agent has not posted.</p>
+            ) : (
+              <ol className="space-y-4">
+                {posts.map((post) => (
+                  <li key={post.id} data-message-id={post.id}>
+                    <PostBody message={post} />
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        </aside>
+      </div>
+    </>
   );
 }

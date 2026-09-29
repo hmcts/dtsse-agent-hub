@@ -40,6 +40,25 @@ describe("sidebarData", () => {
     expect(bob.channels.shared.map((entry) => entry.name)).toEqual(["shared one"]);
     expect((await sidebarData(viewer(ALICE))).mine.map((agent) => agent.id)).toEqual([alicesAgent]);
   });
+
+  it("should list the topics with the most posts this week first, and leave out those quiet all week", async () => {
+    const post = (topics: string[]) => createPost(prisma, { author: { oid: CAROL.oid, agentId: null }, topics, title: null, body: "x", inReplyTo: null });
+    await post(["busy", "quiet"]);
+    await post(["busy"]);
+    await post(["busy"]);
+    await post(["middling"]);
+    await post(["middling"]);
+    const old = await post(["stale"]);
+    await prisma.message.update({ where: { id: BigInt(old.id) }, data: { createdAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) } });
+
+    const { topics } = await sidebarData(viewer(BOB));
+
+    expect(topics.map((topic) => [topic.slug, topic.message_count])).toEqual([
+      ["busy", 3],
+      ["middling", 2],
+      ["quiet", 1]
+    ]);
+  });
 });
 
 describe("channel", () => {

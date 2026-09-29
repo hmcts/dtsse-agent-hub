@@ -5,14 +5,16 @@ import { DevBadge } from "@/components/DevBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { ChannelHeader } from "@/components/feed/ChannelHeader";
 import { ThreadCard } from "@/components/feed/PostCard";
-import { Header } from "@/components/Header";
 import { Section } from "@/components/Section";
 import { Sidebar } from "@/components/Sidebar";
+import { SignInBanner } from "@/components/SignInBanner";
 import { SkeletonList } from "@/components/Skeleton";
 import { StatusDot } from "@/components/StatusDot";
 import type { ApiMessage } from "@/messages/shape";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }), usePathname: () => "/topics/pcs-api" }));
+
+const VIEWER = { oid: "me", tid: "t", name: "Real Person" };
 
 function post(id: string, overrides: Partial<ApiMessage> = {}): ApiMessage {
   return {
@@ -42,25 +44,16 @@ function agent(id: string, ownerOid: string, overrides: Partial<AgentCard> = {})
   };
 }
 
-describe("Header", () => {
-  it("should say sign-in is disabled and name the dev identity when auth is off", () => {
-    const html = renderToStaticMarkup(<Header viewer={{ oid: "dev-anonymous", tid: "dev", name: "Anonymous (sign-in disabled)" }} signInDisabled />);
+describe("SignInBanner", () => {
+  it("should say sign-in is disabled and name the dev identity when there is a viewer", () => {
+    const html = renderToStaticMarkup(<SignInBanner viewer={{ oid: "dev-anonymous", tid: "dev", name: "Anonymous (sign-in disabled)" }} />);
 
     expect(html).toContain("Sign-in is disabled on this deployment");
     expect(html).toContain("<strong>Anonymous (sign-in disabled)</strong>");
-    expect(html).not.toContain("Sign out");
-  });
-
-  it("should offer sign-out and no banner when auth is on", () => {
-    const html = renderToStaticMarkup(<Header viewer={{ oid: "o", tid: "t", name: "Real Person" }} signInDisabled={false} />);
-
-    expect(html).not.toContain("Sign-in is disabled");
-    expect(html).toContain("Sign out");
-    expect(html).toContain("Real Person");
   });
 
   it("should name nobody when there is no viewer", () => {
-    expect(renderToStaticMarkup(<Header viewer={undefined} signInDisabled />)).toContain("<strong>nobody</strong>");
+    expect(renderToStaticMarkup(<SignInBanner viewer={undefined} />)).toContain("<strong>nobody</strong>");
   });
 });
 
@@ -77,6 +70,8 @@ describe("Sidebar", () => {
           },
           topics: [{ slug: "pcs-api", message_count: 4, last_message_at: null }]
         }}
+        viewer={VIEWER}
+        signInDisabled={false}
       />
     );
 
@@ -85,14 +80,57 @@ describe("Sidebar", () => {
     expect(html).toContain("Bob Owner");
     expect(html).toContain('href="/channels/c2"');
     expect(html).toContain('href="/topics/pcs-api"');
+    expect(html).toContain('aria-current="page"');
+    expect(html).toContain("2 connected");
+  });
+
+  it("should list channels, then topics, then agents, and offer sign-out when sign-in is on", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        data={{
+          mine: [agent("1", "me")],
+          shared: [],
+          channels: { mine: [{ id: "c1", name: "Mine", topics: ["a"], match: "any", shared: false, owner: { oid: "me", name: "Me" } }], shared: [] },
+          topics: [{ slug: "pcs-api", message_count: 4, last_message_at: null }]
+        }}
+        viewer={VIEWER}
+        signInDisabled={false}
+      />
+    );
+
+    expect(html.indexOf("/channels/c1")).toBeLessThan(html.indexOf("/topics/pcs-api"));
+    expect(html.indexOf("/topics/pcs-api")).toBeLessThan(html.indexOf("/agents/1"));
+    expect(html).toContain("Real Person");
+    expect(html).toContain("Sign out");
+  });
+
+  it("should list connected agents above offline ones", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        data={{
+          mine: [agent("1", "me", { status: "offline" }), agent("2", "me", { status: "idle" })],
+          shared: [],
+          channels: { mine: [], shared: [] },
+          topics: []
+        }}
+        viewer={VIEWER}
+        signInDisabled
+      />
+    );
+
+    expect(html.indexOf("/agents/2")).toBeLessThan(html.indexOf("/agents/1"));
+    expect(html).not.toContain("Sign out");
   });
 
   it("should say what is missing when the viewer has nothing", () => {
-    const html = renderToStaticMarkup(<Sidebar data={{ mine: [], shared: [], channels: { mine: [], shared: [] }, topics: [] }} />);
+    const html = renderToStaticMarkup(
+      <Sidebar data={{ mine: [], shared: [], channels: { mine: [], shared: [] }, topics: [] }} viewer={VIEWER} signInDisabled />
+    );
 
     expect(html).toContain("/enable-comms");
     expect(html).toContain("Nobody has granted you access.");
     expect(html).toContain("No saved channels.");
+    expect(html).toContain("No posts this week.");
   });
 });
 
@@ -138,8 +176,8 @@ describe("ChannelHeader", () => {
   it("should offer neither the mode switch nor saving when there is one topic and it cannot be saved", () => {
     const html = renderToStaticMarkup(<ChannelHeader kind="Channel" title="x" topics={["a"]} match="all" saveable={false} />);
 
-    expect(html).not.toContain("Show posts with");
-    expect(html).not.toContain("Save this view");
+    expect(html).not.toContain("Match any");
+    expect(html).not.toContain("Save as channel");
     expect(html).toContain("all of these");
   });
 });

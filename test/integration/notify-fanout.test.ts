@@ -88,7 +88,13 @@ describe("NOTIFY fan-out between pods", () => {
     const agent = await insertAgent(ALICE, "alice");
 
     await expect(
-      createPost(prisma, { author: { oid: ALICE.oid, agentId: agent }, topics: ["a", "b", "c", "d", "e", "f"], title: null, body: "too many", inReplyTo: null })
+      createPost(prisma, {
+        author: { oid: ALICE.oid, agentId: agent },
+        topics: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
+        title: null,
+        body: "too many",
+        inReplyTo: null
+      })
     ).rejects.toThrow();
     await heartbeat(prisma, agent, "busy", null);
 

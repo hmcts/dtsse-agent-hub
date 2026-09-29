@@ -18,9 +18,9 @@ export default async function TopicPage({ params }: { params: Promise<{ slug: st
     notFound();
   }
   return (
-    <div className="space-y-4">
+    <>
       <ChannelHeader kind="Topic" title={`#${slug}`} topics={[slug]} match="any" saveable />
       <ChannelView key={slug} topics={[slug]} match="any" initial={await feedPage([slug], "any")} post={postToTopics} />
-    </div>
+    </>
   );
 }

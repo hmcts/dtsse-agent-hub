@@ -25,9 +25,10 @@ function post() {
 }
 
 describe("defaultTopics", () => {
-  it("should start with every topic of the view when it has five or fewer, and the first five otherwise", () => {
+  it("should start with every topic of the view when it has ten or fewer, and the first ten otherwise", () => {
     expect(defaultTopics(["a", "b"])).toEqual(["a", "b"]);
-    expect(defaultTopics(["a", "b", "c", "d", "e", "f"])).toEqual(["a", "b", "c", "d", "e"]);
+    expect(defaultTopics(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"])).toEqual(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
+    expect(defaultTopics(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"])).toEqual(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
   });
 });
 
@@ -57,18 +58,20 @@ describe("Composer", () => {
     expect(screen.getByText("pick at least one topic")).toBeTruthy();
   });
 
-  it("should not let a post be sent when more than five topics are chosen", () => {
-    render(<Composer topics={["a", "b", "c", "d", "e", "f"]} post={vi.fn()} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+  it("should not let a post be sent when more than ten topics are chosen", () => {
+    render(
+      <Composer topics={["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]} post={vi.fn()} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />
+    );
 
-    fireEvent.click(screen.getByLabelText("#f"));
+    fireEvent.click(screen.getByLabelText("#k"));
     fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
 
     expect(post().disabled).toBe(true);
-    expect(screen.getByText("a post has at most 5 topics")).toBeTruthy();
+    expect(screen.getByText("a post has at most 10 topics")).toBeTruthy();
   });
 
   it("should show the server's refusal when the action refuses", async () => {
-    const action = vi.fn(async () => ({ ok: false as const, error: "a post needs between 1 and 5 distinct topics" }));
+    const action = vi.fn(async () => ({ ok: false as const, error: "a post needs between 1 and 10 distinct topics" }));
     render(<Composer topics={["a"]} post={action} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
 
     fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "hello" } });
@@ -76,7 +79,7 @@ describe("Composer", () => {
       fireEvent.click(post());
     });
 
-    expect(screen.getByRole("alert").textContent).toContain("between 1 and 5");
+    expect(screen.getByRole("alert").textContent).toContain("between 1 and 10");
   });
 
   it("should say the post was not sent when the call itself fails", async () => {

@@ -17,7 +17,7 @@ export default async function SavedChannel({ params }: { params: Promise<{ id: s
   }
   const mine = found.owner.oid === viewer.oid;
   return (
-    <div className="space-y-4">
+    <>
       <ChannelHeader
         kind={mine ? (found.shared ? "Your channel, shared" : "Your channel") : `Shared by ${found.owner.name}`}
         title={found.name}
@@ -28,6 +28,6 @@ export default async function SavedChannel({ params }: { params: Promise<{ id: s
         {mine ? <DeleteChannel id={found.id} /> : null}
       </ChannelHeader>
       <ChannelView key={found.id} topics={found.topics} match={found.match} initial={await feedPage(found.topics, found.match)} post={postToTopics} />
-    </div>
+    </>
   );
 }

@@ -5,7 +5,7 @@ import { InvalidTopics, MAX_POST_TOPICS, MIN_POST_TOPICS, normaliseSlug } from "
  * What makes a channel, and what makes a topic set in a URL. Shared by the channel builder, which checks as the
  * person types, and the server action that saves, which checks again because a direct POST skips the builder.
  *
- * A saved channel carries 1–5 topics, the same bounds as a post, so the composer on a channel can always post to
+ * A saved channel carries `MIN_POST_TOPICS` to `MAX_POST_TOPICS` topics, the same bounds as a post, so the composer on a channel can always post to
  * every one of its topics. A `/c?topics=` view is not saved and may name more.
  */
 

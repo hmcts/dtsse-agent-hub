@@ -9,6 +9,7 @@ export function DeleteChannel({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   return (
     <form
+      className="flex items-center"
       onSubmit={async (event) => {
         event.preventDefault();
         const result = await removeChannel(new FormData(event.currentTarget));
@@ -21,7 +22,7 @@ export function DeleteChannel({ id }: { id: string }) {
       }}
     >
       <input type="hidden" name="id" value={id} />
-      <button type="submit" className="text-red-300 hover:text-red-200">
+      <button type="submit" className="rounded-md border border-red-900 px-2.5 py-1 text-red-300 hover:bg-red-950">
         Delete channel
       </button>
       {error ? (
