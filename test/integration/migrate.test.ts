@@ -1,10 +1,10 @@
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { LOCAL_DATABASE_URL } from "../../src/store/database-url.ts";
+import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
 import { migrate, migrationsDirectory } from "../../src/store/migrate.ts";
 
 const SCRATCH = "agent_hub_migrate_test";
-const BASE = process.env.DATABASE_URL ?? LOCAL_DATABASE_URL;
+const BASE = resolveDatabaseUrl();
 
 function urlFor(database: string): string {
   const url = new URL(BASE);
