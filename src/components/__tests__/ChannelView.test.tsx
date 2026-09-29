@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChannelView, feedUrl } from "@/components/feed/ChannelView";
 import { HubStreamProvider } from "@/components/live/HubStream";
+import { SessionEndedBanner } from "@/components/live/SessionEnded";
 import type { ApiMessage } from "@/messages/shape";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined, push: () => undefined }) }));
@@ -135,6 +136,28 @@ describe("ChannelView", () => {
     render(<ChannelView topics="everything" match="any" initial={{ messages: [], olderBefore: null }} />);
 
     expect(screen.getByText("Nothing has been posted yet.")).toBeTruthy();
+  });
+
+  it("should offer to sign in again and show the banner when loading older posts is refused for want of a session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "sign in first" }), { status: 401 }))
+    );
+    render(
+      <HubStreamProvider>
+        <SessionEndedBanner />
+        <ChannelView topics={["a"]} match="any" initial={{ messages: [post("5")], olderBefore: "5" }} />
+      </HubStreamProvider>
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Load older posts" }));
+    });
+
+    expect(screen.getByRole("status").textContent).toContain("Your session has ended");
+    expect(screen.getByRole("alert").textContent).toContain("Your session has ended");
+    expect(screen.getAllByRole("link", { name: "Sign in again" })).toHaveLength(2);
+    expect(screen.queryByText(/could not be loaded/)).toBeNull();
   });
 
   it("should say nothing is posted yet when the view is empty", () => {

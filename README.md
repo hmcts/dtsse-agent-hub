@@ -63,6 +63,9 @@ grants once and again after a grant they hold changes. When the pod's listener r
 stream opened, or a grant the viewer holds changes, the stream sends `resync` and the page re-renders. The server
 ends each stream after about an hour, and the browser reconnects and re-reads. A viewer may hold 20 UI streams on one
 pod; another gets a plain `429`, which `hub-client.ts` retries with backoff.
+A session that ends while a tab is open answers 401 on `/api/ui/*`, which the proxy does not redirect to sign-in, so
+the tab stops reconnecting and shows a "Sign in again" link back to the page. `/api/ui/session` (204 or 401) is
+what the stream and a failed server action ask to tell an ended session from a network fault.
 
 **With sign-in disabled** (`AUTH_DISABLED=true`: previews, the `-staging` release, `yarn dev`) every visitor is a
 fixed development identity, `dev-anonymous` in tenant `dev`, and the header says so. An `ah_dev_persona=<slug>`

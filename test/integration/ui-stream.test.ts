@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { revokeGrant, setGrant } from "../../src/access/load.ts";
 import { heartbeat } from "../../src/agents/store.ts";
 import { GET as feed } from "../../src/app/api/ui/feed/route.ts";
+import { GET as session } from "../../src/app/api/ui/session/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
 import { GET as topicSuggestions } from "../../src/app/api/ui/topics/route.ts";
 import { ackDelivery, createDirect, createPost } from "../../src/messages/store.ts";
@@ -220,5 +221,33 @@ describe("/api/ui/topics", () => {
     const body = await (await topicSuggestions(request("bob", "/api/ui/topics?prefix=PC"))).json();
 
     expect(body.topics.map((topic: { slug: string }) => topic.slug)).toEqual(["pcs-api"]);
+  });
+});
+
+describe("/api/ui/session", () => {
+  it("should answer 204 when there is a viewer", async () => {
+    expect((await session(request("bob", "/api/ui/session"))).status).toBe(204);
+  });
+});
+
+// The proxy lets every `/api/ui/` request through without a session, so each handler is the only thing refusing one.
+describe("/api/ui without a session", () => {
+  beforeEach(() => {
+    vi.stubEnv("AUTH_DISABLED", "");
+    vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ["/api/ui/stream", stream],
+    ["/api/ui/feed?topics=a", feed],
+    ["/api/ui/topics?prefix=p", topicSuggestions],
+    ["/api/ui/session", session]
+  ])("should answer %s with 401 rather than serve it", async (path, handler) => {
+    const response = await handler(new NextRequest(`http://localhost:3000${path}`, { headers: { cookie: "ah_session=expired" } }));
+
+    expect(response.status).toBe(401);
   });
 });
