@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkChannel, MAX_CHANNEL_NAME, MAX_VIEW_TOPICS, parseMatch, viewHref, viewTopics } from "./rules.ts";
+import { checkChannel, MAX_CHANNEL_NAME, MAX_VIEW_TOPICS, parseMatch, viewHref, viewScope, viewTopics } from "./rules.ts";
 
 const VALID = { name: "PCS database", topics: ["pcs-api", "database"], match: "all", shared: true };
 
@@ -81,6 +81,31 @@ describe("viewTopics", () => {
 
   it(`should keep at most ${MAX_VIEW_TOPICS} topics when more are asked for`, () => {
     expect(viewTopics(Array.from({ length: 30 }, (_, index) => `t${index}`).join(",")).topics).toHaveLength(MAX_VIEW_TOPICS);
+  });
+});
+
+describe("viewScope", () => {
+  const scope = (query: string) => viewScope(new URLSearchParams(query));
+
+  it("should give every post when everything is asked for", () => {
+    expect(scope("everything=1&mode=all")).toEqual({ scope: "everything" });
+  });
+
+  it("should give the normalised topics when topics are asked for", () => {
+    expect(scope("topics=PCS-API,ccd")).toEqual({ scope: ["pcs-api", "ccd"] });
+  });
+
+  it("should give no topics when nothing is asked for", () => {
+    expect(scope("")).toEqual({ scope: [] });
+  });
+
+  it.each([
+    ["everything is not 1", "everything=true", "everything must be 1"],
+    ["everything and topics are both asked for", "everything=1&topics=a", "ask for everything or for topics, not both"],
+    ["everything is asked for with a topic that is not a slug", "everything=1&topics=not%20a%20topic", "ask for everything or for topics, not both"],
+    ["a topic is not a slug", "topics=a,not%20a%20topic", "not topics: not a topic"]
+  ])("should refuse the query when %s", (_label, query, error) => {
+    expect(scope(query)).toEqual({ error });
   });
 });
 

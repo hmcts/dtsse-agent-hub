@@ -3,7 +3,7 @@ import { grantsHeldBy } from "@/access/load";
 import { canViewAgent } from "@/access/rules";
 import { errorResponse } from "@/agent-api/http";
 import { findAgent, isUuid } from "@/agents/store";
-import { parseMatch, viewTopics } from "@/channels/rules";
+import { parseMatch, viewScope } from "@/channels/rules";
 import { loadThreadMessage } from "@/messages/direct-thread";
 import { realtime } from "@/realtime/process";
 import { openSseStream, SSE_HEADERS } from "@/realtime/sse";
@@ -16,7 +16,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Live updates for one browser tab. `?topics=a,b&mode=any|all` watches posts, `?agent=<id>` an agent's thread;
+ * Live updates for one browser tab. `?topics=a,b&mode=any|all` watches posts on those topics and `?everything=1`
+ * every post, and `?agent=<id>` an agent's thread;
  * agent status changes the viewer may see are always sent. An agent the viewer cannot see is refused as missing.
  * A viewer already holding their limit of streams on this pod is refused with 429, which the client backs off from.
  */
@@ -26,9 +27,9 @@ export async function GET(request: NextRequest): Promise<Response> {
     return viewer;
   }
   const query = request.nextUrl.searchParams;
-  const { topics, invalid } = viewTopics(query.getAll("topics"));
-  if (invalid.length > 0) {
-    return errorResponse(400, `not topics: ${invalid.join(", ")}`);
+  const asked = viewScope(query);
+  if ("error" in asked) {
+    return errorResponse(400, asked.error);
   }
 
   const agentId = query.get("agent");
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     signal: request.signal,
     onClose: release,
     onOpen: uiStream(
-      { topics, match: parseMatch(query.get("mode")), agent },
+      { topics: asked.scope, match: parseMatch(query.get("mode")), agent },
       {
         hub,
         listener,

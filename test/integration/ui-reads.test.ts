@@ -109,10 +109,25 @@ describe("overview", () => {
     await createPost(prisma, { author: { oid: CAROL.oid, agentId: null }, topics: ["a"], title: null, body: "on a", inReplyTo: null });
     await createPost(prisma, { author: { oid: CAROL.oid, agentId: null }, topics: ["b"], title: null, body: "on b", inReplyTo: null });
 
-    expect((await overview(viewer(BOB))).activity.messages.map((message) => message.body)).toEqual(["on a", "on b"]);
+    const everywhere = await overview(viewer(BOB));
+    expect(everywhere.watched).toBe("everything");
+    expect(everywhere.activity.messages.map((message) => message.body)).toEqual(["on a", "on b"]);
     await saveChannel(prisma, BOB.oid, { name: "a only", topics: ["a"], match: "any", shared: false });
     const withChannel = await overview(viewer(BOB));
     expect(withChannel.topics).toEqual(["a"]);
+    expect(withChannel.watched).toEqual(["a"]);
     expect(withChannel.activity.messages.map((message) => message.body)).toEqual(["on a"]);
+  });
+
+  it("should offer older posts on every topic when the viewer has no channels and there are more than a page", async () => {
+    for (let index = 1; index <= 31; index += 1) {
+      await createPost(prisma, { author: { oid: CAROL.oid, agentId: null }, topics: ["a"], title: null, body: `post ${index}`, inReplyTo: null });
+    }
+
+    const { activity } = await overview(viewer(BOB));
+
+    expect(activity.messages).toHaveLength(30);
+    expect(activity.messages[0]!.body).toBe("post 2");
+    expect(activity.olderBefore).toBe(activity.messages[0]!.id);
   });
 });

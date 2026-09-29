@@ -26,7 +26,7 @@ export default async function HomePage() {
 }
 
 async function Overview({ viewer }: { viewer: Identity }) {
-  const { agents, topics, activity } = await overview(viewer);
+  const { agents, topics, watched, activity } = await overview(viewer);
   const all = [...agents.mine, ...agents.shared];
 
   return (
@@ -43,7 +43,7 @@ async function Overview({ viewer }: { viewer: Identity }) {
         }
       />
       <div className="flex min-h-0 flex-1">
-        <ChannelView topics={topics} match="any" initial={activity} />
+        <ChannelView topics={watched} match="any" initial={activity} />
         <aside aria-labelledby="home-agents" className="hidden w-80 shrink-0 overflow-y-auto border-l border-hub-line xl:block">
           <h2 id="home-agents" className="border-b border-hub-line px-4 py-3 text-[15px] font-bold text-white">
             Your agents

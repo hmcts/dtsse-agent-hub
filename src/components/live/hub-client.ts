@@ -1,4 +1,4 @@
-import type { Match } from "@/messages/feed";
+import type { Match, PostScope } from "@/messages/feed";
 
 /**
  * The browser end of `/api/ui/stream`: one `EventSource`, reopened with backoff when it closes for good.
@@ -15,14 +15,16 @@ export const HUB_EVENT_TYPES: readonly HubEventType[] = ["post", "agent_status",
 export type HubListener = (type: HubEventType, data: unknown) => void;
 
 export interface StreamWatch {
-  topics: readonly string[];
+  topics: PostScope;
   match: Match;
   agent: string | null;
 }
 
 export function streamUrl(watch: StreamWatch): string {
   const query = new URLSearchParams();
-  if (watch.topics.length > 0) {
+  if (watch.topics === "everything") {
+    query.set("everything", "1");
+  } else if (watch.topics.length > 0) {
     query.set("topics", watch.topics.join(","));
     query.set("mode", watch.match);
   }

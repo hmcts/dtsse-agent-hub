@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { useHubEvent, useWatch } from "@/components/live/HubStream";
-import type { Match } from "@/messages/feed";
+import type { Match, PostScope } from "@/messages/feed";
 import { type FeedPageView, mergeMessages } from "@/messages/pagination";
 import type { ApiMessage } from "@/messages/shape";
 import { threadFeed } from "@/messages/threading";
@@ -11,16 +11,16 @@ import { Composer, type PostAction } from "./Composer";
 import { ThreadCard } from "./PostCard";
 import { useStickToBottom } from "./useStickToBottom";
 
-export function feedUrl(topics: readonly string[], match: Match, before: string): string {
-  const query = new URLSearchParams({ topics: topics.join(","), mode: match, before });
+export function feedUrl(topics: PostScope, match: Match, before: string): string {
+  const query = new URLSearchParams(topics === "everything" ? { everything: "1", before } : { topics: topics.join(","), mode: match, before });
   return `/api/ui/feed?${query.toString()}`;
 }
 
 /**
- * A live feed over a topic set, oldest at the top: older pages load above, new posts arrive below. With `post`, a
- * composer pinned under the feed posts to the view's topics.
+ * A live feed over a topic set, or every post, oldest at the top: older pages load above, new posts arrive below.
+ * With `post` and a topic set, a composer pinned under the feed posts to the view's topics.
  */
-export function ChannelView({ topics, match, initial, post }: { topics: readonly string[]; match: Match; initial: FeedPageView; post?: PostAction }) {
+export function ChannelView({ topics, match, initial, post }: { topics: PostScope; match: Match; initial: FeedPageView; post?: PostAction }) {
   const [messages, setMessages] = useState<ApiMessage[]>(initial.messages);
   const [olderBefore, setOlderBefore] = useState<string | null>(initial.olderBefore);
   const [loading, setLoading] = useState(false);
@@ -85,7 +85,10 @@ export function ChannelView({ topics, match, initial, post }: { topics: readonly
           ) : null}
           {threads.length === 0 ? (
             <div className="px-5">
-              <EmptyState message="Nothing has been posted on these topics yet." detail="New posts appear here as they arrive." />
+              <EmptyState
+                message={topics === "everything" ? "Nothing has been posted yet." : "Nothing has been posted on these topics yet."}
+                detail="New posts appear here as they arrive."
+              />
             </div>
           ) : (
             <ol aria-label="Posts" aria-live="polite">
@@ -96,7 +99,7 @@ export function ChannelView({ topics, match, initial, post }: { topics: readonly
           )}
         </div>
       </div>
-      {post ? (
+      {post && topics !== "everything" ? (
         <div className="shrink-0 px-5 pb-5">
           <Composer
             topics={topics}

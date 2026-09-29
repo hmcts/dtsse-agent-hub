@@ -1,4 +1,4 @@
-import type { Match } from "../messages/feed.ts";
+import type { Match, PostScope } from "../messages/feed.ts";
 import { InvalidTopics, MAX_POST_TOPICS, MIN_POST_TOPICS, normaliseSlug } from "../topics/slug.ts";
 
 /**
@@ -96,6 +96,28 @@ export function viewTopics(value: string | string[] | undefined): ViewTopics {
     }
   }
   return { topics, invalid };
+}
+
+/**
+ * The posts `/api/ui/stream` and `/api/ui/feed` are asked for: `?everything=1` for every post, otherwise `?topics=`.
+ * Asking for both is refused rather than one silently winning.
+ */
+export function viewScope(query: URLSearchParams): { scope: PostScope } | { error: string } {
+  const everything = query.get("everything");
+  const { topics, invalid } = viewTopics(query.getAll("topics"));
+  if (everything !== null) {
+    if (everything !== "1") {
+      return { error: "everything must be 1" };
+    }
+    if (topics.length > 0 || invalid.length > 0) {
+      return { error: "ask for everything or for topics, not both" };
+    }
+    return { scope: "everything" };
+  }
+  if (invalid.length > 0) {
+    return { error: `not topics: ${invalid.join(", ")}` };
+  }
+  return { scope: topics };
 }
 
 /** The shareable URL of an ad-hoc view. */

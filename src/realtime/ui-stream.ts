@@ -1,6 +1,6 @@
 import { type AgentRef, canReadMessage, canViewAgent, type Grant } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
-import type { Match } from "../messages/feed.ts";
+import type { Match, PostScope } from "../messages/feed.ts";
 import type { ApiMessage } from "../messages/shape.ts";
 import { loadMessage } from "../messages/store.ts";
 import type { Database } from "../store/prisma.ts";
@@ -13,7 +13,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
 /**
  * What `/api/ui/stream` sends one browser tab: the events on the hub that the viewer may see and the page asked for.
  *
- * - `post`: a post on the watched topics, matched `any` or `all`. Posts are readable by everyone signed in.
+ * - `post`: a post on the watched topics, matched `any` or `all`, or any post when the page watches `everything`.
+ *   Posts are readable by everyone signed in.
  * - `agent_status`: a status change of any agent the viewer can see, for the sidebar's dots.
  * - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery, when the viewer
  *   can still see that agent and read that message.
@@ -27,8 +28,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  */
 
 export interface UiWatch {
-  /** Normalised slugs; empty watches no posts. */
-  topics: readonly string[];
+  /** Normalised slugs, or `everything` for every post; empty watches no posts. */
+  topics: PostScope;
   match: Match;
   /** The agent whose thread the page shows, already checked visible when the stream opened. */
   agent: AgentRef | null;
@@ -58,17 +59,21 @@ export function sharedPostLoader(db: Database): (id: bigint) => Promise<ApiMessa
 }
 
 export function matchesTopics(messageTopics: readonly string[], watch: Pick<UiWatch, "topics" | "match">): boolean {
-  if (watch.topics.length === 0) {
+  const topics = watch.topics;
+  if (topics === "everything") {
+    return true;
+  }
+  if (topics.length === 0) {
     return false;
   }
-  return watch.match === "all" ? watch.topics.every((topic) => messageTopics.includes(topic)) : watch.topics.some((topic) => messageTopics.includes(topic));
+  return watch.match === "all" ? topics.every((topic) => messageTopics.includes(topic)) : topics.some((topic) => messageTopics.includes(topic));
 }
 
 /** The frame an event becomes for this viewer, or `undefined` when it is not theirs to see. */
 export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit<UiStreamSources, "hub" | "listener">): Promise<string | undefined> {
   switch (event.type) {
     case "post": {
-      if (watch.topics.length === 0) {
+      if (watch.topics !== "everything" && watch.topics.length === 0) {
         return undefined;
       }
       const message = await sources.post(BigInt(event.message_id));
