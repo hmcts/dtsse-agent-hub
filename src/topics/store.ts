@@ -50,15 +50,16 @@ export interface TopicSummary {
 export const DEFAULT_TOPIC_LIMIT = 50;
 export const MAX_TOPIC_LIMIT = 200;
 
-/** Topics whose slug starts with `prefix`, most recently active first; never-posted topics last. */
+/**
+ * Topics whose slug starts with `prefix`, most recently active first; never-posted topics last. Only the topics on
+ * the page are counted.
+ */
 export async function listTopics(db: Database, prefix: string, limit: number): Promise<TopicSummary[]> {
   const pattern = `${prefix.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
   const rows = await db.$queryRaw<{ slug: string; message_count: bigint; last_message_at: Date | null }[]>`
-    SELECT t.slug, count(mt.message_id) AS message_count, t.last_message_at
+    SELECT t.slug, (SELECT count(*) FROM message_topic mt WHERE mt.topic_id = t.id) AS message_count, t.last_message_at
     FROM topic t
-    LEFT JOIN message_topic mt ON mt.topic_id = t.id
     WHERE t.slug LIKE ${pattern}
-    GROUP BY t.id
     ORDER BY t.last_message_at DESC NULLS LAST, t.slug
     LIMIT ${limit}
   `;
@@ -74,14 +75,19 @@ export const ACTIVE_WINDOW_DAYS = 7;
 /**
  * The topics with the most posts in the last `ACTIVE_WINDOW_DAYS`, busiest first, ties broken by the latest post. A
  * topic with no posts in the window is left out, however many it had before.
+ *
+ * The window's posts come from `message_post_created_at_idx`. The bound on `mt.message_id` never excludes one of them,
+ * but lets `message_topic` be read from its primary key starting at the window rather than scanned whole.
  */
 export async function mostActiveTopics(db: Database, limit: number): Promise<TopicSummary[]> {
   const rows = await db.$queryRaw<{ slug: string; message_count: bigint; last_message_at: Date | null }[]>`
+    WITH recent AS (
+      SELECT id FROM message WHERE kind = 'post' AND created_at > now() - make_interval(days => ${ACTIVE_WINDOW_DAYS}::int)
+    )
     SELECT t.slug, count(*) AS message_count, t.last_message_at
-    FROM topic t
-    JOIN message_topic mt ON mt.topic_id = t.id
-    JOIN message m ON m.id = mt.message_id
-    WHERE m.kind = 'post' AND m.created_at > now() - make_interval(days => ${ACTIVE_WINDOW_DAYS}::int)
+    FROM recent m
+    JOIN message_topic mt ON mt.message_id = m.id AND mt.message_id >= (SELECT min(id) FROM recent)
+    JOIN topic t ON t.id = mt.topic_id
     GROUP BY t.id
     ORDER BY count(*) DESC, t.last_message_at DESC NULLS LAST, t.slug
     LIMIT ${limit}

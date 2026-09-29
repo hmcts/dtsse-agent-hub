@@ -46,28 +46,70 @@ export interface ChannelQuery {
 /**
  * The newest page of a channel's posts before `before`, returned oldest first. `any` is a post on at least one of the
  * topics; `all` is a post carrying every one of them.
+ *
+ * Both walk the `message_topic (topic_id, message_id)` index down from `before` and stop once the page is full, so
+ * the cost follows the page rather than how many posts the topics have ever had.
  */
 export async function channelFeed(db: Database, query: ChannelQuery): Promise<ApiMessage[]> {
-  const topics = [...new Set(query.topics)];
-  if (topics.length === 0) {
+  const slugs = [...new Set(query.topics)];
+  if (slugs.length === 0) {
+    return [];
+  }
+  const found = await db.topic.findMany({ where: { slug: { in: slugs } }, select: { id: true } });
+  const topicIds = found.map((topic) => topic.id);
+  if (topicIds.length === 0 || (query.match === "all" && topicIds.length < slugs.length)) {
     return [];
   }
   const before = query.before ?? BigInt("9223372036854775807");
-  const required = query.match === "all" ? topics.length : 1;
-  const rows = await db.$queryRaw<{ id: bigint }[]>`
-    SELECT mt.message_id AS id
-    FROM topic t
-    JOIN message_topic mt ON mt.topic_id = t.id AND mt.message_id < ${before}
-    WHERE t.slug = ANY(${topics}::text[])
-    GROUP BY mt.message_id
-    HAVING count(*) >= ${required}
-    ORDER BY mt.message_id DESC
-    LIMIT ${query.limit}
-  `;
+  const rows = query.match === "all" ? await pageOnAll(db, topicIds, before, query.limit) : await pageOnAny(db, topicIds, before, query.limit);
   return await loadMessages(
     db,
     rows.map((row) => row.id)
   );
+}
+
+/** The page is among each topic's own newest `limit` posts before `before`. */
+async function pageOnAny(db: Database, topicIds: number[], before: bigint, limit: number): Promise<{ id: bigint }[]> {
+  return await db.$queryRaw<{ id: bigint }[]>`
+    SELECT DISTINCT newest.message_id AS id
+    FROM unnest(${topicIds}::int[]) AS wanted (topic_id)
+    CROSS JOIN LATERAL (
+      SELECT mt.message_id FROM message_topic mt
+      WHERE mt.topic_id = wanted.topic_id AND mt.message_id < ${before}
+      ORDER BY mt.message_id DESC
+      LIMIT ${limit}
+    ) newest
+    ORDER BY id DESC
+    LIMIT ${limit}
+  `;
+}
+
+/**
+ * A leapfrog intersection, newest first. Each step reads every topic's newest post at or below `bound`. When they
+ * agree, that post carries every topic and the walk goes on below it; otherwise the lowest of them is the highest id
+ * that could still be on all of them, and the walk goes on from there. It ends when any topic runs out, so it takes
+ * at most about two steps per post on the quietest topic, and the `LIMIT` stops it as soon as the page is full.
+ */
+async function pageOnAll(db: Database, topicIds: number[], before: bigint, limit: number): Promise<{ id: bigint }[]> {
+  return await db.$queryRaw<{ id: bigint }[]>`
+    WITH RECURSIVE walk (bound, hit) AS (
+      SELECT ${before}::bigint - 1, NULL::bigint
+      UNION ALL
+      SELECT CASE WHEN step.low = step.high THEN step.low - 1 ELSE step.low END,
+             CASE WHEN step.low = step.high THEN step.low END
+      FROM walk
+      CROSS JOIN LATERAL (
+        SELECT min(head.message_id) AS low, max(head.message_id) AS high, count(head.message_id) AS heads
+        FROM unnest(${topicIds}::int[]) AS wanted (topic_id)
+        CROSS JOIN LATERAL (
+          SELECT max(mt.message_id) AS message_id FROM message_topic mt
+          WHERE mt.topic_id = wanted.topic_id AND mt.message_id <= walk.bound
+        ) head
+      ) step
+      WHERE step.heads = ${topicIds.length}::int
+    )
+    SELECT hit AS id FROM walk WHERE hit IS NOT NULL LIMIT ${limit}
+  `;
 }
 
 export interface TopicQuery {
