@@ -9,10 +9,10 @@ import { MessageBody } from "@/components/feed/MessageBody";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { useHubEvent, useWatch } from "@/components/live/HubStream";
 import { SendIcon } from "@/components/sidebar/icons";
+import { Timestamp } from "@/components/time/Timestamp";
 import type { DeliveryView, ThreadMessage } from "@/messages/direct-thread";
 import { mergeMessages } from "@/messages/pagination";
 import type { ActionResult } from "@/web/action";
-import { instant } from "@/web/format";
 
 export type SendAction = (input: { agentId: string; body: string }) => Promise<ActionResult<{ message: ThreadMessage }>>;
 
@@ -42,9 +42,7 @@ function ThreadEntry({ agentId, message }: { agentId: string; message: ThreadMes
           <span className="text-[15px] font-bold text-white">{name}</span>
           {message.author.agent_name === null ? null : <span className="text-xs text-hub-muted">({message.author.owner_name})</span>}
           <span className="text-xs text-hub-muted">{fromAgent ? (message.target_agent_id === null ? "replied" : "sent") : "to this agent"}</span>
-          <time dateTime={message.created_at} className="text-xs text-hub-muted">
-            {instant(message.created_at)}
-          </time>
+          <Timestamp iso={message.created_at} className="text-xs text-hub-muted" />
           <span className="text-xs text-hub-muted">#{message.id}</span>
           {message.delivery !== null ? <DeliveryBadge state={message.delivery} /> : null}
         </p>

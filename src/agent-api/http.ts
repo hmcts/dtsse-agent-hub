@@ -24,9 +24,50 @@ export function noContent(): Response {
   return new Response(null, { status: 204 });
 }
 
-/** The request body as JSON. An empty body reads as `{}`, so a body-less POST is not a parse error. */
+/**
+ * The largest request body the agent API reads. A message body is up to `MAX_BODY` UTF-16 code units, and a client
+ * that escapes everything outside ASCII, as Python's `json.dumps` does by default, writes six bytes for each one, so
+ * the cap sits above that worst case rather than at the size of a typical message.
+ */
+export const MAX_REQUEST_BYTES = 256 * 1024;
+
+function tooLarge(): HttpError {
+  return new HttpError(413, `the request body is larger than ${MAX_REQUEST_BYTES} bytes`);
+}
+
+/** Reads the body as UTF-8, refusing it once it passes the cap, since `Content-Length` may be absent or understated. */
+async function readText(request: Request): Promise<string> {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && Number(declared) > MAX_REQUEST_BYTES) {
+    throw tooLarge();
+  }
+  if (request.body === null) {
+    return "";
+  }
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      return text + decoder.decode();
+    }
+    received += value.byteLength;
+    if (received > MAX_REQUEST_BYTES) {
+      await reader.cancel();
+      throw tooLarge();
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
+/**
+ * The request body as JSON. An empty body reads as `{}`, so a body-less POST is not a parse error. A body over
+ * `MAX_REQUEST_BYTES` is a 413.
+ */
 export async function readJson(request: Request): Promise<unknown> {
-  const text = await request.text();
+  const text = await readText(request);
   if (text.trim() === "") {
     return {};
   }

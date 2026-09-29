@@ -1,11 +1,13 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { revokeGrant, setGrant } from "../../src/access/load.ts";
 import { heartbeat, markOffline } from "../../src/agents/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import type { HubEvent } from "../../src/realtime/events.ts";
 import { createEventHub, type EventHub } from "../../src/realtime/hub.ts";
 import { type Listener, startListener } from "../../src/realtime/listener.ts";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
-import { connect, insertAgent, person, prisma, resetDatabase } from "./database.ts";
+import type { PrismaClient } from "../../src/store/prisma.ts";
+import { connect, insertAgent, insertUser, person, prisma, resetDatabase } from "./database.ts";
 
 const ALICE = person("alice");
 const BOB = person("bob");
@@ -100,6 +102,53 @@ describe("NOTIFY fan-out between pods", () => {
 
     await until(() => pods[0]!.events.length >= 1);
     expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy" }]);
+  });
+
+  it("should announce a grant to every pod when it is set, changed or revoked", async () => {
+    await insertUser(ALICE);
+    await insertUser(BOB);
+
+    await setGrant(prisma, ALICE.oid, BOB.oid, "read");
+    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
+    await revokeGrant(prisma, ALICE.oid, BOB.oid);
+
+    const grant: HubEvent = { type: "grant", owner_oid: ALICE.oid, grantee_oid: BOB.oid };
+    for (const running of pods) {
+      await until(() => running.events.length >= 3);
+      expect(running.events).toEqual([grant, grant, grant]);
+    }
+  });
+
+  it("should not announce a revocation when there was no grant to revoke", async () => {
+    const agent = await insertAgent(ALICE, "alice");
+
+    await revokeGrant(prisma, ALICE.oid, BOB.oid);
+    await heartbeat(prisma, agent, "busy", null);
+
+    await until(() => pods[0]!.events.length >= 1);
+    expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy" }]);
+  });
+
+  it("should not announce a grant write that rolled back", async () => {
+    const agent = await insertAgent(ALICE, "alice");
+    await insertUser(BOB);
+    const failsAtCommit = new Proxy(prisma, {
+      get: (target, property, receiver) =>
+        property === "$transaction"
+          ? (write: (tx: unknown) => Promise<unknown>) =>
+              target.$transaction(async (tx) => {
+                await write(tx);
+                throw new Error("rolled back");
+              })
+          : Reflect.get(target, property, receiver)
+    }) as PrismaClient;
+
+    await expect(setGrant(failsAtCommit, ALICE.oid, BOB.oid, "read")).rejects.toThrow("rolled back");
+    await heartbeat(prisma, agent, "busy", null);
+
+    await until(() => pods[0]!.events.length >= 1);
+    expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy" }]);
+    expect(await prisma.agentGrant.count()).toBe(0);
   });
 
   it("should reconnect after its connection is killed and ask every stream to resync", async () => {
