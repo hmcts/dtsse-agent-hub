@@ -40,12 +40,14 @@ export async function GET(request: NextRequest): Promise<Response> {
     agent = { id: found.id, ownerOid: found.ownerOid };
   }
 
+  const { hub, listener } = realtime();
   const body = openSseStream({
     signal: request.signal,
     onOpen: uiStream(
       { topics, match: parseMatch(query.get("mode")), agent },
       {
-        hub: realtime().hub,
+        hub,
+        listener,
         viewerOid: viewer.oid,
         grants: () => grantsHeldBy(prisma, viewer.oid),
         post: (id) => loadMessage(prisma, id),

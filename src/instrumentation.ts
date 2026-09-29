@@ -12,6 +12,7 @@ function platform(): Platform {
 export async function register(): Promise<void> {
   await readSecrets();
   startMonitoring();
+  await startRealtime();
   await startSweeping();
 }
 
@@ -29,6 +30,19 @@ function startMonitoring(): void {
     new (platform().MonitoringService)(connectionString, "dtsse-agent-hub");
   } catch (error) {
     console.warn(`could not start Application Insights: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Opens the pod's LISTEN connection at boot rather than on the first stream. After `readSecrets`, because its
+ * connection string is assembled from the mounted `POSTGRES_*`.
+ */
+async function startRealtime(): Promise<void> {
+  try {
+    const { realtime } = await import("./realtime/process.ts");
+    realtime();
+  } catch (error) {
+    console.warn(`could not start the realtime listener: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

@@ -81,5 +81,7 @@ data: {"message": <Message>}
 
 - The response opens with a `: connected` comment, and a `: ping` comment is sent every 15 seconds. Clients ignore comment lines.
 - On connect, every `delivery` for the agent still in state `queued` is sent first, oldest first. After that, new direct messages are sent as they arrive.
+- No queued message is missed between the replay and the live messages, and a connection sends each message at most once. A message can be sent again on a later connection until it is acked, so a client that reconnects before acking must expect it twice.
+- If the service cannot read the agent's deliveries, it ends the stream. Reconnect with backoff: the replay on the next connection sends whatever is still queued.
 - A message stays `queued`, and is resent on the next connection, until the client acks it.
 - `Last-Event-ID` is accepted but only for logging; the ack is the source of truth for what's been delivered.

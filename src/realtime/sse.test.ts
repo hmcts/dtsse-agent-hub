@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openSseStream, PING_INTERVAL_MS, type Send, sseComment, sseEvent } from "./sse.ts";
+import { type Fail, openSseStream, PING_INTERVAL_MS, type Send, sseComment, sseEvent } from "./sse.ts";
 
 describe("sseEvent", () => {
   it("should frame an id, an event name and data, ending with a blank line", () => {
@@ -160,5 +160,50 @@ describe("openSseStream", () => {
 
     expect(await readAll(stream)).toBe(": connected\n\n");
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("no database"));
+  });
+
+  it("should end the stream, log why, clean up once and stop pinging when onOpen fails it later", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const abort = new AbortController();
+    const cleanup = vi.fn();
+    let fail: Fail = () => undefined;
+    const stream = openSseStream({
+      signal: abort.signal,
+      onOpen: (_send, given) => {
+        fail = given;
+        return cleanup;
+      },
+      pingIntervalMs: 1000
+    });
+    const text = readAll(stream);
+    await flush();
+
+    fail(new Error("replay failed"));
+    fail(new Error("again"));
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(await text).toBe(": connected\n\n");
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(console.warn).toHaveBeenCalledOnce();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("replay failed"));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("should run the cleanup straight away when onOpen fails the stream before returning it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const abort = new AbortController();
+    const cleanup = vi.fn();
+    const stream = openSseStream({
+      signal: abort.signal,
+      onOpen: (_send, fail) => {
+        fail("not listening");
+        return cleanup;
+      }
+    });
+
+    expect(await readAll(stream)).toBe(": connected\n\n");
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("not listening"));
   });
 });

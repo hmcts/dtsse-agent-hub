@@ -4,6 +4,7 @@ import type { Match } from "../messages/feed.ts";
 import type { ApiMessage } from "../messages/shape.ts";
 import type { HubEvent } from "./events.ts";
 import type { EventHub } from "./hub.ts";
+import type { Listener } from "./listener.ts";
 import { type OnOpen, type Send, sseEvent } from "./sse.ts";
 
 /**
@@ -13,7 +14,9 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  * - `agent_status`: a status change of any agent the viewer can see, for the sidebar's dots.
  * - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery, when the viewer
  *   can still see that agent and read that message.
- * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, so the page should re-read.
+ * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, so the page should re-read. Also sent
+ *   once `LISTEN` becomes active when the stream opened before it was, since anything committed until then was
+ *   never notified.
  *
  * Grants are re-read for each event that needs them, so revoking access stops the next event rather than the next
  * connection. Work is chained so frames leave in the order the hub published them.
@@ -29,11 +32,14 @@ export interface UiWatch {
 
 export interface UiStreamSources {
   hub: EventHub;
+  listener: Pick<Listener, "ready" | "connected">;
   viewerOid: string;
   grants: () => Promise<Grant[]>;
   post: (id: bigint) => Promise<ApiMessage | undefined>;
   direct: (id: bigint) => Promise<LoadedThreadMessage | undefined>;
 }
+
+const RESYNC_FRAME = sseEvent({ event: "resync", data: "{}" });
 
 export function matchesTopics(messageTopics: readonly string[], watch: Pick<UiWatch, "topics" | "match">): boolean {
   if (watch.topics.length === 0) {
@@ -43,7 +49,7 @@ export function matchesTopics(messageTopics: readonly string[], watch: Pick<UiWa
 }
 
 /** The frame an event becomes for this viewer, or `undefined` when it is not theirs to see. */
-export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit<UiStreamSources, "hub">): Promise<string | undefined> {
+export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit<UiStreamSources, "hub" | "listener">): Promise<string | undefined> {
   switch (event.type) {
     case "post": {
       if (watch.topics.length === 0) {
@@ -84,14 +90,22 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       return sseEvent({ event: "delivery", data: JSON.stringify({ message_id: event.message_id, state: event.state }) });
     }
     case "resync":
-      return sseEvent({ event: "resync", data: "{}" });
+      return RESYNC_FRAME;
   }
 }
 
-export function uiStream(watch: UiWatch, { hub, ...sources }: UiStreamSources): OnOpen {
+export function uiStream(watch: UiWatch, { hub, listener, ...sources }: UiStreamSources): OnOpen {
   return (send: Send) => {
     let chain: Promise<void> = Promise.resolve();
     let open = true;
+
+    if (!listener.connected()) {
+      chain = listener.ready().then(() => {
+        if (open) {
+          send(RESYNC_FRAME);
+        }
+      });
+    }
 
     const unsubscribe = hub.subscribe((event) => {
       chain = chain
