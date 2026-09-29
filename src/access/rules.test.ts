@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type AgentRef,
+  agentAccess,
   canAgentMessageAgent,
   canGrant,
   canManageGrants,
@@ -210,5 +211,16 @@ describe("replyRoute", () => {
     const post: MessageRef = { kind: "post", authorOid: STRANGER, authorAgent: null, targetAgent: null, parentAuthorOid: null };
 
     expect(replyRoute(replier, post, [])).toEqual({ to: "person" });
+  });
+});
+
+describe("agentAccess", () => {
+  it.each<[Role, ReturnType<typeof agentAccess>]>([
+    ["owner", "owner"],
+    ["read grantee", "read"],
+    ["write grantee", "write"],
+    ["stranger", "none"]
+  ])("should report the %s as %s when they look at the agent", (role, access) => {
+    expect(agentAccess(ROLES[role], TARGET, GRANTS)).toBe(access);
   });
 });

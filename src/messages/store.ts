@@ -45,7 +45,7 @@ export interface NewPost {
 
 /**
  * Writes a post, creating any topic it names for the first time and stamping each topic's `last_message_at`. The
- * topic-count trigger checks the 1–5 rule at commit, and the NOTIFY is delivered only on commit.
+ * topic-count trigger checks the count at commit, and the NOTIFY is delivered only on commit.
  */
 export async function createPost(prisma: PrismaClient, post: NewPost): Promise<ApiMessage> {
   const id = await prisma.$transaction(async (tx) => {
@@ -128,14 +128,20 @@ export async function queuedDelivery(db: Database, agentId: string, messageId: b
   return delivery?.state === "queued" ? await loadMessage(db, messageId) : undefined;
 }
 
-/** Marks a delivery delivered. `false` when the agent has no delivery for that message. Acking twice is harmless. */
-export async function ackDelivery(db: Database, agentId: string, messageId: bigint): Promise<boolean> {
-  const { count } = await db.delivery.updateMany({
-    where: { messageId, agentId, state: "queued" },
-    data: { state: "delivered", deliveredAt: new Date() }
+/**
+ * Marks a delivery delivered, and announces it so a UI thread showing the message updates. `false` when the agent
+ * has no delivery for that message. Acking twice is harmless and announces nothing the second time.
+ */
+export async function ackDelivery(prisma: PrismaClient, agentId: string, messageId: bigint): Promise<boolean> {
+  const acked = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.delivery.updateMany({
+      where: { messageId, agentId, state: "queued" },
+      data: { state: "delivered", deliveredAt: new Date() }
+    });
+    if (count > 0) {
+      await notify(tx, { type: "delivery", message_id: messageId.toString(), agent_id: agentId, state: "delivered" });
+    }
+    return count > 0;
   });
-  if (count > 0) {
-    return true;
-  }
-  return (await db.delivery.count({ where: { messageId, agentId } })) > 0;
+  return acked || (await prisma.delivery.count({ where: { messageId, agentId } })) > 0;
 }

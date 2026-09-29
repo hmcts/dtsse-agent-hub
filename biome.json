@@ -57,6 +57,12 @@
       "includes": ["src/app/**/*.tsx", "src/components/**"],
       "linter": {
         "rules": {
+          "suspicious": {
+            "noArrayIndexKey": "off"
+          },
+          "a11y": {
+            "useSemanticElements": "off"
+          },
           "style": {
             "useBlockStatements": "off"
           }

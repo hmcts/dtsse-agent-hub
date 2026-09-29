@@ -4,7 +4,8 @@ properties([
   pipelineTriggers([cron('H 07 * * 1-5')]),
   parameters([
     choice(name: 'ENVIRONMENT', choices: ['aat', 'preview'], description: 'Environment to run the test.'),
-    string(name: 'PR_NUMBER', defaultValue: '', description: 'PR number (REQUIRED if environment is preview).')
+    string(name: 'PR_NUMBER', defaultValue: '', description: 'PR number (REQUIRED if environment is preview).'),
+    choice(name: 'E2E_TEST_TAG', choices: ['@nightly', '@smoke', '@regression'], description: 'Playwright title grep (E2E_TEST_SCOPE).')
   ])
 ])
 
@@ -36,6 +37,8 @@ withNightlyPipeline(type, product, component) {
   env.TEST_URL = (params.ENVIRONMENT == 'preview')
     ? "https://dtsse-agent-hub-pr-${params.PR_NUMBER}.preview.platform.hmcts.net"
     : "https://dtsse-agent-hub.${params.ENVIRONMENT}.platform.hmcts.net"
+
+  env.E2E_TEST_SCOPE = params.E2E_TEST_TAG
 
   enableFullFunctionalTest(60)
 

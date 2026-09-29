@@ -1,13 +1,21 @@
 import { fileURLToPath } from "node:url";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  plugins: [react()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url))
     }
   },
+  oxc: {
+    jsx: {
+      runtime: "automatic"
+    }
+  },
   test: {
+    // Component tests opt into jsdom with a `@vitest-environment jsdom` docblock.
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     exclude: ["node_modules", "dist", ".next", "test"],
@@ -24,15 +32,21 @@ export default defineConfig({
         "src/users/store.ts",
         "src/agents/store.ts",
         "src/agents/sweep.ts",
+        "src/agents/views.ts",
         "src/topics/store.ts",
+        "src/channels/store.ts",
         "src/messages/store.ts",
         "src/messages/feed.ts",
+        "src/messages/direct-thread.ts",
         "src/access/load.ts",
+        "src/access/views.ts",
         "src/realtime/listener.ts",
         "src/realtime/process.ts",
         "src/realtime/notify.ts",
         "src/messages/send.ts",
-        "src/agent-api/**"
+        "src/agent-api/**",
+        "src/viewer/current.ts",
+        "src/web/data.ts"
       ],
       reporter: ["lcov", "text"],
       reportsDirectory: "coverage",

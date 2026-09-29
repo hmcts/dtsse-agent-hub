@@ -20,7 +20,7 @@ FROM dependencies AS build
 
 WORKDIR /app
 
-COPY --chown=hmcts:hmcts tsconfig.json tsconfig.cli.json next.config.mjs biome.json prisma.config.ts ./
+COPY --chown=hmcts:hmcts tsconfig.json tsconfig.cli.json next.config.mjs biome.json prisma.config.ts tailwind.config.ts postcss.config.mjs ./
 COPY --chown=hmcts:hmcts src ./src
 COPY --chown=hmcts:hmcts prisma ./prisma
 
