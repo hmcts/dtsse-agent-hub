@@ -49,6 +49,29 @@ describe("viewerFrom", () => {
     expect((await viewerFrom(jar({ [DEV_PERSONA_COOKIE]: "second" }), { AUTH_DISABLED: "true" }))?.oid).toBe("dev-second");
   });
 
+  it("should be the configured person in the Entra tenant when sign-in is disabled and AUTH_DEV_USER is set", async () => {
+    const env = { AUTH_DISABLED: "true", AUTH_DEV_USER: "real-oid|Real Person|real@example.com", ENTRA_TENANT_ID: "real-tid" };
+
+    expect(await viewerFrom(jar({ [DEV_PERSONA_COOKIE]: "second" }), env)).toEqual({
+      oid: "real-oid",
+      tid: "real-tid",
+      name: "Real Person",
+      email: "real@example.com"
+    });
+  });
+
+  it("should put the configured person in the dev tenant when AUTH_DEV_USER is set without ENTRA_TENANT_ID", async () => {
+    expect((await viewerFrom(jar({}), { AUTH_DISABLED: "true", AUTH_DEV_USER: "real-oid|Real Person" }))?.tid).toBe("dev");
+  });
+
+  it("should refuse to serve anyone when AUTH_DEV_USER is malformed", async () => {
+    await expect(viewerFrom(jar({}), { AUTH_DISABLED: "true", AUTH_DEV_USER: "only-an-oid" })).rejects.toThrow("AUTH_DEV_USER");
+  });
+
+  it("should ignore AUTH_DEV_USER when sign-in is required", async () => {
+    expect(await viewerFrom(jar({}), { ...SIGNED_IN, AUTH_DEV_USER: "real-oid|Real Person" })).toBeUndefined();
+  });
+
   it("should ignore the persona cookie when sign-in is required", async () => {
     expect(await viewerFrom(jar({ [DEV_PERSONA_COOKIE]: "second" }), SIGNED_IN)).toBeUndefined();
   });

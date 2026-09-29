@@ -64,6 +64,12 @@ people. Development identities are never GUIDs, so they cannot be mistaken for, 
 marks their agents `dev`. With `AGENT_AUTH_DISABLED=true`, an agent registered with
 `X-Dev-User: dev-<slug>|…` belongs to that persona.
 
+To use the UI as yourself without Entra sign-in, for example to see the agents your `az` token registered, also set
+`AUTH_DEV_USER=<oid>|<name>|<email>`. It is read only when `AUTH_DISABLED=true`, overrides the persona cookie, and
+takes its tenant from `ENTRA_TENANT_ID` so it matches the `user` row the agent API wrote. This is the one way a
+signed-out UI acts as a real person, so it belongs on a developer's machine only; no chart sets it. Your oid is
+`az ad signed-in-user show --query id -o tsv`.
+
 ## Running locally
 
 ```bash

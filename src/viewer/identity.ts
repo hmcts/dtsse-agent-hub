@@ -1,6 +1,6 @@
-import { DEV_TENANT } from "../agent-auth/dev.ts";
+import { DEV_TENANT, parseDevUser } from "../agent-auth/dev.ts";
 import { readSession, SESSION_COOKIE } from "../auth/session.ts";
-import { authRequired, type Environment, sessionSecret } from "../auth/settings.ts";
+import { AuthConfigurationError, authRequired, type Environment, sessionSecret } from "../auth/settings.ts";
 import type { Identity } from "../users/identity.ts";
 
 /**
@@ -43,10 +43,27 @@ export function isDevIdentity(identity: { tid: string }): boolean {
 
 export type CookieReader = (name: string) => string | undefined;
 
+/**
+ * `AUTH_DEV_USER=<oid>|<name>|<email>`, read only while sign-in is off: act as a real person without Entra, so the UI
+ * shows the agents their `az` token registered. The tenant is `ENTRA_TENANT_ID` when set, so it matches the `user`
+ * row that registration wrote.
+ */
+export function configuredDevUser(env: Environment = process.env): Identity | undefined {
+  const value = env.AUTH_DEV_USER;
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  const identity = parseDevUser(value);
+  if (identity === undefined) {
+    throw new AuthConfigurationError("AUTH_DEV_USER must be <oid>|<name>|<email>, and the oid and name are required");
+  }
+  return { ...identity, tid: env.ENTRA_TENANT_ID || DEV_TENANT };
+}
+
 /** The viewer, or `undefined` when nobody may be served: no session, a session that does not open, no secret. */
 export async function viewerFrom(cookie: CookieReader, env: Environment = process.env): Promise<Identity | undefined> {
   if (!authRequired(env)) {
-    return devIdentity(cookie(DEV_PERSONA_COOKIE));
+    return configuredDevUser(env) ?? devIdentity(cookie(DEV_PERSONA_COOKIE));
   }
   const secret = sessionSecret(env);
   if (secret === undefined) {
