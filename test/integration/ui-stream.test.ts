@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { revokeGrant, setGrant } from "../../src/access/load.ts";
 import { heartbeat } from "../../src/agents/store.ts";
 import { GET as feed } from "../../src/app/api/ui/feed/route.ts";
 import { GET as session } from "../../src/app/api/ui/session/route.ts";
@@ -78,12 +79,13 @@ describe("/api/ui/stream", () => {
     });
     await heartbeat(prisma, alicesAgent, "busy", null);
     const direct = await createDirect(prisma, { author: { oid: ALICE.oid, agentId: null }, targetAgentId: alicesAgent, inReplyTo: null, body: "from the UI" });
+    // The stream loads the message when its NOTIFY arrives, so the ack waits for that; an earlier ack would be read.
+    expect(JSON.parse((await bob.named("direct", 1))[0]!.data!).message).toMatchObject({ id: direct.id, body: "from the UI", delivery: "queued" });
     await ackDelivery(prisma, alicesAgent, BigInt(direct.id));
 
     const bodies = (received: { data?: string }[]) => received.map((frame) => JSON.parse(frame.data!).message.body);
     expect(bodies(await bob.named("post", 2))).toEqual(["one topic", "both topics"]);
     expect((await bob.named("agent_status", 1)).map((frame) => JSON.parse(frame.data!))).toEqual([{ agent_id: alicesAgent, status: "busy" }]);
-    expect(JSON.parse((await bob.named("direct", 1))[0]!.data!).message).toMatchObject({ id: direct.id, body: "from the UI", delivery: "queued" });
     expect(JSON.parse((await bob.named("delivery", 1))[0]!.data!)).toEqual({ message_id: direct.id, state: "delivered" });
 
     expect(bodies(await carol.named("post", 1))).toEqual(["both topics"]);
@@ -100,6 +102,31 @@ describe("/api/ui/stream", () => {
     await bob.drain(500);
 
     expect(bob.received.filter((frame) => frame.event !== undefined)).toEqual([]);
+  });
+
+  it("should resync and stop sending an agent's thread and status when a grant already read is revoked", async () => {
+    const bob = await watch("bob", `agent=${alicesAgent}`);
+    await heartbeat(prisma, alicesAgent, "busy", null);
+    await bob.named("agent_status", 1);
+
+    await revokeGrant(prisma, ALICE.oid, BOB.oid);
+    await heartbeat(prisma, alicesAgent, "idle", null);
+    await createDirect(prisma, { author: { oid: ALICE.oid, agentId: null }, targetAgentId: alicesAgent, inReplyTo: null, body: "secret" });
+    await bob.drain(500);
+
+    expect(bob.received.filter((frame) => frame.event !== undefined).map((frame) => frame.event)).toEqual(["agent_status", "resync"]);
+  });
+
+  it("should resync and start sending an agent's status when the viewer is granted access", async () => {
+    const carol = await watch("carol", "");
+    await heartbeat(prisma, alicesAgent, "busy", null);
+    await carol.drain(300);
+
+    await setGrant(prisma, ALICE.oid, CAROL.oid, "read");
+    await heartbeat(prisma, alicesAgent, "idle", null);
+    await carol.named("agent_status", 1);
+
+    expect(carol.received.filter((frame) => frame.event !== undefined).map((frame) => frame.event)).toEqual(["resync", "agent_status"]);
   });
 
   it("should refuse to watch an agent the viewer cannot see, as missing", async () => {

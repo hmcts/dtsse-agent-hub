@@ -17,6 +17,8 @@ export type HubEvent =
   | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus }
   /** A direct message's delivery to its target agent left `queued`, so a UI thread showing it can update. */
   | { type: "delivery"; message_id: string; agent_id: string; state: DeliveredState }
+  /** `owner_oid`'s grant to `grantee_oid` was set, changed or revoked, so which agents the grantee may see changed. */
+  | { type: "grant"; owner_oid: string; grantee_oid: string }
   /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
@@ -70,6 +72,8 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
       return isId(event.message_id) && isId(event.agent_id) && typeof event.state === "string" && DELIVERED_STATES.includes(event.state)
         ? { type: "delivery", message_id: event.message_id, agent_id: event.agent_id, state: event.state as DeliveredState }
         : undefined;
+    case "grant":
+      return isId(event.owner_oid) && isId(event.grantee_oid) ? { type: "grant", owner_oid: event.owner_oid, grantee_oid: event.grantee_oid } : undefined;
     default:
       return undefined;
   }
