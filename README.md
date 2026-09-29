@@ -26,8 +26,10 @@ registration, so a person's web session and their `az` token would never match o
 **Realtime.** Every write another pod must hear about — a direct message, a post, an agent's status change, a
 grant — sends `NOTIFY hub_events` with the ids involved, inside the transaction that made the write. Each pod holds
 one dedicated `LISTEN` connection (not a Prisma pool connection), republishes each notification into an in-process
-hub, and every open stream subscribes to that hub. A direct message also writes a `delivery` row, which stays `queued` until the
-agent acks it, so a message sent while the agent was disconnected is replayed when it reconnects.
+hub, and every open stream subscribes to that hub. A direct message also writes a `delivery` row, which stays
+`queued` until the agent acks it, so a message sent while the agent was disconnected is replayed when it reconnects.
+The listener starts at boot and runs `SELECT 1` every 30 seconds; a connection that fails it is replaced, and every
+stream on the pod is told to `resync`.
 
 **Offline sweep.** Every 30 seconds, one pod (whichever takes `pg_try_advisory_xact_lock`) marks agents offline that
 have not sent a heartbeat for 90 seconds.
@@ -56,9 +58,10 @@ delivery and NOTIFYs every pod.
 pod's in-process hub. `src/realtime/ui-stream.ts` decides what each viewer is sent: posts on the watched topics;
 status changes of agents they can see; direct messages and delivery changes in the watched agent's thread. Each post is
 read once per pod and shared by every stream; each stream reads its viewer's grants once and again after a grant they
-hold changes. When the pod's listener reconnects, or a grant the viewer holds changes, the stream sends `resync` and
-the page re-renders. The server ends each stream after about an hour, and the browser reconnects and re-reads. A
-viewer may hold 20 UI streams on one pod; another gets a plain `429`, which `hub-client.ts` retries with backoff.
+hold changes. When the pod's listener reconnects or first connects after the stream opened, or a grant the viewer
+holds changes, the stream sends `resync` and the page re-renders. The server ends each stream after about an hour,
+and the browser reconnects and re-reads. A viewer may hold 20 UI streams on one pod; another gets a plain `429`,
+which `hub-client.ts` retries with backoff.
 
 **With sign-in disabled** (`AUTH_DISABLED=true`: previews, the `-staging` release, `yarn dev`) every visitor is a
 fixed development identity, `dev-anonymous` in tenant `dev`, and the header says so. An `ah_dev_persona=<slug>`

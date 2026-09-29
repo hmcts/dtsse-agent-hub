@@ -4,6 +4,8 @@ import { type OnOpen, sseEvent } from "./sse.ts";
 
 export interface AgentStreamSources {
   hub: EventHub;
+  /** Resolves once the pod's `LISTEN` is active, so every NOTIFY committed after it reaches the hub. */
+  ready: () => Promise<void>;
   /** Every delivery still queued for the agent, oldest first. */
   queued: () => Promise<ApiMessage[]>;
   /** The message, if its delivery to the agent is still queued. */
@@ -18,12 +20,16 @@ export function directFrame(message: ApiMessage): string {
  * What `GET /api/agent/{agent_id}/stream` sends: every queued delivery on connect, then each new direct message to
  * the agent as its NOTIFY arrives.
  *
- * The hub is subscribed to BEFORE the replay is read, so a message committed between the two is not missed; one
- * that is both replayed and notified is sent once. Work is chained so frames leave in the order they were decided.
- * A `resync` from a reconnected listener replays again, since NOTIFYs sent while it was down are gone.
+ * The order on open is subscribe to the hub, wait for `LISTEN` to be active, then read the replay. A message
+ * committed before the replay's read is in the replay; one committed after it is notified, because `LISTEN` was
+ * already active. One that is both is sent once per connection, keyed by message id. Work is chained so frames
+ * leave in the order they were decided.
+ *
+ * A `resync` from a reconnected listener replays again, since NOTIFYs sent while it was down are gone. A failed read
+ * ends the stream: the message is still queued, and the client's reconnect replays it.
  */
 export function agentStream(agentId: string, sources: AgentStreamSources): OnOpen {
-  return (send) => {
+  return (send, fail) => {
     const sent = new Set<string>();
     let chain: Promise<void> = Promise.resolve();
     let open = true;
@@ -36,9 +42,16 @@ export function agentStream(agentId: string, sources: AgentStreamSources): OnOpe
     }
 
     function enqueue(work: () => Promise<void>): void {
-      chain = chain.then(work).catch((error: unknown) => {
-        console.warn(`an agent stream could not read its deliveries: ${error instanceof Error ? error.message : String(error)}`);
-      });
+      chain = chain
+        .then(async () => {
+          if (open) {
+            await work();
+          }
+        })
+        .catch((error: unknown) => {
+          open = false;
+          fail(new Error(`an agent stream could not read its deliveries: ${error instanceof Error ? error.message : String(error)}`));
+        });
     }
 
     const replay = async () => {
@@ -63,7 +76,10 @@ export function agentStream(agentId: string, sources: AgentStreamSources): OnOpe
       }
     });
 
-    enqueue(replay);
+    enqueue(async () => {
+      await sources.ready();
+      await replay();
+    });
 
     return () => {
       open = false;

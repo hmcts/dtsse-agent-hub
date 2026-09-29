@@ -27,6 +27,12 @@ function direct(id: string, target: string | null = AGENT) {
   return { type: "direct" as const, message_id: id, target_agent_id: target, author_agent_id: null };
 }
 
+const ready = async () => undefined;
+
+function noFail(error: unknown): void {
+  throw new Error(`the stream failed: ${String(error)}`);
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -42,7 +48,7 @@ describe("agentStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const queuedOne = vi.fn(async (id: bigint) => message(id.toString()));
-    agentStream(AGENT, { hub, queued: async () => [message("1"), message("2")], queuedOne })((frame) => frames.push(frame));
+    agentStream(AGENT, { hub, ready, queued: async () => [message("1"), message("2")], queuedOne })((frame) => frames.push(frame), noFail);
     await settle();
 
     hub.publish(direct("3"));
@@ -56,7 +62,7 @@ describe("agentStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const queuedOne = vi.fn(async (id: bigint) => message(id.toString()));
-    agentStream(AGENT, { hub, queued: async () => [], queuedOne })((frame) => frames.push(frame));
+    agentStream(AGENT, { hub, ready, queued: async () => [], queuedOne })((frame) => frames.push(frame), noFail);
     await settle();
 
     hub.publish(direct("4", "agent-other"));
@@ -72,7 +78,10 @@ describe("agentStream", () => {
   it("should send a message once when it is both replayed and notified", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    agentStream(AGENT, { hub, queued: async () => [message("8")], queuedOne: async (id) => message(id.toString()) })((frame) => frames.push(frame));
+    agentStream(AGENT, { hub, ready, queued: async () => [message("8")], queuedOne: async (id) => message(id.toString()) })(
+      (frame) => frames.push(frame),
+      noFail
+    );
     hub.publish(direct("8"));
     await settle();
 
@@ -82,7 +91,7 @@ describe("agentStream", () => {
   it("should not send a notified message that was acked before it could be read", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    agentStream(AGENT, { hub, queued: async () => [], queuedOne: async () => undefined })((frame) => frames.push(frame));
+    agentStream(AGENT, { hub, ready, queued: async () => [], queuedOne: async () => undefined })((frame) => frames.push(frame), noFail);
     hub.publish(direct("9"));
     await settle();
 
@@ -93,7 +102,7 @@ describe("agentStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const queue = [message("10")];
-    agentStream(AGENT, { hub, queued: async () => [...queue], queuedOne: async () => undefined })((frame) => frames.push(frame));
+    agentStream(AGENT, { hub, ready, queued: async () => [...queue], queuedOne: async () => undefined })((frame) => frames.push(frame), noFail);
     await settle();
 
     queue.push(message("11"));
@@ -106,7 +115,10 @@ describe("agentStream", () => {
   it("should stop listening and sending once closed", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    const close = await agentStream(AGENT, { hub, queued: async () => [], queuedOne: async (id) => message(id.toString()) })((frame) => frames.push(frame));
+    const close = await agentStream(AGENT, { hub, ready, queued: async () => [], queuedOne: async (id) => message(id.toString()) })(
+      (frame) => frames.push(frame),
+      noFail
+    );
 
     close();
     hub.publish(direct("12"));
@@ -116,23 +128,44 @@ describe("agentStream", () => {
     expect(hub.size()).toBe(0);
   });
 
-  it("should keep the stream open and log when a read fails", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it("should subscribe before waiting for LISTEN, and read the replay only once it is active", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
+    let listening: () => void = () => undefined;
+    const queued = vi.fn(async () => [message("13")]);
     agentStream(AGENT, {
       hub,
-      queued: async () => {
-        throw new Error("connection reset");
-      },
+      ready: () => new Promise((resolve) => (listening = resolve)),
+      queued,
       queuedOne: async (id) => message(id.toString())
-    })((frame) => frames.push(frame));
+    })((frame) => frames.push(frame), noFail);
     await settle();
 
+    expect(hub.size()).toBe(1);
+    expect(queued).not.toHaveBeenCalled();
+    listening();
     hub.publish(direct("13"));
+    hub.publish(direct("14"));
     await settle();
 
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("connection reset"));
-    expect(frames).toEqual([directFrame(message("13"))]);
+    expect(frames).toEqual([directFrame(message("13")), directFrame(message("14"))]);
+  });
+
+  it.each([
+    ["the replay", { queued: () => Promise.reject(new Error("connection reset")), queuedOne: async (id: bigint) => message(id.toString()) }],
+    ["a notified message", { queued: async () => [], queuedOne: () => Promise.reject(new Error("connection reset")) }]
+  ])("should end the stream, and send nothing more, when reading %s fails", async (_label, reads) => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    const fail = vi.fn();
+    agentStream(AGENT, { hub, ready, ...reads })((frame) => frames.push(frame), fail);
+    hub.publish(direct("15"));
+    await settle();
+    hub.publish(direct("16"));
+    await settle();
+
+    expect(fail).toHaveBeenCalledOnce();
+    expect(fail).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("connection reset") }));
+    expect(frames).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import pg from "pg";
 import { decodeEvent, HUB_CHANNEL } from "./events.ts";
+import { startHealthChecks } from "./health.ts";
 import type { EventHub } from "./hub.ts";
 
 /**
@@ -15,6 +16,8 @@ export interface ListenerOptions {
   channel?: string;
   minBackoffMs?: number;
   maxBackoffMs?: number;
+  healthIntervalMs?: number;
+  healthTimeoutMs?: number;
 }
 
 export interface Listener {
@@ -27,18 +30,34 @@ export interface Listener {
 const MIN_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 30_000;
 
+/**
+ * Without it keepalive waits for the OS default, about two hours, before probing a silent socket, so a dropped
+ * connection that only listens goes unnoticed that long. The health query in `health.ts` catches what keepalive
+ * misses.
+ */
+export const KEEPALIVE_INITIAL_DELAY_MS = 30_000;
+
 /** Exponential with full jitter, so every pod does not reconnect at the same instant after a failover. */
 export function backoffDelay(attempt: number, minMs: number = MIN_BACKOFF_MS, maxMs: number = MAX_BACKOFF_MS, random: () => number = Math.random): number {
   const ceiling = Math.min(maxMs, minMs * 2 ** attempt);
   return Math.max(minMs, Math.floor(random() * ceiling));
 }
 
-export function startListener({ connectionString, hub, channel = HUB_CHANNEL, minBackoffMs, maxBackoffMs }: ListenerOptions): Listener {
+export function startListener({
+  connectionString,
+  hub,
+  channel = HUB_CHANNEL,
+  minBackoffMs,
+  maxBackoffMs,
+  healthIntervalMs,
+  healthTimeoutMs
+}: ListenerOptions): Listener {
   let stopped = false;
   let client: pg.Client | undefined;
   let attempt = 0;
   let everConnected = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
+  let stopHealthChecks: () => void = () => undefined;
   let resolveReady: () => void = () => undefined;
   const ready = new Promise<void>((resolve) => {
     resolveReady = resolve;
@@ -62,6 +81,7 @@ export function startListener({ connectionString, hub, channel = HUB_CHANNEL, mi
       return;
     }
     client = undefined;
+    stopHealthChecks();
     current.removeAllListeners();
     // A client that errored may still emit; an unhandled `error` event would crash the process.
     current.on("error", () => undefined);
@@ -76,7 +96,12 @@ export function startListener({ connectionString, hub, channel = HUB_CHANNEL, mi
     if (stopped) {
       return;
     }
-    const current = new pg.Client({ connectionString, keepAlive: true, application_name: "dtsse-agent-hub-listener" });
+    const current = new pg.Client({
+      connectionString,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: KEEPALIVE_INITIAL_DELAY_MS,
+      application_name: "dtsse-agent-hub-listener"
+    });
     client = current;
     current.on("error", (error) => drop(current, error.message));
     current.on("end", () => drop(current, "connection ended"));
@@ -105,6 +130,12 @@ export function startListener({ connectionString, hub, channel = HUB_CHANNEL, mi
     }
 
     attempt = 0;
+    stopHealthChecks = startHealthChecks({
+      client: current,
+      onFailure: (reason) => drop(current, reason),
+      intervalMs: healthIntervalMs,
+      timeoutMs: healthTimeoutMs
+    });
     if (everConnected) {
       hub.publish({ type: "resync" });
     }
@@ -123,6 +154,7 @@ export function startListener({ connectionString, hub, channel = HUB_CHANNEL, mi
         clearTimeout(retry);
         retry = undefined;
       }
+      stopHealthChecks();
       const current = client;
       client = undefined;
       if (current !== undefined) {

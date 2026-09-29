@@ -41,6 +41,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     agent = { id: found.id, ownerOid: found.ownerOid };
   }
 
+  const { hub, listener } = realtime();
   const release = streamLimits().ui.take(viewer.oid);
   if (release === undefined) {
     return new Response("too many open streams", { status: 429 });
@@ -51,7 +52,8 @@ export async function GET(request: NextRequest): Promise<Response> {
     onOpen: uiStream(
       { topics, match: parseMatch(query.get("mode")), agent },
       {
-        hub: realtime().hub,
+        hub,
+        listener,
         viewerOid: viewer.oid,
         grants: () => grantsHeldBy(prisma, viewer.oid),
         post: sharedPostLoader(prisma),
