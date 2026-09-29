@@ -1,4 +1,5 @@
-import type { Database, Prisma } from "../store/prisma.ts";
+import { notify } from "../realtime/notify.ts";
+import type { Database, Prisma, PrismaClient } from "../store/prisma.ts";
 import { canGrant, type Grant, type GrantLevel, type MessageRef } from "./rules.ts";
 
 /** The loaders the rules in `rules.ts` are applied over, and the two writes those rules gate. */
@@ -44,18 +45,27 @@ export async function loadMessageRef(db: Database, id: bigint): Promise<LoadedMe
   return { ...ref, parentAuthorOid: parent?.authorOid ?? null };
 }
 
-export async function setGrant(db: Database, actorOid: string, granteeOid: string, level: GrantLevel): Promise<void> {
-  const known = (await db.user.count({ where: { oid: granteeOid } })) > 0;
+/** Sets `actorOid`'s grant to `granteeOid`, and tells the grantee's open streams on commit. */
+export async function setGrant(prisma: PrismaClient, actorOid: string, granteeOid: string, level: GrantLevel): Promise<void> {
+  const known = (await prisma.user.count({ where: { oid: granteeOid } })) > 0;
   if (!canGrant(actorOid, actorOid, granteeOid, known)) {
     throw new AccessDenied(known ? "you cannot grant yourself access" : "that person has not used the hub yet, so cannot be granted access");
   }
-  await db.agentGrant.upsert({
-    where: { ownerOid_granteeOid: { ownerOid: actorOid, granteeOid } },
-    create: { ownerOid: actorOid, granteeOid, level },
-    update: { level }
+  await prisma.$transaction(async (tx) => {
+    await tx.agentGrant.upsert({
+      where: { ownerOid_granteeOid: { ownerOid: actorOid, granteeOid } },
+      create: { ownerOid: actorOid, granteeOid, level },
+      update: { level }
+    });
+    await notify(tx, { type: "grant", owner_oid: actorOid, grantee_oid: granteeOid });
   });
 }
 
-export async function revokeGrant(db: Database, actorOid: string, granteeOid: string): Promise<void> {
-  await db.agentGrant.deleteMany({ where: { ownerOid: actorOid, granteeOid } });
+export async function revokeGrant(prisma: PrismaClient, actorOid: string, granteeOid: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.agentGrant.deleteMany({ where: { ownerOid: actorOid, granteeOid } });
+    if (count > 0) {
+      await notify(tx, { type: "grant", owner_oid: actorOid, grantee_oid: granteeOid });
+    }
+  });
 }

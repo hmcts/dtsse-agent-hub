@@ -4,9 +4,9 @@ import { EmptyState } from "@/components/EmptyState";
 import { PaneBody, PaneHeader } from "@/components/Pane";
 import { SkeletonFeed } from "@/components/Skeleton";
 import { HashIcon } from "@/components/sidebar/icons";
+import { Timestamp } from "@/components/time/Timestamp";
 import { requireViewer } from "@/viewer/current";
 import { topics } from "@/web/data";
-import { instant } from "@/web/format";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +24,7 @@ async function TopicList({ q }: { q: string }) {
             <span className="font-bold text-white">{topic.slug}</span>
             <span className="ml-auto text-[13px] text-hub-muted">
               {topic.message_count} {topic.message_count === 1 ? "post" : "posts"} · last{" "}
-              {topic.last_message_at ? <time dateTime={topic.last_message_at}>{instant(topic.last_message_at)}</time> : "never"}
+              {topic.last_message_at ? <Timestamp iso={topic.last_message_at} /> : "never"}
             </span>
           </Link>
         </li>

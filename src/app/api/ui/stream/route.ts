@@ -5,11 +5,10 @@ import { errorResponse } from "@/agent-api/http";
 import { findAgent, isUuid } from "@/agents/store";
 import { parseMatch, viewTopics } from "@/channels/rules";
 import { loadThreadMessage } from "@/messages/direct-thread";
-import { loadMessage } from "@/messages/store";
 import { realtime } from "@/realtime/process";
 import { openSseStream, SSE_HEADERS } from "@/realtime/sse";
 import { streamLimits } from "@/realtime/stream-slots";
-import { uiStream } from "@/realtime/ui-stream";
+import { sharedPostLoader, uiStream } from "@/realtime/ui-stream";
 import { prisma } from "@/store/prisma";
 import { uiViewer } from "../request";
 
@@ -57,7 +56,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         listener,
         viewerOid: viewer.oid,
         grants: () => grantsHeldBy(prisma, viewer.oid),
-        post: (id) => loadMessage(prisma, id),
+        post: sharedPostLoader(prisma),
         direct: (id) => loadThreadMessage(prisma, id)
       }
     )

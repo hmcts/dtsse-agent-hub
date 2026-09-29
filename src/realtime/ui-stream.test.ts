@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Grant, MessageRef } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
 import type { ApiMessage } from "../messages/shape.ts";
 import type { HubEvent } from "./events.ts";
 import { createEventHub } from "./hub.ts";
-import { matchesTopics, selectFrame, type UiStreamSources, type UiWatch, uiStream } from "./ui-stream.ts";
+import { sharedLoads } from "./shared-load.ts";
+import { cachedGrants, matchesTopics, selectFrame, sharedPostLoader, type UiStreamSources, type UiWatch, uiStream } from "./ui-stream.ts";
 
 const VIEWER = "oid-viewer";
 const OWNER = "oid-owner";
@@ -179,12 +180,160 @@ describe("selectFrame", () => {
   it("should tell the page to re-read when the listener resyncs", async () => {
     expect(await selectFrame({ type: "resync" }, TOPICS, sources([]))).toBe("event: resync\ndata: {}\n\n");
   });
+
+  it("should tell the page to re-read when a grant the viewer holds changes", async () => {
+    expect(await selectFrame({ type: "grant", owner_oid: OWNER, grantee_oid: VIEWER }, TOPICS, sources([]))).toBe("event: resync\ndata: {}\n\n");
+  });
+
+  it("should send nothing when a grant to someone else changes", async () => {
+    expect(await selectFrame({ type: "grant", owner_oid: VIEWER, grantee_oid: STRANGER }, TOPICS, sources([]))).toBeUndefined();
+  });
+});
+
+describe("cachedGrants", () => {
+  it("should read once when asked repeatedly", async () => {
+    const load = vi.fn(async () => READ);
+    const grants = cachedGrants(load);
+
+    await grants.get();
+    await grants.get();
+
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("should read again when it has been invalidated", async () => {
+    const load = vi.fn<() => Promise<Grant[]>>().mockResolvedValueOnce(READ).mockResolvedValueOnce([]);
+    const grants = cachedGrants(load);
+
+    expect(await grants.get()).toEqual(READ);
+    grants.invalidate();
+
+    expect(await grants.get()).toEqual([]);
+  });
+
+  it("should read again when the last read failed", async () => {
+    const load = vi.fn<() => Promise<Grant[]>>().mockRejectedValueOnce(new Error("database gone")).mockResolvedValueOnce(READ);
+    const grants = cachedGrants(load);
+
+    await expect(grants.get()).rejects.toThrow("database gone");
+
+    expect(await grants.get()).toEqual(READ);
+  });
+
+  it("should keep the newer read when a read from before an invalidation fails", async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const stale = new Promise<Grant[]>((_resolve, reject) => {
+      fail = reject;
+    });
+    const load = vi.fn<() => Promise<Grant[]>>().mockReturnValueOnce(stale).mockResolvedValueOnce(READ);
+    const grants = cachedGrants(load);
+
+    const first = grants.get();
+    grants.invalidate();
+    await grants.get();
+    fail(new Error("database gone"));
+    await expect(first).rejects.toThrow("database gone");
+
+    expect(await grants.get()).toEqual(READ);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("sharedPostLoader", () => {
+  beforeEach(() => {
+    delete (globalThis as { agentHubUiPosts?: unknown }).agentHubUiPosts;
+  });
+
+  it("should hand every stream in the pod the same loader when called again", () => {
+    const db = { message: { findMany: async () => [] } } as unknown as Parameters<typeof sharedPostLoader>[0];
+
+    expect(sharedPostLoader(db)).toBe(sharedPostLoader(db));
+  });
+
+  it("should read a post it has not loaded when asked for it", async () => {
+    const findMany = vi.fn(async () => []);
+    const db = { message: { findMany } } as unknown as Parameters<typeof sharedPostLoader>[0];
+
+    expect(await sharedPostLoader(db)(41n)).toBeUndefined();
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: [41n] } } }));
+  });
 });
 
 describe("uiStream", () => {
   async function settle(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
+
+  it("should load a post once for every open stream when a post event arrives", async () => {
+    const hub = createEventHub();
+    const load = vi.fn(async (id: bigint) => (id === 1n ? post("1", ["pcs-api"]) : undefined));
+    const shared = sharedLoads(load, { ttlMs: 10_000 });
+    const tabs = Array.from({ length: 5 }, () => {
+      const frames: string[] = [];
+      const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), post: shared })((frame) => frames.push(frame), vi.fn()) as () => void;
+      return { frames, close };
+    });
+
+    hub.publish({ type: "post", message_id: "1" });
+    await settle();
+    await settle();
+
+    expect(load).toHaveBeenCalledTimes(1);
+    for (const tab of tabs) {
+      expect(tab.frames.map((frame) => frame.split("\n")[0])).toEqual(["id: 1"]);
+      tab.close();
+    }
+  });
+
+  it("should read the viewer's grants once when status events keep arriving", async () => {
+    const hub = createEventHub();
+    const grants = vi.fn(async () => READ);
+    const frames: string[] = [];
+    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), grants })((frame) => frames.push(frame), vi.fn()) as () => void;
+
+    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "busy" });
+    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "idle" });
+    await settle();
+    await settle();
+
+    expect(grants).toHaveBeenCalledTimes(1);
+    expect(frames).toHaveLength(2);
+    close();
+  });
+
+  it("should re-read the viewer's grants and resync when a grant they hold is revoked", async () => {
+    const hub = createEventHub();
+    const grants = vi.fn<() => Promise<Grant[]>>().mockResolvedValueOnce(READ).mockResolvedValueOnce([]);
+    const frames: string[] = [];
+    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), grants })((frame) => frames.push(frame), vi.fn()) as () => void;
+
+    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "busy" });
+    hub.publish({ type: "grant", owner_oid: OWNER, grantee_oid: VIEWER });
+    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "idle" });
+    await settle();
+    await settle();
+
+    expect(grants).toHaveBeenCalledTimes(2);
+    expect(frames.map((frame) => frame.split("\n")[0])).toEqual(["event: agent_status", "event: resync"]);
+    close();
+  });
+
+  it("should keep the cached grants when a grant to someone else changes", async () => {
+    const hub = createEventHub();
+    const grants = vi.fn(async () => READ);
+    const frames: string[] = [];
+    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), grants })((frame) => frames.push(frame), vi.fn()) as () => void;
+
+    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "busy" });
+    hub.publish({ type: "grant", owner_oid: OWNER, grantee_oid: STRANGER });
+    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "idle" });
+    await settle();
+    await settle();
+
+    expect(grants).toHaveBeenCalledTimes(1);
+    expect(frames).toHaveLength(2);
+    close();
+  });
 
   it("should send the frames it selects in the order the hub published them when events arrive together", async () => {
     const hub = createEventHub();
