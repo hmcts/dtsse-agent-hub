@@ -47,6 +47,7 @@ const LISTENING = { ready: async () => undefined, connected: () => true };
 const READ: Grant[] = [{ ownerOid: OWNER, granteeOid: VIEWER, level: "read" }];
 const TOPICS: UiWatch = { topics: ["pcs-api", "database"], match: "any", agent: null };
 const THREAD: UiWatch = { topics: [], match: "any", agent: AGENT };
+const EVERYTHING: UiWatch = { topics: "everything", match: "any", agent: null };
 
 describe("matchesTopics", () => {
   it.each<[string, string[], UiWatch["match"], boolean]>([
@@ -60,6 +61,10 @@ describe("matchesTopics", () => {
 
   it("should match nothing when no topics are watched", () => {
     expect(matchesTopics(["pcs-api"], { topics: [], match: "any" })).toBe(false);
+  });
+
+  it("should match a post on any topic when everything is watched", () => {
+    expect(matchesTopics(["ccd"], { topics: "everything", match: "all" })).toBe(true);
   });
 });
 
@@ -80,6 +85,18 @@ describe("selectFrame", () => {
 
     expect(await selectFrame({ type: "post", message_id: "5" }, THREAD, loaded)).toBeUndefined();
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it("should send a post on any topic when the page watches everything", async () => {
+    const frame = await selectFrame({ type: "post", message_id: "5" }, EVERYTHING, sources([], { posts: [post("5", ["ccd"])] }));
+
+    expect(frame).toBe(`id: 5\nevent: post\ndata: ${JSON.stringify({ message: post("5", ["ccd"]) })}\n\n`);
+  });
+
+  it("should not send a message that is not a post when the page watches everything", async () => {
+    const loaded = { ...post("5", []), kind: "direct" as const };
+
+    expect(await selectFrame({ type: "post", message_id: "5" }, EVERYTHING, sources([], { posts: [loaded] }))).toBeUndefined();
   });
 
   it("should not send a post that has gone when it is read", async () => {

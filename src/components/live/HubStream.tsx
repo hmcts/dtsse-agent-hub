@@ -67,16 +67,15 @@ export function HubStreamProvider({ children }: { children: React.ReactNode }) {
   return <HubContext.Provider value={value}>{children}</HubContext.Provider>;
 }
 
-/** Asks the tab's stream for these topics and this agent while the calling component is mounted. */
-export function useWatch(topics: readonly string[], match: StreamWatch["match"], agent: string | null = null): void {
+/** Asks the tab's stream for these topics, or every post, and this agent while the calling component is mounted. */
+export function useWatch(topics: StreamWatch["topics"], match: StreamWatch["match"], agent: string | null = null): void {
   const context = useContext(HubContext);
-  const key = `${topics.join(",")}|${match}|${agent ?? ""}`;
+  const key = JSON.stringify({ topics, match, agent });
   useEffect(() => {
     if (context === null) {
       return;
     }
-    const [joined = "", mode, watchedAgent = ""] = key.split("|");
-    context.watch({ topics: joined === "" ? [] : joined.split(","), match: mode === "all" ? "all" : "any", agent: watchedAgent === "" ? null : watchedAgent });
+    context.watch(JSON.parse(key) as StreamWatch);
     return () => context.watch(null);
   }, [context, key]);
 }

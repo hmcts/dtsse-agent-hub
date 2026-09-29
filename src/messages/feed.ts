@@ -34,6 +34,9 @@ export async function agentFeed(db: Database, agentId: string, after: bigint, li
 
 export type Match = "any" | "all";
 
+/** The posts a view is over: a set of topic slugs, or every post on any topic. */
+export type PostScope = readonly string[] | "everything";
+
 export interface ChannelQuery {
   /** Topic slugs, already normalised. */
   topics: readonly string[];
@@ -146,9 +149,17 @@ export async function topicMessages(db: Database, query: TopicQuery): Promise<Ap
   return query.before === undefined ? messages : messages.reverse();
 }
 
-/** The latest posts on any topic, oldest first. */
-export async function recentPosts(db: Database, limit: number): Promise<ApiMessage[]> {
-  const rows = await db.message.findMany({ where: { kind: "post" }, select: { id: true }, orderBy: { id: "desc" }, take: limit });
+/**
+ * The newest page of posts on any topic before `before`, returned oldest first. Walks `message_post_id_idx` down
+ * from `before`, so the directs between posts are never read.
+ */
+export async function recentPosts(db: Database, query: { before?: bigint; limit: number }): Promise<ApiMessage[]> {
+  const rows = await db.message.findMany({
+    where: { kind: "post", ...(query.before === undefined ? {} : { id: { lt: query.before } }) },
+    select: { id: true },
+    orderBy: { id: "desc" },
+    take: query.limit
+  });
   return await loadMessages(
     db,
     rows.map((row) => row.id)
