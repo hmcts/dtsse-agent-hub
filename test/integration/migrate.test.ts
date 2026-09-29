@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
+import { appendFile, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import pg from "pg";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { LOCAL_DATABASE_URL } from "../../src/store/database-url.ts";
 import { migrate, migrationsDirectory } from "../../src/store/migrate.ts";
 
@@ -107,6 +111,46 @@ describe("migrate", () => {
     const runs = await Promise.all([migrate(), migrate(), migrate()]);
 
     expect(runs.flat().length).toBe((await query(SCRATCH, `SELECT 1 FROM "_prisma_migrations"`)).length);
+  });
+
+  it("should record the sha256 of each migration file as its checksum", async () => {
+    const rows = await query<{ migration_name: string; checksum: string }>(SCRATCH, `SELECT migration_name, checksum FROM "_prisma_migrations"`);
+
+    for (const row of rows) {
+      const sql = await readFile(path.join(migrationsDirectory(), row.migration_name, "migration.sql"));
+      expect(row.checksum).toBe(createHash("sha256").update(sql).digest("hex"));
+    }
+  });
+
+  describe("when an applied migration's file has changed", () => {
+    let directory: string;
+
+    beforeEach(async () => {
+      directory = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
+      await cp(migrationsDirectory(), directory, { recursive: true });
+    });
+
+    afterEach(async () => {
+      await rm(directory, { recursive: true, force: true });
+    });
+
+    it("should fail naming the migration when its file no longer matches the ledger", async () => {
+      const [first] = (await readdir(directory, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+      await appendFile(path.join(directory, first!, "migration.sql"), "\n-- edited after it was applied\n");
+
+      await expect(migrate(directory)).rejects.toThrow(`migration ${first} has changed since it was applied`);
+    });
+
+    it("should apply no pending migration when an earlier one has changed", async () => {
+      const [first] = (await readdir(directory, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+      await appendFile(path.join(directory, first!, "migration.sql"), "\n-- edited after it was applied\n");
+      await mkdir(path.join(directory, "99991231000000_pending"));
+      await writeFile(path.join(directory, "99991231000000_pending", "migration.sql"), "CREATE TABLE never_created (id INTEGER);\n");
+
+      await expect(migrate(directory)).rejects.toThrow(/has changed since it was applied/);
+
+      expect(await query(SCRATCH, "SELECT 1 FROM information_schema.tables WHERE table_name = 'never_created'")).toEqual([]);
+    });
   });
 });
 
