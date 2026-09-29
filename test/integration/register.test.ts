@@ -1,8 +1,9 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { generateKeyPair, SignJWT } from "jose";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as heartbeat } from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
 import { POST as offline } from "../../src/app/api/agent/[agentId]/offline/route.ts";
 import { POST as register } from "../../src/app/api/agent/register/route.ts";
-import { person, prisma, resetDatabase } from "./database.ts";
+import { devUser, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 
 const ALICE = person("alice");
@@ -78,6 +79,63 @@ describe("POST /api/agent/register", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
+  });
+});
+
+describe("authentication", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  function registration(headers: Record<string, string>): Request {
+    return new Request("http://localhost:3000/api/agent/register", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(REGISTRATION)
+    });
+  }
+
+  it("should record an X-Dev-User oid under the dev- prefix, so the header cannot act as a real person", async () => {
+    const real = "a1b2c3d4-0000-0000-0000-000000000001";
+
+    const response = await register(registration({ "x-dev-user": `${real}|Real Person|real@example.com` }), { params: Promise.resolve({}) });
+
+    expect(response.status).toBe(200);
+    const agent = await prisma.agent.findFirstOrThrow();
+    expect(agent.ownerOid).toBe(`dev-${real}`);
+    expect(await prisma.user.findUnique({ where: { oid: real } })).toBeNull();
+  });
+
+  it("should answer 503 rather than trust X-Dev-User when the bypass is set on a production build", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    const response = await register(registration({ "x-dev-user": devUser(ALICE) }), { params: Promise.resolve({}) });
+
+    expect(response.status).toBe(503);
+    expect(await prisma.agent.count()).toBe(0);
+  });
+
+  it("should answer 503 with Retry-After, not 401, when the tenant's keys cannot be fetched", async () => {
+    vi.stubEnv("AGENT_AUTH_DISABLED", "");
+    vi.stubEnv("ENTRA_TENANT_ID", "outage-tenant");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Promise.reject(new TypeError("fetch failed")))
+    );
+    const { privateKey } = await generateKeyPair("RS256");
+    const jwt = await new SignJWT({ oid: "an-oid", tid: "outage-tenant", scp: "user_impersonation" })
+      .setProtectedHeader({ alg: "RS256", kid: "k" })
+      .setIssuer("https://login.microsoftonline.com/outage-tenant/v2.0")
+      .setAudience("api://dtsse-agent-hub")
+      .setExpirationTime("5m")
+      .sign(privateKey);
+
+    const response = await register(registration({ authorization: `Bearer ${jwt}` }), { params: Promise.resolve({}) });
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("10");
+    expect(response.headers.get("www-authenticate")).toBeNull();
   });
 });
 

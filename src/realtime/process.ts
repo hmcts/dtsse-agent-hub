@@ -8,10 +8,10 @@ export interface Realtime {
 }
 
 /**
- * The pod's hub and its one LISTEN connection, started on first use. On `globalThis` because Next builds separate
- * module graphs for `instrumentation.ts` and the route handlers, and each would otherwise hold its own listener.
- *
- * The agent stream uses this, and so will the UI stream: both subscribe to the same hub.
+ * The pod's hub and its one LISTEN connection. `instrumentation.ts` starts it at boot, after the secrets load, so
+ * `LISTEN` is usually active before the first stream opens; a stream that opens sooner waits for `ready()`. On
+ * `globalThis` because Next builds separate module graphs for `instrumentation.ts` and the route handlers, and each
+ * would otherwise hold its own listener.
  */
 const globalForRealtime = globalThis as unknown as { agentHubRealtime?: Realtime };
 

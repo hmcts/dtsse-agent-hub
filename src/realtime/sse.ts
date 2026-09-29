@@ -65,8 +65,11 @@ export function sseRetry(ms: number): string {
 
 export type Send = (frame: string) => void;
 
+/** Ends the stream, logging why, so the client reconnects rather than holding a stream that has stopped working. */
+export type Fail = (error: unknown) => void;
+
 /** Runs when the stream opens. Returns what to run when it closes. */
-export type OnOpen = (send: Send) => (() => void) | Promise<() => void>;
+export type OnOpen = (send: Send, fail: Fail) => (() => void) | Promise<() => void>;
 
 export interface StreamOptions {
   signal: AbortSignal;
@@ -117,6 +120,13 @@ export function openSseStream({
     }
   }
 
+  const fail: Fail = (error) => {
+    if (!closed) {
+      console.warn(`an SSE stream failed: ${error instanceof Error ? error.message : String(error)}`);
+      close();
+    }
+  };
+
   const send: Send = (frame) => {
     if (closed || controllerRef === undefined) {
       return;
@@ -145,7 +155,7 @@ export function openSseStream({
       send(sseComment("connected"));
       let opened: () => void;
       try {
-        opened = await onOpen(send);
+        opened = await onOpen(send, fail);
       } catch (error) {
         console.warn(`an SSE stream failed to open: ${error instanceof Error ? error.message : String(error)}`);
         close();

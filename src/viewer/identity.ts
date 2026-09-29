@@ -1,4 +1,4 @@
-import { DEV_TENANT, parseDevUser } from "../agent-auth/dev.ts";
+import { DEV_OID_PREFIX, DEV_TENANT, parseIdentity } from "../agent-auth/dev.ts";
 import { readSession, SESSION_COOKIE } from "../auth/session.ts";
 import { AuthConfigurationError, authRequired, type Environment, sessionSecret } from "../auth/settings.ts";
 import type { Identity } from "../users/identity.ts";
@@ -9,8 +9,9 @@ import type { Identity } from "../users/identity.ts";
  *
  * With `AUTH_DISABLED=true` (a preview, the pipeline's `-staging` release, `yarn dev`) nobody can sign in, so the
  * viewer is a fixed development identity instead. It is a real `user` row, so owning channels and granting access
- * work as they do signed in. Its oid is `dev-…` and its tenant `dev`: an Entra oid is a GUID, so a development
- * identity can never be mistaken for, or act as, a real person.
+ * work as they do signed in. Its oid is `dev-…` and its tenant `dev`: an Entra oid is a GUID, so a persona can never
+ * be mistaken for a real person, and the agent API's `X-Dev-User` gets the same prefix, so it names a persona too.
+ * `AUTH_DEV_USER` is the one deliberate exception: it acts as the real person it names.
  */
 
 export class NotSignedIn extends Error {}
@@ -28,7 +29,7 @@ export const ANONYMOUS_PERSONA = "anonymous";
 export function devIdentity(persona: string | undefined = ANONYMOUS_PERSONA): Identity {
   const name = persona !== undefined && PERSONA.test(persona) ? persona : ANONYMOUS_PERSONA;
   return {
-    oid: `dev-${name}`,
+    oid: `${DEV_OID_PREFIX}${name}`,
     tid: DEV_TENANT,
     name: name === ANONYMOUS_PERSONA ? "Anonymous (sign-in disabled)" : `Dev ${name} (sign-in disabled)`,
     // `.invalid` is reserved and resolves nowhere, so the access page can find a development identity by address
@@ -53,7 +54,7 @@ export function configuredDevUser(env: Environment = process.env): Identity | un
   if (value === undefined || value === "") {
     return undefined;
   }
-  const identity = parseDevUser(value);
+  const identity = parseIdentity(value);
   if (identity === undefined) {
     throw new AuthConfigurationError("AUTH_DEV_USER must be <oid>|<name>|<email>, and the oid and name are required");
   }

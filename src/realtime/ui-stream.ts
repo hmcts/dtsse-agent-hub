@@ -6,6 +6,7 @@ import { loadMessage } from "../messages/store.ts";
 import type { Database } from "../store/prisma.ts";
 import type { HubEvent } from "./events.ts";
 import type { EventHub } from "./hub.ts";
+import type { Listener } from "./listener.ts";
 import { sharedLoads } from "./shared-load.ts";
 import { type OnOpen, type Send, sseEvent } from "./sse.ts";
 
@@ -17,7 +18,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  * - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery, when the viewer
  *   can still see that agent and read that message.
  * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, or a grant the viewer holds changed
- *   and the agents they may see with it; either way the page should re-read.
+ *   and the agents they may see with it; either way the page should re-read. Also sent once `LISTEN` becomes active
+ *   when the stream opened before it was, since anything committed until then was never notified.
  *
  * A post is read once per pod and shared by every stream, since anyone may read it. The viewer's grants are read
  * once per stream and read again after a `grant` event naming them as grantee, so a revocation stops the events
@@ -34,6 +36,7 @@ export interface UiWatch {
 
 export interface UiStreamSources {
   hub: EventHub;
+  listener: Pick<Listener, "ready" | "connected">;
   viewerOid: string;
   /** Every grant the viewer holds. `uiStream` caches it until a `grant` event names the viewer. */
   grants: () => Promise<Grant[]>;
@@ -62,7 +65,7 @@ export function matchesTopics(messageTopics: readonly string[], watch: Pick<UiWa
 }
 
 /** The frame an event becomes for this viewer, or `undefined` when it is not theirs to see. */
-export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit<UiStreamSources, "hub">): Promise<string | undefined> {
+export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit<UiStreamSources, "hub" | "listener">): Promise<string | undefined> {
   switch (event.type) {
     case "post": {
       if (watch.topics.length === 0) {
@@ -131,12 +134,20 @@ export function cachedGrants(load: () => Promise<Grant[]>): { get: () => Promise
   };
 }
 
-export function uiStream(watch: UiWatch, { hub, ...sources }: UiStreamSources): OnOpen {
+export function uiStream(watch: UiWatch, { hub, listener, ...sources }: UiStreamSources): OnOpen {
   return (send: Send) => {
     let chain: Promise<void> = Promise.resolve();
     let open = true;
     const grants = cachedGrants(sources.grants);
     const cached = { ...sources, grants: grants.get };
+
+    if (!listener.connected()) {
+      chain = listener.ready().then(() => {
+        if (open) {
+          send(RESYNC);
+        }
+      });
+    }
 
     const unsubscribe = hub.subscribe((event) => {
       chain = chain
