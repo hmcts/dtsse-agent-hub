@@ -1,5 +1,6 @@
 import pg from "pg";
 import { decodeEvent, HUB_CHANNEL } from "./events.ts";
+import { startHealthChecks } from "./health.ts";
 import type { EventHub } from "./hub.ts";
 
 /**
@@ -30,13 +31,11 @@ const MIN_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 30_000;
 
 /**
- * A connection that only listens sends nothing, so a socket dropped without a FIN or RST (a NAT or load balancer
- * timing it out) looks healthy indefinitely. TCP keepalive probes it at the OS level, and the health query catches
- * what keepalive misses, such as a server that still acknowledges packets but no longer answers.
+ * Without it keepalive waits for the OS default, about two hours, before probing a silent socket, so a dropped
+ * connection that only listens goes unnoticed that long. The health query in `health.ts` catches what keepalive
+ * misses.
  */
 export const KEEPALIVE_INITIAL_DELAY_MS = 30_000;
-export const HEALTH_INTERVAL_MS = 30_000;
-export const HEALTH_TIMEOUT_MS = 10_000;
 
 /** Exponential with full jitter, so every pod does not reconnect at the same instant after a failover. */
 export function backoffDelay(attempt: number, minMs: number = MIN_BACKOFF_MS, maxMs: number = MAX_BACKOFF_MS, random: () => number = Math.random): number {
@@ -50,15 +49,15 @@ export function startListener({
   channel = HUB_CHANNEL,
   minBackoffMs,
   maxBackoffMs,
-  healthIntervalMs = HEALTH_INTERVAL_MS,
-  healthTimeoutMs = HEALTH_TIMEOUT_MS
+  healthIntervalMs,
+  healthTimeoutMs
 }: ListenerOptions): Listener {
   let stopped = false;
   let client: pg.Client | undefined;
   let attempt = 0;
   let everConnected = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
-  let health: ReturnType<typeof setInterval> | undefined;
+  let stopHealthChecks: () => void = () => undefined;
   let resolveReady: () => void = () => undefined;
   const ready = new Promise<void>((resolve) => {
     resolveReady = resolve;
@@ -75,35 +74,6 @@ export function startListener({
       void connect();
     }, delay);
     retry.unref();
-  }
-
-  function stopHealthChecks(): void {
-    if (health !== undefined) {
-      clearInterval(health);
-      health = undefined;
-    }
-  }
-
-  async function checkHealth(current: pg.Client): Promise<void> {
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        current.query("SELECT 1"),
-        new Promise<never>((_resolve, reject) => {
-          timeout = setTimeout(() => reject(new Error(`no answer within ${healthTimeoutMs}ms`)), healthTimeoutMs);
-        })
-      ]);
-    } catch (error) {
-      drop(current, `health check failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  function startHealthChecks(current: pg.Client): void {
-    stopHealthChecks();
-    health = setInterval(() => void checkHealth(current), healthIntervalMs);
-    health.unref();
   }
 
   function drop(current: pg.Client, reason: string): void {
@@ -160,7 +130,12 @@ export function startListener({
     }
 
     attempt = 0;
-    startHealthChecks(current);
+    stopHealthChecks = startHealthChecks({
+      client: current,
+      onFailure: (reason) => drop(current, reason),
+      intervalMs: healthIntervalMs,
+      timeoutMs: healthTimeoutMs
+    });
     if (everConnected) {
       hub.publish({ type: "resync" });
     }

@@ -1,8 +1,9 @@
 import type { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HubEvent } from "./events.ts";
+import { HEALTH_INTERVAL_MS, HEALTH_TIMEOUT_MS } from "./health.ts";
 import { createEventHub } from "./hub.ts";
-import { backoffDelay, HEALTH_INTERVAL_MS, HEALTH_TIMEOUT_MS, KEEPALIVE_INITIAL_DELAY_MS, startListener } from "./listener.ts";
+import { backoffDelay, KEEPALIVE_INITIAL_DELAY_MS, startListener } from "./listener.ts";
 
 interface FakeClient extends EventEmitter {
   config: Record<string, unknown>;
