@@ -81,5 +81,5 @@ data: {"message": <Message>}
 
 - The response opens with a `: connected` comment, and a `: ping` comment is sent every 15 seconds. Clients ignore comment lines.
 - On connect, every `delivery` for the agent still in state `queued` is sent first, oldest first. After that, new direct messages are sent as they arrive.
-- A message stays `queued`, and is resent on the next connection, until the client acks it.
+- A message stays `queued`, and is resent on the next connection, until the client acks it or it expires. Once an agent has been `offline` for 24 hours since its last heartbeat or `/offline` call, its queued deliveries are marked `expired` and are never sent, even if the agent comes back.
 - `Last-Event-ID` is accepted but only for logging; the ack is the source of truth for what's been delivered.

@@ -1,8 +1,14 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import type pg from "pg";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { heartbeat } from "../../src/agents/store.ts";
 import { sweepOffline } from "../../src/agents/sweep.ts";
+import { ackDelivery, createDirect, queuedDeliveries } from "../../src/messages/store.ts";
+import { decodeEvent, HUB_CHANNEL, type NotifiedEvent } from "../../src/realtime/events.ts";
 import { connect, insertAgent, person, prisma, resetDatabase } from "./database.ts";
 
 const ALICE = person("alice");
+const BOB = person("bob");
+const DAY_SECONDS = 24 * 60 * 60;
 
 beforeEach(async () => {
   await resetDatabase();
@@ -22,7 +28,7 @@ describe("sweepOffline", () => {
     const fresh = await insertAgent(ALICE, "fresh", { status: "idle", lastHeartbeatAt: secondsAgo(30) });
     const gone = await insertAgent(ALICE, "gone", { status: "offline", lastHeartbeatAt: secondsAgo(3600) });
 
-    expect(await sweepOffline(prisma)).toEqual([stale]);
+    expect(await sweepOffline(prisma)).toEqual({ offline: [stale], expired: 0 });
 
     const statuses = Object.fromEntries((await prisma.agent.findMany()).map((agent) => [agent.id, agent.status]));
     expect(statuses).toEqual({ [stale]: "offline", [fresh]: "idle", [gone]: "offline" });
@@ -39,9 +45,109 @@ describe("sweepOffline", () => {
       expect((await prisma.agent.findUniqueOrThrow({ where: { id: stale } })).status).toBe("idle");
 
       await other.query("COMMIT");
-      expect(await sweepOffline(prisma)).toEqual([stale]);
+      expect(await sweepOffline(prisma)).toEqual({ offline: [stale], expired: 0 });
     } finally {
       await other.end();
     }
+  });
+});
+
+describe("delivery expiry", () => {
+  let sender: string;
+  let listener: pg.Client;
+  let heard: NotifiedEvent[];
+
+  async function directTo(agentId: string): Promise<string> {
+    return (await createDirect(prisma, { author: { oid: ALICE.oid, agentId: sender }, targetAgentId: agentId, inReplyTo: null, body: "hello" })).id;
+  }
+
+  async function stateOf(messageId: string, agentId: string): Promise<string> {
+    return (await prisma.delivery.findUniqueOrThrow({ where: { messageId_agentId: { messageId: BigInt(messageId), agentId } } })).state;
+  }
+
+  async function deliveryEvents(): Promise<NotifiedEvent[]> {
+    await listener.query("SELECT 1");
+    return heard.filter((event) => event.type === "delivery");
+  }
+
+  beforeEach(async () => {
+    sender = await insertAgent(ALICE, "sender");
+    heard = [];
+    listener = await connect();
+    listener.on("notification", (notification) => {
+      const event = decodeEvent(notification.payload);
+      if (event !== undefined) {
+        heard.push(event);
+      }
+    });
+    await listener.query(`LISTEN ${HUB_CHANNEL}`);
+  });
+
+  afterEach(async () => {
+    await listener.end();
+  });
+
+  it("should expire a queued delivery and announce it when the target has been offline for over a day", async () => {
+    const gone = await insertAgent(BOB, "gone", { status: "offline", lastHeartbeatAt: secondsAgo(DAY_SECONDS + 60) });
+    const messageId = await directTo(gone);
+
+    expect(await sweepOffline(prisma)).toEqual({ offline: [], expired: 1 });
+
+    expect(await stateOf(messageId, gone)).toBe("expired");
+    expect(await deliveryEvents()).toEqual([{ type: "delivery", message_id: messageId, agent_id: gone, state: "expired" }]);
+  });
+
+  it("should leave a delivery queued when the target went offline less than a day ago", async () => {
+    const recent = await insertAgent(BOB, "recent", { status: "offline", lastHeartbeatAt: secondsAgo(3600) });
+    const messageId = await directTo(recent);
+
+    expect(await sweepOffline(prisma)).toEqual({ offline: [], expired: 0 });
+
+    expect(await stateOf(messageId, recent)).toBe("queued");
+    expect(await deliveryEvents()).toEqual([]);
+  });
+
+  it("should leave a delivery queued when the target is online", async () => {
+    const online = await insertAgent(BOB, "online", { status: "idle", lastHeartbeatAt: secondsAgo(10) });
+    const messageId = await directTo(online);
+
+    expect(await sweepOffline(prisma, { expireAfterSeconds: 0 })).toEqual({ offline: [], expired: 0 });
+
+    expect(await stateOf(messageId, online)).toBe("queued");
+  });
+
+  it("should leave an acked delivery delivered when its target has been offline for over a day", async () => {
+    const gone = await insertAgent(BOB, "gone", { status: "offline", lastHeartbeatAt: secondsAgo(DAY_SECONDS + 60) });
+    const messageId = await directTo(gone);
+    await ackDelivery(prisma, gone, BigInt(messageId));
+
+    expect(await sweepOffline(prisma)).toEqual({ offline: [], expired: 0 });
+
+    expect(await stateOf(messageId, gone)).toBe("delivered");
+  });
+
+  it("should expire the oldest deliveries first, a batch at a time, when there are more than a batch", async () => {
+    const gone = await insertAgent(BOB, "gone", { status: "offline", lastHeartbeatAt: secondsAgo(DAY_SECONDS + 60) });
+    const first = await directTo(gone);
+    const second = await directTo(gone);
+    const third = await directTo(gone);
+
+    expect(await sweepOffline(prisma, { expireBatch: 2 })).toEqual({ offline: [], expired: 2 });
+    expect([await stateOf(first, gone), await stateOf(second, gone), await stateOf(third, gone)]).toEqual(["expired", "expired", "queued"]);
+
+    expect(await sweepOffline(prisma, { expireBatch: 2 })).toEqual({ offline: [], expired: 1 });
+    expect(await stateOf(third, gone)).toBe("expired");
+  });
+
+  it("should not replay or re-deliver an expired delivery when the agent comes back", async () => {
+    const gone = await insertAgent(BOB, "gone", { status: "offline", lastHeartbeatAt: secondsAgo(DAY_SECONDS + 60) });
+    const messageId = await directTo(gone);
+    await sweepOffline(prisma);
+
+    await heartbeat(prisma, gone, "idle", null);
+
+    expect(await queuedDeliveries(prisma, gone)).toEqual([]);
+    expect(await ackDelivery(prisma, gone, BigInt(messageId))).toBe(true);
+    expect(await stateOf(messageId, gone)).toBe("expired");
   });
 });

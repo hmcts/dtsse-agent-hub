@@ -33,8 +33,9 @@ function startMonitoring(): void {
 }
 
 /**
- * Marks silent agents offline every 30 seconds. Imported dynamically, after `readSecrets`, because `store/prisma.ts`
- * resolves `POSTGRES_*` at module load and would otherwise capture the local default.
+ * Marks silent agents offline, and expires deliveries to long-offline ones, every 30 seconds. Imported dynamically,
+ * after `readSecrets`, because `store/prisma.ts` resolves `POSTGRES_*` at module load and would otherwise capture
+ * the local default.
  */
 async function startSweeping(): Promise<void> {
   try {

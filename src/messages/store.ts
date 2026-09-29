@@ -145,3 +145,35 @@ export async function ackDelivery(prisma: PrismaClient, agentId: string, message
   });
   return acked || (await prisma.delivery.count({ where: { messageId, agentId } })) > 0;
 }
+
+/**
+ * Expires up to `limit` deliveries still queued for agents that have been offline for longer than
+ * `offlineForSeconds`, oldest first, and announces each so a UI thread showing the message updates. Call it inside
+ * a transaction, so the NOTIFYs go out only if the expiry commits.
+ *
+ * An offline agent's heartbeat revives it, so the cut-off is measured from the later of its last heartbeat and its
+ * end. `SKIP LOCKED` leaves a delivery being acked to the ack. Returns how many expired.
+ */
+export async function expireDeliveries(db: Database, offlineForSeconds: number, limit: number): Promise<number> {
+  const expired = await db.$queryRaw<{ message_id: string; agent_id: string }[]>`
+    WITH due AS (
+      SELECT d.message_id, d.agent_id
+        FROM delivery d
+        JOIN agent a ON a.id = d.agent_id
+       WHERE d.state = 'queued'
+         AND a.status = 'offline'
+         AND GREATEST(a.last_heartbeat_at, a.ended_at) < now() - make_interval(secs => ${offlineForSeconds}::double precision)
+       ORDER BY d.message_id
+       LIMIT ${limit}::int
+         FOR UPDATE OF d SKIP LOCKED
+    )
+    UPDATE delivery SET state = 'expired'
+      FROM due
+     WHERE delivery.message_id = due.message_id AND delivery.agent_id = due.agent_id
+    RETURNING delivery.message_id::text AS message_id, delivery.agent_id::text AS agent_id
+  `;
+  for (const delivery of expired) {
+    await notify(db, { type: "delivery", message_id: delivery.message_id, agent_id: delivery.agent_id, state: "expired" });
+  }
+  return expired.length;
+}
