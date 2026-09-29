@@ -1,0 +1,19 @@
+{
+  // The migration entrypoint, run by Node directly with no bundler, so `nodenext` resolution and relative imports
+  // only: nothing reachable from here may use the `@/*` alias.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["esnext"],
+    "jsx": "preserve",
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "incremental": false,
+    "plugins": [],
+    "paths": {}
+  },
+  "include": ["src/cli/**/*.ts"],
+  "exclude": ["node_modules", "**/*.test.ts", "**/__tests__/**"]
+}

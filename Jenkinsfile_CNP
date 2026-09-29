@@ -1,0 +1,90 @@
+#!groovy
+
+// Pinned to the ref dtsse-github-metrics uses, which shares this product's Jenkins identity and AAT subscription.
+// The library's `master` resolves `TF_VAR_jenkins_AAD_objectId` from a per-environment managed identity; metrics
+// pinned away from it because it forces a replace of its Postgres Entra administrator, which the server's delete lock
+// refuses. Move both repositories back to the floating `Infrastructure` together once the platform has resolved that.
+@Library("Infrastructure@DTSPO-35113/master")
+
+def type = "nodejs"
+def product = "dtsse"
+def component = "agent-hub"
+
+def yarnBuilder = new uk.gov.hmcts.contino.YarnBuilder(this)
+
+// The integration suite needs a real Postgres, so `before('test')` starts one on the agent. The image is the ACR
+// mirror, so the pull is not rate-limited. The container name and host port are both per build: two builds can share
+// an agent, and a shared name let one build's teardown destroy the other's database mid-suite.
+def postgresImage = 'hmctsprod.azurecr.io/imported/postgres:16-alpine'
+def buildRef = env.BRANCH_NAME == null ? null : "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+def postgresContainer = "agent-hub-test-postgres-${buildRef}".replaceAll('[^A-Za-z0-9_.-]', '-')
+
+static Map<String, Object> secret(String secretName, String envVariable) {
+  [
+    $class: 'AzureKeyVaultSecret',
+    secretType: 'Secret',
+    name: secretName,
+    envVariable: envVariable
+  ]
+}
+
+def secrets = [
+  'dtsse-${env}': [
+    secret('AppInsightsConnectionString', 'APPLICATIONINSIGHTS_CONNECTION_STRING')
+  ]
+]
+
+withPipeline(type, product, component) {
+  loadVaultSecrets(secrets)
+
+  // One hook per stage name: `registerBefore` is a map keyed on the stage, so a second `before('test')` would
+  // replace this one.
+  before('test') {
+    yarnBuilder.yarn('db:generate')
+    yarnBuilder.yarn('typecheck')
+
+    if (!buildRef) {
+      error 'BRANCH_NAME is not set, so the integration Postgres container would not be unique to this build'
+    }
+
+    sh script: """
+      set -e
+      env AZURE_CONFIG_DIR=/opt/jenkins/.azure-nonprod az acr login --name hmctsprod --subscription DCD-CNP-PROD
+      docker inspect ${postgresImage} > /dev/null 2>&1 || docker pull ${postgresImage}
+      docker run --rm --name ${postgresContainer} --publish 0:5432 \
+        -e POSTGRES_DB=agent_hub -e POSTGRES_USER=hmcts -e POSTGRES_HOST_AUTH_METHOD=trust \
+        -d ${postgresImage}
+      for attempt in \$(seq 1 30); do
+        docker exec ${postgresContainer} pg_isready -U hmcts -d agent_hub && break
+        sleep 2
+      done
+      docker exec ${postgresContainer} pg_isready -U hmcts -d agent_hub
+    """, label: 'Start the integration-test Postgres'
+
+    // `docker port` prints one line per binding (IPv4 and IPv6).
+    def postgresPort = sh(
+      script: "docker port ${postgresContainer} 5432 | head -1 | sed 's/.*://'",
+      returnStdout: true,
+      label: 'Read the port the daemon assigned'
+    ).trim()
+
+    // Before the sonar scan, which reads `coverage-integration/lcov.info`.
+    withEnv(["DATABASE_URL=postgresql://hmcts@localhost:${postgresPort}/agent_hub"]) {
+      yarnBuilder.yarn('db:migrate')
+      yarnBuilder.yarn('test:integration')
+    }
+  }
+
+  afterAlways('test') {
+    sh script: "docker stop ${postgresContainer} && docker rm ${postgresContainer} || echo 'test postgres already gone'",
+      label: 'Stop the integration-test Postgres'
+  }
+
+  onPR() {
+    env.TEST_URL = "https://dtsse-agent-hub-pr-${CHANGE_ID}.preview.platform.hmcts.net"
+  }
+
+  onMaster() {
+    env.TEST_URL = "https://dtsse-agent-hub.aat.platform.hmcts.net"
+  }
+}

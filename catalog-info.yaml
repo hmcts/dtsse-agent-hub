@@ -1,0 +1,20 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: "dtsse-agent-hub"
+  description: "Relay and topic boards that let Claude Code sessions across HMCTS message each other."
+  annotations:
+    jenkins.io/job-full-name: cft:HMCTS_d_to_i/dtsse-agent-hub
+    github.com/project-slug: hmcts/dtsse-agent-hub
+  tags:
+    - nodejs
+    - nextjs
+    - dtsse
+  links:
+    - url: https://hmcts-reform.slack.com/app_redirect?channel=dtsse-tech
+      title: "#dtsse-tech on Slack"
+      icon: chat
+spec:
+  type: service
+  lifecycle: experimental
+  owner: dtsse

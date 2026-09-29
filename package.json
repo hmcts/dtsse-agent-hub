@@ -1,0 +1,64 @@
+{
+  "name": "dtsse-agent-hub",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Relay and topic boards that let Claude Code sessions across HMCTS message each other, with a web UI behind Entra SSO.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "yarn@4.14.1",
+  "scripts": {
+    "dev": "yarn deps:up && next dev",
+    "build": "yarn build:app && yarn build:cli",
+    "build:app": "next build",
+    "build:cli": "tsc -p tsconfig.cli.json",
+    "clean": "rm -rf .next dist",
+    "start": "node .next/standalone/server.js",
+    "deps:up": "docker compose up -d --wait",
+    "deps:down": "docker compose down",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
+    "test:a11y": "echo 'no accessibility suite yet: the only page is a placeholder until the UI lands'",
+    "test:smoke": "tsx test/smoke/health.ts",
+    "test:functional": "tsx test/smoke/health.ts",
+    "test:fullfunctional": "tsx test/smoke/health.ts",
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit",
+    "db:generate": "prisma generate",
+    "db:migrate": "tsx src/cli/migrate.ts",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@hmcts-cft/cloud-native-platform": "2.0.0",
+    "@prisma/adapter-pg": "7.8.0",
+    "@prisma/client": "7.8.0",
+    "jose": "6.1.0",
+    "next": "16.3.5",
+    "openid-client": "6.8.4",
+    "pg": "8.20.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.15",
+    "@types/node": "24.12.3",
+    "@types/pg": "8.23.1",
+    "@types/react": "18.3.3",
+    "@types/react-dom": "18.3.0",
+    "@vitest/coverage-v8": "4.1.6",
+    "prisma": "7.8.0",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vite": "8.0.12",
+    "vitest": "4.1.6"
+  },
+  "resolutions": {
+    "pg": "8.20.0"
+  }
+}

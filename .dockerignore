@@ -1,0 +1,30 @@
+.git/
+.github/
+.vscode/
+.idea/
+node_modules/
+.next/
+dist/
+coverage/
+coverage-integration/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+.yarn/cache/
+.yarn/install-state.gz
+.yarn/build-state.yml
+.yarn/unplugged/
+*.tsbuildinfo
+docs/
+test/e2e/
+
+# Credential material, mirroring .gitignore. These files are untracked, so they only ever exist in a
+# developer's working copy — but the build context is uploaded to the registry, so an ignore rule here
+# is the only thing keeping a GitHub App private key out of that upload.
+.env*
+*.pem
+*.pem.aes
+*.aes
+*.key
+*.p12

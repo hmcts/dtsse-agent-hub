@@ -1,0 +1,201 @@
+// The migrations under prisma/migrations are written by hand and are the source of truth for the database:
+// they carry the topic-count constraint trigger, CHECK constraints and partial indexes this schema cannot
+// express. This file describes the same tables to the generated client, and must be kept in step with them.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/store/generated"
+}
+
+// No `url` here: Prisma 7 rejects it in the schema. The connection string reaches the CLI through
+// prisma.config.ts and the runtime client through the `PrismaPg` adapter in src/store/prisma.ts.
+datasource db {
+  provider = "postgresql"
+}
+
+enum AgentStatus {
+  busy
+  idle
+  offline
+
+  @@map("agent_status")
+}
+
+enum GrantLevel {
+  read
+  write
+
+  @@map("grant_level")
+}
+
+enum MessageKind {
+  post
+  direct
+
+  @@map("message_kind")
+}
+
+enum DeliveryState {
+  queued
+  delivered
+  expired
+
+  @@map("delivery_state")
+}
+
+enum ChannelMatch {
+  any
+  all
+
+  @@map("channel_match")
+}
+
+/// A person, keyed by their Entra object id, which is the same for the web sign-in and the `az` token.
+model User {
+  oid         String   @id
+  tid         String
+  name        String
+  email       String?
+  firstSeenAt DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+
+  agents      Agent[]
+  grantsGiven AgentGrant[] @relation("grantOwner")
+  grantsHeld  AgentGrant[] @relation("grantee")
+  messages    Message[]
+  channels    Channel[]
+
+  @@map("user")
+}
+
+model Agent {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerOid        String      @map("owner_oid")
+  sessionId       String      @unique @map("session_id")
+  name            String
+  cwd             String?
+  repo            String?
+  branch          String?
+  host            String?
+  status          AgentStatus @default(idle)
+  lastHeartbeatAt DateTime    @default(now()) @map("last_heartbeat_at") @db.Timestamptz(6)
+  readCursor      BigInt      @default(0) @map("read_cursor")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  endedAt         DateTime?   @map("ended_at") @db.Timestamptz(6)
+
+  owner         User           @relation(fields: [ownerOid], references: [oid])
+  authored      Message[]      @relation("authorAgent")
+  received      Message[]      @relation("targetAgent")
+  subscriptions Subscription[]
+  deliveries    Delivery[]
+
+  @@index([ownerOid])
+  @@map("agent")
+}
+
+/// Covers every agent the owner has, current and future.
+model AgentGrant {
+  ownerOid   String     @map("owner_oid")
+  granteeOid String     @map("grantee_oid")
+  level      GrantLevel
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  owner   User @relation("grantOwner", fields: [ownerOid], references: [oid])
+  grantee User @relation("grantee", fields: [granteeOid], references: [oid])
+
+  @@id([ownerOid, granteeOid])
+  @@index([granteeOid])
+  @@map("agent_grant")
+}
+
+model Topic {
+  id            Int       @id @default(autoincrement())
+  slug          String    @unique
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastMessageAt DateTime? @map("last_message_at") @db.Timestamptz(6)
+
+  messages      MessageTopic[]
+  subscriptions Subscription[]
+
+  @@map("topic")
+}
+
+model Message {
+  id            BigInt      @id @default(autoincrement())
+  kind          MessageKind
+  authorAgentId String?     @map("author_agent_id") @db.Uuid
+  authorOid     String      @map("author_oid")
+  targetAgentId String?     @map("target_agent_id") @db.Uuid
+  inReplyTo     BigInt?     @map("in_reply_to")
+  title         String?
+  body          String
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  authorAgent Agent?         @relation("authorAgent", fields: [authorAgentId], references: [id], onDelete: SetNull)
+  author      User           @relation(fields: [authorOid], references: [oid])
+  targetAgent Agent?         @relation("targetAgent", fields: [targetAgentId], references: [id], onDelete: SetNull)
+  parent      Message?       @relation("thread", fields: [inReplyTo], references: [id], onDelete: SetNull)
+  replies     Message[]      @relation("thread")
+  topics      MessageTopic[]
+  deliveries  Delivery[]
+
+  @@map("message")
+}
+
+model MessageTopic {
+  messageId BigInt @map("message_id")
+  topicId   Int    @map("topic_id")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  topic   Topic   @relation(fields: [topicId], references: [id])
+
+  @@id([messageId, topicId])
+  @@index([topicId, messageId])
+  @@map("message_topic")
+}
+
+model Subscription {
+  agentId   String   @map("agent_id") @db.Uuid
+  topicId   Int      @map("topic_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  topic Topic @relation(fields: [topicId], references: [id])
+
+  @@id([agentId, topicId])
+  @@index([topicId])
+  @@map("subscription")
+}
+
+/// One row per direct message per target agent. Stays `queued` until the agent acks it.
+model Delivery {
+  messageId   BigInt        @map("message_id")
+  agentId     String        @map("agent_id") @db.Uuid
+  state       DeliveryState @default(queued)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  deliveredAt DateTime?     @map("delivered_at") @db.Timestamptz(6)
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  agent   Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, agentId])
+  @@index([agentId, state])
+  @@map("delivery")
+}
+
+/// A saved view over a topic set. It holds no messages of its own.
+model Channel {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerOid  String       @map("owner_oid")
+  name      String
+  topics    String[]
+  match     ChannelMatch @default(any)
+  shared    Boolean      @default(false)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  owner User @relation(fields: [ownerOid], references: [oid])
+
+  @@index([ownerOid])
+  @@map("channel")
+}
