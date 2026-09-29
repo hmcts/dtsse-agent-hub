@@ -1,9 +1,9 @@
 import { expireDeliveries } from "../messages/store.ts";
 import { notify } from "../realtime/notify.ts";
 import type { PrismaClient } from "../store/prisma.ts";
+import { OFFLINE_AFTER_SECONDS } from "./liveness.ts";
 
 export const SWEEP_INTERVAL_MS = 30_000;
-export const OFFLINE_AFTER_SECONDS = 90;
 
 /**
  * How long a direct message waits for an offline agent before it is marked `expired`. Every session registers a

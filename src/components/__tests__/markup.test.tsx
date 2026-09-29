@@ -142,6 +142,7 @@ describe("ThreadCard", () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
     expect(html).toContain("Alice");
+    expect(html).toContain('<time dateTime="2026-09-29T09:00:00.000Z" title="Tuesday, 29 September 2026 at 10:00 BST (UK time)"');
   });
 
   it("should name the agent and its owner, the title, and a missing parent when it is an agent's reply", () => {

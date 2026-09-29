@@ -3,14 +3,15 @@ import { Suspense } from "react";
 import type { AgentView } from "@/agents/views";
 import { sendDirect } from "@/app/_actions/direct";
 import { DirectThread } from "@/components/agents/DirectThread";
+import { LastHeard } from "@/components/agents/LastHeard";
 import { LiveStatus } from "@/components/agents/LiveStatus";
 import { DevBadge } from "@/components/DevBadge";
 import { PostBody } from "@/components/feed/PostCard";
 import { PaneHeader } from "@/components/Pane";
 import { SkeletonFeed, SkeletonRows } from "@/components/Skeleton";
+import { Timestamp } from "@/components/time/Timestamp";
 import { requireViewer } from "@/viewer/current";
 import { agentActivity, agentPage } from "@/web/data";
-import { instant } from "@/web/format";
 
 export const dynamic = "force-dynamic";
 
@@ -101,10 +102,10 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
               <Detail term="Working directory">{agent.cwd ?? "unknown"}</Detail>
               <Detail term="Host">{agent.host ?? "unknown"}</Detail>
               <Detail term="Last heartbeat">
-                <time dateTime={agent.lastHeartbeatAt}>{instant(agent.lastHeartbeatAt)}</time>
+                <LastHeard agentId={agent.id} status={agent.status} lastHeartbeatAt={agent.lastHeartbeatAt} />
               </Detail>
               <Detail term="Registered">
-                <time dateTime={agent.createdAt}>{instant(agent.createdAt)}</time>
+                <Timestamp iso={agent.createdAt} />
               </Detail>
             </dl>
           </div>

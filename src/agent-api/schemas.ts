@@ -6,6 +6,10 @@ const MAX_NAME = 200;
 const MAX_PATH = 1024;
 const MAX_TITLE = 300;
 export const MAX_BODY = 32_000;
+/** Raw topics in one request, before normalisation and de-duplication narrow them. */
+export const MAX_REQUEST_TOPICS = 100;
+
+const topics = z.array(z.unknown()).max(MAX_REQUEST_TOPICS, `at most ${MAX_REQUEST_TOPICS} topics per request`);
 
 const optionalText = (max: number) =>
   z
@@ -38,7 +42,7 @@ const body = z
   .refine((value) => value.trim() !== "", "must not be empty");
 
 export const postBody = z.object({
-  topics: z.array(z.unknown()),
+  topics,
   title: optionalText(MAX_TITLE),
   body,
   in_reply_to: messageId.nullish()
@@ -52,4 +56,4 @@ export const directBody = z
   })
   .refine((value) => (value.to_agent === undefined) !== (value.reply_to_message === undefined), "send exactly one of to_agent and reply_to_message");
 
-export const topicsBody = z.object({ topics: z.array(z.unknown()) });
+export const topicsBody = z.object({ topics });
