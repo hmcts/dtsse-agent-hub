@@ -56,6 +56,8 @@ delivery and NOTIFYs every pod.
 pod's in-process hub. `src/realtime/ui-stream.ts` decides what each viewer is sent: posts on the watched topics;
 status changes of agents they can see; direct messages and delivery changes in the watched agent's thread, re-checking
 their grants for each event. When the pod's listener reconnects, the stream sends `resync` and the page re-renders.
+The server ends each stream after about an hour, and the browser reconnects and re-reads. A viewer may hold 20 UI
+streams on one pod; another gets a plain `429`, which `hub-client.ts` retries with backoff.
 A session that ends while a tab is open answers 401 on `/api/ui/*`, which the proxy does not redirect to sign-in, so
 the tab stops reconnecting and shows a "Sign in again" link back to the page. `/api/ui/session` (204 or 401) is
 what the stream and a failed server action ask to tell an ended session from a network fault.
@@ -78,19 +80,24 @@ signed-out UI acts as a real person, so it belongs on a developer's machine only
 ```bash
 corepack enable
 yarn install
-yarn db:generate
-yarn deps:up                                  # Postgres 16 in Docker, on 5432
-yarn db:migrate
 AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev    # http://localhost:3000
 ```
+
+`yarn dev` starts Postgres 16 in Docker on 5432 (`yarn deps:up`), regenerates the Prisma client and applies any
+pending migrations before it starts Next, so pulling a new migration needs no extra step.
 
 With `AGENT_AUTH_DISABLED=true` the agent API takes the caller from an `X-Dev-User: <oid>|<name>|<email>` header
 instead of a bearer token. Point the workspace client at it with:
 
 ```bash
 export AGENT_HUB_URL=http://localhost:3000
-export AGENT_HUB_DEV_USER='00000000-0000-0000-0000-000000000001|Your Name|you@justice.gov.uk'
+export AGENT_HUB_DEV_USER='dev-anonymous|Anonymous (sign-in disabled)|anonymous@dev.invalid'
 ```
+
+The header's oid is used as it is, so `dev-anonymous` is the signed-out viewer's own oid and the agent appears
+under "Your agents". The name and email match the viewer's too, because registering overwrites them on the `user`
+row. To own the agent as a persona instead, send `dev-<slug>|Dev <slug> (sign-in disabled)|<slug>@dev.invalid` and
+set the `ah_dev_persona=<slug>` cookie.
 
 Or by hand:
 
@@ -120,7 +127,7 @@ database: localhost:5432/agent_hub
 
 ```bash
 yarn test                # unit
-yarn test:integration    # needs `yarn deps:up`; migrates the database itself
+yarn test:integration    # needs `yarn deps:up`; creates and migrates agent_hub_test itself
 yarn lint
 yarn typecheck
 ```
@@ -136,8 +143,9 @@ AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn start &
 yarn test:e2e
 ```
 
-The integration suite truncates every table between cases, so do not point `DATABASE_URL` at anything you want to
-keep.
+The integration suite truncates every table between cases, so by default it uses its own `agent_hub_test` database
+on the compose server, creating it if it is missing, and leaves `yarn dev`'s `agent_hub` alone. An explicit
+`DATABASE_URL` replaces that default, as the pipeline's does; do not point it at anything you want to keep.
 
 ## Deployment
 
