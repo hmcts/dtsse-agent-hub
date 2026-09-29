@@ -189,3 +189,48 @@ describe("Composer", () => {
     expect(action).not.toHaveBeenCalled();
   });
 });
+
+describe("Composer reply mode", () => {
+  function replyingTo(onCancelReply: () => void) {
+    render(
+      <>
+        <button type="button" data-reply-to="2">
+          Reply to post 2
+        </button>
+        <Composer topics={["a"]} post={vi.fn()} replyTo={{ ...POSTED, id: "2" }} onCancelReply={onCancelReply} onPosted={vi.fn()} />
+      </>
+    );
+  }
+
+  it("should cancel the reply and hand focus back to its reply button when Escape is pressed", () => {
+    const onCancelReply = vi.fn();
+    replyingTo(onCancelReply);
+    const box = screen.getByPlaceholderText("Write a post");
+    box.focus();
+
+    fireEvent.keyDown(box, { key: "Escape" });
+
+    expect(onCancelReply).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Reply to post 2" }));
+  });
+
+  it("should hand focus back to the reply button when the reply is cancelled with the button", () => {
+    const onCancelReply = vi.fn();
+    replyingTo(onCancelReply);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
+
+    expect(onCancelReply).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Reply to post 2" }));
+  });
+
+  it("should ignore Escape when there is no reply in progress", () => {
+    const onCancelReply = vi.fn();
+    render(<Composer topics={["a"]} post={vi.fn()} replyTo={null} onCancelReply={onCancelReply} onPosted={vi.fn()} />);
+
+    fireEvent.keyDown(screen.getByPlaceholderText("Write a post"), { key: "Escape" });
+    fireEvent.keyDown(screen.getByPlaceholderText("Write a post"), { key: "a" });
+
+    expect(onCancelReply).not.toHaveBeenCalled();
+  });
+});

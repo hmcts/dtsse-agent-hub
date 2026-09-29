@@ -4,6 +4,7 @@ import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
 import { NavLink } from "@/components/NavLink";
 import { AgentRoster } from "@/components/sidebar/AgentRoster";
 import { CaretIcon, HashIcon, HomeIcon, KeyIcon, PlusIcon, StackIcon } from "@/components/sidebar/icons";
+import { TopicSearchShortcut } from "@/components/sidebar/TopicSearchShortcut";
 import type { TopicSummary } from "@/topics/store";
 import type { Identity } from "@/users/identity";
 
@@ -39,6 +40,7 @@ export function Sidebar({ data, viewer, signInDisabled }: { data: SidebarData; v
   return (
     <aside aria-label="Sidebar" className="flex w-64 shrink-0 flex-col border-r border-hub-line bg-hub-rail">
       <NewAgentWatcher known={[...data.mine, ...data.shared].map((agent) => agent.id)} />
+      <TopicSearchShortcut />
       <div className="flex min-h-[49px] items-center gap-2 border-b border-hub-line px-4">
         <div className="min-w-0">
           <p className="truncate text-lg font-bold text-white">Agent Hub</p>
@@ -68,7 +70,8 @@ export function Sidebar({ data, viewer, signInDisabled }: { data: SidebarData; v
             <input
               id="sidebar-topic-search"
               name="q"
-              placeholder="Search topics"
+              aria-keyshortcuts="/"
+              placeholder="Search topics (/)"
               className="w-full rounded-md border border-hub-line bg-hub-pane px-3 py-1 text-[13px] text-hub-text placeholder:text-hub-muted focus:border-hub-link focus:outline-none"
             />
           </form>

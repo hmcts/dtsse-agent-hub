@@ -3,9 +3,12 @@
  */
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DirectThread, mayMessage } from "@/components/agents/DirectThread";
+import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
+import { DirectThread, mayMessage, offlineNote } from "@/components/agents/DirectThread";
+import { ANNOUNCE_AFTER_MS } from "@/components/live/Announcer";
 import { HubStreamProvider } from "@/components/live/HubStream";
 import type { ThreadMessage } from "@/messages/direct-thread";
+import { duration } from "@/web/format";
 
 const AGENT = "11111111-1111-1111-1111-111111111111";
 
@@ -68,14 +71,14 @@ describe("mayMessage", () => {
 
 describe("DirectThread", () => {
   it.each(["owner", "write"] as const)("should show the composer when the viewer has %s access", (access) => {
-    render(<DirectThread agentId={AGENT} access={access} initial={[]} send={vi.fn()} />);
+    render(<DirectThread agentId={AGENT} status="idle" access={access} initial={[]} send={vi.fn()} />);
 
     expect(screen.getByRole("form", { name: "Message this agent" })).toBeTruthy();
     expect(screen.queryByTestId("read-only-thread")).toBeNull();
   });
 
   it("should hide the composer and say why when the viewer has read access only", () => {
-    render(<DirectThread agentId={AGENT} access="read" initial={[message("1")]} send={vi.fn()} />);
+    render(<DirectThread agentId={AGENT} status="idle" access="read" initial={[message("1")]} send={vi.fn()} />);
 
     expect(screen.queryByRole("form", { name: "Message this agent" })).toBeNull();
     expect(screen.getByTestId("read-only-thread").textContent).toContain("read access");
@@ -86,6 +89,7 @@ describe("DirectThread", () => {
     render(
       <DirectThread
         agentId={AGENT}
+        status="idle"
         access="read"
         initial={[
           message("1", { delivery: "delivered" }),
@@ -106,7 +110,7 @@ describe("DirectThread", () => {
 
   it("should add the sent message to the thread and clear the box when sending succeeds", async () => {
     const send = vi.fn(async () => ({ ok: true as const, message: message("9", { body: "hello agent" }) }));
-    render(<DirectThread agentId={AGENT} access="owner" initial={[]} send={send} />);
+    render(<DirectThread agentId={AGENT} status="idle" access="owner" initial={[]} send={send} />);
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "hello agent" } });
     await act(async () => {
@@ -120,7 +124,7 @@ describe("DirectThread", () => {
 
   it("should show the refusal when the server refuses the message", async () => {
     const send = vi.fn(async () => ({ ok: false as const, error: "you have read access to this agent, not write access" }));
-    render(<DirectThread agentId={AGENT} access="write" initial={[]} send={send} />);
+    render(<DirectThread agentId={AGENT} status="idle" access="write" initial={[]} send={send} />);
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "hi" } });
     await act(async () => {
@@ -134,7 +138,7 @@ describe("DirectThread", () => {
     const send = vi.fn(async () => {
       throw new Error("offline");
     });
-    render(<DirectThread agentId={AGENT} access="write" initial={[]} send={send} />);
+    render(<DirectThread agentId={AGENT} status="idle" access="write" initial={[]} send={send} />);
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "hi" } });
     await act(async () => {
@@ -149,7 +153,7 @@ describe("DirectThread", () => {
     const send = vi.fn(async () => {
       throw new Error("An unexpected response was received from the server.");
     });
-    render(<DirectThread agentId={AGENT} access="write" initial={[]} send={send} />);
+    render(<DirectThread agentId={AGENT} status="idle" access="write" initial={[]} send={send} />);
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "hi" } });
     await act(async () => {
@@ -164,7 +168,7 @@ describe("DirectThread", () => {
 
   it("should not send when the message is only whitespace", async () => {
     const send = vi.fn();
-    render(<DirectThread agentId={AGENT} access="owner" initial={[]} send={send} />);
+    render(<DirectThread agentId={AGENT} status="idle" access="owner" initial={[]} send={send} />);
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "   " } });
     await act(async () => {
@@ -178,7 +182,7 @@ describe("DirectThread", () => {
     vi.stubGlobal("EventSource", FakeSource);
     render(
       <HubStreamProvider>
-        <DirectThread agentId={AGENT} access="read" initial={[message("1")]} send={vi.fn()} />
+        <DirectThread agentId={AGENT} status="idle" access="read" initial={[message("1")]} send={vi.fn()} />
       </HubStreamProvider>
     );
 
@@ -200,8 +204,97 @@ describe("DirectThread", () => {
 
 describe("DirectThread message ids", () => {
   it("should link each entry's id to its message page when rendering the thread", () => {
-    render(<DirectThread agentId={AGENT} access="read" initial={[message("41")]} send={vi.fn()} />);
+    render(<DirectThread agentId={AGENT} status="idle" access="read" initial={[message("41")]} send={vi.fn()} />);
 
     expect(screen.getByRole("link", { name: "#41" }).getAttribute("href")).toBe("/m/41");
+  });
+});
+
+describe("offlineNote", () => {
+  it("should say the message is queued and when it expires when the agent has a name", () => {
+    expect(offlineNote("pcs")).toBe(
+      `@pcs is offline; your message is queued and delivered when it reconnects. Queued messages expire after ${duration(EXPIRE_AFTER_SECONDS)} offline.`
+    );
+    expect(offlineNote("pcs")).toContain("24 hours");
+  });
+
+  it("should say this agent when the agent's name is not known", () => {
+    expect(offlineNote(undefined)).toMatch(/^This agent is offline;/);
+  });
+});
+
+describe("DirectThread when the agent is offline", () => {
+  it("should describe the composer with the offline note when the agent is offline", () => {
+    render(<DirectThread agentId={AGENT} agentName="pcs" status="offline" access="owner" initial={[]} send={vi.fn()} />);
+
+    const note = screen.getByText(/@pcs is offline/);
+    expect(screen.getByRole("textbox").getAttribute("aria-describedby")).toBe(note.id);
+  });
+
+  it("should show no offline note when the agent is live", () => {
+    render(<DirectThread agentId={AGENT} agentName="pcs" status="busy" access="owner" initial={[]} send={vi.fn()} />);
+
+    expect(screen.queryByText(/is offline/)).toBeNull();
+    expect(screen.getByRole("textbox").getAttribute("aria-describedby")).toBeNull();
+  });
+
+  it("should show and hide the offline note as the agent's status changes on the stream", async () => {
+    vi.stubGlobal("EventSource", FakeSource);
+    render(
+      <HubStreamProvider>
+        <DirectThread agentId={AGENT} agentName="pcs" status="idle" access="owner" initial={[]} send={vi.fn()} />
+      </HubStreamProvider>
+    );
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_status", { agent_id: "someone-else", status: "offline" });
+    });
+    expect(screen.queryByText(/is offline/)).toBeNull();
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_status", { agent_id: AGENT, status: "offline" });
+    });
+    expect(screen.getByText(/@pcs is offline/)).toBeTruthy();
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_status", { agent_id: AGENT, status: "idle" });
+    });
+    expect(screen.queryByText(/is offline/)).toBeNull();
+  });
+});
+
+describe("DirectThread announcements", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should announce a new message by its sender, and nothing for one already shown, when messages arrive live", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", FakeSource);
+    render(
+      <HubStreamProvider>
+        <DirectThread agentId={AGENT} status="idle" access="read" initial={[message("1")]} send={vi.fn()} />
+      </HubStreamProvider>
+    );
+
+    expect(screen.getByRole("list", { name: "Direct messages" }).getAttribute("aria-live")).toBeNull();
+    await act(async () => {
+      FakeSource.last?.emit("direct", { message: message("1") });
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANNOUNCE_AFTER_MS);
+    });
+    expect(screen.getByTestId("arrivals").textContent).toBe("");
+
+    await act(async () => {
+      FakeSource.last?.emit("direct", {
+        message: message("2", { author: { type: "agent", agent_id: AGENT, agent_name: "pcs", owner_name: "Bob", owner_email: null } })
+      });
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANNOUNCE_AFTER_MS);
+    });
+
+    expect(screen.getByTestId("arrivals").textContent).toBe("New message from @pcs");
   });
 });

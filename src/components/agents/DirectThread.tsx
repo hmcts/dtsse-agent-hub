@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { AgentAccess } from "@/access/rules";
+import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import { Avatar } from "@/components/Avatar";
+import { useLiveStatus } from "@/components/agents/LiveStatus";
 import { EmptyState } from "@/components/EmptyState";
 import { SEND_BUTTON, submitOnEnter } from "@/components/feed/Composer";
 import { MessageBody } from "@/components/feed/MessageBody";
 import { BYLINE_ID, MessageLink } from "@/components/feed/MessageLink";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
+import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useEndSession, useHubEvent, useWatch } from "@/components/live/HubStream";
 import { SessionEndedMessage } from "@/components/live/SessionEnded";
 import { sessionEnded } from "@/components/live/session";
@@ -15,7 +18,9 @@ import { SendIcon } from "@/components/sidebar/icons";
 import { Timestamp } from "@/components/time/Timestamp";
 import type { DeliveryView, ThreadMessage } from "@/messages/direct-thread";
 import { mergeMessages } from "@/messages/pagination";
+import type { AgentStatus } from "@/realtime/events";
 import type { ActionResult } from "@/web/action";
+import { duration } from "@/web/format";
 
 export type SendAction = (input: { agentId: string; body: string }) => Promise<ActionResult<{ message: ThreadMessage }>>;
 
@@ -30,13 +35,23 @@ export function mayMessage(access: Exclude<AgentAccess, "none">): boolean {
   return access === "owner" || access === "write";
 }
 
+/** Why a message to an offline agent is not lost, and how long it is kept. */
+export function offlineNote(agentName: string | undefined): string {
+  const who = agentName ? `@${agentName}` : "This agent";
+  return `${who} is offline; your message is queued and delivered when it reconnects. Queued messages expire after ${duration(EXPIRE_AFTER_SECONDS)} offline.`;
+}
+
+function senderName(message: ThreadMessage): string {
+  return message.author.agent_name === null ? message.author.owner_name : `@${message.author.agent_name}`;
+}
+
 function DeliveryBadge({ state }: { state: DeliveryView }) {
   return <span className={`rounded border px-1 text-[11px] uppercase tracking-wide ${DELIVERY_STYLE[state]}`}>{state}</span>;
 }
 
 function ThreadEntry({ agentId, message }: { agentId: string; message: ThreadMessage }) {
   const fromAgent = message.author.agent_id === agentId;
-  const name = message.author.agent_name === null ? message.author.owner_name : `@${message.author.agent_name}`;
+  const name = senderName(message);
   return (
     <li className="flex gap-2 px-5 py-2 hover:bg-hub-raised" data-message-id={message.id}>
       <Avatar name={name} />
@@ -62,12 +77,14 @@ function ThreadEntry({ agentId, message }: { agentId: string; message: ThreadMes
 export function DirectThread({
   agentId,
   agentName,
+  status: initialStatus,
   access,
   initial,
   send
 }: {
   agentId: string;
   agentName?: string;
+  status: AgentStatus;
   access: Exclude<AgentAccess, "none">;
   initial: ThreadMessage[];
   send: SendAction;
@@ -79,6 +96,9 @@ export function DirectThread({
   const scroller = useStickToBottom<HTMLDivElement>(messages);
   const endSession = useEndSession();
   const [signedOut, setSignedOut] = useState(false);
+  const status = useLiveStatus(agentId, initialStatus);
+  const arrivals = useAnnouncer("messages");
+  const noteId = useId();
 
   useWatch([], "any", agentId);
 
@@ -87,6 +107,9 @@ export function DirectThread({
   }, [initial]);
 
   useHubEvent<{ message: ThreadMessage }>("direct", ({ message }) => {
+    if (!messages.some((shown) => shown.id === message.id)) {
+      arrivals.announce(`New message from ${senderName(message)}`);
+    }
     setMessages((current) => mergeMessages(current, [message]));
   });
 
@@ -130,23 +153,30 @@ export function DirectThread({
               <EmptyState message="No direct messages with this agent yet." />
             </div>
           ) : (
-            <ol aria-label="Direct messages" aria-live="polite">
+            <ol aria-label="Direct messages">
               {messages.map((message) => (
                 <ThreadEntry key={message.id} agentId={agentId} message={message} />
               ))}
             </ol>
           )}
         </div>
+        <AnnouncerRegion text={arrivals.text} />
       </div>
       <div className="shrink-0 px-5 pb-5">
         {mayMessage(access) ? (
           <form onSubmit={submit} className="rounded-lg border border-hub-line bg-hub-pane focus-within:border-hub-muted" aria-label="Message this agent">
+            {status === "offline" ? (
+              <p id={noteId} className="rounded-t-lg bg-hub-raised px-3 py-1.5 text-xs text-amber-300">
+                {offlineNote(agentName)}
+              </p>
+            ) : null}
             <label className="block">
               <span className="sr-only">Message this agent</span>
               <textarea
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
                 onKeyDown={submitOnEnter}
+                aria-describedby={status === "offline" ? noteId : undefined}
                 required
                 rows={2}
                 maxLength={32_000}

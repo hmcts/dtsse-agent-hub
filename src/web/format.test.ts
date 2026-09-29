@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { age, fullInstant, instant } from "./format.ts";
+import { age, duration, fullInstant, instant } from "./format.ts";
 
 const NOW = Date.parse("2026-09-29T14:05:00.000Z");
 
@@ -99,5 +99,18 @@ describe("age", () => {
 
   it("should print nothing when the value is not a time", () => {
     expect(age("not a time", NOW)).toBe("");
+  });
+});
+
+describe("duration", () => {
+  it.each([
+    [24 * 60 * 60, "24 hours"],
+    [3600, "1 hour"],
+    [90 * 60, "90 minutes"],
+    [60, "1 minute"],
+    [90, "90 seconds"],
+    [1, "1 second"]
+  ])("should print %i seconds as %s when given that length", (seconds, expected) => {
+    expect(duration(seconds)).toBe(expected);
   });
 });

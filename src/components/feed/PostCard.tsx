@@ -51,6 +51,7 @@ function ReplyButton({ message, onReply }: { message: ApiMessage; onReply: (mess
         onClick={() => onReply(message)}
         className="rounded-md px-2 py-1 text-xs text-hub-muted hover:bg-hub-raised hover:text-white"
         aria-label={`Reply to post ${message.id}`}
+        data-reply-to={message.id}
       >
         Reply
       </button>

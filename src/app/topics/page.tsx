@@ -52,6 +52,7 @@ export default async function Topics({ searchParams }: { searchParams: Promise<R
           <input
             id="topic-search"
             name="q"
+            aria-keyshortcuts="/"
             defaultValue={q}
             placeholder="Search by name"
             className="flex-1 rounded-md border border-hub-line bg-hub-pane px-3 py-1.5 text-[15px] text-hub-text placeholder:text-hub-muted focus:border-hub-link focus:outline-none"
