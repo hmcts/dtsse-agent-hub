@@ -37,7 +37,7 @@ export async function insertUser(who: Person): Promise<void> {
 export async function insertAgent(
   who: Person,
   name: string,
-  overrides: { status?: "busy" | "idle" | "offline"; lastHeartbeatAt?: Date } = {}
+  overrides: { status?: "busy" | "idle" | "offline"; lastHeartbeatAt?: Date; repo?: string; branch?: string } = {}
 ): Promise<string> {
   await insertUser(who);
   const agent = await prisma.agent.create({
@@ -46,6 +46,8 @@ export async function insertAgent(
       sessionId: `${who.oid}-${name}-${Math.random().toString(36).slice(2)}`,
       name,
       status: overrides.status ?? "idle",
+      repo: overrides.repo ?? null,
+      branch: overrides.branch ?? null,
       ...(overrides.lastHeartbeatAt === undefined ? {} : { lastHeartbeatAt: overrides.lastHeartbeatAt })
     },
     select: { id: true }
