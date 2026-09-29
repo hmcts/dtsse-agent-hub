@@ -77,12 +77,13 @@ describe("/api/ui/stream", () => {
     });
     await heartbeat(prisma, alicesAgent, "busy", null);
     const direct = await createDirect(prisma, { author: { oid: ALICE.oid, agentId: null }, targetAgentId: alicesAgent, inReplyTo: null, body: "from the UI" });
+    // The stream loads the message when its NOTIFY arrives, so the ack waits for that; an earlier ack would be read.
+    expect(JSON.parse((await bob.named("direct", 1))[0]!.data!).message).toMatchObject({ id: direct.id, body: "from the UI", delivery: "queued" });
     await ackDelivery(prisma, alicesAgent, BigInt(direct.id));
 
     const bodies = (received: { data?: string }[]) => received.map((frame) => JSON.parse(frame.data!).message.body);
     expect(bodies(await bob.named("post", 2))).toEqual(["one topic", "both topics"]);
     expect((await bob.named("agent_status", 1)).map((frame) => JSON.parse(frame.data!))).toEqual([{ agent_id: alicesAgent, status: "busy" }]);
-    expect(JSON.parse((await bob.named("direct", 1))[0]!.data!).message).toMatchObject({ id: direct.id, body: "from the UI", delivery: "queued" });
     expect(JSON.parse((await bob.named("delivery", 1))[0]!.data!)).toEqual({ message_id: direct.id, state: "delivered" });
 
     expect(bodies(await carol.named("post", 1))).toEqual(["both topics"]);
