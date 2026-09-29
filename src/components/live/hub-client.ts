@@ -1,11 +1,13 @@
 import type { Match } from "@/messages/feed";
+import { sessionEnded } from "./session.ts";
 
 /**
  * The browser end of `/api/ui/stream`: one `EventSource`, reopened with backoff when it closes for good.
  *
- * `EventSource` retries a dropped connection by itself, but gives up on a non-200 answer (a pod restarting, a
- * redirect to sign in) and stays closed; that case is retried here. Whenever the connection opens again after an
- * error, events may have been missed, so a `resync` is delivered for the page to re-read.
+ * `EventSource` retries a dropped connection by itself, but gives up on a non-200 answer and stays closed; that case
+ * is retried here. It cannot see the status, so before each retry the session is checked: a 401 means the person has
+ * to sign in again, and retrying would never succeed. Whenever the connection opens again after an error, events may
+ * have been missed, so a `resync` is delivered for the page to re-read.
  */
 
 export type HubEventType = "post" | "agent_status" | "direct" | "delivery" | "resync";
@@ -13,6 +15,12 @@ export type HubEventType = "post" | "agent_status" | "direct" | "delivery" | "re
 export const HUB_EVENT_TYPES: readonly HubEventType[] = ["post", "agent_status", "direct", "delivery", "resync"];
 
 export type HubListener = (type: HubEventType, data: unknown) => void;
+
+export interface HubHandlers {
+  event: HubListener;
+  /** Called once, with the connection closed for good, when the stream failed because the session has ended. */
+  signedOut: () => void;
+}
 
 export interface StreamWatch {
   topics: readonly string[];
@@ -43,6 +51,7 @@ export interface HubClientDependencies {
   open: (url: string) => EventSourceLike;
   setTimer: (callback: () => void, ms: number) => unknown;
   clearTimer: (timer: unknown) => void;
+  sessionEnded: () => Promise<boolean>;
 }
 
 const CLOSED = 2;
@@ -57,12 +66,13 @@ function browserDependencies(): HubClientDependencies {
   return {
     open: (url) => new EventSource(url),
     setTimer: (callback, ms) => setTimeout(callback, ms),
-    clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>)
+    clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    sessionEnded: () => sessionEnded()
   };
 }
 
 /** Connects and keeps connected until the returned function is called. */
-export function connectHub(url: string, listener: HubListener, dependencies: HubClientDependencies = browserDependencies()): () => void {
+export function connectHub(url: string, handlers: HubHandlers, dependencies: HubClientDependencies = browserDependencies()): () => void {
   let stopped = false;
   let source: EventSourceLike | undefined;
   let timer: unknown;
@@ -79,15 +89,25 @@ export function connectHub(url: string, listener: HubListener, dependencies: Hub
       attempt = 0;
       if (missed) {
         missed = false;
-        listener("resync", {});
+        handlers.event("resync", {});
       }
     });
     current.addEventListener("error", () => {
       missed = true;
       if (current.readyState === CLOSED && source === current && !stopped) {
         current.close();
-        timer = dependencies.setTimer(connect, retryDelay(attempt));
-        attempt += 1;
+        void dependencies.sessionEnded().then((ended) => {
+          if (stopped || source !== current) {
+            return;
+          }
+          if (ended) {
+            stopped = true;
+            handlers.signedOut();
+            return;
+          }
+          timer = dependencies.setTimer(connect, retryDelay(attempt));
+          attempt += 1;
+        });
       }
     });
     for (const type of HUB_EVENT_TYPES) {
@@ -98,7 +118,7 @@ export function connectHub(url: string, listener: HubListener, dependencies: Hub
         } catch {
           return;
         }
-        listener(type, data);
+        handlers.event(type, data);
       });
     }
   }

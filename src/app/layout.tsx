@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { authRequired } from "@/auth/settings";
 import { HubStreamProvider } from "@/components/live/HubStream";
+import { SessionEndedBanner } from "@/components/live/SessionEnded";
 import { Sidebar } from "@/components/Sidebar";
 import { SignInBanner } from "@/components/SignInBanner";
 import { currentViewer } from "@/viewer/current";
@@ -24,6 +25,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <HubStreamProvider>
           <div className="flex h-full flex-col">
             {signInDisabled ? <SignInBanner viewer={viewer} /> : null}
+            <SessionEndedBanner />
             <div className="flex min-h-0 flex-1">
               {sidebar && viewer ? <Sidebar data={sidebar} viewer={viewer} signInDisabled={signInDisabled} /> : null}
               <main className="flex min-w-0 flex-1 flex-col">{children}</main>

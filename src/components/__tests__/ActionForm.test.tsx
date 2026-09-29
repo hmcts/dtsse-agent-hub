@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 afterEach(() => {
   cleanup();
   refresh.mockReset();
+  vi.unstubAllGlobals();
 });
 
 async function submit(): Promise<void> {
@@ -75,5 +76,28 @@ describe("ActionForm", () => {
     await submit();
 
     expect(screen.getByRole("alert").textContent).toContain("could not be done");
+  });
+
+  it("should offer to sign in again instead of a failure when the call throws because the session has ended", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 }))
+    );
+    render(
+      <ActionForm
+        action={vi.fn(async () => {
+          throw new Error("An unexpected response was received from the server.");
+        })}
+        label="Grant"
+      >
+        <span />
+      </ActionForm>
+    );
+
+    await submit();
+
+    expect(screen.getByRole("status").textContent).toContain("Your session has ended");
+    expect(screen.getByRole("link", { name: "Sign in again" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

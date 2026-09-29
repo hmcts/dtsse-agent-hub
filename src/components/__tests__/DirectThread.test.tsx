@@ -50,6 +50,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function sessionAnswers(status: number) {
+  const fetch = vi.fn(async () => new Response(null, { status }));
+  vi.stubGlobal("fetch", fetch);
+  return fetch;
+}
+
 describe("mayMessage", () => {
   it.each([
     ["owner", true],
@@ -136,6 +142,24 @@ describe("DirectThread", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toContain("could not be sent");
+  });
+
+  it("should offer to sign in again instead of a failure when the call fails because the session has ended", async () => {
+    const fetch = sessionAnswers(401);
+    const send = vi.fn(async () => {
+      throw new Error("An unexpected response was received from the server.");
+    });
+    render(<DirectThread agentId={AGENT} access="write" initial={[]} send={send} />);
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "hi" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Message this agent" }));
+    });
+
+    expect(fetch).toHaveBeenCalledWith("/api/ui/session", expect.anything());
+    expect(screen.getByRole("status").textContent).toContain("Your session has ended");
+    expect(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href")).toBe("/auth/login?redirect=%2F");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("should not send when the message is only whitespace", async () => {
