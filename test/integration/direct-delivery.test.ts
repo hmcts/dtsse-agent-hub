@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setGrant } from "../../src/access/load.ts";
 import { POST as ack } from "../../src/app/api/agent/[agentId]/deliveries/[messageId]/ack/route.ts";
 import { POST as direct } from "../../src/app/api/agent/[agentId]/direct/route.ts";
@@ -8,6 +8,8 @@ import { GET as agents } from "../../src/app/api/agent/agents/route.ts";
 import { GET as messages } from "../../src/app/api/agent/messages/[id]/route.ts";
 import { createDirect } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
+import { MIN_STREAM_MAX_SECONDS, RECONNECT_AFTER_MS } from "../../src/realtime/sse.ts";
+import { streamLimits } from "../../src/realtime/stream-slots.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
@@ -191,6 +193,36 @@ describe("the agent stream", () => {
     expect((await again.directs(1)).map((event) => event.id)).toEqual([live.id]);
     second.abort.abort();
     await again.cancel();
+  });
+
+  describe("at its lifetime", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("should end with a reconnect event and give its slot back, and the next connection should replay a message sent in between", async () => {
+      vi.stubEnv("STREAM_MAX_SECONDS", String(MIN_STREAM_MAX_SECONDS));
+      await setGrant(prisma, BOB.oid, ALICE.oid, "write");
+      const opened = Date.now();
+      const first = openStream(BOB, bobsAgent);
+      const ended = await frames(await first.response).end();
+      const lastedMs = Date.now() - opened;
+
+      expect(ended[0]).toEqual({ comment: "connected" });
+      expect(ended[1]).toEqual({ retry: String(RECONNECT_AFTER_MS) });
+      expect(ended.at(-1)).toEqual({ event: "reconnect", data: "{}" });
+      expect(lastedMs).toBeGreaterThanOrEqual(MIN_STREAM_MAX_SECONDS * 900);
+      expect(lastedMs).toBeLessThan(MIN_STREAM_MAX_SECONDS * 1000 + 2000);
+      expect(streamLimits().agent.held(BOB.oid)).toBe(0);
+
+      const { message: between } = await jsonOf(await send(ALICE, alicesAgent, { to_agent: bobsAgent, body: "sent between streams" }));
+      const second = openStream(BOB, bobsAgent);
+      const reader = frames(await second.response);
+
+      expect(await reader.directs(1)).toEqual([{ id: between.id, message: expect.objectContaining({ body: "sent between streams" }) }]);
+      second.abort.abort();
+      await reader.cancel();
+    });
   });
 
   it("should not send another agent's direct messages", async () => {

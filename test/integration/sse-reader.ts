@@ -5,6 +5,7 @@ export interface Frame {
   event?: string;
   data?: string;
   comment?: string;
+  retry?: string;
 }
 
 /** Reads SSE frames from a response body as they arrive. */
@@ -13,10 +14,12 @@ export function frames(response: Response) {
   const decoder = new TextDecoder();
   const received: Frame[] = [];
   let buffer = "";
+  let ended = false;
 
   async function pump(): Promise<boolean> {
     const { done, value } = await reader.read();
     if (done) {
+      ended = true;
       return false;
     }
     buffer += decoder.decode(value, { stream: true });
@@ -31,7 +34,7 @@ export function frames(response: Response) {
         } else {
           const [field, ...rest] = line.split(": ");
           const value = rest.join(": ");
-          if (field === "id" || field === "event") {
+          if (field === "id" || field === "event" || field === "retry") {
             frame[field] = value;
           } else if (field === "data") {
             frame.data = frame.data === undefined ? value : `${frame.data}\n${value}`;
@@ -85,6 +88,17 @@ export function frames(response: Response) {
           break;
         }
       }
+    },
+    /** Reads until the server ends the response, failing if it has not within `timeoutMs`. */
+    async end(timeoutMs = 10_000): Promise<Frame[]> {
+      const deadline = Date.now() + timeoutMs;
+      while (!ended) {
+        if (Date.now() > deadline) {
+          throw new Error(`the stream had not ended after ${timeoutMs}ms`);
+        }
+        await Promise.race([pump(), new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 100))]);
+      }
+      return received;
     },
     async cancel(): Promise<void> {
       await reader.cancel().catch(() => undefined);
