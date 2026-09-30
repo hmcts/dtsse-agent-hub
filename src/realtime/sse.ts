@@ -10,19 +10,35 @@ export const SSE_HEADERS: Record<string, string> = {
 
 export const PING_INTERVAL_MS = 15_000;
 
-/**
- * A stream is closed after at most an hour, so a half-open connection gives its slot back and connections rebalance
- * across pods. The jitter
- * spreads the reconnects of streams that opened together, such as after a deploy.
- */
-export const MAX_STREAM_LIFETIME_MS = 60 * 60_000;
-export const STREAM_LIFETIME_JITTER_MS = 5 * 60_000;
+/** Every stream ends within this, because the shared AAT Traefik stops forwarding any response after 30 seconds. */
+export const DEFAULT_STREAM_MAX_SECONDS = 25;
+export const MIN_STREAM_MAX_SECONDS = 5;
 
-/** The reconnect delay a client is told to use when the server ends a stream that reached its lifetime. */
+/** The share of the lifetime a stream may end early by, so streams that opened together do not reconnect together. */
+export const STREAM_LIFETIME_JITTER = 0.1;
+
+/** The reconnect delay a browser is told, at the start of every stream, to use once it ends. */
 export const RECONNECT_AFTER_MS = 1_000;
 
-export function streamLifetimeMs(random: () => number = Math.random): number {
-  return MAX_STREAM_LIFETIME_MS - Math.floor(random() * STREAM_LIFETIME_JITTER_MS);
+/**
+ * `STREAM_MAX_SECONDS`: a positive integer, raised to at least `MIN_STREAM_MAX_SECONDS`. Unset gives the default; any
+ * other value is logged and gives the default too, so a bad setting cannot stop streams working.
+ */
+export function streamMaxSeconds(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  const raw = env.STREAM_MAX_SECONDS?.trim();
+  if (raw === undefined || raw === "") {
+    return DEFAULT_STREAM_MAX_SECONDS;
+  }
+  if (!/^\d+$/.test(raw) || Number(raw) === 0) {
+    console.warn(`STREAM_MAX_SECONDS must be a positive integer, not ${JSON.stringify(raw.slice(0, 32))}; using ${DEFAULT_STREAM_MAX_SECONDS}`);
+    return DEFAULT_STREAM_MAX_SECONDS;
+  }
+  return Math.max(MIN_STREAM_MAX_SECONDS, Number(raw));
+}
+
+export function streamLifetimeMs(maxSeconds: number = streamMaxSeconds(), random: () => number = Math.random): number {
+  const maxMs = maxSeconds * 1000;
+  return maxMs - Math.floor(random() * maxMs * STREAM_LIFETIME_JITTER);
 }
 
 export interface SseFrame {
@@ -78,19 +94,25 @@ export interface StreamOptions {
   onClose?: () => void;
   pingIntervalMs?: number;
   maxLifetimeMs?: number;
+  /** Sent just before the stream ends at its lifetime, so the client can tell a planned close from a failure. */
+  closingFrame?: string;
 }
 
+export const LIFETIME_REACHED = sseComment("lifetime reached");
+
 /**
- * A byte stream that sends `: ping` every interval until the client goes away or the stream reaches its lifetime,
- * then runs the cleanup `onOpen` returned exactly once, whether the request was aborted, the reader cancelled or the
- * server ended it. At the lifetime the client is told to reconnect promptly, and the stream closes cleanly.
+ * A byte stream that opens by telling the client to reconnect `RECONNECT_AFTER_MS` after it ends, then sends `: ping`
+ * every interval until the client goes away or the stream reaches its lifetime. It runs the cleanup `onOpen` returned
+ * exactly once, whether the request was aborted, the reader cancelled or the server ended it. At the lifetime it sends
+ * `closingFrame` and closes cleanly.
  */
 export function openSseStream({
   signal,
   onOpen,
   onClose,
   pingIntervalMs = PING_INTERVAL_MS,
-  maxLifetimeMs = streamLifetimeMs()
+  maxLifetimeMs = streamLifetimeMs(),
+  closingFrame = LIFETIME_REACHED
 }: StreamOptions): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let closed = false;
@@ -147,12 +169,12 @@ export function openSseStream({
       }
       signal.addEventListener("abort", close);
       lifetime = setTimeout(() => {
-        send(sseRetry(RECONNECT_AFTER_MS));
-        send(sseComment("lifetime reached"));
+        send(closingFrame);
         close();
       }, maxLifetimeMs);
       // An initial comment so the client and every proxy on the way see the response begin immediately.
       send(sseComment("connected"));
+      send(sseRetry(RECONNECT_AFTER_MS));
       let opened: () => void;
       try {
         opened = await onOpen(send, fail);

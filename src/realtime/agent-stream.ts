@@ -12,6 +12,9 @@ export interface AgentStreamSources {
   queuedOne: (messageId: bigint) => Promise<ApiMessage | undefined>;
 }
 
+/** Ends every agent stream that reaches its lifetime: the client reconnects at once, and the replay resends anything unacked. */
+export const RECONNECT_FRAME = sseEvent({ event: "reconnect", data: "{}" });
+
 export function directFrame(message: ApiMessage): string {
   return sseEvent({ id: message.id, event: "direct", data: JSON.stringify({ message }) });
 }

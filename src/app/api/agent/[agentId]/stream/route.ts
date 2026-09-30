@@ -1,7 +1,7 @@
 import { HttpError } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
 import { queuedDeliveries, queuedDelivery } from "@/messages/store";
-import { agentStream } from "@/realtime/agent-stream";
+import { agentStream, RECONNECT_FRAME } from "@/realtime/agent-stream";
 import { realtime } from "@/realtime/process";
 import { openSseStream, SSE_HEADERS } from "@/realtime/sse";
 import { streamLimits } from "@/realtime/stream-slots";
@@ -24,6 +24,7 @@ export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
   const body = openSseStream({
     signal: request.signal,
     onClose: release,
+    closingFrame: RECONNECT_FRAME,
     onOpen: agentStream(agent.id, {
       hub,
       ready: listener.ready,

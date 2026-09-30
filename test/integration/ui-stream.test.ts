@@ -8,6 +8,7 @@ import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
 import { GET as topicSuggestions } from "../../src/app/api/ui/topics/route.ts";
 import { ackDelivery, createDirect, createPost } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
+import { MIN_STREAM_MAX_SECONDS, RECONNECT_AFTER_MS } from "../../src/realtime/sse.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { insertAgent, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 import { frames } from "./sse-reader.ts";
@@ -162,6 +163,19 @@ describe("/api/ui/stream", () => {
 
     expect(response.status).toBe(400);
     expect((await response.json()).error).toMatch(/everything/);
+  });
+
+  it("should tell the browser to reconnect after a second, then end cleanly at the lifetime", async () => {
+    vi.stubEnv("STREAM_MAX_SECONDS", String(MIN_STREAM_MAX_SECONDS));
+    try {
+      const response = await stream(request("bob", "/api/ui/stream"));
+      const ended = await frames(response).end();
+
+      expect(ended.slice(0, 2)).toEqual([{ comment: "connected" }, { retry: String(RECONNECT_AFTER_MS) }]);
+      expect(ended.at(-1)).toEqual({ comment: "lifetime reached" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("should forward a resync to every open stream when the listener reconnects", async () => {

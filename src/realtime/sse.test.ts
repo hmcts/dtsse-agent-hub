@@ -1,17 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_STREAM_MAX_SECONDS,
   type Fail,
-  MAX_STREAM_LIFETIME_MS,
+  MIN_STREAM_MAX_SECONDS,
   openSseStream,
   PING_INTERVAL_MS,
   RECONNECT_AFTER_MS,
   type Send,
-  STREAM_LIFETIME_JITTER_MS,
   sseComment,
   sseEvent,
   sseRetry,
-  streamLifetimeMs
+  streamLifetimeMs,
+  streamMaxSeconds
 } from "./sse.ts";
+
+const OPENING = `: connected\n\nretry: ${RECONNECT_AFTER_MS}\n\n`;
 
 describe("sseEvent", () => {
   it("should frame an id, an event name and data, ending with a blank line", () => {
@@ -46,20 +49,50 @@ describe("sseRetry", () => {
   });
 });
 
-describe("streamLifetimeMs", () => {
-  it.each([
-    [0, MAX_STREAM_LIFETIME_MS],
-    [0.5, MAX_STREAM_LIFETIME_MS - STREAM_LIFETIME_JITTER_MS / 2],
-    [0.999_999, MAX_STREAM_LIFETIME_MS - STREAM_LIFETIME_JITTER_MS + 1]
-  ])("should stay within the jitter below the maximum when random gives %s", (random, expected) => {
-    expect(streamLifetimeMs(() => random)).toBe(expected);
+describe("streamMaxSeconds", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it("should use Math.random when no source is given", () => {
+  it.each([
+    ["unset", undefined, DEFAULT_STREAM_MAX_SECONDS],
+    ["empty", " ", DEFAULT_STREAM_MAX_SECONDS],
+    ["a positive integer", "20", 20],
+    ["padded", " 12 ", 12],
+    ["below the minimum", "2", MIN_STREAM_MAX_SECONDS]
+  ])("should give the right number of seconds when STREAM_MAX_SECONDS is %s", (_label, value, expected) => {
+    expect(streamMaxSeconds({ STREAM_MAX_SECONDS: value })).toBe(expected);
+  });
+
+  it.each([["0"], ["-5"], ["1.5"], ["ten"], ["20s"]])("should log and use the default when STREAM_MAX_SECONDS is %s", (value) => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(streamMaxSeconds({ STREAM_MAX_SECONDS: value })).toBe(DEFAULT_STREAM_MAX_SECONDS);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("STREAM_MAX_SECONDS must be a positive integer"));
+  });
+
+  it("should read the process environment when none is given", () => {
+    vi.stubEnv("STREAM_MAX_SECONDS", "17");
+
+    expect(streamMaxSeconds()).toBe(17);
+    vi.unstubAllEnvs();
+  });
+});
+
+describe("streamLifetimeMs", () => {
+  it.each([
+    [0, 20_000],
+    [0.5, 19_000],
+    [0.999_999, 18_001]
+  ])("should stay within a tenth below the maximum when random gives %s", (random, expected) => {
+    expect(streamLifetimeMs(20, () => random)).toBe(expected);
+  });
+
+  it("should default to the configured maximum and Math.random when nothing is given", () => {
     const lifetime = streamLifetimeMs();
 
-    expect(lifetime).toBeLessThanOrEqual(MAX_STREAM_LIFETIME_MS);
-    expect(lifetime).toBeGreaterThan(MAX_STREAM_LIFETIME_MS - STREAM_LIFETIME_JITTER_MS);
+    expect(lifetime).toBeLessThanOrEqual(DEFAULT_STREAM_MAX_SECONDS * 1000);
+    expect(lifetime).toBeGreaterThan(DEFAULT_STREAM_MAX_SECONDS * 900);
   });
 });
 
@@ -99,7 +132,8 @@ describe("openSseStream", () => {
       onOpen: (send) => {
         send(sseEvent({ id: "1", event: "direct", data: "{}" }));
         return cleanup;
-      }
+      },
+      maxLifetimeMs: PING_INTERVAL_MS * 3
     });
     const text = readAll(stream);
     await flush();
@@ -107,7 +141,7 @@ describe("openSseStream", () => {
     await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS * 2);
     abort.abort();
 
-    expect(await text).toBe(": connected\n\nid: 1\nevent: direct\ndata: {}\n\n: ping\n\n: ping\n\n");
+    expect(await text).toBe(`${OPENING}id: 1\nevent: direct\ndata: {}\n\n: ping\n\n: ping\n\n`);
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
@@ -120,7 +154,7 @@ describe("openSseStream", () => {
     abort.abort();
     await vi.advanceTimersByTimeAsync(5000);
 
-    expect(await text).toBe(": connected\n\n");
+    expect(await text).toBe(OPENING);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -154,7 +188,7 @@ describe("openSseStream", () => {
     abort.abort();
     send(sseEvent({ data: "late" }));
 
-    expect(await text).toBe(": connected\n\n");
+    expect(await text).toBe(OPENING);
   });
 
   it("should close immediately and never call onOpen when the request was already aborted", async () => {
@@ -178,7 +212,7 @@ describe("openSseStream", () => {
     resolve(cleanup);
     await flush();
 
-    expect(await text).toBe(": connected\n\n");
+    expect(await text).toBe(OPENING);
     expect(cleanup).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -193,7 +227,7 @@ describe("openSseStream", () => {
       }
     });
 
-    expect(await readAll(stream)).toBe(": connected\n\n");
+    expect(await readAll(stream)).toBe(OPENING);
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("no database"));
   });
 
@@ -221,7 +255,7 @@ describe("openSseStream", () => {
     abort.abort();
     await vi.advanceTimersByTimeAsync(5000);
 
-    expect(await text).toBe(": connected\n\n");
+    expect(await text).toBe(OPENING);
     expect(cleanup).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
     expect(console.warn).toHaveBeenCalledOnce();
@@ -243,7 +277,7 @@ describe("openSseStream", () => {
       onClose
     });
 
-    expect(await readAll(stream)).toBe(": connected\n\n");
+    expect(await readAll(stream)).toBe(OPENING);
     expect(cleanup).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("not listening"));
@@ -259,7 +293,7 @@ describe("openSseStream", () => {
 
     await vi.advanceTimersByTimeAsync(2500);
 
-    expect(await text).toBe(`: connected\n\n: ping\n\n: ping\n\nretry: ${RECONNECT_AFTER_MS}\n\n: lifetime reached\n\n`);
+    expect(await text).toBe(`${OPENING}: ping\n\n: ping\n\n: lifetime reached\n\n`);
     expect(cleanup).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
@@ -283,18 +317,36 @@ describe("openSseStream", () => {
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
-  it("should default the lifetime to within the jitter below the maximum when none is given", async () => {
+  it("should send the closing frame given, then clean up as on abort, when the stream reaches its lifetime", async () => {
+    const abort = new AbortController();
+    const cleanup = vi.fn();
+    const onClose = vi.fn();
+    const closingFrame = sseEvent({ event: "reconnect", data: "{}" });
+    const stream = openSseStream({ signal: abort.signal, onOpen: () => cleanup, onClose, maxLifetimeMs: 5000, closingFrame });
+    const text = readAll(stream);
+    await flush();
+
+    await vi.advanceTimersByTimeAsync(5000);
+    abort.abort();
+
+    expect(await text).toBe(`${OPENING}event: reconnect\ndata: {}\n\n`);
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("should end within the default maximum, after one ping, when no lifetime is given", async () => {
     const abort = new AbortController();
     const onClose = vi.fn();
     const stream = openSseStream({ signal: abort.signal, onOpen: () => () => undefined, onClose });
     const text = readAll(stream);
     await flush();
 
-    await vi.advanceTimersByTimeAsync(MAX_STREAM_LIFETIME_MS - STREAM_LIFETIME_JITTER_MS);
+    await vi.advanceTimersByTimeAsync(DEFAULT_STREAM_MAX_SECONDS * 900);
     expect(onClose).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(STREAM_LIFETIME_JITTER_MS);
+    await vi.advanceTimersByTimeAsync(DEFAULT_STREAM_MAX_SECONDS * 100);
 
-    expect(await text).toContain(": lifetime reached");
+    expect(await text).toBe(`${OPENING}: ping\n\n: lifetime reached\n\n`);
     expect(onClose).toHaveBeenCalledOnce();
   });
 

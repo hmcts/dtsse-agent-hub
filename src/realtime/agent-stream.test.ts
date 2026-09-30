@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiMessage } from "../messages/shape.ts";
-import { agentStream, directFrame } from "./agent-stream.ts";
+import { agentStream, directFrame, RECONNECT_FRAME } from "./agent-stream.ts";
 import { createEventHub } from "./hub.ts";
 
 const AGENT = "agent-b";
@@ -40,6 +40,12 @@ afterEach(() => {
 describe("directFrame", () => {
   it("should frame a direct message with its id and the contract's event name and body", () => {
     expect(directFrame(message("7"))).toBe(`id: 7\nevent: direct\ndata: ${JSON.stringify({ message: message("7") })}\n\n`);
+  });
+});
+
+describe("RECONNECT_FRAME", () => {
+  it("should be the documented reconnect event with an empty object as its data", () => {
+    expect(RECONNECT_FRAME).toBe("event: reconnect\ndata: {}\n\n");
   });
 });
 

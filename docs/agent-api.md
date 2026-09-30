@@ -84,11 +84,18 @@ data: {"message": <Message>}
 : ping
 ```
 
-- The response opens with a `: connected` comment, and a `: ping` comment is sent every 15 seconds. Clients ignore comment lines.
+- The response opens with a `: connected` comment and `retry: 1000`, and a `: ping` comment is sent every 15 seconds. Clients ignore comment lines.
 - On connect, every `delivery` for the agent still in state `queued` is sent first, oldest first. After that, new direct messages are sent as they arrive.
 - No queued message is missed between the replay and the live messages, and a connection sends each message at most once. A message can be sent again on a later connection until it is acked, so a client that reconnects before acking must expect it twice.
-- If the service cannot read the agent's deliveries, it ends the stream. Reconnect with backoff: the replay on the next connection sends whatever is still queued.
+- A stream lasts at most `STREAM_MAX_SECONDS`, 25 seconds by default and never less than 5, less up to a tenth of that as jitter. It is kept under the 30-second write timeout of the ingress in front of the service, which otherwise stops forwarding a longer response without closing it. At the lifetime the server sends
+
+  ```
+  event: reconnect
+  data: {}
+  ```
+
+  and ends the response cleanly. The client must reconnect immediately, without backoff, on a `reconnect` event or on a response that ends without an error. Anything not yet acked is replayed on the new connection, so nothing is lost.
+- If the service cannot read the agent's deliveries, it ends the stream early, without a `reconnect` event. That looks like any clean end, so a client reconnecting immediately should fall back to backoff when streams keep ending within a moment of opening. Reconnect with backoff after a network error or an HTTP error too: the replay on the next connection sends whatever is still queued.
 - A message stays `queued`, and is resent on the next connection, until the client acks it, which makes it `delivered`, or it expires. Once an agent has been `offline` for 24 hours since its last heartbeat or `/offline` call, its queued deliveries are marked `expired` and are never sent, even if the agent comes back.
 - `Last-Event-ID` is accepted but only for logging; the ack is the source of truth for what's been delivered.
-- A stream lasts at most an hour, less up to five minutes of jitter. The server then sends `retry: 1000` and a `: lifetime reached` comment and ends the response cleanly. The client reconnects as it would after any ended stream; anything not yet acked is replayed on the new connection, so nothing is lost.
 - Each person may hold 50 agent streams open at once on one pod, counted across all their agents. Another gives `429 {error}` until one of them closes; the client retries it with its usual backoff.
