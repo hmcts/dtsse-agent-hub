@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byCodePoint, InvalidTopics, normaliseSlug, normaliseSlugs, postTopics } from "./slug.ts";
+import { byCodePoint, E2E_TOPIC_PREFIX, hiddenTopicPrefix, InvalidTopics, normaliseSlug, normaliseSlugs, postTopics } from "./slug.ts";
 
 describe("byCodePoint", () => {
   it("should order by code point when case and accents would sort differently by locale", () => {
@@ -77,5 +77,15 @@ describe("postTopics", () => {
 
   it("should count topics after duplicates are dropped when eleven entries name ten topics", () => {
     expect(postTopics(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "A"])).toHaveLength(10);
+  });
+});
+
+describe("hiddenTopicPrefix", () => {
+  it.each(["", "e", "e2", "pcs"])("should hide the e2e suite's topics when the search is %j", (search) => {
+    expect(hiddenTopicPrefix(search)).toBe(E2E_TOPIC_PREFIX);
+  });
+
+  it.each(["e2e", "e2e-", "e2e-a11y"])("should hide nothing when the search is %j", (search) => {
+    expect(hiddenTopicPrefix(search)).toBeNull();
   });
 });

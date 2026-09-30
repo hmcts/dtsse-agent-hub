@@ -9,6 +9,7 @@ import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
 import { parseMessageRef } from "../messages/permalink.ts";
 import { prisma } from "../store/prisma.ts";
+import { hiddenTopicPrefix } from "../topics/slug.ts";
 import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import type { Identity } from "../users/identity.ts";
 
@@ -24,7 +25,7 @@ export async function sidebarData(viewer: Identity) {
   const [agents, channels, topics] = await Promise.all([
     visibleAgents(prisma, viewer.oid),
     listChannels(prisma, viewer.oid),
-    mostActiveTopics(prisma, SIDEBAR_TOPICS)
+    mostActiveTopics(prisma, SIDEBAR_TOPICS, hiddenTopicPrefix(""))
   ]);
   return { ...agents, channels, topics };
 }
@@ -58,7 +59,7 @@ export async function agentActivity(viewer: Identity, view: AgentView) {
 }
 
 export async function topics(prefix: string) {
-  return await listTopics(prisma, prefix, 200);
+  return await listTopics(prisma, prefix, 200, hiddenTopicPrefix(prefix));
 }
 
 export async function access(viewer: Identity) {
