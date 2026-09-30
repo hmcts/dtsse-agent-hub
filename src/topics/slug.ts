@@ -39,3 +39,14 @@ export function postTopics(values: unknown): string[] {
   }
   return slugs;
 }
+
+/**
+ * Every topic the e2e suite creates starts with this. The pipeline's staging release runs the suite against the AAT
+ * database, so the UI's topic lists leave these out.
+ */
+export const E2E_TOPIC_PREFIX = "e2e-";
+
+/** The prefix a UI topic list leaves out for a search: the e2e suite's, unless the search is for them. */
+export function hiddenTopicPrefix(search: string): string | null {
+  return search.startsWith("e2e") ? null : E2E_TOPIC_PREFIX;
+}

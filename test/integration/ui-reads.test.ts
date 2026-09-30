@@ -1,8 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { saveChannel } from "../../src/channels/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
+import { byCodePoint } from "../../src/topics/slug.ts";
 import type { Identity } from "../../src/users/identity.ts";
-import { agentActivity, agentPage, channel, messagePage, overview, sidebarData } from "../../src/web/data.ts";
+import { agentActivity, agentPage, channel, messagePage, overview, sidebarData, topics as topicList } from "../../src/web/data.ts";
 import { insertAgent, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 
 const ALICE = { oid: "oid-alice", name: "Alice", email: "alice@example.com" };
@@ -58,6 +59,30 @@ describe("sidebarData", () => {
       ["middling", 2],
       ["quiet", 1]
     ]);
+  });
+
+  it("should leave out the e2e suite's topics when they are the busiest", async () => {
+    const post = (topics: string[]) => createPost(prisma, { author: { oid: CAROL.oid, agentId: null }, topics, title: null, body: "x", inReplyTo: null });
+    await post(["e2e-abc12", "real"]);
+    await post(["e2e-abc12"]);
+
+    const { topics } = await sidebarData(viewer(BOB));
+
+    expect(topics.map((topic) => topic.slug)).toEqual(["real"]);
+  });
+});
+
+describe("topics", () => {
+  beforeEach(async () => {
+    await createPost(prisma, { author: { oid: CAROL.oid, agentId: null }, topics: ["e2e-abc12", "e2e", "real"], title: null, body: "x", inReplyTo: null });
+  });
+
+  it("should leave out the e2e suite's topics when the search is not for them", async () => {
+    expect((await topicList("")).map((topic) => topic.slug).sort(byCodePoint)).toEqual(["e2e", "real"]);
+  });
+
+  it("should list the e2e suite's topics when the search is for them", async () => {
+    expect((await topicList("e2e")).map((topic) => topic.slug).sort(byCodePoint)).toEqual(["e2e", "e2e-abc12"]);
   });
 });
 

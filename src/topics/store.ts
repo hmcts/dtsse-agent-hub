@@ -47,16 +47,21 @@ export interface TopicSummary {
 export const DEFAULT_TOPIC_LIMIT = 50;
 export const MAX_TOPIC_LIMIT = 200;
 
+function prefixPattern(prefix: string): string {
+  return `${prefix.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
+}
+
 /**
- * Topics whose slug starts with `prefix`, most recently active first; never-posted topics last. Only the topics on
- * the page are counted.
+ * Topics whose slug starts with `prefix` and not with `hidden`, most recently active first; never-posted topics last.
+ * Only the topics on the page are counted.
  */
-export async function listTopics(db: Database, prefix: string, limit: number): Promise<TopicSummary[]> {
-  const pattern = `${prefix.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
+export async function listTopics(db: Database, prefix: string, limit: number, hidden: string | null = null): Promise<TopicSummary[]> {
+  const pattern = prefixPattern(prefix);
+  const hiddenPattern = hidden === null ? null : prefixPattern(hidden);
   const rows = await db.$queryRaw<{ slug: string; message_count: bigint; last_message_at: Date | null }[]>`
     SELECT t.slug, (SELECT count(*) FROM message_topic mt WHERE mt.topic_id = t.id) AS message_count, t.last_message_at
     FROM topic t
-    WHERE t.slug LIKE ${pattern}
+    WHERE t.slug LIKE ${pattern} AND (${hiddenPattern}::text IS NULL OR t.slug NOT LIKE ${hiddenPattern})
     ORDER BY t.last_message_at DESC NULLS LAST, t.slug
     LIMIT ${limit}
   `;
@@ -71,12 +76,13 @@ export const ACTIVE_WINDOW_DAYS = 7;
 
 /**
  * The topics with the most posts in the last `ACTIVE_WINDOW_DAYS`, busiest first, ties broken by the latest post. A
- * topic with no posts in the window is left out, however many it had before.
+ * topic with no posts in the window is left out, however many it had before, as is one whose slug starts with `hidden`.
  *
  * The window's posts come from `message_post_created_at_idx`. The bound on `mt.message_id` never excludes one of them,
  * but lets `message_topic` be read from its primary key starting at the window rather than scanned whole.
  */
-export async function mostActiveTopics(db: Database, limit: number): Promise<TopicSummary[]> {
+export async function mostActiveTopics(db: Database, limit: number, hidden: string | null = null): Promise<TopicSummary[]> {
+  const hiddenPattern = hidden === null ? null : prefixPattern(hidden);
   const rows = await db.$queryRaw<{ slug: string; message_count: bigint; last_message_at: Date | null }[]>`
     WITH recent AS (
       SELECT id FROM message WHERE kind = 'post' AND created_at > now() - make_interval(days => ${ACTIVE_WINDOW_DAYS}::int)
@@ -85,6 +91,7 @@ export async function mostActiveTopics(db: Database, limit: number): Promise<Top
     FROM recent m
     JOIN message_topic mt ON mt.message_id = m.id AND mt.message_id >= (SELECT min(id) FROM recent)
     JOIN topic t ON t.id = mt.topic_id
+    WHERE ${hiddenPattern}::text IS NULL OR t.slug NOT LIKE ${hiddenPattern}
     GROUP BY t.id
     ORDER BY count(*) DESC, t.last_message_at DESC NULLS LAST, t.slug
     LIMIT ${limit}
