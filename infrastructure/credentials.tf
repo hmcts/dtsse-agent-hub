@@ -32,8 +32,9 @@ resource "azurerm_key_vault" "credentials" {
 
   rbac_authorization_enabled = true
 
-  # A credential the owner deletes should be gone, not recoverable for 90 days: the hub purges on delete.
-  purge_protection_enabled   = false
+  # A deleted credential stays soft-deleted, recoverable only by the hub's identity, for the shortest retention Azure
+  # allows. Saving one again while it is soft-deleted means recovering it first.
+  purge_protection_enabled   = true
   soft_delete_retention_days = 7
 }
 
