@@ -166,6 +166,13 @@ on the compose server, creating it if it is missing, and leaves `yarn dev`'s `ag
   `version` with any `values.yaml` change.
 - **Database**: the `dts-agent-hub` Postgres flexible server in `infrastructure/`, which writes its connection
   details to the `dtsse-{env}` vault as `agent-hub-postgres-host`, `-port`, `-user`, `-password` and `-database`.
+- **Credentials vault** (AAT only): `dtsse-ah-creds-{env}` and the hub's own identity `dtsse-agent-hub-{env}-mi`, in
+  `infrastructure/credentials.tf`. It holds each person's virtual-agent credentials, so it is RBAC-only and the hub's
+  identity is the only principal with data-plane access. It is not built with `cnp-module-key-vault`, which grants
+  the developers group read access outside production. Purge protection is on with 7-day soft delete, so a
+  deleted credential is recoverable by the hub's identity for a week and then gone. Its URL is written to `dtsse-{env}` as
+  `agent-hub-credentials-vault-url`. Nothing uses it until the chart moves to the `dtsse-agent-hub` ServiceAccount,
+  whose federated credentials live in cnp-flux-config.
 
 **The pipeline library is pinned** to `Infrastructure@DTSPO-35113/master` in `Jenkinsfile_CNP`, the same ref
 dtsse-github-metrics uses. The library's `master` resolves the Postgres Entra administrator
