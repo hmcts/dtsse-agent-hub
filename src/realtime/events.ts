@@ -19,6 +19,8 @@ export type HubEvent =
   | { type: "delivery"; message_id: string; agent_id: string; state: DeliveredState }
   /** `owner_oid`'s grant to `grantee_oid` was set, changed or revoked, so which agents the grantee may see changed. */
   | { type: "grant"; owner_oid: string; grantee_oid: string }
+  /** New entries in an agent's transcript, the newest `last_id`, so a UI showing its conversation can read them. */
+  | { type: "transcript"; agent_id: string; owner_oid: string; last_id: string }
   /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
@@ -74,6 +76,10 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
         : undefined;
     case "grant":
       return isId(event.owner_oid) && isId(event.grantee_oid) ? { type: "grant", owner_oid: event.owner_oid, grantee_oid: event.grantee_oid } : undefined;
+    case "transcript":
+      return isId(event.agent_id) && isId(event.owner_oid) && isId(event.last_id)
+        ? { type: "transcript", agent_id: event.agent_id, owner_oid: event.owner_oid, last_id: event.last_id }
+        : undefined;
     default:
       return undefined;
   }

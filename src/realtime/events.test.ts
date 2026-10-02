@@ -9,7 +9,8 @@ describe("encodeEvent and decodeEvent", () => {
     { type: "direct", message_id: "15", target_agent_id: "agent-b", author_agent_id: null },
     { type: "agent_status", agent_id: "agent-a", owner_oid: "oid-a", status: "offline" },
     { type: "delivery", message_id: "16", agent_id: "agent-b", state: "delivered" },
-    { type: "grant", owner_oid: "oid-a", grantee_oid: "oid-b" }
+    { type: "grant", owner_oid: "oid-a", grantee_oid: "oid-b" },
+    { type: "transcript", agent_id: "agent-a", owner_oid: "oid-a", last_id: "17" }
   ])("should carry a $type event across unchanged", (event) => {
     expect(decodeEvent(encodeEvent(event))).toEqual(event);
   });
@@ -32,7 +33,9 @@ describe("encodeEvent and decodeEvent", () => {
     ["a status without an owner", JSON.stringify({ type: "agent_status", agent_id: "a", status: "idle" })],
     ["a delivery back to queued", JSON.stringify({ type: "delivery", message_id: "1", agent_id: "a", state: "queued" })],
     ["a delivery without an agent", JSON.stringify({ type: "delivery", message_id: "1", state: "delivered" })],
-    ["a grant without a grantee", JSON.stringify({ type: "grant", owner_oid: "o" })]
+    ["a grant without a grantee", JSON.stringify({ type: "grant", owner_oid: "o" })],
+    ["a transcript without its last id", JSON.stringify({ type: "transcript", agent_id: "a", owner_oid: "o" })],
+    ["a transcript without an owner", JSON.stringify({ type: "transcript", agent_id: "a", last_id: "1" })]
   ])("should ignore %s", (_label, payload) => {
     expect(decodeEvent(payload)).toBeUndefined();
   });

@@ -41,6 +41,38 @@ export async function registerAgent(request: APIRequestContext, persona: string,
   return ((await response.json()) as { agent_id: string }).agent_id;
 }
 
+export interface TranscriptEntry {
+  key: string;
+  role: "user" | "assistant" | "tool_use" | "tool_result" | "system";
+  content: Record<string, unknown>;
+  truncated?: boolean;
+  redacted?: boolean;
+  message_id?: string | null;
+  occurred_at: string;
+}
+
+/** Uploads transcript entries for an agent `registerAgent` made, and returns how many were new. */
+export async function uploadTranscript(request: APIRequestContext, persona: string, agentId: string, entries: TranscriptEntry[]): Promise<number> {
+  const response = await request.post(`/api/agent/${agentId}/transcript`, {
+    headers: { "x-dev-user": devUser(persona) },
+    data: { session_id: unique("e2e-session"), entries }
+  });
+  expect(response.status()).toBe(200);
+  return ((await response.json()) as { accepted: number }).accepted;
+}
+
+/** A small conversation with every kind of entry the page renders, keyed under `prefix`. */
+export function sampleTranscript(prefix: string): TranscriptEntry[] {
+  const at = (seconds: number) => new Date(Date.now() - 60_000 + seconds * 1000).toISOString();
+  return [
+    { key: `${prefix}:1`, role: "user", content: { text: "Please run the unit tests" }, occurred_at: at(0) },
+    { key: `${prefix}:2`, role: "tool_use", content: { id: "t1", name: "Bash", input: { command: "yarn test" } }, occurred_at: at(1) },
+    { key: `${prefix}:3`, role: "tool_result", content: { tool_use_id: "t1", output: "1 failed\n".repeat(3), is_error: true }, occurred_at: at(2) },
+    { key: `${prefix}:4`, role: "tool_use", redacted: true, content: { id: "t2", name: "Read", redacted: "AKIA[0-9A-Z]{16}" }, occurred_at: at(3) },
+    { key: `${prefix}:5`, role: "assistant", content: { text: "One test **failed**; fixing it now." }, truncated: true, occurred_at: at(4) }
+  ];
+}
+
 /** Builds a channel through the builder and returns its URL. */
 export async function buildChannel(page: Page, name: string, topics: string[]): Promise<string> {
   await page.goto("/channels/new");

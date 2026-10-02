@@ -8,6 +8,7 @@ import {
   canPersonMessageAgent,
   canReadMessage,
   canViewAgent,
+  canViewTranscript,
   type Grant,
   grantLevel,
   type MessageRef,
@@ -44,6 +45,7 @@ const ROLES: Record<Role, string> = {
 
 interface Expectation {
   viewAgent: boolean;
+  viewTranscript: boolean;
   messageAsPerson: boolean;
   messageAsAgent: boolean;
   readDirect: boolean;
@@ -51,10 +53,10 @@ interface Expectation {
 }
 
 const MATRIX: Record<Role, Expectation> = {
-  owner: { viewAgent: true, messageAsPerson: true, messageAsAgent: true, readDirect: true, manageGrants: true },
-  "read grantee": { viewAgent: true, messageAsPerson: false, messageAsAgent: false, readDirect: true, manageGrants: false },
-  "write grantee": { viewAgent: true, messageAsPerson: true, messageAsAgent: true, readDirect: true, manageGrants: false },
-  stranger: { viewAgent: false, messageAsPerson: false, messageAsAgent: false, readDirect: false, manageGrants: false }
+  owner: { viewAgent: true, viewTranscript: true, messageAsPerson: true, messageAsAgent: true, readDirect: true, manageGrants: true },
+  "read grantee": { viewAgent: true, viewTranscript: true, messageAsPerson: false, messageAsAgent: false, readDirect: true, manageGrants: false },
+  "write grantee": { viewAgent: true, viewTranscript: true, messageAsPerson: true, messageAsAgent: true, readDirect: true, manageGrants: false },
+  stranger: { viewAgent: false, viewTranscript: false, messageAsPerson: false, messageAsAgent: false, readDirect: false, manageGrants: false }
 };
 
 /** A direct message from a third party's agent to the owner's agent. */
@@ -65,6 +67,10 @@ describe.each(Object.entries(MATRIX) as [Role, Expectation][])("access for the %
 
   it(`should ${expected.viewAgent ? "" : "not "}show the agent when the viewer is the ${role}`, () => {
     expect(canViewAgent(oid, TARGET, GRANTS)).toBe(expected.viewAgent);
+  });
+
+  it(`should ${expected.viewTranscript ? "" : "not "}show the agent's transcript when the viewer is the ${role}`, () => {
+    expect(canViewTranscript(oid, TARGET, GRANTS)).toBe(expected.viewTranscript);
   });
 
   it(`should ${expected.messageAsPerson ? "" : "not "}let a person message the agent when they are the ${role}`, () => {

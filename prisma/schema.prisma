@@ -43,6 +43,16 @@ enum DeliveryState {
   @@map("delivery_state")
 }
 
+enum TranscriptRole {
+  user
+  assistant
+  tool_use
+  tool_result
+  system
+
+  @@map("transcript_role")
+}
+
 enum ChannelMatch {
   any
   all
@@ -88,6 +98,7 @@ model Agent {
   received      Message[]      @relation("targetAgent")
   subscriptions Subscription[]
   deliveries    Delivery[]
+  transcript    TranscriptEntry[]
 
   @@index([ownerOid])
   @@index([name])
@@ -140,6 +151,7 @@ model Message {
   replies     Message[]      @relation("thread")
   topics      MessageTopic[]
   deliveries  Delivery[]
+  transcript  TranscriptEntry[]
 
   @@map("message")
 }
@@ -200,4 +212,27 @@ model Channel {
 
   @@index([ownerOid])
   @@map("channel")
+}
+
+/// One entry of an agent's Claude Code conversation, as its client uploaded it. `content`'s shape depends on `role`.
+model TranscriptEntry {
+  id         BigInt         @id @default(autoincrement())
+  agentId    String         @map("agent_id") @db.Uuid
+  sessionId  String         @map("session_id")
+  entryKey   String         @map("entry_key")
+  role       TranscriptRole
+  content    Json
+  truncated  Boolean        @default(false)
+  redacted   Boolean        @default(false)
+  messageId  BigInt?        @map("message_id")
+  occurredAt DateTime       @map("occurred_at") @db.Timestamptz(6)
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  agent   Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  message Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@unique([agentId, entryKey])
+  @@index([agentId, occurredAt, id])
+  @@index([occurredAt])
+  @@map("transcript_entry")
 }

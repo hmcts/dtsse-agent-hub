@@ -4,13 +4,14 @@ import { canReadMessage } from "../access/rules.ts";
 import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
-import { agentThread, type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
+import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
 import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
 import { parseMessageRef } from "../messages/permalink.ts";
 import { prisma } from "../store/prisma.ts";
 import { hiddenTopicPrefix } from "../topics/slug.ts";
 import { listTopics, mostActiveTopics } from "../topics/store.ts";
+import { agentConversation } from "../transcripts/views.ts";
 import type { Identity } from "../users/identity.ts";
 
 /**
@@ -54,8 +55,9 @@ export async function agentPage(viewer: Identity, id: string): Promise<AgentView
 
 /** The rest of an agent's page, which it streams in once `agentPage` has decided the viewer may see the agent. */
 export async function agentActivity(viewer: Identity, view: AgentView) {
-  const [thread, posts] = await Promise.all([agentThread(prisma, viewer.oid, view.agent.id, view.grants), agentPosts(prisma, view.agent.id, 20)]);
-  return { thread, posts };
+  const agent = { id: view.agent.id, ownerOid: view.agent.owner.oid };
+  const [conversation, posts] = await Promise.all([agentConversation(prisma, viewer.oid, agent, view.grants), agentPosts(prisma, view.agent.id, 20)]);
+  return { conversation, posts };
 }
 
 export async function topics(prefix: string) {
