@@ -67,10 +67,23 @@ export async function loadThreadMessage(db: Database, id: bigint): Promise<Loade
 
 export const THREAD_LIMIT = 100;
 
-/** The latest direct messages in the agent's thread that the viewer may read, oldest first. */
-export async function agentThread(db: Database, viewerOid: string, agentId: string, grants: readonly Grant[]): Promise<ThreadMessage[]> {
+/** Bounds on when a thread's messages were sent: from `since` inclusive, before `until`. */
+export interface ThreadWindow {
+  since?: Date;
+  until?: Date;
+}
+
+/** The latest direct messages in the agent's thread that the viewer may read, within `window`, oldest first. */
+export async function agentThread(
+  db: Database,
+  viewerOid: string,
+  agentId: string,
+  grants: readonly Grant[],
+  window: ThreadWindow = {}
+): Promise<ThreadMessage[]> {
+  const createdAt = { ...(window.since === undefined ? {} : { gte: window.since }), ...(window.until === undefined ? {} : { lt: window.until }) };
   const rows = await db.message.findMany({
-    where: { kind: "direct", OR: [{ targetAgentId: agentId }, { authorAgentId: agentId }] },
+    where: { kind: "direct", OR: [{ targetAgentId: agentId }, { authorAgentId: agentId }], ...(Object.keys(createdAt).length === 0 ? {} : { createdAt }) },
     select: SELECT,
     orderBy: { id: "desc" },
     take: THREAD_LIMIT

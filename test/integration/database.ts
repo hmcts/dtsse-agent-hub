@@ -5,7 +5,7 @@ import { prisma } from "../../src/store/prisma.ts";
 /** Empties every table the schema defines, leaving the migration ledger alone. */
 export async function resetDatabase(): Promise<void> {
   await prisma.$executeRawUnsafe(
-    `TRUNCATE "delivery", "subscription", "message_topic", "message", "topic", "channel", "agent_grant", "agent", "user" RESTART IDENTITY CASCADE`
+    `TRUNCATE "transcript_entry", "delivery", "subscription", "message_topic", "message", "topic", "channel", "agent_grant", "agent", "user" RESTART IDENTITY CASCADE`
   );
 }
 

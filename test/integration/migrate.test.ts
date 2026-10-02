@@ -61,6 +61,7 @@ describe("migrate", () => {
       "message_topic",
       "subscription",
       "topic",
+      "transcript_entry",
       "user"
     ]);
   });

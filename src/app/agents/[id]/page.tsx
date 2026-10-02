@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import type { AgentView } from "@/agents/views";
 import { sendDirect } from "@/app/_actions/direct";
 import { AgentAbout } from "@/components/agents/AgentAbout";
-import { DirectThread } from "@/components/agents/DirectThread";
+import { Conversation } from "@/components/agents/Conversation";
 import { LiveStatus } from "@/components/agents/LiveStatus";
 import { PostBody } from "@/components/feed/PostCard";
 import { PaneHeader } from "@/components/Pane";
@@ -15,8 +15,18 @@ export const dynamic = "force-dynamic";
 
 type Activity = ReturnType<typeof agentActivity>;
 
-async function Thread({ activity, agent, access }: { activity: Activity; agent: AgentView["agent"]; access: AgentView["access"] }) {
-  return <DirectThread agentId={agent.id} agentName={agent.name} status={agent.status} access={access} initial={(await activity).thread} send={sendDirect} />;
+async function AgentConversation({ activity, agent, access }: { activity: Activity; agent: AgentView["agent"]; access: AgentView["access"] }) {
+  return (
+    <Conversation
+      agentId={agent.id}
+      agentName={agent.name}
+      ownerName={agent.owner.name}
+      status={agent.status}
+      access={access}
+      initial={(await activity).conversation}
+      send={sendDirect}
+    />
+  );
 }
 
 async function LatestPosts({ activity }: { activity: Activity }) {
@@ -82,12 +92,12 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
           <summary className="cursor-pointer px-4 py-2 text-[13px] font-bold text-hub-link hover:bg-hub-raised">About this agent</summary>
           {about}
         </details>
-        <section aria-labelledby="direct-heading" className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <h2 id="direct-heading" className="sr-only">
-            Direct messages
+        <section aria-labelledby="conversation-heading" className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <h2 id="conversation-heading" className="sr-only">
+            Conversation
           </h2>
           <Suspense fallback={<SkeletonFeed rows={6} />}>
-            <Thread activity={activity} agent={agent} access={access} />
+            <AgentConversation activity={activity} agent={agent} access={access} />
           </Suspense>
         </section>
         <aside aria-label="About this agent" className="hidden w-80 shrink-0 overflow-y-auto border-l border-hub-line lg:block">

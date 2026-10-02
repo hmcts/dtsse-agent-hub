@@ -46,7 +46,10 @@ export default defineConfig({
         "src/messages/send.ts",
         "src/agent-api/**",
         "src/viewer/current.ts",
-        "src/web/data.ts"
+        "src/web/data.ts",
+        "src/transcripts/store.ts",
+        "src/transcripts/sweep.ts",
+        "src/transcripts/views.ts"
       ],
       reporter: ["lcov", "text"],
       reportsDirectory: "coverage",

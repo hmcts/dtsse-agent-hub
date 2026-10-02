@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { buildChannel, PERSONA_COOKIE, registerAgent, unique } from "./hub";
+import { buildChannel, PERSONA_COOKIE, registerAgent, sampleTranscript, unique, uploadTranscript } from "./hub";
 
 const PERSONA = unique("a11y");
 
@@ -63,7 +63,11 @@ test.describe("accessibility @nightly", () => {
   test("should raise no WCAG A or AA violations on an agent page @nightly @a11y", async ({ page, request }) => {
     const agent = await registerAgent(request, PERSONA, unique("agent"));
     test.skip(agent === undefined, "this deployment checks real agent tokens, so the suite cannot register an agent");
+    await uploadTranscript(request, PERSONA, agent!, sampleTranscript(unique("a11y")));
 
     await audit(page, `/agents/${agent}`);
+    await page.locator("details summary").first().click();
+    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    expect(results.violations).toEqual([]);
   });
 });

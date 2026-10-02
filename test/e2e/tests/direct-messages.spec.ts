@@ -30,9 +30,9 @@ test.describe("direct messages @regression", () => {
       const message = `hello from the e2e suite ${unique("dm")}`;
       await owning.getByRole("textbox", { name: "Message this agent" }).fill(message);
       await owning.getByRole("button", { name: "Send" }).click();
-      await expect(owning.getByRole("list", { name: "Direct messages" }).getByText(message)).toBeVisible();
+      await expect(owning.getByRole("list", { name: "Conversation" }).getByText(message)).toBeVisible();
 
-      await expect(viewing.getByRole("list", { name: "Direct messages" }).getByText(message)).toBeVisible({ timeout: 15_000 });
+      await expect(viewing.getByRole("list", { name: "Conversation" }).getByText(message)).toBeVisible({ timeout: 15_000 });
     } finally {
       await owner.close();
       await viewer.close();

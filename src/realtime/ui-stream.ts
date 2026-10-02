@@ -1,4 +1,4 @@
-import { type AgentRef, canReadMessage, canViewAgent, type Grant } from "../access/rules.ts";
+import { type AgentRef, canReadMessage, canViewAgent, canViewTranscript, type Grant } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
 import type { Match, PostScope } from "../messages/feed.ts";
 import type { ApiMessage } from "../messages/shape.ts";
@@ -18,6 +18,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  * - `agent_status`: a status change of any agent the viewer can see, for the sidebar's dots.
  * - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery, when the viewer
  *   can still see that agent and read that message.
+ * - `transcript`: the watched agent's transcript has new entries, up to `last_id`, when the viewer may still read
+ *   it. Only the id is sent; the page reads the entries through `/api/ui/agents/{id}/transcript`.
  * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, or a grant the viewer holds changed
  *   and the agents they may see with it; either way the page should re-read. Also sent once `LISTEN` becomes active
  *   when the stream opened before it was, since anything committed until then was never notified.
@@ -109,6 +111,13 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
         return undefined;
       }
       return sseEvent({ event: "delivery", data: JSON.stringify({ message_id: event.message_id, state: event.state }) });
+    }
+    case "transcript": {
+      const agent = watch.agent;
+      if (agent === null || event.agent_id !== agent.id || !canViewTranscript(sources.viewerOid, agent, await sources.grants())) {
+        return undefined;
+      }
+      return sseEvent({ event: "transcript", data: JSON.stringify({ agent_id: event.agent_id, last_id: event.last_id }) });
     }
     case "grant":
       return event.grantee_oid === sources.viewerOid ? RESYNC : undefined;

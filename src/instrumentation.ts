@@ -35,16 +35,18 @@ function startMonitoring(): void {
 }
 
 /**
- * Marks silent agents offline, and expires deliveries to long-offline ones, every 30 seconds. Imported dynamically,
- * after `readSecrets`, because `store/prisma.ts` resolves `POSTGRES_*` at module load and would otherwise capture
- * the local default.
+ * Marks silent agents offline, and expires deliveries to long-offline ones, every 30 seconds; and trims transcripts
+ * to their retention and per-agent cap every 10 minutes. Imported dynamically, after `readSecrets`, because
+ * `store/prisma.ts` resolves `POSTGRES_*` at module load and would otherwise capture the local default.
  */
 async function startSweeping(): Promise<void> {
   try {
     const { prisma } = await import("./store/prisma.ts");
     const { startOfflineSweep } = await import("./agents/sweep.ts");
     startOfflineSweep(prisma);
+    const { startTranscriptSweep } = await import("./transcripts/sweep.ts");
+    startTranscriptSweep(prisma);
   } catch (error) {
-    console.warn(`could not start the offline sweep: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`could not start the sweeps: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

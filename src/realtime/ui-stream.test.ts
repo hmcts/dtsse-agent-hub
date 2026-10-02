@@ -194,6 +194,20 @@ describe("selectFrame", () => {
     expect(await selectFrame({ type: "delivery", message_id: "7", agent_id: AGENT.id, state: "delivered" }, watch, sources(grants))).toBeUndefined();
   });
 
+  it("should send the newest transcript id of the watched agent when the viewer may read its transcript", async () => {
+    const frame = await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: OWNER, last_id: "21" }, THREAD, sources(READ));
+
+    expect(frame).toBe(`event: transcript\ndata: ${JSON.stringify({ agent_id: AGENT.id, last_id: "21" })}\n\n`);
+  });
+
+  it.each<[string, UiWatch, Grant[]]>([
+    ["no agent is watched", TOPICS, READ],
+    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: OWNER } }, READ],
+    ["the viewer can no longer read the transcript", THREAD, []]
+  ])("should not send a transcript change when %s", async (_label, watch, grants) => {
+    expect(await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: OWNER, last_id: "21" }, watch, sources(grants))).toBeUndefined();
+  });
+
   it("should tell the page to re-read when the listener resyncs", async () => {
     expect(await selectFrame({ type: "resync" }, TOPICS, sources([]))).toBe("event: resync\ndata: {}\n\n");
   });

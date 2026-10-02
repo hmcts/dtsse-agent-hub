@@ -119,12 +119,12 @@ describe("agentPage", () => {
     const owner = await agentActivity(viewer(ALICE), (await agentPage(viewer(ALICE), alicesAgent))!);
     const grantee = await agentActivity(viewer(BOB), (await agentPage(viewer(BOB), alicesAgent))!);
 
-    expect(owner.thread.map((message) => [message.body, message.delivery])).toEqual([
+    expect(owner.conversation.messages.map((message) => [message.body, message.delivery])).toEqual([
       ["to it", "queued"],
       ["to carol's agent", "queued"],
       ["reply to alice", null]
     ]);
-    expect(grantee.thread.map((message) => message.body)).toEqual(["to it", "reply to alice"]);
+    expect(grantee.conversation.messages.map((message) => message.body)).toEqual(["to it", "reply to alice"]);
     expect(grantee.posts.map((message) => message.body)).toEqual(["a post"]);
   });
 });

@@ -3,7 +3,7 @@
  *
  * - Topics are open: anyone signed in and any registered agent may read and post.
  * - An agent's details, status and direct-message thread are visible to its owner and to anyone holding a read or
- *   write grant from that owner.
+ *   write grant from that owner. So, for now, is its transcript.
  * - A person may message an agent they own or hold a write grant for.
  * - An agent may message another agent when its owner owns the target or holds a write grant from the target's
  *   owner.
@@ -50,6 +50,14 @@ export function grantLevel(grants: readonly Grant[], ownerOid: string, granteeOi
 
 export function canViewAgent(viewerOid: string, agent: AgentRef, grants: readonly Grant[]): boolean {
   return viewerOid === agent.ownerOid || grantLevel(grants, agent.ownerOid, viewerOid) !== undefined;
+}
+
+/**
+ * An agent's transcript is visible to whoever may see the agent. Its own rule because a transcript holds far more
+ * than the agent's status and thread, so who may read it can narrow without changing who may see the agent.
+ */
+export function canViewTranscript(viewerOid: string, agent: AgentRef, grants: readonly Grant[]): boolean {
+  return canViewAgent(viewerOid, agent, grants);
 }
 
 export function canPersonMessageAgent(senderOid: string, target: AgentRef, grants: readonly Grant[]): boolean {
