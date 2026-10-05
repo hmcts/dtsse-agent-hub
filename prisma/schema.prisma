@@ -57,6 +57,7 @@ enum CredentialKind {
   github
   azure
   claude
+  bedrock
 
   @@map("credential_kind")
 }
@@ -92,7 +93,7 @@ enum VirtualAgentStatus {
 }
 
 enum ModelRoute {
-  gateway
+  bedrock
   own_licence
 
   @@map("model_route")

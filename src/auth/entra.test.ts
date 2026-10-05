@@ -157,7 +157,7 @@ describe("completeSignIn", () => {
     ["the role in another case", ["aigateway.user"], false],
     ["roles that are not a list", "AIGateway.User", false],
     ["no roles claim", undefined, false]
-  ])("should record the AI gateway route when the id token carries %s", async (_label, roles, expected) => {
+  ])("should record the AIGateway.User role when the id token carries %s", async (_label, roles, expected) => {
     granted({ ...IDENTITY, ...(roles === undefined ? {} : { roles }) });
 
     expect((await completeSignIn(SETTINGS, CURRENT, beginSignIn("/"))).aiGateway).toBe(expected);

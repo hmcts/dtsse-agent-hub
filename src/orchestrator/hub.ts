@@ -8,7 +8,7 @@ import { withoutTrailingSlashes } from "./settings.ts";
 
 export type Desired = "running" | "stopped" | "deleted";
 
-export type ModelRoute = "gateway" | "own_licence";
+export type ModelRoute = "bedrock" | "own_licence";
 
 export interface ClaimedAgent {
   id: string;

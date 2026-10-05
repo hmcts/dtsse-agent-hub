@@ -12,23 +12,28 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * Saving and deleting the signed-in person's own credentials. The owner is the session's identity, never a value
  * from the form. Neither action returns a value, and no action reads one.
  *
- * Only a GitHub token and, for someone on their own licence, a Claude token can be pasted: the Azure token cache
- * comes from the virtual agent's own device-code login.
+ * A GitHub token, a Bedrock API key and, for someone on their own licence, a Claude token can be pasted: the Azure
+ * token cache comes from the virtual agent's own device-code login. A Bedrock key is accepted on either route, since
+ * the workspace on a laptop reads it back too.
  */
 
 const CREDENTIALS_PATH = "/settings/credentials";
 
-const PASTEABLE = { github: "GitHub token", claude: "Claude token" } as const;
+const PASTEABLE = { github: "GitHub token", claude: "Claude token", bedrock: "Bedrock API key" } as const;
+
+function isPasteable(kind: string): kind is keyof typeof PASTEABLE {
+  return Object.hasOwn(PASTEABLE, kind);
+}
 
 export async function saveCredential(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
   return await runAction<{ confirmation: string }>("save credential", async () => {
     const viewer = await requireViewer();
     const kind = text(form.get("kind"));
-    if (kind !== "github" && kind !== "claude") {
-      return { ok: false, error: "only a GitHub or Claude token can be pasted here" };
+    if (!isPasteable(kind)) {
+      return { ok: false, error: "only a GitHub token, a Claude token or a Bedrock API key can be pasted here" };
     }
     if (kind === "claude" && viewer.modelRoute !== "own-licence") {
-      return { ok: false, error: "your virtual agents use the HMCTS AI gateway, so they need no Claude token" };
+      return { ok: false, error: "your virtual agents use Amazon Bedrock, so they need no Claude token" };
     }
     const backend = credentialBackend(prisma);
     if (!backend.available) {

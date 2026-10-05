@@ -10,7 +10,7 @@ afterEach(() => {
 const STORE: SecretStore = { acceptsDevIdentities: true, put: async () => undefined, get: async () => undefined, remove: async () => undefined };
 
 describe("pathKind", () => {
-  it.each(["github", "azure", "claude"])("should accept %s when it is a kind of credential", (kind) => {
+  it.each(["github", "azure", "claude", "bedrock"])("should accept %s when it is a kind of credential", (kind) => {
     expect(pathKind(kind)).toBe(kind);
   });
 

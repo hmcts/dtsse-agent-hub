@@ -1,7 +1,10 @@
 import { DEV_OID_PREFIX } from "../agent-auth/dev.ts";
 
-/** What a person's virtual agent needs on their behalf: a GitHub token, an Azure CLI token cache, a Claude token. */
-export const CREDENTIAL_KINDS = ["github", "azure", "claude"] as const;
+/**
+ * What a person's virtual agent needs on their behalf: a GitHub token, an Azure CLI token cache, and the key to its
+ * model, a Claude token or an Amazon Bedrock API key.
+ */
+export const CREDENTIAL_KINDS = ["github", "azure", "claude", "bedrock"] as const;
 
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 

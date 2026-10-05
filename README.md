@@ -53,7 +53,7 @@ it needs ownership or a write grant. The rules are in `src/access/rules.ts`.
 | `/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
 | `/access` | the grants you have given and hold; grant or revoke read or write by email |
 | `/virtual`, `/virtual/[id]` | with virtual agents on: your virtual agents, creating one, and one agent's lifecycle, the sign-ins it is waiting on and its conversation |
-| `/settings/credentials` | your model route, and which of your virtual-agent credentials are stored; paste a GitHub token, or a Claude token on your own licence, or delete one. A stored value is never shown |
+| `/settings/credentials` | your model route, and which of your virtual-agent credentials are stored; paste a GitHub token, a Bedrock API key, or a Claude token on your own licence, or delete one. A stored value is never shown |
 
 Pages are server components reading through `src/web/data.ts`; writes are the server actions in
 `src/app/_actions/`, each of which reads the viewer from the session cookie itself. A person's direct message to
@@ -105,6 +105,22 @@ the `-staging` release.
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
 
+### Model routes
+
+Each virtual agent has a model route, set from its owner's sign-in when it is created and passed to its pod as
+`AGENT_HUB_MODEL_ROUTE`:
+
+| Route | Who | The model | Credentials it needs |
+| --- | --- | --- | --- |
+| `bedrock` | holders of the `AIGateway.User` app role | Amazon Bedrock, called directly with the owner's own Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) | `github`, `azure`, `bedrock` |
+| `own_licence` | everyone else | the owner's own Claude licence | `github`, `azure`, `claude` |
+
+The Bedrock API key is pasted, on `/settings/credentials` or the agent's page, or sent with
+`PUT /api/agent/credentials/bedrock`; until it is stored the pod reports `awaiting_credentials` with `bedrock: …`.
+It is the one credential its owner can read back, with `GET /api/agent/credentials/bedrock`, because the
+workspace's `.claude/run.sh` on their laptop uses it too. Anyone holding a person's agent-hub token can therefore
+read their Bedrock key; `docs/agent-api.md` (Credentials) has the detail.
+
 A pasted sign-in code is sealed under a key derived from `SESSION_SECRET`, so that must be set too. Locally, the
 orchestrator can be stood in for with `X-Dev-Orchestrator: <name>` under `AGENT_AUTH_DISABLED=true`:
 
@@ -152,7 +168,7 @@ lease comes back to it, it behaves as above.
 **A switchover** moves agents once the old cluster's orchestrator stops renewing the lease. After
 `ORCHESTRATOR_LEASE_SECONDS` (two minutes by default) the new cluster's next claim takes the lease, and with it every
 agent meant to be running: each is started on the new cluster on a fresh disk, with a new launch token that shuts the
-old pod out at once. The pod restores the owner's GitHub, Azure and Claude credentials from the hub and re-bootstraps
+old pod out at once. The pod restores the owner's GitHub, Azure and Bedrock or Claude credentials from the hub and re-bootstraps
 its repos. Uncommitted work and Claude's own session history on the old disk are lost; the conversation the hub
 stored stays on the agent's page. Stopped agents are not moved; one that is started again starts on
 the new cluster. If the old cluster stays up, its orchestrator, now on standby, deletes the moved agents'
@@ -275,7 +291,7 @@ each value AES-256-GCM sealed under a key derived from `SESSION_SECRET`, so set 
 SESSION_SECRET=$(openssl rand -base64 48) AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev
 ```
 
-The local store refuses to start under `NODE_ENV=production`. With sign-in disabled every persona is on the AI gateway
+The local store refuses to start under `NODE_ENV=production`. With sign-in disabled every persona is on the Bedrock
 route except `own-licence` and `own-licence-…`, which are on their own Claude licence, so
 `ah_dev_persona=own-licence` shows the Claude token field.
 

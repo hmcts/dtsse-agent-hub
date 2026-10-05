@@ -20,7 +20,7 @@ const { actAs, revalidated } = await import("./web-session.ts");
 const { removeCredential, saveCredential } = await import("../../src/app/_actions/credentials.ts");
 const { credentialSettings } = await import("../../src/web/data.ts");
 
-const { PUT, DELETE } = credentialRoute;
+const { GET, PUT, DELETE } = credentialRoute;
 
 const ALICE = person("alice");
 const BOB = person("bob");
@@ -28,6 +28,7 @@ const BOB = person("bob");
 const GITHUB = `ghp_${"A1b2".repeat(9)}`;
 const GITHUB_AGAIN = `ghp_${"Z9y8".repeat(9)}`;
 const CLAUDE = `sk-ant-oat01-${"Qw_-".repeat(12)}`;
+const BEDROCK = `ABSK${"QmVkcm9ja0FQSUtleS1leGFtcGxl".repeat(4)}`;
 const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
 
 function azureCacheFor(oid: string): string {
@@ -45,6 +46,10 @@ const AZURE = azureCacheFor(ALICE.oid);
 
 function put(as: Person, kind: string, body: unknown): Promise<Response> {
   return call(PUT, { as, path: `/api/agent/credentials/${kind}`, method: "PUT", params: { kind }, body });
+}
+
+function read(as: Person, kind: string): Promise<Response> {
+  return call(GET, { as, path: `/api/agent/credentials/${kind}`, params: { kind } });
 }
 
 function remove(as: Person, kind: string): Promise<Response> {
@@ -232,17 +237,78 @@ describe("DELETE /api/agent/credentials/{kind}", () => {
   it("should answer 404 when the kind is unknown", async () => {
     expect((await remove(ALICE, "ssh")).status).toBe(404);
   });
+
+  it("should remove a stored Bedrock API key when the owner deletes it from the command line", async () => {
+    await put(ALICE, "bedrock", { value: BEDROCK });
+
+    expect((await remove(ALICE, "bedrock")).status).toBe(204);
+
+    expect(await prisma.credential.count()).toBe(0);
+    expect((await read(ALICE, "bedrock")).status).toBe(404);
+  });
+});
+
+describe("a Bedrock API key", () => {
+  it("should store the caller's key from the command line when it is valid", async () => {
+    expect((await put(ALICE, "bedrock", { value: ` ${BEDROCK}\n` })).status).toBe(204);
+
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
+      ownerOid: ALICE.oid,
+      kind: "bedrock",
+      secretName: "u-dev-alice-bedrock",
+      updatedVia: "cli"
+    });
+    expect(await everythingStored()).not.toContain(BEDROCK);
+  });
+
+  it("should refuse a pasted GitHub token with an error saying what it is, never echoing it", async () => {
+    const response = await put(ALICE, "bedrock", { value: GITHUB });
+
+    expect(response.status).toBe(400);
+    const body = await response.text();
+    expect(body).toContain("GitHub token, not an Amazon Bedrock API key");
+    expect(body).not.toContain(GITHUB);
+    expect(await prisma.credential.count()).toBe(0);
+  });
 });
 
 describe("reading credentials back", () => {
-  it("should offer no way to read a value back through the agent API when a credential is stored", async () => {
-    await put(ALICE, "github", { value: GITHUB });
+  it("should give the owner their own Bedrock API key when it is stored", async () => {
+    await put(ALICE, "bedrock", { value: BEDROCK });
 
-    const methods = Object.keys(credentialRoute)
-      .filter((name) => /^[A-Z]+$/.test(name))
-      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const response = await read(ALICE, "bedrock");
 
-    expect(methods).toEqual(["DELETE", "PUT"]);
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({ value: BEDROCK });
+  });
+
+  it("should answer 404 when the owner has no Bedrock API key stored", async () => {
+    const response = await read(ALICE, "bedrock");
+
+    expect(response.status).toBe(404);
+    expect(await jsonOf(response)).toEqual({ error: "no bedrock credential is stored" });
+  });
+
+  it("should give each person only their own Bedrock API key when two have one stored", async () => {
+    await put(ALICE, "bedrock", { value: BEDROCK });
+
+    expect((await read(BOB, "bedrock")).status).toBe(404);
+  });
+
+  it.each(["github", "azure", "claude"])("should answer 405 and never the value when the owner asks for their stored %s", async (kind) => {
+    const values: Record<string, string> = { github: GITHUB, azure: AZURE, claude: CLAUDE };
+    expect((await put(ALICE, kind, { value: values[kind] })).status).toBe(204);
+
+    const response = await read(ALICE, kind);
+
+    expect(response.status).toBe(405);
+    const body = await response.text();
+    expect(body).toContain("write-only");
+    expect(body).not.toContain(values[kind]!);
+  });
+
+  it("should answer 404 when the owner asks for an unknown kind", async () => {
+    expect((await read(ALICE, "ssh")).status).toBe(404);
   });
 
   it("should report what is stored as metadata alone when the status is read", async () => {
@@ -254,7 +320,8 @@ describe("reading credentials back", () => {
     expect(statuses.map((status) => [status.kind, status.stored])).toEqual([
       ["github", true],
       ["azure", true],
-      ["claude", false]
+      ["claude", false],
+      ["bedrock", false]
     ]);
     expect(JSON.stringify(statuses)).not.toContain(GITHUB);
     expect(JSON.stringify(statuses)).not.toContain(AZURE);
@@ -263,23 +330,23 @@ describe("reading credentials back", () => {
   it("should give the settings page metadata and never a value when the viewer has credentials stored", async () => {
     await put(ALICE, "github", { value: GITHUB });
 
-    const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" });
+    const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" });
 
-    expect(settings).toMatchObject({ available: true, modelRoute: "gateway" });
+    expect(settings).toMatchObject({ available: true, modelRoute: "bedrock" });
     expect(JSON.stringify(settings)).not.toContain(GITHUB);
   });
 
   it("should tell the settings page credentials are unavailable when the deployment cannot store them", async () => {
     vi.stubEnv("CREDENTIALS_VAULT_URL", "https://dtsse-ah-creds-test.vault.azure.net/");
 
-    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" })).toMatchObject({
+    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" })).toMatchObject({
       available: false,
       reason: expect.stringContaining("development identity")
     });
 
     vi.stubEnv("CREDENTIALS_VAULT_URL", "");
     vi.stubEnv("SESSION_SECRET", "");
-    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" })).toMatchObject({ available: false });
+    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" })).toMatchObject({ available: false });
   });
 });
 
@@ -335,10 +402,10 @@ describe("saveCredential and removeCredential", () => {
     expect(JSON.stringify(result)).not.toContain(GITHUB);
   });
 
-  it("should refuse a Claude token when the viewer's agents use the AI gateway", async () => {
+  it("should refuse a Claude token when the viewer's agents use Amazon Bedrock", async () => {
     actAs("alice");
 
-    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toMatchObject({ ok: false, error: expect.stringContaining("AI gateway") });
+    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toMatchObject({ ok: false, error: expect.stringContaining("Amazon Bedrock") });
     expect(await prisma.credential.count()).toBe(0);
   });
 
@@ -349,9 +416,30 @@ describe("saveCredential and removeCredential", () => {
     expect(await readCredential(prisma, localStore(), devIdentity("own-licence").oid, "claude")).toBe(CLAUDE);
   });
 
+  it.each(["alice", "own-licence"])("should save a pasted Bedrock API key from the web when the viewer is the %s persona", async (persona) => {
+    actAs(persona);
+
+    const result = await saveCredential(form({ kind: "bedrock", value: BEDROCK }));
+
+    expect(result).toEqual({ ok: true, confirmation: "Your Bedrock API key is stored" });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity(persona).oid, kind: "bedrock", updatedVia: "web" });
+    expect(await readCredential(prisma, localStore(), devIdentity(persona).oid, "bedrock")).toBe(BEDROCK);
+    expect(JSON.stringify(result)).not.toContain(BEDROCK);
+  });
+
+  it("should delete a stored Bedrock API key from the web when asked", async () => {
+    actAs("alice");
+    await saveCredential(form({ kind: "bedrock", value: BEDROCK }));
+
+    expect(await removeCredential(form({ kind: "bedrock" }))).toEqual({ ok: true });
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
   it.each([
-    ["an Azure cache, which comes from the virtual agent", { kind: "azure", value: AZURE }, "GitHub or Claude"],
-    ["an unknown kind", { kind: "ssh", value: GITHUB }, "GitHub or Claude"],
+    ["an Azure cache, which comes from the virtual agent", { kind: "azure", value: AZURE }, "can be pasted here"],
+    ["an unknown kind", { kind: "ssh", value: GITHUB }, "can be pasted here"],
+    ["a property every object has", { kind: "toString", value: GITHUB }, "can be pasted here"],
+    ["a Claude token pasted as a Bedrock API key", { kind: "bedrock", value: CLAUDE }, "Claude token, not an Amazon Bedrock API key"],
     ["a malformed token", { kind: "github", value: "nope" }, "GitHub token"]
   ])("should refuse %s when it is pasted", async (_label, values, error) => {
     actAs("alice");

@@ -61,14 +61,14 @@ const SELECT = {
   createdAt: true
 } as const;
 
-type StoredRoute = "gateway" | "own_licence";
+type StoredRoute = "bedrock" | "own_licence";
 
 function toRoute(stored: StoredRoute): ModelRoute {
-  return stored === "own_licence" ? "own-licence" : "gateway";
+  return stored === "own_licence" ? "own-licence" : "bedrock";
 }
 
 function fromRoute(route: ModelRoute): StoredRoute {
-  return route === "own-licence" ? "own_licence" : "gateway";
+  return route === "own-licence" ? "own_licence" : "bedrock";
 }
 
 function toRow<R extends { modelRoute: StoredRoute }>(row: R): Omit<R, "modelRoute"> & { modelRoute: ModelRoute } {

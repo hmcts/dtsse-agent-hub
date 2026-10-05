@@ -14,7 +14,7 @@ const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white ho
 export function ModelRouteLine({ route }: { route: ModelRoute }) {
   return (
     <p className="text-sm text-hub-text">
-      Model: {route === "gateway" ? "the HMCTS AI gateway" : "your own Claude licence, so it will also need your Claude token"}
+      Model: {route === "bedrock" ? "Amazon Bedrock, with your Bedrock API key" : "your own Claude licence, so it will also need your Claude token"}
     </p>
   );
 }

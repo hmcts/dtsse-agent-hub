@@ -105,7 +105,7 @@ export async function completeSignIn(settings: AuthSettings, currentUrl: URL, si
 }
 
 /**
- * The app role whose holders' virtual agents use the HMCTS AI gateway rather than their own Claude licence. It is
+ * The app role whose holders' virtual agents use Amazon Bedrock rather than their own Claude licence. It is
  * assigned to an Entra group and arrives in the id token's `roles` claim, which is absent for anyone holding no role.
  */
 export const AI_GATEWAY_ROLE = "AIGateway.User";

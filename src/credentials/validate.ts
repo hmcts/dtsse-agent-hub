@@ -12,6 +12,19 @@ const GITHUB_TOKEN = /^(gh[opsu]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})$
 /** `claude setup-token` prints an `sk-ant-oat…` OAuth token; an API key is `sk-ant-api…`, and both fit this. */
 const CLAUDE_TOKEN = /^sk-ant-[A-Za-z0-9_-]{20,}$/;
 
+/**
+ * An Amazon Bedrock API key is opaque: long-term keys usually start `ABSK` and short-term ones `bedrock-api-key-`,
+ * but AWS does not promise either, so only its length and printable, space-free ASCII are required.
+ */
+const BEDROCK_KEY = /^[\x21-\x7e]{20,4096}$/;
+
+/** Things people paste by mistake for a Bedrock API key, each with what it actually is. */
+const NOT_BEDROCK: readonly (readonly [RegExp, string])[] = [
+  [/^(gh[a-z]_|github_pat_)/, "that is a GitHub token, not an Amazon Bedrock API key"],
+  [/^sk-ant-/, "that is a Claude token, not an Amazon Bedrock API key: paste the key AWS gave you for Bedrock"],
+  [/^(AKIA|ASIA)[A-Z0-9]{16}$/, "that is an AWS access key id, not an Amazon Bedrock API key: create an API key in the Bedrock console"]
+];
+
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export type CheckedCredential = { ok: true; value: string; accountLabel: string | null } | { ok: false; error: string };
@@ -19,7 +32,8 @@ export type CheckedCredential = { ok: true; value: string; accountLabel: string 
 const LABELS: Record<CredentialKind, string> = {
   github: "a GitHub token",
   azure: "an Azure token cache",
-  claude: "a Claude token"
+  claude: "a Claude token",
+  bedrock: "an Amazon Bedrock API key"
 };
 
 /** The username of the first account an MSAL token cache holds, as the `az` login it came from shows it. */
@@ -117,7 +131,19 @@ export function checkCredential(kind: CredentialKind, raw: unknown): CheckedCred
       return CLAUDE_TOKEN.test(value)
         ? { ok: true, value, accountLabel: null }
         : { ok: false, error: "that is not a Claude token: expected the sk-ant-… token `claude setup-token` prints" };
+    case "bedrock":
+      return checkBedrockKey(value);
     case "azure":
       return checkAzureCache(value);
   }
+}
+
+function checkBedrockKey(value: string): CheckedCredential {
+  const mistake = NOT_BEDROCK.find(([shape]) => shape.test(value));
+  if (mistake !== undefined) {
+    return { ok: false, error: mistake[1] };
+  }
+  return BEDROCK_KEY.test(value)
+    ? { ok: true, value, accountLabel: null }
+    : { ok: false, error: "that is not an Amazon Bedrock API key: expected 20 to 4096 printable characters with no spaces" };
 }

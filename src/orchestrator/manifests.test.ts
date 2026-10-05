@@ -14,7 +14,7 @@ const AGENT: ClaimedAgent = {
   statefulset_name: "va-0f8a6a1e",
   pvc_name: "work-va-0f8a6a1e-0",
   delete_disk: false,
-  model_route: "gateway",
+  model_route: "bedrock",
   owner: { oid: "owner" }
 };
 

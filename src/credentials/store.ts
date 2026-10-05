@@ -7,8 +7,8 @@ import { checkCredential } from "./validate.ts";
 
 /**
  * Each person's credentials: the value in a `SecretStore`, and a `credential` row saying it is there. The row never
- * holds the value, and nothing a person can call reads one back; `readCredential` is for the hub's own use on the
- * owner's behalf.
+ * holds the value. `readCredential` hands one to the owner's own virtual agent, and to the owner only for the kinds
+ * `canOwnerReadCredential` allows.
  */
 
 /** Where values are kept: the credentials Key Vault, or the local encrypted table in development and tests. */
@@ -117,8 +117,8 @@ export async function credentialStatus(db: Database, ownerOid: string): Promise<
 }
 
 /**
- * The value of the owner's credential, for the hub to hand to that owner's own virtual agent. No route returns it:
- * credentials are write-only for people.
+ * The value of the owner's credential, for the hub to hand to that owner's own virtual agent, or to the owner when
+ * `canOwnerReadCredential` allows. Never log it.
  */
 export async function readCredential(db: Database, store: SecretStore, ownerOid: string, kind: CredentialKind): Promise<string | undefined> {
   const row = await db.credential.findUnique({ where: { ownerOid_kind: { ownerOid, kind } }, select: { secretName: true } });
