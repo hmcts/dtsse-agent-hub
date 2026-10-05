@@ -29,6 +29,7 @@ export class SessionOwnedElsewhere extends Error {}
  *
  * A virtual agent's session (`owner.virtualAgentId` set) is recorded as that virtual agent's current agent, which a
  * re-registration after `/clear` moves to the new session. Its owner's `user` row is not rewritten.
+ * It is named after the virtual agent, whatever the session calls itself.
  */
 export async function registerAgent(prisma: PrismaClient, owner: Caller, registration: Registration): Promise<{ id: string; name: string }> {
   const virtualAgentId = owner.virtualAgentId ?? null;
@@ -39,7 +40,9 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
     const [agent] = await tx.$queryRaw<{ id: string; name: string }[]>`
       INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id)
       VALUES (
-        ${owner.oid}, ${registration.sessionId}, ${registration.name}, ${registration.cwd}, ${registration.repo},
+        ${owner.oid}, ${registration.sessionId},
+        COALESCE((SELECT name FROM virtual_agent WHERE id = ${virtualAgentId}::uuid), ${registration.name}),
+        ${registration.cwd}, ${registration.repo},
         ${registration.branch}, ${registration.host}, 'idle', now(), (SELECT COALESCE(max(id), 0) FROM message), ${virtualAgentId}::uuid
       )
       ON CONFLICT (session_id) DO UPDATE
@@ -75,16 +78,16 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
 }
 
 /** Locks the agent's row for the rest of the transaction, and reads what a status change is compared against. */
-async function lockAgent(db: Database, agentId: string): Promise<{ status: AgentStatus; ownerOid: string } | undefined> {
-  const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string }[]>`
-    SELECT status::text AS status, owner_oid FROM agent WHERE id = ${agentId}::uuid FOR UPDATE
+async function lockAgent(db: Database, agentId: string): Promise<{ status: AgentStatus; ownerOid: string; virtual: boolean } | undefined> {
+  const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string; virtual: boolean }[]>`
+    SELECT status::text AS status, owner_oid, virtual_agent_id IS NOT NULL AS virtual FROM agent WHERE id = ${agentId}::uuid FOR UPDATE
   `;
-  return row === undefined ? undefined : { status: row.status, ownerOid: row.owner_oid };
+  return row === undefined ? undefined : { status: row.status, ownerOid: row.owner_oid, virtual: row.virtual };
 }
 
 /**
  * Records a heartbeat, and announces the status when it changed. An agent the sweep marked offline comes back
- * with its next heartbeat.
+ * with its next heartbeat. A virtual agent's session keeps the name its owner gave the virtual agent.
  */
 export async function heartbeat(prisma: PrismaClient, agentId: string, status: Exclude<AgentStatus, "offline">, name: string | null): Promise<void> {
   await prisma.$transaction(async (tx) => {
@@ -94,7 +97,7 @@ export async function heartbeat(prisma: PrismaClient, agentId: string, status: E
     }
     await tx.agent.update({
       where: { id: agentId },
-      data: { status, lastHeartbeatAt: new Date(), endedAt: null, ...(name === null ? {} : { name }) }
+      data: { status, lastHeartbeatAt: new Date(), endedAt: null, ...(name === null || before.virtual ? {} : { name }) }
     });
     if (before.status !== status) {
       await notify(tx, { type: "agent_status", agent_id: agentId, owner_oid: before.ownerOid, status });
