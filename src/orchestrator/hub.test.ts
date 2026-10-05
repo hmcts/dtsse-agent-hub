@@ -38,13 +38,36 @@ function hubWith(responses: (Response | Error)[], options: { credential?: TokenC
 describe("createHub", () => {
   it("should claim for the cluster with the orchestrator's token for the hub's scope", async () => {
     const agents = [{ id: "a", launch_token: "ahv_x" }];
-    const { hub, calls } = hubWith([json(200, { virtual_agents: agents })]);
+    const { hub, calls } = hubWith([json(200, { virtual_agents: agents, active: true })]);
 
-    expect(await hub.claim("cft-preview-00")).toEqual(agents);
+    expect(await hub.claim("cft-preview-00")).toEqual({ active: true, agents });
     expect(calls[0]!.url).toBe("https://agent-hub.example/api/orchestrator/claim");
     expect(calls[0]!.init).toMatchObject({ method: "POST", body: JSON.stringify({ cluster: "cft-preview-00" }) });
     expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer app-token");
     expect(credential.getToken).toHaveBeenCalledWith(SCOPE);
+  });
+
+  it("should take a claim as active when the hub does not say otherwise", async () => {
+    const { hub } = hubWith([json(200, { virtual_agents: [] })]);
+
+    expect(await hub.claim("c")).toEqual({ active: true, agents: [] });
+  });
+
+  it("should report who holds the lease when the hub puts this cluster on standby", async () => {
+    const lease = { cluster: "cft-preview-01", renewed_at: "2026-10-05T12:00:00.000Z" };
+    const { hub } = hubWith([json(200, { virtual_agents: [], active: false, lease: { ...lease, extra: 1 } })]);
+
+    expect(await hub.claim("cft-preview-00")).toEqual({ active: false, lease });
+  });
+
+  it.each([
+    ["no lease", undefined],
+    ["a lease that is not an object", "cft-preview-01"],
+    ["a lease without its time", { cluster: "cft-preview-01" }]
+  ])("should refuse a standby answer when it carries %s", async (_label, lease) => {
+    const { hub } = hubWith([json(200, { virtual_agents: [], active: false, lease })]);
+
+    await expect(hub.claim("c")).rejects.toThrow("POST /api/orchestrator/claim: the hub said this cluster is on standby but not who holds the lease");
   });
 
   it("should post what was observed for an agent", async () => {
@@ -58,7 +81,7 @@ describe("createHub", () => {
   });
 
   it("should list the live agents without a body", async () => {
-    const live = [{ id: "a", statefulset_name: "va-a", pvc_name: null }];
+    const live = [{ id: "a", statefulset_name: "va-a", pvc_name: null, cluster: "cft-preview-00" }];
     const { hub, calls } = hubWith([json(200, { virtual_agents: live })]);
 
     expect(await hub.live()).toEqual(live);

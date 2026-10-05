@@ -1,5 +1,5 @@
 import { FAILING_REASONS } from "../virtual-agents/lifecycle.ts";
-import { type ClaimedAgent, type Hub, HubError, type ObservedBody } from "./hub.ts";
+import { type Claim, type ClaimedAgent, type Hub, HubError, type Lease, type ObservedBody } from "./hub.ts";
 import type { Kube, Pod, Resource, StatefulSet } from "./kube.ts";
 import { describeError, type Log } from "./log.ts";
 import { carriedOver, ID_LABEL, MANAGED_BY, MANAGED_SELECTOR, podName, statefulSet } from "./manifests.ts";
@@ -13,6 +13,9 @@ import type { OrchestratorSettings } from "./settings.ts";
  * orchestrator holds the claim and looks again each pass; if it dies, the claim lapses after two minutes and the
  * agent is claimed again. A running agent is reported at once, and again whenever what is seen changes, until its
  * pod is ready or failing or `RUNNING_WATCH_MS` has passed, after which its own reports take over.
+ *
+ * Only the cluster holding the hub's orchestrator lease is given anything by a claim. Any other is on standby: it
+ * reports nothing, and its orphan sweep also deletes what the hub has moved to another cluster.
  */
 
 export const RUNNING_WATCH_MS = 15 * 60_000;
@@ -40,6 +43,8 @@ interface Watch {
 export interface ReconcileState {
   passes: number;
   watching: Map<string, Watch>;
+  /** The lease holder this cluster last stood by for, `null` once it was active, `undefined` before its first claim. */
+  standby?: string | null;
 }
 
 export interface PassResult {
@@ -47,6 +52,8 @@ export interface PassResult {
   reported: number;
   errors: number;
   orphans: number;
+  /** The lease another cluster holds, when this pass was on standby. */
+  standby?: Lease;
 }
 
 export function initialState(): ReconcileState {
@@ -174,22 +181,28 @@ async function check({ kube, hub, log }: ReconcileDeps, watch: Watch, now: numbe
 
 /**
  * Deletes every StatefulSet labelled `app.kubernetes.io/managed-by=agent-hub-orchestrator` that the hub no longer
- * has an agent for, and with it that agent's disk. The label is what scopes the sweep in a namespace other workloads
- * share: anything without it is never listed, and is skipped if it is. Nothing is deleted unless the hub has
- * answered, so an outage cannot empty the namespace. One at a time, as everything else the orchestrator does.
+ * has an agent for, and with it that agent's disk. On standby it also deletes those of agents the hub has on another
+ * cluster: they have started again there, on a fresh disk, and the pods here hold tokens the hub no longer accepts.
+ * An agent with no cluster recorded is kept, since it may be this cluster's.
+ *
+ * The label is what scopes the sweep in a namespace other workloads share: anything without it is never listed, and
+ * is skipped if it is. Nothing is deleted unless the hub has answered, so an outage cannot empty the namespace. One at
+ * a time, as everything else the orchestrator does.
  */
-export async function sweepOrphans({ kube, hub, log }: ReconcileDeps): Promise<number> {
-  const live = new Set((await hub.live()).map((agent) => agent.statefulset_name));
+export async function sweepOrphans({ kube, hub, settings, log }: ReconcileDeps, standby = false): Promise<number> {
+  const live = new Map((await hub.live()).map((agent) => [agent.statefulset_name, agent.cluster]));
   let deleted = 0;
   for (const resource of await kube.list("statefulsets", MANAGED_SELECTOR)) {
     const name = resource.metadata.name;
-    if (!owned(resource) || live.has(name) || resource.metadata.deletionTimestamp !== undefined) {
+    const cluster = live.get(name);
+    const movedTo = standby && typeof cluster === "string" && cluster !== settings.cluster ? cluster : undefined;
+    if (!owned(resource) || (live.has(name) && movedTo === undefined) || resource.metadata.deletionTimestamp !== undefined) {
       continue;
     }
     try {
       if (await kube.delete("statefulsets", name)) {
         deleted += 1;
-        log("info", "deleted an orphan", { kind: "statefulsets", name });
+        log("info", "deleted an orphan", { kind: "statefulsets", name, ...(movedTo === undefined ? {} : { moved_to: movedTo }) });
       }
     } catch (error) {
       log("error", "could not delete an orphan", { kind: "statefulsets", name, error: describeError(error) });
@@ -240,13 +253,41 @@ async function checkWatched(deps: ReconcileDeps, state: ReconcileState, watch: W
 }
 
 /** The number of orphans deleted, or `undefined` when the sweep failed. */
-async function sweepSafely(deps: ReconcileDeps): Promise<number | undefined> {
+async function sweepSafely(deps: ReconcileDeps, standby: boolean): Promise<number | undefined> {
   try {
-    return await sweepOrphans(deps);
+    return await sweepOrphans(deps, standby);
   } catch (error) {
     deps.log("error", "could not sweep orphans", { error: describeError(error) });
     return undefined;
   }
+}
+
+/** Logs when this cluster becomes active or goes on standby, and when the lease it stands by for changes hands. */
+function noteLease({ settings, log }: ReconcileDeps, state: ReconcileState, claim: Claim): void {
+  const standby = claim.active ? null : claim.lease.cluster;
+  if (state.standby === standby) {
+    return;
+  }
+  if (claim.active) {
+    log("info", "active: this cluster holds the hub's orchestrator lease", { cluster: settings.cluster });
+  } else {
+    log("info", "on standby: another cluster holds the hub's orchestrator lease", {
+      cluster: settings.cluster,
+      holder: claim.lease.cluster,
+      renewed_at: claim.lease.renewed_at,
+      dropped_watches: state.watching.size
+    });
+  }
+  state.standby = standby;
+}
+
+async function sweepIfDue(deps: ReconcileDeps, state: ReconcileState, result: PassResult, standby: boolean): Promise<void> {
+  if (state.passes % deps.settings.orphanSweepEvery === 0) {
+    const orphans = await sweepSafely(deps, standby);
+    result.orphans = orphans ?? 0;
+    result.errors += orphans === undefined ? 1 : 0;
+  }
+  state.passes += 1;
 }
 
 /**
@@ -257,7 +298,16 @@ export async function reconcilePass(deps: ReconcileDeps, state: ReconcileState):
   const now = deps.now ?? Date.now;
   const result: PassResult = { claimed: 0, reported: 0, errors: 0, orphans: 0 };
 
-  const claimed = await deps.hub.claim(deps.settings.cluster);
+  const claim = await deps.hub.claim(deps.settings.cluster);
+  noteLease(deps, state, claim);
+  if (!claim.active) {
+    // The holder reports on these agents now, and the hub would take this cluster's reports as theirs.
+    state.watching.clear();
+    await sweepIfDue(deps, state, result, true);
+    return { ...result, standby: claim.lease };
+  }
+
+  const claimed = claim.agents;
   result.claimed = claimed.length;
   for (const agent of claimed) {
     if (!(await applyClaimed(deps, state, agent, now()))) {
@@ -271,11 +321,6 @@ export async function reconcilePass(deps: ReconcileDeps, state: ReconcileState):
     result.errors += checked === "failed" ? 1 : 0;
   }
 
-  if (state.passes % deps.settings.orphanSweepEvery === 0) {
-    const orphans = await sweepSafely(deps);
-    result.orphans = orphans ?? 0;
-    result.errors += orphans === undefined ? 1 : 0;
-  }
-  state.passes += 1;
+  await sweepIfDue(deps, state, result, false);
   return result;
 }

@@ -103,6 +103,7 @@ the `-staging` release.
 | `VIRTUAL_AGENT_IDLE_MINUTES` | `120` | A running agent with no activity for this long is stopped |
 | `VIRTUAL_AGENT_EVENING_STOP` | `19:00` | UK time, `HH:MM`, at which every virtual agent started before it is stopped, on weekdays |
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |
+| `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
 
 A pasted sign-in code is sealed under a key derived from `SESSION_SECRET`, so that must be set too. Locally, the
 orchestrator can be stood in for with `X-Dev-Orchestrator: <name>` under `AGENT_AUTH_DISABLED=true`:
@@ -123,7 +124,8 @@ cnp-flux-config). That identity's object id, the `orchestrator_identity_principa
 It manages one kind of object, a StatefulSet per virtual agent, and reads their pods. Every
 `ORCHESTRATOR_INTERVAL_SECONDS` it makes one pass:
 
-- **Claim** (`POST /api/orchestrator/claim`) the agents the hub has work for, then for each:
+- **Claim** (`POST /api/orchestrator/claim`) the agents the hub has work for, if this cluster holds the hub's
+  orchestrator lease (below), then for each:
   - `running`: apply the StatefulSet `<statefulset_name>` at one replica, with the claim's launch token, or with the
     token the StatefulSet already holds when the claim returns none; report what it sees at once.
   - `stopped`: scale the StatefulSet to zero, which keeps its disk.
@@ -138,6 +140,23 @@ It manages one kind of object, a StatefulSet per virtual agent, and reads their 
 - **Sweep orphans** on the first pass and every 30th: any StatefulSet labelled
   `app.kubernetes.io/managed-by=agent-hub-orchestrator` that `GET /api/orchestrator/live` does not name is deleted,
   and its disk with it. Nothing is deleted when the hub cannot answer.
+
+**Which orchestrator acts.** Preview has two clusters, `cft-preview-00` and `-01`, and during a switchover Flux runs
+an orchestrator in both. The active one is whichever holds the hub's orchestrator lease, which every claim renews; it
+needs no setting of its own. Any other is on **standby**: the hub gives it nothing to claim, so it reports nothing, and
+its liveness answers `200 {"status":"UP","standby":true,"lease_holder":"<cluster>"}` so it is not restarted for being
+idle. It logs when it goes on standby or becomes active, and when the holder changes. Its orphan sweep, on the same
+schedule, also deletes its labelled StatefulSets for agents whose `cluster` in `live` is another cluster's. When the
+lease comes back to it, it behaves as above.
+
+**A switchover** moves agents once the old cluster's orchestrator stops renewing the lease. After
+`ORCHESTRATOR_LEASE_SECONDS` (two minutes by default) the new cluster's next claim takes the lease, and with it every
+agent meant to be running: each is started on the new cluster on a fresh disk, with a new launch token that shuts the
+old pod out at once. The pod restores the owner's GitHub, Azure and Claude credentials from the hub and re-bootstraps
+its repos. Uncommitted work and Claude's own session history on the old disk are lost; the conversation the hub
+stored stays on the agent's page. Stopped agents are not moved; one that is started again starts on
+the new cluster. If the old cluster stays up, its orchestrator, now on standby, deletes the moved agents'
+StatefulSets and disks at its next sweep.
 
 **The namespace is shared** with dtsse's PR previews, so the label is what scopes the sweep: the list asks for
 `app.kubernetes.io/managed-by=agent-hub-orchestrator` only, and anything returned without it is skipped. Nothing is
@@ -170,7 +189,8 @@ created with.
 
 **Liveness.** An HTTP server on `ORCHESTRATOR_PORT` answers `/health`, `/health/liveness` and `/health/readiness`
 with `200 {"status":"UP"}` while a pass has claimed successfully within the last three intervals, and `503` otherwise,
-so an orchestrator that cannot reach the hub or the API server is restarted.
+so an orchestrator that cannot reach the hub or the API server is restarted. A claim that puts it on standby counts as
+successful.
 
 **Stopping.** `SIGTERM` finishes the current pass and exits 0.
 

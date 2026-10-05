@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type ClaimedAgent, type Hub, HubError, type LiveAgent, type ObservedBody } from "./hub.ts";
+import { type ClaimedAgent, type Hub, HubError, type Lease, type LiveAgent, type ObservedBody } from "./hub.ts";
 import { type Kind, type Kinds, type Kube, KubeError, type Pod, type Resource, type StatefulSet } from "./kube.ts";
 import { labels, statefulSet } from "./manifests.ts";
 import { initialState, type Log, podReason, RUNNING_WATCH_MS, reconcilePass, SCHEDULING_GRACE_MS, settled, sweepOrphans } from "./reconcile.ts";
@@ -89,9 +89,10 @@ function fakeHub(claims: ClaimedAgent[][] = [], live: LiveAgent[] = []) {
   const observed: { id: string; body: ObservedBody }[] = [];
   const refusing = new Map<string, HubError>();
   let liveFails = false;
+  const lease: { holder?: Lease } = {};
   const hub: Hub = {
     async claim() {
-      return claims.shift() ?? [];
+      return lease.holder === undefined ? { active: true, agents: claims.shift() ?? [] } : { active: false, lease: lease.holder };
     },
     async observed(id, body) {
       const refusal = refusing.get(id);
@@ -111,6 +112,9 @@ function fakeHub(claims: ClaimedAgent[][] = [], live: LiveAgent[] = []) {
     hub,
     observed,
     refusing,
+    standBy(holder: Lease | undefined) {
+      lease.holder = holder;
+    },
     failLive() {
       liveFails = true;
     }
@@ -521,6 +525,17 @@ describe("reconcilePass", () => {
     expect(await t.pass()).toMatchObject({ orphans: 1, errors: 0 });
   });
 
+  it("should log that it is active once when its first claim succeeds", async () => {
+    const t = setup();
+
+    await t.pass();
+    await t.pass();
+
+    expect(t.logs.filter((entry) => entry.message.startsWith("active"))).toEqual([
+      { level: "info", message: "active: this cluster holds the hub's orchestrator lease", fields: { cluster: "cft-preview-00" } }
+    ]);
+  });
+
   it("should count a failed sweep as an error without failing the pass", async () => {
     const t = setup();
     t.state.passes = 0;
@@ -528,6 +543,88 @@ describe("reconcilePass", () => {
 
     expect(await t.pass()).toMatchObject({ errors: 1, orphans: 0 });
     expect(t.logs.at(-1)).toMatchObject({ message: "could not sweep orphans", fields: { error: "hub down" } });
+  });
+});
+
+describe("reconcilePass on standby", () => {
+  const HOLDER: Lease = { cluster: "cft-preview-01", renewed_at: "2026-10-05T12:00:00.000Z" };
+
+  function managed(name: string, id: string): StatefulSet {
+    return { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name, labels: labels(id) } };
+  }
+
+  it("should make no report and apply nothing when another cluster holds the lease", async () => {
+    const t = setup([[agent()]]);
+    t.standBy(HOLDER);
+
+    expect(await t.pass()).toEqual({ claimed: 0, reported: 0, errors: 0, orphans: 0, standby: HOLDER });
+    expect(t.observed).toEqual([]);
+    expect(t.calls.filter((call) => !call.startsWith("list"))).toEqual([]);
+  });
+
+  it("should stop watching what it applied when it loses the lease, and report nothing more on it", async () => {
+    const t = setup([[agent({ launch_token: "ahv_new" })]]);
+    await t.pass();
+    const reported = t.observed.length;
+    t.standBy(HOLDER);
+
+    await t.pass();
+    await t.pass();
+
+    expect(t.observed).toHaveLength(reported);
+    expect(t.state.watching.size).toBe(0);
+    expect(t.logs.find((entry) => entry.message.startsWith("on standby"))?.fields).toMatchObject({ dropped_watches: 1 });
+  });
+
+  it("should log its state only when it changes", async () => {
+    const t = setup();
+    t.standBy(HOLDER);
+    await t.pass();
+    await t.pass();
+    t.standBy({ ...HOLDER, cluster: "cft-preview-02" });
+    await t.pass();
+    t.standBy(undefined);
+    await t.pass();
+    await t.pass();
+
+    expect(t.logs.map((entry) => [entry.message, entry.fields?.holder])).toEqual([
+      ["on standby: another cluster holds the hub's orchestrator lease", "cft-preview-01"],
+      ["on standby: another cluster holds the hub's orchestrator lease", "cft-preview-02"],
+      ["active: this cluster holds the hub's orchestrator lease", undefined]
+    ]);
+  });
+
+  it("should sweep on the first pass and every orphanSweepEvery passes after, deleting what has moved to another cluster", async () => {
+    const t = setup([], {
+      live: [
+        { id: ID, statefulset_name: STS, pvc_name: null, cluster: "cft-preview-01" },
+        { id: OTHER, statefulset_name: "va-1a2b3c4d", pvc_name: null, cluster: "cft-preview-00" }
+      ]
+    });
+    t.state.passes = 0;
+    t.standBy(HOLDER);
+    t.store.statefulsets.set(STS, managed(STS, ID));
+    t.store.statefulsets.set("va-1a2b3c4d", managed("va-1a2b3c4d", OTHER));
+
+    expect(await t.pass()).toMatchObject({ orphans: 1, errors: 0 });
+    for (let pass = 1; pass < 30; pass += 1) {
+      await t.pass();
+    }
+    t.store.statefulsets.set("va-99999999", managed("va-99999999", "99999999-1234-4000-8000-000000000009"));
+    expect(await t.pass()).toMatchObject({ orphans: 1 });
+
+    expect([...t.store.statefulsets.keys()]).toEqual(["va-1a2b3c4d"]);
+    expect(t.logs.find((entry) => entry.message === "deleted an orphan")?.fields).toEqual({ kind: "statefulsets", name: STS, moved_to: "cft-preview-01" });
+    expect(t.calls.filter((call) => call.startsWith("list"))).toHaveLength(2);
+  });
+
+  it("should count a failed standby sweep as an error without failing the pass", async () => {
+    const t = setup();
+    t.state.passes = 0;
+    t.standBy(HOLDER);
+    t.failLive();
+
+    expect(await t.pass()).toMatchObject({ errors: 1, standby: HOLDER });
   });
 });
 
@@ -546,7 +643,7 @@ describe("sweepOrphans", () => {
   }
 
   it("should delete the StatefulSets that belong to no live agent and keep those that do", async () => {
-    const t = setup([], { live: [{ id: ID, statefulset_name: STS, pvc_name: "work-va-0f8a6a1e-0" }] });
+    const t = setup([], { live: [{ id: ID, statefulset_name: STS, pvc_name: "work-va-0f8a6a1e-0", cluster: "cft-preview-00" }] });
     populate(t.store);
 
     expect(await sweepOrphans(t.deps)).toBe(1);
@@ -555,8 +652,33 @@ describe("sweepOrphans", () => {
     expect(t.calls.filter((call) => call.startsWith("list"))).toEqual(["list statefulsets app.kubernetes.io/managed-by=agent-hub-orchestrator"]);
   });
 
+  it("should keep a live agent's StatefulSet homed on another cluster when it is active", async () => {
+    const t = setup([], { live: [{ id: ID, statefulset_name: STS, pvc_name: null, cluster: "cft-preview-01" }] });
+    t.store.statefulsets.set(STS, managed(STS, ID));
+
+    expect(await sweepOrphans(t.deps)).toBe(0);
+  });
+
+  it("should delete only labelled StatefulSets that are not live or are homed elsewhere when on standby", async () => {
+    const t = setup([], {
+      live: [
+        { id: ID, statefulset_name: STS, pvc_name: null, cluster: "cft-preview-01" },
+        { id: OTHER, statefulset_name: "va-1a2b3c4d", pvc_name: "work-va-1a2b3c4d-0", cluster: "cft-preview-00" },
+        { id: "22222222-1234-4000-8000-000000000003", statefulset_name: "va-22222222", pvc_name: null, cluster: null }
+      ]
+    });
+    populate(t.store);
+    t.store.statefulsets.set("va-22222222", managed("va-22222222", "22222222-1234-4000-8000-000000000003"));
+    t.store.statefulsets.set("va-33333333", managed("va-33333333", "33333333-1234-4000-8000-000000000004"));
+    t.store.statefulsets.set("dtsse-pr-1234", { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: "dtsse-pr-1234" } });
+
+    expect(await sweepOrphans(t.deps, true)).toBe(2);
+
+    expect([...t.store.statefulsets.keys()].sort((a, b) => (a < b ? -1 : 1))).toEqual(["dtsse-pr-1234", "va-1a2b3c4d", "va-22222222"]);
+  });
+
   it("should keep a live agent's StatefulSet when the hub has recorded its disk deleted", async () => {
-    const t = setup([], { live: [{ id: ID, statefulset_name: STS, pvc_name: null }] });
+    const t = setup([], { live: [{ id: ID, statefulset_name: STS, pvc_name: null, cluster: "cft-preview-00" }] });
     t.store.statefulsets.set(STS, managed(STS, ID));
 
     expect(await sweepOrphans(t.deps)).toBe(0);

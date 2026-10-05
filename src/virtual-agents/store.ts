@@ -7,7 +7,7 @@ import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
 import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken } from "./launch-token.ts";
 import { nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
 import { checkName, createRefusal, startRefusal } from "./limits.ts";
-import { diskTtlDays } from "./settings.ts";
+import { diskTtlDays, orchestratorLeaseSeconds } from "./settings.ts";
 import { announce, type StopReason } from "./stop.ts";
 
 /**
@@ -294,21 +294,107 @@ interface ClaimRow {
   disk_due: boolean;
 }
 
+export interface OrchestratorLease {
+  cluster: string;
+  renewed_at: string;
+}
+
+/** What a claim answers: the agents claimed, or, while another cluster holds the lease, nothing and who holds it. */
+export type ClaimResult = { active: true; virtual_agents: ClaimedVirtualAgent[] } | { active: false; virtual_agents: []; lease: OrchestratorLease };
+
+export interface ClaimOptions {
+  limit?: number;
+  now?: Date;
+  leaseSeconds?: number;
+}
+
+interface LeaseRow {
+  cluster: string;
+  renewed_at: Date;
+}
+
 /**
- * Up to `limit` agents the orchestrator has work for: a spec it has not applied, or a disk that has expired and not
- * been deleted. `SKIP LOCKED`, and a claim lasting `CLAIM_TIMEOUT_MS` unless reported on, so concurrent
- * orchestrators get disjoint sets and a dead one's claims pass to the next.
+ * Takes or renews the single orchestrator lease for `cluster`, holding its row locked for the rest of the
+ * transaction, so claims are made one at a time and only by the holder. `undefined` when `cluster` holds it now;
+ * otherwise the other cluster's fresh lease.
+ */
+async function takeLease(db: Database, cluster: string, now: Date, leaseSeconds: number): Promise<LeaseRow | undefined> {
+  const stale = new Date(now.getTime() - leaseSeconds * 1000);
+  const [previous] = await db.$queryRaw<LeaseRow[]>`SELECT cluster, renewed_at FROM orchestrator_lease WHERE id = 1 FOR UPDATE`;
+  if (previous !== undefined && previous.cluster !== cluster && previous.renewed_at > stale) {
+    return previous;
+  }
+  const taken = await db.$queryRaw<LeaseRow[]>`
+    INSERT INTO orchestrator_lease (id, cluster, renewed_at) VALUES (1, ${cluster}, ${now})
+    ON CONFLICT (id) DO UPDATE SET cluster = EXCLUDED.cluster, renewed_at = EXCLUDED.renewed_at
+     WHERE orchestrator_lease.cluster = EXCLUDED.cluster OR orchestrator_lease.renewed_at <= ${stale}
+    RETURNING cluster, renewed_at
+  `;
+  if (taken.length === 0) {
+    // Another cluster made the first lease between the read and the insert.
+    const [holder] = await db.$queryRaw<LeaseRow[]>`SELECT cluster, renewed_at FROM orchestrator_lease WHERE id = 1 FOR UPDATE`;
+    return holder;
+  }
+  if (previous === undefined) {
+    console.info(`the orchestrator lease was taken by ${cluster}`);
+  } else if (previous.cluster !== cluster) {
+    console.warn(`the orchestrator lease passed from ${previous.cluster} to ${cluster}, whose last claim was at ${previous.renewed_at.toISOString()}`);
+  }
+  return undefined;
+}
+
+/**
+ * Moves to `cluster` every agent meant to be running whose StatefulSet is on another: its disk stays behind, so it
+ * starts again on a fresh one. The generation is bumped so the claim that follows has work for it, and the token is
+ * dropped, which shuts the old pod out at once and has the claim mint a new one. A running agent with no cluster
+ * recorded is taken to be on the holder's, so it is adopted without a restart.
+ */
+async function takeOver(db: Database, cluster: string, now: Date): Promise<void> {
+  const moved = await db.$queryRaw<{ id: string; owner_oid: string; from_cluster: string }[]>`
+    WITH moving AS (
+      SELECT id, cluster AS from_cluster
+        FROM virtual_agent
+       WHERE desired = 'running' AND cluster IS NOT NULL AND cluster <> ${cluster}
+         FOR UPDATE SKIP LOCKED
+    )
+    UPDATE virtual_agent v
+       SET cluster = ${cluster}, generation = v.generation + 1, status = 'provisioning',
+           status_detail = 'moved from ' || moving.from_cluster || ' to ' || ${cluster} || '; starting on a fresh disk',
+           status_changed_at = ${now}, launch_token_hash = NULL, launch_token_issued_at = NULL, claimed_by = NULL, claimed_at = NULL,
+           updated_at = ${now}
+      FROM moving
+     WHERE v.id = moving.id
+    RETURNING v.id::text AS id, v.owner_oid, moving.from_cluster
+  `;
+  for (const row of moved) {
+    console.warn(`virtual agent ${row.id} moved from ${row.from_cluster} to ${cluster}, on a fresh disk`);
+    await announce(db, row.id, row.owner_oid);
+  }
+  await db.$executeRaw`
+    WITH unplaced AS (
+      SELECT id FROM virtual_agent WHERE desired = 'running' AND cluster IS NULL FOR UPDATE SKIP LOCKED
+    )
+    UPDATE virtual_agent v SET cluster = ${cluster} FROM unplaced WHERE v.id = unplaced.id
+  `;
+}
+
+/**
+ * Only the holder of the orchestrator lease claims; any other cluster is told it is on standby. The holder first
+ * takes over the running agents homed on another cluster, then claims up to `limit` agents it has work for: a spec it
+ * has not applied, or a disk that has expired and not been deleted. A claim lasts `CLAIM_TIMEOUT_MS` unless reported
+ * on, so a holder that restarts has its claims again. Every claimed agent's cluster becomes the caller's.
  *
  * A launch token is minted, replacing any before it, when the agent is meant to be running and either has none or is
  * starting a new pod. Its plain value goes in this response and nowhere else.
  */
-export async function claimVirtualAgents(
-  prisma: PrismaClient,
-  cluster: string,
-  limit: number = CLAIM_LIMIT,
-  now: Date = new Date()
-): Promise<ClaimedVirtualAgent[]> {
+export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, options: ClaimOptions = {}): Promise<ClaimResult> {
+  const { limit = CLAIM_LIMIT, now = new Date(), leaseSeconds = orchestratorLeaseSeconds() } = options;
   return await prisma.$transaction(async (tx) => {
+    const holder = await takeLease(tx, cluster, now, leaseSeconds);
+    if (holder !== undefined) {
+      return { active: false, virtual_agents: [], lease: { cluster: holder.cluster, renewed_at: holder.renewed_at.toISOString() } };
+    }
+    await takeOver(tx, cluster, now);
     const rows = await tx.$queryRaw<ClaimRow[]>`
       WITH due AS (
         SELECT id
@@ -320,7 +406,7 @@ export async function claimVirtualAgents(
            FOR UPDATE SKIP LOCKED
       )
       UPDATE virtual_agent v
-         SET claimed_by = ${cluster}, claimed_at = ${now}
+         SET claimed_by = ${cluster}, claimed_at = ${now}, cluster = ${cluster}
         FROM due
        WHERE v.id = due.id
       RETURNING v.id::text AS id, v.generation, v.desired::text AS desired, v.status::text AS status, v.statefulset_name, v.pvc_name,
@@ -347,7 +433,7 @@ export async function claimVirtualAgents(
         ...(launchToken === undefined ? {} : { launch_token: launchToken })
       });
     }
-    return claimed;
+    return { active: true, virtual_agents: claimed };
   });
 }
 
@@ -409,13 +495,23 @@ export interface LiveVirtualAgent {
   statefulset_name: string;
   /** `null` once the disk has been deleted, so a PVC by that name is an orphan. */
   pvc_name: string | null;
+  /** The cluster its StatefulSet is meant to be on, or `null` before any orchestrator has claimed it. */
+  cluster: string | null;
 }
 
-/** Every virtual agent the hub still has a row for, so anything else the orchestrator finds is an orphan. */
+/**
+ * Every virtual agent the hub still has a row for, so anything else the orchestrator finds is an orphan. It needs no
+ * lease: an orchestrator on standby reads it to delete what has moved away from its cluster.
+ */
 export async function liveVirtualAgents(db: Database): Promise<LiveVirtualAgent[]> {
   const rows = await db.virtualAgent.findMany({
-    select: { id: true, statefulsetName: true, pvcName: true, diskDeletedAt: true },
+    select: { id: true, statefulsetName: true, pvcName: true, diskDeletedAt: true, cluster: true },
     orderBy: { id: "asc" }
   });
-  return rows.map((row) => ({ id: row.id, statefulset_name: row.statefulsetName, pvc_name: row.diskDeletedAt === null ? row.pvcName : null }));
+  return rows.map((row) => ({
+    id: row.id,
+    statefulset_name: row.statefulsetName,
+    pvc_name: row.diskDeletedAt === null ? row.pvcName : null,
+    cluster: row.cluster
+  }));
 }

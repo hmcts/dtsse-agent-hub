@@ -61,6 +61,7 @@ describe("migrate", () => {
       "dev_credential_value",
       "message",
       "message_topic",
+      "orchestrator_lease",
       "subscription",
       "topic",
       "transcript_entry",
