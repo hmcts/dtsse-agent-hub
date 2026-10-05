@@ -91,8 +91,9 @@ signed-out UI acts as a real person, so it belongs on a developer's machine only
 ## Virtual agents
 
 Off unless `VIRTUAL_AGENTS_ENABLED=true`. Off, the sidebar has no link, `/virtual` is not found, `/api/virtual/**` and
-`/api/orchestrator/**` answer 404, launch tokens are not recognised and the virtual-agent sweep does not run. No chart sets
-it yet.
+`/api/orchestrator/**` answer 404, launch tokens are not recognised and the virtual-agent sweep does not run. The chart turns it on for the
+persistent AAT release, with `ORCHESTRATOR_OIDS` set to `dtsse-agent-hub-orchestrator-aat-mi`, and off for previews and
+the `-staging` release.
 
 | Variable | Default | What it is |
 | --- | --- | --- |
