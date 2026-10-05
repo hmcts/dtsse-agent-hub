@@ -9,5 +9,5 @@ export const dynamic = "force-dynamic";
 
 export const POST = orchestratorRoute(async ({ request }) => {
   const { cluster } = parse(claimBody, await readJson(request));
-  return json({ virtual_agents: await claimVirtualAgents(prisma, cluster) });
+  return json(await claimVirtualAgents(prisma, cluster));
 });

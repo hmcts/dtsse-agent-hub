@@ -23,9 +23,11 @@ import { MAX_PER_USER, MAX_RUNNING_PER_USER } from "../../src/virtual-agents/lim
 import { storePastedCode } from "../../src/virtual-agents/logins.ts";
 import {
   type ClaimedVirtualAgent,
+  type ClaimResult,
   claimVirtualAgents,
   createVirtualAgent,
   findVirtualAgent,
+  observeVirtualAgent,
   setDesired,
   type VirtualAgentRow
 } from "../../src/virtual-agents/store.ts";
@@ -88,8 +90,23 @@ async function orchestrator<P>(handler: Handler<P>, path: string, params: P, met
 async function claim(cluster = "preview-01"): Promise<ClaimedVirtualAgent[]> {
   const response = await orchestrator(claimRoute.POST, "/api/orchestrator/claim", {}, "POST", { cluster });
   expect(response.status).toBe(200);
-  return (await jsonOf<{ virtual_agents: ClaimedVirtualAgent[] }>(response)).virtual_agents;
+  const body = await jsonOf<ClaimResult>(response);
+  expect(body.active).toBe(true);
+  return body.virtual_agents;
 }
+
+/** The agents a claim by `cluster` gets, failing the test if that cluster is refused the lease. */
+async function claimedBy(cluster: string, now?: Date): Promise<ClaimedVirtualAgent[]> {
+  const result = await claimVirtualAgents(prisma, cluster, { now });
+  expect(result.active).toBe(true);
+  return result.virtual_agents;
+}
+
+async function homeOf(id: string): Promise<string | null> {
+  return (await prisma.virtualAgent.findUniqueOrThrow({ where: { id } })).cluster;
+}
+
+const LATER = () => new Date(Date.now() + 3 * 60_000);
 
 async function observe(id: string, body: Record<string, unknown>): Promise<Response> {
   return await orchestrator(observedRoute.POST, `/api/orchestrator/virtual-agents/${id}/observed`, { id }, "POST", body);
@@ -219,19 +236,30 @@ describe("creating virtual agents", () => {
 });
 
 describe("POST /api/orchestrator/claim", () => {
-  it("should give two concurrent orchestrators disjoint sets that cover everything due", async () => {
+  it("should let only one of two clusters claiming at once take the lease, and give it everything due", async () => {
     const ids: string[] = [];
     for (const owner of [ALICE, BOB, CAROL]) {
       ids.push((await create(owner, "one")).id, (await create(owner, "two")).id);
     }
 
-    const [left, right] = await Promise.all([claimVirtualAgents(prisma, "cluster-a", 4), claimVirtualAgents(prisma, "cluster-b", 4)]);
+    const results = await Promise.all([claimVirtualAgents(prisma, "cluster-a"), claimVirtualAgents(prisma, "cluster-b")]);
 
-    const leftIds = left.map((entry) => entry.id);
-    const rightIds = right.map((entry) => entry.id);
-    expect(leftIds.filter((id) => rightIds.includes(id))).toEqual([]);
-    expect([...leftIds, ...rightIds].sort(byCodePoint)).toEqual([...ids].sort(byCodePoint));
-    expect(await claimVirtualAgents(prisma, "cluster-c")).toEqual([]);
+    const active = results.filter((result) => result.active);
+    const standby = results.filter((result) => !result.active);
+    expect(active).toHaveLength(1);
+    expect(standby).toEqual([
+      { active: false, virtual_agents: [], lease: { cluster: expect.stringMatching(/^cluster-[ab]$/), renewed_at: expect.any(String) } }
+    ]);
+    expect(active[0]!.virtual_agents.map((entry) => entry.id).sort(byCodePoint)).toEqual([...ids].sort(byCodePoint));
+  });
+
+  it("should claim at most the limit at once, leaving the rest for the next claim", async () => {
+    for (const owner of [ALICE, BOB, CAROL]) {
+      await create(owner, "one");
+    }
+
+    expect((await claimVirtualAgents(prisma, "cluster-a", { limit: 2 })).virtual_agents).toHaveLength(2);
+    expect(await claimedBy("cluster-a")).toHaveLength(1);
   });
 
   it("should describe each claimed agent and mint a token for one that is starting", async () => {
@@ -255,17 +283,17 @@ describe("POST /api/orchestrator/claim", () => {
     expect(Buffer.from(stored.launchTokenHash!).toString("utf8")).not.toContain(claimed!.launch_token!);
   });
 
-  it("should hand a claim to another orchestrator once it has gone unreported for two minutes, replacing the token", async () => {
+  it("should hand a claim back to its holder once it has gone unreported for two minutes, replacing the token", async () => {
     const agent = await create(ALICE, "pcs-api");
-    const [first] = await claimVirtualAgents(prisma, "cluster-a");
-    expect(await claimVirtualAgents(prisma, "cluster-b")).toEqual([]);
+    const [first] = await claimedBy("cluster-a");
+    expect(await claimedBy("cluster-a")).toEqual([]);
 
-    const [second] = await claimVirtualAgents(prisma, "cluster-b", 20, new Date(Date.now() + 3 * 60_000));
+    const [again] = await claimedBy("cluster-a", LATER());
 
-    expect(second?.id).toBe(agent.id);
-    expect(second?.launch_token).not.toBe(first?.launch_token);
+    expect(again).toMatchObject({ id: agent.id, generation: first!.generation });
+    expect(again?.launch_token).not.toBe(first?.launch_token);
     expect((await status(agent.id, first!.launch_token!, { phase: "provisioning" })).status).toBe(401);
-    expect((await status(agent.id, second!.launch_token!, { phase: "provisioning" })).status).toBe(204);
+    expect((await status(agent.id, again!.launch_token!, { phase: "provisioning" })).status).toBe(204);
   });
 
   it("should not mint again for an agent whose pod already holds a token when its spec changes otherwise", async () => {
@@ -288,6 +316,120 @@ describe("POST /api/orchestrator/claim", () => {
     const { token } = await started(ALICE, "pcs-api");
 
     expect((await pod(claimRoute.POST, token, "/api/orchestrator/claim", {}, "POST", { cluster: "x" })).status).toBe(401);
+  });
+});
+
+describe("the orchestrator lease", () => {
+  it("should be taken by the first cluster to claim and renewed by each claim it makes", async () => {
+    const first = new Date();
+    const second = new Date(first.getTime() + 10_000);
+
+    expect(await claimVirtualAgents(prisma, "cluster-a", { now: first })).toEqual({ active: true, virtual_agents: [] });
+    expect(await prisma.orchestratorLease.findUniqueOrThrow({ where: { id: 1 } })).toEqual({ id: 1, cluster: "cluster-a", renewedAt: first });
+    await claimVirtualAgents(prisma, "cluster-a", { now: second });
+
+    expect(await prisma.orchestratorLease.findUniqueOrThrow({ where: { id: 1 } })).toEqual({ id: 1, cluster: "cluster-a", renewedAt: second });
+  });
+
+  it("should put another cluster on standby, claiming nothing, while the lease is fresh", async () => {
+    const renewed = new Date();
+    await claimVirtualAgents(prisma, "preview-01", { now: renewed });
+    const agent = await create(ALICE, "pcs-api");
+
+    const response = await orchestrator(claimRoute.POST, "/api/orchestrator/claim", {}, "POST", { cluster: "preview-02" }, "preview-02");
+
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({ virtual_agents: [], active: false, lease: { cluster: "preview-01", renewed_at: renewed.toISOString() } });
+    expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id: agent.id } })).toMatchObject({ claimedBy: null, cluster: null });
+    expect(await prisma.orchestratorLease.findUniqueOrThrow({ where: { id: 1 } })).toMatchObject({ cluster: "preview-01", renewedAt: renewed });
+  });
+
+  it("should pass to another cluster, and say so, once the holder has not claimed for the lease's length", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const renewed = new Date();
+    await claimVirtualAgents(prisma, "cluster-a", { now: renewed });
+
+    expect((await claimVirtualAgents(prisma, "cluster-b", { now: new Date(renewed.getTime() + 119_000) })).active).toBe(false);
+    expect((await claimVirtualAgents(prisma, "cluster-b", { now: new Date(renewed.getTime() + 120_000) })).active).toBe(true);
+    expect(await claimVirtualAgents(prisma, "cluster-a", { now: new Date(renewed.getTime() + 121_000) })).toMatchObject({
+      active: false,
+      lease: { cluster: "cluster-b" }
+    });
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("the orchestrator lease passed from cluster-a to cluster-b"));
+    warn.mockRestore();
+  });
+
+  it("should last ORCHESTRATOR_LEASE_SECONDS when that is set", async () => {
+    vi.stubEnv("ORCHESTRATOR_LEASE_SECONDS", "600");
+    const renewed = new Date();
+    await claimVirtualAgents(prisma, "cluster-a", { now: renewed });
+
+    expect((await claimVirtualAgents(prisma, "cluster-b", { now: new Date(renewed.getTime() + 300_000) })).active).toBe(false);
+  });
+});
+
+describe("moving virtual agents between clusters", () => {
+  /** An agent started and running on `cluster`, with its pod's token. */
+  async function runningOn(cluster: string, name = "pcs-api"): Promise<{ id: string; token: string; generation: number }> {
+    const agent = await create(ALICE, name);
+    const claimed = (await claimedBy(cluster)).find((entry) => entry.id === agent.id)!;
+    await observeVirtualAgent(prisma, agent.id, { generation: claimed.generation, replicasReady: 1, podPhase: "Running" });
+    return { id: agent.id, token: claimed.launch_token!, generation: claimed.generation };
+  }
+
+  it("should start a running agent on the new holder's cluster on a fresh disk, with a new token that shuts the old pod out", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { id, token, generation } = await runningOn("cluster-a");
+
+    const [moved] = await claimedBy("cluster-b", LATER());
+
+    expect(moved).toMatchObject({ id, desired: "running", generation: generation + 1, launch_token: expect.stringMatching(/^ahv_/) });
+    expect(await row(id)).toMatchObject({ status: "provisioning", statusDetail: "moved from cluster-a to cluster-b; starting on a fresh disk" });
+    expect(await homeOf(id)).toBe("cluster-b");
+    expect((await status(id, token, { phase: "running" })).status).toBe(401);
+    expect((await status(id, moved!.launch_token!, { phase: "provisioning" })).status).toBe(204);
+    expect(warn).toHaveBeenCalledWith(`virtual agent ${id} moved from cluster-a to cluster-b, on a fresh disk`);
+    warn.mockRestore();
+  });
+
+  it("should move nothing while the old cluster still holds the lease", async () => {
+    const { id, token, generation } = await runningOn("cluster-a");
+
+    expect((await claimVirtualAgents(prisma, "cluster-b")).active).toBe(false);
+
+    expect(await row(id)).toMatchObject({ generation, status: "provisioning", statusDetail: null });
+    expect(await homeOf(id)).toBe("cluster-a");
+    expect((await status(id, token, { phase: "running" })).status).toBe(204);
+  });
+
+  it("should leave a stopped agent on its cluster, and move it to the holder's when it starts again", async () => {
+    const { id } = await runningOn("cluster-a");
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+    const [stopping] = await claimedBy("cluster-a");
+    await observeVirtualAgent(prisma, id, { generation: stopping!.generation, replicasReady: 0 });
+    const stopped = await row(id);
+
+    expect(await claimedBy("cluster-b", LATER())).toEqual([]);
+    expect(await row(id)).toMatchObject({ status: "stopped", generation: stopped.generation });
+    expect(await homeOf(id)).toBe("cluster-a");
+
+    await setDesired(prisma, ALICE.oid, id, "running");
+    const [starting] = await claimedBy("cluster-b", LATER());
+
+    expect(starting).toMatchObject({ id, desired: "running", launch_token: expect.any(String) });
+    expect(await homeOf(id)).toBe("cluster-b");
+  });
+
+  it("should adopt a running agent with no cluster recorded without restarting it", async () => {
+    const { id, token, generation } = await runningOn("cluster-a");
+    await prisma.virtualAgent.update({ where: { id }, data: { cluster: null } });
+
+    expect(await claimedBy("cluster-a")).toEqual([]);
+
+    expect(await homeOf(id)).toBe("cluster-a");
+    expect((await row(id)).generation).toBe(generation);
+    expect((await status(id, token, { phase: "running" })).status).toBe(204);
   });
 });
 
@@ -362,7 +504,7 @@ describe("POST /api/orchestrator/virtual-agents/{id}/observed", () => {
     expect((await row(id)).diskDeletedAt).not.toBeNull();
     expect(await claim()).toEqual([]);
     const live = await jsonOf(await orchestrator(liveRoute.GET, "/api/orchestrator/live", {}));
-    expect(live.virtual_agents).toEqual([{ id, statefulset_name: `va-${id.slice(0, 8)}`, pvc_name: null }]);
+    expect(live.virtual_agents).toEqual([{ id, statefulset_name: `va-${id.slice(0, 8)}`, pvc_name: null, cluster: "preview-01" }]);
   });
 
   it("should remove a deleted agent once its pod and disk are both gone", async () => {
@@ -408,7 +550,18 @@ describe("GET /api/orchestrator/live", () => {
 
     const live = await jsonOf(await orchestrator(liveRoute.GET, "/api/orchestrator/live", {}));
 
-    expect(live.virtual_agents).toEqual([{ id: agent.id, statefulset_name: `va-${agent.id.slice(0, 8)}`, pvc_name: `work-va-${agent.id.slice(0, 8)}-0` }]);
+    expect(live.virtual_agents).toEqual([
+      { id: agent.id, statefulset_name: `va-${agent.id.slice(0, 8)}`, pvc_name: `work-va-${agent.id.slice(0, 8)}-0`, cluster: null }
+    ]);
+  });
+
+  it("should name the cluster each agent is on once one has claimed it, without the caller holding the lease", async () => {
+    const agent = await create(ALICE, "a");
+    await claimVirtualAgents(prisma, "preview-00");
+
+    const live = await jsonOf(await orchestrator(liveRoute.GET, "/api/orchestrator/live", {}, "GET", undefined, "preview-01"));
+
+    expect(live.virtual_agents).toEqual([expect.objectContaining({ id: agent.id, cluster: "preview-00" })]);
   });
 });
 

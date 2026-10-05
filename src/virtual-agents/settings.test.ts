@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DISK_TTL_DAYS,
   DEFAULT_IDLE_MINUTES,
+  DEFAULT_ORCHESTRATOR_LEASE_SECONDS,
   diskTtlDays,
   eveningStop,
   idleMinutes,
+  orchestratorLeaseSeconds,
   orchestratorOids,
   orchestratorRole,
   VirtualAgentConfigurationError,
@@ -37,6 +39,21 @@ describe("idleMinutes and diskTtlDays", () => {
 
   it.each(["0", "-5", "1.5", "two"])("should refuse %s when it is not a whole number of at least one", (value) => {
     expect(() => idleMinutes({ VIRTUAL_AGENT_IDLE_MINUTES: value })).toThrow(VirtualAgentConfigurationError);
+  });
+});
+
+describe("orchestratorLeaseSeconds", () => {
+  it("should default to two minutes when nothing is set", () => {
+    expect(orchestratorLeaseSeconds({})).toBe(DEFAULT_ORCHESTRATOR_LEASE_SECONDS);
+    expect(DEFAULT_ORCHESTRATOR_LEASE_SECONDS).toBe(120);
+  });
+
+  it("should read a whole number of seconds when one is set", () => {
+    expect(orchestratorLeaseSeconds({ ORCHESTRATOR_LEASE_SECONDS: "300" })).toBe(300);
+  });
+
+  it("should refuse a lease when it is not a whole number of at least one", () => {
+    expect(() => orchestratorLeaseSeconds({ ORCHESTRATOR_LEASE_SECONDS: "0" })).toThrow(VirtualAgentConfigurationError);
   });
 });
 

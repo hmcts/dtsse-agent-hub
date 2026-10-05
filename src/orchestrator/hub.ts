@@ -34,10 +34,20 @@ export interface LiveAgent {
   id: string;
   statefulset_name: string;
   pvc_name: string | null;
+  /** The cluster the hub has the agent on; `null` before it is first claimed. */
+  cluster: string | null;
 }
 
+export interface Lease {
+  cluster: string;
+  renewed_at: string;
+}
+
+/** The agents claimed while this cluster holds the hub's lease, or the holder while another does. */
+export type Claim = { active: true; agents: ClaimedAgent[] } | { active: false; lease: Lease };
+
 export interface Hub {
-  claim(cluster: string): Promise<ClaimedAgent[]>;
+  claim(cluster: string): Promise<Claim>;
   observed(id: string, body: ObservedBody): Promise<void>;
   live(): Promise<LiveAgent[]>;
 }
@@ -75,15 +85,26 @@ async function errorOf(response: Response): Promise<string> {
   }
 }
 
+interface AgentList<T> {
+  virtual_agents: T[];
+  active?: unknown;
+  lease?: unknown;
+}
+
 /** A parse error quotes the body, and a claim's body holds launch tokens, so the error names only the request. */
-async function agentsOf<T>(response: Response, request: string): Promise<{ virtual_agents: T[] }> {
+async function agentsOf<T>(response: Response, request: string): Promise<AgentList<T>> {
   try {
     const parsed = (await response.json()) as { virtual_agents?: unknown };
     if (Array.isArray(parsed.virtual_agents)) {
-      return parsed as { virtual_agents: T[] };
+      return parsed as AgentList<T>;
     }
   } catch {}
   throw new Error(`${request}: the hub's answer was not a list of virtual agents`);
+}
+
+function isLease(value: unknown): value is Lease {
+  const lease = value as Partial<Lease> | null;
+  return typeof lease === "object" && lease !== null && typeof lease.cluster === "string" && typeof lease.renewed_at === "string";
 }
 
 export function createHub({
@@ -143,8 +164,15 @@ export function createHub({
 
   return {
     async claim(cluster) {
-      const response = await call("POST", "/api/orchestrator/claim", { cluster });
-      return (await agentsOf<ClaimedAgent>(response, "POST /api/orchestrator/claim")).virtual_agents;
+      const request = "POST /api/orchestrator/claim";
+      const answer = await agentsOf<ClaimedAgent>(await call("POST", "/api/orchestrator/claim", { cluster }), request);
+      if (answer.active !== false) {
+        return { active: true, agents: answer.virtual_agents };
+      }
+      if (!isLease(answer.lease)) {
+        throw new Error(`${request}: the hub said this cluster is on standby but not who holds the lease`);
+      }
+      return { active: false, lease: { cluster: answer.lease.cluster, renewed_at: answer.lease.renewed_at } };
     },
 
     async observed(id, body) {

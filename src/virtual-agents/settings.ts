@@ -8,6 +8,7 @@ export type Environment = Readonly<Record<string, string | undefined>>;
 export const DEFAULT_IDLE_MINUTES = 120;
 export const DEFAULT_EVENING_STOP = "19:00";
 export const DEFAULT_DISK_TTL_DAYS = 14;
+export const DEFAULT_ORCHESTRATOR_LEASE_SECONDS = 120;
 
 export class VirtualAgentConfigurationError extends Error {}
 
@@ -33,6 +34,11 @@ export function idleMinutes(env: Environment = process.env): number {
 
 export function diskTtlDays(env: Environment = process.env): number {
   return positiveWhole(env, "VIRTUAL_AGENT_DISK_TTL_DAYS", DEFAULT_DISK_TTL_DAYS);
+}
+
+/** How long the orchestrator lease outlives its holder's last claim before another cluster may take it. */
+export function orchestratorLeaseSeconds(env: Environment = process.env): number {
+  return positiveWhole(env, "ORCHESTRATOR_LEASE_SECONDS", DEFAULT_ORCHESTRATOR_LEASE_SECONDS);
 }
 
 export interface WallClock {

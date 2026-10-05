@@ -40,7 +40,7 @@ function startup(): { settings: OrchestratorSettings; kubeConfig: KubeConfig } |
 async function pass(deps: ReconcileDeps, state: ReconcileState, health: Health): Promise<void> {
   try {
     const result = await reconcilePass(deps, state);
-    health.passed();
+    health.passed(result.standby);
     if (result.claimed > 0 || result.reported > 0 || result.errors > 0 || result.orphans > 0) {
       log(result.errors > 0 ? "warn" : "info", "pass", { ...result, watching: state.watching.size });
     }
