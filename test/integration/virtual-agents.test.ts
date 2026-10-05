@@ -58,6 +58,7 @@ const CAROL = person("carol");
 
 const GITHUB = `ghp_${"A1b2".repeat(9)}`;
 const CLAUDE = `sk-ant-oat01-${"Qw_-".repeat(12)}`;
+const BEDROCK = `bedrock-api-key-${"YmVkcm9jay5hbWF6b25hd3MuY29t".repeat(6)}`;
 const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
 
 function azureCacheFor(oid: string): string {
@@ -112,13 +113,13 @@ async function observe(id: string, body: Record<string, unknown>): Promise<Respo
   return await orchestrator(observedRoute.POST, `/api/orchestrator/virtual-agents/${id}/observed`, { id }, "POST", body);
 }
 
-async function create(owner: Person, name: string, modelRoute: "gateway" | "own-licence" = "gateway"): Promise<VirtualAgentRow> {
+async function create(owner: Person, name: string, modelRoute: "bedrock" | "own-licence" = "bedrock"): Promise<VirtualAgentRow> {
   await insertUser(owner);
   return await createVirtualAgent(prisma, { owner, modelRoute, name });
 }
 
 /** A virtual agent the orchestrator has claimed and started, with the launch token its pod holds. */
-async function started(owner: Person, name: string, modelRoute: "gateway" | "own-licence" = "gateway"): Promise<{ id: string; token: string }> {
+async function started(owner: Person, name: string, modelRoute: "bedrock" | "own-licence" = "bedrock"): Promise<{ id: string; token: string }> {
   const row = await create(owner, name, modelRoute);
   const claimed = (await claim()).find((entry) => entry.id === row.id);
   expect(claimed?.launch_token).toBeDefined();
@@ -174,7 +175,7 @@ describe("creating virtual agents", () => {
   it("should create one meant to be running, with names derived from its id, when the owner is under the limits", async () => {
     const agent = await create(ALICE, "PCS-api");
 
-    expect(agent).toMatchObject({ name: "pcs-api", desired: "running", status: "requested", generation: 1, observedGeneration: 0, modelRoute: "gateway" });
+    expect(agent).toMatchObject({ name: "pcs-api", desired: "running", status: "requested", generation: 1, observedGeneration: 0, modelRoute: "bedrock" });
     expect(agent.statefulsetName).toBe(`va-${agent.id.slice(0, 8)}`);
     expect(agent.pvcName).toBe(`work-va-${agent.id.slice(0, 8)}-0`);
   });
@@ -251,6 +252,14 @@ describe("POST /api/orchestrator/claim", () => {
       { active: false, virtual_agents: [], lease: { cluster: expect.stringMatching(/^cluster-[ab]$/), renewed_at: expect.any(String) } }
     ]);
     expect(active[0]!.virtual_agents.map((entry) => entry.id).sort(byCodePoint)).toEqual([...ids].sort(byCodePoint));
+  });
+
+  it("should pass the Bedrock route to the orchestrator when the agent is on it", async () => {
+    await create(ALICE, "pcs-api", "bedrock");
+
+    const [claimed] = await claim();
+
+    expect(claimed?.model_route).toBe("bedrock");
   });
 
   it("should claim at most the limit at once, leaving the rest for the next claim", async () => {
@@ -665,6 +674,16 @@ describe("a launch token on the agent API", () => {
     expect([put.status, remove.status]).toEqual([403, 403]);
     expect(await prisma.credential.count()).toBe(0);
   });
+
+  it("should refuse a launch token reading its owner's Bedrock API key through the person's route", async () => {
+    const { token } = await started(ALICE, "pcs-api");
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "bedrock", value: BEDROCK, via: "web" });
+
+    const response = await pod(personalCredentialRoute.GET, token, "/api/agent/credentials/bedrock", { kind: "bedrock" });
+
+    expect(response.status).toBe(403);
+    expect(await response.text()).not.toContain(BEDROCK);
+  });
 });
 
 describe("/api/virtual/{id}/status", () => {
@@ -812,6 +831,38 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     const { id, token } = await started(ALICE, "pcs-api");
 
     expect((await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/ssh`, { virtualAgentId: id, kind: "ssh" })).status).toBe(404);
+  });
+
+  it("should give the pod its owner's Bedrock API key, and 404 until there is one", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    const fetchKey = () => pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/bedrock`, { virtualAgentId: id, kind: "bedrock" });
+    expect((await fetchKey()).status).toBe(404);
+
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "bedrock", value: BEDROCK, via: "web" });
+
+    const found = await fetchKey();
+    expect(found.status).toBe(200);
+    expect(await jsonOf(found)).toEqual({ value: BEDROCK });
+  });
+
+  it("should store a Bedrock API key the pod saves as saved by the pod", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+
+    const response = await pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/bedrock`, { virtualAgentId: id, kind: "bedrock" }, "PUT", {
+      value: BEDROCK
+    });
+
+    expect(response.status).toBe(204);
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: ALICE.oid, kind: "bedrock", updatedVia: "pod" });
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "bedrock")).toBe(BEDROCK);
+  });
+
+  it("should record the pod waiting for a Bedrock API key when it reports awaiting_credentials", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+
+    expect((await status(id, token, { phase: "awaiting_credentials", detail: "bedrock: paste your Bedrock API key" })).status).toBe(204);
+
+    expect(await row(id)).toMatchObject({ status: "awaiting_credentials", statusDetail: "bedrock: paste your Bedrock API key" });
   });
 });
 
@@ -1272,20 +1323,26 @@ describe("the web UI's reads and actions", () => {
     await create(BOB, "bobs");
     const agentId = (await jsonOf(await register(token, "va-session-1"))).agent_id;
     await directAsPerson(prisma, ALICE.oid, agentId, "hello");
-    const viewer = { ...ALICE, tid: "dev", modelRoute: "gateway" as const };
+    const viewer = { ...ALICE, tid: "dev", modelRoute: "bedrock" as const };
 
     const list = await virtualAgentsPage(viewer);
     const page = await virtualAgentPage(viewer, id);
 
     expect(list.agents.map((agent) => agent.name)).toEqual(["pcs-api"]);
-    expect(page?.detail.needed).toEqual(["github", "azure"]);
+    expect(page?.detail.needed).toEqual(["github", "azure", "bedrock"]);
     expect(page?.linked?.view.agent.id).toBe(agentId);
     expect(page?.linked?.conversation.messages.map((message) => message.body)).toEqual(["hello"]);
-    expect(await virtualAgentPage({ ...BOB, tid: "dev", modelRoute: "gateway" }, id)).toBeUndefined();
+    expect(await virtualAgentPage({ ...BOB, tid: "dev", modelRoute: "bedrock" }, id)).toBeUndefined();
     expect(await virtualAgentPage(viewer, "not-a-uuid")).toBeUndefined();
   });
 
-  it("should need a Claude token too when the agent is on its owner's own licence", async () => {
+  it("should need a Bedrock API key and no Claude token when the agent is on the Bedrock route", async () => {
+    const agent = await create(ALICE, "pcs-api", "bedrock");
+
+    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "azure", "bedrock"]);
+  });
+
+  it("should need a Claude token and no Bedrock API key when the agent is on its owner's own licence", async () => {
     const agent = await create(ALICE, "pcs-api", "own-licence");
 
     expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "azure", "claude"]);

@@ -8,8 +8,14 @@ import { LoginCountdown } from "./LoginCountdown";
 const TITLES: Record<CredentialKind, string> = {
   github: "GitHub",
   azure: "Azure",
-  claude: "Claude"
+  claude: "Claude",
+  bedrock: "Bedrock API key"
 };
+
+/** A kind the owner pastes here rather than signs in for through their virtual agent. */
+function isPasted(kind: CredentialKind): boolean {
+  return kind === "bedrock";
+}
 
 const INPUT = "mt-1 w-96 max-w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 font-mono text-sm text-hub-text";
 const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
@@ -76,12 +82,30 @@ function PendingLogin({ virtualAgentId, login, paste }: { virtualAgentId: string
   );
 }
 
+/** The owner's own key, saved straight into their credentials as on the credentials page; never shown back. */
+function PasteCredential({ kind, stored, save }: { kind: CredentialKind; stored: boolean; save: FormAction }) {
+  const title = TITLES[kind];
+  return (
+    <ActionForm action={save} label={`Save your ${title}`} className="flex flex-wrap items-end gap-3">
+      <input type="hidden" name="kind" value={kind} />
+      <label className="block">
+        <span className="block text-hub-text">{stored ? `Replace your ${title}` : `Paste your ${title}`}</span>
+        <input name="value" type="password" required autoComplete="off" spellCheck={false} className={INPUT} />
+      </label>
+      <button type="submit" className={BUTTON}>
+        Save
+      </button>
+    </ActionForm>
+  );
+}
+
 function Card({
   virtualAgentId,
   kind,
   status,
   login,
   paste,
+  save,
   now
 }: {
   virtualAgentId: string;
@@ -89,9 +113,22 @@ function Card({
   status: CredentialStatus | undefined;
   login: LoginView | undefined;
   paste: FormAction;
+  save: FormAction;
   now: number;
 }) {
-  const state = checklistState(status?.stored === true, login, now);
+  const stored = status?.stored === true;
+  if (isPasted(kind)) {
+    return (
+      <li className="space-y-2 border-b border-hub-line px-4 py-3 last:border-b-0">
+        <div className="flex flex-wrap items-baseline gap-x-3">
+          <h3 className="text-sm font-bold text-white">{TITLES[kind]}</h3>
+          <span className={`text-xs ${stored ? "text-green-300" : "text-hub-muted"}`}>{stored ? "✓ Stored" : "Not stored"}</span>
+        </div>
+        <PasteCredential kind={kind} stored={stored} save={save} />
+      </li>
+    );
+  }
+  const state = checklistState(stored, login, now);
   const detail = { stored: "✓ Stored", login: "Sign-in waiting for you", waiting: "Waiting for your virtual agent to ask" }[state];
   return (
     <li className="space-y-2 border-b border-hub-line px-4 py-3 last:border-b-0">
@@ -112,7 +149,8 @@ function Card({
 
 /**
  * What the virtual agent needs before it can work, one card per credential: stored, a sign-in waiting for the owner
- * with its code or a box to paste one into, or nothing yet. Only the owner ever sees this page.
+ * with its code or a box to paste one into, or nothing yet. A Bedrock API key has no sign-in, so its card always
+ * offers a box to paste the key itself. Only the owner ever sees this page.
  */
 export function OnboardingChecklist({
   virtualAgentId,
@@ -120,6 +158,7 @@ export function OnboardingChecklist({
   statuses,
   logins,
   paste,
+  save,
   now,
   unavailable
 }: {
@@ -128,6 +167,7 @@ export function OnboardingChecklist({
   statuses: CredentialStatus[];
   logins: LoginView[];
   paste: FormAction;
+  save: FormAction;
   now: number;
   unavailable?: string;
 }) {
@@ -146,6 +186,7 @@ export function OnboardingChecklist({
             status={statuses.find((status) => status.kind === kind)}
             login={logins.find((login) => login.kind === kind)}
             paste={paste}
+            save={save}
             now={now}
           />
         ))}

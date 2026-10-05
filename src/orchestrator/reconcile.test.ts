@@ -36,7 +36,7 @@ function agent(overrides: Partial<ClaimedAgent> = {}): ClaimedAgent {
     statefulset_name: `va-${id.slice(0, 8)}`,
     pvc_name: `work-va-${id.slice(0, 8)}-0`,
     delete_disk: false,
-    model_route: "gateway",
+    model_route: "bedrock",
     owner: { oid: "owner" },
     ...overrides
   };

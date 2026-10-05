@@ -39,7 +39,7 @@ function card(overrides: Partial<VirtualAgentCard> = {}): VirtualAgentCard {
     desired: "running",
     status: "running",
     statusDetail: null,
-    modelRoute: "gateway",
+    modelRoute: "bedrock",
     stopReason: null,
     lastActivityAt: "2026-10-05T10:55:00.000Z",
     stoppedAt: null,
@@ -85,7 +85,7 @@ describe("labels", () => {
 
 describe("VirtualAgentsView", () => {
   it("should list the viewer's agents with their status, idle time and a link to each", () => {
-    render(<VirtualAgentsView agents={[card()]} route="gateway" create={ok()} now={NOW} />);
+    render(<VirtualAgentsView agents={[card()]} route="bedrock" create={ok()} now={NOW} />);
 
     const list = screen.getByRole("list", { name: "Your virtual agents" });
     expect(within(list).getByRole("link", { name: "pcs-api" }).getAttribute("href")).toBe("/virtual/0f8a6a1e-0000-4000-8000-000000000001");
@@ -105,7 +105,7 @@ describe("VirtualAgentsView", () => {
             diskExpiresAt: "2026-10-07T12:00:00.000Z"
           })
         ]}
-        route="gateway"
+        route="bedrock"
         create={ok()}
         now={NOW}
       />
@@ -125,9 +125,15 @@ describe("VirtualAgentsView", () => {
     expect(screen.getByRole("form", { name: "Create a virtual agent" })).toBeTruthy();
   });
 
+  it("should name Amazon Bedrock and the viewer's Bedrock API key when the viewer is on the Bedrock route", () => {
+    render(<VirtualAgentsView agents={[]} route="bedrock" create={ok()} now={NOW} />);
+
+    expect(screen.getByText("Model: Amazon Bedrock, with your Bedrock API key")).toBeTruthy();
+  });
+
   it("should send the name to the create action when the form is submitted", async () => {
     const create = vi.fn(async () => ({ ok: true as const, confirmation: "pcs-api is starting" }));
-    render(<VirtualAgentsView agents={[]} route="gateway" create={create} now={NOW} />);
+    render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} />);
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "pcs-api" } });
     await act(async () => {
@@ -139,7 +145,7 @@ describe("VirtualAgentsView", () => {
   });
 
   it("should offer no create form and say why when the viewer is at a limit", () => {
-    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b" })]} route="gateway" create={ok()} now={NOW} />);
+    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b" })]} route="bedrock" create={ok()} now={NOW} />);
 
     expect(screen.queryByRole("form", { name: "Create a virtual agent" })).toBeNull();
     expect(screen.getByText(/2 virtual agents running/)).toBeTruthy();
@@ -279,6 +285,7 @@ describe("OnboardingChecklist", () => {
         statuses={[stored("azure", "alice@justice.gov.uk")]}
         logins={[]}
         paste={ok()}
+        save={ok()}
         now={NOW}
       />
     );
@@ -292,7 +299,7 @@ describe("OnboardingChecklist", () => {
   });
 
   it("should show a device code, its link and how long it lasts when a device-code login is pending", () => {
-    render(<OnboardingChecklist virtualAgentId="va-1" needed={["github"]} statuses={[]} logins={[login()]} paste={ok()} now={NOW} />);
+    render(<OnboardingChecklist virtualAgentId="va-1" needed={["github"]} statuses={[]} logins={[login()]} paste={ok()} save={ok()} now={NOW} />);
 
     const link = screen.getByRole("link", { name: "https://github.com/login/device" });
     expect(link.getAttribute("rel")).toContain("noopener");
@@ -309,6 +316,7 @@ describe("OnboardingChecklist", () => {
         statuses={[]}
         logins={[login({ kind: "claude", prompt: "paste_code", userCode: null, verificationUri: "https://claude.ai/oauth/authorize?x=1" })]}
         paste={paste}
+        save={ok()}
         now={NOW}
       />
     );
@@ -333,6 +341,7 @@ describe("OnboardingChecklist", () => {
         statuses={[]}
         logins={[login({ kind: "claude", prompt: "paste_code", codeWaiting: true })]}
         paste={ok()}
+        save={ok()}
         now={NOW}
       />
     );
@@ -341,16 +350,64 @@ describe("OnboardingChecklist", () => {
     expect(screen.getByRole("status").textContent).toContain("waiting for your virtual agent");
   });
 
+  it("should offer a password box for the Bedrock API key and save it as the owner's credential when it is not stored", async () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Your Bedrock API key is stored" }));
+    render(<OnboardingChecklist virtualAgentId="va-1" needed={["github", "azure", "bedrock"]} statuses={[]} logins={[]} paste={ok()} save={save} now={NOW} />);
+
+    const item = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem")[2]!;
+    expect(item.querySelector("h3")?.textContent).toBe("Bedrock API key");
+    expect(item.textContent).toContain("Not stored");
+    const input = within(item).getByLabelText("Paste your Bedrock API key");
+    expect(input).toHaveProperty("type", "password");
+    fireEvent.change(input, { target: { value: "ABSK-pasted" } });
+    await act(async () => {
+      fireEvent.submit(within(item).getByRole("form", { name: "Save your Bedrock API key" }));
+    });
+
+    const sent = (save.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("kind"), sent.get("value")]).toEqual(["bedrock", "ABSK-pasted"]);
+    expect(within(item).getByRole("status").textContent).toBe("Your Bedrock API key is stored");
+  });
+
+  it("should tick a stored Bedrock API key, count it and offer to replace it without showing it when it is stored", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        needed={["github", "azure", "bedrock"]}
+        statuses={[stored("bedrock")]}
+        logins={[]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    const item = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem")[2]!;
+    expect(item.textContent).toContain("✓ Stored");
+    expect(within(item).getByLabelText("Replace your Bedrock API key")).toHaveProperty("value", "");
+    expect(screen.getByText("1 of 3 stored")).toBeTruthy();
+  });
+
   it("should say the last sign-in failed when it did", () => {
     render(
-      <OnboardingChecklist virtualAgentId="va-1" needed={["azure"]} statuses={[]} logins={[login({ kind: "azure", state: "failed" })]} paste={ok()} now={NOW} />
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        needed={["azure"]}
+        statuses={[]}
+        logins={[login({ kind: "azure", state: "failed" })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
     );
 
     expect(screen.getByRole("alert").textContent).toContain("Azure sign-in failed");
   });
 
   it("should say why credentials cannot be stored when the deployment has nowhere to keep them", () => {
-    render(<OnboardingChecklist virtualAgentId="va-1" needed={["github"]} statuses={[]} logins={[]} paste={ok()} now={NOW} unavailable="no vault here" />);
+    render(
+      <OnboardingChecklist virtualAgentId="va-1" needed={["github"]} statuses={[]} logins={[]} paste={ok()} save={ok()} now={NOW} unavailable="no vault here" />
+    );
 
     expect(screen.getByText("no vault here")).toBeTruthy();
   });

@@ -75,7 +75,7 @@ export async function virtualAgentCards(db: Database, ownerOid: string): Promise
 }
 
 export function neededCredentials(route: ModelRoute): CredentialKind[] {
-  return route === "own-licence" ? ["github", "azure", "claude"] : ["github", "azure"];
+  return route === "own-licence" ? ["github", "azure", "claude"] : ["github", "azure", "bedrock"];
 }
 
 /** The agent, its logins and what it needs, or `undefined` when there is no such agent or it is not the viewer's. */

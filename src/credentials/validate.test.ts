@@ -54,6 +54,49 @@ describe("checkCredential for claude", () => {
   });
 });
 
+describe("checkCredential for bedrock", () => {
+  it.each([
+    ["a long-term key", `ABSK${"QmVkcm9jaw+/=".repeat(10)}`],
+    ["a short-term key", `bedrock-api-key-${"YmVkcm9jay5hbWF6b25hd3MuY29t".repeat(20)}`],
+    ["a key of another shape at the shortest length", "x".repeat(20)],
+    ["a key at the longest length", "k".repeat(4096)]
+  ])("should accept %s when it is printable ASCII without spaces", (_label, value) => {
+    expect(checkCredential("bedrock", value)).toEqual({ ok: true, value, accountLabel: null });
+  });
+
+  it("should trim surrounding whitespace when the paste carries a newline", () => {
+    const value = `ABSK${"a".repeat(40)}`;
+
+    expect(checkCredential("bedrock", `\n ${value} \n`)).toEqual({ ok: true, value, accountLabel: null });
+  });
+
+  it.each([
+    ["a key that is too short", "ABSK12345"],
+    ["a key that is too long", "k".repeat(4097)],
+    ["a key with a space in it", `ABSK${"a".repeat(20)} ${"a".repeat(20)}`],
+    ["a key with a tab in it", `ABSK${"a".repeat(20)}\t${"a".repeat(20)}`],
+    ["a key with a character outside ASCII", `ABSK${"a".repeat(20)}é`]
+  ])("should refuse %s without echoing it when it is not a key", (_label, value) => {
+    const checked = checkCredential("bedrock", value);
+
+    expect(checked).toEqual({ ok: false, error: expect.stringContaining("Amazon Bedrock API key") });
+    expect(JSON.stringify(checked)).not.toContain(value);
+  });
+
+  it.each([
+    ["a GitHub token", `ghp_${"a".repeat(36)}`, "GitHub token"],
+    ["a fine-grained GitHub token", `github_pat_11ABC_${"e".repeat(70)}`, "GitHub token"],
+    ["a Claude token", `sk-ant-oat01-${"a".repeat(40)}`, "Claude token"],
+    ["an AWS access key id", "AKIAIOSFODNN7EXAMPLE", "access key id"],
+    ["a temporary AWS access key id", "ASIAIOSFODNN7EXAMPLE", "access key id"]
+  ])("should say what was pasted when it is %s", (_label, value, named) => {
+    const checked = checkCredential("bedrock", value);
+
+    expect(checked).toEqual({ ok: false, error: expect.stringContaining(named) });
+    expect(JSON.stringify(checked)).not.toContain(value);
+  });
+});
+
 describe("checkCredential for azure", () => {
   it("should accept a gzipped MSAL cache and label it with the account when it has one", () => {
     const value = azureCache({ Account: ACCOUNT, AccessToken: {}, RefreshToken: {} });
@@ -95,7 +138,7 @@ describe("checkCredential for azure", () => {
 });
 
 describe("checkCredential limits", () => {
-  it.each(["github", "azure", "claude"] as const)("should refuse a %s value over the length limit when it is too long", (kind) => {
+  it.each(["github", "azure", "claude", "bedrock"] as const)("should refuse a %s value over the length limit when it is too long", (kind) => {
     expect(checkCredential(kind, "a".repeat(MAX_CREDENTIAL_LENGTH + 1))).toMatchObject({
       ok: false,
       error: expect.stringContaining(String(MAX_CREDENTIAL_LENGTH))

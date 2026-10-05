@@ -19,7 +19,7 @@ function status(kind: CredentialStatus["kind"], overrides: Partial<CredentialSta
   return { kind, stored: false, accountLabel: null, updatedAt: null, updatedVia: null, ...overrides };
 }
 
-const NOTHING_STORED = [status("github"), status("azure"), status("claude")];
+const NOTHING_STORED = [status("github"), status("azure"), status("claude"), status("bedrock")];
 
 function actions(): CredentialActions {
   return { save: vi.fn(async () => ({ ok: true as const, confirmation: "Your GitHub token is stored" })), remove: vi.fn(async () => ({ ok: true as const })) };
@@ -35,10 +35,10 @@ function card(heading: string): HTMLElement {
 }
 
 describe("CredentialSettingsView", () => {
-  it("should say the viewer is on the AI gateway and offer no Claude token field when their route is the gateway", () => {
-    show({ available: true, modelRoute: "gateway", statuses: NOTHING_STORED });
+  it("should say the viewer is on Amazon Bedrock and offer no Claude token field when their route is Bedrock", () => {
+    show({ available: true, modelRoute: "bedrock", statuses: NOTHING_STORED });
 
-    expect(card("Model").textContent).toContain("HMCTS AI gateway");
+    expect(card("Model").textContent).toContain("Amazon Bedrock, with your Bedrock API key");
     expect(within(card("Claude token")).queryByRole("form")).toBeNull();
     expect(card("Claude token").textContent).toContain("Not needed");
     expect(screen.getByRole("form", { name: "Save GitHub token" })).toBeTruthy();
@@ -59,9 +59,9 @@ describe("CredentialSettingsView", () => {
   });
 
   it("should say each credential is not stored and offer no delete when nothing is stored", () => {
-    show({ available: true, modelRoute: "gateway", statuses: NOTHING_STORED });
+    show({ available: true, modelRoute: "bedrock", statuses: NOTHING_STORED });
 
-    for (const heading of ["GitHub token", "Azure sign-in", "Claude token"]) {
+    for (const heading of ["GitHub token", "Azure sign-in", "Claude token", "Bedrock API key"]) {
       expect(card(heading).textContent).toContain("Not stored");
     }
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
@@ -70,7 +70,7 @@ describe("CredentialSettingsView", () => {
   it("should show when and how a stored credential was saved and its account, but no value, when one is stored", () => {
     show({
       available: true,
-      modelRoute: "gateway",
+      modelRoute: "bedrock",
       statuses: [
         status("github", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "cli" }),
         status("azure", { stored: true, accountLabel: "a.person@justice.gov.uk", updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "pod" }),
@@ -89,14 +89,30 @@ describe("CredentialSettingsView", () => {
     expect(within(azure).getByRole("form", { name: "Delete Azure sign-in" })).toBeTruthy();
   });
 
+  it.each(["bedrock", "own-licence"] as const)("should offer a password field for the Bedrock API key when the route is %s", (modelRoute) => {
+    show({ available: true, modelRoute, statuses: NOTHING_STORED });
+
+    expect(within(card("Bedrock API key")).getByLabelText("Paste a Bedrock API key")).toHaveProperty("type", "password");
+  });
+
+  it("should show a stored Bedrock API key as stored with a delete and no value when one is stored", () => {
+    show({ available: true, modelRoute: "bedrock", statuses: [status("bedrock", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "cli" })] });
+
+    const bedrock = card("Bedrock API key");
+    expect(bedrock.textContent).toContain("Stored");
+    expect(bedrock.textContent).toContain("from the command line");
+    expect(within(bedrock).getByRole("form", { name: "Delete Bedrock API key" })).toBeTruthy();
+    expect(within(bedrock).getByLabelText("Replace your Bedrock API key")).toHaveProperty("value", "");
+  });
+
   it("should say a stored credential was saved on this page when it came from the web", () => {
-    show({ available: true, modelRoute: "gateway", statuses: [status("github", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "web" })] });
+    show({ available: true, modelRoute: "bedrock", statuses: [status("github", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "web" })] });
 
     expect(card("GitHub token").textContent).toContain("on this page");
   });
 
   it("should send the kind and the pasted value to the save action and confirm when a token is saved", async () => {
-    const given = show({ available: true, modelRoute: "gateway", statuses: NOTHING_STORED });
+    const given = show({ available: true, modelRoute: "bedrock", statuses: NOTHING_STORED });
 
     fireEvent.change(screen.getByLabelText("Paste a GitHub token"), { target: { value: "ghp_pasted" } });
     await act(async () => {
@@ -110,7 +126,7 @@ describe("CredentialSettingsView", () => {
   });
 
   it("should send the kind to the delete action when a stored credential is deleted", async () => {
-    const given = show({ available: true, modelRoute: "gateway", statuses: [status("azure", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z" })] });
+    const given = show({ available: true, modelRoute: "bedrock", statuses: [status("azure", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z" })] });
 
     await act(async () => {
       fireEvent.submit(screen.getByRole("form", { name: "Delete Azure sign-in" }));
@@ -120,7 +136,7 @@ describe("CredentialSettingsView", () => {
   });
 
   it("should say credentials are unavailable, and why, with no forms when the deployment cannot store them", () => {
-    show({ available: false, modelRoute: "gateway", reason: "this deployment has no credentials vault" });
+    show({ available: false, modelRoute: "bedrock", reason: "this deployment has no credentials vault" });
 
     expect(screen.getByText("Credentials unavailable")).toBeTruthy();
     expect(screen.getByText("this deployment has no credentials vault")).toBeTruthy();

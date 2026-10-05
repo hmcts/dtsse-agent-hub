@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { saveCredential } from "@/app/_actions/credentials";
 import { sendDirect } from "@/app/_actions/direct";
 import { deleteVirtualAgent, pasteLoginCode, startVirtualAgent, stopVirtualAgent } from "@/app/_actions/virtual-agents";
 import { Conversation } from "@/components/agents/Conversation";
@@ -43,6 +44,7 @@ export default async function VirtualAgentPage({ params }: { params: Promise<{ i
         statuses={credentials.available ? credentials.statuses : []}
         logins={detail.logins}
         paste={pasteLoginCode}
+        save={saveCredential}
         now={now}
         {...(credentials.available ? {} : { unavailable: credentials.reason })}
       />

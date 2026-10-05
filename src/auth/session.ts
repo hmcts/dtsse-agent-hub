@@ -38,9 +38,8 @@ export async function readSession(cookie: string | undefined, secret: string): P
     tid,
     name,
     ...(typeof email === "string" ? { email } : {}),
-    // Anything but `true`, including a cookie sealed before the role was read, is no gateway: wrongly withholding
-    // it lasts until the person next signs in, where wrongly granting it would spend the gateway on someone outside
-    // the group.
+    // Anything but `true`, including a cookie sealed before the role was read, is no role: wrongly withholding it
+    // lasts until the person next signs in, where wrongly granting it would put someone outside the group on Bedrock.
     aiGateway: aiGateway === true
   };
 }

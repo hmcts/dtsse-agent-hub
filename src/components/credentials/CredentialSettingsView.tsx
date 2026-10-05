@@ -15,7 +15,8 @@ export interface CredentialActions {
 const TITLES: Record<CredentialKind, string> = {
   github: "GitHub token",
   azure: "Azure sign-in",
-  claude: "Claude token"
+  claude: "Claude token",
+  bedrock: "Bedrock API key"
 };
 
 const VIA: Record<CredentialVia, string> = {
@@ -29,10 +30,10 @@ const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white ho
 
 export function ModelRouteNotice({ route }: { route: ModelRoute }) {
   return (
-    <Section heading="Model" detail={route === "gateway" ? "HMCTS AI gateway" : "Your own Claude licence"}>
+    <Section heading="Model" detail={route === "bedrock" ? "Amazon Bedrock" : "Your own Claude licence"}>
       <p className="text-sm text-hub-text">
-        {route === "gateway" ? (
-          "Your virtual agents use the HMCTS AI gateway, so they need no Claude token of yours."
+        {route === "bedrock" ? (
+          "Your virtual agents use Amazon Bedrock, with your Bedrock API key, so they need that key and no Claude token of yours."
         ) : (
           <>
             Your virtual agents use your own Claude licence, so they need the Claude token <code className="font-mono">claude setup-token</code> prints.
@@ -48,8 +49,8 @@ function notPasteable(kind: CredentialKind, route: ModelRoute): string | undefin
   if (kind === "azure") {
     return "This comes from your virtual agent's own Azure device-code sign-in, and cannot be pasted here.";
   }
-  if (kind === "claude" && route === "gateway") {
-    return "Not needed: your virtual agents use the HMCTS AI gateway.";
+  if (kind === "claude" && route === "bedrock") {
+    return "Not needed: your virtual agents use Amazon Bedrock, with your Bedrock API key.";
   }
   return undefined;
 }
@@ -106,8 +107,9 @@ export function CredentialSettingsView({ settings, actions }: { settings: Creden
       {settings.available ? (
         <>
           <p className="max-w-3xl text-[15px] text-hub-muted">
-            You normally set these up on a virtual agent's page, by signing in with device codes, so pasting a token here is optional. A stored credential can
-            never be read back, by you or anyone else, through this page or any API: you can only replace or delete it.
+            You normally set these up on a virtual agent's page, by signing in with device codes, so pasting a token here is optional. This page never shows a
+            stored credential: you can only replace or delete it. Only your Bedrock API key can be read back, by you, through the agent API, so the workspace on
+            your laptop can use it; nothing reads back the others.
           </p>
           {settings.statuses.map((status) => (
             <CredentialCard key={status.kind} status={status} route={settings.modelRoute} actions={actions} />

@@ -196,3 +196,59 @@ describe("migrate waiting for the database", () => {
     expect(pause).not.toHaveBeenCalled();
   });
 });
+
+describe("the bedrock migration", () => {
+  const RENAME = "agent_hub_migrate_bedrock_test";
+  const MIGRATION = "20261009090000_bedrock";
+  const original = process.env.DATABASE_URL;
+  let before: string;
+
+  beforeAll(async () => {
+    await query("postgres", `DROP DATABASE IF EXISTS "${RENAME}"`);
+    await query("postgres", `CREATE DATABASE "${RENAME}"`);
+    process.env.DATABASE_URL = urlFor(RENAME);
+    before = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
+    await cp(migrationsDirectory(), before, { recursive: true });
+    await rm(path.join(before, MIGRATION), { recursive: true });
+  });
+
+  afterAll(async () => {
+    if (original === undefined) {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = original;
+    }
+    await rm(before, { recursive: true, force: true });
+    await query("postgres", `DROP DATABASE IF EXISTS "${RENAME}"`);
+  });
+
+  it("should move existing gateway virtual agents to bedrock and add the bedrock credential kind when it is applied", async () => {
+    await migrate(before);
+    await query(RENAME, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      RENAME,
+      `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'on-gateway', 'gateway'), ('dev-alice', 'own', 'own_licence')`
+    );
+
+    expect(await migrate()).toEqual([MIGRATION]);
+
+    const agents = await query<{ name: string; model_route: string }>(RENAME, `SELECT name, model_route::text FROM "virtual_agent" ORDER BY name`);
+    expect(agents).toEqual([
+      { name: "on-gateway", model_route: "bedrock" },
+      { name: "own", model_route: "own_licence" }
+    ]);
+    const labels = await query<{ type: string; label: string }>(
+      RENAME,
+      `SELECT t.typname AS type, e.enumlabel AS label FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+        WHERE t.typname IN ('credential_kind', 'model_route') ORDER BY t.typname, e.enumsortorder`
+    );
+    expect(labels).toEqual([
+      { type: "credential_kind", label: "github" },
+      { type: "credential_kind", label: "azure" },
+      { type: "credential_kind", label: "claude" },
+      { type: "credential_kind", label: "bedrock" },
+      { type: "model_route", label: "bedrock" },
+      { type: "model_route", label: "own_licence" }
+    ]);
+  });
+});

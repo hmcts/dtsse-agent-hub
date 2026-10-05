@@ -10,6 +10,7 @@ import {
   canManageCredential,
   canManageGrants,
   canManageVirtualAgent,
+  canOwnerReadCredential,
   canPersonMessageAgent,
   canReadMessage,
   canUseCredentialRoutes,
@@ -287,6 +288,16 @@ describe("canUseCredentialRoutes", () => {
 
   it("should refuse a caller when it holds a launch token", () => {
     expect(canUseCredentialRoutes({ virtualAgentId: "va-1" })).toBe(false);
+  });
+});
+
+describe("canOwnerReadCredential", () => {
+  it("should let the owner read their key back when it is an Amazon Bedrock API key", () => {
+    expect(canOwnerReadCredential("bedrock")).toBe(true);
+  });
+
+  it.each(["github", "azure", "claude", "Bedrock", ""])("should keep %j write-only when it is any other kind", (kind) => {
+    expect(canOwnerReadCredential(kind)).toBe(false);
   });
 });
 

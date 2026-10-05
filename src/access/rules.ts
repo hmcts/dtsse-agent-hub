@@ -8,7 +8,8 @@
  * - An agent may message another agent when its owner owns the target or holds a write grant from the target's
  *   owner.
  * - Only an owner changes their grants, and only to people the hub already knows.
- * - Only a person saves, replaces or deletes their own credentials. No grant extends to them.
+ * - Only a person saves, replaces or deletes their own credentials. No grant extends to them. Of their values, they
+ *   may read back only their own Amazon Bedrock API key, with their own token.
  * - Only a person manages their own virtual agents and sees their login codes. A virtual agent's launch token acts
  *   as its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.
  *
@@ -130,11 +131,21 @@ export function canGrant(actorOid: string, ownerOid: string, granteeOid: string,
 }
 
 /**
- * Whether `actorOid` may save, replace or delete `ownerOid`'s stored credentials. Credentials are write-only for
- * people: nothing, this rule included, lets anyone read a value back through the hub.
+ * Whether `actorOid` may save, replace or delete `ownerOid`'s stored credentials. This rule lets nobody read a value
+ * back; `canOwnerReadCredential` is the one exception to credentials being write-only for people.
  */
 export function canManageCredential(actorOid: string, ownerOid: string): boolean {
   return actorOid === ownerOid;
+}
+
+/**
+ * Whether a person may read back their own stored credential of `kind` through `GET /api/agent/credentials/{kind}`.
+ * Only an Amazon Bedrock API key: the workspace's launcher on their laptop fetches it to call Bedrock, so it has to
+ * come back out. Anyone holding that person's agent-hub token can therefore read it. Every other kind acts as the
+ * person in GitHub, Azure or Claude, and stays write-only.
+ */
+export function canOwnerReadCredential(kind: string): boolean {
+  return kind === "bedrock";
 }
 
 export type AgentAccess = "owner" | "write" | "read" | "none";
@@ -175,8 +186,8 @@ export function canActAsVirtualAgent(tokenVirtualAgentId: string | undefined, vi
 }
 
 /**
- * `/api/agent/credentials/{kind}` is for a person at their own command line. A pod stores the credentials its logins
- * produce through its virtual agent's routes instead, which are the only ones that can also read them.
+ * `/api/agent/credentials/{kind}` is for a person at their own command line. A pod stores and reads its owner's
+ * credentials through its virtual agent's routes instead, so a launch token cannot read even a Bedrock key here.
  */
 export function canUseCredentialRoutes(caller: { virtualAgentId?: string }): boolean {
   return caller.virtualAgentId === undefined;

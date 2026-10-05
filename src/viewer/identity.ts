@@ -62,25 +62,25 @@ export function configuredDevUser(env: Environment = process.env): Identity | un
 }
 
 /**
- * Which model a person's virtual agents use: the HMCTS AI gateway, for holders of the `AIGateway.User` app role, or
- * a Claude licence of their own, whose token they store with the hub.
+ * Which model a person's virtual agents use: Amazon Bedrock, called directly with the Bedrock API key they store with
+ * the hub, for holders of the `AIGateway.User` app role, or a Claude licence of their own, whose token they store.
  */
-export type ModelRoute = "gateway" | "own-licence";
+export type ModelRoute = "bedrock" | "own-licence";
 
 export interface Viewer extends Identity {
   modelRoute: ModelRoute;
 }
 
-/** A persona named `own-licence` or `own-licence-…` is on the own-licence route; every other persona has the gateway. */
+/** A persona named `own-licence` or `own-licence-…` is on the own-licence route; every other persona is on Bedrock. */
 export const OWN_LICENCE_PERSONA = "own-licence";
 
 export function modelRouteFor(aiGateway: boolean): ModelRoute {
-  return aiGateway ? "gateway" : "own-licence";
+  return aiGateway ? "bedrock" : "own-licence";
 }
 
 function devModelRoute(identity: Identity): ModelRoute {
   const persona = identity.oid.slice(DEV_OID_PREFIX.length);
-  return persona === OWN_LICENCE_PERSONA || persona.startsWith(`${OWN_LICENCE_PERSONA}-`) ? "own-licence" : "gateway";
+  return persona === OWN_LICENCE_PERSONA || persona.startsWith(`${OWN_LICENCE_PERSONA}-`) ? "own-licence" : "bedrock";
 }
 
 /** The viewer, or `undefined` when nobody may be served: no session, a session that does not open, no secret. */
@@ -88,7 +88,7 @@ export async function viewerFrom(cookie: CookieReader, env: Environment = proces
   if (!authRequired(env)) {
     const configured = configuredDevUser(env);
     if (configured !== undefined) {
-      return { ...configured, modelRoute: "gateway" };
+      return { ...configured, modelRoute: "bedrock" };
     }
     const persona = devIdentity(cookie(DEV_PERSONA_COOKIE));
     return { ...persona, modelRoute: devModelRoute(persona) };

@@ -17,20 +17,20 @@ describe("sealSession and readSession", () => {
     expect(await readSession(await sealSession(anonymous, SECRET), SECRET)).toEqual(anonymous);
   });
 
-  it("should carry the AI gateway role when the reader holds it", async () => {
+  it("should carry the AIGateway.User role when the reader holds it", async () => {
     const gateway: Session = { ...READER, aiGateway: true };
 
     expect(await readSession(await sealSession(gateway, SECRET), SECRET)).toEqual(gateway);
   });
 
-  it("should read no AI gateway role when the cookie was sealed without the field", async () => {
+  it("should read no AIGateway.User role when the cookie was sealed without the field", async () => {
     const { seal } = await import("./sealed.ts");
     const older = await seal({ oid: "0000-1111", tid: "tenant-1", name: "A Reader" }, SECRET, SESSION_MAX_AGE);
 
     expect(await readSession(older, SECRET)).toEqual({ oid: "0000-1111", tid: "tenant-1", name: "A Reader", aiGateway: false });
   });
 
-  it("should read no AI gateway role when the field is anything but true", async () => {
+  it("should read no AIGateway.User role when the field is anything but true", async () => {
     const { seal } = await import("./sealed.ts");
     const odd = await seal({ oid: "0000-1111", tid: "tenant-1", name: "A Reader", aiGateway: "true" }, SECRET, SESSION_MAX_AGE);
 
