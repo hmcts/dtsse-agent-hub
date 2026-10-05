@@ -1,3 +1,5 @@
+import { SidebarToggle } from "@/components/sidebar/Drawer";
+
 /**
  * The top bar of the message pane: the page's title, a line under it, and its actions on the right. Every page
  * starts with one, so the title is always the page's only `h1`.
@@ -14,7 +16,8 @@ export function PaneHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <header className="flex min-h-[49px] shrink-0 items-center gap-4 border-b border-hub-line px-5 py-2">
+    <header className="flex min-h-[49px] shrink-0 items-center gap-4 border-b border-hub-line px-5 py-2 max-md:gap-2 max-md:px-4">
+      <SidebarToggle />
       <div className="min-w-0">
         <div className="flex items-baseline gap-2">
           <h1 className="truncate text-lg font-bold text-white">{title}</h1>

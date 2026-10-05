@@ -90,3 +90,19 @@ export function ServerIcon() {
     </Icon>
   );
 }
+
+export function MenuIcon() {
+  return (
+    <Icon>
+      <path d="M3.5 5.5h13M3.5 10h13M3.5 14.5h13" />
+    </Icon>
+  );
+}
+
+export function CloseIcon() {
+  return (
+    <Icon>
+      <path d="m5 5 10 10M15 5 5 15" />
+    </Icon>
+  );
+}

@@ -3,6 +3,7 @@ import type { ChannelSummary } from "@/channels/store";
 import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
 import { NavLink } from "@/components/NavLink";
 import { AgentRoster } from "@/components/sidebar/AgentRoster";
+import { SidebarClose, SidebarDrawer } from "@/components/sidebar/Drawer";
 import { CaretIcon, HashIcon, HomeIcon, KeyIcon, LockIcon, PlusIcon, ServerIcon, StackIcon } from "@/components/sidebar/icons";
 import { TopicSearchShortcut } from "@/components/sidebar/TopicSearchShortcut";
 import type { TopicSummary } from "@/topics/store";
@@ -48,103 +49,108 @@ export function Sidebar({
 }) {
   const channels = [...data.channels.mine, ...data.channels.shared];
   return (
-    <aside aria-label="Sidebar" className="flex w-64 shrink-0 flex-col border-r border-hub-line bg-hub-rail">
-      <NewAgentWatcher known={[...data.mine, ...data.shared].map((agent) => agent.id)} />
-      <TopicSearchShortcut />
-      <div className="flex min-h-[49px] items-center gap-2 border-b border-hub-line px-4">
-        <div className="min-w-0">
-          <p className="truncate text-lg font-bold text-white">Agent Hub</p>
-          <p className="truncate text-xs text-hub-muted">{viewer.name}</p>
+    <SidebarDrawer>
+      <aside aria-label="Sidebar" className="flex w-64 max-w-[85vw] shrink-0 flex-col border-r border-hub-line bg-hub-rail">
+        <NewAgentWatcher known={[...data.mine, ...data.shared].map((agent) => agent.id)} />
+        <TopicSearchShortcut />
+        <div className="flex min-h-[49px] items-center gap-2 border-b border-hub-line px-4">
+          <div className="min-w-0">
+            <p className="truncate text-lg font-bold text-white">Agent Hub</p>
+            <p className="truncate text-xs text-hub-muted">{viewer.name}</p>
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            {signInDisabled ? null : (
+              <a href="/auth/logout" className="rounded px-2 py-1 text-xs text-hub-muted hover:bg-hub-hover hover:text-white">
+                Sign out
+              </a>
+            )}
+            <SidebarClose />
+          </div>
         </div>
-        {signInDisabled ? null : (
-          <a href="/auth/logout" className="ml-auto shrink-0 rounded px-2 py-1 text-xs text-hub-muted hover:bg-hub-hover hover:text-white">
-            Sign out
-          </a>
-        )}
-      </div>
 
-      <nav aria-label="Main" className="min-h-0 flex-1 space-y-4 overflow-y-auto py-3">
-        <div className="space-y-0.5">
-          <NavLink href="/">
-            <HomeIcon />
-            Home
-          </NavLink>
-          <NavLink href="/access">
-            <KeyIcon />
-            Access
-          </NavLink>
-          {virtualAgents ? (
-            <NavLink href="/virtual">
-              <ServerIcon />
-              Virtual agents
+        <nav aria-label="Main" className="min-h-0 flex-1 space-y-4 overflow-y-auto py-3">
+          <div className="space-y-0.5">
+            <NavLink href="/">
+              <HomeIcon />
+              Home
             </NavLink>
-          ) : null}
-          <NavLink href="/settings/credentials">
-            <LockIcon />
-            Credentials
-          </NavLink>
-          <form action="/topics" method="get" role="search" className="px-2 pt-2">
-            <label htmlFor="sidebar-topic-search" className="sr-only">
-              Search topics
-            </label>
-            <input
-              id="sidebar-topic-search"
-              name="q"
-              aria-keyshortcuts="/"
-              placeholder="Search topics (/)"
-              className="w-full rounded-md border border-hub-line bg-hub-pane px-3 py-1 text-[13px] text-hub-text placeholder:text-hub-muted focus:border-hub-link focus:outline-none"
-            />
-          </form>
-        </div>
+            <NavLink href="/access">
+              <KeyIcon />
+              Access
+            </NavLink>
+            {virtualAgents ? (
+              <NavLink href="/virtual">
+                <ServerIcon />
+                Virtual agents
+              </NavLink>
+            ) : null}
+            <NavLink href="/settings/credentials">
+              <LockIcon />
+              Credentials
+            </NavLink>
+            <form action="/topics" method="get" role="search" className="px-2 pt-2">
+              <label htmlFor="sidebar-topic-search" className="sr-only">
+                Search topics
+              </label>
+              <input
+                id="sidebar-topic-search"
+                name="q"
+                aria-keyshortcuts="/"
+                placeholder="Search topics (/)"
+                className="w-full rounded-md border border-hub-line bg-hub-pane px-3 py-1 text-[13px] text-hub-text placeholder:text-hub-muted focus:border-hub-link focus:outline-none"
+              />
+            </form>
+          </div>
 
-        <Group label="Channels">
-          {channels.length === 0 ? (
-            <Hint>No saved channels.</Hint>
-          ) : (
-            <ul aria-label="Channels" className="space-y-0.5">
-              {channels.map((channel) => (
-                <li key={channel.id}>
-                  <NavLink href={`/channels/${channel.id}`}>
-                    <StackIcon />
-                    <span className="truncate">{channel.name}</span>
-                    {channel.shared ? <span className="ml-auto text-[10px] uppercase tracking-wide">shared</span> : null}
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
-          )}
-          <NavLink href="/channels/new">
-            <PlusIcon />
-            Add a channel
-          </NavLink>
-        </Group>
+          <Group label="Channels">
+            {channels.length === 0 ? (
+              <Hint>No saved channels.</Hint>
+            ) : (
+              <ul aria-label="Channels" className="space-y-0.5">
+                {channels.map((channel) => (
+                  <li key={channel.id}>
+                    <NavLink href={`/channels/${channel.id}`}>
+                      <StackIcon />
+                      <span className="truncate">{channel.name}</span>
+                      {channel.shared ? <span className="ml-auto text-[10px] uppercase tracking-wide">shared</span> : null}
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <NavLink href="/channels/new">
+              <PlusIcon />
+              Add a channel
+            </NavLink>
+          </Group>
 
-        <Group label="Topics">
-          {data.topics.length === 0 ? (
-            <Hint>No posts this week.</Hint>
-          ) : (
-            <ul aria-label="Most active topics" className="space-y-0.5">
-              {data.topics.map((topic) => (
-                <li key={topic.slug}>
-                  <NavLink href={`/topics/${topic.slug}`}>
-                    <HashIcon />
-                    <span className="truncate">{topic.slug}</span>
-                    <span className="ml-auto text-xs" title={`${topic.message_count} posts this week`}>
-                      {topic.message_count}
-                    </span>
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
-          )}
-          <NavLink href="/topics">
-            <PlusIcon />
-            Browse all topics
-          </NavLink>
-        </Group>
-      </nav>
+          <Group label="Topics">
+            {data.topics.length === 0 ? (
+              <Hint>No posts this week.</Hint>
+            ) : (
+              <ul aria-label="Most active topics" className="space-y-0.5">
+                {data.topics.map((topic) => (
+                  <li key={topic.slug}>
+                    <NavLink href={`/topics/${topic.slug}`}>
+                      <HashIcon />
+                      <span className="truncate">{topic.slug}</span>
+                      <span className="ml-auto text-xs" title={`${topic.message_count} posts this week`}>
+                        {topic.message_count}
+                      </span>
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <NavLink href="/topics">
+              <PlusIcon />
+              Browse all topics
+            </NavLink>
+          </Group>
+        </nav>
 
-      <AgentRoster mine={data.mine} shared={data.shared} />
-    </aside>
+        <AgentRoster mine={data.mine} shared={data.shared} />
+      </aside>
+    </SidebarDrawer>
   );
 }
