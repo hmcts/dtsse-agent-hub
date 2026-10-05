@@ -2,7 +2,6 @@
 # picks a change up when `Chart.yaml`'s `version` changes with it.
 nodejs:
   applicationPort: 3000
-  # The only identity that can read the credentials vault.
   saEnabled: false
   customServiceAccountName: dtsse-agent-hub
   image: hmctsprod.azurecr.io/dtsse/agent-hub:latest
