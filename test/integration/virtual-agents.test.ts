@@ -586,6 +586,30 @@ describe("registering a virtual agent's session", () => {
     expect((await row(id)).agentId).toBe(agent_id);
   });
 
+  it("should name the agent after the virtual agent when its session registers under another name", async () => {
+    const { token } = await started(ALICE, "jerry");
+
+    const response = await register(token, "va-session-1");
+
+    expect(response.status).toBe(200);
+    const { agent_id, name } = await jsonOf(response);
+    expect(name).toBe("jerry");
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).name).toBe("jerry");
+  });
+
+  it("should keep the virtual agent's name when a heartbeat renames the session", async () => {
+    const { token } = await started(ALICE, "jerry");
+    const { agent_id } = await jsonOf(await register(token, "va-session-1"));
+
+    const response = await pod(heartbeatRoute.POST, token, `/api/agent/${agent_id}/heartbeat`, { agentId: agent_id }, "POST", {
+      status: "busy",
+      name: "cft-workspace-17"
+    });
+
+    expect(response.status).toBe(204);
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).toMatchObject({ name: "jerry", status: "busy" });
+  });
+
   it("should move the link to the new session when the pod registers again after /clear", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
     const first = (await jsonOf(await register(token, "va-session-1"))).agent_id;
