@@ -61,14 +61,46 @@ export function configuredDevUser(env: Environment = process.env): Identity | un
   return { ...identity, tid: env.ENTRA_TENANT_ID || DEV_TENANT };
 }
 
+/**
+ * Which model a person's virtual agents use: the HMCTS AI gateway, for holders of the `AIGateway.User` app role, or
+ * a Claude licence of their own, whose token they store with the hub.
+ */
+export type ModelRoute = "gateway" | "own-licence";
+
+export interface Viewer extends Identity {
+  modelRoute: ModelRoute;
+}
+
+/** A persona named `own-licence` or `own-licence-…` is on the own-licence route; every other persona has the gateway. */
+export const OWN_LICENCE_PERSONA = "own-licence";
+
+export function modelRouteFor(aiGateway: boolean): ModelRoute {
+  return aiGateway ? "gateway" : "own-licence";
+}
+
+function devModelRoute(identity: Identity): ModelRoute {
+  const persona = identity.oid.slice(DEV_OID_PREFIX.length);
+  return persona === OWN_LICENCE_PERSONA || persona.startsWith(`${OWN_LICENCE_PERSONA}-`) ? "own-licence" : "gateway";
+}
+
 /** The viewer, or `undefined` when nobody may be served: no session, a session that does not open, no secret. */
-export async function viewerFrom(cookie: CookieReader, env: Environment = process.env): Promise<Identity | undefined> {
+export async function viewerFrom(cookie: CookieReader, env: Environment = process.env): Promise<Viewer | undefined> {
   if (!authRequired(env)) {
-    return configuredDevUser(env) ?? devIdentity(cookie(DEV_PERSONA_COOKIE));
+    const configured = configuredDevUser(env);
+    if (configured !== undefined) {
+      return { ...configured, modelRoute: "gateway" };
+    }
+    const persona = devIdentity(cookie(DEV_PERSONA_COOKIE));
+    return { ...persona, modelRoute: devModelRoute(persona) };
   }
   const secret = sessionSecret(env);
   if (secret === undefined) {
     return undefined;
   }
-  return await readSession(cookie(SESSION_COOKIE), secret);
+  const session = await readSession(cookie(SESSION_COOKIE), secret);
+  if (session === undefined) {
+    return undefined;
+  }
+  const { aiGateway, ...identity } = session;
+  return { ...identity, modelRoute: modelRouteFor(aiGateway) };
 }

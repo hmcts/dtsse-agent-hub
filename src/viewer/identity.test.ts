@@ -42,7 +42,16 @@ describe("isDevIdentity", () => {
 
 describe("viewerFrom", () => {
   it("should be the anonymous dev identity when sign-in is disabled and there is no persona", async () => {
-    expect(await viewerFrom(jar({}), { AUTH_DISABLED: "true" })).toEqual(devIdentity());
+    expect(await viewerFrom(jar({}), { AUTH_DISABLED: "true" })).toEqual({ ...devIdentity(), modelRoute: "gateway" });
+  });
+
+  it.each([
+    ["second", "gateway"],
+    ["own-licence", "own-licence"],
+    ["own-licence-2", "own-licence"],
+    ["own-licenced", "gateway"]
+  ])("should put the persona %s on the %s route when sign-in is disabled", async (persona, route) => {
+    expect((await viewerFrom(jar({ [DEV_PERSONA_COOKIE]: persona }), { AUTH_DISABLED: "true" }))?.modelRoute).toBe(route);
   });
 
   it("should take the persona cookie when sign-in is disabled", async () => {
@@ -56,7 +65,8 @@ describe("viewerFrom", () => {
       oid: "real-oid",
       tid: "real-tid",
       name: "Real Person",
-      email: "real@example.com"
+      email: "real@example.com",
+      modelRoute: "gateway"
     });
   });
 
@@ -76,11 +86,17 @@ describe("viewerFrom", () => {
     expect(await viewerFrom(jar({ [DEV_PERSONA_COOKIE]: "second" }), SIGNED_IN)).toBeUndefined();
   });
 
-  it("should be the session's person when the cookie opens", async () => {
-    const session = { oid: "real-oid", tid: "real-tid", name: "Real Person", email: "real@example.com" };
-    const cookie = await sealSession(session, SECRET);
+  it("should be the session's person on their own licence when the cookie opens without the gateway role", async () => {
+    const identity = { oid: "real-oid", tid: "real-tid", name: "Real Person", email: "real@example.com" };
+    const cookie = await sealSession({ ...identity, aiGateway: false }, SECRET);
 
-    expect(await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN)).toEqual(session);
+    expect(await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN)).toEqual({ ...identity, modelRoute: "own-licence" });
+  });
+
+  it("should put the session's person on the gateway route when the cookie carries the gateway role", async () => {
+    const cookie = await sealSession({ oid: "real-oid", tid: "real-tid", name: "Real Person", aiGateway: true }, SECRET);
+
+    expect((await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN))?.modelRoute).toBe("gateway");
   });
 
   it("should be nobody when the session cookie does not open", async () => {

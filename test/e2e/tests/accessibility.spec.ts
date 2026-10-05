@@ -16,7 +16,7 @@ test.describe("accessibility @nightly", () => {
     await context.addCookies([{ name: PERSONA_COOKIE, value: PERSONA, url: baseURL! }]);
   });
 
-  for (const path of ["/", "/topics", "/channels/new", "/access", "/c?topics=e2e-a11y", "/topics/e2e-a11y"]) {
+  for (const path of ["/", "/topics", "/channels/new", "/access", "/settings/credentials", "/c?topics=e2e-a11y", "/topics/e2e-a11y"]) {
     test(`should raise no WCAG A or AA violations on ${path} @nightly @a11y`, async ({ page }) => {
       await audit(page, path);
     });

@@ -10,7 +10,8 @@ describe("encodeEvent and decodeEvent", () => {
     { type: "agent_status", agent_id: "agent-a", owner_oid: "oid-a", status: "offline" },
     { type: "delivery", message_id: "16", agent_id: "agent-b", state: "delivered" },
     { type: "grant", owner_oid: "oid-a", grantee_oid: "oid-b" },
-    { type: "transcript", agent_id: "agent-a", owner_oid: "oid-a", last_id: "17" }
+    { type: "transcript", agent_id: "agent-a", owner_oid: "oid-a", last_id: "17" },
+    { type: "credential", owner_oid: "oid-a", kind: "github" }
   ])("should carry a $type event across unchanged", (event) => {
     expect(decodeEvent(encodeEvent(event))).toEqual(event);
   });
@@ -35,7 +36,9 @@ describe("encodeEvent and decodeEvent", () => {
     ["a delivery without an agent", JSON.stringify({ type: "delivery", message_id: "1", state: "delivered" })],
     ["a grant without a grantee", JSON.stringify({ type: "grant", owner_oid: "o" })],
     ["a transcript without its last id", JSON.stringify({ type: "transcript", agent_id: "a", owner_oid: "o" })],
-    ["a transcript without an owner", JSON.stringify({ type: "transcript", agent_id: "a", last_id: "1" })]
+    ["a transcript without an owner", JSON.stringify({ type: "transcript", agent_id: "a", last_id: "1" })],
+    ["a credential without a kind", JSON.stringify({ type: "credential", owner_oid: "o" })],
+    ["a credential without an owner", JSON.stringify({ type: "credential", kind: "github" })]
   ])("should ignore %s", (_label, payload) => {
     expect(decodeEvent(payload)).toBeUndefined();
   });

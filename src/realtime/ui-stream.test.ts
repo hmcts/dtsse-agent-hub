@@ -219,6 +219,14 @@ describe("selectFrame", () => {
   it("should send nothing when a grant to someone else changes", async () => {
     expect(await selectFrame({ type: "grant", owner_oid: VIEWER, grantee_oid: STRANGER }, TOPICS, sources([]))).toBeUndefined();
   });
+
+  it("should tell the page to re-read when the viewer's own credential changes", async () => {
+    expect(await selectFrame({ type: "credential", owner_oid: VIEWER, kind: "github" }, TOPICS, sources([]))).toBe("event: resync\ndata: {}\n\n");
+  });
+
+  it("should send nothing when someone else's credential changes", async () => {
+    expect(await selectFrame({ type: "credential", owner_oid: STRANGER, kind: "github" }, TOPICS, sources([]))).toBeUndefined();
+  });
 });
 
 describe("cachedGrants", () => {

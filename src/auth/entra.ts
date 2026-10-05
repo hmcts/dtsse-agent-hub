@@ -99,8 +99,19 @@ export async function completeSignIn(settings: AuthSettings, currentUrl: URL, si
     oid,
     tid,
     name: typeof claims?.name === "string" ? claims.name : (email ?? oid),
-    ...(email === undefined ? {} : { email })
+    ...(email === undefined ? {} : { email }),
+    aiGateway: hasAiGatewayRole(claims?.roles)
   };
+}
+
+/**
+ * The app role whose holders' virtual agents use the HMCTS AI gateway rather than their own Claude licence. It is
+ * assigned to an Entra group and arrives in the id token's `roles` claim, which is absent for anyone holding no role.
+ */
+export const AI_GATEWAY_ROLE = "AIGateway.User";
+
+export function hasAiGatewayRole(roles: unknown): boolean {
+  return Array.isArray(roles) && roles.includes(AI_GATEWAY_ROLE);
 }
 
 /**

@@ -49,6 +49,7 @@ it needs ownership or a write grant. The rules are in `src/access/rules.ts`.
 | `/agents/[id]` | an agent you may see: its status, details, posts and direct-message thread |
 | `/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
 | `/access` | the grants you have given and hold; grant or revoke read or write by email |
+| `/settings/credentials` | your model route, and which of your virtual-agent credentials are stored; paste a GitHub token, or a Claude token on your own licence, or delete one. A stored value is never shown |
 
 Pages are server components reading through `src/web/data.ts`; writes are the server actions in
 `src/app/_actions/`, each of which reads the viewer from the session cookie itself. A person's direct message to
@@ -124,6 +125,20 @@ To validate real tokens locally instead, leave `AGENT_AUTH_DISABLED` unset and s
 Neither bypass is ever set by a chart. The web sign-in (`AUTH_DISABLED`) is off in preview and in the pipeline's
 temporary AAT release, because Entra matches redirect URIs by whole string; agent authentication stays on in both.
 
+### Credentials locally
+
+Without `CREDENTIALS_VAULT_URL`, a process outside production keeps credentials in the `dev_credential_value` table,
+each value AES-256-GCM sealed under a key derived from `SESSION_SECRET`, so set one to use `/settings/credentials` or
+`PUT /api/agent/credentials/{kind}` under `yarn dev`:
+
+```bash
+SESSION_SECRET=$(openssl rand -base64 48) AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev
+```
+
+The local store refuses to start under `NODE_ENV=production`. With sign-in disabled every persona is on the AI gateway
+route except `own-licence` and `own-licence-…`, which are on their own Claude licence, so
+`ah_dev_persona=own-licence` shows the Claude token field.
+
 ### The deployed secrets are opt-in
 
 `yarn dev` reads the `dtsse-aat` Key Vault only with `USE_KEY_VAULT=true`; otherwise it uses the compose defaults.
@@ -170,9 +185,16 @@ on the compose server, creating it if it is missing, and leaves `yarn dev`'s `ag
   `infrastructure/credentials.tf`. It holds each person's virtual-agent credentials, so it is RBAC-only and the hub's
   identity is the only principal with data-plane access. It is not built with `cnp-module-key-vault`, which grants
   the developers group read access outside production. Purge protection is on with 7-day soft delete, so a
-  deleted credential is recoverable by the hub's identity for a week and then gone. Its URL is written to `dtsse-{env}` as
-  `agent-hub-credentials-vault-url`. Nothing uses it until the chart moves to the `dtsse-agent-hub` ServiceAccount,
-  whose federated credentials live in cnp-flux-config.
+  deleted credential is recoverable by the hub's identity for a week and then gone. Saving a credential whose name is
+  still soft-deleted recovers it and then writes the new value. Its URL is written to `dtsse-{env}` as
+  `agent-hub-credentials-vault-url`, which the chart mounts as `CREDENTIALS_VAULT_URL`. A process without it keeps no
+  credentials in production, and says so on `/settings/credentials` rather than failing to start.
+- **ServiceAccount**: in AAT the pods run as `dtsse-agent-hub` (`saEnabled: false`, `customServiceAccountName`), annotated
+  with the hub identity's client id, so workload identity gives them the hub's own token for the credentials vault.
+  The chart's SecretProviderClass still takes its client id from the `dtsse` SA, so the CSI secret mounts authenticate
+  as `dtsse-{env}-mi`, which has a federated credential for `dtsse-agent-hub` too. Both federated credentials live in
+  cnp-flux-config. Previews and the pipeline's `-staging` release, both with sign-in off, stay on the `dtsse` SA
+  (`saEnabled: true` in their templates), which has no access to the vault.
 
 **The pipeline library is pinned** to `Infrastructure@DTSPO-35113/master` in `Jenkinsfile_CNP`, the same ref
 dtsse-github-metrics uses. The library's `master` resolves the Postgres Entra administrator

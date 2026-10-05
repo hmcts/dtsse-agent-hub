@@ -146,8 +146,21 @@ describe("completeSignIn", () => {
       oid: "0000-oid",
       tid: "a-tenant",
       name: "A Person",
-      email: "a.person@justice.gov.uk"
+      email: "a.person@justice.gov.uk",
+      aiGateway: false
     });
+  });
+
+  it.each([
+    ["the AI gateway role among others", ["Something.Else", "AIGateway.User"], true],
+    ["only another role", ["Something.Else"], false],
+    ["the role in another case", ["aigateway.user"], false],
+    ["roles that are not a list", "AIGateway.User", false],
+    ["no roles claim", undefined, false]
+  ])("should record the AI gateway route when the id token carries %s", async (_label, roles, expected) => {
+    granted({ ...IDENTITY, ...(roles === undefined ? {} : { roles }) });
+
+    expect((await completeSignIn(SETTINGS, CURRENT, beginSignIn("/"))).aiGateway).toBe(expected);
   });
 
   it("should take the email from preferred_username when the email claim is absent", async () => {

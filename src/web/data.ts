@@ -4,6 +4,8 @@ import { canReadMessage } from "../access/rules.ts";
 import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
+import { credentialBackend } from "../credentials/backend.ts";
+import { type CredentialStatus, credentialStatus, ownerRefusal } from "../credentials/store.ts";
 import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
 import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
@@ -13,6 +15,7 @@ import { hiddenTopicPrefix } from "../topics/slug.ts";
 import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { Identity } from "../users/identity.ts";
+import type { ModelRoute, Viewer } from "../viewer/identity.ts";
 
 /**
  * The reads the pages make, in one place. `server-only` so a client component importing it fails the build rather
@@ -67,6 +70,23 @@ export async function topics(prefix: string) {
 export async function access(viewer: Identity) {
   const [given, received] = await Promise.all([grantsGiven(prisma, viewer.oid), grantsReceived(prisma, viewer.oid)]);
   return { given, received };
+}
+
+export type CredentialSettings =
+  | { available: true; modelRoute: ModelRoute; statuses: CredentialStatus[] }
+  | { available: false; modelRoute: ModelRoute; reason: string };
+
+/** What the viewer has stored, as metadata: nothing here, or anywhere the pages read, carries a credential's value. */
+export async function credentialSettings(viewer: Viewer): Promise<CredentialSettings> {
+  const backend = credentialBackend(prisma);
+  if (!backend.available) {
+    return { available: false, modelRoute: viewer.modelRoute, reason: backend.reason };
+  }
+  const refusal = ownerRefusal(backend.store, viewer.oid);
+  if (refusal !== undefined) {
+    return { available: false, modelRoute: viewer.modelRoute, reason: refusal.message };
+  }
+  return { available: true, modelRoute: viewer.modelRoute, statuses: await credentialStatus(prisma, viewer.oid) };
 }
 
 export interface MessagePageView {

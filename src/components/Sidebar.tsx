@@ -3,7 +3,7 @@ import type { ChannelSummary } from "@/channels/store";
 import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
 import { NavLink } from "@/components/NavLink";
 import { AgentRoster } from "@/components/sidebar/AgentRoster";
-import { CaretIcon, HashIcon, HomeIcon, KeyIcon, PlusIcon, StackIcon } from "@/components/sidebar/icons";
+import { CaretIcon, HashIcon, HomeIcon, KeyIcon, LockIcon, PlusIcon, StackIcon } from "@/components/sidebar/icons";
 import { TopicSearchShortcut } from "@/components/sidebar/TopicSearchShortcut";
 import type { TopicSummary } from "@/topics/store";
 import type { Identity } from "@/users/identity";
@@ -62,6 +62,10 @@ export function Sidebar({ data, viewer, signInDisabled }: { data: SidebarData; v
           <NavLink href="/access">
             <KeyIcon />
             Access
+          </NavLink>
+          <NavLink href="/settings/credentials">
+            <LockIcon />
+            Credentials
           </NavLink>
           <form action="/topics" method="get" role="search" className="px-2 pt-2">
             <label htmlFor="sidebar-topic-search" className="sr-only">

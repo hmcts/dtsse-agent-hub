@@ -36,6 +36,8 @@
     "test:e2e": "yarn e2e:browser && playwright test --config test/e2e/playwright.config.ts"
   },
   "dependencies": {
+    "@azure/identity": "4.13.2",
+    "@azure/keyvault-secrets": "4.11.2",
     "@hmcts-cft/cloud-native-platform": "2.0.0",
     "@prisma/adapter-pg": "7.8.0",
     "@prisma/client": "7.8.0",

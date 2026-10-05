@@ -12,8 +12,8 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * a value from the form, so nobody can change another owner's grants.
  */
 
-export async function grantAccess(form: FormData): Promise<ActionResult<{ granted: string }>> {
-  return await runAction<{ granted: string }>("grant", async () => {
+export async function grantAccess(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("grant", async () => {
     const viewer = await requireViewer();
     const email = text(form.get("email"));
     const level = form.get("level") === "write" ? "write" : "read";
@@ -30,7 +30,7 @@ export async function grantAccess(form: FormData): Promise<ActionResult<{ grante
     const grantee = matches[0]!;
     await setGrant(prisma, viewer.oid, grantee.oid, level);
     revalidatePath("/access");
-    return { ok: true, granted: `${grantee.name} now has ${level} access to your agents` };
+    return { ok: true, confirmation: `${grantee.name} now has ${level} access to your agents` };
   });
 }
 

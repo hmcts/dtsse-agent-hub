@@ -49,7 +49,8 @@ export default defineConfig({
         "src/web/data.ts",
         "src/transcripts/store.ts",
         "src/transcripts/sweep.ts",
-        "src/transcripts/views.ts"
+        "src/transcripts/views.ts",
+        "src/credentials/store.ts"
       ],
       reporter: ["lcov", "text"],
       reportsDirectory: "coverage",
