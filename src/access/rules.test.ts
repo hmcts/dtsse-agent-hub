@@ -4,6 +4,7 @@ import {
   agentAccess,
   canAgentMessageAgent,
   canGrant,
+  canManageCredential,
   canManageGrants,
   canPersonMessageAgent,
   canReadMessage,
@@ -221,5 +222,16 @@ describe("agentAccess", () => {
     ["stranger", "none"]
   ])("should report the %s as %s when they look at the agent", (role, access) => {
     expect(agentAccess(ROLES[role], TARGET, GRANTS)).toBe(access);
+  });
+});
+
+describe("canManageCredential", () => {
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s manages the owner's credentials", (expected, role) => {
+    expect(canManageCredential(ROLES[role], OWNER)).toBe(expected);
   });
 });

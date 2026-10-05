@@ -21,6 +21,8 @@ export type HubEvent =
   | { type: "grant"; owner_oid: string; grantee_oid: string }
   /** New entries in an agent's transcript, the newest `last_id`, so a UI showing its conversation can read them. */
   | { type: "transcript"; agent_id: string; owner_oid: string; last_id: string }
+  /** `owner_oid`'s stored credential of `kind` was saved or deleted. Never carries the value. */
+  | { type: "credential"; owner_oid: string; kind: string }
   /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
@@ -80,6 +82,8 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
       return isId(event.agent_id) && isId(event.owner_oid) && isId(event.last_id)
         ? { type: "transcript", agent_id: event.agent_id, owner_oid: event.owner_oid, last_id: event.last_id }
         : undefined;
+    case "credential":
+      return isId(event.owner_oid) && isId(event.kind) ? { type: "credential", owner_oid: event.owner_oid, kind: event.kind } : undefined;
     default:
       return undefined;
   }

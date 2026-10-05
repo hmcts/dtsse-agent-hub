@@ -53,6 +53,22 @@ enum TranscriptRole {
   @@map("transcript_role")
 }
 
+enum CredentialKind {
+  github
+  azure
+  claude
+
+  @@map("credential_kind")
+}
+
+enum CredentialVia {
+  web
+  cli
+  pod
+
+  @@map("credential_via")
+}
+
 enum ChannelMatch {
   any
   all
@@ -74,6 +90,7 @@ model User {
   grantsHeld  AgentGrant[] @relation("grantee")
   messages    Message[]
   channels    Channel[]
+  credentials Credential[]
 
   @@map("user")
 }
@@ -235,4 +252,30 @@ model TranscriptEntry {
   @@index([agentId, occurredAt, id])
   @@index([occurredAt])
   @@map("transcript_entry")
+}
+
+/// Which credentials a person has stored, and when and how each was last saved. Never the value: that is in the credentials vault under `secretName`.
+model Credential {
+  ownerOid     String         @map("owner_oid")
+  kind         CredentialKind
+  secretName   String         @map("secret_name")
+  accountLabel String?        @map("account_label")
+  updatedAt    DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedVia   CredentialVia  @map("updated_via")
+
+  owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
+
+  @@id([ownerOid, kind])
+  @@map("credential")
+}
+
+/// The development and test value store, sealed with AES-256-GCM. Never used in production.
+model DevCredentialValue {
+  secretName String   @id @map("secret_name")
+  ciphertext Bytes
+  iv         Bytes
+  tag        Bytes
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("dev_credential_value")
 }

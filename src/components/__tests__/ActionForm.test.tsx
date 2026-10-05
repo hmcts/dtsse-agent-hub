@@ -22,7 +22,7 @@ async function submit(): Promise<void> {
 
 describe("ActionForm", () => {
   it("should send the form's fields, confirm, and re-render the page when the action succeeds", async () => {
-    const action = vi.fn(async (_form: FormData) => ({ ok: true as const, granted: "Bob now has read access" }));
+    const action = vi.fn(async (_form: FormData) => ({ ok: true as const, confirmation: "Bob now has read access" }));
     render(
       <ActionForm action={action} label="Grant">
         <input name="email" defaultValue="bob@example.com" />

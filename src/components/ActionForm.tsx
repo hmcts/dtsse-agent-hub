@@ -7,7 +7,7 @@ import { SessionEndedMessage } from "@/components/live/SessionEnded";
 import { sessionEnded } from "@/components/live/session";
 import type { ActionResult } from "@/web/action";
 
-export type FormAction = (form: FormData) => Promise<ActionResult<object & { granted?: string }>>;
+export type FormAction = (form: FormData) => Promise<ActionResult<object & { confirmation?: string }>>;
 
 /** A form posting to a server action, showing its refusal or confirmation, and re-rendering the page on success. */
 export function ActionForm({ action, label, className, children }: { action: FormAction; label: string; className?: string; children: React.ReactNode }) {
@@ -26,7 +26,7 @@ export function ActionForm({ action, label, className, children }: { action: For
       const result = await action(new FormData(form));
       if (result.ok) {
         form.reset();
-        setMessage(result.granted ? { ok: true, text: result.granted } : null);
+        setMessage(result.confirmation ? { ok: true, text: result.confirmation } : null);
         router.refresh();
       } else {
         setMessage({ ok: false, text: result.error });

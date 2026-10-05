@@ -147,7 +147,7 @@ describe("grantAccess and revokeAccess", () => {
 
     const granted = await grantAccess(form({ email: " BOB@dev.invalid ", level: "write" }));
 
-    expect(granted).toEqual({ ok: true, granted: `${BOB.name} now has write access to your agents` });
+    expect(granted).toEqual({ ok: true, confirmation: `${BOB.name} now has write access to your agents` });
     expect(await prisma.agentGrant.findMany({ select: { ownerOid: true, granteeOid: true, level: true } })).toEqual([
       { ownerOid: ALICE.oid, granteeOid: BOB.oid, level: "write" }
     ]);

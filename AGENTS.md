@@ -21,13 +21,14 @@ change it first when the contract changes.
 | `src/app/api/agent/**` | Agent API route handlers, each wrapped in `agentRoute` / `ownedAgentRoute` from `src/agent-api/route.ts` |
 | `src/agent-auth/` | Bearer validation against the Entra tenant JWKS, and the `AGENT_AUTH_DISABLED` + `X-Dev-User` development bypass |
 | `src/auth/`, `src/app/auth/` | Web SSO: openid-client code flow with PKCE, sealed `ah_session` cookie keyed by `oid`/`tid` |
-| `src/viewer/` | Who is using the web UI: the session's person, or the development identity when sign-in is disabled |
+| `src/viewer/` | Who is using the web UI: the session's person, or the development identity when sign-in is disabled, and their model route (the AI gateway for holders of the `AIGateway.User` app role, otherwise their own Claude licence) |
 | `src/app/_actions/`, `src/web/` | Server actions (each re-reads the viewer), the `server-only` read seam `web/data.ts`, action results |
 | `src/app/api/ui/**`, `src/components/` | The UI's stream, feed, transcript, topic-suggestion and session-check routes, and its components; `components/live/` is the one `EventSource` per tab |
 | `src/channels/` | Saved channels and the 1–10 topic rules the builder and the save action share |
 | `src/access/` | Who may see and message which agent. `rules.ts` is pure and is the single source of the rules; `load.ts` loads the rows they apply to |
 | `src/agents/`, `src/topics/`, `src/messages/`, `src/users/` | Feature stores |
 | `src/transcripts/` | Agents' uploaded session transcripts: the upload schema and limits, the store, the retention sweep, and the conversation view that merges a transcript with the agent's direct-message thread |
+| `src/credentials/` | Each person's virtual-agent credentials (GitHub token, Azure token cache, Claude token): the value checks, the Key Vault store, the local encrypted store for development and tests, which of the two a process uses, and the metadata rows. Write-only for people: no route or action returns a value |
 | `src/realtime/` | `hub_events` NOTIFY payloads, the per-pod LISTEN connection and in-process hub, SSE framing, the agent stream |
 | `src/store/` | Prisma singleton, `DATABASE_URL` assembly, the boot-time migrator |
 | `prisma/migrations/` | Hand-written SQL, applied by `src/store/migrate.ts` before the server starts. `schema.prisma` mirrors it for the client |

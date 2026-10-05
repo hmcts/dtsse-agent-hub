@@ -11,6 +11,8 @@ export interface Session {
   tid: string;
   name: string;
   email?: string;
+  /** Whether the id token carried the `AIGateway.User` app role. Read at sign-in, so a change waits for the next. */
+  aiGateway: boolean;
 }
 
 export const SESSION_COOKIE = "ah_session";
@@ -27,7 +29,7 @@ export async function readSession(cookie: string | undefined, secret: string): P
   if (payload === undefined) {
     return undefined;
   }
-  const { oid, tid, name, email } = payload;
+  const { oid, tid, name, email, aiGateway } = payload;
   if (typeof oid !== "string" || typeof tid !== "string" || typeof name !== "string") {
     return undefined;
   }
@@ -35,6 +37,10 @@ export async function readSession(cookie: string | undefined, secret: string): P
     oid,
     tid,
     name,
-    ...(typeof email === "string" ? { email } : {})
+    ...(typeof email === "string" ? { email } : {}),
+    // Anything but `true`, including a cookie sealed before the role was read, is no gateway: wrongly withholding
+    // it lasts until the person next signs in, where wrongly granting it would spend the gateway on someone outside
+    // the group.
+    aiGateway: aiGateway === true
   };
 }

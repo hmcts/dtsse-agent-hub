@@ -8,6 +8,7 @@
  * - An agent may message another agent when its owner owns the target or holds a write grant from the target's
  *   owner.
  * - Only an owner changes their grants, and only to people the hub already knows.
+ * - Only a person saves, replaces or deletes their own credentials. No grant extends to them.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
  */
@@ -124,6 +125,14 @@ export function canManageGrants(actorOid: string, ownerOid: string): boolean {
 /** Whether `actorOid` may grant `granteeOid` access to `ownerOid`'s agents. `granteeKnown` means a `user` row exists. */
 export function canGrant(actorOid: string, ownerOid: string, granteeOid: string, granteeKnown: boolean): boolean {
   return canManageGrants(actorOid, ownerOid) && granteeKnown && granteeOid !== ownerOid;
+}
+
+/**
+ * Whether `actorOid` may save, replace or delete `ownerOid`'s stored credentials. Credentials are write-only for
+ * people: nothing, this rule included, lets anyone read a value back through the hub.
+ */
+export function canManageCredential(actorOid: string, ownerOid: string): boolean {
+  return actorOid === ownerOid;
 }
 
 export type AgentAccess = "owner" | "write" | "read" | "none";

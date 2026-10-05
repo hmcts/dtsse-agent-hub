@@ -4,7 +4,7 @@ import { authSettings, sessionSecret } from "./settings.ts";
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
 
-const READER: Session = { oid: "0000-1111", tid: "tenant-1", name: "A Reader", email: "a.reader@justice.gov.uk" };
+const READER: Session = { oid: "0000-1111", tid: "tenant-1", name: "A Reader", email: "a.reader@justice.gov.uk", aiGateway: false };
 
 describe("sealSession and readSession", () => {
   it("should carry a reader back out unchanged", async () => {
@@ -12,9 +12,29 @@ describe("sealSession and readSession", () => {
   });
 
   it("should carry a reader with no email address", async () => {
-    const anonymous: Session = { oid: "0000-2222", tid: "tenant-1", name: "No Address" };
+    const anonymous: Session = { oid: "0000-2222", tid: "tenant-1", name: "No Address", aiGateway: false };
 
     expect(await readSession(await sealSession(anonymous, SECRET), SECRET)).toEqual(anonymous);
+  });
+
+  it("should carry the AI gateway role when the reader holds it", async () => {
+    const gateway: Session = { ...READER, aiGateway: true };
+
+    expect(await readSession(await sealSession(gateway, SECRET), SECRET)).toEqual(gateway);
+  });
+
+  it("should read no AI gateway role when the cookie was sealed without the field", async () => {
+    const { seal } = await import("./sealed.ts");
+    const older = await seal({ oid: "0000-1111", tid: "tenant-1", name: "A Reader" }, SECRET, SESSION_MAX_AGE);
+
+    expect(await readSession(older, SECRET)).toEqual({ oid: "0000-1111", tid: "tenant-1", name: "A Reader", aiGateway: false });
+  });
+
+  it("should read no AI gateway role when the field is anything but true", async () => {
+    const { seal } = await import("./sealed.ts");
+    const odd = await seal({ oid: "0000-1111", tid: "tenant-1", name: "A Reader", aiGateway: "true" }, SECRET, SESSION_MAX_AGE);
+
+    expect((await readSession(odd, SECRET))?.aiGateway).toBe(false);
   });
 
   it("should not put the reader's identity where a browser can read it", async () => {

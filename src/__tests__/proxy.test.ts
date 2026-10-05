@@ -4,7 +4,7 @@ import { SESSION_COOKIE, sealSession } from "@/auth/session";
 import { config, proxy } from "@/proxy";
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
-const PERSON = { oid: "abc", tid: "tenant", name: "A Person" };
+const PERSON = { oid: "abc", tid: "tenant", name: "A Person", aiGateway: false };
 
 function ask(url: string, cookies: Record<string, string> = {}): NextRequest {
   const request = new NextRequest(new URL(url, "https://agent-hub.example"));
