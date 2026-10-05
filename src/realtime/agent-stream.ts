@@ -1,4 +1,4 @@
-import type { ApiMessage } from "../messages/shape.ts";
+import type { StreamedDirect } from "../messages/shape.ts";
 import type { EventHub } from "./hub.ts";
 import { type OnOpen, sseEvent } from "./sse.ts";
 
@@ -7,16 +7,16 @@ export interface AgentStreamSources {
   /** Resolves once the pod's `LISTEN` is active, so every NOTIFY committed after it reaches the hub. */
   ready: () => Promise<void>;
   /** Every delivery still queued for the agent, oldest first. */
-  queued: () => Promise<ApiMessage[]>;
+  queued: () => Promise<StreamedDirect[]>;
   /** The message, if its delivery to the agent is still queued. */
-  queuedOne: (messageId: bigint) => Promise<ApiMessage | undefined>;
+  queuedOne: (messageId: bigint) => Promise<StreamedDirect | undefined>;
 }
 
 /** Ends every agent stream that reaches its lifetime: the client reconnects at once, and the replay resends anything unacked. */
 export const RECONNECT_FRAME = sseEvent({ event: "reconnect", data: "{}" });
 
-export function directFrame(message: ApiMessage): string {
-  return sseEvent({ id: message.id, event: "direct", data: JSON.stringify({ message }) });
+export function directFrame(direct: StreamedDirect): string {
+  return sseEvent({ id: direct.message.id, event: "direct", data: JSON.stringify({ message: direct.message, from_owner: direct.from_owner }) });
 }
 
 /**
@@ -37,10 +37,10 @@ export function agentStream(agentId: string, sources: AgentStreamSources): OnOpe
     let chain: Promise<void> = Promise.resolve();
     let open = true;
 
-    function emit(message: ApiMessage): void {
-      if (open && !sent.has(message.id)) {
-        sent.add(message.id);
-        send(directFrame(message));
+    function emit(direct: StreamedDirect): void {
+      if (open && !sent.has(direct.message.id)) {
+        sent.add(direct.message.id);
+        send(directFrame(direct));
       }
     }
 

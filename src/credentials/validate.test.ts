@@ -1,6 +1,6 @@
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { checkCredential, MAX_CREDENTIAL_LENGTH } from "./validate.ts";
+import { checkAzureCacheOwner, checkCredential, decodeAzureCache, MAX_CREDENTIAL_LENGTH } from "./validate.ts";
 
 function azureCache(cache: unknown): string {
   return gzipSync(Buffer.from(JSON.stringify(cache), "utf8")).toString("base64");
@@ -108,5 +108,62 @@ describe("checkCredential limits", () => {
     ["something that is not a string", 42]
   ])("should ask for a value when given %s", (_label, value) => {
     expect(checkCredential("github", value)).toMatchObject({ ok: false, error: expect.stringContaining("paste") });
+  });
+});
+
+describe("decodeAzureCache", () => {
+  it("should decode base64 of gzipped JSON when it is an object", () => {
+    expect(decodeAzureCache(azureCache({ Account: ACCOUNT }))).toEqual({ Account: ACCOUNT });
+  });
+
+  it.each([
+    ["not base64", "not base64!"],
+    ["base64 of something not gzipped", Buffer.from("plain").toString("base64")],
+    ["gzipped JSON that is not an object", azureCache([1, 2])],
+    ["gzipped JSON null", azureCache(null)],
+    ["gzipped text that is not JSON", gzipSync(Buffer.from("{")).toString("base64")]
+  ])("should give nothing when it is %s", (_label, value) => {
+    expect(decodeAzureCache(value)).toBeUndefined();
+  });
+});
+
+describe("checkAzureCacheOwner", () => {
+  const OID = "a1b2c3d4-0000-4000-8000-000000000001";
+  const TID = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
+
+  function account(home: unknown) {
+    return { username: "a.person@justice.gov.uk", home_account_id: home };
+  }
+
+  it("should accept a cache whose every account is the owner's in this tenant", () => {
+    const cache = azureCache({ Account: { one: account(`${OID}.${TID}`), two: account(`${OID.toUpperCase()}.${TID}`) } });
+
+    expect(checkAzureCacheOwner(` ${cache}\n`, OID, TID)).toEqual({ ok: true });
+  });
+
+  it.each([
+    ["someone else's account", { a: account(`b1b2c3d4-0000-4000-8000-000000000002.${TID}`) }],
+    ["the owner's account in another tenant", { a: account(`${OID}.99999999-9999-9999-9999-999999999999`) }],
+    ["the owner's account beside someone else's", { a: account(`${OID}.${TID}`), b: account(`other.${TID}`) }],
+    ["an account with no home_account_id", { a: { username: "x" } }],
+    ["a home_account_id that is not a string", { a: account(42) }],
+    ["a home_account_id with more parts", { a: account(`${OID}.${TID}.extra`) }],
+    ["a null account", { a: null }],
+    ["no accounts", {}]
+  ])("should refuse a cache holding %s", (_label, accounts) => {
+    expect(checkAzureCacheOwner(azureCache({ Account: accounts }), OID, TID)).toMatchObject({ ok: false, reason: "not-owner" });
+  });
+
+  it.each([
+    ["not a cache", "nope"],
+    ["a cache without an Account section", azureCache({ AccessToken: {} })],
+    ["a cache whose Account section is null", azureCache({ Account: null })],
+    ["not a string", 42]
+  ])("should call it malformed when it is %s", (_label, value) => {
+    expect(checkAzureCacheOwner(value, OID, TID)).toMatchObject({ ok: false, reason: "malformed" });
+  });
+
+  it.each([undefined, " "])("should refuse to judge when the hub's tenant is %j", (tenant) => {
+    expect(checkAzureCacheOwner(azureCache({ Account: { a: account(`${OID}.${TID}`) } }), OID, tenant)).toMatchObject({ ok: false, reason: "unconfigured" });
   });
 });

@@ -6,6 +6,7 @@ import { SessionEndedBanner } from "@/components/live/SessionEnded";
 import { Sidebar } from "@/components/Sidebar";
 import { SignInBanner } from "@/components/SignInBanner";
 import { currentViewer } from "@/viewer/current";
+import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { sidebarData } from "@/web/data";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             {signInDisabled ? <SignInBanner viewer={viewer} /> : null}
             <SessionEndedBanner />
             <div className="flex min-h-0 flex-1">
-              {sidebar && viewer ? <Sidebar data={sidebar} viewer={viewer} signInDisabled={signInDisabled} /> : null}
+              {sidebar && viewer ? <Sidebar data={sidebar} viewer={viewer} signInDisabled={signInDisabled} virtualAgents={virtualAgentsEnabled()} /> : null}
               <main className="flex min-w-0 flex-1 flex-col">{children}</main>
             </div>
           </div>

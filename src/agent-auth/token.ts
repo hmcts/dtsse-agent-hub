@@ -54,17 +54,18 @@ function claim(payload: Record<string, unknown>, name: string): string | undefin
 }
 
 /**
- * The caller an Entra access token names.
+ * The claims of an Entra access token for this API, once it is known to be genuine.
  *
  * Signature, `iss` (the tenant's v2 issuer, which is why the registration sets `accessTokenAcceptedVersion: 2`),
  * `aud`, `exp` and `nbf` are checked by `jwtVerify`; `tid` is checked here, because a multi-tenant key set would
- * otherwise vouch for a token from another tenant. Identity is `oid`, never anything the client sent.
- *
- * `scp` must be present: only a delegated token, issued to a signed-in person, carries it. An app-only
- * (client-credentials) token has `roles` instead, and an ID token has neither, so neither acts as the person whose
- * `oid` it names. Which scope is not checked, because the registration's scope names are not this service's to fix.
+ * otherwise vouch for a token from another tenant. What kind of token it is, delegated or app-only, is for the
+ * caller to decide: `verifyAgentToken` and `verifyOrchestratorToken` each accept only one.
  */
-export async function verifyAgentToken(token: string, settings: AgentAuthSettings, keys: JWTVerifyGetKey = tenantKeys(settings.tenantId)): Promise<Identity> {
+export async function verifyEntraToken(
+  token: string,
+  settings: AgentAuthSettings,
+  keys: JWTVerifyGetKey = tenantKeys(settings.tenantId)
+): Promise<EntraClaims> {
   let payload: Record<string, unknown>;
   try {
     ({ payload } = await jwtVerify(token, outageAware(keys), {
@@ -81,9 +82,6 @@ export async function verifyAgentToken(token: string, settings: AgentAuthSetting
     throw new AgentAuthFailed(`the bearer token was refused: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  if (claim(payload, "scp") === undefined) {
-    throw new AgentAuthFailed("the bearer token is not a delegated access token: it has no scp");
-  }
   const tid = claim(payload, "tid");
   if (tid !== settings.tenantId) {
     throw new AgentAuthFailed(`the bearer token was issued for tenant ${tid ?? "(none)"}`);
@@ -91,6 +89,32 @@ export async function verifyAgentToken(token: string, settings: AgentAuthSetting
   const oid = claim(payload, "oid");
   if (oid === undefined) {
     throw new AgentAuthFailed("the bearer token names no oid");
+  }
+  const roles = Array.isArray(payload.roles) ? payload.roles.filter((role): role is string => typeof role === "string") : [];
+  return { payload, tid, oid, scp: claim(payload, "scp"), roles };
+}
+
+export interface EntraClaims {
+  payload: Record<string, unknown>;
+  tid: string;
+  oid: string;
+  /** Present only on a delegated token, issued to a signed-in person. */
+  scp: string | undefined;
+  /** The app roles assigned to the caller; on an app-only token, to the calling application. */
+  roles: string[];
+}
+
+/**
+ * The caller an Entra access token names. Identity is `oid`, never anything the client sent.
+ *
+ * `scp` must be present: only a delegated token, issued to a signed-in person, carries it. An app-only
+ * (client-credentials) token has `roles` instead, and an ID token has neither, so neither acts as the person whose
+ * `oid` it names. Which scope is not checked, because the registration's scope names are not this service's to fix.
+ */
+export async function verifyAgentToken(token: string, settings: AgentAuthSettings, keys: JWTVerifyGetKey = tenantKeys(settings.tenantId)): Promise<Identity> {
+  const { payload, tid, oid, scp } = await verifyEntraToken(token, settings, keys);
+  if (scp === undefined) {
+    throw new AgentAuthFailed("the bearer token is not a delegated access token: it has no scp");
   }
   const email = claim(payload, "preferred_username") ?? claim(payload, "email") ?? claim(payload, "upn");
   return {

@@ -53,3 +53,28 @@ export function toApiMessage(row: MessageRow): ApiMessage {
     }
   };
 }
+
+/**
+ * A direct message as an agent's stream sends it. `from_owner` is true when a person wrote it from the UI and that
+ * person owns the agent it is for, so the agent may treat it as its owner's own instruction; a message from an agent,
+ * or from a grantee, is never `from_owner`.
+ */
+export interface StreamedDirect {
+  message: ApiMessage;
+  from_owner: boolean;
+}
+
+/** The columns `isFromOwner` reads. */
+export interface AuthorshipRow {
+  authorAgent: { id: string } | null;
+  authorOid: string;
+  targetAgent: { ownerOid: string } | null;
+}
+
+export function isFromOwner(row: AuthorshipRow): boolean {
+  return row.authorAgent === null && row.targetAgent !== null && row.authorOid === row.targetAgent.ownerOid;
+}
+
+export function toStreamedDirect(row: MessageRow & AuthorshipRow): StreamedDirect {
+  return { message: toApiMessage(row), from_owner: isFromOwner(row) };
+}

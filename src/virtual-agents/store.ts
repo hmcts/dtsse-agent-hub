@@ -1,0 +1,421 @@
+import { canManageVirtualAgent } from "../access/rules.ts";
+import { HttpError } from "../agent-api/http.ts";
+import type { Database, PrismaClient } from "../store/prisma.ts";
+import type { Identity } from "../users/identity.ts";
+import type { ModelRoute } from "../viewer/identity.ts";
+import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
+import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken } from "./launch-token.ts";
+import { nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
+import { checkName, createRefusal, startRefusal } from "./limits.ts";
+import { diskTtlDays } from "./settings.ts";
+import { announce, type StopReason } from "./stop.ts";
+
+/**
+ * Virtual agents: what each person asked for, what the orchestrator and the pod last reported, and the launch token
+ * the pod authenticates with. Every change is announced to the owner's UI streams with a `virtual_agent` event.
+ */
+
+export interface VirtualAgentRow {
+  id: string;
+  ownerOid: string;
+  name: string;
+  desired: VirtualAgentDesired;
+  status: VirtualAgentStatus;
+  statusDetail: string | null;
+  statusChangedAt: Date;
+  generation: number;
+  observedGeneration: number;
+  statefulsetName: string;
+  pvcName: string;
+  agentId: string | null;
+  modelRoute: ModelRoute;
+  startedAt: Date;
+  lastActiveAt: Date | null;
+  stoppedAt: Date | null;
+  stopReason: StopReason | null;
+  diskExpiresAt: Date | null;
+  diskDeletedAt: Date | null;
+  createdAt: Date;
+}
+
+const SELECT = {
+  id: true,
+  ownerOid: true,
+  name: true,
+  desired: true,
+  status: true,
+  statusDetail: true,
+  statusChangedAt: true,
+  generation: true,
+  observedGeneration: true,
+  statefulsetName: true,
+  pvcName: true,
+  agentId: true,
+  modelRoute: true,
+  startedAt: true,
+  lastActiveAt: true,
+  stoppedAt: true,
+  stopReason: true,
+  diskExpiresAt: true,
+  diskDeletedAt: true,
+  createdAt: true
+} as const;
+
+type StoredRoute = "gateway" | "own_licence";
+
+function toRoute(stored: StoredRoute): ModelRoute {
+  return stored === "own_licence" ? "own-licence" : "gateway";
+}
+
+function fromRoute(route: ModelRoute): StoredRoute {
+  return route === "own-licence" ? "own_licence" : "gateway";
+}
+
+function toRow<R extends { modelRoute: StoredRoute }>(row: R): Omit<R, "modelRoute"> & { modelRoute: ModelRoute } {
+  return { ...row, modelRoute: toRoute(row.modelRoute) };
+}
+
+/** Holds the owner's `user` row until commit, so two creates or starts by one person cannot both pass the limits. */
+async function lockOwner(db: Database, ownerOid: string): Promise<void> {
+  await db.$queryRaw`SELECT 1 FROM "user" WHERE oid = ${ownerOid} FOR UPDATE`;
+}
+
+async function counts(db: Database, ownerOid: string): Promise<{ total: number; running: number }> {
+  const [total, running] = await Promise.all([
+    db.virtualAgent.count({ where: { ownerOid, desired: { not: "deleted" } } }),
+    db.virtualAgent.count({ where: { ownerOid, desired: "running" } })
+  ]);
+  return { total, running };
+}
+
+/** Locks the row for the rest of the transaction. */
+async function lockVirtualAgent(db: Database, id: string): Promise<VirtualAgentRow | undefined> {
+  const [locked] = await db.$queryRaw<{ id: string }[]>`SELECT id::text AS id FROM virtual_agent WHERE id = ${id}::uuid FOR UPDATE`;
+  if (locked === undefined) {
+    return undefined;
+  }
+  return toRow(await db.virtualAgent.findUniqueOrThrow({ where: { id }, select: SELECT }));
+}
+
+export interface NewVirtualAgent {
+  owner: Pick<Identity, "oid">;
+  modelRoute: ModelRoute;
+  name: unknown;
+}
+
+/**
+ * A new virtual agent, meant to be running, for the orchestrator to claim. Its model route is the owner's at the
+ * moment they created it, since that decides whether the pod needs their Claude token.
+ */
+export async function createVirtualAgent(prisma: PrismaClient, request: NewVirtualAgent): Promise<VirtualAgentRow> {
+  const checked = checkName(request.name);
+  if (!checked.ok) {
+    throw new HttpError(400, checked.error);
+  }
+  return await prisma.$transaction(async (tx) => {
+    await lockOwner(tx, request.owner.oid);
+    const refusal = createRefusal(await counts(tx, request.owner.oid));
+    if (refusal !== undefined) {
+      throw new HttpError(409, refusal);
+    }
+    if ((await tx.virtualAgent.count({ where: { ownerOid: request.owner.oid, name: checked.name } })) > 0) {
+      throw new HttpError(409, `you already have a virtual agent called ${checked.name}`);
+    }
+    const row = toRow(
+      await tx.virtualAgent.create({
+        data: { ownerOid: request.owner.oid, name: checked.name, modelRoute: fromRoute(request.modelRoute) },
+        select: SELECT
+      })
+    );
+    await announce(tx, row.id, row.ownerOid);
+    return row;
+  });
+}
+
+export async function findVirtualAgent(db: Database, id: string): Promise<VirtualAgentRow | undefined> {
+  const row = await db.virtualAgent.findUnique({ where: { id }, select: SELECT });
+  return row === null ? undefined : toRow(row);
+}
+
+/** The owner's virtual agents, oldest first. */
+export async function listVirtualAgents(db: Database, ownerOid: string): Promise<VirtualAgentRow[]> {
+  const rows = await db.virtualAgent.findMany({ where: { ownerOid }, select: SELECT, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+  return rows.map(toRow);
+}
+
+const NO_TOKEN = { launchTokenHash: null, launchTokenIssuedAt: null } as const;
+
+/**
+ * What the owner asks for: start, stop or delete. Each bumps `generation`, so the orchestrator claims the agent and
+ * applies it. Stopping or deleting drops the launch token at once, so the pod is shut out before it is shut down;
+ * starting again clears the last stop and the disk's expiry, and the next claim mints a fresh token.
+ *
+ * Someone other than the owner is told there is no such agent, so the refusal does not confirm one exists.
+ */
+export async function setDesired(
+  prisma: PrismaClient,
+  actorOid: string,
+  id: string,
+  desired: VirtualAgentDesired,
+  now: Date = new Date()
+): Promise<VirtualAgentRow> {
+  return await prisma.$transaction(async (tx) => {
+    const row = await lockVirtualAgent(tx, id);
+    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
+      throw new HttpError(404, "no such virtual agent");
+    }
+    if (row.desired === "deleted") {
+      throw new HttpError(409, "that virtual agent is being deleted");
+    }
+    if (row.desired === desired) {
+      return row;
+    }
+    let data: Record<string, unknown>;
+    if (desired === "running") {
+      await lockOwner(tx, row.ownerOid);
+      const refusal = startRefusal(await counts(tx, row.ownerOid));
+      if (refusal !== undefined) {
+        throw new HttpError(409, refusal);
+      }
+      data = { startedAt: now, stoppedAt: null, stopReason: null, diskExpiresAt: null, diskDeletedAt: null, statusDetail: null };
+    } else {
+      data = { ...NO_TOKEN, ...(desired === "stopped" ? { stopReason: "user" } : {}) };
+    }
+    const updated = toRow(
+      await tx.virtualAgent.update({
+        where: { id },
+        data: { ...data, desired, generation: { increment: 1 }, updatedAt: now },
+        select: SELECT
+      })
+    );
+    await announce(tx, id, row.ownerOid);
+    return updated;
+  });
+}
+
+export interface LaunchTokenCaller extends Identity {
+  virtualAgentId: string;
+}
+
+/**
+ * The owner a launch token acts as, or `undefined` for a token that is malformed, unknown, replaced by a newer one,
+ * or whose agent is no longer meant to be running.
+ */
+export async function callerForLaunchToken(db: Database, token: string): Promise<LaunchTokenCaller | undefined> {
+  if (!isWellFormedLaunchToken(token)) {
+    return undefined;
+  }
+  const row = await db.virtualAgent.findUnique({
+    where: { launchTokenHash: hashLaunchToken(token) },
+    select: { id: true, desired: true, launchTokenHash: true, owner: { select: { oid: true, tid: true, name: true, email: true } } }
+  });
+  if (row === null || row.desired !== "running" || !launchTokenMatches(token, row.launchTokenHash)) {
+    return undefined;
+  }
+  const { oid, tid, name, email } = row.owner;
+  return { oid, tid, name, ...(email === null ? {} : { email }), virtualAgentId: row.id };
+}
+
+/**
+ * The pod's report of how far its boot has got. Refused with 409 when the lifecycle does not allow it, such as from
+ * an agent that is being stopped. Every report counts as activity.
+ */
+export async function reportStatus(prisma: PrismaClient, id: string, phase: PodPhase, detail: string | null, now: Date = new Date()): Promise<VirtualAgentRow> {
+  return await prisma.$transaction(async (tx) => {
+    const row = await lockVirtualAgent(tx, id);
+    if (row === undefined) {
+      throw new HttpError(404, "no such virtual agent");
+    }
+    const outcome = nextStatus(row, { source: "pod", phase, detail });
+    if ("refused" in outcome) {
+      throw new HttpError(409, outcome.refused);
+    }
+    if ("remove" in outcome) {
+      throw new Error("a pod report never removes an agent");
+    }
+    const updated = toRow(
+      await tx.virtualAgent.update({
+        where: { id },
+        data: {
+          status: outcome.status,
+          statusDetail: outcome.detail ?? null,
+          ...(outcome.status === row.status ? {} : { statusChangedAt: now }),
+          lastActiveAt: now,
+          updatedAt: now
+        },
+        select: SELECT
+      })
+    );
+    await announce(tx, id, row.ownerOid);
+    return updated;
+  });
+}
+
+/** Moves the agent as a pod report of `phase` would, when the lifecycle allows it, inside the caller's transaction. */
+export async function moveTo(db: Database, row: VirtualAgentRow, phase: PodPhase, detail: string | null, now: Date): Promise<void> {
+  const outcome = nextStatus(row, { source: "pod", phase, detail });
+  if (!("status" in outcome)) {
+    return;
+  }
+  await db.virtualAgent.update({
+    where: { id: row.id },
+    data: { status: outcome.status, statusDetail: outcome.detail ?? null, ...(outcome.status === row.status ? {} : { statusChangedAt: now }), updatedAt: now }
+  });
+}
+
+export interface ClaimedVirtualAgent {
+  id: string;
+  generation: number;
+  desired: VirtualAgentDesired;
+  statefulset_name: string;
+  pvc_name: string;
+  delete_disk: boolean;
+  model_route: StoredRoute;
+  owner: { oid: string };
+  /** Only when this claim minted one. It is never stored and never returned again. */
+  launch_token?: string;
+}
+
+export const CLAIM_LIMIT = 20;
+
+/** Statuses from which `running` means a new pod, which needs a token of its own. */
+const STARTING_FROM: readonly VirtualAgentStatus[] = ["requested", "stopping", "stopped"];
+
+interface ClaimRow {
+  id: string;
+  generation: number;
+  desired: VirtualAgentDesired;
+  status: VirtualAgentStatus;
+  statefulset_name: string;
+  pvc_name: string;
+  model_route: StoredRoute;
+  owner_oid: string;
+  has_token: boolean;
+  disk_due: boolean;
+}
+
+/**
+ * Up to `limit` agents the orchestrator has work for: a spec it has not applied, or a disk that has expired and not
+ * been deleted. `SKIP LOCKED`, and a claim lasting `CLAIM_TIMEOUT_MS` unless reported on, so concurrent
+ * orchestrators get disjoint sets and a dead one's claims pass to the next.
+ *
+ * A launch token is minted, replacing any before it, when the agent is meant to be running and either has none or is
+ * starting a new pod. Its plain value goes in this response and nowhere else.
+ */
+export async function claimVirtualAgents(
+  prisma: PrismaClient,
+  cluster: string,
+  limit: number = CLAIM_LIMIT,
+  now: Date = new Date()
+): Promise<ClaimedVirtualAgent[]> {
+  return await prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<ClaimRow[]>`
+      WITH due AS (
+        SELECT id
+          FROM virtual_agent
+         WHERE (generation > observed_generation OR (desired <> 'running' AND disk_expires_at <= ${now} AND disk_deleted_at IS NULL))
+           AND (claimed_at IS NULL OR claimed_at <= ${new Date(now.getTime() - CLAIM_TIMEOUT_MS)})
+         ORDER BY updated_at, id
+         LIMIT ${limit}::int
+           FOR UPDATE SKIP LOCKED
+      )
+      UPDATE virtual_agent v
+         SET claimed_by = ${cluster}, claimed_at = ${now}
+        FROM due
+       WHERE v.id = due.id
+      RETURNING v.id::text AS id, v.generation, v.desired::text AS desired, v.status::text AS status, v.statefulset_name, v.pvc_name,
+                v.model_route::text AS model_route, v.owner_oid, v.launch_token_hash IS NOT NULL AS has_token,
+                COALESCE(v.desired <> 'running' AND v.disk_expires_at <= ${now} AND v.disk_deleted_at IS NULL, false) AS disk_due
+    `;
+    const claimed: ClaimedVirtualAgent[] = [];
+    for (const row of rows) {
+      let launchToken: string | undefined;
+      if (row.desired === "running" && (!row.has_token || STARTING_FROM.includes(row.status))) {
+        const minted = mintLaunchToken();
+        await tx.virtualAgent.update({ where: { id: row.id }, data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now } });
+        launchToken = minted.token;
+      }
+      claimed.push({
+        id: row.id,
+        generation: row.generation,
+        desired: row.desired,
+        statefulset_name: row.statefulset_name,
+        pvc_name: row.pvc_name,
+        delete_disk: row.desired === "deleted" || row.disk_due,
+        model_route: row.model_route,
+        owner: { oid: row.owner_oid },
+        ...(launchToken === undefined ? {} : { launch_token: launchToken })
+      });
+    }
+    return claimed;
+  });
+}
+
+export interface ObservedReport extends Omit<Observation, "source"> {
+  generation: number;
+}
+
+export type ObserveResult = { removed: true } | { removed: false; row: VirtualAgentRow };
+
+/**
+ * The orchestrator's report on a claimed agent: which generation it applied, and what it saw. It releases the claim,
+ * moves `observed_generation` forward (never back), and maps what was seen onto the status. An agent that has just
+ * stopped starts its disk's expiry; a deleted agent whose StatefulSet and disk are both gone is removed.
+ */
+export async function observeVirtualAgent(prisma: PrismaClient, id: string, report: ObservedReport, now: Date = new Date()): Promise<ObserveResult> {
+  return await prisma.$transaction(async (tx) => {
+    const row = await lockVirtualAgent(tx, id);
+    if (row === undefined) {
+      throw new HttpError(404, "no such virtual agent");
+    }
+    if (report.generation > row.generation) {
+      throw new HttpError(409, `generation ${report.generation} has not been asked for; the latest is ${row.generation}`);
+    }
+    const outcome = nextStatus(row, { source: "orchestrator", ...report });
+    if ("remove" in outcome) {
+      await tx.virtualAgent.delete({ where: { id } });
+      await announce(tx, id, row.ownerOid);
+      return { removed: true };
+    }
+    if ("refused" in outcome) {
+      throw new HttpError(409, outcome.refused);
+    }
+    const nowStopped = outcome.status === "stopped" && row.status !== "stopped";
+    const diskDeleted = report.diskDeleted === true && row.desired !== "running" && row.diskDeletedAt === null;
+    const updated = toRow(
+      await tx.virtualAgent.update({
+        where: { id },
+        data: {
+          observedGeneration: Math.max(row.observedGeneration, report.generation),
+          claimedBy: null,
+          claimedAt: null,
+          status: outcome.status,
+          ...(outcome.detail === undefined ? {} : { statusDetail: outcome.detail }),
+          ...(outcome.status === row.status ? {} : { statusChangedAt: now }),
+          ...(nowStopped ? { stoppedAt: now, ...(row.diskDeletedAt === null ? { diskExpiresAt: diskExpiresAt(now, diskTtlDays()) } : {}) } : {}),
+          ...(diskDeleted ? { diskDeletedAt: now } : {}),
+          updatedAt: now
+        },
+        select: SELECT
+      })
+    );
+    await announce(tx, id, row.ownerOid);
+    return { removed: false, row: updated };
+  });
+}
+
+export interface LiveVirtualAgent {
+  id: string;
+  statefulset_name: string;
+  /** `null` once the disk has been deleted, so a PVC by that name is an orphan. */
+  pvc_name: string | null;
+}
+
+/** Every virtual agent the hub still has a row for, so anything else the orchestrator finds is an orphan. */
+export async function liveVirtualAgents(db: Database): Promise<LiveVirtualAgent[]> {
+  const rows = await db.virtualAgent.findMany({
+    select: { id: true, statefulsetName: true, pvcName: true, diskDeletedAt: true },
+    orderBy: { id: "asc" }
+  });
+  return rows.map((row) => ({ id: row.id, statefulset_name: row.statefulsetName, pvc_name: row.diskDeletedAt === null ? row.pvcName : null }));
+}

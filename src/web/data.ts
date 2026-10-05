@@ -13,9 +13,11 @@ import { parseMessageRef } from "../messages/permalink.ts";
 import { prisma } from "../store/prisma.ts";
 import { hiddenTopicPrefix } from "../topics/slug.ts";
 import { listTopics, mostActiveTopics } from "../topics/store.ts";
+import type { ConversationPage } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
+import { type VirtualAgentCard, type VirtualAgentDetail, virtualAgentCards, virtualAgentDetail } from "../virtual-agents/views.ts";
 
 /**
  * The reads the pages make, in one place. `server-only` so a client component importing it fails the build rather
@@ -118,4 +120,36 @@ export async function messagePage(viewer: Identity, rawId: string): Promise<Mess
     parent: readable(parent) ? parent.message : null,
     replies: replies.filter((reply) => readable(reply)).map((reply) => reply.message)
   };
+}
+
+export interface VirtualAgentsPageView {
+  modelRoute: ModelRoute;
+  agents: VirtualAgentCard[];
+}
+
+/** The viewer's own virtual agents. Nobody sees anyone else's. */
+export async function virtualAgentsPage(viewer: Viewer): Promise<VirtualAgentsPageView> {
+  return { modelRoute: viewer.modelRoute, agents: await virtualAgentCards(prisma, viewer.oid) };
+}
+
+export interface VirtualAgentPageView {
+  detail: VirtualAgentDetail;
+  credentials: CredentialSettings;
+  /** The agent its current session registered, with its conversation, once there is one. */
+  linked: { view: AgentView; conversation: ConversationPage } | null;
+}
+
+/** One of the viewer's own virtual agents, or `undefined` for the not-found the page answers. */
+export async function virtualAgentPage(viewer: Viewer, id: string): Promise<VirtualAgentPageView | undefined> {
+  const detail = await virtualAgentDetail(prisma, viewer.oid, id);
+  if (detail === undefined) {
+    return undefined;
+  }
+  const agentId = detail.card.agentId;
+  const [credentials, view] = await Promise.all([credentialSettings(viewer), agentId === null ? undefined : agentView(prisma, viewer.oid, agentId)]);
+  if (view === undefined) {
+    return { detail, credentials, linked: null };
+  }
+  const conversation = await agentConversation(prisma, viewer.oid, { id: view.agent.id, ownerOid: view.agent.owner.oid }, view.grants);
+  return { detail, credentials, linked: { view, conversation } };
 }

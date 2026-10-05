@@ -1,21 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ApiMessage } from "../messages/shape.ts";
+import type { StreamedDirect } from "../messages/shape.ts";
 import { agentStream, directFrame, RECONNECT_FRAME } from "./agent-stream.ts";
 import { createEventHub } from "./hub.ts";
 
 const AGENT = "agent-b";
 
-function message(id: string): ApiMessage {
+function message(id: string, fromOwner = false): StreamedDirect {
   return {
-    id,
-    kind: "direct",
-    title: null,
-    body: `message ${id}`,
-    topics: [],
-    in_reply_to: null,
-    target_agent_id: AGENT,
-    created_at: "2026-09-29T09:00:00.000Z",
-    author: { type: "user", agent_id: null, agent_name: null, owner_name: "Alice", owner_email: null }
+    from_owner: fromOwner,
+    message: {
+      id,
+      kind: "direct",
+      title: null,
+      body: `message ${id}`,
+      topics: [],
+      in_reply_to: null,
+      target_agent_id: AGENT,
+      created_at: "2026-09-29T09:00:00.000Z",
+      author: { type: "user", agent_id: null, agent_name: null, owner_name: "Alice", owner_email: null }
+    }
   };
 }
 
@@ -39,7 +42,11 @@ afterEach(() => {
 
 describe("directFrame", () => {
   it("should frame a direct message with its id and the contract's event name and body", () => {
-    expect(directFrame(message("7"))).toBe(`id: 7\nevent: direct\ndata: ${JSON.stringify({ message: message("7") })}\n\n`);
+    expect(directFrame(message("7"))).toBe(`id: 7\nevent: direct\ndata: ${JSON.stringify({ message: message("7").message, from_owner: false })}\n\n`);
+  });
+
+  it("should say the message is from the agent's owner when it is", () => {
+    expect(JSON.parse(directFrame(message("7", true)).split("data: ")[1]!)).toMatchObject({ from_owner: true, message: { id: "7" } });
   });
 });
 

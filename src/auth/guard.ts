@@ -10,12 +10,13 @@ const EXEMPT_PATHS = ["/health", "/liveness", "/readiness", "/favicon.ico"];
  * Every prefix ends in `/`, so `/health` does not also exempt `/health-summary`.
  *
  * `/api/agent/` authenticates every request itself with an Entra bearer token (`src/agent-auth/`); a redirect to a
- * sign-in page is not an answer an agent can act on.
+ * sign-in page is not an answer an agent can act on. `/api/virtual/` (a virtual agent's pod, with its launch token) and
+ * `/api/orchestrator/` (the orchestrator's application token) authenticate the same way.
  *
  * `/api/ui/` is called by `fetch` and `EventSource`, which follow a redirect to a page they cannot read and so
  * cannot tell a person their session has ended. Every handler there answers 401 itself without one (`uiViewer`).
  */
-const EXEMPT_PREFIXES = ["/health/", "/auth/", "/_next/", "/api/agent/", "/api/ui/"];
+const EXEMPT_PREFIXES = ["/health/", "/auth/", "/_next/", "/api/agent/", "/api/virtual/", "/api/orchestrator/", "/api/ui/"];
 
 export function exempt(pathname: string): boolean {
   return EXEMPT_PATHS.includes(pathname) || EXEMPT_PREFIXES.some((prefix) => pathname.startsWith(prefix));

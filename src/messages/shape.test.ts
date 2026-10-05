@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type MessageRow, toApiMessage } from "./shape.ts";
+import { isFromOwner, type MessageRow, toApiMessage, toStreamedDirect } from "./shape.ts";
 
 const ROW: MessageRow = {
   id: 9_007_199_254_740_993n,
@@ -47,5 +47,27 @@ describe("toApiMessage", () => {
 
   it("should render created_at as ISO-8601 in UTC", () => {
     expect(toApiMessage(ROW).created_at).toBe("2026-09-29T09:00:00.000Z");
+  });
+});
+
+describe("isFromOwner", () => {
+  it("should be true when a person wrote it from the UI to an agent they own", () => {
+    expect(isFromOwner({ authorAgent: null, authorOid: "oid-owner", targetAgent: { ownerOid: "oid-owner" } })).toBe(true);
+  });
+
+  it.each([
+    ["an agent wrote it, even one of the owner's", { authorAgent: { id: "agent-1" }, authorOid: "oid-owner", targetAgent: { ownerOid: "oid-owner" } }],
+    ["a grantee wrote it", { authorAgent: null, authorOid: "oid-grantee", targetAgent: { ownerOid: "oid-owner" } }],
+    ["it has no target agent", { authorAgent: null, authorOid: "oid-owner", targetAgent: null }]
+  ])("should be false when %s", (_label, row) => {
+    expect(isFromOwner(row)).toBe(false);
+  });
+});
+
+describe("toStreamedDirect", () => {
+  it("should carry the contract's message and whether its owner wrote it when a direct is streamed", () => {
+    const row = { ...ROW, kind: "direct" as const, authorAgent: null, authorOid: "oid-owner", targetAgent: { ownerOid: "oid-owner" } };
+
+    expect(toStreamedDirect(row)).toEqual({ message: toApiMessage(row), from_owner: true });
   });
 });

@@ -69,3 +69,9 @@ export async function revokeGrant(prisma: PrismaClient, actorOid: string, grante
     }
   });
 }
+
+/** Every agent a virtual agent's sessions registered: what its launch token may act for and read as. */
+export async function virtualAgentSessions(db: Database, virtualAgentId: string): Promise<string[]> {
+  const rows = await db.agent.findMany({ where: { virtualAgentId }, select: { id: true } });
+  return rows.map((row) => row.id);
+}

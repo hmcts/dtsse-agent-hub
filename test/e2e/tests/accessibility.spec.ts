@@ -22,6 +22,24 @@ test.describe("accessibility @nightly", () => {
     });
   }
 
+  test("should raise no WCAG A or AA violations on the virtual agents pages @nightly @a11y", async ({ page }) => {
+    const response = await page.goto("/virtual");
+    test.skip(response?.status() === 404, "virtual agents are off on this deployment");
+    await audit(page, "/virtual");
+
+    const name = unique("a11y").toLowerCase();
+    await page.getByLabel("Name").fill(name);
+    await page.getByRole("button", { name: "Create" }).click();
+    await page.getByRole("link", { name }).click();
+    await page.waitForURL(/\/virtual\/[0-9a-f-]{36}$/);
+    const path = new URL(page.url()).pathname;
+    await audit(page, path);
+
+    await page.getByRole("button", { name: "Delete" }).click();
+    await page.getByRole("button", { name: `Delete ${name}` }).click();
+    await expect(page.getByText("This virtual agent and its disk are being deleted.")).toBeVisible();
+  });
+
   test("should raise no WCAG A or AA violations on the not-found page @nightly @a11y", async ({ page }) => {
     await audit(page, "/agents/00000000-0000-0000-0000-000000000000", 404);
   });

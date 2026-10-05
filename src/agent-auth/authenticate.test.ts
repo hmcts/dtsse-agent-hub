@@ -78,3 +78,67 @@ describe("parseDevUser", () => {
     expect(parseDevUser(header)).toBeUndefined();
   });
 });
+
+describe("authenticateAgent with a launch token", () => {
+  const TOKEN = `ahv_${"A".repeat(43)}`;
+  const OWNER = { oid: "dev-alice", tid: "dev", name: "Alice", virtualAgentId: "va-1" };
+
+  it("should act as the virtual agent's owner when virtual agents are on and the token resolves", async () => {
+    const resolve = async (token: string) => (token === TOKEN ? OWNER : undefined);
+
+    expect(
+      await authenticateAgent(
+        new Headers({ authorization: `Bearer ${TOKEN}` }),
+        { VIRTUAL_AGENTS_ENABLED: "true", ENTRA_TENANT_ID: TENANT },
+        undefined,
+        resolve
+      )
+    ).toEqual(OWNER);
+  });
+
+  it("should accept a launch token when agent authentication is disabled too, since a pod has no other identity", async () => {
+    expect(
+      await authenticateAgent(
+        new Headers({ authorization: `Bearer ${TOKEN}` }),
+        { VIRTUAL_AGENTS_ENABLED: "true", AGENT_AUTH_DISABLED: "true" },
+        undefined,
+        async () => OWNER
+      )
+    ).toEqual(OWNER);
+  });
+
+  it("should refuse a launch token when it resolves to nobody", async () => {
+    await expect(
+      authenticateAgent(
+        new Headers({ authorization: `Bearer ${TOKEN}` }),
+        { VIRTUAL_AGENTS_ENABLED: "true", ENTRA_TENANT_ID: TENANT },
+        undefined,
+        async () => undefined
+      )
+    ).rejects.toThrow(/launch token was refused/);
+  });
+
+  it("should not look a launch token up when virtual agents are off", async () => {
+    let looked = false;
+    const resolve = async () => {
+      looked = true;
+      return OWNER;
+    };
+
+    await expect(authenticateAgent(new Headers({ authorization: `Bearer ${TOKEN}` }), { ENTRA_TENANT_ID: TENANT }, undefined, resolve)).rejects.toThrow(
+      AgentAuthFailed
+    );
+    expect(looked).toBe(false);
+  });
+
+  it("should still refuse a production build with agent authentication disabled when a launch token is sent", async () => {
+    await expect(
+      authenticateAgent(
+        new Headers({ authorization: `Bearer ${TOKEN}` }),
+        { VIRTUAL_AGENTS_ENABLED: "true", AGENT_AUTH_DISABLED: "true", NODE_ENV: "production" },
+        undefined,
+        async () => OWNER
+      )
+    ).rejects.toThrow(AgentAuthConfigurationError);
+  });
+});

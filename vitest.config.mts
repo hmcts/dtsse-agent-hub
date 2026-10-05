@@ -50,7 +50,12 @@ export default defineConfig({
         "src/transcripts/store.ts",
         "src/transcripts/sweep.ts",
         "src/transcripts/views.ts",
-        "src/credentials/store.ts"
+        "src/credentials/store.ts",
+        "src/virtual-agents/store.ts",
+        "src/virtual-agents/logins.ts",
+        "src/virtual-agents/sweep.ts",
+        "src/virtual-agents/views.ts",
+        "src/virtual-agents/stop.ts"
       ],
       reporter: ["lcov", "text"],
       reportsDirectory: "coverage",

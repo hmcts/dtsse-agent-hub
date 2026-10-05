@@ -3,7 +3,7 @@ import type { ChannelSummary } from "@/channels/store";
 import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
 import { NavLink } from "@/components/NavLink";
 import { AgentRoster } from "@/components/sidebar/AgentRoster";
-import { CaretIcon, HashIcon, HomeIcon, KeyIcon, LockIcon, PlusIcon, StackIcon } from "@/components/sidebar/icons";
+import { CaretIcon, HashIcon, HomeIcon, KeyIcon, LockIcon, PlusIcon, ServerIcon, StackIcon } from "@/components/sidebar/icons";
 import { TopicSearchShortcut } from "@/components/sidebar/TopicSearchShortcut";
 import type { TopicSummary } from "@/topics/store";
 import type { Identity } from "@/users/identity";
@@ -35,7 +35,17 @@ function Hint({ children }: { children: React.ReactNode }) {
  * The left rail, as in Slack: the workspace and who is signed in, saved channels, the busiest topics this week, and
  * the viewer's agents pinned to the bottom.
  */
-export function Sidebar({ data, viewer, signInDisabled }: { data: SidebarData; viewer: Identity; signInDisabled: boolean }) {
+export function Sidebar({
+  data,
+  viewer,
+  signInDisabled,
+  virtualAgents = false
+}: {
+  data: SidebarData;
+  viewer: Identity;
+  signInDisabled: boolean;
+  virtualAgents?: boolean;
+}) {
   const channels = [...data.channels.mine, ...data.channels.shared];
   return (
     <aside aria-label="Sidebar" className="flex w-64 shrink-0 flex-col border-r border-hub-line bg-hub-rail">
@@ -63,6 +73,12 @@ export function Sidebar({ data, viewer, signInDisabled }: { data: SidebarData; v
             <KeyIcon />
             Access
           </NavLink>
+          {virtualAgents ? (
+            <NavLink href="/virtual">
+              <ServerIcon />
+              Virtual agents
+            </NavLink>
+          ) : null}
           <NavLink href="/settings/credentials">
             <LockIcon />
             Credentials

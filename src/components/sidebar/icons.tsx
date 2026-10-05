@@ -80,3 +80,13 @@ export function SendIcon() {
     </svg>
   );
 }
+
+export function ServerIcon() {
+  return (
+    <Icon>
+      <rect x="3.5" y="4" width="13" height="5" rx="1" />
+      <rect x="3.5" y="11" width="13" height="5" rx="1" />
+      <path d="M6.5 6.5h.01M6.5 13.5h.01" />
+    </Icon>
+  );
+}

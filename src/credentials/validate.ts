@@ -37,24 +37,63 @@ function accountUsername(accounts: unknown): string | null {
 }
 
 /**
- * An Azure CLI token cache as the pod sends it: the MSAL cache JSON, gzipped and base64-encoded. It has to decode,
- * gunzip and parse to an object with an `Account` section, or it is not something `az` can use.
+ * An Azure CLI token cache as the pod sends it, decoded: the MSAL cache JSON, gzipped and base64-encoded. `undefined`
+ * when it does not decode, gunzip and parse to a JSON object.
  */
-function checkAzureCache(value: string): CheckedCredential {
-  const refused: CheckedCredential = { ok: false, error: "that is not an Azure token cache: expected base64 of a gzipped MSAL cache" };
+export function decodeAzureCache(value: string): Record<string, unknown> | undefined {
   if (value.length % 4 !== 0 || !BASE64.test(value)) {
-    return refused;
+    return undefined;
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(gunzipSync(Buffer.from(value, "base64"), { maxOutputLength: MAX_AZURE_CACHE_BYTES }).toString("utf8"));
   } catch {
-    return refused;
+    return undefined;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) || !("Account" in parsed)) {
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+}
+
+/** It has to decode to an object with an `Account` section, or it is not something `az` can use. */
+function checkAzureCache(value: string): CheckedCredential {
+  const parsed = decodeAzureCache(value);
+  if (parsed === undefined) {
+    return { ok: false, error: "that is not an Azure token cache: expected base64 of a gzipped MSAL cache with an Account section" };
+  }
+  if (!("Account" in parsed)) {
     return { ok: false, error: "that Azure token cache has no Account section" };
   }
-  return { ok: true, value, accountLabel: accountUsername((parsed as { Account: unknown }).Account) };
+  return { ok: true, value, accountLabel: accountUsername(parsed.Account) };
+}
+
+export type AzureOwnership = { ok: true } | { ok: false; reason: "malformed" | "unconfigured" | "not-owner"; error: string };
+
+/**
+ * Whether an Azure token cache holds only the owner's own sign-in: at least one account, and every account's
+ * `home_account_id`, which MSAL writes as `<oid>.<tid>`, naming the owner's oid in this hub's tenant. A cache with
+ * anyone else's account in it would let a virtual agent act in Azure as that person.
+ */
+export function checkAzureCacheOwner(raw: unknown, ownerOid: string, tenantId: string | undefined): AzureOwnership {
+  const parsed = decodeAzureCache(typeof raw === "string" ? raw.trim() : "");
+  if (parsed === undefined || typeof parsed.Account !== "object" || parsed.Account === null) {
+    return { ok: false, reason: "malformed", error: "that is not an Azure token cache with an Account section" };
+  }
+  const tenant = tenantId?.trim().toLowerCase();
+  if (!tenant) {
+    return { ok: false, reason: "unconfigured", error: "ENTRA_TENANT_ID is not set, so an Azure token cache's account cannot be checked" };
+  }
+  const accounts = Object.values(parsed.Account);
+  if (accounts.length === 0) {
+    return { ok: false, reason: "not-owner", error: "that Azure token cache holds no account" };
+  }
+  const owner = ownerOid.toLowerCase();
+  for (const account of accounts) {
+    const home = (account as { home_account_id?: unknown } | null)?.home_account_id;
+    const [oid, tid, ...rest] = typeof home === "string" ? home.toLowerCase().split(".") : [];
+    if (oid !== owner || tid !== tenant || rest.length > 0) {
+      return { ok: false, reason: "not-owner", error: "that Azure token cache is signed in as someone other than you, or in another tenant" };
+    }
+  }
+  return { ok: true };
 }
 
 /**

@@ -19,7 +19,9 @@ change it first when the contract changes.
 | Path | What it holds |
 | --- | --- |
 | `src/app/api/agent/**` | Agent API route handlers, each wrapped in `agentRoute` / `ownedAgentRoute` from `src/agent-api/route.ts` |
-| `src/agent-auth/` | Bearer validation against the Entra tenant JWKS, and the `AGENT_AUTH_DISABLED` + `X-Dev-User` development bypass |
+| `src/app/api/virtual/**`, `src/app/api/orchestrator/**` | A virtual agent's pod routes, wrapped in `virtualRoute` (its own launch token only), and the orchestrator's, wrapped in `orchestratorRoute`. Both answer 404 unless `VIRTUAL_AGENTS_ENABLED=true` |
+| `src/agent-auth/` | Bearer validation against the Entra tenant JWKS, launch-token callers, and the `AGENT_AUTH_DISABLED` + `X-Dev-User` development bypass |
+| `src/agent-auth/orchestrator.ts` | The orchestrator's app-only token: no `scp`, the `VirtualAgents.Orchestrate` role, an `oid` in `ORCHESTRATOR_OIDS`; and its `X-Dev-Orchestrator` development bypass |
 | `src/auth/`, `src/app/auth/` | Web SSO: openid-client code flow with PKCE, sealed `ah_session` cookie keyed by `oid`/`tid` |
 | `src/viewer/` | Who is using the web UI: the session's person, or the development identity when sign-in is disabled, and their model route (the AI gateway for holders of the `AIGateway.User` app role, otherwise their own Claude licence) |
 | `src/app/_actions/`, `src/web/` | Server actions (each re-reads the viewer), the `server-only` read seam `web/data.ts`, action results |
@@ -28,7 +30,8 @@ change it first when the contract changes.
 | `src/access/` | Who may see and message which agent. `rules.ts` is pure and is the single source of the rules; `load.ts` loads the rows they apply to |
 | `src/agents/`, `src/topics/`, `src/messages/`, `src/users/` | Feature stores |
 | `src/transcripts/` | Agents' uploaded session transcripts: the upload schema and limits, the store, the retention sweep, and the conversation view that merges a transcript with the agent's direct-message thread |
-| `src/credentials/` | Each person's virtual-agent credentials (GitHub token, Azure token cache, Claude token): the value checks, the Key Vault store, the local encrypted store for development and tests, which of the two a process uses, and the metadata rows. Write-only for people: no route or action returns a value |
+| `src/credentials/` | Each person's virtual-agent credentials (GitHub token, Azure token cache, Claude token): the value checks, the Key Vault store, the local encrypted store for development and tests, which of the two a process uses, and the metadata rows. Write-only for people: no route or action returns a value to a person; only the owner's own virtual agent reads one, through `/api/virtual/{id}/credentials/{kind}` |
+| `src/virtual-agents/` | Virtual agents: the feature flag and sweep settings, the lifecycle transition table, the per-person limits and name rule, launch tokens (minted, hashed, compared), the store (create, desired state, claims, observations, pod reports), sign-ins relayed to the owner and their sealed pasted codes, the sweep's clock rules and the sweep itself, and the owner's views |
 | `src/realtime/` | `hub_events` NOTIFY payloads, the per-pod LISTEN connection and in-process hub, SSE framing, the agent stream |
 | `src/store/` | Prisma singleton, `DATABASE_URL` assembly, the boot-time migrator |
 | `prisma/migrations/` | Hand-written SQL, applied by `src/store/migrate.ts` before the server starts. `schema.prisma` mirrors it for the client |

@@ -64,7 +64,9 @@ describe("migrate", () => {
       "subscription",
       "topic",
       "transcript_entry",
-      "user"
+      "user",
+      "virtual_agent",
+      "virtual_agent_login"
     ]);
   });
 

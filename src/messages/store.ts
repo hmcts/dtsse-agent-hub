@@ -1,6 +1,6 @@
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { type ApiMessage, toApiMessage } from "./shape.ts";
+import { type ApiMessage, type StreamedDirect, toApiMessage, toStreamedDirect } from "./shape.ts";
 
 export const MESSAGE_SELECT = {
   id: true,
@@ -113,23 +113,34 @@ export async function createDirect(prisma: PrismaClient, direct: NewDirect): Pro
   return (await loadMessage(prisma, id))!;
 }
 
+const STREAMED_SELECT = { ...MESSAGE_SELECT, authorOid: true, targetAgent: { select: { ownerOid: true } } } as const;
+
+/** The direct messages with these ids as an agent's stream sends them, oldest first. */
+async function loadStreamed(db: Database, ids: readonly bigint[]): Promise<StreamedDirect[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+  const rows = await db.message.findMany({ where: { id: { in: [...ids] } }, select: STREAMED_SELECT, orderBy: { id: "asc" } });
+  return rows.map(toStreamedDirect);
+}
+
 /** Every direct message still queued for the agent, oldest first. */
-export async function queuedDeliveries(db: Database, agentId: string): Promise<ApiMessage[]> {
+export async function queuedDeliveries(db: Database, agentId: string): Promise<StreamedDirect[]> {
   const rows = await db.delivery.findMany({
     where: { agentId, state: "queued" },
     select: { messageId: true },
     orderBy: { messageId: "asc" }
   });
-  return await loadMessages(
+  return await loadStreamed(
     db,
     rows.map((row) => row.messageId)
   );
 }
 
 /** The message, if it is still queued for the agent. */
-export async function queuedDelivery(db: Database, agentId: string, messageId: bigint): Promise<ApiMessage | undefined> {
+export async function queuedDelivery(db: Database, agentId: string, messageId: bigint): Promise<StreamedDirect | undefined> {
   const delivery = await db.delivery.findUnique({ where: { messageId_agentId: { messageId, agentId } }, select: { state: true } });
-  return delivery?.state === "queued" ? await loadMessage(db, messageId) : undefined;
+  return delivery?.state === "queued" ? (await loadStreamed(db, [messageId]))[0] : undefined;
 }
 
 /**

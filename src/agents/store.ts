@@ -1,8 +1,8 @@
 import { agentsMessageableBy } from "../access/load.ts";
+import type { Caller } from "../agent-auth/authenticate.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import type { Identity } from "../users/identity.ts";
 import { upsertUser } from "../users/store.ts";
 
 export interface Registration {
@@ -24,27 +24,38 @@ export class SessionOwnedElsewhere extends Error {}
  * the first feed read.
  *
  * A session id already registered by someone else is refused rather than taken over, which is what the `WHERE` on
- * the conflict arm does: it returns no row.
+ * the conflict arm does: it returns no row. The same goes for a session id registered by another virtual agent, or
+ * by none when a launch token is registering it, so a launch token never adopts one of its owner's other agents.
+ *
+ * A virtual agent's session (`owner.virtualAgentId` set) is recorded as that virtual agent's current agent, which a
+ * re-registration after `/clear` moves to the new session. Its owner's `user` row is not rewritten.
  */
-export async function registerAgent(prisma: PrismaClient, owner: Identity, registration: Registration): Promise<{ id: string; name: string }> {
+export async function registerAgent(prisma: PrismaClient, owner: Caller, registration: Registration): Promise<{ id: string; name: string }> {
+  const virtualAgentId = owner.virtualAgentId ?? null;
   return await prisma.$transaction(async (tx) => {
-    await upsertUser(tx, owner);
+    if (virtualAgentId === null) {
+      await upsertUser(tx, owner);
+    }
     const [agent] = await tx.$queryRaw<{ id: string; name: string }[]>`
-      INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor)
+      INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id)
       VALUES (
         ${owner.oid}, ${registration.sessionId}, ${registration.name}, ${registration.cwd}, ${registration.repo},
-        ${registration.branch}, ${registration.host}, 'idle', now(), (SELECT COALESCE(max(id), 0) FROM message)
+        ${registration.branch}, ${registration.host}, 'idle', now(), (SELECT COALESCE(max(id), 0) FROM message), ${virtualAgentId}::uuid
       )
       ON CONFLICT (session_id) DO UPDATE
         SET name = EXCLUDED.name, cwd = EXCLUDED.cwd, repo = EXCLUDED.repo, branch = EXCLUDED.branch, host = EXCLUDED.host,
             status = 'idle', last_heartbeat_at = now(), ended_at = NULL
-        WHERE agent.owner_oid = EXCLUDED.owner_oid
+        WHERE agent.owner_oid = EXCLUDED.owner_oid AND agent.virtual_agent_id IS NOT DISTINCT FROM EXCLUDED.virtual_agent_id
       RETURNING id::text AS id, name
     `;
     if (agent === undefined) {
       throw new SessionOwnedElsewhere("that session id is registered to someone else");
     }
     await notify(tx, { type: "agent_status", agent_id: agent.id, owner_oid: owner.oid, status: "idle" });
+    if (virtualAgentId !== null) {
+      await tx.virtualAgent.update({ where: { id: virtualAgentId }, data: { agentId: agent.id, lastActiveAt: new Date(), updatedAt: new Date() } });
+      await notify(tx, { type: "virtual_agent", virtual_agent_id: virtualAgentId, owner_oid: owner.oid });
+    }
     return agent;
   });
 }
@@ -54,10 +65,12 @@ export interface AgentRow {
   ownerOid: string;
   name: string;
   status: AgentStatus;
+  /** The virtual agent whose session registered it, if any. */
+  virtualAgentId: string | null;
 }
 
 export async function findAgent(db: Database, id: string): Promise<AgentRow | undefined> {
-  const row = await db.agent.findUnique({ where: { id }, select: { id: true, ownerOid: true, name: true, status: true } });
+  const row = await db.agent.findUnique({ where: { id }, select: { id: true, ownerOid: true, name: true, status: true, virtualAgentId: true } });
   return row ?? undefined;
 }
 
