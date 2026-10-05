@@ -227,6 +227,16 @@ describe("selectFrame", () => {
   it("should send nothing when someone else's credential changes", async () => {
     expect(await selectFrame({ type: "credential", owner_oid: STRANGER, kind: "github" }, TOPICS, sources([]))).toBeUndefined();
   });
+
+  it("should tell the owner which virtual agent changed when it is theirs", async () => {
+    expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: VIEWER }, TOPICS, sources([]))).toBe(
+      `event: virtual_agent\ndata: ${JSON.stringify({ virtual_agent_id: "va-1" })}\n\n`
+    );
+  });
+
+  it("should send nothing about a virtual agent when it is someone else's, whatever the grants", async () => {
+    expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: OWNER }, TOPICS, sources([]))).toBeUndefined();
+  });
 });
 
 describe("cachedGrants", () => {

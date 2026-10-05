@@ -28,6 +28,12 @@ describe("exempt", () => {
     expect(exempt("/api/agent/0f8a/stream")).toBe(true);
   });
 
+  it("should leave the virtual-agent and orchestrator APIs to their own bearer authentication", () => {
+    expect(exempt("/api/virtual/0f8a/status")).toBe(true);
+    expect(exempt("/api/orchestrator/claim")).toBe(true);
+    expect(exempt("/api/virtualx")).toBe(false);
+  });
+
   it.each([
     "/api/ui/stream",
     "/api/ui/feed",

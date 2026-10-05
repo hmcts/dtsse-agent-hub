@@ -23,6 +23,8 @@ export type HubEvent =
   | { type: "transcript"; agent_id: string; owner_oid: string; last_id: string }
   /** `owner_oid`'s stored credential of `kind` was saved or deleted. Never carries the value. */
   | { type: "credential"; owner_oid: string; kind: string }
+  /** `owner_oid`'s virtual agent changed: what they asked for, its status, its logins or its linked agent. */
+  | { type: "virtual_agent"; virtual_agent_id: string; owner_oid: string }
   /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
@@ -84,6 +86,10 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
         : undefined;
     case "credential":
       return isId(event.owner_oid) && isId(event.kind) ? { type: "credential", owner_oid: event.owner_oid, kind: event.kind } : undefined;
+    case "virtual_agent":
+      return isId(event.virtual_agent_id) && isId(event.owner_oid)
+        ? { type: "virtual_agent", virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
+        : undefined;
     default:
       return undefined;
   }

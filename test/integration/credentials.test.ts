@@ -28,9 +28,20 @@ const BOB = person("bob");
 const GITHUB = `ghp_${"A1b2".repeat(9)}`;
 const GITHUB_AGAIN = `ghp_${"Z9y8".repeat(9)}`;
 const CLAUDE = `sk-ant-oat01-${"Qw_-".repeat(12)}`;
-const AZURE = gzipSync(
-  Buffer.from(JSON.stringify({ Account: { a: { username: "alice@example.com" } }, RefreshToken: { r: { secret: "refresh-secret" } } }))
-).toString("base64");
+const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
+
+function azureCacheFor(oid: string): string {
+  return gzipSync(
+    Buffer.from(
+      JSON.stringify({
+        Account: { a: { username: "alice@example.com", home_account_id: `${oid}.${TENANT}` } },
+        RefreshToken: { r: { secret: "refresh-secret" } }
+      })
+    )
+  ).toString("base64");
+}
+
+const AZURE = azureCacheFor(ALICE.oid);
 
 function put(as: Person, kind: string, body: unknown): Promise<Response> {
   return call(PUT, { as, path: `/api/agent/credentials/${kind}`, method: "PUT", params: { kind }, body });
@@ -68,6 +79,7 @@ async function everythingStored(): Promise<string> {
 
 beforeEach(async () => {
   vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
+  vi.stubEnv("ENTRA_TENANT_ID", TENANT);
   await resetDatabase();
   revalidated.length = 0;
 });
@@ -110,6 +122,22 @@ describe("PUT /api/agent/credentials/{kind}", () => {
       accountLabel: "alice@example.com",
       updatedVia: "cli"
     });
+  });
+
+  it("should refuse an Azure token cache with 400 when it is signed in as someone else", async () => {
+    const response = await put(ALICE, "azure", { value: azureCacheFor(BOB.oid) });
+
+    expect(response.status).toBe(400);
+    expect((await jsonOf<{ error: string }>(response)).error).toContain("someone other than you");
+    expect(await prisma.credential.count()).toBe(0);
+    expect(await prisma.devCredentialValue.count()).toBe(0);
+  });
+
+  it("should answer 503 for an Azure token cache when the hub's tenant is not configured", async () => {
+    vi.stubEnv("ENTRA_TENANT_ID", "");
+
+    expect((await put(ALICE, "azure", { value: AZURE })).status).toBe(503);
+    expect(await prisma.credential.count()).toBe(0);
   });
 
   it("should replace the value and move the timestamp when the same kind is saved again", async () => {

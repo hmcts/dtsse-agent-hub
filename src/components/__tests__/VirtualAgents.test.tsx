@@ -1,0 +1,412 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Sidebar } from "@/components/Sidebar";
+import { LifecyclePanel } from "@/components/virtual-agents/LifecyclePanel";
+import { LoginCountdown, remaining } from "@/components/virtual-agents/LoginCountdown";
+import { idleFor, statusLabel, stopReasonLabel } from "@/components/virtual-agents/labels";
+import { checklistState, OnboardingChecklist } from "@/components/virtual-agents/OnboardingChecklist";
+import { VirtualAgentRefresh } from "@/components/virtual-agents/VirtualAgentRefresh";
+import { createLimit, DiskNotice, VirtualAgentsView } from "@/components/virtual-agents/VirtualAgentsView";
+import type { CredentialStatus } from "@/credentials/store";
+import type { LoginView } from "@/virtual-agents/logins";
+import type { VirtualAgentCard } from "@/virtual-agents/views";
+
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/" }));
+
+const hubHandlers = new Map<string, (data: unknown) => void>();
+vi.mock("@/components/live/HubStream", () => ({
+  useHubEvent: (type: string, handler: (data: unknown) => void) => hubHandlers.set(type, handler),
+  useEndSession: () => () => undefined
+}));
+
+afterEach(() => {
+  cleanup();
+  refresh.mockReset();
+  hubHandlers.clear();
+  vi.useRealTimers();
+});
+
+const NOW = Date.parse("2026-10-05T12:00:00.000Z");
+
+function card(overrides: Partial<VirtualAgentCard> = {}): VirtualAgentCard {
+  return {
+    id: "0f8a6a1e-0000-4000-8000-000000000001",
+    name: "pcs-api",
+    desired: "running",
+    status: "running",
+    statusDetail: null,
+    modelRoute: "gateway",
+    stopReason: null,
+    lastActivityAt: "2026-10-05T10:55:00.000Z",
+    stoppedAt: null,
+    diskExpiresAt: null,
+    diskDeletedAt: null,
+    agentId: null,
+    createdAt: "2026-10-05T09:00:00.000Z",
+    ...overrides
+  };
+}
+
+function ok() {
+  return vi.fn(async () => ({ ok: true as const }));
+}
+
+describe("labels", () => {
+  it("should say an agent is being deleted whatever its pod last reported", () => {
+    expect(statusLabel("running", "deleted")).toBe("Deleting");
+    expect(statusLabel("awaiting_login", "running")).toBe("Waiting for you to sign in");
+  });
+
+  it.each([
+    ["user", "You stopped it"],
+    ["idle", "Stopped after being idle"],
+    ["evening", "Stopped for the evening"],
+    ["quota", "quota"],
+    ["expired", "time ran out"],
+    ["failed", "it failed"]
+  ] as const)("should explain a stop when its reason is %s", (reason, text) => {
+    expect(stopReasonLabel(reason)).toContain(text);
+  });
+
+  it.each([
+    ["2026-10-05T11:48:00.000Z", "12 min"],
+    ["2026-10-05T09:00:00.000Z", "3 h"],
+    ["2026-10-05T08:55:00.000Z", "3 h 5 min"],
+    ["2026-10-02T12:00:00.000Z", "3 days"],
+    ["2026-10-05T12:05:00.000Z", "0 min"]
+  ])("should say how long since %s as %s", (since, text) => {
+    expect(idleFor(since, NOW)).toBe(text);
+  });
+});
+
+describe("VirtualAgentsView", () => {
+  it("should list the viewer's agents with their status, idle time and a link to each", () => {
+    render(<VirtualAgentsView agents={[card()]} route="gateway" create={ok()} now={NOW} />);
+
+    const list = screen.getByRole("list", { name: "Your virtual agents" });
+    expect(within(list).getByRole("link", { name: "pcs-api" }).getAttribute("href")).toBe("/virtual/0f8a6a1e-0000-4000-8000-000000000001");
+    expect(list.textContent).toContain("Running");
+    expect(list.textContent).toContain("idle for 1 h 5 min");
+  });
+
+  it("should say why a stopped agent stopped and warn before its disk is deleted", () => {
+    render(
+      <VirtualAgentsView
+        agents={[
+          card({
+            desired: "stopped",
+            status: "stopped",
+            stopReason: "evening",
+            stoppedAt: "2026-10-04T18:00:00.000Z",
+            diskExpiresAt: "2026-10-07T12:00:00.000Z"
+          })
+        ]}
+        route="gateway"
+        create={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.getByText(/Stopped for the evening/)).toBeTruthy();
+    expect(screen.getByText(/Its disk will be deleted in 2 days/)).toBeTruthy();
+    expect(screen.queryByText(/idle for/)).toBeNull();
+  });
+
+  it("should warn that a virtual agent acts with the viewer's access and name the model route when it offers to create one", () => {
+    render(<VirtualAgentsView agents={[]} route="own-licence" create={ok()} now={NOW} />);
+
+    expect(screen.getByText("A virtual agent acts with your GitHub and Azure access.")).toBeTruthy();
+    expect(screen.getByText(/your own Claude licence/)).toBeTruthy();
+    expect(screen.getByText("You have no virtual agents.")).toBeTruthy();
+    expect(screen.getByRole("form", { name: "Create a virtual agent" })).toBeTruthy();
+  });
+
+  it("should send the name to the create action when the form is submitted", async () => {
+    const create = vi.fn(async () => ({ ok: true as const, confirmation: "pcs-api is starting" }));
+    render(<VirtualAgentsView agents={[]} route="gateway" create={create} now={NOW} />);
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "pcs-api" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Create a virtual agent" }));
+    });
+
+    expect((create.mock.calls[0] as unknown as [FormData])[0].get("name")).toBe("pcs-api");
+    expect(screen.getByRole("status").textContent).toBe("pcs-api is starting");
+  });
+
+  it("should offer no create form and say why when the viewer is at a limit", () => {
+    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b" })]} route="gateway" create={ok()} now={NOW} />);
+
+    expect(screen.queryByRole("form", { name: "Create a virtual agent" })).toBeNull();
+    expect(screen.getByText(/2 virtual agents running/)).toBeTruthy();
+  });
+});
+
+describe("createLimit", () => {
+  it("should refuse at the total limit, not counting agents being deleted", () => {
+    const stopped = card({ desired: "stopped" });
+    expect(createLimit([stopped, stopped, stopped])).toContain("Delete one");
+    expect(createLimit([stopped, stopped, card({ desired: "deleted" })])).toBeUndefined();
+  });
+});
+
+describe("DiskNotice", () => {
+  it("should say the disk has gone when it was deleted", () => {
+    render(<DiskNotice agent={{ diskExpiresAt: "2026-10-01T00:00:00.000Z", diskDeletedAt: "2026-10-01T00:00:00.000Z" }} now={NOW} />);
+
+    expect(screen.getByText(/disk has been deleted/)).toBeTruthy();
+  });
+
+  it("should say today when the expiry has come", () => {
+    render(<DiskNotice agent={{ diskExpiresAt: "2026-10-05T11:00:00.000Z", diskDeletedAt: null }} now={NOW} />);
+
+    expect(screen.getByText(/deleted today/)).toBeTruthy();
+  });
+
+  it("should show nothing when the expiry is far off", () => {
+    const { container } = render(<DiskNotice agent={{ diskExpiresAt: "2026-10-19T12:00:00.000Z", diskDeletedAt: null }} now={NOW} />);
+
+    expect(container.textContent).toBe("");
+  });
+
+  it("should say one day in the singular", () => {
+    render(<DiskNotice agent={{ diskExpiresAt: "2026-10-06T11:00:00.000Z", diskDeletedAt: null }} now={NOW} />);
+
+    expect(screen.getByText(/in 1 day /)).toBeTruthy();
+  });
+});
+
+describe("LifecyclePanel", () => {
+  function actions() {
+    return { start: ok(), stop: ok(), remove: ok() };
+  }
+
+  it("should offer to stop a running agent and show its detail", () => {
+    render(<LifecyclePanel agent={card({ statusDetail: "cloning hmcts/pcs-api" })} actions={actions()} />);
+
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+    expect(screen.getByText("cloning hmcts/pcs-api")).toBeTruthy();
+  });
+
+  it("should offer to start a stopped agent and say why it stopped", async () => {
+    const given = actions();
+    render(<LifecyclePanel agent={card({ desired: "stopped", status: "stopped", stopReason: "idle" })} actions={given} />);
+
+    expect(screen.getByText("Stopped after being idle")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    });
+    expect((given.start.mock.calls[0] as unknown as [FormData])[0].get("id")).toBe(card().id);
+  });
+
+  it("should ask again before deleting, and delete only once confirmed", async () => {
+    const given = actions();
+    render(<LifecyclePanel agent={card()} actions={given} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirm = screen.getByRole("group", { name: "Confirm deleting pcs-api" });
+    expect(confirm.textContent).toContain("Anything not pushed is lost");
+    expect(given.remove).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole("button", { name: "Delete pcs-api" }));
+    });
+    expect((given.remove.mock.calls[0] as unknown as [FormData])[0].get("id")).toBe(card().id);
+  });
+
+  it("should go back without deleting when the confirmation is cancelled", () => {
+    const given = actions();
+    render(<LifecyclePanel agent={card()} actions={given} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("group")).toBeNull();
+    expect(given.remove).not.toHaveBeenCalled();
+  });
+
+  it("should offer nothing when the agent is being deleted", () => {
+    render(<LifecyclePanel agent={card({ desired: "deleted", status: "stopping" })} actions={actions()} />);
+
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText(/being deleted/)).toBeTruthy();
+  });
+});
+
+function login(overrides: Partial<LoginView> = {}): LoginView {
+  return {
+    kind: "github",
+    prompt: "device_code",
+    userCode: "ABCD-1234",
+    verificationUri: "https://github.com/login/device",
+    expiresAt: "2026-10-05T12:10:00.000Z",
+    state: "pending",
+    codeWaiting: false,
+    ...overrides
+  };
+}
+
+function stored(kind: CredentialStatus["kind"], accountLabel: string | null = null): CredentialStatus {
+  return { kind, stored: true, accountLabel, updatedAt: "2026-10-05T11:00:00.000Z", updatedVia: "pod" };
+}
+
+describe("checklistState", () => {
+  it("should put a pending login first, even over a stored credential", () => {
+    expect(checklistState(true, login(), NOW)).toBe("login");
+  });
+
+  it.each([
+    ["an expired login", login({ expiresAt: "2026-10-05T11:59:59.000Z" })],
+    ["a completed login", login({ state: "completed" })],
+    ["no login", undefined]
+  ])("should fall back to whether it is stored when there is %s", (_label, given) => {
+    expect(checklistState(true, given, NOW)).toBe("stored");
+    expect(checklistState(false, given, NOW)).toBe("waiting");
+  });
+});
+
+describe("OnboardingChecklist", () => {
+  it("should show a card for each credential needed, with stored ones ticked", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        needed={["github", "azure"]}
+        statuses={[stored("azure", "alice@justice.gov.uk")]}
+        logins={[]}
+        paste={ok()}
+        now={NOW}
+      />
+    );
+
+    const items = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem");
+    expect(items.map((item) => item.querySelector("h3")?.textContent)).toEqual(["GitHub", "Azure"]);
+    expect(items[0]!.textContent).toContain("Waiting for your virtual agent to ask");
+    expect(items[1]!.textContent).toContain("✓ Stored");
+    expect(items[1]!.textContent).toContain("for alice@justice.gov.uk");
+    expect(screen.getByText("1 of 2 stored")).toBeTruthy();
+  });
+
+  it("should show a device code, its link and how long it lasts when a device-code login is pending", () => {
+    render(<OnboardingChecklist virtualAgentId="va-1" needed={["github"]} statuses={[]} logins={[login()]} paste={ok()} now={NOW} />);
+
+    const link = screen.getByRole("link", { name: "https://github.com/login/device" });
+    expect(link.getAttribute("rel")).toContain("noopener");
+    expect(screen.getByText("ABCD-1234").tagName).toBe("CODE");
+    expect(screen.getByText("GitHub device code:")).toBeTruthy();
+  });
+
+  it("should offer a box to paste a code back to the agent when a paste-code login is pending", async () => {
+    const paste = vi.fn(async () => ({ ok: true as const, confirmation: "Sent to your virtual agent" }));
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        needed={["github", "azure", "claude"]}
+        statuses={[]}
+        logins={[login({ kind: "claude", prompt: "paste_code", userCode: null, verificationUri: "https://claude.ai/oauth/authorize?x=1" })]}
+        paste={paste}
+        now={NOW}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "the Claude sign-in page" }).getAttribute("href")).toBe("https://claude.ai/oauth/authorize?x=1");
+    const input = screen.getByLabelText("Claude code");
+    expect(input).toHaveProperty("type", "password");
+    fireEvent.change(input, { target: { value: "pasted#code" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Paste the Claude code" }));
+    });
+
+    const sent = (paste.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("kind"), sent.get("code")]).toEqual(["va-1", "claude", "pasted#code"]);
+  });
+
+  it("should say a pasted code is waiting rather than ask again when one has been sent", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        needed={["claude"]}
+        statuses={[]}
+        logins={[login({ kind: "claude", prompt: "paste_code", codeWaiting: true })]}
+        paste={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.queryByRole("form")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("waiting for your virtual agent");
+  });
+
+  it("should say the last sign-in failed when it did", () => {
+    render(
+      <OnboardingChecklist virtualAgentId="va-1" needed={["azure"]} statuses={[]} logins={[login({ kind: "azure", state: "failed" })]} paste={ok()} now={NOW} />
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain("Azure sign-in failed");
+  });
+
+  it("should say why credentials cannot be stored when the deployment has nowhere to keep them", () => {
+    render(<OnboardingChecklist virtualAgentId="va-1" needed={["github"]} statuses={[]} logins={[]} paste={ok()} now={NOW} unavailable="no vault here" />);
+
+    expect(screen.getByText("no vault here")).toBeTruthy();
+  });
+});
+
+describe("LoginCountdown", () => {
+  it("should round up to the second and never go below zero when it counts down", () => {
+    expect(remaining("2026-10-05T12:01:30.000Z", NOW)).toBe("1:30");
+    expect(remaining("2026-10-05T12:00:00.500Z", NOW)).toBe("0:01");
+    expect(remaining("2026-10-05T11:00:00.000Z", NOW)).toBe("0:00");
+  });
+
+  it("should tick once mounted and say when the code has expired", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    render(<LoginCountdown expiresAt="2026-10-05T12:00:02.000Z" />);
+
+    expect(screen.getByText("for 0:02")).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(screen.getByText("expired")).toBeTruthy();
+  });
+});
+
+describe("VirtualAgentRefresh", () => {
+  it("should re-read the page when the virtual agent it shows changes, and not for another", () => {
+    render(<VirtualAgentRefresh virtualAgentId="va-1" />);
+
+    hubHandlers.get("virtual_agent")?.({ virtual_agent_id: "va-2" });
+    expect(refresh).not.toHaveBeenCalled();
+    hubHandlers.get("virtual_agent")?.({ virtual_agent_id: "va-1" });
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("should re-read the list for any of the viewer's virtual agents when it names none", () => {
+    render(<VirtualAgentRefresh />);
+
+    hubHandlers.get("virtual_agent")?.({ virtual_agent_id: "va-9" });
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Sidebar", () => {
+  const data = { mine: [], shared: [], channels: { mine: [], shared: [] }, topics: [] };
+  const viewer = { oid: "dev-alice", tid: "dev", name: "Alice" };
+
+  it("should link to the viewer's virtual agents when the feature is on", () => {
+    render(<Sidebar data={data} viewer={viewer} signInDisabled virtualAgents />);
+
+    expect(screen.getByRole("link", { name: "Virtual agents" }).getAttribute("href")).toBe("/virtual");
+  });
+
+  it("should not mention virtual agents when the feature is off", () => {
+    render(<Sidebar data={data} viewer={viewer} signInDisabled />);
+
+    expect(screen.queryByRole("link", { name: "Virtual agents" })).toBeNull();
+  });
+});

@@ -9,6 +9,8 @@
  *   owner.
  * - Only an owner changes their grants, and only to people the hub already knows.
  * - Only a person saves, replaces or deletes their own credentials. No grant extends to them.
+ * - Only a person manages their own virtual agents and sees their login codes. A virtual agent's launch token acts
+ *   as its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
  */
@@ -143,4 +145,53 @@ export function agentAccess(viewerOid: string, agent: AgentRef, grants: readonly
     return "owner";
   }
   return grantLevel(grants, agent.ownerOid, viewerOid) ?? "none";
+}
+
+export interface VirtualAgentRef {
+  id: string;
+  ownerOid: string;
+}
+
+/**
+ * Only its owner starts, stops or deletes a virtual agent, and only they see its device codes or paste a login code
+ * back to it. No grant extends to any of this: the agent acts with the owner's GitHub and Azure access, so a code it
+ * shows is a sign-in as the owner.
+ */
+export function canManageVirtualAgent(actorOid: string, virtualAgent: VirtualAgentRef): boolean {
+  return actorOid === virtualAgent.ownerOid;
+}
+
+/**
+ * A launch token acts as its owner, but only for the agents its own virtual agent's sessions registered: never for
+ * the owner's other agents, which run on their laptop with whatever else they have open.
+ */
+export function canLaunchTokenActForAgent(tokenVirtualAgentId: string, agent: { virtualAgentId: string | null }): boolean {
+  return agent.virtualAgentId === tokenVirtualAgentId;
+}
+
+/** `/api/virtual/{id}/…` is for that virtual agent's own pod, so only its own launch token. */
+export function canActAsVirtualAgent(tokenVirtualAgentId: string | undefined, virtualAgentId: string): boolean {
+  return tokenVirtualAgentId !== undefined && tokenVirtualAgentId === virtualAgentId;
+}
+
+/**
+ * `/api/agent/credentials/{kind}` is for a person at their own command line. A pod stores the credentials its logins
+ * produce through its virtual agent's routes instead, which are the only ones that can also read them.
+ */
+export function canUseCredentialRoutes(caller: { virtualAgentId?: string }): boolean {
+  return caller.virtualAgentId === undefined;
+}
+
+/**
+ * What a launch token may read through `GET /api/agent/messages/{id}`: what its own virtual agent's sessions could
+ * see as agents, never what its owner could. Posts, and directs to or from any of `sessionAgentIds`, which covers an
+ * agent's reply into its own UI thread (`targetAgent: null`, authored by the session). A direct between the owner and
+ * their other agents is not among them, and the route answers it as if it did not exist.
+ */
+export function canLaunchTokenReadMessage(sessionAgentIds: readonly string[], message: MessageRef): boolean {
+  if (message.kind === "post") {
+    return true;
+  }
+  const ours = (agent: AgentRef | null) => agent !== null && sessionAgentIds.includes(agent.id);
+  return ours(message.targetAgent) || ours(message.authorAgent);
 }

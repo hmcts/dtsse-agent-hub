@@ -20,6 +20,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   can still see that agent and read that message.
  * - `transcript`: the watched agent's transcript has new entries, up to `last_id`, when the viewer may still read
  *   it. Only the id is sent; the page reads the entries through `/api/ui/agents/{id}/transcript`.
+ * - `virtual_agent`: one of the viewer's own virtual agents changed. Only the id is sent, and only to its owner, since
+ *   the page it updates can show login codes; the page re-reads.
  * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, a grant the viewer holds changed
  *   and the agents they may see with it, or the viewer saved or deleted a credential, perhaps from the CLI; either
  *   way the page should re-read. Also sent once `LISTEN` becomes active
@@ -124,6 +126,10 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       return event.grantee_oid === sources.viewerOid ? RESYNC : undefined;
     case "credential":
       return event.owner_oid === sources.viewerOid ? RESYNC : undefined;
+    case "virtual_agent":
+      return event.owner_oid === sources.viewerOid
+        ? sseEvent({ event: "virtual_agent", data: JSON.stringify({ virtual_agent_id: event.virtual_agent_id }) })
+        : undefined;
     case "resync":
       return RESYNC;
   }

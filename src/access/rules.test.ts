@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   type AgentRef,
   agentAccess,
+  canActAsVirtualAgent,
   canAgentMessageAgent,
   canGrant,
+  canLaunchTokenActForAgent,
+  canLaunchTokenReadMessage,
   canManageCredential,
   canManageGrants,
+  canManageVirtualAgent,
   canPersonMessageAgent,
   canReadMessage,
+  canUseCredentialRoutes,
   canViewAgent,
   canViewTranscript,
   type Grant,
@@ -233,5 +238,91 @@ describe("canManageCredential", () => {
     [false, "stranger"]
   ])("should answer %s when the %s manages the owner's credentials", (expected, role) => {
     expect(canManageCredential(ROLES[role], OWNER)).toBe(expected);
+  });
+});
+
+describe("canManageVirtualAgent", () => {
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s manages the owner's virtual agent", (expected, role) => {
+    expect(canManageVirtualAgent(ROLES[role], { id: "va-1", ownerOid: OWNER })).toBe(expected);
+  });
+});
+
+describe("canLaunchTokenActForAgent", () => {
+  it("should allow a launch token to act when its own virtual agent registered the agent", () => {
+    expect(canLaunchTokenActForAgent("va-1", { virtualAgentId: "va-1" })).toBe(true);
+  });
+
+  it("should refuse a launch token when another virtual agent registered the agent", () => {
+    expect(canLaunchTokenActForAgent("va-1", { virtualAgentId: "va-2" })).toBe(false);
+  });
+
+  it("should refuse a launch token when no virtual agent registered the agent, though its owner is the same", () => {
+    expect(canLaunchTokenActForAgent("va-1", { virtualAgentId: null })).toBe(false);
+  });
+});
+
+describe("canActAsVirtualAgent", () => {
+  it("should allow a launch token when the routes are its own virtual agent's", () => {
+    expect(canActAsVirtualAgent("va-1", "va-1")).toBe(true);
+  });
+
+  it("should refuse a launch token when the routes are another virtual agent's", () => {
+    expect(canActAsVirtualAgent("va-1", "va-2")).toBe(false);
+  });
+
+  it("should refuse a caller when it has no launch token", () => {
+    expect(canActAsVirtualAgent(undefined, "va-1")).toBe(false);
+  });
+});
+
+describe("canUseCredentialRoutes", () => {
+  it("should allow a caller when it holds a person's own token", () => {
+    expect(canUseCredentialRoutes({})).toBe(true);
+  });
+
+  it("should refuse a caller when it holds a launch token", () => {
+    expect(canUseCredentialRoutes({ virtualAgentId: "va-1" })).toBe(false);
+  });
+});
+
+describe("canLaunchTokenReadMessage", () => {
+  const SESSIONS = ["va-session-1", "va-session-2"];
+  const session: AgentRef = { id: "va-session-2", ownerOid: OWNER };
+  const laptop: AgentRef = { id: "laptop", ownerOid: OWNER };
+  const elsewhere: AgentRef = agentOf(STRANGER);
+
+  function direct(authorAgent: AgentRef | null, targetAgent: AgentRef | null): MessageRef {
+    return { kind: "direct", authorOid: authorAgent?.ownerOid ?? OWNER, authorAgent, targetAgent, parentAuthorOid: null };
+  }
+
+  it("should allow a post when anyone may read it", () => {
+    expect(canLaunchTokenReadMessage([], { kind: "post", authorOid: STRANGER, authorAgent: elsewhere, targetAgent: null, parentAuthorOid: null })).toBe(true);
+  });
+
+  it.each([
+    ["sent to one of its sessions by a person", direct(null, session)],
+    ["sent to one of its sessions by another agent", direct(elsewhere, session)],
+    ["sent by one of its sessions to another agent", direct(session, elsewhere)],
+    ["a reply by one of its sessions into its own UI thread", direct(session, null)]
+  ])("should allow a direct when it is %s", (_label, message) => {
+    expect(canLaunchTokenReadMessage(SESSIONS, message)).toBe(true);
+  });
+
+  it.each([
+    ["sent by the owner to their other agent", direct(null, laptop)],
+    ["sent by the owner's other agent to someone else's", direct(laptop, elsewhere)],
+    ["a reply by the owner's other agent into its own UI thread", direct(laptop, null)],
+    ["sent to someone else's agent by a person", direct(null, elsewhere)]
+  ])("should refuse a direct when it is %s", (_label, message) => {
+    expect(canLaunchTokenReadMessage(SESSIONS, message)).toBe(false);
+  });
+
+  it("should refuse every direct when the virtual agent has no sessions yet", () => {
+    expect(canLaunchTokenReadMessage([], direct(null, session))).toBe(false);
   });
 });
