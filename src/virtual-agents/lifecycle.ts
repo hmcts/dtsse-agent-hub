@@ -78,7 +78,7 @@ export interface Observation {
 export type Outcome = { status: VirtualAgentStatus; detail?: string | null } | { remove: true } | { refused: string };
 
 /** Container and scheduling reasons that mean the pod will not come up by itself. */
-const FAILING_REASONS = new Set([
+export const FAILING_REASONS: ReadonlySet<string> = new Set([
   "CrashLoopBackOff",
   "ImagePullBackOff",
   "ErrImagePull",

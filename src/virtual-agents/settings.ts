@@ -59,3 +59,13 @@ export function orchestratorOids(env: Environment = process.env): string[] {
     .map((value) => value.trim())
     .filter((value) => value !== "");
 }
+
+/**
+ * The app role an orchestrator's token must carry, from `ORCHESTRATOR_ROLE`, or `null` when it is unset and no role
+ * is required: central-app-registration cannot assign an app role to a managed identity, so the deployed orchestrator
+ * is trusted by its `oid` alone.
+ */
+export function orchestratorRole(env: Environment = process.env): string | null {
+  const role = env.ORCHESTRATOR_ROLE?.trim();
+  return role ? role : null;
+}
