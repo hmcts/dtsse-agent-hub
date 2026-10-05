@@ -67,5 +67,5 @@ export function orchestratorOids(env: Environment = process.env): string[] {
  */
 export function orchestratorRole(env: Environment = process.env): string | null {
   const role = env.ORCHESTRATOR_ROLE?.trim();
-  return role ? role : null;
+  return role || null;
 }

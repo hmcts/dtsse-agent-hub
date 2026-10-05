@@ -1,26 +1,27 @@
 import { describe, expect, it } from "vitest";
 import type { ClaimedAgent } from "./hub.ts";
 import type { StatefulSet } from "./kube.ts";
-import { existingDisk, launchSecret, launchSecretName, podName, statefulSet, workPvcName } from "./manifests.ts";
+import { carriedOver, podName, statefulSet } from "./manifests.ts";
 import type { VirtualAgentSpec } from "./settings.ts";
 
 const ID = "0f8a6a1e-1234-4000-8000-000000000001";
+const TOKEN = "ahv_launch";
 
 const AGENT: ClaimedAgent = {
   id: ID,
   generation: 3,
   desired: "running",
   statefulset_name: "va-0f8a6a1e",
-  pvc_name: "va-0f8a6a1e",
+  pvc_name: "work-va-0f8a6a1e-0",
   delete_disk: false,
   model_route: "gateway",
   owner: { oid: "owner" }
 };
 
 const SPEC: VirtualAgentSpec = {
-  namespace: "virtual-agents",
+  namespace: "dtsse",
   image: `registry.example/agent@sha256:${"b".repeat(64)}`,
-  serviceAccount: "virtual-agent",
+  serviceAccount: "default",
   hubUrl: "https://agent-hub.aat.platform.hmcts.net",
   tenantId: "tenant",
   diskSize: "32Gi",
@@ -34,11 +35,7 @@ const LABELS = {
 };
 
 type PodSpec = {
-  serviceAccountName: string;
-  automountServiceAccountToken: boolean;
-  terminationGracePeriodSeconds: number;
-  securityContext: unknown;
-  containers: { env: { name: string; value?: string; valueFrom?: unknown }[]; [key: string]: unknown }[];
+  containers: { env: { name: string; value?: string }[]; [key: string]: unknown }[];
   volumes: unknown[];
   [key: string]: unknown;
 };
@@ -51,29 +48,21 @@ function claimTemplate(set: StatefulSet): { metadata: unknown; spec: Record<stri
   return (set.spec as unknown as { volumeClaimTemplates: { metadata: unknown; spec: Record<string, unknown> }[] }).volumeClaimTemplates[0]!;
 }
 
-describe("names", () => {
-  it("should name the Secret, the pod and the PVC after the StatefulSet when it is va-<id>", () => {
-    expect([launchSecretName("va-1"), podName("va-1"), workPvcName("va-1")]).toEqual(["va-1-launch", "va-1-0", "work-va-1-0"]);
-  });
-});
+function statefulSetWith(spec: unknown): StatefulSet {
+  return { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: "x" }, spec } as StatefulSet;
+}
 
-describe("launchSecret", () => {
-  it("should hold the launch token base64-encoded under token, labelled for the agent", () => {
-    expect(launchSecret({ ...AGENT, launch_token: "ahv_secret" }, "virtual-agents")).toEqual({
-      apiVersion: "v1",
-      kind: "Secret",
-      metadata: { name: "va-0f8a6a1e-launch", namespace: "virtual-agents", labels: LABELS },
-      type: "Opaque",
-      data: { token: Buffer.from("ahv_secret").toString("base64") }
-    });
+describe("podName", () => {
+  it("should name the one pod after the StatefulSet with ordinal 0", () => {
+    expect(podName("va-1")).toBe("va-1-0");
   });
 });
 
 describe("statefulSet", () => {
   it("should run one replica with the agent's labels and generation when it is meant to be running", () => {
-    const set = statefulSet(AGENT, SPEC);
+    const set = statefulSet(AGENT, SPEC, TOKEN);
 
-    expect(set.metadata).toEqual({ name: "va-0f8a6a1e", namespace: "virtual-agents", labels: LABELS });
+    expect(set.metadata).toEqual({ name: "va-0f8a6a1e", namespace: "dtsse", labels: LABELS });
     expect(set.spec).toMatchObject({
       replicas: 1,
       serviceName: "va-0f8a6a1e",
@@ -83,23 +72,27 @@ describe("statefulSet", () => {
   });
 
   it.each(["stopped", "deleted"] as const)("should run no replica when it is meant to be %s", (desired) => {
-    expect(statefulSet({ ...AGENT, desired }, SPEC).spec?.replicas).toBe(0);
+    expect(statefulSet({ ...AGENT, desired }, SPEC, TOKEN).spec?.replicas).toBe(0);
+  });
+
+  it("should delete the disk with the StatefulSet and keep it when it scales to zero", () => {
+    expect(statefulSet(AGENT, SPEC, TOKEN).spec?.persistentVolumeClaimRetentionPolicy).toEqual({ whenDeleted: "Delete", whenScaled: "Retain" });
   });
 
   it("should run the pod unprivileged, without a ServiceAccount token or workload identity", () => {
-    const spec = podSpec(statefulSet(AGENT, SPEC));
+    const spec = podSpec(statefulSet(AGENT, SPEC, TOKEN));
 
     expect(spec).toMatchObject({
-      serviceAccountName: "virtual-agent",
+      serviceAccountName: "default",
       automountServiceAccountToken: false,
       terminationGracePeriodSeconds: 60,
       securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true, seccompProfile: { type: "RuntimeDefault" } }
     });
-    expect(JSON.stringify(statefulSet(AGENT, SPEC))).not.toContain("azure.workload.identity");
+    expect(JSON.stringify(statefulSet(AGENT, SPEC, TOKEN))).not.toContain("azure.workload.identity");
   });
 
   it("should run the boot script in the image with the agent's sizes and mounts", () => {
-    const [container] = podSpec(statefulSet(AGENT, SPEC)).containers;
+    const [container] = podSpec(statefulSet(AGENT, SPEC, TOKEN)).containers;
 
     expect(container).toMatchObject({
       name: "agent",
@@ -117,14 +110,14 @@ describe("statefulSet", () => {
         { name: "gh", mountPath: "/home/hmcts/.config/gh" }
       ]
     });
-    expect(podSpec(statefulSet(AGENT, SPEC)).volumes).toEqual([
+    expect(podSpec(statefulSet(AGENT, SPEC, TOKEN)).volumes).toEqual([
       { name: "azure", emptyDir: { medium: "Memory", sizeLimit: "64Mi" } },
       { name: "gh", emptyDir: { medium: "Memory", sizeLimit: "64Mi" } }
     ]);
   });
 
-  it("should give the pod its hub, identity and model route, and the launch token from its Secret", () => {
-    const [container] = podSpec(statefulSet({ ...AGENT, model_route: "own_licence" }, SPEC)).containers;
+  it("should give the pod its hub, identity, model route and launch token as plain values", () => {
+    const [container] = podSpec(statefulSet({ ...AGENT, model_route: "own_licence" }, SPEC, TOKEN)).containers;
 
     expect(container!.env).toEqual([
       { name: "AGENT_HUB_URL", value: "https://agent-hub.aat.platform.hmcts.net" },
@@ -134,45 +127,63 @@ describe("statefulSet", () => {
       { name: "AZURE_TENANT_ID", value: "tenant" },
       { name: "DISABLE_AUTOUPDATER", value: "1" },
       { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
-      { name: "AGENT_HUB_LAUNCH_TOKEN", valueFrom: { secretKeyRef: { name: "va-0f8a6a1e-launch", key: "token" } } }
+      { name: "AGENT_HUB_LAUNCH_TOKEN", value: TOKEN }
     ]);
   });
 
   it("should claim a disk of the configured size on the cluster's default class when no class is set", () => {
-    expect(claimTemplate(statefulSet(AGENT, SPEC))).toEqual({
+    expect(claimTemplate(statefulSet(AGENT, SPEC, TOKEN))).toEqual({
       metadata: { name: "work", labels: LABELS },
       spec: { accessModes: ["ReadWriteOnce"], resources: { requests: { storage: "32Gi" } } }
     });
   });
 
   it("should claim the disk on the configured class when one is set", () => {
-    expect(claimTemplate(statefulSet(AGENT, { ...SPEC, storageClass: "managed-csi-premium" })).spec.storageClassName).toBe("managed-csi-premium");
+    expect(claimTemplate(statefulSet(AGENT, { ...SPEC, storageClass: "managed-csi-premium" }, TOKEN)).spec.storageClassName).toBe("managed-csi-premium");
   });
 
-  it("should keep the disk an existing StatefulSet was made with when one is passed", () => {
-    expect(claimTemplate(statefulSet(AGENT, SPEC, { size: "16Gi", storageClass: "old" })).spec).toEqual({
+  it("should keep the disk an existing StatefulSet was made with when one is carried over", () => {
+    expect(claimTemplate(statefulSet(AGENT, SPEC, TOKEN, { disk: { size: "16Gi", storageClass: "old" } })).spec).toEqual({
       accessModes: ["ReadWriteOnce"],
       resources: { requests: { storage: "16Gi" } },
       storageClassName: "old"
     });
   });
+
+  it("should use the configured disk when what is carried over has none", () => {
+    expect(claimTemplate(statefulSet(AGENT, SPEC, TOKEN, { launchToken: "other" })).spec).toMatchObject({ resources: { requests: { storage: "32Gi" } } });
+  });
 });
 
-describe("existingDisk", () => {
-  it("should read the size and class when the StatefulSet has a claim template", () => {
-    expect(existingDisk(statefulSet(AGENT, { ...SPEC, diskSize: "8Gi", storageClass: "fast" }))).toEqual({ size: "8Gi", storageClass: "fast" });
+describe("carriedOver", () => {
+  it("should carry the disk and the launch token when the StatefulSet has both", () => {
+    expect(carriedOver(statefulSet(AGENT, { ...SPEC, diskSize: "8Gi", storageClass: "fast" }, TOKEN))).toEqual({
+      disk: { size: "8Gi", storageClass: "fast" },
+      launchToken: TOKEN
+    });
   });
 
-  it("should read no class when the template names none", () => {
-    expect(existingDisk(statefulSet(AGENT, SPEC))).toEqual({ size: "32Gi", storageClass: null });
+  it("should carry no class when the claim template names none", () => {
+    expect(carriedOver(statefulSet(AGENT, SPEC, TOKEN)).disk).toEqual({ size: "32Gi", storageClass: null });
   });
 
   it.each([
     ["there is no StatefulSet", null],
-    ["it has no spec", { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: "x" } }],
-    ["it has no claim templates", { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: "x" }, spec: {} }],
-    ["its template has no size", { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: "x" }, spec: { volumeClaimTemplates: [{}] } }]
-  ])("should be undefined when %s", (_label, existing) => {
-    expect(existingDisk(existing as StatefulSet | null)).toBeUndefined();
+    ["it has no spec", { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: "x" } } as StatefulSet],
+    ["its spec is empty", statefulSetWith({})],
+    ["its claim template has no size and its pod no containers", statefulSetWith({ volumeClaimTemplates: [{}], template: { spec: {} } })],
+    ["its claim templates are not a list", statefulSetWith({ volumeClaimTemplates: {} })],
+    [
+      "it has no agent container",
+      statefulSetWith({ template: { spec: { containers: [{ name: "other", env: [{ name: "AGENT_HUB_LAUNCH_TOKEN", value: "x" }] }] } } })
+    ],
+    ["its container has no env", statefulSetWith({ template: { spec: { containers: [{ name: "agent" }] } } })],
+    ["its token is empty", statefulSetWith({ template: { spec: { containers: [{ name: "agent", env: [{ name: "AGENT_HUB_LAUNCH_TOKEN", value: "" }] }] } } })],
+    [
+      "its token comes from elsewhere",
+      statefulSetWith({ template: { spec: { containers: [{ name: "agent", env: [{ name: "AGENT_HUB_LAUNCH_TOKEN", valueFrom: {} }] }] } } })
+    ]
+  ])("should carry nothing when %s", (_label, existing) => {
+    expect(carriedOver(existing)).toEqual({});
   });
 });

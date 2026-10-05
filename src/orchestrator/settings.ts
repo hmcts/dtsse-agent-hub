@@ -7,7 +7,8 @@ export type Environment = Readonly<Record<string, string | undefined>>;
 
 export const DEFAULT_HUB_URL = "https://agent-hub.aat.platform.hmcts.net";
 export const DEFAULT_HUB_AUDIENCE = "api://dtsse-agent-hub";
-export const DEFAULT_SERVICE_ACCOUNT = "virtual-agent";
+/** The namespace's own: the pods mount no token and have no workload identity, so they need no account of their own. */
+export const DEFAULT_SERVICE_ACCOUNT = "default";
 export const DEFAULT_DISK_SIZE = "32Gi";
 export const DEFAULT_INTERVAL_SECONDS = 10;
 export const DEFAULT_PORT = 8080;
@@ -42,14 +43,26 @@ export interface OrchestratorSettings {
 export class OrchestratorConfigurationError extends Error {}
 
 const CLUSTER = /^[A-Za-z0-9._-]{1,100}$/;
-const DIGEST_PINNED = /^[a-z0-9.-]+(?::\d+)?(?:\/[a-z0-9._-]+)+(?::\w[\w.-]{0,127})?@sha256:[a-f0-9]{64}$/;
+const DIGEST = /^sha256:[a-f0-9]{64}$/;
+const IMAGE_NAME = /^[a-z0-9][a-z0-9._:/-]{0,254}$/;
+const DNS_LABEL = /^[a-z0-9-]{1,63}$/;
 const QUANTITY = /^[1-9]\d*(Mi|Gi|Ti)$/;
-const DNS_NAME = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** `<registry>/<repository>[:tag]@sha256:<64 hex digits>`, checked in parts so no pattern has to backtrack. */
+function digestPinned(image: string): boolean {
+  const [name, digest, extra] = image.split("@");
+  return extra === undefined && name !== undefined && digest !== undefined && name.includes("/") && IMAGE_NAME.test(name) && DIGEST.test(digest);
+}
+
+/** A Kubernetes object name: dot-separated labels of lowercase letters, digits and inner hyphens. */
+function dnsName(value: string): boolean {
+  return value.length <= 253 && value.split(".").every((label) => DNS_LABEL.test(label) && !label.startsWith("-") && !label.endsWith("-"));
+}
 
 function text(env: Environment, name: string): string | undefined {
   const value = env[name]?.trim();
-  return value ? value : undefined;
+  return value || undefined;
 }
 
 function httpUrl(value: string): boolean {
@@ -83,7 +96,7 @@ export function orchestratorSettings(env: Environment, namespace: string | undef
 
   const image = text(env, "VIRTUAL_AGENT_IMAGE");
   check(image !== undefined, "VIRTUAL_AGENT_IMAGE is not set");
-  check(image === undefined || DIGEST_PINNED.test(image), "VIRTUAL_AGENT_IMAGE must be pinned by digest: <registry>/<repository>@sha256:<64 hex digits>");
+  check(image === undefined || digestPinned(image), "VIRTUAL_AGENT_IMAGE must be pinned by digest: <registry>/<repository>@sha256:<64 hex digits>");
 
   const cluster = text(env, "ORCHESTRATOR_CLUSTER");
   check(cluster !== undefined, "ORCHESTRATOR_CLUSTER is not set: name the cluster this runs in, as cft-preview-00");
@@ -106,13 +119,13 @@ export function orchestratorSettings(env: Environment, namespace: string | undef
   check(httpUrl(agentHubUrl), "VIRTUAL_AGENT_HUB_URL must be an http or https URL");
 
   const serviceAccount = text(env, "VIRTUAL_AGENT_SERVICE_ACCOUNT") ?? DEFAULT_SERVICE_ACCOUNT;
-  check(DNS_NAME.test(serviceAccount), "VIRTUAL_AGENT_SERVICE_ACCOUNT must be a Kubernetes object name");
+  check(dnsName(serviceAccount), "VIRTUAL_AGENT_SERVICE_ACCOUNT must be a Kubernetes object name");
 
   const diskSize = text(env, "VIRTUAL_AGENT_DISK_SIZE") ?? DEFAULT_DISK_SIZE;
   check(QUANTITY.test(diskSize), "VIRTUAL_AGENT_DISK_SIZE must be a size in Mi, Gi or Ti, as 32Gi");
 
   const storageClass = text(env, "VIRTUAL_AGENT_STORAGE_CLASS") ?? null;
-  check(storageClass === null || DNS_NAME.test(storageClass), "VIRTUAL_AGENT_STORAGE_CLASS must be a Kubernetes object name");
+  check(storageClass === null || dnsName(storageClass), "VIRTUAL_AGENT_STORAGE_CLASS must be a Kubernetes object name");
 
   const audience = text(env, "AGENT_HUB_AUDIENCE") ?? DEFAULT_HUB_AUDIENCE;
   const intervalSeconds = whole("ORCHESTRATOR_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS, 3600);
@@ -125,10 +138,18 @@ export function orchestratorSettings(env: Environment, namespace: string | undef
     cluster: cluster!,
     namespace: ns!,
     hubUrl,
-    hubScope: `${audience.replace(/\/+$/, "")}/.default`,
+    hubScope: `${withoutTrailingSlashes(audience)}/.default`,
     intervalMs: intervalSeconds * 1000,
     orphanSweepEvery: ORPHAN_SWEEP_EVERY,
     port,
     agent: { namespace: ns!, image: image!, serviceAccount, hubUrl: agentHubUrl, tenantId: tenantId!, diskSize, storageClass }
   };
+}
+
+export function withoutTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") {
+    end -= 1;
+  }
+  return value.slice(0, end);
 }

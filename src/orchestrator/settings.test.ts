@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OrchestratorConfigurationError, orchestratorSettings } from "./settings.ts";
+import { OrchestratorConfigurationError, orchestratorSettings, withoutTrailingSlashes } from "./settings.ts";
 
 const IMAGE = `hmctsprod.azurecr.io/dtsse/agent-hub-virtual-agent@sha256:${"a".repeat(64)}`;
 const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
@@ -25,7 +25,7 @@ describe("orchestratorSettings", () => {
       agent: {
         namespace: "virtual-agents",
         image: IMAGE,
-        serviceAccount: "virtual-agent",
+        serviceAccount: "default",
         hubUrl: "https://agent-hub.aat.platform.hmcts.net",
         tenantId: TENANT,
         diskSize: "32Gi",
@@ -90,6 +90,13 @@ describe("orchestratorSettings", () => {
 
   it.each([
     ["an image pinned by tag", { VIRTUAL_AGENT_IMAGE: "hmctsprod.azurecr.io/dtsse/agent:latest" }, /pinned by digest/],
+    ["an image with two digests", { VIRTUAL_AGENT_IMAGE: `${IMAGE}@sha256:${"a".repeat(64)}` }, /pinned by digest/],
+    ["an image without a repository path", { VIRTUAL_AGENT_IMAGE: `agent@sha256:${"a".repeat(64)}` }, /pinned by digest/],
+    ["an image with a short digest", { VIRTUAL_AGENT_IMAGE: "hmctsprod.azurecr.io/dtsse/agent@sha256:abc" }, /pinned by digest/],
+    ["a service account starting with a hyphen", { VIRTUAL_AGENT_SERVICE_ACCOUNT: "-va" }, /VIRTUAL_AGENT_SERVICE_ACCOUNT/],
+    ["a storage class ending with a hyphen", { VIRTUAL_AGENT_STORAGE_CLASS: "managed-" }, /VIRTUAL_AGENT_STORAGE_CLASS/],
+    ["a storage class with an empty label", { VIRTUAL_AGENT_STORAGE_CLASS: "a..b" }, /VIRTUAL_AGENT_STORAGE_CLASS/],
+    ["a storage class too long to be a name", { VIRTUAL_AGENT_STORAGE_CLASS: "a".repeat(254) }, /VIRTUAL_AGENT_STORAGE_CLASS/],
     ["a cluster name with a space", { ORCHESTRATOR_CLUSTER: "cft preview" }, /ORCHESTRATOR_CLUSTER must be/],
     ["a tenant that is not a GUID", { AZURE_TENANT_ID: "hmcts" }, /AZURE_TENANT_ID/],
     ["no federated token file", { AZURE_FEDERATED_TOKEN_FILE: " " }, /AZURE_FEDERATED_TOKEN_FILE/],
@@ -108,5 +115,21 @@ describe("orchestratorSettings", () => {
 
   it("should refuse a namespace file that is blank", () => {
     expect(() => orchestratorSettings(ENV, " \n")).toThrow(/no namespace/);
+  });
+});
+
+describe("withoutTrailingSlashes", () => {
+  it.each([
+    ["api://dtsse-agent-hub//", "api://dtsse-agent-hub"],
+    ["https://hub", "https://hub"],
+    ["///", ""]
+  ])("should turn %s into %s", (value, expected) => {
+    expect(withoutTrailingSlashes(value)).toBe(expected);
+  });
+});
+
+describe("dotted names", () => {
+  it("should accept a storage class with dots when every label is valid", () => {
+    expect(orchestratorSettings({ ...ENV, VIRTUAL_AGENT_STORAGE_CLASS: "managed.csi-premium" }, "ns").agent.storageClass).toBe("managed.csi-premium");
   });
 });

@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createKube, FIELD_MANAGER, inClusterConfig, type Kube, KubeError, type Secret } from "./kube.ts";
+import { createKube, FIELD_MANAGER, inClusterConfig, type Kube, KubeError, type StatefulSet } from "./kube.ts";
 
 interface Seen {
   method: string;
@@ -53,7 +53,7 @@ function reply(status: number, body: unknown): typeof answer {
   return (_seen, response) => response.writeHead(status, { "content-type": "application/json" }).end(typeof body === "string" ? body : JSON.stringify(body));
 }
 
-const SECRET: Secret = { apiVersion: "v1", kind: "Secret", metadata: { name: "va-1-launch" }, data: { token: "dG9r" } };
+const SET: StatefulSet = { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: "va-1" }, spec: { replicas: 1 } };
 
 describe("createKube", () => {
   it("should get a StatefulSet from the apps API in its namespace with the ServiceAccount token", async () => {
@@ -66,31 +66,28 @@ describe("createKube", () => {
 
   it("should get core resources from the core API", async () => {
     await kube().get("pods", "va-1-0");
-    await kube().get("persistentvolumeclaims", "work-va-1-0");
+    await kube().get("pods", "va-1-1");
 
-    expect(seen.map((entry) => entry.url)).toEqual([
-      "/api/v1/namespaces/virtual-agents/pods/va-1-0",
-      "/api/v1/namespaces/virtual-agents/persistentvolumeclaims/work-va-1-0"
-    ]);
+    expect(seen.map((entry) => entry.url)).toEqual(["/api/v1/namespaces/virtual-agents/pods/va-1-0", "/api/v1/namespaces/virtual-agents/pods/va-1-1"]);
   });
 
   it("should be null when the resource is not found", async () => {
     answer = reply(404, { message: "not found" });
 
-    expect(await kube().get("secrets", "missing")).toBeNull();
+    expect(await kube().get("pods", "missing")).toBeNull();
   });
 
   it("should throw the API's message when a get fails otherwise", async () => {
-    answer = reply(403, { message: "secrets is forbidden" });
+    answer = reply(403, { message: "pods is forbidden" });
 
-    await expect(kube().get("secrets", "x")).rejects.toThrow(/403 secrets is forbidden/);
+    await expect(kube().get("pods", "x")).rejects.toThrow(/403 pods is forbidden/);
   });
 
   it("should read the token file again on every call when it has been rotated", async () => {
     const client = kube();
-    await client.get("secrets", "a");
+    await client.get("pods", "a");
     writeFileSync(join(dir, "token"), "second-token");
-    await client.get("secrets", "a");
+    await client.get("pods", "a");
 
     expect(seen.map((entry) => entry.headers.authorization)).toEqual(["Bearer first-token", "Bearer second-token"]);
   });
@@ -103,17 +100,17 @@ describe("createKube", () => {
   });
 
   it("should list nothing when the API returns no items", async () => {
-    expect(await kube().list("secrets", "a=b")).toEqual([]);
+    expect(await kube().list("pods", "a=b")).toEqual([]);
   });
 
   it("should apply server-side as the orchestrator's field manager, forcing ownership", async () => {
-    answer = reply(200, SECRET);
+    answer = reply(200, SET);
 
-    expect(await kube().apply("secrets", SECRET)).toEqual(SECRET);
+    expect(await kube().apply("statefulsets", SET)).toEqual(SET);
     expect(seen[0]).toMatchObject({
       method: "PATCH",
-      url: `/api/v1/namespaces/virtual-agents/secrets/va-1-launch?fieldManager=${FIELD_MANAGER}&force=true`,
-      body: JSON.stringify(SECRET)
+      url: `/apis/apps/v1/namespaces/virtual-agents/statefulsets/va-1?fieldManager=${FIELD_MANAGER}&force=true`,
+      body: JSON.stringify(SET)
     });
     expect(seen[0]!.headers["content-type"]).toBe("application/apply-patch+yaml");
   });
@@ -122,7 +119,7 @@ describe("createKube", () => {
     answer = reply(422, { message: "spec: Forbidden" });
 
     const failure = await kube()
-      .apply("secrets", SECRET)
+      .apply("statefulsets", SET)
       .catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(KubeError);
     expect(failure).toMatchObject({ status: 422, message: expect.stringContaining("spec: Forbidden") });
@@ -141,8 +138,8 @@ describe("createKube", () => {
   });
 
   it("should delete in the background and say it did when the resource was there", async () => {
-    expect(await kube().delete("persistentvolumeclaims", "work-va-1-0")).toBe(true);
-    expect(seen[0]).toMatchObject({ method: "DELETE", url: "/api/v1/namespaces/virtual-agents/persistentvolumeclaims/work-va-1-0" });
+    expect(await kube().delete("statefulsets", "va-1")).toBe(true);
+    expect(seen[0]).toMatchObject({ method: "DELETE", url: "/apis/apps/v1/namespaces/virtual-agents/statefulsets/va-1" });
     expect(JSON.parse(seen[0]!.body)).toMatchObject({ propagationPolicy: "Background" });
   });
 

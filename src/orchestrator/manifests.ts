@@ -1,29 +1,23 @@
 import type { ClaimedAgent } from "./hub.ts";
-import type { Secret, StatefulSet } from "./kube.ts";
+import type { StatefulSet } from "./kube.ts";
 import type { VirtualAgentSpec } from "./settings.ts";
 
 /**
- * What the orchestrator applies for each virtual agent. Only StatefulSets: the preview cluster's Gatekeeper refuses
- * a pod no controller owns.
+ * What the orchestrator applies for each virtual agent: a StatefulSet and nothing else. The preview cluster's
+ * Gatekeeper refuses a pod no controller owns; the launch token is in the pod template rather than a Secret, and the
+ * disk is the claim template's, deleted with the StatefulSet, so the orchestrator needs no access to Secrets or PVCs.
  */
 
 export const MANAGED_BY = "agent-hub-orchestrator";
 export const MANAGED_SELECTOR = `app.kubernetes.io/managed-by=${MANAGED_BY}`;
 export const ID_LABEL = "agent-hub.hmcts.net/virtual-agent-id";
 export const GENERATION_ANNOTATION = "agent-hub.hmcts.net/generation";
+export const LAUNCH_TOKEN_ENV = "AGENT_HUB_LAUNCH_TOKEN";
 
+const CONTAINER = "agent";
 const CLAIM_TEMPLATE = "work";
 const HOME = "/home/hmcts";
 const UID = 1000;
-
-export function launchSecretName(statefulsetName: string): string {
-  return `${statefulsetName}-launch`;
-}
-
-/** The claim template's PVC for the StatefulSet's one pod, named as Kubernetes names it. */
-export function workPvcName(statefulsetName: string): string {
-  return `${CLAIM_TEMPLATE}-${statefulsetName}-0`;
-}
 
 export function podName(statefulsetName: string): string {
   return `${statefulsetName}-0`;
@@ -33,17 +27,61 @@ export function labels(id: string): Record<string, string> {
   return { "app.kubernetes.io/name": "virtual-agent", "app.kubernetes.io/managed-by": MANAGED_BY, [ID_LABEL]: id };
 }
 
-export function launchSecret(agent: ClaimedAgent & { launch_token: string }, namespace: string): Secret {
-  return {
-    apiVersion: "v1",
-    kind: "Secret",
-    metadata: { name: launchSecretName(agent.statefulset_name), namespace, labels: labels(agent.id) },
-    type: "Opaque",
-    data: { token: Buffer.from(agent.launch_token, "utf8").toString("base64") }
-  };
+/** A StatefulSet's claim template cannot change once created, so an existing agent keeps the disk it was made with. */
+export interface Disk {
+  size: string;
+  storageClass: string | null;
 }
 
-function env(agent: ClaimedAgent, spec: VirtualAgentSpec) {
+/** What an existing StatefulSet carries over to the next apply of it. */
+export interface Carried {
+  disk?: Disk;
+  launchToken?: string;
+}
+
+interface EnvVar {
+  name: string;
+  value?: unknown;
+}
+
+interface Shape {
+  volumeClaimTemplates?: { spec?: { resources?: { requests?: { storage?: unknown } }; storageClassName?: unknown } }[];
+  template?: { spec?: { containers?: { name?: unknown; env?: EnvVar[] }[] } };
+}
+
+function shapeOf(existing: StatefulSet | null): Shape {
+  return (existing?.spec ?? {}) as Shape;
+}
+
+function diskOf(shape: Shape): Disk | undefined {
+  const template = Array.isArray(shape.volumeClaimTemplates) ? shape.volumeClaimTemplates[0] : undefined;
+  const size = template?.spec?.resources?.requests?.storage;
+  if (typeof size !== "string") {
+    return undefined;
+  }
+  const storageClass = template?.spec?.storageClassName;
+  return { size, storageClass: typeof storageClass === "string" ? storageClass : null };
+}
+
+function launchTokenOf(shape: Shape): string | undefined {
+  const containers = shape.template?.spec?.containers;
+  const container = Array.isArray(containers) ? containers.find((candidate) => candidate.name === CONTAINER) : undefined;
+  const value = (Array.isArray(container?.env) ? container.env : []).find((entry) => entry.name === LAUNCH_TOKEN_ENV)?.value;
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/**
+ * The disk an existing StatefulSet was created with, and the launch token its pod was given, so that an apply with
+ * no new token keeps the one the running pod holds.
+ */
+export function carriedOver(existing: StatefulSet | null): Carried {
+  const shape = shapeOf(existing);
+  const disk = diskOf(shape);
+  const launchToken = launchTokenOf(shape);
+  return { ...(disk === undefined ? {} : { disk }), ...(launchToken === undefined ? {} : { launchToken }) };
+}
+
+function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
   return [
     { name: "AGENT_HUB_URL", value: spec.hubUrl },
     { name: "AGENT_HUB_VIRTUAL", value: "1" },
@@ -52,36 +90,21 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec) {
     { name: "AZURE_TENANT_ID", value: spec.tenantId },
     { name: "DISABLE_AUTOUPDATER", value: "1" },
     { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
-    { name: "AGENT_HUB_LAUNCH_TOKEN", valueFrom: { secretKeyRef: { name: launchSecretName(agent.statefulset_name), key: "token" } } }
+    { name: LAUNCH_TOKEN_ENV, value: launchToken }
   ];
 }
 
-/** A StatefulSet's claim template cannot change once created, so an existing agent keeps the disk it was made with. */
-export interface Disk {
-  size: string;
-  storageClass: string | null;
-}
-
-/** The disk an existing StatefulSet was created with, or `undefined` when it has no claim template to read. */
-export function existingDisk(existing: StatefulSet | null): Disk | undefined {
-  const templates = existing?.spec?.volumeClaimTemplates;
-  const template = Array.isArray(templates)
-    ? (templates[0] as { spec?: { resources?: { requests?: { storage?: unknown } }; storageClassName?: unknown } })
-    : undefined;
-  const size = template?.spec?.resources?.requests?.storage;
-  if (typeof size !== "string") {
-    return undefined;
-  }
-  const storageClass = template?.spec?.storageClassName;
-  return { size, storageClass: typeof storageClass === "string" ? storageClass : null };
-}
 /**
  * The pod template carries the claim's generation, so starting an agent again replaces a pod that is still there
- * with one that reads the newly minted launch token; a claim of the same generation changes nothing.
+ * with one holding the newly minted launch token; a claim of the same generation changes nothing.
+ *
+ * The claim template's PVC is deleted with the StatefulSet and kept when it scales to zero, so stopping keeps the
+ * disk, deleting the StatefulSet deletes it, and starting after that makes a fresh one.
  */
-export function statefulSet(agent: ClaimedAgent, spec: VirtualAgentSpec, disk: Disk = { size: spec.diskSize, storageClass: spec.storageClass }): StatefulSet {
+export function statefulSet(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string, carried?: Carried): StatefulSet {
   const name = agent.statefulset_name;
   const tagged = labels(agent.id);
+  const disk = carried?.disk ?? { size: spec.diskSize, storageClass: spec.storageClass };
   return {
     apiVersion: "apps/v1",
     kind: "StatefulSet",
@@ -90,6 +113,7 @@ export function statefulSet(agent: ClaimedAgent, spec: VirtualAgentSpec, disk: D
       replicas: agent.desired === "running" ? 1 : 0,
       serviceName: name,
       selector: { matchLabels: { [ID_LABEL]: agent.id } },
+      persistentVolumeClaimRetentionPolicy: { whenDeleted: "Delete", whenScaled: "Retain" },
       template: {
         metadata: { labels: tagged, annotations: { [GENERATION_ANNOTATION]: String(agent.generation) } },
         spec: {
@@ -105,10 +129,10 @@ export function statefulSet(agent: ClaimedAgent, spec: VirtualAgentSpec, disk: D
           },
           containers: [
             {
-              name: "agent",
+              name: CONTAINER,
               image: spec.image,
               command: ["virtual-agent-boot"],
-              env: env(agent, spec),
+              env: env(agent, spec, launchToken),
               securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
               resources: {
                 requests: { cpu: "1", memory: "4Gi", "ephemeral-storage": "2Gi" },

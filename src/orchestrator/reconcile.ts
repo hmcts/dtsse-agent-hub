@@ -1,7 +1,8 @@
 import { FAILING_REASONS } from "../virtual-agents/lifecycle.ts";
 import { type ClaimedAgent, type Hub, HubError, type ObservedBody } from "./hub.ts";
-import type { Kind, Kinds, Kube, Pod, Resource } from "./kube.ts";
-import { existingDisk, ID_LABEL, launchSecret, launchSecretName, MANAGED_BY, MANAGED_SELECTOR, podName, statefulSet, workPvcName } from "./manifests.ts";
+import type { Kube, Pod, Resource, StatefulSet } from "./kube.ts";
+import { describeError, type Log } from "./log.ts";
+import { carriedOver, ID_LABEL, MANAGED_BY, MANAGED_SELECTOR, podName, statefulSet } from "./manifests.ts";
 import type { OrchestratorSettings } from "./settings.ts";
 
 /**
@@ -19,8 +20,7 @@ export const RUNNING_WATCH_MS = 15 * 60_000;
 /** A pod waits this long for a node before it is reported unschedulable, so a cluster scaling up does not fail it. */
 export const SCHEDULING_GRACE_MS = 5 * 60_000;
 
-export type Level = "info" | "warn" | "error";
-export type Log = (level: Level, message: string, fields?: Record<string, unknown>) => void;
+export type { Level, Log } from "./log.ts";
 
 export interface ReconcileDeps {
   kube: Kube;
@@ -51,10 +51,6 @@ export interface PassResult {
 
 export function initialState(): ReconcileState {
   return { passes: 0, watching: new Map() };
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -105,67 +101,51 @@ export function owned(resource: Resource, id?: string): boolean {
   return tags["app.kubernetes.io/managed-by"] === MANAGED_BY && (id === undefined || tags[ID_LABEL] === id);
 }
 
-/** The hub's `pvc_name`, once it is known to be the PVC the StatefulSet's claim template makes; `undefined` if not. */
-export function pvcNameOf(agent: { statefulset_name: string; pvc_name: string | null }): string | undefined {
-  return agent.pvc_name === workPvcName(agent.statefulset_name) ? agent.pvc_name : undefined;
-}
-
-async function ownedOrAbsent<K extends Kind>(kube: Kube, kind: K, name: string, id: string): Promise<Kinds[K] | null> {
-  const found = await kube.get(kind, name);
+async function ownedStatefulSet(kube: Kube, name: string, id: string): Promise<StatefulSet | null> {
+  const found = await kube.get("statefulsets", name);
   if (found !== null && !owned(found, id)) {
-    throw new Error(`refusing to touch ${kind} ${name}: it is not labelled as virtual agent ${id}'s`);
+    throw new Error(`refusing to touch StatefulSet ${name}: it is not labelled as virtual agent ${id}'s`);
   }
   return found;
 }
 
-async function deleteOwned(kube: Kube, kind: Kind, name: string, id: string): Promise<void> {
-  if ((await ownedOrAbsent(kube, kind, name, id)) !== null) {
-    await kube.delete(kind, name);
-  }
-}
-
-async function apply({ kube, settings }: ReconcileDeps, agent: ClaimedAgent, pvc: string): Promise<void> {
+/**
+ * Running applies the StatefulSet with the claim's new launch token, or the one its pod already holds. Stopping
+ * scales it to zero, which keeps the disk. Deleting the agent or its disk deletes the StatefulSet, and its PVC
+ * retention policy deletes the disk with it.
+ */
+async function apply({ kube, settings }: ReconcileDeps, agent: ClaimedAgent): Promise<void> {
   const name = agent.statefulset_name;
-  const secret = launchSecretName(name);
-  switch (agent.desired) {
-    case "running": {
-      const existing = await ownedOrAbsent(kube, "statefulsets", name, agent.id);
-      if (agent.launch_token !== undefined) {
-        await ownedOrAbsent(kube, "secrets", secret, agent.id);
-        await kube.apply("secrets", launchSecret({ ...agent, launch_token: agent.launch_token }, settings.namespace));
-      }
-      await kube.apply("statefulsets", statefulSet(agent, settings.agent, existingDisk(existing)));
-      return;
+  const existing = await ownedStatefulSet(kube, name, agent.id);
+  if (agent.desired === "running") {
+    const carried = carriedOver(existing);
+    const launchToken = agent.launch_token ?? carried.launchToken;
+    if (launchToken === undefined) {
+      throw new Error("the claim has no launch token and the StatefulSet holds none; stop and start the agent to mint one");
     }
-    case "stopped":
-      if ((await ownedOrAbsent(kube, "statefulsets", name, agent.id)) !== null) {
-        await kube.patchScale(name, 0);
-      }
-      if (agent.delete_disk) {
-        await deleteOwned(kube, "persistentvolumeclaims", pvc, agent.id);
-      }
-      return;
-    case "deleted":
-      await deleteOwned(kube, "statefulsets", name, agent.id);
-      await deleteOwned(kube, "secrets", secret, agent.id);
-      await deleteOwned(kube, "persistentvolumeclaims", pvc, agent.id);
-      return;
+    await kube.apply("statefulsets", statefulSet(agent, settings.agent, launchToken, carried));
+  } else if (existing === null) {
+    return;
+  } else if (agent.desired === "deleted" || agent.delete_disk) {
+    await kube.delete("statefulsets", name);
+  } else {
+    await kube.patchScale(name, 0);
   }
 }
 
+/**
+ * The orchestrator cannot read PVCs, so the disk counts as deleted once the StatefulSet that owns it is gone: its
+ * retention policy deletes the PVC with it.
+ */
 async function look(kube: Kube, agent: ClaimedAgent, now: number): Promise<ObservedBody> {
   const name = agent.statefulset_name;
-  const [found, pod, pvc] = await Promise.all([
-    kube.get("statefulsets", name),
-    kube.get("pods", podName(name)),
-    kube.get("persistentvolumeclaims", agent.pvc_name)
-  ]);
+  const [found, pod] = await Promise.all([kube.get("statefulsets", name), kube.get("pods", podName(name))]);
   return {
     generation: agent.generation,
     replicas_ready: found?.status?.readyReplicas ?? 0,
     pod_phase: pod?.status?.phase ?? (pod === null ? null : "Pending"),
     reason: podReason(pod, now),
-    disk_deleted: pvc === null
+    disk_deleted: found === null
   };
 }
 
@@ -193,114 +173,108 @@ async function check({ kube, hub, log }: ReconcileDeps, watch: Watch, now: numbe
 }
 
 /**
- * Deletes every StatefulSet, Secret and PVC labelled `app.kubernetes.io/managed-by=agent-hub-orchestrator` that the
- * hub no longer has an agent for, or no longer has a disk for. The label is what scopes the sweep in a namespace
- * other workloads share: anything without it is never listed, and is skipped if it is. Nothing is deleted unless the
- * hub has answered, so an outage cannot empty the namespace, and no PVC is deleted while any of the hub's PVC names
- * is not what the StatefulSets make, since the sweep would then take a live agent's disk for an orphan.
+ * Deletes every StatefulSet labelled `app.kubernetes.io/managed-by=agent-hub-orchestrator` that the hub no longer
+ * has an agent for, and with it that agent's disk. The label is what scopes the sweep in a namespace other workloads
+ * share: anything without it is never listed, and is skipped if it is. Nothing is deleted unless the hub has
+ * answered, so an outage cannot empty the namespace. One at a time, as everything else the orchestrator does.
  */
 export async function sweepOrphans({ kube, hub, log }: ReconcileDeps): Promise<number> {
-  const live = await hub.live();
-  const misnamed = live.filter((agent) => agent.pvc_name !== null && pvcNameOf(agent) === undefined);
-  for (const agent of misnamed) {
-    log("error", "THE HUB'S pvc_name IS NOT THE STATEFULSET'S PVC: not sweeping PVCs", {
-      id: agent.id,
-      pvc_name: agent.pvc_name,
-      expected: workPvcName(agent.statefulset_name)
-    });
-  }
-  const statefulSets = new Set(live.map((agent) => agent.statefulset_name));
-  const secrets = new Set(live.map((agent) => launchSecretName(agent.statefulset_name)));
-  const disks = new Set(live.flatMap((agent) => (agent.pvc_name === null ? [] : [agent.pvc_name])));
-  const kinds: [Kind, Set<string>][] = [
-    ["statefulsets", statefulSets],
-    ["secrets", secrets]
-  ];
-  if (misnamed.length === 0) {
-    kinds.push(["persistentvolumeclaims", disks]);
-  }
+  const live = new Set((await hub.live()).map((agent) => agent.statefulset_name));
   let deleted = 0;
-  for (const [kind, keep] of kinds) {
-    for (const resource of await kube.list(kind, MANAGED_SELECTOR)) {
-      const name = resource.metadata.name;
-      if (!owned(resource) || keep.has(name) || resource.metadata.deletionTimestamp !== undefined) {
-        continue;
+  for (const resource of await kube.list("statefulsets", MANAGED_SELECTOR)) {
+    const name = resource.metadata.name;
+    if (!owned(resource) || live.has(name) || resource.metadata.deletionTimestamp !== undefined) {
+      continue;
+    }
+    try {
+      if (await kube.delete("statefulsets", name)) {
+        deleted += 1;
+        log("info", "deleted an orphan", { kind: "statefulsets", name });
       }
-      try {
-        if (await kube.delete(kind, name)) {
-          deleted += 1;
-          log("info", "deleted an orphan", { kind, name });
-        }
-      } catch (error) {
-        log("error", "could not delete an orphan", { kind, name, error: describe(error) });
-      }
+    } catch (error) {
+      log("error", "could not delete an orphan", { kind: "statefulsets", name, error: describeError(error) });
     }
   }
   return deleted;
 }
 
-/** Throws only when the claim does: one agent's failure is logged and the rest of the pass goes on. */
+/** Applies one claimed agent and starts watching it; `false` when it could not be applied. */
+async function applyClaimed(deps: ReconcileDeps, state: ReconcileState, agent: ClaimedAgent, now: number): Promise<boolean> {
+  const { log } = deps;
+  state.watching.delete(agent.id);
+  try {
+    await apply(deps, agent);
+  } catch (error) {
+    log("error", "could not apply", { id: agent.id, generation: agent.generation, desired: agent.desired, error: describeError(error) });
+    return false;
+  }
+  state.watching.set(agent.id, { agent, since: now });
+  log("info", "applied", {
+    id: agent.id,
+    generation: agent.generation,
+    desired: agent.desired,
+    delete_disk: agent.delete_disk,
+    launch_token: agent.launch_token !== undefined
+  });
+  return true;
+}
+
+type Checked = "reported" | "quiet" | "failed";
+
+/** Looks at one watched agent, and stops watching it once it is done or the hub will not take its report. */
+async function checkWatched(deps: ReconcileDeps, state: ReconcileState, watch: Watch, now: number): Promise<Checked> {
+  try {
+    const { done, reported } = await check(deps, watch, now);
+    if (done) {
+      state.watching.delete(watch.agent.id);
+    }
+    return reported ? "reported" : "quiet";
+  } catch (error) {
+    // The hub no longer has the agent, or refuses this report: a newer claim brings whatever is still to do.
+    if (error instanceof HubError && (error.status === 404 || error.status === 409)) {
+      state.watching.delete(watch.agent.id);
+    }
+    deps.log("error", "could not observe", { id: watch.agent.id, generation: watch.agent.generation, error: describeError(error) });
+    return "failed";
+  }
+}
+
+/** The number of orphans deleted, or `undefined` when the sweep failed. */
+async function sweepSafely(deps: ReconcileDeps): Promise<number | undefined> {
+  try {
+    return await sweepOrphans(deps);
+  } catch (error) {
+    deps.log("error", "could not sweep orphans", { error: describeError(error) });
+    return undefined;
+  }
+}
+
+/**
+ * Throws only when the claim does: one agent's failure is logged and the rest of the pass goes on. Agents are taken
+ * one at a time, so the API server and the hub each see one request from the orchestrator at once.
+ */
 export async function reconcilePass(deps: ReconcileDeps, state: ReconcileState): Promise<PassResult> {
   const now = deps.now ?? Date.now;
-  const { log } = deps;
   const result: PassResult = { claimed: 0, reported: 0, errors: 0, orphans: 0 };
 
   const claimed = await deps.hub.claim(deps.settings.cluster);
   result.claimed = claimed.length;
   for (const agent of claimed) {
-    state.watching.delete(agent.id);
-    const pvc = pvcNameOf(agent);
-    if (pvc === undefined) {
+    if (!(await applyClaimed(deps, state, agent, now()))) {
       result.errors += 1;
-      log("error", "THE HUB'S pvc_name IS NOT THE STATEFULSET'S PVC: leaving this agent alone", {
-        id: agent.id,
-        pvc_name: agent.pvc_name,
-        expected: workPvcName(agent.statefulset_name)
-      });
-      continue;
-    }
-    try {
-      await apply(deps, agent, pvc);
-      state.watching.set(agent.id, { agent, since: now() });
-      log("info", "applied", {
-        id: agent.id,
-        generation: agent.generation,
-        desired: agent.desired,
-        delete_disk: agent.delete_disk,
-        launch_token: agent.launch_token !== undefined
-      });
-    } catch (error) {
-      result.errors += 1;
-      log("error", "could not apply", { id: agent.id, generation: agent.generation, desired: agent.desired, error: describe(error) });
     }
   }
 
-  for (const watch of [...state.watching.values()]) {
-    try {
-      const { done, reported } = await check(deps, watch, now());
-      if (reported) {
-        result.reported += 1;
-      }
-      if (done) {
-        state.watching.delete(watch.agent.id);
-      }
-    } catch (error) {
-      result.errors += 1;
-      // The hub no longer has the agent, or refuses this report: a newer claim brings whatever is still to do.
-      if (error instanceof HubError && (error.status === 404 || error.status === 409)) {
-        state.watching.delete(watch.agent.id);
-      }
-      log("error", "could not observe", { id: watch.agent.id, generation: watch.agent.generation, error: describe(error) });
-    }
+  for (const watch of state.watching.values()) {
+    const checked = await checkWatched(deps, state, watch, now());
+    result.reported += checked === "reported" ? 1 : 0;
+    result.errors += checked === "failed" ? 1 : 0;
   }
 
   if (state.passes % deps.settings.orphanSweepEvery === 0) {
-    try {
-      result.orphans = await sweepOrphans(deps);
-    } catch (error) {
-      result.errors += 1;
-      log("error", "could not sweep orphans", { error: describe(error) });
-    }
+    const orphans = await sweepSafely(deps);
+    result.orphans = orphans ?? 0;
+    result.errors += orphans === undefined ? 1 : 0;
   }
   state.passes += 1;
   return result;

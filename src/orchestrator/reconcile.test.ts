@@ -10,16 +10,16 @@ const OTHER = "1a2b3c4d-1234-4000-8000-000000000002";
 
 const SETTINGS: OrchestratorSettings = {
   cluster: "cft-preview-00",
-  namespace: "virtual-agents",
+  namespace: "dtsse",
   hubUrl: "https://hub",
   hubScope: "api://dtsse-agent-hub/.default",
   intervalMs: 10_000,
   orphanSweepEvery: 30,
   port: 8080,
   agent: {
-    namespace: "virtual-agents",
+    namespace: "dtsse",
     image: `registry/agent@sha256:${"c".repeat(64)}`,
-    serviceAccount: "virtual-agent",
+    serviceAccount: "default",
     hubUrl: "https://hub",
     tenantId: "tenant",
     diskSize: "32Gi",
@@ -45,7 +45,7 @@ function agent(overrides: Partial<ClaimedAgent> = {}): ClaimedAgent {
 type Store = { [K in Kind]: Map<string, Kinds[K]> };
 
 function fakeKube() {
-  const store: Store = { statefulsets: new Map(), secrets: new Map(), persistentvolumeclaims: new Map(), pods: new Map() };
+  const store: Store = { statefulsets: new Map(), pods: new Map() };
   const calls: string[] = [];
   const failing = new Set<string>();
   const guard = (call: string) => {
@@ -140,8 +140,6 @@ function ready(set: StatefulSet | undefined, readyReplicas: number): void {
   set!.status = { readyReplicas };
 }
 
-const PVC: Resource = { apiVersion: "v1", kind: "PersistentVolumeClaim", metadata: { name: "work-va-0f8a6a1e-0", labels: labels(ID) } };
-
 describe("podReason", () => {
   const now = Date.parse("2026-10-05T12:00:00Z");
 
@@ -230,69 +228,109 @@ describe("settled", () => {
   });
 });
 
+const STS = "va-0f8a6a1e";
+const POD = "va-0f8a6a1e-0";
+
+function existing(overrides: Partial<ClaimedAgent> = {}, token = "ahv_old"): StatefulSet {
+  return statefulSet(agent(overrides), SETTINGS.agent, token);
+}
+
+function envOf(set: StatefulSet | undefined): Record<string, unknown> {
+  const containers = (set?.spec as { template: { spec: { containers: { env: { name: string; value: unknown }[] }[] } } }).template.spec.containers;
+  return Object.fromEntries(containers[0]!.env.map((entry) => [entry.name, entry.value]));
+}
+
+const GONE: ObservedBody = { generation: 0, replicas_ready: 0, pod_phase: null, reason: null, disk_deleted: true };
+
 describe("reconcilePass", () => {
-  it("should apply the launch Secret and a one-replica StatefulSet and report at once when a running agent is claimed with a token", async () => {
-    const t = setup([[agent({ launch_token: "ahv_token" })]]);
+  it("should apply a one-replica StatefulSet holding the new launch token and report at once when a running agent is claimed with one", async () => {
+    const t = setup([[agent({ launch_token: "ahv_new" })]]);
 
     expect(await t.pass()).toEqual({ claimed: 1, reported: 1, errors: 0, orphans: 0 });
 
-    expect(t.store.secrets.get("va-0f8a6a1e-launch")?.data).toEqual({ token: Buffer.from("ahv_token").toString("base64") });
-    expect(t.store.statefulsets.get("va-0f8a6a1e")?.spec?.replicas).toBe(1);
-    expect(t.observed).toEqual([{ id: ID, body: { generation: 1, replicas_ready: 0, pod_phase: null, reason: null, disk_deleted: true } }]);
+    expect(t.store.statefulsets.get(STS)?.spec?.replicas).toBe(1);
+    expect(envOf(t.store.statefulsets.get(STS)).AGENT_HUB_LAUNCH_TOKEN).toBe("ahv_new");
+    expect(t.observed).toEqual([{ id: ID, body: { generation: 1, replicas_ready: 0, pod_phase: null, reason: null, disk_deleted: false } }]);
   });
 
-  it("should leave the Secret alone when the claim returns no token", async () => {
+  it("should replace the token the StatefulSet holds when the claim mints a new one", async () => {
+    const t = setup([[agent({ generation: 4, launch_token: "ahv_new" })]]);
+    t.store.statefulsets.set(STS, existing({ desired: "stopped", generation: 3 }));
+
+    await t.pass();
+
+    expect(envOf(t.store.statefulsets.get(STS)).AGENT_HUB_LAUNCH_TOKEN).toBe("ahv_new");
+  });
+
+  it("should keep the token the running pod holds when the claim returns none", async () => {
+    const t = setup([[agent()]]);
+    t.store.statefulsets.set(STS, existing());
+
+    await t.pass();
+
+    expect(envOf(t.store.statefulsets.get(STS)).AGENT_HUB_LAUNCH_TOKEN).toBe("ahv_old");
+  });
+
+  it("should fail the agent's apply when there is no token to give the pod", async () => {
     const t = setup([[agent()]]);
 
-    await t.pass();
-
-    expect(t.store.secrets.size).toBe(0);
-    expect(t.calls.some((call) => call.startsWith("apply secrets"))).toBe(false);
-    expect(t.store.statefulsets.has("va-0f8a6a1e")).toBe(true);
+    expect(await t.pass()).toMatchObject({ errors: 1, reported: 0 });
+    expect(t.store.statefulsets.size).toBe(0);
+    expect(t.logs.find((entry) => entry.message === "could not apply")?.fields?.error).toMatch(/no launch token/);
   });
 
-  it("should never log the launch token", async () => {
-    const t = setup([[agent({ launch_token: "ahv_token" })]]);
+  it("should never log the launch token or the StatefulSet's spec", async () => {
+    const t = setup([[agent({ launch_token: "ahv_new" })], [agent({ id: OTHER })]]);
+    t.store.statefulsets.set("va-1a2b3c4d", existing({ id: OTHER }, "ahv_held"));
 
     await t.pass();
+    await t.pass();
 
-    expect(JSON.stringify(t.logs)).not.toContain("ahv_token");
+    const logged = JSON.stringify(t.logs);
+    expect(logged).not.toContain("ahv_new");
+    expect(logged).not.toContain("ahv_held");
+    expect(logged).not.toContain("AGENT_HUB_URL");
     expect(t.logs.find((entry) => entry.message === "applied")?.fields).toMatchObject({ launch_token: true });
   });
 
   it("should keep an existing StatefulSet's disk when it applies the spec again", async () => {
     const t = setup([[agent({ generation: 2 })]]);
-    t.store.statefulsets.set("va-0f8a6a1e", statefulSet(agent(), { ...SETTINGS.agent, diskSize: "16Gi" }));
+    t.store.statefulsets.set(STS, statefulSet(agent(), { ...SETTINGS.agent, diskSize: "16Gi" }, "ahv_old"));
 
     await t.pass();
 
-    expect(JSON.stringify(t.store.statefulsets.get("va-0f8a6a1e"))).toContain('"storage":"16Gi"');
+    expect(JSON.stringify(t.store.statefulsets.get(STS))).toContain('"storage":"16Gi"');
+  });
+
+  it("should recreate the StatefulSet, and with it a fresh disk, when an agent whose disk expired is started", async () => {
+    const t = setup([[agent({ generation: 5, launch_token: "ahv_new" })]]);
+
+    await t.pass();
+
+    expect(t.calls).toContain(`apply statefulsets ${STS}`);
+    expect(JSON.stringify(t.store.statefulsets.get(STS))).toContain('"storage":"32Gi"');
   });
 
   it("should report a running agent again when what is seen changes, and stop watching once its pod is failing", async () => {
-    const t = setup([[agent()]]);
+    const t = setup([[agent({ launch_token: "ahv_new" })]]);
     await t.pass();
     expect(t.observed).toHaveLength(1);
 
     await t.pass();
     expect(t.observed).toHaveLength(1);
 
-    t.store.pods.set("va-0f8a6a1e-0", waiting("ImagePullBackOff"));
+    t.store.pods.set(POD, waiting("ImagePullBackOff"));
     await t.pass();
     expect(t.observed.at(-1)?.body).toMatchObject({ pod_phase: "Pending", reason: "ImagePullBackOff" });
-
-    t.store.pods.set("va-0f8a6a1e-0", waiting("ErrImagePull"));
-    await t.pass();
-    expect(t.observed).toHaveLength(2);
     expect(t.state.watching.size).toBe(0);
   });
 
   it("should stop watching a running agent once a replica is ready", async () => {
-    const t = setup([[agent()]]);
+    const t = setup([[agent({ launch_token: "ahv_new" })]]);
     await t.pass();
 
-    ready(t.store.statefulsets.get("va-0f8a6a1e"), 1);
-    t.store.pods.set("va-0f8a6a1e-0", pod("Running"));
+    ready(t.store.statefulsets.get(STS), 1);
+    t.store.pods.set(POD, pod("Running"));
     await t.pass();
 
     expect(t.observed.at(-1)?.body).toMatchObject({ replicas_ready: 1, pod_phase: "Running" });
@@ -301,7 +339,7 @@ describe("reconcilePass", () => {
 
   it("should stop watching a running agent that never comes up once the watch has run its course", async () => {
     let now = 0;
-    const t = setup([[agent()]], { now: () => now });
+    const t = setup([[agent({ launch_token: "ahv_new" })]], { now: () => now });
     await t.pass();
 
     now = RUNNING_WATCH_MS;
@@ -311,29 +349,29 @@ describe("reconcilePass", () => {
   });
 
   it("should report a pod with no phase yet as Pending", async () => {
-    const t = setup([[agent()]]);
-    t.store.pods.set("va-0f8a6a1e-0", { apiVersion: "v1", kind: "Pod", metadata: { name: "va-0f8a6a1e-0" } });
+    const t = setup([[agent({ launch_token: "ahv_new" })]]);
+    t.store.pods.set(POD, { apiVersion: "v1", kind: "Pod", metadata: { name: POD } });
 
     await t.pass();
 
     expect(t.observed[0]?.body.pod_phase).toBe("Pending");
   });
 
-  it("should scale a stopped agent to zero and report only once its pod has gone", async () => {
+  it("should stop an agent by scaling it to zero, keeping the StatefulSet and its disk, and report once the pod has gone", async () => {
     const t = setup([[agent({ desired: "stopped", generation: 2 })]]);
-    t.store.statefulsets.set("va-0f8a6a1e", statefulSet(agent(), SETTINGS.agent));
-    t.store.pods.set("va-0f8a6a1e-0", pod("Running"));
-    t.store.persistentvolumeclaims.set("work-va-0f8a6a1e-0", PVC);
+    t.store.statefulsets.set(STS, existing());
+    t.store.pods.set(POD, pod("Running"));
 
     expect(await t.pass()).toMatchObject({ claimed: 1, reported: 0 });
-    expect(t.store.statefulsets.get("va-0f8a6a1e")?.spec?.replicas).toBe(0);
+    expect(t.calls).toContain(`scale ${STS} 0`);
+    expect(t.store.statefulsets.get(STS)?.spec?.replicas).toBe(0);
     expect(t.observed).toEqual([]);
 
-    t.store.pods.delete("va-0f8a6a1e-0");
+    t.store.pods.delete(POD);
     await t.pass();
 
-    expect(t.observed).toEqual([{ id: ID, body: { generation: 2, replicas_ready: 0, pod_phase: null, reason: null, disk_deleted: false } }]);
-    expect(t.store.persistentvolumeclaims.has("work-va-0f8a6a1e-0")).toBe(true);
+    expect(t.observed).toEqual([{ id: ID, body: { ...GONE, generation: 2, disk_deleted: false } }]);
+    expect(t.calls.some((call) => call.startsWith("delete"))).toBe(false);
     expect(t.state.watching.size).toBe(0);
   });
 
@@ -342,51 +380,63 @@ describe("reconcilePass", () => {
 
     await t.pass();
 
-    expect(t.calls.some((call) => call.startsWith("scale"))).toBe(false);
-    expect(t.observed).toEqual([{ id: ID, body: { generation: 2, replicas_ready: 0, pod_phase: null, reason: null, disk_deleted: true } }]);
+    expect(t.calls.some((call) => /^(scale|delete|apply) /.test(call))).toBe(false);
+    expect(t.observed).toEqual([{ id: ID, body: { ...GONE, generation: 2 } }]);
   });
 
-  it("should delete a stopped agent's expired disk and report it deleted", async () => {
+  it("should delete a stopped agent's StatefulSet, and so its disk, when its disk has expired, and report it deleted once gone", async () => {
     const t = setup([[agent({ desired: "stopped", generation: 2, delete_disk: true })]]);
-    t.store.statefulsets.set("va-0f8a6a1e", statefulSet(agent({ desired: "stopped" }), SETTINGS.agent));
-    t.store.persistentvolumeclaims.set("work-va-0f8a6a1e-0", PVC);
+    t.store.statefulsets.set(STS, existing({ desired: "stopped" }));
 
     await t.pass();
 
-    expect(t.calls.indexOf("scale va-0f8a6a1e 0")).toBeLessThan(t.calls.indexOf("delete persistentvolumeclaims work-va-0f8a6a1e-0"));
-    expect(t.store.persistentvolumeclaims.size).toBe(0);
-    expect(t.store.statefulsets.has("va-0f8a6a1e")).toBe(true);
-    expect(t.observed[0]?.body).toMatchObject({ disk_deleted: true });
+    expect(t.calls).toContain(`delete statefulsets ${STS}`);
+    expect(t.calls.some((call) => call.startsWith("scale"))).toBe(false);
+    expect(t.observed).toEqual([{ id: ID, body: { ...GONE, generation: 2 } }]);
   });
 
-  it("should delete a deleted agent's StatefulSet, Secret and disk and report once they are gone", async () => {
+  it("should delete a deleted agent's StatefulSet and report once it and its pod are gone", async () => {
     const t = setup([[agent({ desired: "deleted", generation: 3, delete_disk: true })]]);
-    t.store.statefulsets.set("va-0f8a6a1e", statefulSet(agent(), SETTINGS.agent));
-    t.store.secrets.set("va-0f8a6a1e-launch", { apiVersion: "v1", kind: "Secret", metadata: { name: "va-0f8a6a1e-launch", labels: labels(ID) } });
-    t.store.persistentvolumeclaims.set("work-va-0f8a6a1e-0", PVC);
+    t.store.statefulsets.set(STS, existing());
+    t.store.pods.set(POD, pod("Running"));
 
     await t.pass();
-
-    expect([t.store.statefulsets.size, t.store.secrets.size, t.store.persistentvolumeclaims.size]).toEqual([0, 0, 0]);
-    expect(t.observed).toEqual([{ id: ID, body: { generation: 3, replicas_ready: 0, pod_phase: null, reason: null, disk_deleted: true } }]);
-  });
-
-  it("should hold a deleted agent's report while its pod is still terminating", async () => {
-    const t = setup([[agent({ desired: "deleted", generation: 3, delete_disk: true })]]);
-    t.store.pods.set("va-0f8a6a1e-0", pod("Running"));
-
-    await t.pass();
+    expect(t.store.statefulsets.size).toBe(0);
     expect(t.observed).toEqual([]);
     expect(t.state.watching.has(ID)).toBe(true);
 
     t.store.pods.clear();
     await t.pass();
-    expect(t.observed).toHaveLength(1);
+    expect(t.observed).toEqual([{ id: ID, body: { ...GONE, generation: 3 } }]);
+  });
+
+  it.each([
+    ["deleted", agent({ desired: "deleted", delete_disk: true })],
+    ["stopped", agent({ desired: "stopped" })],
+    ["stopped with an expired disk", agent({ desired: "stopped", delete_disk: true })],
+    ["running", agent({ launch_token: "ahv_new" })]
+  ])("should refuse to touch a StatefulSet of the same name not labelled as the agent's when it is %s", async (_label, claimed) => {
+    const t = setup([[claimed]]);
+    t.store.statefulsets.set(STS, { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: STS, labels: { app: "dtsse-pr-1234" } } });
+
+    expect(await t.pass()).toMatchObject({ errors: 1 });
+
+    expect(t.store.statefulsets.get(STS)?.metadata.labels).toEqual({ app: "dtsse-pr-1234" });
+    expect(t.calls.some((call) => /^(apply|delete|scale) /.test(call))).toBe(false);
+    expect(t.logs.find((entry) => entry.message === "could not apply")?.fields?.error).toMatch(/refusing to touch/);
+  });
+
+  it("should refuse to touch a StatefulSet labelled as another virtual agent's", async () => {
+    const t = setup([[agent({ desired: "deleted", delete_disk: true })]]);
+    t.store.statefulsets.set(STS, { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: STS, labels: labels(OTHER) } });
+
+    expect(await t.pass()).toMatchObject({ errors: 1 });
+    expect(t.store.statefulsets.has(STS)).toBe(true);
   });
 
   it("should carry on with the other agents when one cannot be applied", async () => {
-    const t = setup([[agent(), agent({ id: OTHER })]]);
-    t.failing.add("apply statefulsets va-0f8a6a1e");
+    const t = setup([[agent({ launch_token: "a" }), agent({ id: OTHER, launch_token: "b" })]]);
+    t.failing.add(`apply statefulsets ${STS}`);
 
     expect(await t.pass()).toEqual({ claimed: 2, reported: 1, errors: 1, orphans: 0 });
 
@@ -397,23 +447,23 @@ describe("reconcilePass", () => {
 
   it("should count a scaling failure as that agent's error", async () => {
     const t = setup([[agent({ desired: "stopped" })]]);
-    t.store.statefulsets.set("va-0f8a6a1e", statefulSet(agent(), SETTINGS.agent));
-    t.failing.add("scale va-0f8a6a1e 0");
+    t.store.statefulsets.set(STS, existing());
+    t.failing.add(`scale ${STS} 0`);
 
     expect(await t.pass()).toMatchObject({ errors: 1, reported: 0 });
   });
 
   it("should carry on with the other agents when one cannot be observed, and keep watching it", async () => {
-    const t = setup([[agent(), agent({ id: OTHER })]]);
-    t.failing.add("get pods va-0f8a6a1e-0");
+    const t = setup([[agent({ launch_token: "a" }), agent({ id: OTHER, launch_token: "b" })]]);
+    t.failing.add(`get pods ${POD}`);
 
     expect(await t.pass()).toMatchObject({ errors: 1, reported: 1 });
     expect(t.state.watching.has(ID)).toBe(true);
-    expect(t.logs.find((entry) => entry.message === "could not observe")?.fields).toMatchObject({ id: ID, error: "get pods va-0f8a6a1e-0 failed" });
+    expect(t.logs.find((entry) => entry.message === "could not observe")?.fields).toMatchObject({ id: ID, error: `get pods ${POD} failed` });
   });
 
   it.each([404, 409])("should stop watching an agent when the hub refuses its report with %i", async (status) => {
-    const t = setup([[agent()]]);
+    const t = setup([[agent({ launch_token: "a" })]]);
     t.refusing.set(ID, new HubError("refused", status));
 
     expect(await t.pass()).toMatchObject({ errors: 1 });
@@ -421,7 +471,7 @@ describe("reconcilePass", () => {
   });
 
   it("should keep watching an agent when the hub fails its report otherwise", async () => {
-    const t = setup([[agent()]]);
+    const t = setup([[agent({ launch_token: "a" })]]);
     t.refusing.set(ID, new HubError("unavailable", 503));
 
     await t.pass();
@@ -430,53 +480,13 @@ describe("reconcilePass", () => {
   });
 
   it("should replace a watch when the agent is claimed again", async () => {
-    const t = setup([[agent()], [agent({ desired: "stopped", generation: 2 })]]);
+    const t = setup([[agent({ launch_token: "a" })], [agent({ desired: "stopped", generation: 2 })]]);
     await t.pass();
     expect(t.state.watching.get(ID)?.agent.desired).toBe("running");
 
     await t.pass();
 
     expect(t.observed.at(-1)).toEqual({ id: ID, body: expect.objectContaining({ generation: 2 }) });
-  });
-
-  it("should leave an agent alone and say so loudly when the hub's pvc_name is not the StatefulSet's PVC", async () => {
-    const t = setup([[agent({ desired: "deleted", delete_disk: true, pvc_name: "va-0f8a6a1e" }), agent({ id: OTHER })]]);
-    t.store.persistentvolumeclaims.set("va-0f8a6a1e", { ...PVC, metadata: { ...PVC.metadata, name: "va-0f8a6a1e" } });
-
-    expect(await t.pass()).toMatchObject({ claimed: 2, errors: 1, reported: 1 });
-
-    expect(t.calls.some((call) => call.includes("va-0f8a6a1e"))).toBe(false);
-    expect(t.state.watching.has(ID)).toBe(false);
-    expect(t.logs.find((entry) => entry.level === "error")).toMatchObject({
-      message: expect.stringContaining("pvc_name IS NOT THE STATEFULSET'S PVC"),
-      fields: { id: ID, pvc_name: "va-0f8a6a1e", expected: "work-va-0f8a6a1e-0" }
-    });
-  });
-
-  it.each([
-    ["StatefulSet", "statefulsets", "va-0f8a6a1e", agent({ desired: "deleted", delete_disk: true })],
-    ["Secret", "secrets", "va-0f8a6a1e-launch", agent({ desired: "deleted", delete_disk: true })],
-    ["PVC", "persistentvolumeclaims", "work-va-0f8a6a1e-0", agent({ desired: "stopped", delete_disk: true })],
-    ["StatefulSet", "statefulsets", "va-0f8a6a1e", agent({ desired: "stopped" })],
-    ["StatefulSet", "statefulsets", "va-0f8a6a1e", agent()],
-    ["Secret", "secrets", "va-0f8a6a1e-launch", agent({ launch_token: "ahv_token" })]
-  ] as const)("should refuse to touch a %s of the same name that is not labelled as the agent's", async (_label, kind, name, claimed) => {
-    const t = setup([[claimed]]);
-    (t.store[kind] as Map<string, Resource>).set(name, { apiVersion: "v1", kind: "Other", metadata: { name, labels: { app: "dtsse-pr-1234" } } });
-
-    expect(await t.pass()).toMatchObject({ errors: 1 });
-
-    expect(t.store[kind].has(name)).toBe(true);
-    expect(t.calls.some((call) => /^(apply|delete|scale) /.test(call))).toBe(false);
-    expect(t.logs.find((entry) => entry.message === "could not apply")?.fields?.error).toMatch(/refusing to touch/);
-  });
-
-  it("should refuse to touch a resource labelled as another virtual agent's", async () => {
-    const t = setup([[agent({ desired: "deleted", delete_disk: true })]]);
-    t.store.statefulsets.set("va-0f8a6a1e", { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: "va-0f8a6a1e", labels: labels(OTHER) } });
-
-    expect(await t.pass()).toMatchObject({ errors: 1 });
-    expect(t.store.statefulsets.has("va-0f8a6a1e")).toBe(true);
   });
 
   it("should fail the whole pass when the claim fails", async () => {
@@ -503,6 +513,14 @@ describe("reconcilePass", () => {
     expect(swept).toEqual([0, 30, 60]);
   });
 
+  it("should count orphans the sweep deleted", async () => {
+    const t = setup();
+    t.state.passes = 0;
+    t.store.statefulsets.set(STS, existing());
+
+    expect(await t.pass()).toMatchObject({ orphans: 1, errors: 0 });
+  });
+
   it("should count a failed sweep as an error without failing the pass", async () => {
     const t = setup();
     t.state.passes = 0;
@@ -514,88 +532,41 @@ describe("reconcilePass", () => {
 });
 
 describe("sweepOrphans", () => {
-  function resource(kind: string, name: string, id: string, deleting = false): Resource {
-    return { apiVersion: "v1", kind, metadata: { name, labels: labels(id), ...(deleting ? { deletionTimestamp: "2026-10-05T00:00:00Z" } : {}) } };
+  function managed(name: string, id: string, deleting = false): StatefulSet {
+    return {
+      apiVersion: "apps/v1",
+      kind: "StatefulSet",
+      metadata: { name, labels: labels(id), ...(deleting ? { deletionTimestamp: "2026-10-05T00:00:00Z" } : {}) }
+    };
   }
 
   function populate(store: Store): void {
-    for (const [id, sts] of [
-      [ID, "va-0f8a6a1e"],
-      [OTHER, "va-1a2b3c4d"]
-    ]) {
-      store.statefulsets.set(sts!, resource("StatefulSet", sts!, id!));
-      store.secrets.set(`${sts}-launch`, resource("Secret", `${sts}-launch`, id!));
-      store.persistentvolumeclaims.set(`work-${sts}-0`, resource("PersistentVolumeClaim", `work-${sts}-0`, id!));
-    }
+    store.statefulsets.set(STS, managed(STS, ID));
+    store.statefulsets.set("va-1a2b3c4d", managed("va-1a2b3c4d", OTHER));
   }
 
-  it("should delete what belongs to no live agent and keep what does", async () => {
-    const t = setup([], { live: [{ id: ID, statefulset_name: "va-0f8a6a1e", pvc_name: "work-va-0f8a6a1e-0" }] });
-    populate(t.store);
-
-    expect(await sweepOrphans(t.deps)).toBe(3);
-
-    expect([...t.store.statefulsets.keys()]).toEqual(["va-0f8a6a1e"]);
-    expect([...t.store.secrets.keys()]).toEqual(["va-0f8a6a1e-launch"]);
-    expect([...t.store.persistentvolumeclaims.keys()]).toEqual(["work-va-0f8a6a1e-0"]);
-    expect(t.calls).toContain("list statefulsets app.kubernetes.io/managed-by=agent-hub-orchestrator");
-  });
-
-  it("should delete a live agent's disk when the hub has recorded it deleted", async () => {
-    const t = setup([], {
-      live: [
-        { id: ID, statefulset_name: "va-0f8a6a1e", pvc_name: null },
-        { id: OTHER, statefulset_name: "va-1a2b3c4d", pvc_name: "work-va-1a2b3c4d-0" }
-      ]
-    });
+  it("should delete the StatefulSets that belong to no live agent and keep those that do", async () => {
+    const t = setup([], { live: [{ id: ID, statefulset_name: STS, pvc_name: "work-va-0f8a6a1e-0" }] });
     populate(t.store);
 
     expect(await sweepOrphans(t.deps)).toBe(1);
-    expect([...t.store.persistentvolumeclaims.keys()]).toEqual(["work-va-1a2b3c4d-0"]);
+
+    expect([...t.store.statefulsets.keys()]).toEqual([STS]);
+    expect(t.calls.filter((call) => call.startsWith("list"))).toEqual(["list statefulsets app.kubernetes.io/managed-by=agent-hub-orchestrator"]);
   });
 
-  it("should leave alone what is already being deleted", async () => {
-    const t = setup();
-    t.store.persistentvolumeclaims.set("work-va-0f8a6a1e-0", resource("PersistentVolumeClaim", "work-va-0f8a6a1e-0", ID, true));
+  it("should keep a live agent's StatefulSet when the hub has recorded its disk deleted", async () => {
+    const t = setup([], { live: [{ id: ID, statefulset_name: STS, pvc_name: null }] });
+    t.store.statefulsets.set(STS, managed(STS, ID));
 
     expect(await sweepOrphans(t.deps)).toBe(0);
-    expect(t.calls.some((call) => call.startsWith("delete"))).toBe(false);
-  });
-
-  it("should not count what had already gone when it came to delete it", async () => {
-    const t = setup();
-    t.store.statefulsets.set("va-0f8a6a1e", resource("StatefulSet", "va-0f8a6a1e", ID));
-    const original = t.deps.kube.delete;
-    t.deps.kube.delete = async (kind, name) => {
-      await original(kind, name);
-      return false;
-    };
-
-    expect(await sweepOrphans(t.deps)).toBe(0);
-  });
-
-  it("should carry on when one orphan cannot be deleted", async () => {
-    const t = setup();
-    populate(t.store);
-    t.failing.add("delete statefulsets va-0f8a6a1e");
-
-    expect(await sweepOrphans(t.deps)).toBe(5);
-    expect(t.logs.find((entry) => entry.level === "error")?.fields).toMatchObject({ kind: "statefulsets", name: "va-0f8a6a1e" });
   });
 
   it("should list only what carries the orchestrator's label and never delete anything unlabelled", async () => {
     const t = setup();
     t.store.statefulsets.set("dtsse-pr-1234", { apiVersion: "apps/v1", kind: "StatefulSet", metadata: { name: "dtsse-pr-1234" } });
-    t.store.secrets.set("dtsse-pr-1234-values", { apiVersion: "v1", kind: "Secret", metadata: { name: "dtsse-pr-1234-values", labels: { app: "x" } } });
-    t.store.persistentvolumeclaims.set("data-dtsse-pr-1234-0", { apiVersion: "v1", kind: "PersistentVolumeClaim", metadata: { name: "data-dtsse-pr-1234-0" } });
 
     expect(await sweepOrphans(t.deps)).toBe(0);
-
-    expect(t.calls.filter((call) => call.startsWith("list"))).toEqual([
-      "list statefulsets app.kubernetes.io/managed-by=agent-hub-orchestrator",
-      "list secrets app.kubernetes.io/managed-by=agent-hub-orchestrator",
-      "list persistentvolumeclaims app.kubernetes.io/managed-by=agent-hub-orchestrator"
-    ]);
     expect(t.calls.some((call) => call.startsWith("delete"))).toBe(false);
   });
 
@@ -608,20 +579,33 @@ describe("sweepOrphans", () => {
     expect(t.store.statefulsets.has("dtsse-pr-1234")).toBe(true);
   });
 
-  it("should sweep no PVCs and say so loudly when any of the hub's pvc_names is not the StatefulSet's PVC", async () => {
-    const t = setup([], {
-      live: [
-        { id: ID, statefulset_name: "va-0f8a6a1e", pvc_name: "va-0f8a6a1e" },
-        { id: OTHER, statefulset_name: "va-1a2b3c4d", pvc_name: null }
-      ]
-    });
-    populate(t.store);
+  it("should leave alone what is already being deleted", async () => {
+    const t = setup();
+    t.store.statefulsets.set(STS, managed(STS, ID, true));
 
     expect(await sweepOrphans(t.deps)).toBe(0);
+    expect(t.calls.some((call) => call.startsWith("delete"))).toBe(false);
+  });
 
-    expect(t.store.persistentvolumeclaims.size).toBe(2);
-    expect(t.calls).not.toContain("list persistentvolumeclaims app.kubernetes.io/managed-by=agent-hub-orchestrator");
-    expect(t.logs.find((entry) => entry.level === "error")?.fields).toMatchObject({ id: ID, expected: "work-va-0f8a6a1e-0" });
+  it("should not count what had already gone when it came to delete it", async () => {
+    const t = setup();
+    t.store.statefulsets.set(STS, managed(STS, ID));
+    const original = t.deps.kube.delete;
+    t.deps.kube.delete = async (kind, name) => {
+      await original(kind, name);
+      return false;
+    };
+
+    expect(await sweepOrphans(t.deps)).toBe(0);
+  });
+
+  it("should carry on when one orphan cannot be deleted", async () => {
+    const t = setup();
+    populate(t.store);
+    t.failing.add(`delete statefulsets ${STS}`);
+
+    expect(await sweepOrphans(t.deps)).toBe(1);
+    expect(t.logs.find((entry) => entry.level === "error")?.fields).toMatchObject({ kind: "statefulsets", name: STS });
   });
 
   it("should delete nothing when the hub cannot say what is live", async () => {

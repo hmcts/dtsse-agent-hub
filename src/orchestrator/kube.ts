@@ -26,19 +26,9 @@ export interface Resource {
   metadata: ObjectMeta;
 }
 
-export interface Secret extends Resource {
-  type?: string;
-  data?: Record<string, string>;
-}
-
 export interface StatefulSet extends Resource {
   spec?: { replicas?: number; [field: string]: unknown };
   status?: { replicas?: number; readyReplicas?: number };
-}
-
-export interface PersistentVolumeClaim extends Resource {
-  spec?: Record<string, unknown>;
-  status?: { phase?: string };
 }
 
 export interface ContainerState {
@@ -67,8 +57,6 @@ export interface Pod extends Resource {
 
 export interface Kinds {
   statefulsets: StatefulSet;
-  secrets: Secret;
-  persistentvolumeclaims: PersistentVolumeClaim;
   pods: Pod;
 }
 
@@ -76,8 +64,6 @@ export type Kind = keyof Kinds;
 
 const API: Record<Kind, string> = {
   statefulsets: "/apis/apps/v1",
-  secrets: "/api/v1",
-  persistentvolumeclaims: "/api/v1",
   pods: "/api/v1"
 };
 

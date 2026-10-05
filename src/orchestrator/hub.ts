@@ -1,4 +1,5 @@
 import type { TokenCredential } from "@azure/identity";
+import { withoutTrailingSlashes } from "./settings.ts";
 
 /**
  * The hub's `/api/orchestrator/**` routes in `docs/agent-api.md`, called with the orchestrator's own app-only token.
@@ -94,40 +95,47 @@ export function createHub({
   backoffMs = 500,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 }: HubOptions): Hub {
-  const base = url.replace(/\/+$/, "");
+  const base = withoutTrailingSlashes(url);
 
+  /** One attempt: the response, or the network or token failure that stopped it getting one. */
+  async function attempt(method: string, path: string, body: unknown): Promise<Response | Error> {
+    try {
+      const token = await credential.getToken(scope);
+      if (token === null) {
+        throw new Error(`no token for ${scope}`);
+      }
+      return await send(`${base}${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${token.token}`,
+          accept: "application/json",
+          ...(body === undefined ? {} : { "content-type": "application/json" })
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000)
+      });
+    } catch (error) {
+      return new Error(`${method} ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Sequential on purpose: each retry waits out the backoff after the attempt before it.
   async function call(method: string, path: string, body?: unknown): Promise<Response> {
     let failure: Error = new Error(`${method} ${path} was not attempted`);
-    for (let attempt = 1; attempt <= attempts; attempt += 1) {
-      if (attempt > 1) {
-        await sleep(backoffMs * 2 ** (attempt - 2));
+    for (let tries = 1; tries <= attempts; tries += 1) {
+      if (tries > 1) {
+        await sleep(backoffMs * 2 ** (tries - 2));
       }
-      let response: Response;
-      try {
-        const token = await credential.getToken(scope);
-        if (token === null) {
-          throw new Error(`no token for ${scope}`);
+      const outcome = await attempt(method, path, body);
+      if (outcome instanceof Error) {
+        failure = outcome;
+      } else if (outcome.ok) {
+        return outcome;
+      } else {
+        failure = new HubError(`${method} ${path}: ${outcome.status} ${await errorOf(outcome)}`, outcome.status);
+        if (!retryable(outcome.status)) {
+          break;
         }
-        response = await send(`${base}${path}`, {
-          method,
-          headers: {
-            authorization: `Bearer ${token.token}`,
-            accept: "application/json",
-            ...(body === undefined ? {} : { "content-type": "application/json" })
-          },
-          body: body === undefined ? undefined : JSON.stringify(body),
-          signal: AbortSignal.timeout(30_000)
-        });
-      } catch (error) {
-        failure = new Error(`${method} ${path}: ${error instanceof Error ? error.message : String(error)}`);
-        continue;
-      }
-      if (response.ok) {
-        return response;
-      }
-      failure = new HubError(`${method} ${path}: ${response.status} ${await errorOf(response)}`, response.status);
-      if (!retryable(response.status)) {
-        break;
       }
     }
     throw failure;
