@@ -1,3 +1,6 @@
+import { isIP } from "node:net";
+import { DEFAULT_PUBLIC_DOMAIN } from "../virtual-agents/ports.ts";
+
 /**
  * The orchestrator's environment, read once at startup. Every problem is reported together, so a misconfigured
  * deployment says everything that is wrong with it in its first log line rather than one variable per restart.
@@ -15,6 +18,11 @@ export const DEFAULT_PORT = 8080;
 /** Passes between orphan sweeps: at the default interval, every five minutes. */
 export const ORPHAN_SWEEP_EVERY = 30;
 
+export interface HostAlias {
+  ip: string;
+  hostnames: string[];
+}
+
 /** What each virtual agent's StatefulSet is built from. */
 export interface VirtualAgentSpec {
   namespace: string;
@@ -26,6 +34,10 @@ export interface VirtualAgentSpec {
   diskSize: string;
   /** `null` for the cluster's default storage class. */
   storageClass: string | null;
+  /** Extra `/etc/hosts` entries for the pod, grouped by address. */
+  hostAliases: HostAlias[];
+  /** Each exposed port's Ingress host is `<statefulset>-<port>.<publicDomain>`. */
+  publicDomain: string;
 }
 
 export interface OrchestratorSettings {
@@ -58,6 +70,37 @@ function digestPinned(image: string): boolean {
 /** A Kubernetes object name: dot-separated labels of lowercase letters, digits and inner hyphens. */
 function dnsName(value: string): boolean {
   return value.length <= 253 && value.split(".").every((label) => DNS_LABEL.test(label) && !label.startsWith("-") && !label.endsWith("-"));
+}
+
+/**
+ * `VIRTUAL_AGENT_HOST_ALIASES`: comma-separated `host=ip` pairs, for hosts whose public DNS answer the pod cannot use,
+ * as `build.hmcts.net`, which resolves to an Entra application proxy that needs an interactive sign-in while its
+ * private address answers from the preview cluster. Every bad pair is reported, as for the other settings.
+ */
+export function parseHostAliases(raw: string | undefined): { aliases: HostAlias[]; problems: string[] } {
+  const problems: string[] = [];
+  const byIp = new Map<string, string[]>();
+  const seen = new Set<string>();
+  for (const entry of (raw ?? "").split(",")) {
+    const pair = entry.trim();
+    if (pair === "") {
+      continue;
+    }
+    const [host, ip, extra] = pair.split("=").map((part) => part.trim());
+    // `split` always gives at least one part.
+    const hostname = host!.toLowerCase();
+    if (extra !== undefined || ip === undefined || hostname === "" || !dnsName(hostname) || isIP(ip) === 0) {
+      problems.push(`VIRTUAL_AGENT_HOST_ALIASES has "${pair}", which is not host=ip with a DNS name and an IP address`);
+      continue;
+    }
+    if (seen.has(hostname)) {
+      problems.push(`VIRTUAL_AGENT_HOST_ALIASES names ${hostname} more than once`);
+      continue;
+    }
+    seen.add(hostname);
+    byIp.set(ip, [...(byIp.get(ip) ?? []), hostname]);
+  }
+  return { aliases: [...byIp].map(([ip, hostnames]) => ({ ip, hostnames })), problems };
 }
 
 function text(env: Environment, name: string): string | undefined {
@@ -127,6 +170,12 @@ export function orchestratorSettings(env: Environment, namespace: string | undef
   const storageClass = text(env, "VIRTUAL_AGENT_STORAGE_CLASS") ?? null;
   check(storageClass === null || dnsName(storageClass), "VIRTUAL_AGENT_STORAGE_CLASS must be a Kubernetes object name");
 
+  const hostAliases = parseHostAliases(env.VIRTUAL_AGENT_HOST_ALIASES);
+  problems.push(...hostAliases.problems);
+
+  const publicDomain = text(env, "VIRTUAL_AGENT_PUBLIC_DOMAIN")?.toLowerCase() ?? DEFAULT_PUBLIC_DOMAIN;
+  check(dnsName(publicDomain), "VIRTUAL_AGENT_PUBLIC_DOMAIN must be a DNS name, as preview.platform.hmcts.net");
+
   const audience = text(env, "AGENT_HUB_AUDIENCE") ?? DEFAULT_HUB_AUDIENCE;
   const intervalSeconds = whole("ORCHESTRATOR_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS, 3600);
   const port = whole("ORCHESTRATOR_PORT", DEFAULT_PORT, 65535);
@@ -142,7 +191,17 @@ export function orchestratorSettings(env: Environment, namespace: string | undef
     intervalMs: intervalSeconds * 1000,
     orphanSweepEvery: ORPHAN_SWEEP_EVERY,
     port,
-    agent: { namespace: ns!, image: image!, serviceAccount, hubUrl: agentHubUrl, tenantId: tenantId!, diskSize, storageClass }
+    agent: {
+      namespace: ns!,
+      image: image!,
+      serviceAccount,
+      hubUrl: agentHubUrl,
+      tenantId: tenantId!,
+      diskSize,
+      storageClass,
+      hostAliases: hostAliases.aliases,
+      publicDomain
+    }
   };
 }
 

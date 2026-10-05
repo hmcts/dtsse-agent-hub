@@ -3,6 +3,8 @@
  * secrets reach `process.env` only once `instrumentation.ts` has loaded them.
  */
 
+import { DEFAULT_PUBLIC_DOMAIN } from "./ports.ts";
+
 export type Environment = Readonly<Record<string, string | undefined>>;
 
 export const DEFAULT_IDLE_MINUTES = 120;
@@ -74,4 +76,9 @@ export function orchestratorOids(env: Environment = process.env): string[] {
 export function orchestratorRole(env: Environment = process.env): string | null {
   const role = env.ORCHESTRATOR_ROLE?.trim();
   return role || null;
+}
+
+/** The domain each exposed port's host is under; the orchestrator reads the same variable for its Ingress hosts. */
+export function publicDomain(env: Environment = process.env): string {
+  return env.VIRTUAL_AGENT_PUBLIC_DOMAIN?.trim() || DEFAULT_PUBLIC_DOMAIN;
 }

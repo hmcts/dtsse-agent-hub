@@ -1,11 +1,14 @@
+import { publicHost, publicUrl } from "../virtual-agents/ports.ts";
+import { DEFAULT_SIZE, isVirtualAgentSize, SIZE_RESOURCES } from "../virtual-agents/size.ts";
 import type { ClaimedAgent } from "./hub.ts";
-import type { StatefulSet } from "./kube.ts";
+import type { Ingress, Service, StatefulSet } from "./kube.ts";
 import type { VirtualAgentSpec } from "./settings.ts";
 
 /**
- * What the orchestrator applies for each virtual agent: a StatefulSet and nothing else. The preview cluster's
- * Gatekeeper refuses a pod no controller owns; the launch token is in the pod template rather than a Secret, and the
- * disk is the claim template's, deleted with the StatefulSet, so the orchestrator needs no access to Secrets or PVCs.
+ * What the orchestrator applies for each virtual agent: a StatefulSet, and a Service and an Ingress while it exposes
+ * web ports. The preview cluster's Gatekeeper refuses a pod no controller owns; the launch token is in the pod
+ * template rather than a Secret, and the disk is the claim template's, deleted with the StatefulSet, so the
+ * orchestrator needs no access to Secrets or PVCs.
  */
 
 export const MANAGED_BY = "agent-hub-orchestrator";
@@ -13,6 +16,7 @@ export const MANAGED_SELECTOR = `app.kubernetes.io/managed-by=${MANAGED_BY}`;
 export const ID_LABEL = "agent-hub.hmcts.net/virtual-agent-id";
 export const GENERATION_ANNOTATION = "agent-hub.hmcts.net/generation";
 export const LAUNCH_TOKEN_ENV = "AGENT_HUB_LAUNCH_TOKEN";
+export const PUBLIC_URLS_ENV = "AGENT_HUB_PUBLIC_URLS";
 
 const CONTAINER = "agent";
 const CLAIM_TEMPLATE = "work";
@@ -82,6 +86,7 @@ export function carriedOver(existing: StatefulSet | null): Carried {
 }
 
 function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
+  const ports = exposedPorts(agent);
   return [
     { name: "AGENT_HUB_URL", value: spec.hubUrl },
     { name: "AGENT_HUB_VIRTUAL", value: "1" },
@@ -90,8 +95,23 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
     { name: "AZURE_TENANT_ID", value: spec.tenantId },
     { name: "DISABLE_AUTOUPDATER", value: "1" },
     { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
-    { name: LAUNCH_TOKEN_ENV, value: launchToken }
+    { name: LAUNCH_TOKEN_ENV, value: launchToken },
+    ...(ports.length === 0
+      ? []
+      : [{ name: PUBLIC_URLS_ENV, value: ports.map((port) => `${port}=${publicUrl(agent.statefulset_name, port, spec.publicDomain)}`).join(",") }])
   ];
+}
+
+/**
+ * The CPU and memory of the agent's size, and the same scratch space for every size. Built afresh on every apply, so
+ * a StatefulSet made before a size change gets the new resources the next time it is applied.
+ */
+export function resources(agent: Pick<ClaimedAgent, "size">) {
+  const size = SIZE_RESOURCES[isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE];
+  return {
+    requests: { ...size.requests, "ephemeral-storage": "2Gi" },
+    limits: { ...size.limits, "ephemeral-storage": "10Gi" }
+  };
 }
 
 /**
@@ -120,6 +140,7 @@ export function statefulSet(agent: ClaimedAgent, spec: VirtualAgentSpec, launchT
           serviceAccountName: spec.serviceAccount,
           automountServiceAccountToken: false,
           terminationGracePeriodSeconds: 60,
+          ...(spec.hostAliases.length === 0 ? {} : { hostAliases: spec.hostAliases }),
           securityContext: {
             runAsUser: UID,
             runAsGroup: UID,
@@ -134,10 +155,7 @@ export function statefulSet(agent: ClaimedAgent, spec: VirtualAgentSpec, launchT
               command: ["virtual-agent-boot"],
               env: env(agent, spec, launchToken),
               securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
-              resources: {
-                requests: { cpu: "1", memory: "4Gi", "ephemeral-storage": "2Gi" },
-                limits: { cpu: "4", memory: "8Gi", "ephemeral-storage": "10Gi" }
-              },
+              resources: resources(agent),
               volumeMounts: [
                 { name: CLAIM_TEMPLATE, mountPath: "/workspace", subPath: "workspace" },
                 { name: CLAIM_TEMPLATE, mountPath: `${HOME}/.claude`, subPath: "claude" },
@@ -162,6 +180,48 @@ export function statefulSet(agent: ClaimedAgent, spec: VirtualAgentSpec, launchT
           }
         }
       ]
+    }
+  };
+}
+
+export function exposedPorts(agent: Pick<ClaimedAgent, "exposed_ports">): number[] {
+  return Array.isArray(agent.exposed_ports) ? agent.exposed_ports : [];
+}
+
+function portName(port: number): string {
+  return `p-${port}`;
+}
+
+/**
+ * The agent's exposed ports in front of its pod, named as the StatefulSet. Labelled as the StatefulSet, so the
+ * orchestrator only ever changes or deletes its own, and selecting the pod by the agent's id alone.
+ */
+export function service(agent: ClaimedAgent, spec: VirtualAgentSpec): Service {
+  return {
+    apiVersion: "v1",
+    kind: "Service",
+    metadata: { name: agent.statefulset_name, namespace: spec.namespace, labels: labels(agent.id) },
+    spec: {
+      type: "ClusterIP",
+      selector: { [ID_LABEL]: agent.id },
+      ports: exposedPorts(agent).map((port) => ({ name: portName(port), port, targetPort: port, protocol: "TCP" }))
+    }
+  };
+}
+
+/** One host per exposed port, through Traefik with TLS, each to the Service on that port. */
+export function ingress(agent: ClaimedAgent, spec: VirtualAgentSpec): Ingress {
+  const name = agent.statefulset_name;
+  return {
+    apiVersion: "networking.k8s.io/v1",
+    kind: "Ingress",
+    metadata: { name, namespace: spec.namespace, labels: labels(agent.id), annotations: { "traefik.ingress.kubernetes.io/router.tls": "true" } },
+    spec: {
+      ingressClassName: "traefik",
+      rules: exposedPorts(agent).map((port) => ({
+        host: publicHost(name, port, spec.publicDomain),
+        http: { paths: [{ path: "/", pathType: "Prefix", backend: { service: { name, port: { number: port } } } }] }
+      }))
     }
   };
 }

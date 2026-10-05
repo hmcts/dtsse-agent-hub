@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ClaimedAgent } from "./hub.ts";
 import type { StatefulSet } from "./kube.ts";
-import { carriedOver, podName, statefulSet } from "./manifests.ts";
+import { carriedOver, exposedPorts, ingress, podName, resources, service, statefulSet } from "./manifests.ts";
 import type { VirtualAgentSpec } from "./settings.ts";
 
 const ID = "0f8a6a1e-1234-4000-8000-000000000001";
@@ -25,7 +25,9 @@ const SPEC: VirtualAgentSpec = {
   hubUrl: "https://agent-hub.aat.platform.hmcts.net",
   tenantId: "tenant",
   diskSize: "32Gi",
-  storageClass: null
+  storageClass: null,
+  hostAliases: [],
+  publicDomain: "preview.platform.hmcts.net"
 };
 
 const LABELS = {
@@ -185,5 +187,98 @@ describe("carriedOver", () => {
     ]
   ])("should carry nothing when %s", (_label, existing) => {
     expect(carriedOver(existing)).toEqual({});
+  });
+});
+
+describe("resources", () => {
+  it.each([
+    ["small", { cpu: "1", memory: "4Gi" }, { cpu: "4", memory: "8Gi" }],
+    ["medium", { cpu: "2", memory: "8Gi" }, { cpu: "4", memory: "16Gi" }],
+    ["large", { cpu: "4", memory: "16Gi" }, { cpu: "8", memory: "32Gi" }]
+  ] as const)("should give a %s agent its CPU and memory with the same scratch space as every size", (size, requests, limits) => {
+    expect(resources({ size })).toEqual({
+      requests: { ...requests, "ephemeral-storage": "2Gi" },
+      limits: { ...limits, "ephemeral-storage": "10Gi" }
+    });
+  });
+
+  it.each([
+    ["no size", {}],
+    ["a size it does not know", { size: "huge" as never }]
+  ])("should size the agent small when the claim has %s", (_label, agent) => {
+    expect(resources(agent)).toEqual(resources({ size: "small" }));
+  });
+
+  it("should put the claim's size on the container when the StatefulSet is built", () => {
+    const [container] = podSpec(statefulSet({ ...AGENT, size: "large" }, SPEC, TOKEN)).containers;
+
+    expect(container!.resources).toEqual(resources({ size: "large" }));
+  });
+});
+
+describe("host aliases", () => {
+  it("should add the configured host aliases to the pod when there are some", () => {
+    const aliases = [{ ip: "10.10.73.250", hostnames: ["build.hmcts.net"] }];
+
+    expect(podSpec(statefulSet(AGENT, { ...SPEC, hostAliases: aliases }, TOKEN)).hostAliases).toEqual(aliases);
+  });
+
+  it("should leave host aliases out when none are configured", () => {
+    expect(podSpec(statefulSet(AGENT, SPEC, TOKEN))).not.toHaveProperty("hostAliases");
+  });
+});
+
+describe("exposed ports", () => {
+  const EXPOSED: ClaimedAgent = { ...AGENT, exposed_ports: [3000, 8080] };
+
+  it("should treat a claim with no exposed ports as exposing none", () => {
+    expect(exposedPorts(AGENT)).toEqual([]);
+    expect(exposedPorts({ exposed_ports: [3000] })).toEqual([3000]);
+  });
+
+  it("should give the pod each port's public URL when it exposes ports", () => {
+    const [container] = podSpec(statefulSet(EXPOSED, SPEC, TOKEN)).containers;
+
+    expect(container!.env.at(-1)).toEqual({
+      name: "AGENT_HUB_PUBLIC_URLS",
+      value: "3000=https://va-0f8a6a1e-3000.preview.platform.hmcts.net,8080=https://va-0f8a6a1e-8080.preview.platform.hmcts.net"
+    });
+  });
+
+  it("should give the pod no public URLs when it exposes no ports", () => {
+    const [container] = podSpec(statefulSet(AGENT, SPEC, TOKEN)).containers;
+
+    expect(container!.env.map((entry) => entry.name)).not.toContain("AGENT_HUB_PUBLIC_URLS");
+  });
+
+  it("should put a ClusterIP Service labelled as the agent's in front of its pod with one port per exposed port", () => {
+    expect(service(EXPOSED, SPEC)).toEqual({
+      apiVersion: "v1",
+      kind: "Service",
+      metadata: { name: "va-0f8a6a1e", namespace: "dtsse", labels: LABELS },
+      spec: {
+        type: "ClusterIP",
+        selector: { "agent-hub.hmcts.net/virtual-agent-id": ID },
+        ports: [
+          { name: "p-3000", port: 3000, targetPort: 3000, protocol: "TCP" },
+          { name: "p-8080", port: 8080, targetPort: 8080, protocol: "TCP" }
+        ]
+      }
+    });
+  });
+
+  it("should route one Traefik TLS host per exposed port to the Service on that port", () => {
+    expect(ingress(EXPOSED, { ...SPEC, publicDomain: "example.net" })).toEqual({
+      apiVersion: "networking.k8s.io/v1",
+      kind: "Ingress",
+      metadata: { name: "va-0f8a6a1e", namespace: "dtsse", labels: LABELS, annotations: { "traefik.ingress.kubernetes.io/router.tls": "true" } },
+      spec: {
+        ingressClassName: "traefik",
+        rules: [3000, 8080].map((port) => ({
+          host: `va-0f8a6a1e-${port}.example.net`,
+          http: { paths: [{ path: "/", pathType: "Prefix", backend: { service: { name: "va-0f8a6a1e", port: { number: port } } } }] }
+        }))
+      }
+    });
   });
 });

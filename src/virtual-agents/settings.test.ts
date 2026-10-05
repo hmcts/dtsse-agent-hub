@@ -9,6 +9,7 @@ import {
   orchestratorLeaseSeconds,
   orchestratorOids,
   orchestratorRole,
+  publicDomain,
   VirtualAgentConfigurationError,
   virtualAgentsEnabled
 } from "./settings.ts";
@@ -88,5 +89,16 @@ describe("orchestratorRole", () => {
 
   it.each([undefined, "", "  "])("should require no role when it is %j", (value) => {
     expect(orchestratorRole({ ORCHESTRATOR_ROLE: value })).toBeNull();
+  });
+});
+
+describe("publicDomain", () => {
+  it("should be preview.platform.hmcts.net when VIRTUAL_AGENT_PUBLIC_DOMAIN is not set", () => {
+    expect(publicDomain({})).toBe("preview.platform.hmcts.net");
+    expect(publicDomain({ VIRTUAL_AGENT_PUBLIC_DOMAIN: " " })).toBe("preview.platform.hmcts.net");
+  });
+
+  it("should be the setting when it is set", () => {
+    expect(publicDomain({ VIRTUAL_AGENT_PUBLIC_DOMAIN: " example.net " })).toBe("example.net");
   });
 });

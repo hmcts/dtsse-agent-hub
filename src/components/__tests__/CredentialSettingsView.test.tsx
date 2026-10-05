@@ -3,7 +3,7 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type CredentialActions, CredentialSettingsView } from "@/components/credentials/CredentialSettingsView";
+import { type CredentialActions, CredentialSettingsView, CredentialsSection } from "@/components/credentials/CredentialSettingsView";
 import type { CredentialStatus } from "@/credentials/store";
 import type { CredentialSettings } from "@/web/data";
 
@@ -142,5 +142,27 @@ describe("CredentialSettingsView", () => {
     expect(screen.getByText("this deployment has no credentials vault")).toBeTruthy();
     expect(screen.queryByRole("form")).toBeNull();
     expect(card("Model")).toBeTruthy();
+  });
+});
+
+describe("CredentialsSection", () => {
+  it("should head the credentials as a section the virtual agents page links to when it is part of that page", () => {
+    render(<CredentialsSection settings={{ available: true, modelRoute: "bedrock", statuses: NOTHING_STORED }} actions={actions()} />);
+
+    const section = screen.getByRole("region", { name: "Credentials" });
+    expect(section.id).toBe("credentials");
+    expect(within(section).getByRole("heading", { level: 2, name: "Credentials" })).toBeTruthy();
+    expect(within(section).getByRole("form", { name: "Save GitHub token" })).toBeTruthy();
+  });
+});
+
+describe("the Jenkins API token card", () => {
+  it("should say it is optional and link to where the token is made when the viewer's credentials are listed", () => {
+    show({ available: true, modelRoute: "bedrock", statuses: [...NOTHING_STORED, status("jenkins")] });
+
+    const jenkins = card("Jenkins API token");
+    expect(jenkins.textContent).toContain("Optional");
+    expect(within(jenkins).getByRole("link").getAttribute("href")).toBe("https://build.hmcts.net/me/configure");
+    expect(within(jenkins).getByRole("form", { name: "Save Jenkins API token" })).toBeTruthy();
   });
 });

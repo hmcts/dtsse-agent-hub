@@ -6,6 +6,9 @@ import type { ModelRoute } from "../viewer/identity.ts";
 import { lastActivity } from "./cleanup.ts";
 import type { VirtualAgentDesired, VirtualAgentStatus } from "./lifecycle.ts";
 import { type LoginView, loginViews } from "./logins.ts";
+import { publicUrl } from "./ports.ts";
+import { publicDomain } from "./settings.ts";
+import type { VirtualAgentSize } from "./size.ts";
 import type { StopReason } from "./stop.ts";
 import { findVirtualAgent, listVirtualAgents, type VirtualAgentRow } from "./store.ts";
 
@@ -18,6 +21,9 @@ export interface VirtualAgentCard {
   status: VirtualAgentStatus;
   statusDetail: string | null;
   modelRoute: ModelRoute;
+  size: VirtualAgentSize;
+  /** Each exposed port with the URL it is served at. */
+  exposedPorts: { port: number; url: string }[];
   stopReason: StopReason | null;
   /** The latest pod report or transcript entry, or `null` before there has been either. */
   lastActivityAt: string | null;
@@ -33,6 +39,8 @@ export interface VirtualAgentDetail {
   logins: LoginView[];
   /** What this agent needs stored: GitHub and Azure always, and a Claude token on the owner's own licence. */
   needed: CredentialKind[];
+  /** What it can use if stored, but starts without. */
+  optional: CredentialKind[];
 }
 
 function iso(date: Date | null | undefined): string | null {
@@ -55,6 +63,8 @@ function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCa
     status: row.status,
     statusDetail: row.statusDetail,
     modelRoute: row.modelRoute,
+    size: row.size,
+    exposedPorts: row.exposedPorts.map((port) => ({ port, url: publicUrl(row.statefulsetName, port, publicDomain()) })),
     stopReason: row.stopReason,
     lastActivityAt: iso(lastActivity(row.lastActiveAt, row.agentId === null ? undefined : newest.get(row.agentId))),
     stoppedAt: iso(row.stoppedAt),
@@ -74,6 +84,9 @@ export async function virtualAgentCards(db: Database, ownerOid: string): Promise
   return rows.map((row) => toCard(row, newest));
 }
 
+/** A Jenkins API token only adds the Jenkins tools, so the pod never waits for one. */
+export const OPTIONAL_CREDENTIALS: CredentialKind[] = ["jenkins"];
+
 export function neededCredentials(route: ModelRoute): CredentialKind[] {
   return route === "own-licence" ? ["github", "azure", "claude"] : ["github", "azure", "bedrock"];
 }
@@ -88,5 +101,5 @@ export async function virtualAgentDetail(db: Database, viewerOid: string, id: st
     return undefined;
   }
   const [newest, logins] = await Promise.all([newestEntries(db, row.agentId === null ? [] : [row.agentId]), loginViews(db, id)]);
-  return { card: toCard(row, newest), logins, needed: neededCredentials(row.modelRoute) };
+  return { card: toCard(row, newest), logins, needed: neededCredentials(row.modelRoute), optional: OPTIONAL_CREDENTIALS };
 }

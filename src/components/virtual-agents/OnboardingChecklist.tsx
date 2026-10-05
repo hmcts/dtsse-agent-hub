@@ -1,4 +1,5 @@
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { JenkinsHint } from "@/components/credentials/JenkinsHint";
 import { Section } from "@/components/Section";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
@@ -9,12 +10,13 @@ const TITLES: Record<CredentialKind, string> = {
   github: "GitHub",
   azure: "Azure",
   claude: "Claude",
-  bedrock: "Bedrock API key"
+  bedrock: "Bedrock API key",
+  jenkins: "Jenkins API token"
 };
 
 /** A kind the owner pastes here rather than signs in for through their virtual agent. */
 function isPasted(kind: CredentialKind): boolean {
-  return kind === "bedrock";
+  return kind === "bedrock" || kind === "jenkins";
 }
 
 const INPUT = "mt-1 w-96 max-w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 font-mono text-sm text-hub-text";
@@ -124,6 +126,7 @@ function Card({
           <h3 className="text-sm font-bold text-white">{TITLES[kind]}</h3>
           <span className={`text-xs ${stored ? "text-green-300" : "text-hub-muted"}`}>{stored ? "✓ Stored" : "Not stored"}</span>
         </div>
+        {kind === "jenkins" ? <JenkinsHint /> : null}
         <PasteCredential kind={kind} stored={stored} save={save} />
       </li>
     );
@@ -150,11 +153,12 @@ function Card({
 /**
  * What the virtual agent needs before it can work, one card per credential: stored, a sign-in waiting for the owner
  * with its code or a box to paste one into, or nothing yet. A Bedrock API key has no sign-in, so its card always
- * offers a box to paste the key itself. Only the owner ever sees this page.
+ * offers a box to paste the key itself. A Jenkins API token, which is optional, works the same way. Only the owner ever sees this page.
  */
 export function OnboardingChecklist({
   virtualAgentId,
   needed,
+  optional = [],
   statuses,
   logins,
   paste,
@@ -164,6 +168,8 @@ export function OnboardingChecklist({
 }: {
   virtualAgentId: string;
   needed: CredentialKind[];
+  /** Shown after the needed ones, and not counted: the agent starts without them. */
+  optional?: CredentialKind[];
   statuses: CredentialStatus[];
   logins: LoginView[];
   paste: FormAction;
@@ -178,7 +184,7 @@ export function OnboardingChecklist({
     >
       {unavailable ? <p className="pb-3 text-sm text-hub-muted">{unavailable}</p> : null}
       <ul aria-label="Sign-ins" className="-mx-4 -mb-4">
-        {needed.map((kind) => (
+        {[...needed, ...optional].map((kind) => (
           <Card
             key={kind}
             virtualAgentId={virtualAgentId}

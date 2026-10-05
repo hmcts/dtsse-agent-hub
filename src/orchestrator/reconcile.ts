@@ -1,8 +1,8 @@
 import { FAILING_REASONS } from "../virtual-agents/lifecycle.ts";
 import { type Claim, type ClaimedAgent, type Hub, HubError, type Lease, type ObservedBody } from "./hub.ts";
-import type { Kube, Pod, Resource, StatefulSet } from "./kube.ts";
+import type { Kind, Kube, Pod, Resource, StatefulSet } from "./kube.ts";
 import { describeError, type Log } from "./log.ts";
-import { carriedOver, ID_LABEL, MANAGED_BY, MANAGED_SELECTOR, podName, statefulSet } from "./manifests.ts";
+import { carriedOver, exposedPorts, ID_LABEL, ingress, MANAGED_BY, MANAGED_SELECTOR, podName, service, statefulSet } from "./manifests.ts";
 import type { OrchestratorSettings } from "./settings.ts";
 
 /**
@@ -108,22 +108,47 @@ export function owned(resource: Resource, id?: string): boolean {
   return tags["app.kubernetes.io/managed-by"] === MANAGED_BY && (id === undefined || tags[ID_LABEL] === id);
 }
 
-async function ownedStatefulSet(kube: Kube, name: string, id: string): Promise<StatefulSet | null> {
-  const found = await kube.get("statefulsets", name);
+const KIND_NAMES: Record<Kind, string> = { statefulsets: "StatefulSet", pods: "Pod", services: "Service", ingresses: "Ingress" };
+
+async function ownedResource<K extends Kind>(kube: Kube, kind: K, name: string, id: string) {
+  const found = await kube.get(kind, name);
   if (found !== null && !owned(found, id)) {
-    throw new Error(`refusing to touch StatefulSet ${name}: it is not labelled as virtual agent ${id}'s`);
+    throw new Error(`refusing to touch ${KIND_NAMES[kind]} ${name}: it is not labelled as virtual agent ${id}'s`);
   }
   return found;
 }
 
 /**
+ * A Service and an Ingress while the agent exposes ports and is not deleted, kept while it is stopped so its URLs
+ * answer 503 rather than vanish; neither otherwise. Either is checked as the agent's before it is written.
+ */
+async function expose(kube: Kube, agent: ClaimedAgent, settings: OrchestratorSettings): Promise<void> {
+  const name = agent.statefulset_name;
+  const wanted = agent.desired !== "deleted" && exposedPorts(agent).length > 0;
+  const existingService = await ownedResource(kube, "services", name, agent.id);
+  const existingIngress = await ownedResource(kube, "ingresses", name, agent.id);
+  if (wanted) {
+    await kube.apply("services", service(agent, settings.agent));
+    await kube.apply("ingresses", ingress(agent, settings.agent));
+    return;
+  }
+  if (existingIngress !== null) {
+    await kube.delete("ingresses", name);
+  }
+  if (existingService !== null) {
+    await kube.delete("services", name);
+  }
+}
+
+/**
  * Running applies the StatefulSet with the claim's new launch token, or the one its pod already holds. Stopping
  * scales it to zero, which keeps the disk. Deleting the agent or its disk deletes the StatefulSet, and its PVC
- * retention policy deletes the disk with it.
+ * retention policy deletes the disk with it. Its Service and Ingress follow its exposed ports first.
  */
 async function apply({ kube, settings }: ReconcileDeps, agent: ClaimedAgent): Promise<void> {
   const name = agent.statefulset_name;
-  const existing = await ownedStatefulSet(kube, name, agent.id);
+  const existing: StatefulSet | null = await ownedResource(kube, "statefulsets", name, agent.id);
+  await expose(kube, agent, settings);
   if (agent.desired === "running") {
     const carried = carriedOver(existing);
     const launchToken = agent.launch_token ?? carried.launchToken;
@@ -179,11 +204,14 @@ async function check({ kube, hub, log }: ReconcileDeps, watch: Watch, now: numbe
   return { done: true, reported: true };
 }
 
+/** The Ingress before the Service it routes to, and both before the StatefulSet. */
+const SWEPT = ["ingresses", "services", "statefulsets"] as const;
+
 /**
- * Deletes every StatefulSet labelled `app.kubernetes.io/managed-by=agent-hub-orchestrator` that the hub no longer
- * has an agent for, and with it that agent's disk. On standby it also deletes those of agents the hub has on another
- * cluster: they have started again there, on a fresh disk, and the pods here hold tokens the hub no longer accepts.
- * An agent with no cluster recorded is kept, since it may be this cluster's.
+ * Deletes every Ingress, Service and StatefulSet labelled `app.kubernetes.io/managed-by=agent-hub-orchestrator`
+ * that the hub no longer has an agent for, and with the StatefulSet that agent's disk. On standby it also deletes
+ * those of agents the hub has on another cluster: they have started again there, on a fresh disk, and the pods here
+ * hold tokens the hub no longer accepts. An agent with no cluster recorded is kept, since it may be this cluster's.
  *
  * The label is what scopes the sweep in a namespace other workloads share: anything without it is never listed, and
  * is skipped if it is. Nothing is deleted unless the hub has answered, so an outage cannot empty the namespace. One at
@@ -192,20 +220,22 @@ async function check({ kube, hub, log }: ReconcileDeps, watch: Watch, now: numbe
 export async function sweepOrphans({ kube, hub, settings, log }: ReconcileDeps, standby = false): Promise<number> {
   const live = new Map((await hub.live()).map((agent) => [agent.statefulset_name, agent.cluster]));
   let deleted = 0;
-  for (const resource of await kube.list("statefulsets", MANAGED_SELECTOR)) {
-    const name = resource.metadata.name;
-    const cluster = live.get(name);
-    const movedTo = standby && typeof cluster === "string" && cluster !== settings.cluster ? cluster : undefined;
-    if (!owned(resource) || (live.has(name) && movedTo === undefined) || resource.metadata.deletionTimestamp !== undefined) {
-      continue;
-    }
-    try {
-      if (await kube.delete("statefulsets", name)) {
-        deleted += 1;
-        log("info", "deleted an orphan", { kind: "statefulsets", name, ...(movedTo === undefined ? {} : { moved_to: movedTo }) });
+  for (const kind of SWEPT) {
+    for (const resource of await kube.list(kind, MANAGED_SELECTOR)) {
+      const name = resource.metadata.name;
+      const cluster = live.get(name);
+      const movedTo = standby && typeof cluster === "string" && cluster !== settings.cluster ? cluster : undefined;
+      if (!owned(resource) || (live.has(name) && movedTo === undefined) || resource.metadata.deletionTimestamp !== undefined) {
+        continue;
       }
-    } catch (error) {
-      log("error", "could not delete an orphan", { kind: "statefulsets", name, error: describeError(error) });
+      try {
+        if (await kube.delete(kind, name)) {
+          deleted += 1;
+          log("info", "deleted an orphan", { kind, name, ...(movedTo === undefined ? {} : { moved_to: movedTo }) });
+        }
+      } catch (error) {
+        log("error", "could not delete an orphan", { kind, name, error: describeError(error) });
+      }
     }
   }
   return deleted;

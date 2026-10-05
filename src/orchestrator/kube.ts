@@ -55,16 +55,28 @@ export interface Pod extends Resource {
   status?: { phase?: string; reason?: string; conditions?: PodCondition[]; containerStatuses?: ContainerStatus[] };
 }
 
+export interface Service extends Resource {
+  spec?: { [field: string]: unknown };
+}
+
+export interface Ingress extends Resource {
+  spec?: { [field: string]: unknown };
+}
+
 export interface Kinds {
   statefulsets: StatefulSet;
   pods: Pod;
+  services: Service;
+  ingresses: Ingress;
 }
 
 export type Kind = keyof Kinds;
 
 const API: Record<Kind, string> = {
   statefulsets: "/apis/apps/v1",
-  pods: "/api/v1"
+  pods: "/api/v1",
+  services: "/api/v1",
+  ingresses: "/apis/networking.k8s.io/v1"
 };
 
 export interface Kube {

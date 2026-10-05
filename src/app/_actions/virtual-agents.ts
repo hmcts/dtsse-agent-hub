@@ -7,12 +7,13 @@ import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { storePastedCode } from "@/virtual-agents/logins";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
-import { createVirtualAgent as create, setDesired } from "@/virtual-agents/store";
+import { createVirtualAgent as create, renameVirtualAgent as rename, setDesired, setExposedPort, setVirtualAgentSize } from "@/virtual-agents/store";
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
- * Creating, starting, stopping and deleting the signed-in person's own virtual agents, and pasting a login code back
- * to one. The owner is always the session's identity; an id from the form names an agent, and `setDesired` and
+ * Creating, starting, stopping, renaming, resizing and deleting the signed-in person's own virtual agents, exposing
+ * their web ports, and pasting a login code back to one. The owner is always the session's identity; an id from the
+ * form names an agent, and `setDesired`, `renameVirtualAgent`, `setVirtualAgentSize`, `setExposedPort` and
  * `storePastedCode` refuse one that is not the viewer's.
  */
 
@@ -33,7 +34,7 @@ export async function createVirtualAgent(form: FormData): Promise<ActionResult<{
       return OFF;
     }
     const viewer = await requireViewer();
-    const row = await create(prisma, { owner: viewer, modelRoute: viewer.modelRoute, name: form.get("name") });
+    const row = await create(prisma, { owner: viewer, modelRoute: viewer.modelRoute, name: form.get("name"), size: form.get("size") });
     revalidate();
     return { ok: true, id: row.id, confirmation: `${row.name} is starting` };
   });
@@ -65,6 +66,62 @@ export async function stopVirtualAgent(form: FormData): Promise<ActionResult> {
 
 export async function deleteVirtualAgent(form: FormData): Promise<ActionResult> {
   return await desire("delete virtual agent", form, "deleted");
+}
+
+export async function renameVirtualAgent(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("rename virtual agent", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const id = text(form.get("id"));
+    if (id === "") {
+      return { ok: false, error: "no virtual agent was named" };
+    }
+    const row = await rename(prisma, viewer.oid, id, form.get("name"));
+    revalidate(id);
+    return { ok: true, confirmation: `Renamed to ${row.name}` };
+  });
+}
+
+export async function resizeVirtualAgent(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("resize virtual agent", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const id = text(form.get("id"));
+    if (id === "") {
+      return { ok: false, error: "no virtual agent was named" };
+    }
+    const row = await setVirtualAgentSize(prisma, viewer.oid, id, form.get("size"));
+    revalidate(id);
+    return { ok: true, confirmation: `${row.name} is now ${row.size}` };
+  });
+}
+
+async function exposure(name: string, form: FormData, exposed: boolean): Promise<ActionResult> {
+  return await runAction(name, async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const id = text(form.get("id"));
+    if (id === "") {
+      return { ok: false, error: "no virtual agent was named" };
+    }
+    await setExposedPort(prisma, viewer.oid, id, form.get("port"), exposed);
+    revalidate(id);
+    return { ok: true };
+  });
+}
+
+export async function exposePort(form: FormData): Promise<ActionResult> {
+  return await exposure("expose port", form, true);
+}
+
+export async function unexposePort(form: FormData): Promise<ActionResult> {
+  return await exposure("stop exposing port", form, false);
 }
 
 /** The code a sign-in page gave the owner, sealed for their pod to fetch once. Never echoed back. */

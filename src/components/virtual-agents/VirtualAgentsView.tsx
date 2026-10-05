@@ -7,6 +7,7 @@ import { diskWarningDays } from "@/virtual-agents/cleanup";
 import { MAX_NAME_LENGTH, MAX_PER_USER, MAX_RUNNING_PER_USER } from "@/virtual-agents/limits";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 import { idleFor, statusLabel, stopReasonLabel } from "./labels";
+import { SizeSelect } from "./SizePanel";
 
 const INPUT = "mt-1 w-72 max-w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 font-mono text-sm text-hub-text";
 const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567] disabled:opacity-60";
@@ -86,6 +87,7 @@ export function CreateVirtualAgent({ route, create, refusal }: { route: ModelRou
               <span className="block text-hub-text">Name</span>
               <input name="name" required maxLength={MAX_NAME_LENGTH} autoComplete="off" spellCheck={false} className={INPUT} />
             </label>
+            <SizeSelect />
             <button type="submit" className={BUTTON}>
               Create
             </button>

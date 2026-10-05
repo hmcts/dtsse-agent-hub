@@ -1,12 +1,22 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { asPersona, unique } from "./hub";
 
-test.describe("credentials @smoke", () => {
-  test("should render the credentials page with the viewer's model route @smoke @regression", async ({ page }) => {
-    const response = await page.goto("/settings/credentials");
-
-    expect(response?.status()).toBe(200);
+/** With virtual agents on, `/settings/credentials` sends people to the credentials section of `/virtual`. */
+async function openCredentials(page: Page): Promise<void> {
+  const response = await page.goto("/settings/credentials");
+  expect(response?.status()).toBe(200);
+  if (new URL(page.url()).pathname === "/virtual") {
+    expect(new URL(page.url()).hash).toBe("#credentials");
+    await expect(page.getByRole("region", { name: "Credentials" })).toBeVisible();
+  } else {
     await expect(page.getByRole("heading", { level: 1, name: "Credentials" })).toBeVisible();
+  }
+}
+
+test.describe("credentials @smoke", () => {
+  test("should render the credentials with the viewer's model route @smoke @regression", async ({ page }) => {
+    await openCredentials(page);
+
     await expect(page.getByRole("heading", { name: "Model" })).toBeVisible();
     await expect(page.getByText("Credentials unavailable").or(page.getByRole("heading", { name: "GitHub token" }))).toBeVisible();
   });
@@ -15,7 +25,7 @@ test.describe("credentials @smoke", () => {
     const context = await asPersona(browser, `own-licence-${unique("e2e")}`, baseURL!);
     try {
       const page = await context.newPage();
-      await page.goto("/settings/credentials");
+      await openCredentials(page);
       // Previews and the -staging release have sign-in off, so credentials are unavailable there.
       test.skip(await page.getByText("Credentials unavailable").isVisible(), "this deployment cannot store a development identity's credentials");
 

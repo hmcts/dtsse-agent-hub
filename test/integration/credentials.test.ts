@@ -29,6 +29,7 @@ const GITHUB = `ghp_${"A1b2".repeat(9)}`;
 const GITHUB_AGAIN = `ghp_${"Z9y8".repeat(9)}`;
 const CLAUDE = `sk-ant-oat01-${"Qw_-".repeat(12)}`;
 const BEDROCK = `ABSK${"QmVkcm9ja0FQSUtleS1leGFtcGxl".repeat(4)}`;
+const JENKINS = "11a2b3c4d5e6f708192a3b4c5d6e7f8091";
 const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
 
 function azureCacheFor(oid: string): string {
@@ -295,8 +296,8 @@ describe("reading credentials back", () => {
     expect((await read(BOB, "bedrock")).status).toBe(404);
   });
 
-  it.each(["github", "azure", "claude"])("should answer 405 and never the value when the owner asks for their stored %s", async (kind) => {
-    const values: Record<string, string> = { github: GITHUB, azure: AZURE, claude: CLAUDE };
+  it.each(["github", "azure", "claude", "jenkins"])("should answer 405 and never the value when the owner asks for their stored %s", async (kind) => {
+    const values: Record<string, string> = { github: GITHUB, azure: AZURE, claude: CLAUDE, jenkins: JENKINS };
     expect((await put(ALICE, kind, { value: values[kind] })).status).toBe(204);
 
     const response = await read(ALICE, kind);
@@ -321,7 +322,8 @@ describe("reading credentials back", () => {
       ["github", true],
       ["azure", true],
       ["claude", false],
-      ["bedrock", false]
+      ["bedrock", false],
+      ["jenkins", false]
     ]);
     expect(JSON.stringify(statuses)).not.toContain(GITHUB);
     expect(JSON.stringify(statuses)).not.toContain(AZURE);
@@ -468,5 +470,40 @@ describe("saveCredential and removeCredential", () => {
     actAs("alice");
 
     expect(await removeCredential(form({ kind: "" }))).toMatchObject({ ok: false, error: "no credential was named" });
+  });
+});
+
+describe("a Jenkins API token", () => {
+  it("should store the caller's token from the command line when it is valid", async () => {
+    expect((await put(ALICE, "jenkins", { value: ` ${JENKINS}\n` })).status).toBe(204);
+
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
+      ownerOid: ALICE.oid,
+      kind: "jenkins",
+      secretName: "u-dev-alice-jenkins",
+      updatedVia: "cli"
+    });
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "jenkins")).toBe(JENKINS);
+    expect(await everythingStored()).not.toContain(JENKINS);
+  });
+
+  it("should refuse a pasted Claude token with an error saying what it is, never echoing it", async () => {
+    const response = await put(ALICE, "jenkins", { value: CLAUDE });
+
+    expect(response.status).toBe(400);
+    const body = await response.text();
+    expect(body).toContain("Claude token, not a Jenkins API token");
+    expect(body).not.toContain(CLAUDE);
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
+  it("should save a pasted token from the web and list it with the others", async () => {
+    actAs("alice");
+
+    expect(await saveCredential(form({ kind: "jenkins", value: JENKINS }))).toEqual({ ok: true, confirmation: "Your Jenkins API token is stored" });
+
+    const statuses = await credentialStatus(prisma, devIdentity("alice").oid);
+    expect(statuses.map((status) => [status.kind, status.stored])).toContainEqual(["jenkins", true]);
+    expect(revalidated).toEqual(expect.arrayContaining(["/settings/credentials", "/virtual"]));
   });
 });

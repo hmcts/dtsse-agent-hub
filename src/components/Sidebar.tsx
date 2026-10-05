@@ -78,16 +78,18 @@ export function Sidebar({
               <KeyIcon />
               Access
             </NavLink>
+            {/* With virtual agents on, credentials are a section of their page. */}
             {virtualAgents ? (
               <NavLink href="/virtual">
                 <ServerIcon />
                 Virtual agents
               </NavLink>
-            ) : null}
-            <NavLink href="/settings/credentials">
-              <LockIcon />
-              Credentials
-            </NavLink>
+            ) : (
+              <NavLink href="/settings/credentials">
+                <LockIcon />
+                Credentials
+              </NavLink>
+            )}
             <form action="/topics" method="get" role="search" className="px-2 pt-2">
               <label htmlFor="sidebar-topic-search" className="sr-only">
                 Search topics

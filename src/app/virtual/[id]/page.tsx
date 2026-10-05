@@ -1,13 +1,25 @@
 import { notFound } from "next/navigation";
 import { saveCredential } from "@/app/_actions/credentials";
 import { sendDirect } from "@/app/_actions/direct";
-import { deleteVirtualAgent, pasteLoginCode, startVirtualAgent, stopVirtualAgent } from "@/app/_actions/virtual-agents";
+import {
+  deleteVirtualAgent,
+  exposePort,
+  pasteLoginCode,
+  renameVirtualAgent,
+  resizeVirtualAgent,
+  startVirtualAgent,
+  stopVirtualAgent,
+  unexposePort
+} from "@/app/_actions/virtual-agents";
 import { Conversation } from "@/components/agents/Conversation";
 import { EmptyState } from "@/components/EmptyState";
 import { PaneHeader } from "@/components/Pane";
 import { LifecyclePanel } from "@/components/virtual-agents/LifecyclePanel";
 import { statusLabel } from "@/components/virtual-agents/labels";
 import { OnboardingChecklist } from "@/components/virtual-agents/OnboardingChecklist";
+import { PortsPanel } from "@/components/virtual-agents/PortsPanel";
+import { RenameVirtualAgent } from "@/components/virtual-agents/RenameVirtualAgent";
+import { SizePanel } from "@/components/virtual-agents/SizePanel";
 import { VirtualAgentRefresh } from "@/components/virtual-agents/VirtualAgentRefresh";
 import { DiskNotice, ModelRouteLine } from "@/components/virtual-agents/VirtualAgentsView";
 import { requireViewer } from "@/viewer/current";
@@ -17,7 +29,7 @@ import { virtualAgentPage } from "@/web/data";
 export const dynamic = "force-dynamic";
 
 /**
- * One of the viewer's own virtual agents: its lifecycle, the sign-ins it needs, and once its session has registered,
+ * One of the viewer's own virtual agents: its lifecycle, name, size and web ports, the sign-ins it needs, and once its session has registered,
  * that agent's conversation. Anyone else's, or any id while the feature is off, is not found.
  */
 export default async function VirtualAgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -38,9 +50,13 @@ export default async function VirtualAgentPage({ params }: { params: Promise<{ i
     <div className="space-y-4 p-4">
       <LifecyclePanel agent={agent} actions={{ start: startVirtualAgent, stop: stopVirtualAgent, remove: deleteVirtualAgent }} />
       {agent.desired === "stopped" ? <DiskNotice agent={agent} now={now} /> : null}
+      <RenameVirtualAgent agent={agent} rename={renameVirtualAgent} />
+      <SizePanel agent={agent} resize={resizeVirtualAgent} />
+      <PortsPanel agent={agent} actions={{ expose: exposePort, unexpose: unexposePort }} />
       <OnboardingChecklist
         virtualAgentId={agent.id}
         needed={detail.needed}
+        optional={detail.optional}
         statuses={credentials.available ? credentials.statuses : []}
         logins={detail.logins}
         paste={pasteLoginCode}

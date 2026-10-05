@@ -164,7 +164,7 @@ export interface VirtualAgentRef {
 }
 
 /**
- * Only its owner starts, stops or deletes a virtual agent, and only they see its device codes or paste a login code
+ * Only its owner starts, stops, renames or deletes a virtual agent, and only they see its device codes or paste a login code
  * back to it. No grant extends to any of this: the agent acts with the owner's GitHub and Azure access, so a code it
  * shows is a sign-in as the owner.
  */

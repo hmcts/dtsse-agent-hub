@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type ClaimedAgent, type Hub, HubError, type Lease, type LiveAgent, type ObservedBody } from "./hub.ts";
 import { type Kind, type Kinds, type Kube, KubeError, type Pod, type Resource, type StatefulSet } from "./kube.ts";
-import { labels, statefulSet } from "./manifests.ts";
+import { ingress, labels, service, statefulSet } from "./manifests.ts";
 import { initialState, type Log, podReason, RUNNING_WATCH_MS, reconcilePass, SCHEDULING_GRACE_MS, settled, sweepOrphans } from "./reconcile.ts";
 import type { OrchestratorSettings } from "./settings.ts";
 
@@ -23,7 +23,9 @@ const SETTINGS: OrchestratorSettings = {
     hubUrl: "https://hub",
     tenantId: "tenant",
     diskSize: "32Gi",
-    storageClass: null
+    storageClass: null,
+    hostAliases: [],
+    publicDomain: "preview.platform.hmcts.net"
   }
 };
 
@@ -45,7 +47,7 @@ function agent(overrides: Partial<ClaimedAgent> = {}): ClaimedAgent {
 type Store = { [K in Kind]: Map<string, Kinds[K]> };
 
 function fakeKube() {
-  const store: Store = { statefulsets: new Map(), pods: new Map() };
+  const store: Store = { statefulsets: new Map(), pods: new Map(), services: new Map(), ingresses: new Map() };
   const calls: string[] = [];
   const failing = new Set<string>();
   const guard = (call: string) => {
@@ -615,7 +617,7 @@ describe("reconcilePass on standby", () => {
 
     expect([...t.store.statefulsets.keys()]).toEqual(["va-1a2b3c4d"]);
     expect(t.logs.find((entry) => entry.message === "deleted an orphan")?.fields).toEqual({ kind: "statefulsets", name: STS, moved_to: "cft-preview-01" });
-    expect(t.calls.filter((call) => call.startsWith("list"))).toHaveLength(2);
+    expect(t.calls.filter((call) => call.startsWith("list"))).toHaveLength(6);
   });
 
   it("should count a failed standby sweep as an error without failing the pass", async () => {
@@ -649,7 +651,11 @@ describe("sweepOrphans", () => {
     expect(await sweepOrphans(t.deps)).toBe(1);
 
     expect([...t.store.statefulsets.keys()]).toEqual([STS]);
-    expect(t.calls.filter((call) => call.startsWith("list"))).toEqual(["list statefulsets app.kubernetes.io/managed-by=agent-hub-orchestrator"]);
+    expect(t.calls.filter((call) => call.startsWith("list"))).toEqual([
+      "list ingresses app.kubernetes.io/managed-by=agent-hub-orchestrator",
+      "list services app.kubernetes.io/managed-by=agent-hub-orchestrator",
+      "list statefulsets app.kubernetes.io/managed-by=agent-hub-orchestrator"
+    ]);
   });
 
   it("should keep a live agent's StatefulSet homed on another cluster when it is active", async () => {
@@ -737,5 +743,83 @@ describe("sweepOrphans", () => {
 
     await expect(sweepOrphans(t.deps)).rejects.toThrow("hub down");
     expect(t.store.statefulsets.size).toBe(2);
+  });
+});
+
+describe("exposed ports", () => {
+  const PORTS = { exposed_ports: [3000] };
+
+  it("should apply the Service and the Ingress when a running agent exposes ports", async () => {
+    const claimed = agent({ ...PORTS, launch_token: "ahv_new" });
+    const t = setup([[claimed]]);
+
+    expect(await t.pass()).toMatchObject({ errors: 0 });
+
+    expect(t.store.services.get(STS)).toEqual(service(claimed, SETTINGS.agent));
+    expect(t.store.ingresses.get(STS)).toEqual(ingress(claimed, SETTINGS.agent));
+  });
+
+  it("should keep the Service and the Ingress while the agent is stopped", async () => {
+    const t = setup([[agent({ ...PORTS, launch_token: "ahv_new" })], [agent({ ...PORTS, generation: 2, desired: "stopped" })]]);
+    await t.pass();
+
+    await t.pass();
+
+    expect(t.store.services.has(STS)).toBe(true);
+    expect(t.store.ingresses.has(STS)).toBe(true);
+  });
+
+  it.each([
+    ["it exposes no ports any more", agent({ generation: 2, exposed_ports: [] })],
+    ["it is deleted", agent({ ...PORTS, generation: 2, desired: "deleted", delete_disk: true })]
+  ])("should delete the Ingress and then the Service when %s", async (_label, next) => {
+    const t = setup([[agent({ ...PORTS, launch_token: "ahv_new" })], [next]]);
+    await t.pass();
+
+    await t.pass();
+
+    expect(t.store.services.has(STS)).toBe(false);
+    expect(t.store.ingresses.has(STS)).toBe(false);
+    expect(t.calls.filter((call) => call.startsWith("delete ") && !call.includes("statefulsets"))).toEqual([
+      `delete ingresses ${STS}`,
+      `delete services ${STS}`
+    ]);
+  });
+
+  it("should delete nothing when an agent that never exposed ports exposes none", async () => {
+    const t = setup([[agent({ launch_token: "ahv_new" })]]);
+
+    await t.pass();
+
+    expect(t.calls.some((call) => /^(apply|delete) (services|ingresses)/.test(call))).toBe(false);
+  });
+
+  it.each(["services", "ingresses"] as const)("should refuse to touch %s of the same name not labelled as the agent's", async (kind) => {
+    const t = setup([[agent({ ...PORTS, launch_token: "ahv_new" })]]);
+    (t.store[kind] as Map<string, Resource>).set(STS, { apiVersion: "v1", kind: "Other", metadata: { name: STS, labels: { app: "dtsse-pr-1234" } } });
+
+    expect(await t.pass()).toMatchObject({ errors: 1 });
+
+    expect(t.store[kind].get(STS)?.metadata.labels).toEqual({ app: "dtsse-pr-1234" });
+    expect(t.calls.some((call) => /^(apply|delete) /.test(call))).toBe(false);
+    expect(t.logs.find((entry) => entry.message === "could not apply")?.fields?.error).toMatch(/refusing to touch (Service|Ingress)/);
+  });
+
+  it("should sweep the Services and Ingresses of agents the hub no longer has, and keep a live agent's", async () => {
+    const t = setup([], { live: [{ id: OTHER, statefulset_name: "va-1a2b3c4d", pvc_name: null, cluster: "cft-preview-00" }] });
+    for (const kind of ["services", "ingresses"] as const) {
+      (t.store[kind] as Map<string, Resource>).set(STS, { apiVersion: "v1", kind: "Service", metadata: { name: STS, labels: labels(ID) } });
+      (t.store[kind] as Map<string, Resource>).set("va-1a2b3c4d", {
+        apiVersion: "v1",
+        kind: "Service",
+        metadata: { name: "va-1a2b3c4d", labels: labels(OTHER) }
+      });
+    }
+
+    expect(await sweepOrphans(t.deps)).toBe(2);
+
+    expect([...t.store.services.keys()]).toEqual(["va-1a2b3c4d"]);
+    expect([...t.store.ingresses.keys()]).toEqual(["va-1a2b3c4d"]);
+    expect(t.calls.filter((call) => call.startsWith("delete"))).toEqual([`delete ingresses ${STS}`, `delete services ${STS}`]);
   });
 });

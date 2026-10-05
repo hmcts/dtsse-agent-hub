@@ -1,4 +1,5 @@
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { JenkinsHint } from "@/components/credentials/JenkinsHint";
 import { EmptyState } from "@/components/EmptyState";
 import { Section } from "@/components/Section";
 import { Timestamp } from "@/components/time/Timestamp";
@@ -16,7 +17,8 @@ const TITLES: Record<CredentialKind, string> = {
   github: "GitHub token",
   azure: "Azure sign-in",
   claude: "Claude token",
-  bedrock: "Bedrock API key"
+  bedrock: "Bedrock API key",
+  jenkins: "Jenkins API token"
 };
 
 const VIA: Record<CredentialVia, string> = {
@@ -61,6 +63,7 @@ export function CredentialCard({ status, route, actions }: { status: CredentialS
   return (
     <Section heading={title} detail={status.stored ? "Stored" : "Not stored"}>
       <div className="space-y-3 text-sm">
+        {status.kind === "jenkins" ? <JenkinsHint /> : null}
         {status.stored ? (
           <div className="flex flex-wrap items-center gap-3">
             <p className="text-hub-text">
@@ -119,5 +122,22 @@ export function CredentialSettingsView({ settings, actions }: { settings: Creden
         <EmptyState message="Credentials unavailable" detail={settings.reason} />
       )}
     </>
+  );
+}
+
+export const CREDENTIALS_ANCHOR = "credentials";
+
+/** The credentials as a part of the virtual agents page, which `/settings/credentials` sends people to. */
+export function CredentialsSection({ settings, actions }: { settings: CredentialSettings; actions: CredentialActions }) {
+  return (
+    <section id={CREDENTIALS_ANCHOR} aria-labelledby="credentials-heading" className="scroll-mt-5 space-y-6">
+      <div>
+        <h2 id="credentials-heading" className="text-lg font-bold text-white">
+          Credentials
+        </h2>
+        <p className="text-[13px] text-hub-muted">What your virtual agents use on your behalf</p>
+      </div>
+      <CredentialSettingsView settings={settings} actions={actions} />
+    </section>
   );
 }
