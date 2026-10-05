@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OrchestratorConfigurationError, orchestratorSettings, withoutTrailingSlashes } from "./settings.ts";
+import { OrchestratorConfigurationError, orchestratorSettings, parseHostAliases, withoutTrailingSlashes } from "./settings.ts";
 
 const IMAGE = `hmctsprod.azurecr.io/dtsse/agent-hub-virtual-agent@sha256:${"a".repeat(64)}`;
 const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
@@ -29,7 +29,9 @@ describe("orchestratorSettings", () => {
         hubUrl: "https://agent-hub.aat.platform.hmcts.net",
         tenantId: TENANT,
         diskSize: "32Gi",
-        storageClass: null
+        storageClass: null,
+        hostAliases: [],
+        publicDomain: "preview.platform.hmcts.net"
       }
     });
   });
@@ -131,5 +133,59 @@ describe("withoutTrailingSlashes", () => {
 describe("dotted names", () => {
   it("should accept a storage class with dots when every label is valid", () => {
     expect(orchestratorSettings({ ...ENV, VIRTUAL_AGENT_STORAGE_CLASS: "managed.csi-premium" }, "ns").agent.storageClass).toBe("managed.csi-premium");
+  });
+});
+
+describe("parseHostAliases", () => {
+  it("should read host=ip pairs, grouping hosts by address in the order they first appear", () => {
+    expect(parseHostAliases(" build.hmcts.net=10.10.73.250, Sandbox-Build.hmcts.net = 10.10.73.251 ,mirror.hmcts.net=10.10.73.250,")).toEqual({
+      aliases: [
+        { ip: "10.10.73.250", hostnames: ["build.hmcts.net", "mirror.hmcts.net"] },
+        { ip: "10.10.73.251", hostnames: ["sandbox-build.hmcts.net"] }
+      ],
+      problems: []
+    });
+  });
+
+  it("should accept an IPv6 address", () => {
+    expect(parseHostAliases("build.hmcts.net=fd00::1").aliases).toEqual([{ ip: "fd00::1", hostnames: ["build.hmcts.net"] }]);
+  });
+
+  it.each([undefined, "", " , "])("should give no aliases when the setting is %j", (raw) => {
+    expect(parseHostAliases(raw)).toEqual({ aliases: [], problems: [] });
+  });
+
+  it.each([
+    ["no address", "build.hmcts.net"],
+    ["no host", "=10.0.0.1"],
+    ["an address that is not one", "build.hmcts.net=10.0.0.300"],
+    ["a host that is not a DNS name", "build_hmcts=10.0.0.1"],
+    ["two equals signs", "build.hmcts.net=10.0.0.1=x"]
+  ])("should report a pair with %s", (_label, raw) => {
+    expect(parseHostAliases(raw)).toEqual({ aliases: [], problems: [expect.stringContaining(`"${raw}"`)] });
+  });
+
+  it("should report a host named twice and keep its first address", () => {
+    expect(parseHostAliases("build.hmcts.net=10.0.0.1,BUILD.hmcts.net=10.0.0.2")).toEqual({
+      aliases: [{ ip: "10.0.0.1", hostnames: ["build.hmcts.net"] }],
+      problems: ["VIRTUAL_AGENT_HOST_ALIASES names build.hmcts.net more than once"]
+    });
+  });
+
+  it("should give the pods the aliases and refuse to start on a bad pair when the orchestrator reads its settings", () => {
+    expect(orchestratorSettings({ ...ENV, VIRTUAL_AGENT_HOST_ALIASES: "build.hmcts.net=10.10.73.250" }, "ns").agent.hostAliases).toEqual([
+      { ip: "10.10.73.250", hostnames: ["build.hmcts.net"] }
+    ]);
+    expect(() => orchestratorSettings({ ...ENV, VIRTUAL_AGENT_HOST_ALIASES: "build.hmcts.net" }, "ns")).toThrow(/VIRTUAL_AGENT_HOST_ALIASES/);
+  });
+});
+
+describe("VIRTUAL_AGENT_PUBLIC_DOMAIN", () => {
+  it("should read the domain in lowercase when it is set", () => {
+    expect(orchestratorSettings({ ...ENV, VIRTUAL_AGENT_PUBLIC_DOMAIN: "Example.NET" }, "ns").agent.publicDomain).toBe("example.net");
+  });
+
+  it("should refuse a domain that is not a DNS name", () => {
+    expect(() => orchestratorSettings({ ...ENV, VIRTUAL_AGENT_PUBLIC_DOMAIN: "not a domain" }, "ns")).toThrow(/VIRTUAL_AGENT_PUBLIC_DOMAIN/);
   });
 });

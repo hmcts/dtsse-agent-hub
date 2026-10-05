@@ -1,4 +1,5 @@
 import type { TokenCredential } from "@azure/identity";
+import type { VirtualAgentSize } from "../virtual-agents/size.ts";
 import { withoutTrailingSlashes } from "./settings.ts";
 
 /**
@@ -18,6 +19,10 @@ export interface ClaimedAgent {
   pvc_name: string;
   delete_disk: boolean;
   model_route: ModelRoute;
+  /** The StatefulSet is sized `small` when this is absent or not a size it knows. */
+  size?: VirtualAgentSize;
+  /** Ascending; treated as none when absent. */
+  exposed_ports?: number[];
   owner: { oid: string };
   launch_token?: string;
 }

@@ -58,6 +58,7 @@ enum CredentialKind {
   azure
   claude
   bedrock
+  jenkins
 
   @@map("credential_kind")
 }
@@ -90,6 +91,14 @@ enum VirtualAgentStatus {
   failed
 
   @@map("virtual_agent_status")
+}
+
+enum VirtualAgentSize {
+  small
+  medium
+  large
+
+  @@map("virtual_agent_size")
 }
 
 enum ModelRoute {
@@ -365,6 +374,9 @@ model VirtualAgent {
   launchTokenIssuedAt DateTime?               @map("launch_token_issued_at") @db.Timestamptz(6)
   agentId             String?                 @map("agent_id") @db.Uuid
   modelRoute          ModelRoute              @map("model_route")
+  size                VirtualAgentSize        @default(small)
+  /// At most 3 distinct ports from 1024 to 65535, ascending.
+  exposedPorts        Int[]                   @default([]) @map("exposed_ports")
   startedAt           DateTime                @default(now()) @map("started_at") @db.Timestamptz(6)
   lastActiveAt        DateTime?               @map("last_active_at") @db.Timestamptz(6)
   stoppedAt           DateTime?               @map("stopped_at") @db.Timestamptz(6)

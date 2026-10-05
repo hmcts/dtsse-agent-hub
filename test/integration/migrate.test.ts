@@ -209,7 +209,12 @@ describe("the bedrock migration", () => {
     process.env.DATABASE_URL = urlFor(RENAME);
     before = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
     await cp(migrationsDirectory(), before, { recursive: true });
-    await rm(path.join(before, MIGRATION), { recursive: true });
+    // The database as it was before this migration: it and every one after it are applied by the test.
+    for (const name of await readdir(before)) {
+      if (/^\d/.test(name) && name >= MIGRATION) {
+        await rm(path.join(before, name), { recursive: true });
+      }
+    }
   });
 
   afterAll(async () => {
@@ -230,7 +235,7 @@ describe("the bedrock migration", () => {
       `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'on-gateway', 'gateway'), ('dev-alice', 'own', 'own_licence')`
     );
 
-    expect(await migrate()).toEqual([MIGRATION]);
+    expect((await migrate())[0]).toBe(MIGRATION);
 
     const agents = await query<{ name: string; model_route: string }>(RENAME, `SELECT name, model_route::text FROM "virtual_agent" ORDER BY name`);
     expect(agents).toEqual([
@@ -247,6 +252,7 @@ describe("the bedrock migration", () => {
       { type: "credential_kind", label: "azure" },
       { type: "credential_kind", label: "claude" },
       { type: "credential_kind", label: "bedrock" },
+      { type: "credential_kind", label: "jenkins" },
       { type: "model_route", label: "bedrock" },
       { type: "model_route", label: "own_licence" }
     ]);

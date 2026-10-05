@@ -7,7 +7,9 @@ import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
 import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken } from "./launch-token.ts";
 import { nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
 import { checkName, createRefusal, startRefusal } from "./limits.ts";
+import { checkPort, exposeRefusal, withoutPort, withPort } from "./ports.ts";
 import { diskTtlDays, orchestratorLeaseSeconds } from "./settings.ts";
+import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
 import { announce, type StopReason } from "./stop.ts";
 
 /**
@@ -29,6 +31,8 @@ export interface VirtualAgentRow {
   pvcName: string;
   agentId: string | null;
   modelRoute: ModelRoute;
+  size: VirtualAgentSize;
+  exposedPorts: number[];
   startedAt: Date;
   lastActiveAt: Date | null;
   stoppedAt: Date | null;
@@ -52,6 +56,8 @@ const SELECT = {
   pvcName: true,
   agentId: true,
   modelRoute: true,
+  size: true,
+  exposedPorts: true,
   startedAt: true,
   lastActiveAt: true,
   stoppedAt: true,
@@ -101,6 +107,8 @@ export interface NewVirtualAgent {
   owner: Pick<Identity, "oid">;
   modelRoute: ModelRoute;
   name: unknown;
+  /** `small` when not given. */
+  size?: unknown;
 }
 
 /**
@@ -111,6 +119,10 @@ export async function createVirtualAgent(prisma: PrismaClient, request: NewVirtu
   const checked = checkName(request.name);
   if (!checked.ok) {
     throw new HttpError(400, checked.error);
+  }
+  const size = checkSize(request.size);
+  if (!size.ok) {
+    throw new HttpError(400, size.error);
   }
   return await prisma.$transaction(async (tx) => {
     await lockOwner(tx, request.owner.oid);
@@ -123,7 +135,7 @@ export async function createVirtualAgent(prisma: PrismaClient, request: NewVirtu
     }
     const row = toRow(
       await tx.virtualAgent.create({
-        data: { ownerOid: request.owner.oid, name: checked.name, modelRoute: fromRoute(request.modelRoute) },
+        data: { ownerOid: request.owner.oid, name: checked.name, modelRoute: fromRoute(request.modelRoute), size: size.size },
         select: SELECT
       })
     );
@@ -187,6 +199,109 @@ export async function setDesired(
         data: { ...data, desired, generation: { increment: 1 }, updatedAt: now },
         select: SELECT
       })
+    );
+    await announce(tx, id, row.ownerOid);
+    return updated;
+  });
+}
+
+/**
+ * Gives the virtual agent a new name, and its sessions with it, since a heartbeat would otherwise put the old one
+ * back. The StatefulSet and disk are named from the id, so the pod is not touched. The owner's `user` row is held as
+ * in a create, so a rename and a create of the same name cannot both pass the check.
+ */
+export async function renameVirtualAgent(prisma: PrismaClient, actorOid: string, id: string, name: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
+  const checked = checkName(name);
+  if (!checked.ok) {
+    throw new HttpError(400, checked.error);
+  }
+  return await prisma.$transaction(async (tx) => {
+    const row = await lockVirtualAgent(tx, id);
+    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
+      throw new HttpError(404, "no such virtual agent");
+    }
+    if (row.desired === "deleted") {
+      throw new HttpError(409, "that virtual agent is being deleted");
+    }
+    if (row.name === checked.name) {
+      return row;
+    }
+    await lockOwner(tx, row.ownerOid);
+    if ((await tx.virtualAgent.count({ where: { ownerOid: row.ownerOid, name: checked.name } })) > 0) {
+      throw new HttpError(409, `you already have a virtual agent called ${checked.name}`);
+    }
+    const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { name: checked.name, updatedAt: now }, select: SELECT }));
+    await tx.agent.updateMany({ where: { virtualAgentId: id }, data: { name: checked.name } });
+    await announce(tx, id, row.ownerOid);
+    return updated;
+  });
+}
+
+/**
+ * A new size, bumping `generation` so the orchestrator applies the StatefulSet again with its resources. Refused
+ * while a pod may be running, per `sizeChangeRefusal`; someone other than the owner is told there is no such agent.
+ */
+export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string, id: string, size: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
+  const checked = checkSize(size);
+  if (!checked.ok) {
+    throw new HttpError(400, checked.error);
+  }
+  return await prisma.$transaction(async (tx) => {
+    const row = await lockVirtualAgent(tx, id);
+    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
+      throw new HttpError(404, "no such virtual agent");
+    }
+    const refusal = sizeChangeRefusal(row);
+    if (refusal !== undefined) {
+      throw new HttpError(409, refusal);
+    }
+    if (row.size === checked.size) {
+      return row;
+    }
+    const updated = toRow(
+      await tx.virtualAgent.update({ where: { id }, data: { size: checked.size, generation: { increment: 1 }, updatedAt: now }, select: SELECT })
+    );
+    await announce(tx, id, row.ownerOid);
+    return updated;
+  });
+}
+
+/**
+ * Exposes or stops exposing one of the agent's web ports, in any state but deleted, bumping `generation` so the
+ * orchestrator applies its Service, Ingress and pod again. Someone other than the owner is told there is no such
+ * agent.
+ */
+export async function setExposedPort(
+  prisma: PrismaClient,
+  actorOid: string,
+  id: string,
+  port: unknown,
+  exposed: boolean,
+  now: Date = new Date()
+): Promise<VirtualAgentRow> {
+  const checked = checkPort(port);
+  if (!checked.ok) {
+    throw new HttpError(400, checked.error);
+  }
+  return await prisma.$transaction(async (tx) => {
+    const row = await lockVirtualAgent(tx, id);
+    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
+      throw new HttpError(404, "no such virtual agent");
+    }
+    if (row.desired === "deleted") {
+      throw new HttpError(409, "that virtual agent is being deleted");
+    }
+    if (exposed) {
+      const refusal = exposeRefusal(row.exposedPorts, checked.port);
+      if (refusal !== undefined) {
+        throw new HttpError(409, refusal);
+      }
+    } else if (!row.exposedPorts.includes(checked.port)) {
+      return row;
+    }
+    const ports = exposed ? withPort(row.exposedPorts, checked.port) : withoutPort(row.exposedPorts, checked.port);
+    const updated = toRow(
+      await tx.virtualAgent.update({ where: { id }, data: { exposedPorts: ports, generation: { increment: 1 }, updatedAt: now }, select: SELECT })
     );
     await announce(tx, id, row.ownerOid);
     return updated;
@@ -271,6 +386,8 @@ export interface ClaimedVirtualAgent {
   pvc_name: string;
   delete_disk: boolean;
   model_route: StoredRoute;
+  size: VirtualAgentSize;
+  exposed_ports: number[];
   owner: { oid: string };
   /** Only when this claim minted one. It is never stored and never returned again. */
   launch_token?: string;
@@ -289,6 +406,8 @@ interface ClaimRow {
   statefulset_name: string;
   pvc_name: string;
   model_route: StoredRoute;
+  size: VirtualAgentSize;
+  exposed_ports: number[];
   owner_oid: string;
   has_token: boolean;
   disk_due: boolean;
@@ -410,7 +529,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         FROM due
        WHERE v.id = due.id
       RETURNING v.id::text AS id, v.generation, v.desired::text AS desired, v.status::text AS status, v.statefulset_name, v.pvc_name,
-                v.model_route::text AS model_route, v.owner_oid, v.launch_token_hash IS NOT NULL AS has_token,
+                v.model_route::text AS model_route, v.size::text AS size, v.exposed_ports, v.owner_oid, v.launch_token_hash IS NOT NULL AS has_token,
                 COALESCE(v.desired <> 'running' AND v.disk_expires_at <= ${now} AND v.disk_deleted_at IS NULL, false) AS disk_due
     `;
     const claimed: ClaimedVirtualAgent[] = [];
@@ -429,6 +548,8 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         pvc_name: row.pvc_name,
         delete_disk: row.desired === "deleted" || row.disk_due,
         model_route: row.model_route,
+        size: row.size,
+        exposed_ports: row.exposed_ports,
         owner: { oid: row.owner_oid },
         ...(launchToken === undefined ? {} : { launch_token: launchToken })
       });

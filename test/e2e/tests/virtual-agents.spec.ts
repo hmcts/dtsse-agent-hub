@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { asPersona, unique } from "./hub";
 
 test.describe("virtual agents @regression", () => {
-  test("should create a virtual agent, show a sign-in its pod relays, and delete it @regression", async ({ browser, baseURL, request }) => {
+  test("should create a virtual agent, show a sign-in its pod relays, rename it and delete it @regression", async ({ browser, baseURL, request }) => {
     const persona = unique("va");
     const context = await asPersona(browser, persona, baseURL!);
     try {
@@ -37,10 +37,21 @@ test.describe("virtual agents @regression", () => {
         await expect(page.getByRole("link", { name: "https://github.com/login/device" })).toBeVisible();
       }
 
+      const renamed = `${name}-renamed`;
+      const rename = page.getByRole("form", { name: `Rename ${name}` });
+      await rename.getByLabel("New name").fill(renamed);
+      await rename.getByRole("button", { name: "Rename" }).click();
+      await expect(page.getByRole("heading", { level: 1, name: renamed })).toBeVisible();
+
+      const expose = page.getByRole("form", { name: "Expose a port" });
+      await expose.getByLabel("Port").fill("3000");
+      await expose.getByRole("button", { name: "Expose" }).click();
+      await expect(page.getByRole("list", { name: "Exposed ports" }).getByRole("link", { name: /^https:\/\/va-[0-9a-f]{8}-3000\./ })).toBeVisible();
+
       await page.getByRole("button", { name: "Delete" }).click();
       await page
-        .getByRole("group", { name: `Confirm deleting ${name}` })
-        .getByRole("button", { name: `Delete ${name}` })
+        .getByRole("group", { name: `Confirm deleting ${renamed}` })
+        .getByRole("button", { name: `Delete ${renamed}` })
         .click();
       await expect(page.getByText("This virtual agent and its disk are being deleted.")).toBeVisible();
     } finally {

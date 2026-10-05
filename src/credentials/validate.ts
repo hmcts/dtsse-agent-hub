@@ -25,6 +25,16 @@ const NOT_BEDROCK: readonly (readonly [RegExp, string])[] = [
   [/^(AKIA|ASIA)[A-Z0-9]{16}$/, "that is an AWS access key id, not an Amazon Bedrock API key: create an API key in the Bedrock console"]
 ];
 
+/** A Jenkins API token from `/me/configure`: opaque, so only its length and printable, space-free ASCII are checked. */
+const JENKINS_TOKEN = /^[\x21-\x7e]{20,200}$/;
+
+/** Other tokens pasted by mistake for a Jenkins API token. */
+const NOT_JENKINS: readonly (readonly [RegExp, string])[] = [
+  [/^(gh[a-z]_|github_pat_)/, "that is a GitHub token, not a Jenkins API token"],
+  [/^sk-ant-/, "that is a Claude token, not a Jenkins API token"],
+  [/^(AKIA|ASIA)[A-Z0-9]{16}$/, "that is an AWS access key id, not a Jenkins API token"]
+];
+
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export type CheckedCredential = { ok: true; value: string; accountLabel: string | null } | { ok: false; error: string };
@@ -33,7 +43,8 @@ const LABELS: Record<CredentialKind, string> = {
   github: "a GitHub token",
   azure: "an Azure token cache",
   claude: "a Claude token",
-  bedrock: "an Amazon Bedrock API key"
+  bedrock: "an Amazon Bedrock API key",
+  jenkins: "a Jenkins API token"
 };
 
 /** The username of the first account an MSAL token cache holds, as the `az` login it came from shows it. */
@@ -133,6 +144,8 @@ export function checkCredential(kind: CredentialKind, raw: unknown): CheckedCred
         : { ok: false, error: "that is not a Claude token: expected the sk-ant-… token `claude setup-token` prints" };
     case "bedrock":
       return checkBedrockKey(value);
+    case "jenkins":
+      return checkJenkinsToken(value);
     case "azure":
       return checkAzureCache(value);
   }
@@ -146,4 +159,14 @@ function checkBedrockKey(value: string): CheckedCredential {
   return BEDROCK_KEY.test(value)
     ? { ok: true, value, accountLabel: null }
     : { ok: false, error: "that is not an Amazon Bedrock API key: expected 20 to 4096 printable characters with no spaces" };
+}
+
+function checkJenkinsToken(value: string): CheckedCredential {
+  const mistake = NOT_JENKINS.find(([shape]) => shape.test(value));
+  if (mistake !== undefined) {
+    return { ok: false, error: mistake[1] };
+  }
+  return JENKINS_TOKEN.test(value)
+    ? { ok: true, value, accountLabel: null }
+    : { ok: false, error: "that is not a Jenkins API token: expected 20 to 200 printable characters with no spaces, from your Jenkins user's Configure page" };
 }

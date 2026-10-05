@@ -210,3 +210,34 @@ describe("checkAzureCacheOwner", () => {
     expect(checkAzureCacheOwner(azureCache({ Account: { a: account(`${OID}.${TID}`) } }), OID, tenant)).toMatchObject({ ok: false, reason: "unconfigured" });
   });
 });
+
+describe("checkCredential for jenkins", () => {
+  it.each([
+    ["the hex token Jenkins makes", "11a2b3c4d5e6f708192a3b4c5d6e7f8091"],
+    ["20 characters", "a".repeat(20)],
+    ["200 characters", "Z".repeat(200)]
+  ])("should accept %s and trim it", (_label, value) => {
+    expect(checkCredential("jenkins", ` ${value}\n`)).toEqual({ ok: true, value, accountLabel: null });
+  });
+
+  it.each([
+    ["19 characters", "a".repeat(19)],
+    ["201 characters", "a".repeat(201)],
+    ["a space inside", `${"a".repeat(12)} ${"b".repeat(12)}`],
+    ["a character that is not ASCII", `${"a".repeat(20)}é`]
+  ])("should refuse a value with %s", (_label, value) => {
+    expect(checkCredential("jenkins", value)).toEqual({ ok: false, error: expect.stringContaining("20 to 200 printable characters") });
+  });
+
+  it.each([
+    ["GitHub token", `ghp_${"A1b2".repeat(9)}`],
+    ["Claude token", `sk-ant-oat01-${"Qw_-".repeat(12)}`],
+    ["AWS access key id", "AKIAIOSFODNN7EXAMPLE"]
+  ])("should say a %s is not a Jenkins API token", (kind, value) => {
+    expect(checkCredential("jenkins", value)).toEqual({ ok: false, error: `that is a${kind.startsWith("AWS") ? "n" : ""} ${kind}, not a Jenkins API token` });
+  });
+
+  it("should ask for a token when none is pasted", () => {
+    expect(checkCredential("jenkins", "  ")).toEqual({ ok: false, error: "paste a Jenkins API token" });
+  });
+});

@@ -8,6 +8,9 @@ import { LifecyclePanel } from "@/components/virtual-agents/LifecyclePanel";
 import { LoginCountdown, remaining } from "@/components/virtual-agents/LoginCountdown";
 import { idleFor, statusLabel, stopReasonLabel } from "@/components/virtual-agents/labels";
 import { checklistState, OnboardingChecklist } from "@/components/virtual-agents/OnboardingChecklist";
+import { PortsPanel } from "@/components/virtual-agents/PortsPanel";
+import { RenameVirtualAgent } from "@/components/virtual-agents/RenameVirtualAgent";
+import { SizePanel } from "@/components/virtual-agents/SizePanel";
 import { VirtualAgentRefresh } from "@/components/virtual-agents/VirtualAgentRefresh";
 import { createLimit, DiskNotice, VirtualAgentsView } from "@/components/virtual-agents/VirtualAgentsView";
 import type { CredentialStatus } from "@/credentials/store";
@@ -40,6 +43,8 @@ function card(overrides: Partial<VirtualAgentCard> = {}): VirtualAgentCard {
     status: "running",
     statusDetail: null,
     modelRoute: "bedrock",
+    size: "small",
+    exposedPorts: [],
     stopReason: null,
     lastActivityAt: "2026-10-05T10:55:00.000Z",
     stoppedAt: null,
@@ -241,6 +246,190 @@ describe("LifecyclePanel", () => {
 
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByText(/being deleted/)).toBeTruthy();
+  });
+});
+
+describe("RenameVirtualAgent", () => {
+  it("should offer the current name and send the id and the new name when the form is submitted", async () => {
+    const rename = vi.fn(async () => ({ ok: true as const, confirmation: "Renamed to pcs-frontend" }));
+    render(<RenameVirtualAgent agent={card()} rename={rename} />);
+
+    const field = screen.getByLabelText("New name") as HTMLInputElement;
+    expect(field.value).toBe("pcs-api");
+    fireEvent.change(field, { target: { value: "pcs-frontend" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Rename pcs-api" }));
+    });
+
+    const sent = (rename.mock.calls[0] as unknown as [FormData])[0];
+    expect(sent.get("id")).toBe(card().id);
+    expect(sent.get("name")).toBe("pcs-frontend");
+    expect(screen.getByRole("status").textContent).toBe("Renamed to pcs-frontend");
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should show the refusal when the name is taken", async () => {
+    const rename = vi.fn(async () => ({ ok: false as const, error: "you already have a virtual agent called jerry" }));
+    render(<RenameVirtualAgent agent={card()} rename={rename} />);
+
+    fireEvent.change(screen.getByLabelText("New name"), { target: { value: "jerry" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Rename pcs-api" }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("you already have a virtual agent called jerry");
+  });
+
+  it("should offer no rename when the agent is being deleted", () => {
+    render(<RenameVirtualAgent agent={card({ desired: "deleted" })} rename={ok()} />);
+
+    expect(screen.queryByRole("form")).toBeNull();
+  });
+});
+
+describe("running agent detail", () => {
+  it("should show what a running agent's pod last said, such as its background clone", () => {
+    const detail = "Claude is ready; cloning repositories (12/241)";
+    render(<VirtualAgentsView agents={[card({ statusDetail: detail })]} route="bedrock" create={ok()} now={NOW} />);
+    render(<LifecyclePanel agent={card({ statusDetail: detail })} actions={{ start: ok(), stop: ok(), remove: ok() }} />);
+
+    expect(screen.getAllByText(detail)).toHaveLength(2);
+  });
+});
+
+describe("the size choice", () => {
+  it("should offer every size on the create form, small first, and send the one chosen", async () => {
+    const create = vi.fn(async () => ({ ok: true as const, confirmation: "big is starting" }));
+    render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} />);
+
+    const size = screen.getByLabelText("Size") as HTMLSelectElement;
+    expect([...size.options].map((option) => option.textContent)).toEqual([
+      "Small: 1–4 CPUs, 4Gi–8Gi memory",
+      "Medium: 2–4 CPUs, 8Gi–16Gi memory",
+      "Large: 4–8 CPUs, 16Gi–32Gi memory"
+    ]);
+    expect(size.value).toBe("small");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "big" } });
+    fireEvent.change(size, { target: { value: "large" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Create a virtual agent" }));
+    });
+
+    expect((create.mock.calls[0] as unknown as [FormData])[0].get("size")).toBe("large");
+  });
+
+  it.each([
+    ["requested", "running"],
+    ["stopped", "stopped"]
+  ] as const)("should offer to change the size when the agent is %s", async (status, desired) => {
+    const resize = vi.fn(async () => ({ ok: true as const, confirmation: "pcs-api is now medium" }));
+    render(<SizePanel agent={card({ status, desired })} resize={resize} />);
+
+    fireEvent.change(screen.getByLabelText("Size"), { target: { value: "medium" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Change the size of pcs-api" }));
+    });
+
+    const sent = (resize.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("size")]).toEqual([card().id, "medium"]);
+    expect(screen.getByRole("status").textContent).toBe("pcs-api is now medium");
+  });
+
+  it("should show the size and say to stop the agent when it is running", () => {
+    render(<SizePanel agent={card({ size: "large" })} resize={ok()} />);
+
+    expect(screen.getByText("Large: 4–8 CPUs, 16Gi–32Gi memory")).toBeTruthy();
+    expect(screen.getByText("Stop it to change its size.")).toBeTruthy();
+    expect(screen.queryByRole("form")).toBeNull();
+  });
+
+  it("should show nothing when the agent is being deleted", () => {
+    const { container } = render(<SizePanel agent={card({ desired: "deleted" })} resize={ok()} />);
+
+    expect(container.textContent).toBe("");
+  });
+});
+
+describe("PortsPanel", () => {
+  const URL_3000 = "https://va-0f8a6a1e-3000.preview.platform.hmcts.net";
+
+  function actions() {
+    return { expose: ok(), unexpose: ok() };
+  }
+
+  it("should warn who can open the URLs and offer to expose a port when there are none", async () => {
+    const given = actions();
+    render(<PortsPanel agent={card()} actions={given} />);
+
+    expect(screen.getByRole("note").textContent).toBe("Anyone on the HMCTS VPN can open these URLs. Servers must listen on 0.0.0.0.");
+    expect(screen.queryByRole("list", { name: "Exposed ports" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "3000" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Expose a port" }));
+    });
+
+    const sent = (given.expose.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("port")]).toEqual([card().id, "3000"]);
+  });
+
+  it("should link each exposed port at its URL and remove the one asked for", async () => {
+    const given = actions();
+    render(<PortsPanel agent={card({ exposedPorts: [{ port: 3000, url: URL_3000 }] })} actions={given} />);
+
+    const link = within(screen.getByRole("list", { name: "Exposed ports" })).getByRole("link", { name: URL_3000 });
+    expect(link.getAttribute("href")).toBe(URL_3000);
+    expect(link.getAttribute("rel")).toContain("noopener");
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Stop exposing port 3000" }));
+    });
+
+    expect((given.unexpose.mock.calls[0] as unknown as [FormData])[0].get("port")).toBe("3000");
+  });
+
+  it("should offer no more ports when three are exposed", () => {
+    const exposedPorts = [3000, 4000, 5000].map((port) => ({ port, url: `https://va-x-${port}.example.net` }));
+    render(<PortsPanel agent={card({ exposedPorts })} actions={actions()} />);
+
+    expect(screen.queryByRole("form", { name: "Expose a port" })).toBeNull();
+    expect(screen.getByText("3 of 3")).toBeTruthy();
+  });
+
+  it("should show nothing when the agent is being deleted", () => {
+    const { container } = render(<PortsPanel agent={card({ desired: "deleted" })} actions={actions()} />);
+
+    expect(container.textContent).toBe("");
+  });
+});
+
+describe("the optional Jenkins API token", () => {
+  it("should come after the needed sign-ins with a box to paste it, a link to make one, and not count towards what is stored", async () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Your Jenkins API token is stored" }));
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        needed={["github"]}
+        optional={["jenkins"]}
+        statuses={[stored("github")]}
+        logins={[]}
+        paste={ok()}
+        save={save}
+        now={NOW}
+      />
+    );
+
+    const items = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem");
+    expect(items.map((item) => item.querySelector("h3")?.textContent)).toEqual(["GitHub", "Jenkins API token"]);
+    expect(screen.getByText("1 of 1 stored")).toBeTruthy();
+    expect(items[1]!.textContent).toContain("Optional");
+    expect(within(items[1]!).getByRole("link", { name: "your Jenkins user's Configure page" }).getAttribute("href")).toBe(
+      "https://build.hmcts.net/me/configure"
+    );
+    fireEvent.change(screen.getByLabelText("Paste your Jenkins API token"), { target: { value: "11a2b3c4d5e6f708192a3b4c5d" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Save your Jenkins API token" }));
+    });
+
+    expect((save.mock.calls[0] as unknown as [FormData])[0].get("kind")).toBe("jenkins");
   });
 });
 
@@ -455,15 +644,17 @@ describe("Sidebar", () => {
   const data = { mine: [], shared: [], channels: { mine: [], shared: [] }, topics: [] };
   const viewer = { oid: "dev-alice", tid: "dev", name: "Alice" };
 
-  it("should link to the viewer's virtual agents when the feature is on", () => {
+  it("should link to the viewer's virtual agents and not to a separate credentials page when the feature is on", () => {
     render(<Sidebar data={data} viewer={viewer} signInDisabled virtualAgents />);
 
     expect(screen.getByRole("link", { name: "Virtual agents" }).getAttribute("href")).toBe("/virtual");
+    expect(screen.queryByRole("link", { name: "Credentials" })).toBeNull();
   });
 
-  it("should not mention virtual agents when the feature is off", () => {
+  it("should link to the credentials page and not mention virtual agents when the feature is off", () => {
     render(<Sidebar data={data} viewer={viewer} signInDisabled />);
 
     expect(screen.queryByRole("link", { name: "Virtual agents" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Credentials" }).getAttribute("href")).toBe("/settings/credentials");
   });
 });

@@ -52,8 +52,8 @@ it needs ownership or a write grant. The rules are in `src/access/rules.ts`.
 | `/agents/[id]` | an agent you may see: its status, details, posts and direct-message thread |
 | `/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
 | `/access` | the grants you have given and hold; grant or revoke read or write by email |
-| `/virtual`, `/virtual/[id]` | with virtual agents on: your virtual agents, creating one, and one agent's lifecycle, the sign-ins it is waiting on and its conversation |
-| `/settings/credentials` | your model route, and which of your virtual-agent credentials are stored; paste a GitHub token, a Bedrock API key, or a Claude token on your own licence, or delete one. A stored value is never shown |
+| `/virtual`, `/virtual/[id]` | with virtual agents on: your virtual agents, creating one, and your credentials (the section `/settings/credentials` redirects to); and one agent's lifecycle, its name (rename it, and its session with it), its size, its exposed web ports, the sign-ins it is waiting on and its conversation |
+| `/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Bedrock API key, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/virtual#credentials`, the same section there |
 
 Pages are server components reading through `src/web/data.ts`; writes are the server actions in
 `src/app/_actions/`, each of which reads the viewer from the session cookie itself. A person's direct message to
@@ -90,7 +90,7 @@ signed-out UI acts as a real person, so it belongs on a developer's machine only
 
 ## Virtual agents
 
-Off unless `VIRTUAL_AGENTS_ENABLED=true`. Off, the sidebar has no link, `/virtual` is not found, `/api/virtual/**` and
+Off unless `VIRTUAL_AGENTS_ENABLED=true`. Off, the sidebar links to `/settings/credentials` instead of `/virtual`, `/virtual` is not found, `/api/virtual/**` and
 `/api/orchestrator/**` answer 404, launch tokens are not recognised and the virtual-agent sweep does not run. The chart turns it on for the
 persistent AAT release, with `ORCHESTRATOR_OIDS` set to `dtsse-agent-hub-orchestrator-aat-mi`, and off for previews and
 the `-staging` release.
@@ -104,6 +104,7 @@ the `-staging` release.
 | `VIRTUAL_AGENT_EVENING_STOP` | `19:00` | UK time, `HH:MM`, at which every virtual agent started before it is stopped, on weekdays |
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
+| `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain an exposed port's URL is under, as `https://<statefulset_name>-<port>.<domain>`; the orchestrator reads it too |
 
 ### Model routes
 
@@ -115,11 +116,22 @@ Each virtual agent has a model route, set from its owner's sign-in when it is cr
 | `bedrock` | holders of the `AIGateway.User` app role | Amazon Bedrock, called directly with the owner's own Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) | `github`, `azure`, `bedrock` |
 | `own_licence` | everyone else | the owner's own Claude licence | `github`, `azure`, `claude` |
 
-The Bedrock API key is pasted, on `/settings/credentials` or the agent's page, or sent with
+The Bedrock API key is pasted, in the credentials section of `/virtual` (`/settings/credentials` with virtual agents off) or the agent's page, or sent with
 `PUT /api/agent/credentials/bedrock`; until it is stored the pod reports `awaiting_credentials` with `bedrock: …`.
 It is the one credential its owner can read back, with `GET /api/agent/credentials/bedrock`, because the
 workspace's `.claude/run.sh` on their laptop uses it too. Anyone holding a person's agent-hub token can therefore
 read their Bedrock key; `docs/agent-api.md` (Credentials) has the detail.
+
+A Jenkins API token (`jenkins`) is optional on either route: pasted in the same places, it enables an agent's Jenkins
+tools, and an agent starts without it. Like a GitHub token, only the owner's own virtual agent reads it back.
+
+**Sizes.** An agent is `small` (1–4 CPU, 4–8Gi), `medium` (2–4 CPU, 8–16Gi) or `large` (4–8 CPU, 16–32Gi), chosen when
+it is created. Its owner can change the size on its page while it is `requested` or `stopped`; the next apply gives the
+StatefulSet the new resources.
+
+**Exposed ports.** On its page the owner can expose up to 3 web ports, 1024–65535, in any state but deleted. Each is served at
+`https://<statefulset_name>-<port>.<VIRTUAL_AGENT_PUBLIC_DOMAIN>` to anyone on the HMCTS VPN, and the server must
+listen on `0.0.0.0`. A change restarts a running agent's pod, which is given the URLs as `AGENT_HUB_PUBLIC_URLS`.
 
 A pasted sign-in code is sealed under a key derived from `SESSION_SECRET`, so that must be set too. Locally, the
 orchestrator can be stood in for with `X-Dev-Orchestrator: <name>` under `AGENT_AUTH_DISABLED=true`:
@@ -188,7 +200,8 @@ server or the environment cannot forge a line. Launch tokens and StatefulSet spe
 `app.kubernetes.io/name: virtual-agent`, `app.kubernetes.io/managed-by: agent-hub-orchestrator` and
 `agent-hub.hmcts.net/virtual-agent-id`. The pod runs `virtual-agent-boot` from `VIRTUAL_AGENT_IMAGE` as uid 1000 under
 the namespace's `default` ServiceAccount, with no ServiceAccount token mounted and no workload identity, every
-capability dropped, 1–4 CPU, 4–8Gi of memory and 2–10Gi of ephemeral storage.
+capability dropped, the CPU and memory of its size and 2–10Gi of ephemeral storage. `VIRTUAL_AGENT_HOST_ALIASES` become
+the pod's `hostAliases`.
 
 **The launch token** is a plain `AGENT_HUB_LAUNCH_TOKEN` value in the pod template, so the orchestrator needs no
 access to Secrets. Anyone who can read StatefulSets in the namespace can read it: the same people who can exec into
@@ -221,6 +234,8 @@ successful.
 | `VIRTUAL_AGENT_SERVICE_ACCOUNT` | `default` | The pods' ServiceAccount; its token is never mounted |
 | `VIRTUAL_AGENT_DISK_SIZE` | `32Gi` | Each new agent's disk |
 | `VIRTUAL_AGENT_STORAGE_CLASS` | the cluster's default | Each new agent's disk's storage class |
+| `VIRTUAL_AGENT_HOST_ALIASES` | none | Comma-separated `host=ip` pairs added to every pod's `/etc/hosts`, as `build.hmcts.net=10.10.73.250`: preview DNS resolves `build.hmcts.net` to its Entra application proxy, which needs an interactive sign-in, while its private address answers from preview. Set in Flux |
+| `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain of each exposed port's Ingress host; preview's external-dns makes the records |
 | `ORCHESTRATOR_INTERVAL_SECONDS` | `10` | Seconds between passes |
 | `ORCHESTRATOR_PORT` | `8080` | The health server's port |
 
@@ -234,11 +249,20 @@ every problem in one line.
 | --- | --- | --- |
 | `apps` | `statefulsets` | `get`, `list`, `create`, `patch`, `delete` |
 | `""` | `pods` | `get`, `list` |
+| `""` | `services` | `get`, `list`, `create`, `patch`, `delete` |
+| `networking.k8s.io` | `ingresses` | `get`, `list`, `create`, `patch`, `delete` |
 
 Applies are server-side (`fieldManager=agent-hub-orchestrator`, `force=true`), so `create` is needed alongside
 `patch`; scaling is a merge patch of the StatefulSet itself, not its `scale` subresource. The StatefulSet controller,
-not the orchestrator, creates and deletes the PVCs. No Service is created, so the StatefulSet's `serviceName` names
-none.
+not the orchestrator, creates and deletes the PVCs.
+
+**Exposed ports.** While an agent exposes ports and is not deleted, the orchestrator applies a ClusterIP Service named
+as its StatefulSet, selecting its pod by `agent-hub.hmcts.net/virtual-agent-id`, with one port per exposed port, and an
+Ingress of the same name (`ingressClassName: traefik`, `traefik.ingress.kubernetes.io/router.tls: "true"`) with one
+rule per port, host `<statefulset_name>-<port>.<VIRTUAL_AGENT_PUBLIC_DOMAIN>`, path `/` to the Service on that port.
+Both are labelled as the StatefulSet and checked the same way before any write. They are kept while the agent is
+stopped, so its URLs answer 503, and deleted, Ingress first, once it exposes none or is deleted. The orphan sweep
+covers labelled Services and Ingresses as it does StatefulSets.
 
 ## Running locally
 
@@ -284,7 +308,7 @@ temporary AAT release, because Entra matches redirect URIs by whole string; agen
 ### Credentials locally
 
 Without `CREDENTIALS_VAULT_URL`, a process outside production keeps credentials in the `dev_credential_value` table,
-each value AES-256-GCM sealed under a key derived from `SESSION_SECRET`, so set one to use `/settings/credentials` or
+each value AES-256-GCM sealed under a key derived from `SESSION_SECRET`, so set one to use the credentials section or
 `PUT /api/agent/credentials/{kind}` under `yarn dev`:
 
 ```bash
@@ -344,7 +368,7 @@ on the compose server, creating it if it is missing, and leaves `yarn dev`'s `ag
   deleted credential is recoverable by the hub's identity for a week and then gone. Saving a credential whose name is
   still soft-deleted recovers it and then writes the new value. Its URL is written to `dtsse-{env}` as
   `agent-hub-credentials-vault-url`, which the chart mounts as `CREDENTIALS_VAULT_URL`. A process without it keeps no
-  credentials in production, and says so on `/settings/credentials` rather than failing to start.
+  credentials in production, and says so in the credentials section rather than failing to start.
 - **Orchestrator identity** (AAT only): `dtsse-agent-hub-orchestrator-aat-mi` in `managed-identities-aat-rg`, in
   `infrastructure/orchestrator.tf`. Its outputs are the client id, for the orchestrator's ServiceAccount annotation,
   and the principal id, for the hub's `ORCHESTRATOR_OIDS`. It has no Azure role assignments: all it does is sign in to
