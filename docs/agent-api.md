@@ -189,7 +189,7 @@ Every `/api/virtual/{virtual_agent_id}/…` route needs that virtual agent's own
 
 ### Orchestrator routes
 
-`/api/orchestrator/**` needs an app-only Entra access token for this API (`aud` `api://dtsse-agent-hub` or the client id, the v2 issuer, the tenant's `tid`) that carries no `scp`, has `VirtualAgents.Orchestrate` in `roles`, and whose `oid` is one of `ORCHESTRATOR_OIDS`. A person's token, a launch token, or a token without the role gives `401`. With `AGENT_AUTH_DISABLED=true` under `next dev` only, `X-Dev-Orchestrator: <name>` is accepted instead.
+`/api/orchestrator/**` needs an app-only Entra access token for this API (`aud` `api://dtsse-agent-hub` or the client id, the v2 issuer, the tenant's `tid`) that carries no `scp` and whose `oid` is one of `ORCHESTRATOR_OIDS`; with none set, every orchestrator request gives `503`. When the hub runs with `ORCHESTRATOR_ROLE` set, the token must also carry that app role in `roles`; unset, the default, no role is required, because the deployed orchestrator is a managed identity, to which central-app-registration cannot assign an app role. A person's token, a launch token, a token for another application, or one without the role when it is required gives `401`. With `AGENT_AUTH_DISABLED=true` under `next dev` only, `X-Dev-Orchestrator: <name>` is accepted instead.
 
 | Method and path | Body | Response |
 |---|---|---|
@@ -197,4 +197,4 @@ Every `/api/virtual/{virtual_agent_id}/…` route needs that virtual agent's own
 | `POST /api/orchestrator/virtual-agents/{id}/observed` | `{generation, replicas_ready, pod_phase?, reason?, disk_deleted?}` | `204`. Records `generation` as observed (it never moves back), maps what was seen onto `status` as in Lifecycle, releases the claim and, once an agent is `stopped`, starts its disk's expiry. A `generation` not yet asked for gives `409`; an unknown id `404`. |
 | `GET /api/orchestrator/live` | — | `200 {virtual_agents: [{id, statefulset_name, pvc_name}]}`: every virtual agent the hub has, so anything else in the namespace is an orphan. `pvc_name` is `null` once the disk has been deleted. |
 
-`statefulset_name` and `pvc_name` are both `va-<first 8 hex digits of id>`.
+`statefulset_name` is `va-<first 8 hex digits of id>`. `pvc_name` is `work-va-<first 8 hex digits of id>-0`, the name Kubernetes gives the PVC that the StatefulSet makes from its `work` claim template for its one pod.

@@ -6,6 +6,7 @@ import {
   eveningStop,
   idleMinutes,
   orchestratorOids,
+  orchestratorRole,
   VirtualAgentConfigurationError,
   virtualAgentsEnabled
 } from "./settings.ts";
@@ -60,5 +61,15 @@ describe("orchestratorOids", () => {
 
   it("should be empty when none is set", () => {
     expect(orchestratorOids({})).toEqual([]);
+  });
+});
+
+describe("orchestratorRole", () => {
+  it("should be the trimmed role when one is set", () => {
+    expect(orchestratorRole({ ORCHESTRATOR_ROLE: " VirtualAgents.Orchestrate " })).toBe("VirtualAgents.Orchestrate");
+  });
+
+  it.each([undefined, "", "  "])("should require no role when it is %j", (value) => {
+    expect(orchestratorRole({ ORCHESTRATOR_ROLE: value })).toBeNull();
   });
 });

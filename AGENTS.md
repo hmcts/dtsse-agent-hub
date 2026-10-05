@@ -21,7 +21,7 @@ change it first when the contract changes.
 | `src/app/api/agent/**` | Agent API route handlers, each wrapped in `agentRoute` / `ownedAgentRoute` from `src/agent-api/route.ts` |
 | `src/app/api/virtual/**`, `src/app/api/orchestrator/**` | A virtual agent's pod routes, wrapped in `virtualRoute` (its own launch token only), and the orchestrator's, wrapped in `orchestratorRoute`. Both answer 404 unless `VIRTUAL_AGENTS_ENABLED=true` |
 | `src/agent-auth/` | Bearer validation against the Entra tenant JWKS, launch-token callers, and the `AGENT_AUTH_DISABLED` + `X-Dev-User` development bypass |
-| `src/agent-auth/orchestrator.ts` | The orchestrator's app-only token: no `scp`, the `VirtualAgents.Orchestrate` role, an `oid` in `ORCHESTRATOR_OIDS`; and its `X-Dev-Orchestrator` development bypass |
+| `src/agent-auth/orchestrator.ts` | The orchestrator's app-only token: no `scp`, an `oid` in `ORCHESTRATOR_OIDS`, and the `ORCHESTRATOR_ROLE` app role when that is set; and its `X-Dev-Orchestrator` development bypass |
 | `src/auth/`, `src/app/auth/` | Web SSO: openid-client code flow with PKCE, sealed `ah_session` cookie keyed by `oid`/`tid` |
 | `src/viewer/` | Who is using the web UI: the session's person, or the development identity when sign-in is disabled, and their model route (the AI gateway for holders of the `AIGateway.User` app role, otherwise their own Claude licence) |
 | `src/app/_actions/`, `src/web/` | Server actions (each re-reads the viewer), the `server-only` read seam `web/data.ts`, action results |
@@ -33,6 +33,7 @@ change it first when the contract changes.
 | `src/credentials/` | Each person's virtual-agent credentials (GitHub token, Azure token cache, Claude token): the value checks, the Key Vault store, the local encrypted store for development and tests, which of the two a process uses, and the metadata rows. Write-only for people: no route or action returns a value to a person; only the owner's own virtual agent reads one, through `/api/virtual/{id}/credentials/{kind}` |
 | `src/virtual-agents/` | Virtual agents: the feature flag and sweep settings, the lifecycle transition table, the per-person limits and name rule, launch tokens (minted, hashed, compared), the store (create, desired state, claims, observations, pod reports), sign-ins relayed to the owner and their sealed pasted codes, the sweep's clock rules and the sweep itself, and the owner's views |
 | `src/realtime/` | `hub_events` NOTIFY payloads, the per-pod LISTEN connection and in-process hub, SSE framing, the agent stream |
+| `src/orchestrator/`, `src/cli/orchestrator.ts` | The virtual-agent orchestrator, run from the same image in the preview cluster: its settings, its one structured logger, a minimal in-cluster Kubernetes client, the hub client, the StatefulSet it applies (pure), one reconcile pass with the orphan sweep, the health server, and the loop. Nothing here uses the `@/` alias |
 | `src/store/` | Prisma singleton, `DATABASE_URL` assembly, the boot-time migrator |
 | `prisma/migrations/` | Hand-written SQL, applied by `src/store/migrate.ts` before the server starts. `schema.prisma` mirrors it for the client |
 
@@ -72,7 +73,7 @@ change it first when the contract changes.
 | `yarn test:e2e` | Playwright and axe against `TEST_URL`; see the README for a full local run |
 | `yarn test` | unit suite |
 | `yarn test:integration` | needs `yarn deps:up`; migrates the database itself |
-| `yarn build` | `next build` plus the migration CLI |
+| `yarn build` | `next build` plus the CLIs, `dist/cli/migrate.js` and `dist/cli/orchestrator.js` |
 
 `yarn lint` checks nothing inside a worktree under `.claude/worktrees/`, because `biome.json` excludes that path. Run
 `yarn biome check src test` there instead.

@@ -1,6 +1,6 @@
 {
-  // The migration entrypoint, run by Node directly with no bundler, so `nodenext` resolution and relative imports
-  // only: nothing reachable from here may use the `@/*` alias.
+  // The migration and orchestrator entrypoints, run by Node directly with no bundler, so `nodenext` resolution and
+  // relative imports only: nothing reachable from here may use the `@/*` alias.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "nodenext",

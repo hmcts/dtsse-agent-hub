@@ -159,7 +159,7 @@ describe("creating virtual agents", () => {
 
     expect(agent).toMatchObject({ name: "pcs-api", desired: "running", status: "requested", generation: 1, observedGeneration: 0, modelRoute: "gateway" });
     expect(agent.statefulsetName).toBe(`va-${agent.id.slice(0, 8)}`);
-    expect(agent.pvcName).toBe(agent.statefulsetName);
+    expect(agent.pvcName).toBe(`work-va-${agent.id.slice(0, 8)}-0`);
   });
 
   it("should refuse more running than the running limit, and more in all than the total limit", async () => {
@@ -401,6 +401,14 @@ describe("GET /api/orchestrator/live", () => {
     const live = await jsonOf(await orchestrator(liveRoute.GET, "/api/orchestrator/live", {}));
 
     expect(live.virtual_agents.map((entry: { id: string }) => entry.id).sort(byCodePoint)).toEqual([alice.id, bob.id].sort(byCodePoint));
+  });
+
+  it("should name an agent's disk as its StatefulSet's claim template makes it until the disk is deleted", async () => {
+    const agent = await create(ALICE, "a");
+
+    const live = await jsonOf(await orchestrator(liveRoute.GET, "/api/orchestrator/live", {}));
+
+    expect(live.virtual_agents).toEqual([{ id: agent.id, statefulset_name: `va-${agent.id.slice(0, 8)}`, pvc_name: `work-va-${agent.id.slice(0, 8)}-0` }]);
   });
 });
 

@@ -12,13 +12,14 @@ whose `scripts/agent-hub` client talks to this service. The contract between the
 
 ## How it fits together
 
-One Next.js application and one image. The image runs `node dist/cli/migrate.js` and then `node server.js`.
+One Next.js application and one image. The image runs `node dist/cli/migrate.js` and then `node server.js`; the
+virtual-agent orchestrator runs the same image as `node dist/cli/orchestrator.js`.
 
 | Path | Authenticated by | Serves |
 | --- | --- | --- |
 | `/api/agent/*` | an Entra access token from `az account get-access-token --scope api://dtsse-agent-hub/.default`, or a virtual agent's launch token | the agent API in `docs/agent-api.md` |
 | `/api/virtual/*` | a virtual agent's own launch token | its pod's status, credentials and sign-ins (`docs/agent-api.md`, Virtual agents) |
-| `/api/orchestrator/*` | the orchestrator's app-only Entra token with the `VirtualAgents.Orchestrate` role | claiming, observing and listing virtual agents |
+| `/api/orchestrator/*` | the orchestrator's app-only Entra token, from an identity in `ORCHESTRATOR_OIDS` | claiming, observing and listing virtual agents |
 | `/`, `/auth/*`, `/api/ui/*` | Entra sign-in, sealed `ah_session` cookie | the web UI, its live stream and its feed pages |
 | `/health`, `/health/liveness`, `/health/readiness` | nothing | the probes |
 
@@ -97,6 +98,7 @@ it yet.
 | --- | --- | --- |
 | `VIRTUAL_AGENTS_ENABLED` | off | `true` turns the feature on |
 | `ORCHESTRATOR_OIDS` | none | Comma-separated object ids of the orchestrator's service principals. With none, every orchestrator request answers 503 |
+| `ORCHESTRATOR_ROLE` | none | An app role the orchestrator's token must also carry, as `VirtualAgents.Orchestrate`. Unset, the `oid` alone is checked |
 | `VIRTUAL_AGENT_IDLE_MINUTES` | `120` | A running agent with no activity for this long is stopped |
 | `VIRTUAL_AGENT_EVENING_STOP` | `19:00` | UK time, `HH:MM`, at which every virtual agent started before it is stopped, on weekdays |
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |
@@ -108,6 +110,98 @@ orchestrator can be stood in for with `X-Dev-Orchestrator: <name>` under `AGENT_
 O='X-Dev-Orchestrator: local'
 curl -s -XPOST localhost:3000/api/orchestrator/claim -H "$O" -H 'content-type: application/json' -d '{"cluster":"local"}'
 ```
+
+## Orchestrator
+
+`src/orchestrator/`, run as `node dist/cli/orchestrator.js` from the hub's image. It and its pods run in the preview
+cluster in the existing `dtsse` namespace, as workload identity `dtsse-agent-hub-orchestrator-aat-mi`
+(`infrastructure/orchestrator.tf`, AAT only; its federated credential, on the preview cluster's issuer, is made in
+cnp-flux-config). That identity's object id, the `orchestrator_identity_principal_id` output, goes in the hub's
+`ORCHESTRATOR_OIDS`.
+
+It manages one kind of object, a StatefulSet per virtual agent, and reads their pods. Every
+`ORCHESTRATOR_INTERVAL_SECONDS` it makes one pass:
+
+- **Claim** (`POST /api/orchestrator/claim`) the agents the hub has work for, then for each:
+  - `running`: apply the StatefulSet `<statefulset_name>` at one replica, with the claim's launch token, or with the
+    token the StatefulSet already holds when the claim returns none; report what it sees at once.
+  - `stopped`: scale the StatefulSet to zero, which keeps its disk.
+  - `stopped` with `delete_disk`, or `deleted`: delete the StatefulSet, which deletes its disk with it.
+- **Observe** (`POST …/observed`) the StatefulSet's ready replicas, the pod's phase and why it is not up
+  (`CrashLoopBackOff`, `ImagePullBackOff`, `ErrImagePull`, `CreateContainerConfigError`, `OOMKilled`, or
+  `Unschedulable` after five minutes without a node), and `disk_deleted` once the StatefulSet is gone. A stopped or
+  deleted agent is reported once its pod (and, if asked, its StatefulSet) has gone, and until then the claim is held
+  and the agent looked at each pass; if the orchestrator dies, the claim lapses after two minutes and the agent is
+  claimed again. A running agent is reported again whenever what is seen changes, until its pod is ready or failing,
+  or for 15 minutes.
+- **Sweep orphans** on the first pass and every 30th: any StatefulSet labelled
+  `app.kubernetes.io/managed-by=agent-hub-orchestrator` that `GET /api/orchestrator/live` does not name is deleted,
+  and its disk with it. Nothing is deleted when the hub cannot answer.
+
+**The namespace is shared** with dtsse's PR previews, so the label is what scopes the sweep: the list asks for
+`app.kubernetes.io/managed-by=agent-hub-orchestrator` only, and anything returned without it is skipped. Nothing is
+changed or deleted by name alone either: before it applies, scales or deletes a StatefulSet, the orchestrator checks
+that one of that name is absent or carries both that label and the agent's `agent-hub.hmcts.net/virtual-agent-id`, and
+otherwise leaves it and logs an error.
+
+One agent's failure is logged and the pass goes on. Agents are taken one at a time. Every log line goes through one
+logger, as a JSON object per line on stdout with line breaks removed from every string, so text from the hub, the API
+server or the environment cannot forge a line. Launch tokens and StatefulSet specs are never logged.
+
+**The pod.** The preview cluster's Gatekeeper refuses bare pods, hence the StatefulSet, labelled
+`app.kubernetes.io/name: virtual-agent`, `app.kubernetes.io/managed-by: agent-hub-orchestrator` and
+`agent-hub.hmcts.net/virtual-agent-id`. The pod runs `virtual-agent-boot` from `VIRTUAL_AGENT_IMAGE` as uid 1000 under
+the namespace's `default` ServiceAccount, with no ServiceAccount token mounted and no workload identity, every
+capability dropped, 1–4 CPU, 4–8Gi of memory and 2–10Gi of ephemeral storage.
+
+**The launch token** is a plain `AGENT_HUB_LAUNCH_TOKEN` value in the pod template, so the orchestrator needs no
+access to Secrets. Anyone who can read StatefulSets in the namespace can read it: the same people who can exec into
+the pod, and it works only for that one agent, and only while the agent is meant to be running. The template carries
+the claim's generation, so a newly minted token rolls the pod.
+
+**The disk** is the claim template `work`, so its PVC is `work-<statefulset_name>-0` (the hub's `pvc_name`), mounted at
+`/workspace` and `/home/hmcts/.claude`; `~/.azure` and `~/.config/gh` are 64Mi in-memory volumes. The StatefulSet's
+`persistentVolumeClaimRetentionPolicy` is `whenDeleted: Delete, whenScaled: Retain`: stopping keeps the disk, deleting
+the StatefulSet deletes it, and starting an agent whose disk was deleted makes a new StatefulSet and a fresh disk. The
+orchestrator never reads or deletes a PVC itself; it reports the disk deleted once the StatefulSet is gone, trusting
+the policy. A claim template cannot change once made, so an existing agent keeps the disk size and class it was
+created with.
+
+**Liveness.** An HTTP server on `ORCHESTRATOR_PORT` answers `/health`, `/health/liveness` and `/health/readiness`
+with `200 {"status":"UP"}` while a pass has claimed successfully within the last three intervals, and `503` otherwise,
+so an orchestrator that cannot reach the hub or the API server is restarted.
+
+**Stopping.** `SIGTERM` finishes the current pass and exits 0.
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `VIRTUAL_AGENT_IMAGE` | required | The virtual-agent image, pinned by digest (`<registry>/<repository>@sha256:<digest>`) |
+| `ORCHESTRATOR_CLUSTER` | required | The cluster's name, sent with each claim, as `cft-preview-00` |
+| `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_FEDERATED_TOKEN_FILE` | set by workload identity | The orchestrator's identity; `AZURE_TENANT_ID` is passed on to the pods |
+| `AGENT_HUB_URL` | `https://agent-hub.aat.platform.hmcts.net` | The hub the orchestrator calls |
+| `AGENT_HUB_AUDIENCE` | `api://dtsse-agent-hub` | The hub's Application ID URI; the token is asked for `<it>/.default` |
+| `VIRTUAL_AGENT_HUB_URL` | `AGENT_HUB_URL` | The hub the pods call |
+| `VIRTUAL_AGENT_SERVICE_ACCOUNT` | `default` | The pods' ServiceAccount; its token is never mounted |
+| `VIRTUAL_AGENT_DISK_SIZE` | `32Gi` | Each new agent's disk |
+| `VIRTUAL_AGENT_STORAGE_CLASS` | the cluster's default | Each new agent's disk's storage class |
+| `ORCHESTRATOR_INTERVAL_SECONDS` | `10` | Seconds between passes |
+| `ORCHESTRATOR_PORT` | `8080` | The health server's port |
+
+The namespace is the ServiceAccount's own, from `/var/run/secrets/kubernetes.io/serviceaccount/namespace`; nothing
+assumes it is `dtsse` or that it is the orchestrator's alone. A missing or invalid variable stops it at startup with
+every problem in one line.
+
+**RBAC**, a Role in `dtsse` (a Role, not a ClusterRole: it reaches nothing outside the namespace), and nothing else:
+
+| API group | Resource | Verbs |
+| --- | --- | --- |
+| `apps` | `statefulsets` | `get`, `list`, `create`, `patch`, `delete` |
+| `""` | `pods` | `get`, `list` |
+
+Applies are server-side (`fieldManager=agent-hub-orchestrator`, `force=true`), so `create` is needed alongside
+`patch`; scaling is a merge patch of the StatefulSet itself, not its `scale` subresource. The StatefulSet controller,
+not the orchestrator, creates and deletes the PVCs. No Service is created, so the StatefulSet's `serviceName` names
+none.
 
 ## Running locally
 
@@ -214,6 +308,10 @@ on the compose server, creating it if it is missing, and leaves `yarn dev`'s `ag
   still soft-deleted recovers it and then writes the new value. Its URL is written to `dtsse-{env}` as
   `agent-hub-credentials-vault-url`, which the chart mounts as `CREDENTIALS_VAULT_URL`. A process without it keeps no
   credentials in production, and says so on `/settings/credentials` rather than failing to start.
+- **Orchestrator identity** (AAT only): `dtsse-agent-hub-orchestrator-aat-mi` in `managed-identities-aat-rg`, in
+  `infrastructure/orchestrator.tf`. Its outputs are the client id, for the orchestrator's ServiceAccount annotation,
+  and the principal id, for the hub's `ORCHESTRATOR_OIDS`. It has no Azure role assignments: all it does is sign in to
+  the hub.
 - **ServiceAccount**: in AAT the pods run as `dtsse-agent-hub` (`saEnabled: false`, `customServiceAccountName`), annotated
   with the hub identity's client id, so workload identity gives them the hub's own token for the credentials vault.
   The chart's SecretProviderClass still takes its client id from the `dtsse` SA, so the CSI secret mounts authenticate

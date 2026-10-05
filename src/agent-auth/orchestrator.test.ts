@@ -33,19 +33,22 @@ function bearer(value: string): Headers {
   return new Headers({ authorization: `Bearer ${value}` });
 }
 
+const ROLE_TRUST = { oids: [ORCHESTRATOR], role: ORCHESTRATE_ROLE };
+const OID_TRUST = { oids: [ORCHESTRATOR], role: null };
+
 describe("verifyOrchestratorToken", () => {
   it("should take the orchestrator from oid and azp when an app-only token carries the role", async () => {
-    expect(await verifyOrchestratorToken(await token(APP_ONLY), SETTINGS, [ORCHESTRATOR], keys)).toEqual({ oid: ORCHESTRATOR, name: "orchestrator-client-id" });
+    expect(await verifyOrchestratorToken(await token(APP_ONLY), SETTINGS, ROLE_TRUST, keys)).toEqual({ oid: ORCHESTRATOR, name: "orchestrator-client-id" });
   });
 
   it("should accept the client id as the audience when the token names the application that way", async () => {
-    await expect(verifyOrchestratorToken(await token(APP_ONLY, CLIENT_ID), SETTINGS, [ORCHESTRATOR], keys)).resolves.toMatchObject({ oid: ORCHESTRATOR });
+    await expect(verifyOrchestratorToken(await token(APP_ONLY, CLIENT_ID), SETTINGS, ROLE_TRUST, keys)).resolves.toMatchObject({ oid: ORCHESTRATOR });
   });
 
   it("should name the orchestrator by its oid when the token has no azp", async () => {
     const { azp: _azp, ...claims } = APP_ONLY;
 
-    expect((await verifyOrchestratorToken(await token(claims), SETTINGS, [ORCHESTRATOR], keys)).name).toBe(ORCHESTRATOR);
+    expect((await verifyOrchestratorToken(await token(claims), SETTINGS, ROLE_TRUST, keys)).name).toBe(ORCHESTRATOR);
   });
 
   it.each([
@@ -53,23 +56,43 @@ describe("verifyOrchestratorToken", () => {
     ["an empty scope", ""],
     ["a scope that is not a string", ["agents.access"]]
   ])("should refuse a token carrying scp when it is %s, even with the role", async (_label, scp) => {
-    await expect(verifyOrchestratorToken(await token({ ...APP_ONLY, scp }), SETTINGS, [ORCHESTRATOR], keys)).rejects.toThrow(/delegated/);
+    await expect(verifyOrchestratorToken(await token({ ...APP_ONLY, scp }), SETTINGS, ROLE_TRUST, keys)).rejects.toThrow(/delegated/);
+  });
+
+  it.each([
+    ["a scope", "agents.access"],
+    ["an empty scope", ""]
+  ])("should refuse a token carrying scp when it is %s and no role is required", async (_label, scp) => {
+    await expect(verifyOrchestratorToken(await token({ ...APP_ONLY, roles: undefined, scp }), SETTINGS, OID_TRUST, keys)).rejects.toThrow(/delegated/);
   });
 
   it.each([
     ["no roles", { ...APP_ONLY, roles: undefined }],
     ["other roles", { ...APP_ONLY, roles: ["AIGateway.User"] }],
     ["roles that are not a list", { ...APP_ONLY, roles: ORCHESTRATE_ROLE }]
-  ])("should refuse an app-only token when it has %s", async (_label, claims) => {
-    await expect(verifyOrchestratorToken(await token(claims), SETTINGS, [ORCHESTRATOR], keys)).rejects.toThrow(ORCHESTRATE_ROLE);
+  ])("should refuse an app-only token when a role is required and it has %s", async (_label, claims) => {
+    await expect(verifyOrchestratorToken(await token(claims), SETTINGS, ROLE_TRUST, keys)).rejects.toThrow(ORCHESTRATE_ROLE);
   });
 
-  it("should refuse an app-only token with the role when its oid is not a trusted orchestrator", async () => {
-    await expect(verifyOrchestratorToken(await token(APP_ONLY), SETTINGS, ["someone-else"], keys)).rejects.toThrow(/not an orchestrator/);
+  it("should accept an app-only token without roles when no role is required and its oid is trusted", async () => {
+    const { roles: _roles, ...claims } = APP_ONLY;
+
+    expect(await verifyOrchestratorToken(await token(claims), SETTINGS, OID_TRUST, keys)).toEqual({ oid: ORCHESTRATOR, name: "orchestrator-client-id" });
+  });
+
+  it.each([
+    ["the role is required", ROLE_TRUST],
+    ["no role is required", OID_TRUST]
+  ])("should refuse an app-only token when its oid is not a trusted orchestrator and %s", async (_label, trust) => {
+    await expect(verifyOrchestratorToken(await token(APP_ONLY), SETTINGS, { ...trust, oids: ["someone-else"] }, keys)).rejects.toThrow(/not an orchestrator/);
   });
 
   it("should refuse a token for another tenant when it is otherwise an orchestrator's", async () => {
-    await expect(verifyOrchestratorToken(await token({ ...APP_ONLY, tid: "another" }), SETTINGS, [ORCHESTRATOR], keys)).rejects.toThrow(/tenant/);
+    await expect(verifyOrchestratorToken(await token({ ...APP_ONLY, tid: "another" }), SETTINGS, OID_TRUST, keys)).rejects.toThrow(/tenant/);
+  });
+
+  it("should refuse a token for another audience when no role is required", async () => {
+    await expect(verifyOrchestratorToken(await token(APP_ONLY, "api://something-else"), SETTINGS, OID_TRUST, keys)).rejects.toThrow(AgentAuthFailed);
   });
 });
 
@@ -88,6 +111,26 @@ describe("the agent API's tokens and the orchestrator's", () => {
 describe("authenticateOrchestrator", () => {
   it("should verify the bearer when agent authentication is on", async () => {
     expect(await authenticateOrchestrator(bearer(await token(APP_ONLY)), ENV, keys)).toMatchObject({ oid: ORCHESTRATOR });
+  });
+
+  it("should accept a trusted oid without any role when ORCHESTRATOR_ROLE is unset", async () => {
+    const { roles: _roles, ...claims } = APP_ONLY;
+
+    expect(await authenticateOrchestrator(bearer(await token(claims)), ENV, keys)).toMatchObject({ oid: ORCHESTRATOR });
+  });
+
+  it("should refuse a trusted oid without the role when ORCHESTRATOR_ROLE is set", async () => {
+    const { roles: _roles, ...claims } = APP_ONLY;
+
+    await expect(authenticateOrchestrator(bearer(await token(claims)), { ...ENV, ORCHESTRATOR_ROLE: ORCHESTRATE_ROLE }, keys)).rejects.toThrow(
+      ORCHESTRATE_ROLE
+    );
+  });
+
+  it("should accept a trusted oid with the role when ORCHESTRATOR_ROLE is set", async () => {
+    expect(await authenticateOrchestrator(bearer(await token(APP_ONLY)), { ...ENV, ORCHESTRATOR_ROLE: ORCHESTRATE_ROLE }, keys)).toMatchObject({
+      oid: ORCHESTRATOR
+    });
   });
 
   it("should refuse a request without a bearer when agent authentication is on", async () => {
