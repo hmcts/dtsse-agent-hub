@@ -78,16 +78,20 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
 }
 
 /** Locks the agent's row for the rest of the transaction, and reads what a status change is compared against. */
-async function lockAgent(db: Database, agentId: string): Promise<{ status: AgentStatus; ownerOid: string; virtual: boolean } | undefined> {
-  const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string; virtual: boolean }[]>`
-    SELECT status::text AS status, owner_oid, virtual_agent_id IS NOT NULL AS virtual FROM agent WHERE id = ${agentId}::uuid FOR UPDATE
+async function lockAgent(db: Database, agentId: string): Promise<{ status: AgentStatus; ownerOid: string; virtualName: string | null } | undefined> {
+  const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string; virtual_name: string | null }[]>`
+    SELECT a.status::text AS status, a.owner_oid, v.name AS virtual_name
+      FROM agent a LEFT JOIN virtual_agent v ON v.id = a.virtual_agent_id
+     WHERE a.id = ${agentId}::uuid
+       FOR UPDATE OF a
   `;
-  return row === undefined ? undefined : { status: row.status, ownerOid: row.owner_oid, virtual: row.virtual };
+  return row === undefined ? undefined : { status: row.status, ownerOid: row.owner_oid, virtualName: row.virtual_name };
 }
 
 /**
  * Records a heartbeat, and announces the status when it changed. An agent the sweep marked offline comes back
- * with its next heartbeat. A virtual agent's session keeps the name its owner gave the virtual agent.
+ * with its next heartbeat. A virtual agent's session takes the name its owner gave the virtual agent, which also corrects one registered
+ * under another name.
  */
 export async function heartbeat(prisma: PrismaClient, agentId: string, status: Exclude<AgentStatus, "offline">, name: string | null): Promise<void> {
   await prisma.$transaction(async (tx) => {
@@ -97,7 +101,12 @@ export async function heartbeat(prisma: PrismaClient, agentId: string, status: E
     }
     await tx.agent.update({
       where: { id: agentId },
-      data: { status, lastHeartbeatAt: new Date(), endedAt: null, ...(name === null || before.virtual ? {} : { name }) }
+      data: {
+        status,
+        lastHeartbeatAt: new Date(),
+        endedAt: null,
+        ...(before.virtualName !== null ? { name: before.virtualName } : name === null ? {} : { name })
+      }
     });
     if (before.status !== status) {
       await notify(tx, { type: "agent_status", agent_id: agentId, owner_oid: before.ownerOid, status });
