@@ -958,6 +958,47 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect(await prisma.credential.count()).toBe(0);
   });
 
+  it("should answer the pod 404 when its owner has stored no git identity, and give it theirs once they have", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    const fetchIdentity = () => pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/git_identity`, { virtualAgentId: id, kind: "git_identity" });
+
+    const missing = await fetchIdentity();
+    expect(missing.status).toBe(404);
+    expect(await jsonOf(missing)).toEqual({ error: "no git_identity credential is stored" });
+
+    const identity = JSON.stringify({ name: "Alice", email: "alice@example.com" });
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "git_identity", value: identity, via: "web" });
+
+    expect(await jsonOf(await fetchIdentity())).toEqual({ value: identity });
+  });
+
+  it("should never give a git identity to another person's virtual agent", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    const bobs = await started(BOB, "bobs");
+    const identity = JSON.stringify({ email: "alice@example.com" });
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "git_identity", value: identity, via: "web" });
+
+    const asOtherAgent = await pod(credentialRoute.GET, bobs.token, `/api/virtual/${id}/credentials/git_identity`, {
+      virtualAgentId: id,
+      kind: "git_identity"
+    });
+
+    expect(asOtherAgent.status).toBe(403);
+    expect(await asOtherAgent.text()).not.toContain("alice@example.com");
+  });
+
+  it("should refuse a pod that tries to change its owner's git identity with 403, storing nothing", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+
+    const response = await pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/git_identity`, { virtualAgentId: id, kind: "git_identity" }, "PUT", {
+      value: JSON.stringify({ name: "Someone Else", email: "someone@example.com" })
+    });
+
+    expect(response.status).toBe(403);
+    expect((await jsonOf(response)).error).toContain("git identity");
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
   it("should record the pod waiting for a Bedrock API key when it reports awaiting_credentials", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
 

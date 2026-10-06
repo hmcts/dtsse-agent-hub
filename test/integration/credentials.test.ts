@@ -18,8 +18,10 @@ vi.mock("next/cache", async () => {
 });
 
 const { actAs, revalidated } = await import("./web-session.ts");
-const { removeCredential, resetClaudeMd, saveClaudeMd, saveCredential } = await import("../../src/app/_actions/credentials.ts");
-const { claudeMdSettings, credentialSettings } = await import("../../src/web/data.ts");
+const { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } = await import(
+  "../../src/app/_actions/credentials.ts"
+);
+const { claudeMdSettings, credentialSettings, gitIdentitySettings } = await import("../../src/web/data.ts");
 
 const { GET, PUT, DELETE } = credentialRoute;
 
@@ -325,7 +327,8 @@ describe("reading credentials back", () => {
       ["claude", false],
       ["bedrock", false],
       ["jenkins", false],
-      ["claude_md", false]
+      ["claude_md", false],
+      ["git_identity", false]
     ]);
     expect(JSON.stringify(statuses)).not.toContain(GITHUB);
     expect(JSON.stringify(statuses)).not.toContain(AZURE);
@@ -649,5 +652,133 @@ describe("a CLAUDE.md", () => {
     actAs("alice");
 
     expect(await saveCredential(form({ kind: "claude_md", value: TEXT }))).toMatchObject({ ok: false, error: expect.stringContaining("can be pasted here") });
+  });
+});
+
+describe("a git identity", () => {
+  const IDENTITY = JSON.stringify({ name: "Alice Example", email: "alice@example.com" });
+
+  it("should store the caller's identity from the command line and give it back to them when they read it", async () => {
+    expect((await put(ALICE, "git_identity", { value: IDENTITY })).status).toBe(204);
+
+    const response = await read(ALICE, "git_identity");
+
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({ value: IDENTITY });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
+      ownerOid: ALICE.oid,
+      kind: "git_identity",
+      secretName: "u-dev-alice-git-identity",
+      updatedVia: "cli"
+    });
+  });
+
+  it("should answer 404 when the owner has stored none", async () => {
+    const response = await read(ALICE, "git_identity");
+
+    expect(response.status).toBe(404);
+    expect(await jsonOf(response)).toEqual({ error: "no git_identity credential is stored" });
+  });
+
+  it("should never give one person another's git identity when both read theirs", async () => {
+    await put(ALICE, "git_identity", { value: IDENTITY });
+
+    const response = await read(BOB, "git_identity");
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).not.toContain("alice@example.com");
+  });
+
+  it("should refuse an identity with 400 when its email is not an address", async () => {
+    const response = await put(ALICE, "git_identity", { value: JSON.stringify({ email: "alice" }) });
+
+    expect(response.status).toBe(400);
+    expect(await jsonOf(response)).toEqual({ error: "that is not an email address" });
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
+  it("should save the fields from the web as the viewer, storing only those set, and tell the virtual agents page", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+    actAs("alice");
+
+    const result = await saveGitIdentity(form({ name: "", email: " alice@example.com ", ownerOid: BOB.oid }));
+
+    expect(result).toEqual({ ok: true, confirmation: "Your git identity is saved. Each agent uses it from its next Claude start" });
+    expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "git_identity")).toBe('{"email":"alice@example.com"}');
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "git_identity", updatedVia: "web" });
+    expect(revalidated).toContain("/virtual");
+  });
+
+  it("should say why and store nothing when the web save has neither field", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+    actAs("alice");
+
+    expect(await saveGitIdentity(form({ name: " ", email: "" }))).toEqual({ ok: false, error: "set a name or an email, or clear the git identity" });
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
+  it("should delete the stored identity when the viewer clears it", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+    actAs("alice");
+    await saveGitIdentity(form({ name: "Alice", email: "" }));
+
+    expect(await clearGitIdentity()).toEqual({ ok: true, confirmation: "Your virtual agents are back to the default git identity" });
+    expect(await prisma.credential.count()).toBe(0);
+    expect(await prisma.devCredentialValue.count()).toBe(0);
+  });
+
+  it("should refuse to save or clear when virtual agents are off", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
+    actAs("alice");
+
+    expect(await saveGitIdentity(form({ name: "Alice", email: "" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+    expect(await clearGitIdentity()).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
+  it("should say why when the deployment cannot store it", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+    actAs("alice");
+    vi.stubEnv("CREDENTIALS_VAULT_URL", "http://not-a-vault.example");
+
+    expect(await saveGitIdentity(form({ name: "Alice", email: "" }))).toMatchObject({ ok: false, error: expect.stringContaining("https") });
+    expect(await clearGitIdentity()).toMatchObject({ ok: false, error: expect.stringContaining("https") });
+  });
+
+  it("should give the page empty fields when nothing is stored, and the viewer's own once it is", async () => {
+    const viewer = devIdentity("alice");
+
+    expect(await gitIdentitySettings(viewer)).toEqual({ available: true, stored: false, identity: {} });
+
+    await put(ALICE, "git_identity", { value: IDENTITY });
+
+    expect(await gitIdentitySettings(viewer)).toEqual({ available: true, stored: true, identity: { name: "Alice Example", email: "alice@example.com" } });
+    expect(await gitIdentitySettings(devIdentity("bob"))).toEqual({ available: true, stored: false, identity: {} });
+  });
+
+  it("should tell the page it is unavailable when the deployment cannot store it", async () => {
+    vi.stubEnv("CREDENTIALS_VAULT_URL", "https://dtsse-ah-creds-test.vault.azure.net/");
+    expect(await gitIdentitySettings(devIdentity("alice"))).toMatchObject({ available: false, reason: expect.stringContaining("development identity") });
+
+    vi.stubEnv("CREDENTIALS_VAULT_URL", "");
+    vi.stubEnv("SESSION_SECRET", "");
+    expect(await gitIdentitySettings(devIdentity("alice"))).toMatchObject({ available: false });
+  });
+
+  it("should leave it out of the credentials the settings list shows when one is stored", async () => {
+    await put(ALICE, "git_identity", { value: IDENTITY });
+
+    const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" });
+
+    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "bedrock", "jenkins"]);
+  });
+
+  it("should not be pasteable as an ordinary credential when the credentials form names it", async () => {
+    actAs("alice");
+
+    expect(await saveCredential(form({ kind: "git_identity", value: IDENTITY }))).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("can be pasted here")
+    });
   });
 });
