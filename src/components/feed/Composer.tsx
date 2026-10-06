@@ -103,6 +103,7 @@ export function Composer({
 
   return (
     <form
+      method="post"
       onSubmit={submit}
       onKeyDown={escapeCancelsReply}
       className="rounded-lg border border-hub-line bg-hub-pane focus-within:border-hub-muted"

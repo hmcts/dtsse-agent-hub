@@ -80,6 +80,16 @@ describe("createHub", () => {
     expect(calls[0]!.init.body).toBe(JSON.stringify(body));
   });
 
+  it("should post an apply error for an agent", async () => {
+    const { hub, calls } = hubWith([new Response(null, { status: 204 })]);
+    const body = { generation: 3, error: "GET services/va-1: 403 forbidden" };
+
+    await hub.applyFailed("a/b", body);
+
+    expect(calls[0]!.url).toBe("https://agent-hub.example/api/orchestrator/virtual-agents/a%2Fb/apply-failed");
+    expect(calls[0]!.init).toMatchObject({ method: "POST", body: JSON.stringify(body) });
+  });
+
   it("should list the live agents without a body", async () => {
     const live = [{ id: "a", statefulset_name: "va-a", pvc_name: null, cluster: "cft-preview-00" }];
     const { hub, calls } = hubWith([json(200, { virtual_agents: live })]);

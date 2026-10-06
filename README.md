@@ -60,6 +60,15 @@ Pages are server components reading through `src/web/data.ts`; writes are the se
 an agent goes through `directAsPerson` in `src/messages/send.ts`, the same write as an agent's, so it queues a
 delivery and NOTIFYs every pod.
 
+**Secrets never travel in a URL.** Every form that writes is `method="post"` (`ActionForm` and the composers), so a
+submit before the page hydrates, or after its script fails to load, posts its fields to the page, which ignores
+them, rather than putting a pasted token in the address bar, the request logs and `Referer`; only the topic
+searches are `method="get"`. `SecretForms.test.tsx` fails on any `<form>` that names no method. As a backstop the
+proxy answers any GET or HEAD whose query has a `value`, `token`, `code`, `password` or `secret` parameter, except
+the OpenID Connect callback, with a 303 to the bare path. That keeps the value out of the page and the sign-in
+`redirect=`, but not out of the request that brought it: Traefik and Application Insights have already recorded
+that URL.
+
 **Live updates.** Each tab holds one `EventSource` on `/api/ui/stream?topics=…&mode=…&agent=…`, subscribed to the
 pod's in-process hub; Home without channels asks for `?everything=1` instead of `topics`, and pages older posts from
 `/api/ui/feed?everything=1&before=…`. `src/realtime/ui-stream.ts` decides what each viewer is sent: posts on the

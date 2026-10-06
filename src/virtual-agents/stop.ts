@@ -22,7 +22,11 @@ export async function stopVirtualAgents(db: Database, ids: readonly string[], re
     UPDATE virtual_agent
        SET desired = 'stopped', stop_reason = ${reason}::virtual_agent_stop_reason, generation = generation + 1, pod_generation = pod_generation + 1,
            exposed_ports = '{}', local_only_ports = '{}',
-           launch_token_hash = NULL, launch_token_issued_at = NULL, updated_at = ${now}
+           launch_token_hash = NULL, launch_token_issued_at = NULL, apply_failures = 0,
+           status = CASE WHEN status = 'stopped' THEN status ELSE 'stopping' END,
+           status_detail = CASE WHEN status = 'stopped' THEN status_detail ELSE NULL END,
+           status_changed_at = CASE WHEN status = 'stopped' THEN status_changed_at ELSE ${now} END,
+           updated_at = ${now}
      WHERE id = ANY(${[...ids]}::uuid[]) AND desired = 'running'
     RETURNING id::text AS id, owner_oid
   `;

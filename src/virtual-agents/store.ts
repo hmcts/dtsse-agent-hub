@@ -4,8 +4,8 @@ import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
-import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken } from "./launch-token.ts";
-import { nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
+import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken, withoutLaunchTokens } from "./launch-token.ts";
+import { afterApplyError, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
 import { checkName, createRefusal, startRefusal } from "./limits.ts";
 import { normalisePorts, samePorts } from "./ports.ts";
 import { diskTtlDays, orchestratorLeaseSeconds } from "./settings.ts";
@@ -27,6 +27,7 @@ export interface VirtualAgentRow {
   statusChangedAt: Date;
   generation: number;
   observedGeneration: number;
+  applyFailures: number;
   statefulsetName: string;
   pvcName: string;
   agentId: string | null;
@@ -54,6 +55,7 @@ const SELECT = {
   statusChangedAt: true,
   generation: true,
   observedGeneration: true,
+  applyFailures: true,
   statefulsetName: true,
   pvcName: true,
   agentId: true,
@@ -167,11 +169,19 @@ const NO_PORTS = { exposedPorts: [], localOnlyPorts: [] } as const;
 /** A change the pod template carries, so the orchestrator applies the StatefulSet again. */
 const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1 } } as const;
 
+function statusChange(status: VirtualAgentStatus, now: Date) {
+  return { status, statusDetail: null, statusChangedAt: now };
+}
+
 /**
  * What the owner asks for: start, stop or delete. Each bumps `generation` and `pod_generation`, so the orchestrator
  * claims the agent and applies it. Stopping or deleting drops the launch token at once, so the pod is shut out before
  * it is shut down, and its reported ports with it; starting again clears the last stop and the disk's expiry, and the
  * next claim mints a fresh token.
+ *
+ * The status follows at once, `requested` on a start and `stopping` on a stop or delete (a stopped agent stays
+ * `stopped`), so it never shows the last pod's state while the orchestrator has yet to apply the change, or cannot.
+ * Each change gives the orchestrator a fresh run of claims before its apply errors fail the agent.
  *
  * Someone other than the owner is told there is no such agent, so the refusal does not confirm one exists.
  */
@@ -200,14 +210,15 @@ export async function setDesired(
       if (refusal !== undefined) {
         throw new HttpError(409, refusal);
       }
-      data = { startedAt: now, stoppedAt: null, stopReason: null, diskExpiresAt: null, diskDeletedAt: null, statusDetail: null };
+      data = { startedAt: now, stoppedAt: null, stopReason: null, diskExpiresAt: null, diskDeletedAt: null, ...statusChange("requested", now) };
     } else {
-      data = { ...NO_TOKEN, ...NO_PORTS, ...(desired === "stopped" ? { stopReason: "user" } : {}) };
+      const settled = desired === "stopped" && row.status === "stopped";
+      data = { ...NO_TOKEN, ...NO_PORTS, ...(desired === "stopped" ? { stopReason: "user" } : {}), ...(settled ? {} : statusChange("stopping", now)) };
     }
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
-        data: { ...data, desired, ...POD_CHANGE, updatedAt: now },
+        data: { ...data, desired, ...POD_CHANGE, applyFailures: 0, updatedAt: now },
         select: SELECT
       })
     );
@@ -311,10 +322,10 @@ export async function reportPorts(prisma: PrismaClient, id: string, report: Repo
 }
 
 /**
- * Replaces a running agent's pod, so it boots again and fetches its owner's credentials afresh. The generation is
- * bumped, which the pod template carries, and the launch token dropped, so the old pod is shut out at once and the
- * next claim mints a token for the new one. An agent not meant to be running is left as it is: it boots afresh when
- * it next starts. Someone other than the owner is told there is no such agent.
+ * Replaces a running agent's pod, so it boots again and fetches its owner's credentials afresh. The generation and
+ * the pod generation the pod template carries are bumped, and the launch token dropped, so the old pod is shut out at
+ * once and the next claim mints a token for the new one. An agent not meant to be running is left as it is: it boots
+ * afresh when it next starts. Someone other than the owner is told there is no such agent.
  */
 export async function restartVirtualAgent(
   prisma: PrismaClient,
@@ -336,7 +347,7 @@ export async function restartVirtualAgent(
         where: { id },
         data: {
           ...NO_TOKEN,
-          generation: { increment: 1 },
+          ...POD_CHANGE,
           status: "provisioning",
           statusDetail: detail,
           ...(row.status === "provisioning" ? {} : { statusChangedAt: now }),
@@ -454,7 +465,16 @@ interface ClaimRow {
   exposed_ports: number[];
   owner_oid: string;
   has_token: boolean;
+  apply_failures: number;
   disk_due: boolean;
+}
+
+/**
+ * Failed by the orchestrator's apply errors. The token the last claim minted may have reached no StatefulSet, and
+ * the pod is replaced once an apply works, so it is given a new one.
+ */
+function failedToApply(row: ClaimRow): boolean {
+  return row.status === "failed" && row.apply_failures > 0;
 }
 
 export interface OrchestratorLease {
@@ -573,13 +593,13 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         FROM due
        WHERE v.id = due.id
       RETURNING v.id::text AS id, v.generation, v.pod_generation, v.desired::text AS desired, v.status::text AS status, v.statefulset_name, v.pvc_name,
-                v.model_route::text AS model_route, v.size::text AS size, v.exposed_ports, v.owner_oid, v.launch_token_hash IS NOT NULL AS has_token,
+                v.model_route::text AS model_route, v.size::text AS size, v.exposed_ports, v.owner_oid, v.launch_token_hash IS NOT NULL AS has_token, v.apply_failures,
                 COALESCE(v.desired <> 'running' AND v.disk_expires_at <= ${now} AND v.disk_deleted_at IS NULL, false) AS disk_due
     `;
     const claimed: ClaimedVirtualAgent[] = [];
     for (const row of rows) {
       let launchToken: string | undefined;
-      if (row.desired === "running" && (!row.has_token || STARTING_FROM.includes(row.status))) {
+      if (row.desired === "running" && (!row.has_token || STARTING_FROM.includes(row.status) || failedToApply(row))) {
         const minted = mintLaunchToken();
         await tx.virtualAgent.update({ where: { id: row.id }, data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now } });
         launchToken = minted.token;
@@ -612,7 +632,8 @@ export type ObserveResult = { removed: true } | { removed: false; row: VirtualAg
 /**
  * The orchestrator's report on a claimed agent: which generation it applied, and what it saw. It releases the claim,
  * moves `observed_generation` forward (never back), and maps what was seen onto the status. An agent that has just
- * stopped starts its disk's expiry; a deleted agent whose StatefulSet and disk are both gone is removed.
+ * stopped starts its disk's expiry; a deleted agent whose StatefulSet and disk are both gone is removed. It ends any
+ * run of apply errors.
  */
 export async function observeVirtualAgent(prisma: PrismaClient, id: string, report: ObservedReport, now: Date = new Date()): Promise<ObserveResult> {
   return await prisma.$transaction(async (tx) => {
@@ -639,6 +660,7 @@ export async function observeVirtualAgent(prisma: PrismaClient, id: string, repo
         where: { id },
         data: {
           observedGeneration: Math.max(row.observedGeneration, report.generation),
+          applyFailures: 0,
           claimedBy: null,
           claimedAt: null,
           status: outcome.status,
@@ -653,6 +675,48 @@ export async function observeVirtualAgent(prisma: PrismaClient, id: string, repo
     );
     await announce(tx, id, row.ownerOid);
     return { removed: false, row: updated };
+  });
+}
+
+export interface ApplyErrorReport {
+  generation: number;
+  error: string;
+}
+
+/**
+ * The orchestrator's report that it could not apply a claimed agent. The error goes in `status_detail`, with anything
+ * shaped like a launch token taken out, and after `APPLY_FAILURES_BEFORE_FAILED` in a row the agent is failed. The
+ * generations and the claim are left alone, so the claim lapses and the orchestrator tries again on the next one.
+ * A report about an older generation than the latest is ignored: the latest has not been tried yet.
+ */
+export async function recordApplyError(prisma: PrismaClient, id: string, report: ApplyErrorReport, now: Date = new Date()): Promise<VirtualAgentRow> {
+  return await prisma.$transaction(async (tx) => {
+    const row = await lockVirtualAgent(tx, id);
+    if (row === undefined) {
+      throw new HttpError(404, "no such virtual agent");
+    }
+    if (report.generation > row.generation) {
+      throw new HttpError(409, `generation ${report.generation} has not been asked for; the latest is ${row.generation}`);
+    }
+    if (report.generation < row.generation) {
+      return row;
+    }
+    const next = afterApplyError(row, withoutLaunchTokens(report.error));
+    const updated = toRow(
+      await tx.virtualAgent.update({
+        where: { id },
+        data: {
+          status: next.status,
+          statusDetail: next.detail,
+          applyFailures: next.applyFailures,
+          ...(next.status === row.status ? {} : { statusChangedAt: now }),
+          updatedAt: now
+        },
+        select: SELECT
+      })
+    );
+    await announce(tx, id, row.ownerOid);
+    return updated;
   });
 }
 

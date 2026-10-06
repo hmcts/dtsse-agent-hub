@@ -1,6 +1,7 @@
+import { withoutLaunchTokens } from "../virtual-agents/launch-token.ts";
 import { FAILING_REASONS } from "../virtual-agents/lifecycle.ts";
 import { type Claim, type ClaimedAgent, type Hub, HubError, type Lease, type ObservedBody } from "./hub.ts";
-import type { Kind, Kube, Pod, Resource, StatefulSet } from "./kube.ts";
+import { type Kind, type Kube, KubeError, type Pod, type Resource, type StatefulSet } from "./kube.ts";
 import { describeError, type Log } from "./log.ts";
 import { carriedOver, exposedPorts, ID_LABEL, ingress, MANAGED_BY, MANAGED_SELECTOR, podName, runsPodOf, service, statefulSet } from "./manifests.ts";
 import type { OrchestratorSettings } from "./settings.ts";
@@ -45,6 +46,8 @@ export interface ReconcileState {
   watching: Map<string, Watch>;
   /** The lease holder this cluster last stood by for, `null` once it was active, `undefined` before its first claim. */
   standby?: string | null;
+  /** Set once the API server has refused this orchestrator a read of Services or Ingresses, so that is logged once. */
+  exposureForbidden?: boolean;
 }
 
 export interface PassResult {
@@ -121,12 +124,29 @@ async function ownedResource<K extends Kind>(kube: Kube, kind: K, name: string, 
 /**
  * A Service and an Ingress while the agent's pod reports ports and the agent is not deleted; neither otherwise. Either
  * is checked as the agent's before it is written.
+ *
+ * When neither is wanted, a 403 on reading one is taken as none: an orchestrator that may not read Services or
+ * Ingresses cannot have made one to delete, and an agent with no ports needs neither. That is logged once.
  */
-async function expose(kube: Kube, agent: ClaimedAgent, settings: OrchestratorSettings): Promise<void> {
+async function expose({ kube, settings, log }: ReconcileDeps, state: ReconcileState, agent: ClaimedAgent): Promise<void> {
   const name = agent.statefulset_name;
   const wanted = agent.desired !== "deleted" && exposedPorts(agent).length > 0;
-  const existingService = await ownedResource(kube, "services", name, agent.id);
-  const existingIngress = await ownedResource(kube, "ingresses", name, agent.id);
+  const existing = async <K extends "services" | "ingresses">(kind: K) => {
+    try {
+      return await ownedResource(kube, kind, name, agent.id);
+    } catch (error) {
+      if (wanted || !(error instanceof KubeError && error.status === 403)) {
+        throw error;
+      }
+      if (state.exposureForbidden !== true) {
+        state.exposureForbidden = true;
+        log("warn", "may not read Services or Ingresses; agents without exposed ports are applied without them", { error: describeError(error) });
+      }
+      return null;
+    }
+  };
+  const existingService = await existing("services");
+  const existingIngress = await existing("ingresses");
   if (wanted) {
     await kube.apply("services", service(agent, settings.agent));
     await kube.apply("ingresses", ingress(agent, settings.agent));
@@ -146,10 +166,11 @@ async function expose(kube: Kube, agent: ClaimedAgent, settings: OrchestratorSet
  * Stopping scales it to zero, which keeps the disk. Deleting the agent or its disk deletes the StatefulSet, and its
  * PVC retention policy deletes the disk with it. Its Service and Ingress follow its reported ports first.
  */
-async function apply({ kube, settings }: ReconcileDeps, agent: ClaimedAgent): Promise<void> {
+async function apply(deps: ReconcileDeps, state: ReconcileState, agent: ClaimedAgent): Promise<void> {
+  const { kube, settings } = deps;
   const name = agent.statefulset_name;
   const existing: StatefulSet | null = await ownedResource(kube, "statefulsets", name, agent.id);
-  await expose(kube, agent, settings);
+  await expose(deps, state, agent);
   if (agent.desired === "running") {
     if (agent.launch_token === undefined && runsPodOf(existing, agent)) {
       return;
@@ -245,14 +266,34 @@ export async function sweepOrphans({ kube, hub, settings, log }: ReconcileDeps, 
   return deleted;
 }
 
-/** Applies one claimed agent and starts watching it; `false` when it could not be applied. */
+export const MAX_APPLY_ERROR = 500;
+
+/**
+ * An apply error as it is logged and sent to the hub: on one line, and without launch tokens, since the API server's
+ * refusal can quote the spec it was given, the pod's environment included.
+ */
+export function applyErrorText(error: unknown): string {
+  const text = withoutLaunchTokens(describeError(error)).trim() || "unknown error";
+  return text.length > MAX_APPLY_ERROR ? `${text.slice(0, MAX_APPLY_ERROR - 1)}…` : text;
+}
+
+/**
+ * Applies one claimed agent and starts watching it; `false` when it could not be applied. A failure is reported to
+ * the hub, which shows it to the owner, and the claim is left to lapse so the agent is tried again on the next.
+ */
 async function applyClaimed(deps: ReconcileDeps, state: ReconcileState, agent: ClaimedAgent, now: number): Promise<boolean> {
-  const { log } = deps;
+  const { hub, log } = deps;
   state.watching.delete(agent.id);
   try {
-    await apply(deps, agent);
+    await apply(deps, state, agent);
   } catch (error) {
-    log("error", "could not apply", { id: agent.id, generation: agent.generation, desired: agent.desired, error: describeError(error) });
+    const text = applyErrorText(error);
+    log("error", "could not apply", { id: agent.id, generation: agent.generation, desired: agent.desired, error: text });
+    try {
+      await hub.applyFailed(agent.id, { generation: agent.generation, error: text });
+    } catch (reportError) {
+      log("error", "could not report the apply error", { id: agent.id, generation: agent.generation, error: describeError(reportError) });
+    }
     return false;
   }
   state.watching.set(agent.id, { agent, since: now });

@@ -15,9 +15,18 @@ const STATUS: Record<VirtualAgentStatus, string> = {
   failed: "Failed"
 };
 
-/** The status, except that an agent being deleted says so whatever its pod last reported. */
+/**
+ * The status, except that an agent being deleted says so whatever its pod last reported, and one meant to be stopped
+ * reads as stopping until it is stopped or has failed, whatever its status still says.
+ */
 export function statusLabel(status: VirtualAgentStatus, desired: VirtualAgentDesired): string {
-  return desired === "deleted" ? "Deleting" : STATUS[status];
+  if (desired === "deleted") {
+    return "Deleting";
+  }
+  if (desired === "stopped" && status !== "stopped" && status !== "failed") {
+    return STATUS.stopping;
+  }
+  return STATUS[status];
 }
 
 const STOP_REASON: Record<StopReason, string> = {

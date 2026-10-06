@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { type ClaimedAgent, type Hub, HubError, type Lease, type LiveAgent, type ObservedBody } from "./hub.ts";
+import { type ApplyFailedBody, type ClaimedAgent, type Hub, HubError, type Lease, type LiveAgent, type ObservedBody } from "./hub.ts";
 import { type Kind, type Kinds, type Kube, KubeError, type Pod, type Resource, type StatefulSet } from "./kube.ts";
 import { ingress, labels, service, statefulSet } from "./manifests.ts";
-import { initialState, type Log, podReason, RUNNING_WATCH_MS, reconcilePass, SCHEDULING_GRACE_MS, settled, sweepOrphans } from "./reconcile.ts";
+import {
+  applyErrorText,
+  initialState,
+  type Log,
+  MAX_APPLY_ERROR,
+  podReason,
+  RUNNING_WATCH_MS,
+  reconcilePass,
+  SCHEDULING_GRACE_MS,
+  settled,
+  sweepOrphans
+} from "./reconcile.ts";
 import type { OrchestratorSettings } from "./settings.ts";
 
 const ID = "0f8a6a1e-1234-4000-8000-000000000001";
@@ -50,10 +61,14 @@ function fakeKube() {
   const store: Store = { statefulsets: new Map(), pods: new Map(), services: new Map(), ingresses: new Map() };
   const calls: string[] = [];
   const failing = new Set<string>();
+  const forbidden = new Set<string>();
   const guard = (call: string) => {
     calls.push(call);
     if (failing.has(call)) {
       throw new KubeError(`${call} failed`, 500);
+    }
+    if (forbidden.has(call)) {
+      throw new KubeError(`${call}: 403 forbidden`, 403);
     }
   };
   const kube: Kube = {
@@ -84,11 +99,13 @@ function fakeKube() {
       found.spec = { ...found.spec, replicas };
     }
   };
-  return { kube, store, calls, failing };
+  return { kube, store, calls, failing, forbidden };
 }
 
 function fakeHub(claims: ClaimedAgent[][] = [], live: LiveAgent[] = []) {
   const observed: { id: string; body: ObservedBody }[] = [];
+  const applyFailures: { id: string; body: ApplyFailedBody }[] = [];
+  const reporting: { error?: Error } = {};
   const refusing = new Map<string, HubError>();
   let liveFails = false;
   const lease: { holder?: Lease } = {};
@@ -103,6 +120,12 @@ function fakeHub(claims: ClaimedAgent[][] = [], live: LiveAgent[] = []) {
       }
       observed.push({ id, body });
     },
+    async applyFailed(id, body) {
+      if (reporting.error !== undefined) {
+        throw reporting.error;
+      }
+      applyFailures.push({ id, body });
+    },
     async live() {
       if (liveFails) {
         throw new Error("hub down");
@@ -113,6 +136,8 @@ function fakeHub(claims: ClaimedAgent[][] = [], live: LiveAgent[] = []) {
   return {
     hub,
     observed,
+    applyFailures,
+    reporting,
     refusing,
     standBy(holder: Lease | undefined) {
       lease.holder = holder;
@@ -865,5 +890,82 @@ describe("exposed ports", () => {
     expect([...t.store.services.keys()]).toEqual(["va-1a2b3c4d"]);
     expect([...t.store.ingresses.keys()]).toEqual(["va-1a2b3c4d"]);
     expect(t.calls.filter((call) => call.startsWith("delete"))).toEqual([`delete ingresses ${STS}`, `delete services ${STS}`]);
+  });
+});
+
+describe("apply errors", () => {
+  const PORTS = { exposed_ports: [3000] };
+
+  it("should report a 403 to the hub, observe nothing and keep the claim when the API server refuses the apply", async () => {
+    const t = setup([[agent({ ...PORTS, generation: 4, launch_token: "ahv_new" })]]);
+    t.forbidden.add(`get services ${STS}`);
+
+    expect(await t.pass()).toMatchObject({ claimed: 1, reported: 0, errors: 1 });
+
+    expect(t.applyFailures).toEqual([{ id: ID, body: { generation: 4, error: expect.stringMatching(/^get services va-0f8a6a1e: 403 forbidden$/) } }]);
+    expect(t.observed).toEqual([]);
+    expect(t.state.watching.has(ID)).toBe(false);
+    expect(t.logs.find((entry) => entry.message === "could not apply")).toMatchObject({
+      level: "error",
+      fields: { id: ID, error: expect.stringMatching(/403/) }
+    });
+  });
+
+  it("should never send or log the launch token or the StatefulSet's spec when the API server quotes them", async () => {
+    const t = setup([[agent({ launch_token: "ahv_SECRETtoken_1234567890" })]]);
+    t.kube.apply = async () => {
+      throw new KubeError("StatefulSet.apps va-0f8a6a1e is invalid: env[0].value: ahv_SECRETtoken_1234567890 is not allowed", 422);
+    };
+
+    await t.pass();
+
+    const sent = JSON.stringify(t.applyFailures) + JSON.stringify(t.logs);
+    expect(sent).not.toContain("SECRETtoken");
+    expect(sent).not.toContain("AGENT_HUB_URL");
+    expect(t.applyFailures[0]?.body.error).toContain("ahv_[redacted]");
+  });
+
+  it("should log the report's failure and carry on with the pass when the hub will not take the apply error", async () => {
+    const t = setup([[agent(), agent({ id: OTHER, launch_token: "ahv_b" })]]);
+    t.reporting.error = new HubError("POST …/apply-failed: 503 down", 503);
+
+    expect(await t.pass()).toMatchObject({ claimed: 2, reported: 1, errors: 1 });
+
+    expect(t.logs.find((entry) => entry.message === "could not report the apply error")).toMatchObject({
+      fields: { id: ID, error: expect.stringMatching(/503/) }
+    });
+  });
+
+  it("should apply an agent with no exposed ports, and say so once, when Services and Ingresses may not be read", async () => {
+    const t = setup([[agent({ launch_token: "ahv_new" })], [agent({ generation: 2, desired: "stopped" })]]);
+    t.forbidden.add(`get services ${STS}`);
+    t.forbidden.add(`get ingresses ${STS}`);
+
+    expect(await t.pass()).toMatchObject({ errors: 0 });
+    t.store.statefulsets.get(STS)!.status = { readyReplicas: 0 };
+    expect(await t.pass()).toMatchObject({ errors: 0 });
+
+    expect(t.store.statefulsets.get(STS)?.spec?.replicas).toBe(0);
+    expect(t.applyFailures).toEqual([]);
+    expect(t.calls.some((call) => /^(apply|delete) (services|ingresses)/.test(call))).toBe(false);
+    expect(t.logs.filter((entry) => entry.level === "warn").map((entry) => entry.message)).toEqual([
+      "may not read Services or Ingresses; agents without exposed ports are applied without them"
+    ]);
+  });
+
+  it("should still fail an agent with no exposed ports when the Service read fails for another reason", async () => {
+    const t = setup([[agent({ launch_token: "ahv_new" })]]);
+    t.failing.add(`get services ${STS}`);
+
+    expect(await t.pass()).toMatchObject({ errors: 1 });
+    expect(t.store.statefulsets.size).toBe(0);
+  });
+
+  it("should keep a short error whole and cut a long one to the limit", () => {
+    expect(applyErrorText(new Error(" boom\nagain "))).toBe("boom again");
+    expect(applyErrorText("")).toBe("unknown error");
+    const long = applyErrorText(new Error("x".repeat(2000)));
+    expect(long).toHaveLength(MAX_APPLY_ERROR);
+    expect(long.endsWith("…")).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claimBody, completeBody, loginBody, observedBody, portsBody, statusBody } from "./schemas.ts";
+import { applyFailedBody, claimBody, completeBody, loginBody, observedBody, portsBody, statusBody } from "./schemas.ts";
 
 describe("statusBody", () => {
   it("should accept a phase and keep a detail when one is sent", () => {
@@ -107,5 +107,22 @@ describe("portsBody", () => {
     ["no ports list", { local_only: [3000] }]
   ])("should refuse %s", (_label, body) => {
     expect(portsBody.safeParse(body).success).toBe(false);
+  });
+});
+
+describe("applyFailedBody", () => {
+  it("should accept the generation and the error when the orchestrator could not apply it", () => {
+    expect(applyFailedBody.parse({ generation: 2, error: " GET services/va-1: 403 forbidden " })).toEqual({
+      generation: 2,
+      error: "GET services/va-1: 403 forbidden"
+    });
+  });
+
+  it.each([
+    ["an empty error", { generation: 1, error: " " }],
+    ["an error over 500 characters", { generation: 1, error: "x".repeat(501) }],
+    ["no generation", { error: "boom" }]
+  ])("should refuse %s", (_label, body) => {
+    expect(applyFailedBody.safeParse(body).success).toBe(false);
   });
 });

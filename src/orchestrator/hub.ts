@@ -37,6 +37,12 @@ export interface ObservedBody {
   disk_deleted: boolean;
 }
 
+/** At most 500 characters, with no launch token in it. */
+export interface ApplyFailedBody {
+  generation: number;
+  error: string;
+}
+
 export interface LiveAgent {
   id: string;
   statefulset_name: string;
@@ -56,6 +62,7 @@ export type Claim = { active: true; agents: ClaimedAgent[] } | { active: false; 
 export interface Hub {
   claim(cluster: string): Promise<Claim>;
   observed(id: string, body: ObservedBody): Promise<void>;
+  applyFailed(id: string, body: ApplyFailedBody): Promise<void>;
   live(): Promise<LiveAgent[]>;
 }
 
@@ -184,6 +191,10 @@ export function createHub({
 
     async observed(id, body) {
       await call("POST", `/api/orchestrator/virtual-agents/${encodeURIComponent(id)}/observed`, body);
+    },
+
+    async applyFailed(id, body) {
+      await call("POST", `/api/orchestrator/virtual-agents/${encodeURIComponent(id)}/apply-failed`, body);
     },
 
     async live() {

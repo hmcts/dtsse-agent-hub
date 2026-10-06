@@ -76,3 +76,8 @@ export const portsBody = z.object({
   ports: reportedPorts,
   local_only: reportedPorts.optional().default([])
 });
+
+export const applyFailedBody = z.object({
+  generation: z.number().int().min(0),
+  error: z.string().trim().min(1).max(MAX_DETAIL)
+});

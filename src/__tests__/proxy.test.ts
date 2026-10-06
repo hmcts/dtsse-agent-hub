@@ -99,3 +99,73 @@ describe("proxy matcher", () => {
     expect(pattern.test("/_next/static/chunks/main.js")).toBe(false);
   });
 });
+
+function askWith(method: string, url: string): NextRequest {
+  return new NextRequest(new URL(url, "https://agent-hub.example"), { method });
+}
+
+describe("proxy secret-in-query guard", () => {
+  beforeEach(() => {
+    vi.stubEnv("AUTH_DISABLED", "");
+    vi.stubEnv("SESSION_SECRET", SECRET);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    "value",
+    "token",
+    "code",
+    "password",
+    "secret",
+    "Value",
+    "TOKEN"
+  ])("should redirect 303 to the bare path when a GET carries a %s parameter", async (name) => {
+    const response = await proxy(askWith("GET", `/virtual/va-1?kind=jenkins&${name}=11a2b3c4d5e6f708192a3b4c5d`));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/virtual/va-1");
+  });
+
+  it("should redirect a HEAD that carries a secret parameter too", async () => {
+    expect((await proxy(askWith("HEAD", "/agents/va-1?value=x"))).status).toBe(303);
+  });
+
+  it("should refuse the secret before the sign-in redirect, which would otherwise copy it into redirect=", async () => {
+    const response = await proxy(askWith("GET", "/agents/va-1?value=a-pasted-token"));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).not.toContain("a-pasted-token");
+  });
+
+  it("should refuse the secret even when sign-in is disabled", async () => {
+    vi.stubEnv("AUTH_DISABLED", "true");
+
+    expect((await proxy(askWith("GET", "/settings/credentials?token=x"))).status).toBe(303);
+  });
+
+  it("should let the OpenID Connect callback keep its authorisation code", async () => {
+    expect((await proxy(askWith("GET", "/auth/callback?code=x&state=y"))).status).toBe(200);
+  });
+
+  it("should leave a POST alone when it is a form posted to the page", async () => {
+    vi.stubEnv("AUTH_DISABLED", "true");
+
+    expect((await proxy(askWith("POST", "/agents/va-1?value=x"))).status).toBe(200);
+  });
+
+  it.each([
+    "/agents/va-1?kind=jenkins",
+    "/c?topics=pcs-api,database&mode=any",
+    "/api/ui/feed?topics=a&before=5",
+    "/api/ui/stream?topics=a&after=3",
+    "/api/ui/topics?prefix=p",
+    "/topics?q=pcs",
+    "/agents/va-1?values=x&codes=y"
+  ])("should let %s through when it carries no secret parameter", async (path) => {
+    vi.stubEnv("AUTH_DISABLED", "true");
+
+    expect((await proxy(askWith("GET", path))).status).toBe(200);
+  });
+});
