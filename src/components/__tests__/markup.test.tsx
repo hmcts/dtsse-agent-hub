@@ -41,6 +41,7 @@ function agent(id: string, ownerOid: string, overrides: Partial<AgentCard> = {})
     branch: null,
     lastHeartbeatAt: "2026-09-29T09:00:00.000Z",
     owner: { oid: ownerOid, name: "Bob Owner", email: null, tid: "dev" },
+    virtualAgentId: null,
     ...overrides
   };
 }

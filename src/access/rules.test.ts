@@ -16,6 +16,7 @@ import {
   canUseCredentialRoutes,
   canViewAgent,
   canViewTranscript,
+  canViewVirtualAgent,
   type Grant,
   grantLevel,
   type MessageRef,
@@ -250,6 +251,17 @@ describe("canManageVirtualAgent", () => {
     [false, "stranger"]
   ])("should answer %s when the %s manages the owner's virtual agent", (expected, role) => {
     expect(canManageVirtualAgent(ROLES[role], { id: "va-1", ownerOid: OWNER })).toBe(expected);
+  });
+});
+
+describe("canViewVirtualAgent", () => {
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [true, "read grantee"],
+    [true, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s views the owner's virtual agent", (expected, role) => {
+    expect(canViewVirtualAgent(ROLES[role], { id: "va-1", ownerOid: OWNER }, GRANTS)).toBe(expected);
   });
 });
 

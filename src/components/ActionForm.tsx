@@ -9,8 +9,23 @@ import type { ActionResult } from "@/web/action";
 
 export type FormAction = (form: FormData) => Promise<ActionResult<object & { confirmation?: string }>>;
 
-/** A form posting to a server action, showing its refusal or confirmation, and re-rendering the page on success. */
-export function ActionForm({ action, label, className, children }: { action: FormAction; label: string; className?: string; children: React.ReactNode }) {
+/**
+ * A form posting to a server action, showing its refusal or confirmation, and re-rendering the page on success, or
+ * going to the page `navigate` names for the result.
+ */
+export function ActionForm<T extends object & { confirmation?: string }>({
+  action,
+  label,
+  className,
+  navigate,
+  children
+}: {
+  action: (form: FormData) => Promise<ActionResult<T>>;
+  label: string;
+  className?: string;
+  navigate?: (result: T) => string;
+  children: React.ReactNode;
+}) {
   const router = useRouter();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, setPending] = useState(false);
@@ -24,7 +39,9 @@ export function ActionForm({ action, label, className, children }: { action: For
     setMessage(null);
     try {
       const result = await action(new FormData(form));
-      if (result.ok) {
+      if (result.ok && navigate !== undefined) {
+        router.push(navigate(result));
+      } else if (result.ok) {
         form.reset();
         setMessage(result.confirmation ? { ok: true, text: result.confirmation } : null);
         router.refresh();

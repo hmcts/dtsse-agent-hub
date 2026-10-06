@@ -31,8 +31,7 @@ test.describe("accessibility @nightly", () => {
     const name = unique("a11y").toLowerCase();
     await page.getByLabel("Name").fill(name);
     await page.getByRole("button", { name: "Create" }).click();
-    await page.getByRole("link", { name }).click();
-    await page.waitForURL(/\/virtual\/[0-9a-f-]{36}$/);
+    await page.waitForURL(/\/agents\/[0-9a-f-]{36}$/);
     const path = new URL(page.url()).pathname;
     await audit(page, path);
 

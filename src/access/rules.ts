@@ -10,7 +10,8 @@
  * - Only an owner changes their grants, and only to people the hub already knows.
  * - Only a person saves, replaces or deletes their own credentials. No grant extends to them. Of their values, they
  *   may read back only their own Amazon Bedrock API key, with their own token.
- * - Only a person manages their own virtual agents and sees their login codes. A virtual agent's launch token acts
+ * - A virtual agent is visible to whoever may see its owner's agents, since its sessions are among them. Only that
+ *   person manages it and sees its login codes. A virtual agent's launch token acts
  *   as its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
@@ -161,6 +162,14 @@ export function agentAccess(viewerOid: string, agent: AgentRef, grants: readonly
 export interface VirtualAgentRef {
   id: string;
   ownerOid: string;
+}
+
+/**
+ * Whoever may see the agents a virtual agent's sessions register may see the virtual agent itself: its name, its
+ * state and its current session. Everything else about it is `canManageVirtualAgent`'s.
+ */
+export function canViewVirtualAgent(viewerOid: string, virtualAgent: VirtualAgentRef, grants: readonly Grant[]): boolean {
+  return canViewAgent(viewerOid, virtualAgent, grants);
 }
 
 /**

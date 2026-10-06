@@ -1,9 +1,10 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import type { AgentView } from "../../src/agents/views.ts";
 import { saveChannel } from "../../src/channels/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import type { Identity } from "../../src/users/identity.ts";
-import { agentActivity, agentPage, channel, messagePage, overview, sidebarData, topics as topicList } from "../../src/web/data.ts";
+import { agentActivity, agentRoute, channel, messagePage, overview, sidebarData, topics as topicList } from "../../src/web/data.ts";
 import { insertAgent, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 
 const ALICE = { oid: "oid-alice", name: "Alice", email: "alice@example.com" };
@@ -11,6 +12,12 @@ const BOB = { oid: "oid-bob", name: "Bob", email: "bob@example.com" };
 const CAROL = { oid: "oid-carol", name: "Carol", email: "carol@example.com" };
 
 const viewer = (who: Person): Identity => ({ ...who, tid: "dev" });
+
+/** The agent `who` sees on `/agents/{id}`, when it is an agent shown as itself. */
+async function agentPage(who: Person, id: string): Promise<AgentView | undefined> {
+  const route = await agentRoute({ ...viewer(who), modelRoute: "bedrock" }, id);
+  return route?.variant === "local" ? route.view : undefined;
+}
 
 let alicesAgent: string;
 let carolsAgent: string;
@@ -96,13 +103,13 @@ describe("channel", () => {
   });
 });
 
-describe("agentPage", () => {
+describe("agentRoute for an agent shown as itself", () => {
   it("should give the owner, a grantee and a stranger what each may see of an agent", async () => {
-    expect((await agentPage(viewer(ALICE), alicesAgent))?.access).toBe("owner");
-    expect((await agentPage(viewer(BOB), alicesAgent))?.access).toBe("read");
-    expect(await agentPage(viewer(BOB), carolsAgent)).toBeUndefined();
-    expect(await agentPage(viewer(BOB), "00000000-0000-0000-0000-000000000000")).toBeUndefined();
-    expect(await agentPage(viewer(BOB), "nope")).toBeUndefined();
+    expect((await agentPage(ALICE, alicesAgent))?.access).toBe("owner");
+    expect((await agentPage(BOB, alicesAgent))?.access).toBe("read");
+    expect(await agentPage(BOB, carolsAgent)).toBeUndefined();
+    expect(await agentPage(BOB, "00000000-0000-0000-0000-000000000000")).toBeUndefined();
+    expect(await agentPage(BOB, "nope")).toBeUndefined();
   });
 
   it("should show the thread both ways with delivery state, leaving out what the viewer may not read", async () => {
@@ -116,8 +123,8 @@ describe("agentPage", () => {
     });
     await createPost(prisma, { author: { oid: ALICE.oid, agentId: alicesAgent }, topics: ["a"], title: null, body: "a post", inReplyTo: null });
 
-    const owner = await agentActivity(viewer(ALICE), (await agentPage(viewer(ALICE), alicesAgent))!);
-    const grantee = await agentActivity(viewer(BOB), (await agentPage(viewer(BOB), alicesAgent))!);
+    const owner = await agentActivity(viewer(ALICE), (await agentPage(ALICE, alicesAgent))!);
+    const grantee = await agentActivity(viewer(BOB), (await agentPage(BOB, alicesAgent))!);
 
     expect(owner.conversation.messages.map((message) => [message.body, message.delivery])).toEqual([
       ["to it", "queued"],

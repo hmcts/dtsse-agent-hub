@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { type Heard, onStatus } from "@/agents/liveness";
+import { agentPath } from "@/agents/path";
 import type { AgentCard } from "@/agents/views";
 import { Avatar } from "@/components/Avatar";
 import { HeardAge } from "@/components/agents/LastHeard";
@@ -29,7 +30,7 @@ function Row({ agent, heard, showOwner }: { agent: AgentCard; heard: Heard; show
   const offline = status === "offline";
   return (
     <li>
-      <NavLink href={`/agents/${agent.id}`} className={offline ? "opacity-60" : ""}>
+      <NavLink href={agentPath(agent)} className={offline ? "opacity-60" : ""}>
         <span className="relative">
           <Avatar name={agent.name} size="sm" />
           <span
@@ -41,6 +42,7 @@ function Row({ agent, heard, showOwner }: { agent: AgentCard; heard: Heard; show
           />
         </span>
         <span className="truncate">{agent.name}</span>
+        {agent.virtualAgentId === null ? null : <span className="shrink-0 text-[10px] uppercase tracking-wide text-hub-muted">virtual</span>}
         <span className="sr-only">{status}</span>
         {showOwner || offline ? (
           <span className="ml-auto flex min-w-0 items-baseline gap-1.5 text-xs text-hub-muted">

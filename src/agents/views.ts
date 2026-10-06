@@ -3,6 +3,7 @@ import { type AgentAccess, agentAccess, type Grant } from "../access/rules.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import type { Database } from "../store/prisma.ts";
 import { byCodePoint } from "../topics/slug.ts";
+import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
 import { isUuid } from "./store.ts";
 
 /** Agents as the web UI lists and shows them: only those the viewer may see, which `agentsVisibleTo` decides. */
@@ -15,6 +16,8 @@ export interface AgentCard {
   branch: string | null;
   lastHeartbeatAt: string;
   owner: { oid: string; name: string; email: string | null; tid: string };
+  /** The virtual agent whose session this is, whose page is this agent's page, or `null` for a session on a laptop. */
+  virtualAgentId: string | null;
 }
 
 export interface AgentDetail extends AgentCard {
@@ -30,7 +33,8 @@ const CARD = {
   repo: true,
   branch: true,
   lastHeartbeatAt: true,
-  owner: { select: { oid: true, name: true, email: true, tid: true } }
+  owner: { select: { oid: true, name: true, email: true, tid: true } },
+  virtualAgentId: true
 } as const;
 
 type CardRow = {
@@ -41,6 +45,7 @@ type CardRow = {
   branch: string | null;
   lastHeartbeatAt: Date;
   owner: { oid: string; name: string; email: string | null; tid: string };
+  virtualAgentId: string | null;
 };
 
 function toCard(row: CardRow): AgentCard {
@@ -51,7 +56,9 @@ function toCard(row: CardRow): AgentCard {
     repo: row.repo,
     branch: row.branch,
     lastHeartbeatAt: row.lastHeartbeatAt.toISOString(),
-    owner: row.owner
+    owner: row.owner,
+    // With virtual agents off their pages are not found, so their sessions are shown as the agents they are.
+    virtualAgentId: virtualAgentsEnabled() ? row.virtualAgentId : null
   };
 }
 
