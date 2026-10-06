@@ -1,12 +1,12 @@
-import { publicHost, publicUrl } from "../virtual-agents/ports.ts";
+import { publicHost } from "../virtual-agents/ports.ts";
 import { DEFAULT_SIZE, isVirtualAgentSize, SIZE_RESOURCES } from "../virtual-agents/size.ts";
 import type { ClaimedAgent } from "./hub.ts";
 import type { Ingress, Service, StatefulSet } from "./kube.ts";
 import type { VirtualAgentSpec } from "./settings.ts";
 
 /**
- * What the orchestrator applies for each virtual agent: a StatefulSet, and a Service and an Ingress while it exposes
- * web ports. The preview cluster's Gatekeeper refuses a pod no controller owns; the launch token is in the pod
+ * What the orchestrator applies for each virtual agent: a StatefulSet, and a Service and an Ingress while its pod
+ * reports web ports. The preview cluster's Gatekeeper refuses a pod no controller owns; the launch token is in the pod
  * template rather than a Secret, and the disk is the claim template's, deleted with the StatefulSet, so the
  * orchestrator needs no access to Secrets or PVCs.
  */
@@ -16,7 +16,6 @@ export const MANAGED_SELECTOR = `app.kubernetes.io/managed-by=${MANAGED_BY}`;
 export const ID_LABEL = "agent-hub.hmcts.net/virtual-agent-id";
 export const GENERATION_ANNOTATION = "agent-hub.hmcts.net/generation";
 export const LAUNCH_TOKEN_ENV = "AGENT_HUB_LAUNCH_TOKEN";
-export const PUBLIC_URLS_ENV = "AGENT_HUB_PUBLIC_URLS";
 
 const CONTAINER = "agent";
 const CLAIM_TEMPLATE = "work";
@@ -50,7 +49,8 @@ interface EnvVar {
 
 interface Shape {
   volumeClaimTemplates?: { spec?: { resources?: { requests?: { storage?: unknown } }; storageClassName?: unknown } }[];
-  template?: { spec?: { containers?: { name?: unknown; env?: EnvVar[] }[] } };
+  replicas?: unknown;
+  template?: { metadata?: { annotations?: Record<string, unknown> }; spec?: { containers?: { name?: unknown; env?: EnvVar[] }[] } };
 }
 
 function shapeOf(existing: StatefulSet | null): Shape {
@@ -85,8 +85,11 @@ export function carriedOver(existing: StatefulSet | null): Carried {
   return { ...(disk === undefined ? {} : { disk }), ...(launchToken === undefined ? {} : { launchToken }) };
 }
 
+/**
+ * The pod is given its public domain rather than its URLs, so that a server starting or stopping changes the Service
+ * and Ingress and never the pod template.
+ */
 function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
-  const ports = exposedPorts(agent);
   return [
     { name: "AGENT_HUB_URL", value: spec.hubUrl },
     { name: "AGENT_HUB_VIRTUAL", value: "1" },
@@ -95,10 +98,8 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
     { name: "AZURE_TENANT_ID", value: spec.tenantId },
     { name: "DISABLE_AUTOUPDATER", value: "1" },
     { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
-    { name: LAUNCH_TOKEN_ENV, value: launchToken },
-    ...(ports.length === 0
-      ? []
-      : [{ name: PUBLIC_URLS_ENV, value: ports.map((port) => `${port}=${publicUrl(agent.statefulset_name, port, spec.publicDomain)}`).join(",") }])
+    { name: "VIRTUAL_AGENT_PUBLIC_DOMAIN", value: spec.publicDomain },
+    { name: LAUNCH_TOKEN_ENV, value: launchToken }
   ];
 }
 
@@ -115,8 +116,8 @@ export function resources(agent: Pick<ClaimedAgent, "size">) {
 }
 
 /**
- * The pod template carries the claim's generation, so starting an agent again replaces a pod that is still there
- * with one holding the newly minted launch token; a claim of the same generation changes nothing.
+ * The pod template carries the claim's pod generation, so starting an agent again replaces a pod that is still there
+ * with one holding the newly minted launch token. The hub moves it for everything but a change of ports.
  *
  * The claim template's PVC is deleted with the StatefulSet and kept when it scales to zero, so stopping keeps the
  * disk, deleting the StatefulSet deletes it, and starting after that makes a fresh one.
@@ -135,7 +136,7 @@ export function statefulSet(agent: ClaimedAgent, spec: VirtualAgentSpec, launchT
       selector: { matchLabels: { [ID_LABEL]: agent.id } },
       persistentVolumeClaimRetentionPolicy: { whenDeleted: "Delete", whenScaled: "Retain" },
       template: {
-        metadata: { labels: tagged, annotations: { [GENERATION_ANNOTATION]: String(agent.generation) } },
+        metadata: { labels: tagged, annotations: { [GENERATION_ANNOTATION]: String(podGeneration(agent)) } },
         spec: {
           serviceAccountName: spec.serviceAccount,
           automountServiceAccountToken: false,
@@ -184,6 +185,20 @@ export function statefulSet(agent: ClaimedAgent, spec: VirtualAgentSpec, launchT
   };
 }
 
+export function podGeneration(agent: Pick<ClaimedAgent, "generation" | "pod_generation">): number {
+  return typeof agent.pod_generation === "number" ? agent.pod_generation : agent.generation;
+}
+
+/**
+ * Whether the StatefulSet already runs the pod the claim asks for: one replica, stamped with the claim's pod
+ * generation. Applying it again would put the orchestrator's current image and settings on the template, so a claim
+ * for a change of ports alone would restart the pod.
+ */
+export function runsPodOf(existing: StatefulSet | null, agent: Pick<ClaimedAgent, "generation" | "pod_generation">): boolean {
+  const shape = shapeOf(existing);
+  return existing !== null && shape.replicas === 1 && shape.template?.metadata?.annotations?.[GENERATION_ANNOTATION] === String(podGeneration(agent));
+}
+
 export function exposedPorts(agent: Pick<ClaimedAgent, "exposed_ports">): number[] {
   return Array.isArray(agent.exposed_ports) ? agent.exposed_ports : [];
 }
@@ -193,7 +208,7 @@ function portName(port: number): string {
 }
 
 /**
- * The agent's exposed ports in front of its pod, named as the StatefulSet. Labelled as the StatefulSet, so the
+ * A Service in front of the agent's pod with each port it reports, named and labelled as the StatefulSet, so the
  * orchestrator only ever changes or deletes its own, and selecting the pod by the agent's id alone.
  */
 export function service(agent: ClaimedAgent, spec: VirtualAgentSpec): Service {
@@ -209,7 +224,7 @@ export function service(agent: ClaimedAgent, spec: VirtualAgentSpec): Service {
   };
 }
 
-/** One host per exposed port, through Traefik with TLS, each to the Service on that port. */
+/** One host per reported port, through Traefik with TLS, each to the Service on that port. */
 export function ingress(agent: ClaimedAgent, spec: VirtualAgentSpec): Ingress {
   const name = agent.statefulset_name;
   return {

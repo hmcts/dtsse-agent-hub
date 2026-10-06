@@ -14,6 +14,8 @@ export type ModelRoute = "bedrock" | "own_licence";
 export interface ClaimedAgent {
   id: string;
   generation: number;
+  /** What the pod template is stamped with; `generation` when absent. A change of ports alone leaves it as it was. */
+  pod_generation?: number;
   desired: Desired;
   statefulset_name: string;
   pvc_name: string;
@@ -21,7 +23,7 @@ export interface ClaimedAgent {
   model_route: ModelRoute;
   /** The StatefulSet is sized `small` when this is absent or not a size it knows. */
   size?: VirtualAgentSize;
-  /** Ascending; treated as none when absent. */
+  /** The ports the pod reports listening on beyond loopback, ascending; treated as none when absent. */
   exposed_ports?: number[];
   owner: { oid: string };
   launch_token?: string;

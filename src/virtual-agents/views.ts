@@ -26,8 +26,10 @@ export interface VirtualAgentCard {
   statusDetail: string | null;
   modelRoute: ModelRoute;
   size: VirtualAgentSize;
-  /** Each exposed port with the URL it is served at. */
+  /** Each port the pod reports listening on beyond loopback, with the URL it is served at. */
   exposedPorts: { port: number; url: string }[];
+  /** The ports the pod reports listening on loopback only, which no URL can reach. */
+  localOnlyPorts: number[];
   stopReason: StopReason | null;
   /** The latest pod report or transcript entry, or `null` before there has been either. */
   lastActivityAt: string | null;
@@ -69,6 +71,7 @@ function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCa
     modelRoute: row.modelRoute,
     size: row.size,
     exposedPorts: row.exposedPorts.map((port) => ({ port, url: publicUrl(row.statefulsetName, port, publicDomain()) })),
+    localOnlyPorts: row.localOnlyPorts,
     stopReason: row.stopReason,
     lastActivityAt: iso(lastActivity(row.lastActiveAt, row.agentId === null ? undefined : newest.get(row.agentId))),
     stoppedAt: iso(row.stoppedAt),

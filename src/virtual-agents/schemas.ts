@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { POD_PHASES } from "./lifecycle.ts";
+import { MAX_EXPOSED_PORT, MAX_REPORTED_PORTS, MIN_EXPOSED_PORT } from "./ports.ts";
 
 /** Request bodies of `/api/virtual/{id}/…` and `/api/orchestrator/…` in `docs/agent-api.md`. */
 
@@ -64,6 +65,16 @@ export const observedBody = z.object({
   pod_phase: optionalText(64),
   reason: optionalText(200),
   disk_deleted: z.boolean().optional()
+});
+
+const reportedPorts = z
+  .array(z.number().int().min(MIN_EXPOSED_PORT).max(MAX_EXPOSED_PORT))
+  .max(MAX_REPORTED_PORTS)
+  .refine((ports) => new Set(ports).size === ports.length, "must not list a port twice");
+
+export const portsBody = z.object({
+  ports: reportedPorts,
+  local_only: reportedPorts.optional().default([])
 });
 
 export const applyFailedBody = z.object({

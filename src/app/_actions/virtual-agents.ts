@@ -8,14 +8,14 @@ import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { isSignInKind, reconnectSignIn as reconnect, storePastedCode } from "@/virtual-agents/logins";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
-import { createVirtualAgent as create, renameVirtualAgent as rename, setDesired, setExposedPort, setVirtualAgentSize } from "@/virtual-agents/store";
+import { createVirtualAgent as create, renameVirtualAgent as rename, setDesired, setVirtualAgentSize } from "@/virtual-agents/store";
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
- * Creating, starting, stopping, renaming, resizing and deleting the signed-in person's own virtual agents, exposing
- * their web ports, pasting a login code back to one, and having one sign in again. The owner is always the session's
- * identity; an id from the form names an agent, and `setDesired`, `renameVirtualAgent`, `setVirtualAgentSize`,
- * `setExposedPort`, `storePastedCode` and `reconnectSignIn` refuse one that is not the viewer's.
+ * Creating, starting, stopping, renaming, resizing and deleting the signed-in person's own virtual agents, pasting a
+ * login code back to one, and having one sign in again. The owner is always the session's identity; an id from the
+ * form names an agent, and `setDesired`, `renameVirtualAgent`, `setVirtualAgentSize`, `storePastedCode` and
+ * `reconnectSignIn` refuse one that is not the viewer's.
  */
 
 const LIST_PATH = "/virtual";
@@ -101,30 +101,6 @@ export async function resizeVirtualAgent(form: FormData): Promise<ActionResult<{
     revalidate(id);
     return { ok: true, confirmation: `${row.name} is now ${row.size}` };
   });
-}
-
-async function exposure(name: string, form: FormData, exposed: boolean): Promise<ActionResult> {
-  return await runAction(name, async () => {
-    if (!virtualAgentsEnabled()) {
-      return OFF;
-    }
-    const viewer = await requireViewer();
-    const id = text(form.get("id"));
-    if (id === "") {
-      return { ok: false, error: "no virtual agent was named" };
-    }
-    await setExposedPort(prisma, viewer.oid, id, form.get("port"), exposed);
-    revalidate(id);
-    return { ok: true };
-  });
-}
-
-export async function exposePort(form: FormData): Promise<ActionResult> {
-  return await exposure("expose port", form, true);
-}
-
-export async function unexposePort(form: FormData): Promise<ActionResult> {
-  return await exposure("stop exposing port", form, false);
 }
 
 /** The code a sign-in page gave the owner, sealed for their pod to fetch once. Never echoed back. */

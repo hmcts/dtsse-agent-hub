@@ -5,14 +5,12 @@ import { saveCredential } from "@/app/_actions/credentials";
 import { sendDirect } from "@/app/_actions/direct";
 import {
   deleteVirtualAgent,
-  exposePort,
   pasteLoginCode,
   reconnectSignIn,
   renameVirtualAgent,
   resizeVirtualAgent,
   startVirtualAgent,
-  stopVirtualAgent,
-  unexposePort
+  stopVirtualAgent
 } from "@/app/_actions/virtual-agents";
 import { AgentAbout } from "@/components/agents/AgentAbout";
 import { AgentLayout } from "@/components/agents/AgentLayout";
@@ -35,7 +33,6 @@ const VIRTUAL_AGENT_ACTIONS: VirtualAgentActions = {
   lifecycle: { start: startVirtualAgent, stop: stopVirtualAgent, remove: deleteVirtualAgent },
   rename: renameVirtualAgent,
   resize: resizeVirtualAgent,
-  ports: { expose: exposePort, unexpose: unexposePort },
   paste: pasteLoginCode,
   reconnect: reconnectSignIn,
   save: saveCredential

@@ -113,7 +113,7 @@ the `-staging` release.
 | `VIRTUAL_AGENT_EVENING_STOP` | `19:00` | UK time, `HH:MM`, at which every virtual agent started before it is stopped, on weekdays |
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
-| `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain an exposed port's URL is under, as `https://<statefulset_name>-<port>.<domain>`; the orchestrator reads it too |
+| `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain a reported port's URL is under, as `https://<statefulset_name>-<port>.<domain>`; the orchestrator reads it too |
 
 ### Model routes
 
@@ -147,9 +147,10 @@ section of `/virtual` (`git_identity`, JSON `{name, email}`); a pod reads it but
 it is created. Its owner can change the size on its page while it is `requested` or `stopped`; the next apply gives the
 StatefulSet the new resources.
 
-**Exposed ports.** On its page the owner can expose up to 3 web ports, 1024–65535, in any state but deleted. Each is served at
-`https://<statefulset_name>-<port>.<VIRTUAL_AGENT_PUBLIC_DOMAIN>` to anyone on the HMCTS VPN, and the server must
-listen on `0.0.0.0`. A change restarts a running agent's pod, which is given the URLs as `AGENT_HUB_PUBLIC_URLS`.
+**Web ports.** The pod reports the ports it finds listening (`PUT /api/virtual/{id}/ports`), up to 10, 1024–65535; nobody
+chooses them. Each one bound beyond loopback is served at `https://<statefulset_name>-<port>.<VIRTUAL_AGENT_PUBLIC_DOMAIN>`
+to anyone on the HMCTS VPN, and the agent's page links it; one bound to loopback only is listed with how to open it. A
+change never restarts the pod: it bumps `generation` but not the `pod_generation` the pod template is stamped with.
 
 A pasted sign-in code is sealed under a key derived from `SESSION_SECRET`, so that must be set too. Locally, the
 orchestrator can be stood in for with `X-Dev-Orchestrator: <name>` under `AGENT_AUTH_DISABLED=true`:
@@ -253,7 +254,7 @@ successful.
 | `VIRTUAL_AGENT_DISK_SIZE` | `32Gi` | Each new agent's disk |
 | `VIRTUAL_AGENT_STORAGE_CLASS` | the cluster's default | Each new agent's disk's storage class |
 | `VIRTUAL_AGENT_HOST_ALIASES` | none | Comma-separated `host=ip` pairs added to every pod's `/etc/hosts`, as `build.hmcts.net=10.10.73.250`: preview DNS resolves `build.hmcts.net` to its Entra application proxy, which needs an interactive sign-in, while its private address answers from preview. Set in Flux |
-| `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain of each exposed port's Ingress host; preview's external-dns makes the records |
+| `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain of each reported port's Ingress host, also given to the pod; preview's external-dns makes the records |
 | `ORCHESTRATOR_INTERVAL_SECONDS` | `10` | Seconds between passes |
 | `ORCHESTRATOR_PORT` | `8080` | The health server's port |
 
@@ -274,13 +275,14 @@ Applies are server-side (`fieldManager=agent-hub-orchestrator`, `force=true`), s
 `patch`; scaling is a merge patch of the StatefulSet itself, not its `scale` subresource. The StatefulSet controller,
 not the orchestrator, creates and deletes the PVCs.
 
-**Exposed ports.** While an agent exposes ports and is not deleted, the orchestrator applies a ClusterIP Service named
-as its StatefulSet, selecting its pod by `agent-hub.hmcts.net/virtual-agent-id`, with one port per exposed port, and an
+**Web ports.** While an agent's pod reports ports and it is not deleted, the orchestrator applies a ClusterIP Service named
+as its StatefulSet, selecting its pod by `agent-hub.hmcts.net/virtual-agent-id`, with one port per reported port, and an
 Ingress of the same name (`ingressClassName: traefik`, `traefik.ingress.kubernetes.io/router.tls: "true"`) with one
 rule per port, host `<statefulset_name>-<port>.<VIRTUAL_AGENT_PUBLIC_DOMAIN>`, path `/` to the Service on that port.
-Both are labelled as the StatefulSet and checked the same way before any write. They are kept while the agent is
-stopped, so its URLs answer 503, and deleted, Ingress first, once it exposes none or is deleted. The orphan sweep
-covers labelled Services and Ingresses as it does StatefulSets.
+Both are labelled as the StatefulSet and checked the same way before any write, and deleted, Ingress first, once it
+reports none (stopping clears its ports) or is deleted. The orphan sweep covers labelled Services and Ingresses as it
+does StatefulSets. A claim that mints no launch token for a running agent whose StatefulSet already has one replica
+stamped with the claim's `pod_generation` leaves the StatefulSet alone, so a change of ports never rolls the pod.
 
 ## Running locally
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyFailedBody, claimBody, completeBody, loginBody, observedBody, statusBody } from "./schemas.ts";
+import { applyFailedBody, claimBody, completeBody, loginBody, observedBody, portsBody, statusBody } from "./schemas.ts";
 
 describe("statusBody", () => {
   it("should accept a phase and keep a detail when one is sent", () => {
@@ -82,6 +82,31 @@ describe("observedBody", () => {
     ["a disk_deleted that is not a boolean", { generation: 1, replicas_ready: 0, disk_deleted: "yes" }]
   ])("should refuse %s", (_label, body) => {
     expect(observedBody.safeParse(body).success).toBe(false);
+  });
+});
+
+describe("portsBody", () => {
+  it("should accept up to 10 ports with the loopback-only ones when both are sent", () => {
+    const ports = [1024, 3000, 3001, 4000, 5000, 5173, 6000, 7000, 8080, 65535];
+
+    expect(portsBody.parse({ ports, local_only: [9229] })).toEqual({ ports, local_only: [9229] });
+  });
+
+  it("should read a missing local_only as none", () => {
+    expect(portsBody.parse({ ports: [] })).toEqual({ ports: [], local_only: [] });
+  });
+
+  it.each([
+    ["a port below 1024", { ports: [80] }],
+    ["a port above 65535", { ports: [65536] }],
+    ["a port that is not a whole number", { ports: [3000.5] }],
+    ["a port twice", { ports: [3000, 3000] }],
+    ["11 ports", { ports: Array.from({ length: 11 }, (_unused, index) => 3000 + index) }],
+    ["a loopback-only port twice", { ports: [], local_only: [5173, 5173] }],
+    ["a loopback-only port out of range", { ports: [], local_only: [22] }],
+    ["no ports list", { local_only: [3000] }]
+  ])("should refuse %s", (_label, body) => {
+    expect(portsBody.safeParse(body).success).toBe(false);
   });
 });
 

@@ -3,7 +3,7 @@ import { FAILING_REASONS } from "../virtual-agents/lifecycle.ts";
 import { type Claim, type ClaimedAgent, type Hub, HubError, type Lease, type ObservedBody } from "./hub.ts";
 import { type Kind, type Kube, KubeError, type Pod, type Resource, type StatefulSet } from "./kube.ts";
 import { describeError, type Log } from "./log.ts";
-import { carriedOver, exposedPorts, ID_LABEL, ingress, MANAGED_BY, MANAGED_SELECTOR, podName, service, statefulSet } from "./manifests.ts";
+import { carriedOver, exposedPorts, ID_LABEL, ingress, MANAGED_BY, MANAGED_SELECTOR, podName, runsPodOf, service, statefulSet } from "./manifests.ts";
 import type { OrchestratorSettings } from "./settings.ts";
 
 /**
@@ -122,8 +122,8 @@ async function ownedResource<K extends Kind>(kube: Kube, kind: K, name: string, 
 }
 
 /**
- * A Service and an Ingress while the agent exposes ports and is not deleted, kept while it is stopped so its URLs
- * answer 503 rather than vanish; neither otherwise. Either is checked as the agent's before it is written.
+ * A Service and an Ingress while the agent's pod reports ports and the agent is not deleted; neither otherwise. Either
+ * is checked as the agent's before it is written.
  *
  * When neither is wanted, a 403 on reading one is taken as none: an orchestrator that may not read Services or
  * Ingresses cannot have made one to delete, and an agent with no ports needs neither. That is logged once.
@@ -161,9 +161,10 @@ async function expose({ kube, settings, log }: ReconcileDeps, state: ReconcileSt
 }
 
 /**
- * Running applies the StatefulSet with the claim's new launch token, or the one its pod already holds. Stopping
- * scales it to zero, which keeps the disk. Deleting the agent or its disk deletes the StatefulSet, and its PVC
- * retention policy deletes the disk with it. Its Service and Ingress follow its exposed ports first.
+ * Running applies the StatefulSet with the claim's new launch token, or the one its pod already holds, unless the
+ * claim mints no token and the StatefulSet already runs the claim's pod generation, as after a change of ports alone.
+ * Stopping scales it to zero, which keeps the disk. Deleting the agent or its disk deletes the StatefulSet, and its
+ * PVC retention policy deletes the disk with it. Its Service and Ingress follow its reported ports first.
  */
 async function apply(deps: ReconcileDeps, state: ReconcileState, agent: ClaimedAgent): Promise<void> {
   const { kube, settings } = deps;
@@ -171,6 +172,9 @@ async function apply(deps: ReconcileDeps, state: ReconcileState, agent: ClaimedA
   const existing: StatefulSet | null = await ownedResource(kube, "statefulsets", name, agent.id);
   await expose(deps, state, agent);
   if (agent.desired === "running") {
+    if (agent.launch_token === undefined && runsPodOf(existing, agent)) {
+      return;
+    }
     const carried = carriedOver(existing);
     const launchToken = agent.launch_token ?? carried.launchToken;
     if (launchToken === undefined) {
