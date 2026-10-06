@@ -123,7 +123,6 @@ function useSkillMenu(skills: readonly Skill[], body: string, setBody: (body: st
     >
       {open
         ? matches.map((skill, index) => (
-            // biome-ignore lint/a11y/useKeyWithClickEvents: the textarea keeps focus and handles the keys, through aria-activedescendant
             <div
               key={skill.name}
               id={optionId(index)}
@@ -132,6 +131,12 @@ function useSkillMenu(skills: readonly Skill[], body: string, setBody: (body: st
               aria-selected={index === current}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => pick(skill)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  pick(skill);
+                }
+              }}
               className={`cursor-pointer px-3 py-1 ${index === current ? "bg-hub-active text-white" : "text-hub-text hover:bg-hub-hover"}`}
             >
               <span className="font-mono font-bold">/{skill.name}</span>
