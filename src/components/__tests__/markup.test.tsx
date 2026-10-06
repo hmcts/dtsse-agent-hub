@@ -105,6 +105,39 @@ describe("Sidebar", () => {
     expect(html).toContain("Sign out");
   });
 
+  it("should put the topic search under the Topics heading and above its topics when there are some", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        data={{ mine: [], shared: [], channels: { mine: [], shared: [] }, topics: [{ slug: "pcs-api", message_count: 4, last_message_at: null }] }}
+        viewer={VIEWER}
+        signInDisabled
+      />
+    );
+    const search = html.indexOf('id="sidebar-topic-search"');
+
+    expect(html.indexOf("Add a channel")).toBeLessThan(html.indexOf(">Topics</h2>"));
+    expect(html.indexOf(">Topics</h2>")).toBeLessThan(search);
+    expect(search).toBeLessThan(html.indexOf('aria-label="Most active topics"'));
+  });
+
+  it("should scroll the agent list itself, capped at seven rows, when there are more agents than fit", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        data={{
+          mine: Array.from({ length: 8 }, (_, index) => agent(String(index), "me")),
+          shared: [],
+          channels: { mine: [], shared: [] },
+          topics: []
+        }}
+        viewer={VIEWER}
+        signInDisabled
+      />
+    );
+
+    expect(html).toMatch(/<ul aria-label="Agents" class="[^"]*\bmax-h-\[12\.25rem\][^"]*\boverflow-y-auto\b/);
+    expect(html).toMatch(/<a (?=[^>]*href="\/agents\/0")[^>]*class="[^"]*\bh-7\b/);
+  });
+
   it("should list connected agents above offline ones", () => {
     const html = renderToStaticMarkup(
       <Sidebar
