@@ -5,6 +5,7 @@ import {
   deleteVirtualAgent,
   exposePort,
   pasteLoginCode,
+  reconnectSignIn,
   renameVirtualAgent,
   resizeVirtualAgent,
   startVirtualAgent,
@@ -55,12 +56,14 @@ export default async function VirtualAgentPage({ params }: { params: Promise<{ i
       <PortsPanel agent={agent} actions={{ expose: exposePort, unexpose: unexposePort }} />
       <OnboardingChecklist
         virtualAgentId={agent.id}
+        desired={agent.desired}
         needed={detail.needed}
         optional={detail.optional}
         statuses={credentials.available ? credentials.statuses : []}
         logins={detail.logins}
         paste={pasteLoginCode}
         save={saveCredential}
+        reconnect={reconnectSignIn}
         now={now}
         {...(credentials.available ? {} : { unavailable: credentials.reason })}
       />
