@@ -20,12 +20,14 @@ import { type ActionResult, runAction, text } from "@/web/action";
 
 const LIST_PATH = "/virtual";
 
+const PAGE_PATH = "/agents";
+
 const OFF: { ok: false; error: string } = { ok: false, error: "virtual agents are not available on this deployment" };
 
 function revalidate(id?: string): void {
   revalidatePath(LIST_PATH);
   if (id !== undefined) {
-    revalidatePath(`${LIST_PATH}/${id}`);
+    revalidatePath(`${PAGE_PATH}/${id}`);
   }
 }
 

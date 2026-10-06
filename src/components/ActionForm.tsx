@@ -10,22 +10,25 @@ import type { ActionResult } from "@/web/action";
 export type FormAction = (form: FormData) => Promise<ActionResult<object & { confirmation?: string }>>;
 
 /**
- * A form posting to a server action, showing its refusal or confirmation, and re-rendering the page on success. A form
- * whose fields are controlled by its parent passes `keepValues`, since resetting them would show stale text.
+ * A form posting to a server action, showing its refusal or confirmation, and re-rendering the page on success, or
+ * going to the page `navigate` names for the result. A form whose fields are controlled by its parent passes
+ * `keepValues`, since resetting them would show stale text.
  */
-export function ActionForm({
+export function ActionForm<T extends object & { confirmation?: string }>({
   action,
   label,
   className,
   keepValues = false,
   onSuccess,
+  navigate,
   children
 }: {
-  action: FormAction;
+  action: (form: FormData) => Promise<ActionResult<T>>;
   label: string;
   className?: string;
   keepValues?: boolean;
   onSuccess?: () => void;
+  navigate?: (result: T) => string;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -41,7 +44,9 @@ export function ActionForm({
     setMessage(null);
     try {
       const result = await action(new FormData(form));
-      if (result.ok) {
+      if (result.ok && navigate !== undefined) {
+        router.push(navigate(result));
+      } else if (result.ok) {
         if (!keepValues) {
           form.reset();
         }

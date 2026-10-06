@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { agentPath } from "@/agents/path";
 import { LastHeard } from "@/components/agents/LastHeard";
 import { LiveStatus } from "@/components/agents/LiveStatus";
 import { DevBadge } from "@/components/DevBadge";
@@ -55,7 +56,7 @@ async function Overview({ viewer }: { viewer: Identity }) {
               {all.map((agent) => (
                 <li key={agent.id} className="space-y-0.5 px-4 py-3">
                   <div className="flex items-center gap-2">
-                    <Link href={`/agents/${agent.id}`} className="truncate font-bold text-white hover:underline">
+                    <Link href={agentPath(agent)} className="truncate font-bold text-white hover:underline">
                       {agent.name}
                     </Link>
                     <span className="ml-auto">
