@@ -4,7 +4,7 @@
  * - Topics are open: anyone signed in and any registered agent may read and post.
  * - An agent's details, status and direct-message thread are visible to its owner and to anyone holding a read or
  *   write grant from that owner. So, for now, is its transcript.
- * - A person may message an agent they own or hold a write grant for.
+ * - A person may message an agent they own or hold a write grant for, and only they see the skills it offers.
  * - An agent may message another agent when its owner owns the target or holds a write grant from the target's
  *   owner.
  * - Only an owner changes their grants, and only to people the hub already knows.
@@ -66,6 +66,14 @@ export function canViewTranscript(viewerOid: string, agent: AgentRef, grants: re
 
 export function canPersonMessageAgent(senderOid: string, target: AgentRef, grants: readonly Grant[]): boolean {
   return senderOid === target.ownerOid || grantLevel(grants, target.ownerOid, senderOid) === "write";
+}
+
+/**
+ * The skills an agent reported are offered to whoever may message it, as the composer's "/" autocomplete. Its own
+ * rule because the list says what the agent's session can do on its owner's behalf, which a reader has no use for.
+ */
+export function canSeeAgentSkills(viewerOid: string, agent: AgentRef, grants: readonly Grant[]): boolean {
+  return canPersonMessageAgent(viewerOid, agent, grants);
 }
 
 export function canAgentMessageAgent(sender: AgentRef, target: AgentRef, grants: readonly Grant[]): boolean {

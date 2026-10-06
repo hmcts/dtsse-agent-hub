@@ -165,11 +165,47 @@ describe("registerBody", () => {
     expect(() => parse(registerBody, { name: "n" })).toThrow(/session_id/);
     expect(() => parse(registerBody, { session_id: "s", name: " " })).toThrow(/name/);
   });
+
+  it("should leave skills absent when none are sent, so a registration without them keeps the stored ones", () => {
+    expect(parse(registerBody, { session_id: "s", name: "n" }).skills).toBeUndefined();
+  });
+
+  it("should sort skills by name, keep the first of a repeated name and cut a long description when skills are sent", () => {
+    const skills = [
+      { name: "pcs:start-env", description: "  Start an environment  " },
+      { name: "cft-explain", description: "x".repeat(400) },
+      { name: "pcs:start-env", description: "again" },
+      { name: "cft-how-to" }
+    ];
+
+    expect(parse(registerBody, { session_id: "s", name: "n", skills }).skills).toEqual([
+      { name: "cft-explain", description: "x".repeat(300) },
+      { name: "cft-how-to", description: "" },
+      { name: "pcs:start-env", description: "Start an environment" }
+    ]);
+  });
+
+  it.each([
+    ["an upper-case name", [{ name: "Explain", description: "" }]],
+    ["a name with a leading hyphen", [{ name: "-x", description: "" }]],
+    ["a name with a space", [{ name: "a b", description: "" }]],
+    ["a name over 100 characters", [{ name: "a".repeat(101), description: "" }]],
+    ["more than 200 skills", Array.from({ length: 201 }, (_, index) => ({ name: `s${index}`, description: "" }))],
+    ["skills that are not a list", { name: "x" }]
+  ])("should refuse the registration when it sends %s", (_, skills) => {
+    expect(() => parse(registerBody, { session_id: "s", name: "n", skills })).toThrow(/skills/);
+  });
 });
 
 describe("heartbeatBody", () => {
   it("should refuse offline, which has an endpoint of its own", () => {
     expect(() => parse(heartbeatBody, { status: "offline" })).toThrow(/status/);
+  });
+
+  it("should accept skills when a heartbeat reports a changed list", () => {
+    expect(parse(heartbeatBody, { status: "idle", skills: [{ name: "cft-explain", description: "Explain" }] }).skills).toEqual([
+      { name: "cft-explain", description: "Explain" }
+    ]);
   });
 });
 

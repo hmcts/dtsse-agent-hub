@@ -89,6 +89,7 @@ export default async function VirtualAgentPage({ params }: { params: Promise<{ i
               status={linked.view.agent.status}
               access={linked.view.access}
               initial={linked.conversation}
+              skills={linked.view.skills}
               send={sendDirect}
             />
           )}

@@ -105,6 +105,17 @@ describe("agentPage", () => {
     expect(await agentPage(viewer(BOB), "nope")).toBeUndefined();
   });
 
+  it("should offer the agent's skills to its owner and a write grantee, and not to a read grantee", async () => {
+    const skills = [{ name: "cft-explain", description: "Explain a CFT topic" }];
+    await prisma.agent.update({ where: { id: alicesAgent }, data: { skills } });
+    await insertUser(CAROL);
+    await prisma.agentGrant.create({ data: { ownerOid: ALICE.oid, granteeOid: CAROL.oid, level: "write" } });
+
+    expect((await agentPage(viewer(ALICE), alicesAgent))?.skills).toEqual(skills);
+    expect((await agentPage(viewer(CAROL), alicesAgent))?.skills).toEqual(skills);
+    expect((await agentPage(viewer(BOB), alicesAgent))?.skills).toEqual([]);
+  });
+
   it("should show the thread both ways with delivery state, leaving out what the viewer may not read", async () => {
     const incoming = await createDirect(prisma, { author: { oid: ALICE.oid, agentId: null }, targetAgentId: alicesAgent, inReplyTo: null, body: "to it" });
     await createDirect(prisma, { author: { oid: ALICE.oid, agentId: alicesAgent }, targetAgentId: carolsAgent, inReplyTo: null, body: "to carol's agent" });

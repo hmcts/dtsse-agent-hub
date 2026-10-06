@@ -4,6 +4,7 @@ import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { upsertUser } from "../users/store.ts";
+import type { Skill } from "./skills.ts";
 
 export interface Registration {
   sessionId: string;
@@ -12,6 +13,8 @@ export interface Registration {
   repo: string | null;
   branch: string | null;
   host: string | null;
+  /** Left as stored when `undefined`: not every registration carries them. */
+  skills?: Skill[];
 }
 
 export class SessionOwnedElsewhere extends Error {}
@@ -30,24 +33,28 @@ export class SessionOwnedElsewhere extends Error {}
  * A virtual agent's session (`owner.virtualAgentId` set) is recorded as that virtual agent's current agent, which a
  * re-registration after `/clear` moves to the new session. Its owner's `user` row is not rewritten.
  * It is named after the virtual agent, whatever the session calls itself.
+ *
+ * Skills change no one's view live, so they are not announced; the agent's page reads them when it renders.
  */
 export async function registerAgent(prisma: PrismaClient, owner: Caller, registration: Registration): Promise<{ id: string; name: string }> {
   const virtualAgentId = owner.virtualAgentId ?? null;
+  const skills = registration.skills === undefined ? null : JSON.stringify(registration.skills);
   return await prisma.$transaction(async (tx) => {
     if (virtualAgentId === null) {
       await upsertUser(tx, owner);
     }
     const [agent] = await tx.$queryRaw<{ id: string; name: string }[]>`
-      INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id)
+      INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills)
       VALUES (
         ${owner.oid}, ${registration.sessionId},
         COALESCE((SELECT name FROM virtual_agent WHERE id = ${virtualAgentId}::uuid), ${registration.name}),
         ${registration.cwd}, ${registration.repo},
-        ${registration.branch}, ${registration.host}, 'idle', now(), (SELECT COALESCE(max(id), 0) FROM message), ${virtualAgentId}::uuid
+        ${registration.branch}, ${registration.host}, 'idle', now(), (SELECT COALESCE(max(id), 0) FROM message), ${virtualAgentId}::uuid,
+        COALESCE(${skills}::jsonb, '[]'::jsonb)
       )
       ON CONFLICT (session_id) DO UPDATE
         SET name = EXCLUDED.name, cwd = EXCLUDED.cwd, repo = EXCLUDED.repo, branch = EXCLUDED.branch, host = EXCLUDED.host,
-            status = 'idle', last_heartbeat_at = now(), ended_at = NULL
+            status = 'idle', last_heartbeat_at = now(), ended_at = NULL, skills = COALESCE(${skills}::jsonb, agent.skills)
         WHERE agent.owner_oid = EXCLUDED.owner_oid AND agent.virtual_agent_id IS NOT DISTINCT FROM EXCLUDED.virtual_agent_id
       RETURNING id::text AS id, name
     `;
@@ -91,9 +98,15 @@ async function lockAgent(db: Database, agentId: string): Promise<{ status: Agent
 /**
  * Records a heartbeat, and announces the status when it changed. An agent the sweep marked offline comes back
  * with its next heartbeat. A virtual agent's session takes the name its owner gave the virtual agent, which also corrects one registered
- * under another name.
+ * under another name. `skills`, sent only when the session's list changed, replaces the stored list.
  */
-export async function heartbeat(prisma: PrismaClient, agentId: string, status: Exclude<AgentStatus, "offline">, name: string | null): Promise<void> {
+export async function heartbeat(
+  prisma: PrismaClient,
+  agentId: string,
+  status: Exclude<AgentStatus, "offline">,
+  name: string | null,
+  skills?: Skill[]
+): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const before = await lockAgent(tx, agentId);
     if (before === undefined) {
@@ -105,6 +118,7 @@ export async function heartbeat(prisma: PrismaClient, agentId: string, status: E
         status,
         lastHeartbeatAt: new Date(),
         endedAt: null,
+        ...(skills === undefined ? {} : { skills: skills.map(({ name, description }) => ({ name, description })) }),
         ...(before.virtualName !== null ? { name: before.virtualName } : name === null ? {} : { name })
       }
     });
