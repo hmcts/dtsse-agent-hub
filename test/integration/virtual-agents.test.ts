@@ -1292,6 +1292,19 @@ describe("sweepVirtualAgents", () => {
     expect((await row(chatty.id)).desired).toBe("running");
   });
 
+  it("should not stop an agent as idle when it was started again just now after a night stopped", async () => {
+    const agent = await create(ALICE, "morning");
+    await prisma.virtualAgent.update({
+      where: { id: agent.id },
+      data: { status: "running", statusChangedAt: ago(900), lastActiveAt: ago(900), startedAt: ago(1), agentId: null }
+    });
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ idle: [] });
+    expect((await row(agent.id)).desired).toBe("running");
+  });
+
   it("should stop every agent started before a weekday's evening stop, and not one started after it", async () => {
     const early = await create(ALICE, "early");
     const late = await create(BOB, "late");
