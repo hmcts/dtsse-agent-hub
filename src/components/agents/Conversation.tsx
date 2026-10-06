@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { AgentAccess } from "@/access/rules";
+import type { Skill } from "@/agents/skills";
 import { DirectComposer, type SendAction } from "@/components/agents/DirectComposer";
 import { DirectMessage, senderName } from "@/components/agents/DirectMessage";
 import { TranscriptEntry } from "@/components/agents/TranscriptEntry";
@@ -38,6 +39,7 @@ export function Conversation({
   status,
   access,
   initial,
+  skills = [],
   send
 }: {
   agentId: string;
@@ -46,6 +48,8 @@ export function Conversation({
   status: AgentStatus;
   access: Exclude<AgentAccess, "none">;
   initial: ConversationPage;
+  /** What the composer's "/" autocomplete offers. */
+  skills?: readonly Skill[];
   send: SendAction;
 }) {
   const [messages, setMessages] = useState<ThreadMessage[]>(initial.messages);
@@ -198,6 +202,7 @@ export function Conversation({
           agentName={agentName}
           status={status}
           access={access}
+          skills={skills}
           send={send}
           onSent={(message) => setMessages((current) => mergeMessages(current, [message]))}
         />

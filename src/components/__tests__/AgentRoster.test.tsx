@@ -27,7 +27,7 @@ class FakeSource {
   }
 }
 
-function agent(id: string, name: string, status: AgentCard["status"]): AgentCard {
+function agent(id: string, name: string, status: AgentCard["status"], virtualAgentId: string | null = null): AgentCard {
   return {
     id,
     name,
@@ -35,7 +35,8 @@ function agent(id: string, name: string, status: AgentCard["status"]): AgentCard
     repo: null,
     branch: null,
     lastHeartbeatAt: "2026-09-29T09:00:00.000Z",
-    owner: { oid: "me", name: "Bob Owner", email: null, tid: "dev" }
+    owner: { oid: "me", name: "Bob Owner", email: null, tid: "dev" },
+    virtualAgentId
   };
 }
 
@@ -72,6 +73,18 @@ describe("AgentRoster", () => {
     expect(hrefs()).toEqual(["/agents/2", "/agents/1", "/agents/3"]);
     expect(screen.getByText("2 connected")).toBeTruthy();
     expect(within(screen.getByRole("link", { name: /gamma/ })).getByText("offline")).toBeTruthy();
+  });
+
+  it("should link to the virtual agent and mark it virtual when a virtual agent's session registered the agent", () => {
+    render(
+      <HubStreamProvider>
+        <AgentRoster mine={[agent("1", "alpha", "idle", "va-1"), agent("2", "beta", "idle")]} shared={[]} />
+      </HubStreamProvider>
+    );
+
+    expect(hrefs()).toEqual(["/agents/va-1", "/agents/2"]);
+    expect(within(screen.getByRole("link", { name: /alpha/ })).getByText("virtual")).toBeTruthy();
+    expect(within(screen.getByRole("link", { name: /beta/ })).queryByText("virtual")).toBeNull();
   });
 });
 

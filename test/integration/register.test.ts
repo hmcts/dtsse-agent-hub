@@ -65,6 +65,41 @@ describe("POST /api/agent/register", () => {
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).readCursor).toBe(old.id);
   });
 
+  it("should store the reported skills, and keep them when a later registration of the session sends none", async () => {
+    const skills = [
+      { name: "pcs:start-env", description: "Start an environment" },
+      { name: "cft-explain", description: "Explain a CFT topic" }
+    ];
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, skills } }));
+
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills).toEqual([skills[1], skills[0]]);
+
+    await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, branch: "HDPI-2" } });
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills).toEqual([skills[1], skills[0]]);
+
+    await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, skills: [] } });
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills).toEqual([]);
+  });
+
+  it("should store no skills when a new agent registers without any", async () => {
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: REGISTRATION }));
+
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills).toEqual([]);
+  });
+
+  it("should refuse a registration when a skill name is not valid", async () => {
+    const response = await call(register, {
+      as: ALICE,
+      path: "/api/agent/register",
+      method: "POST",
+      body: { ...REGISTRATION, skills: [{ name: "Not Valid", description: "" }] }
+    });
+
+    expect(response.status).toBe(400);
+    expect((await jsonOf(response)).error).toMatch(/skills/);
+    expect(await prisma.agent.count()).toBe(0);
+  });
+
   it("should refuse a registration without a session id", async () => {
     const response = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { name: "x" } });
 
@@ -157,6 +192,20 @@ describe("heartbeat and offline", () => {
 
     expect(response.status).toBe(204);
     expect(await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).toMatchObject({ status: "busy", name: "new", endedAt: null });
+  });
+
+  it("should replace the stored skills when a heartbeat sends them, and leave them when it does not", async () => {
+    const { agent_id } = await jsonOf(
+      await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, skills: [{ name: "old", description: "" }] } })
+    );
+    const beat = (body: object) =>
+      call(heartbeat, { as: ALICE, path: `/api/agent/${agent_id}/heartbeat`, method: "POST", params: { agentId: agent_id }, body });
+
+    expect((await beat({ status: "idle" })).status).toBe(204);
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills).toEqual([{ name: "old", description: "" }]);
+
+    expect((await beat({ status: "idle", skills: [{ name: "new", description: "Fresh" }] })).status).toBe(204);
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills).toEqual([{ name: "new", description: "Fresh" }]);
   });
 
   it("should give 404 for an agent that does not exist, so the client re-registers", async () => {

@@ -4,13 +4,14 @@
  * - Topics are open: anyone signed in and any registered agent may read and post.
  * - An agent's details, status and direct-message thread are visible to its owner and to anyone holding a read or
  *   write grant from that owner. So, for now, is its transcript.
- * - A person may message an agent they own or hold a write grant for.
+ * - A person may message an agent they own or hold a write grant for, and only they see the skills it offers.
  * - An agent may message another agent when its owner owns the target or holds a write grant from the target's
  *   owner.
  * - Only an owner changes their grants, and only to people the hub already knows.
  * - Only a person saves, replaces or deletes their own credentials. No grant extends to them. Of their values, they
  *   may read back only their own Amazon Bedrock API key, with their own token.
- * - Only a person manages their own virtual agents and sees their login codes. A virtual agent's launch token acts
+ * - A virtual agent is visible to whoever may see its owner's agents, since its sessions are among them. Only that
+ *   person manages it and sees its login codes. A virtual agent's launch token acts
  *   as its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
@@ -66,6 +67,14 @@ export function canViewTranscript(viewerOid: string, agent: AgentRef, grants: re
 
 export function canPersonMessageAgent(senderOid: string, target: AgentRef, grants: readonly Grant[]): boolean {
   return senderOid === target.ownerOid || grantLevel(grants, target.ownerOid, senderOid) === "write";
+}
+
+/**
+ * The skills an agent reported are offered to whoever may message it, as the composer's "/" autocomplete. Its own
+ * rule because the list says what the agent's session can do on its owner's behalf, which a reader has no use for.
+ */
+export function canSeeAgentSkills(viewerOid: string, agent: AgentRef, grants: readonly Grant[]): boolean {
+  return canPersonMessageAgent(viewerOid, agent, grants);
 }
 
 export function canAgentMessageAgent(sender: AgentRef, target: AgentRef, grants: readonly Grant[]): boolean {
@@ -139,13 +148,22 @@ export function canManageCredential(actorOid: string, ownerOid: string): boolean
 }
 
 /**
- * Whether a person may read back their own stored credential of `kind` through `GET /api/agent/credentials/{kind}`.
- * Only an Amazon Bedrock API key: the workspace's launcher on their laptop fetches it to call Bedrock, so it has to
- * come back out. Anyone holding that person's agent-hub token can therefore read it. Every other kind acts as the
- * person in GitHub, Azure or Claude, and stays write-only.
+ * Whether a person may read back their own stored credential of `kind`, through `GET /api/agent/credentials/{kind}`
+ * or the web UI. An Amazon Bedrock API key, because the workspace's launcher on their laptop fetches it to call
+ * Bedrock; and their CLAUDE.md, because the page that edits it has to show it. Anyone holding that person's
+ * agent-hub token can therefore read both. Every other kind acts as the person in GitHub, Azure, Claude or Jenkins,
+ * and stays write-only.
  */
 export function canOwnerReadCredential(kind: string): boolean {
-  return kind === "bedrock";
+  return kind === "bedrock" || kind === "claude_md";
+}
+
+/**
+ * Whether a virtual agent's pod may store its owner's credential of `kind`. Not their CLAUDE.md: every one of the
+ * owner's agents follows it, so one agent rewriting it would steer all the others. Only the owner changes it.
+ */
+export function canVirtualAgentStoreCredential(kind: string): boolean {
+  return kind !== "claude_md";
 }
 
 export type AgentAccess = "owner" | "write" | "read" | "none";
@@ -161,6 +179,14 @@ export function agentAccess(viewerOid: string, agent: AgentRef, grants: readonly
 export interface VirtualAgentRef {
   id: string;
   ownerOid: string;
+}
+
+/**
+ * Whoever may see the agents a virtual agent's sessions register may see the virtual agent itself: its name, its
+ * state and its current session. Everything else about it is `canManageVirtualAgent`'s.
+ */
+export function canViewVirtualAgent(viewerOid: string, virtualAgent: VirtualAgentRef, grants: readonly Grant[]): boolean {
+  return canViewAgent(viewerOid, virtualAgent, grants);
 }
 
 /**

@@ -310,6 +310,46 @@ export async function reportPorts(prisma: PrismaClient, id: string, report: Repo
   });
 }
 
+/**
+ * Replaces a running agent's pod, so it boots again and fetches its owner's credentials afresh. The generation is
+ * bumped, which the pod template carries, and the launch token dropped, so the old pod is shut out at once and the
+ * next claim mints a token for the new one. An agent not meant to be running is left as it is: it boots afresh when
+ * it next starts. Someone other than the owner is told there is no such agent.
+ */
+export async function restartVirtualAgent(
+  prisma: PrismaClient,
+  actorOid: string,
+  id: string,
+  detail: string,
+  now: Date = new Date()
+): Promise<VirtualAgentRow> {
+  return await prisma.$transaction(async (tx) => {
+    const row = await lockVirtualAgent(tx, id);
+    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
+      throw new HttpError(404, "no such virtual agent");
+    }
+    if (row.desired !== "running") {
+      return row;
+    }
+    const updated = toRow(
+      await tx.virtualAgent.update({
+        where: { id },
+        data: {
+          ...NO_TOKEN,
+          generation: { increment: 1 },
+          status: "provisioning",
+          statusDetail: detail,
+          ...(row.status === "provisioning" ? {} : { statusChangedAt: now }),
+          updatedAt: now
+        },
+        select: SELECT
+      })
+    );
+    await announce(tx, id, row.ownerOid);
+    return updated;
+  });
+}
+
 export interface LaunchTokenCaller extends Identity {
   virtualAgentId: string;
 }

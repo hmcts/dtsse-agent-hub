@@ -2,6 +2,7 @@ import { gzipSync } from "node:zlib";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as credentialRoute from "../../src/app/api/agent/credentials/[kind]/route.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
+import { DEFAULT_CLAUDE_MD } from "../../src/credentials/claude-md.ts";
 import { credentialStatus, deleteCredential, putCredential, readCredential, type SecretStore } from "../../src/credentials/store.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { connect, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
@@ -17,8 +18,8 @@ vi.mock("next/cache", async () => {
 });
 
 const { actAs, revalidated } = await import("./web-session.ts");
-const { removeCredential, saveCredential } = await import("../../src/app/_actions/credentials.ts");
-const { credentialSettings } = await import("../../src/web/data.ts");
+const { removeCredential, resetClaudeMd, saveClaudeMd, saveCredential } = await import("../../src/app/_actions/credentials.ts");
+const { claudeMdSettings, credentialSettings } = await import("../../src/web/data.ts");
 
 const { GET, PUT, DELETE } = credentialRoute;
 
@@ -323,7 +324,8 @@ describe("reading credentials back", () => {
       ["azure", true],
       ["claude", false],
       ["bedrock", false],
-      ["jenkins", false]
+      ["jenkins", false],
+      ["claude_md", false]
     ]);
     expect(JSON.stringify(statuses)).not.toContain(GITHUB);
     expect(JSON.stringify(statuses)).not.toContain(AZURE);
@@ -505,5 +507,147 @@ describe("a Jenkins API token", () => {
     const statuses = await credentialStatus(prisma, devIdentity("alice").oid);
     expect(statuses.map((status) => [status.kind, status.stored])).toContainEqual(["jenkins", true]);
     expect(revalidated).toEqual(expect.arrayContaining(["/settings/credentials", "/virtual"]));
+  });
+});
+
+describe("a CLAUDE.md", () => {
+  const TEXT = "# Alice\n\n- I work on PCS; private: the payments outage.\n\tIndented line, trailing spaces  \n\n";
+
+  it("should store the caller's text from the command line and give it back to them exactly when they read it", async () => {
+    expect((await put(ALICE, "claude_md", { value: TEXT })).status).toBe(204);
+
+    const response = await read(ALICE, "claude_md");
+
+    expect(response.status).toBe(200);
+    expect(await jsonOf(response)).toEqual({ value: TEXT });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
+      ownerOid: ALICE.oid,
+      kind: "claude_md",
+      secretName: "u-dev-alice-claude-md",
+      updatedVia: "cli"
+    });
+    expect(await everythingStored()).not.toContain("payments outage");
+  });
+
+  it("should answer 404, not the default, when the owner has stored none", async () => {
+    const response = await read(ALICE, "claude_md");
+
+    expect(response.status).toBe(404);
+    expect(await jsonOf(response)).toEqual({ error: "no claude_md credential is stored" });
+  });
+
+  it("should never give one person another's CLAUDE.md when both read theirs", async () => {
+    await put(ALICE, "claude_md", { value: TEXT });
+
+    const response = await read(BOB, "claude_md");
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).not.toContain("payments outage");
+  });
+
+  it("should refuse text with a control character with 400, never echoing it", async () => {
+    const response = await put(ALICE, "claude_md", { value: "private context\u0007" });
+
+    expect(response.status).toBe(400);
+    const body = await response.text();
+    expect(body).toContain("printable text");
+    expect(body).not.toContain("private context");
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
+  it("should refuse text over the byte limit with 400 when it is within the character limit", async () => {
+    const response = await put(ALICE, "claude_md", { value: "é".repeat(12_001) });
+
+    expect(response.status).toBe(400);
+    expect((await jsonOf(response)).error).toContain("bytes");
+  });
+
+  it("should remove it when the owner deletes it from the command line", async () => {
+    await put(ALICE, "claude_md", { value: TEXT });
+
+    expect((await remove(ALICE, "claude_md")).status).toBe(204);
+    expect((await read(ALICE, "claude_md")).status).toBe(404);
+  });
+
+  it("should save the text from the web with LF line endings, as the viewer, and tell the virtual agents page", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+    actAs("alice");
+
+    const result = await saveClaudeMd(form({ value: "# Me\r\n\r\nBe brief.\r\n", ownerOid: BOB.oid }));
+
+    expect(result).toEqual({ ok: true, confirmation: "Your CLAUDE.md is saved. Each agent uses it from its next Claude start" });
+    expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "claude_md")).toBe("# Me\n\nBe brief.\n");
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "claude_md", updatedVia: "web" });
+    expect(revalidated).toContain("/virtual");
+  });
+
+  it("should say why and store nothing when the web save is refused", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+    actAs("alice");
+
+    expect(await saveClaudeMd(form({ value: "  \n " }))).toEqual({ ok: false, error: "write your CLAUDE.md, or reset it to the default" });
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
+  it("should delete the stored text when the viewer resets it to the default", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+    actAs("alice");
+    await saveClaudeMd(form({ value: TEXT }));
+
+    expect(await resetClaudeMd()).toEqual({ ok: true, confirmation: "Your CLAUDE.md is back to the default" });
+    expect(await prisma.credential.count()).toBe(0);
+    expect(await prisma.devCredentialValue.count()).toBe(0);
+  });
+
+  it("should refuse to save or reset when virtual agents are off", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
+    actAs("alice");
+
+    expect(await saveClaudeMd(form({ value: TEXT }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+    expect(await resetClaudeMd()).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
+  it("should say why when the deployment cannot store it", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+    actAs("alice");
+    vi.stubEnv("CREDENTIALS_VAULT_URL", "http://not-a-vault.example");
+
+    expect(await saveClaudeMd(form({ value: TEXT }))).toMatchObject({ ok: false, error: expect.stringContaining("https") });
+    expect(await resetClaudeMd()).toMatchObject({ ok: false, error: expect.stringContaining("https") });
+  });
+
+  it("should give the page the default when nothing is stored, and the viewer's own text once it is", async () => {
+    const viewer = devIdentity("alice");
+
+    expect(await claudeMdSettings(viewer)).toEqual({ available: true, stored: false, text: DEFAULT_CLAUDE_MD, updatedAt: null });
+
+    await put(ALICE, "claude_md", { value: TEXT });
+
+    expect(await claudeMdSettings(viewer)).toEqual({ available: true, stored: true, text: TEXT, updatedAt: expect.any(String) });
+    expect(await claudeMdSettings(devIdentity("bob"))).toMatchObject({ stored: false, text: DEFAULT_CLAUDE_MD });
+  });
+
+  it("should tell the page it is unavailable when the deployment cannot store it", async () => {
+    vi.stubEnv("CREDENTIALS_VAULT_URL", "https://dtsse-ah-creds-test.vault.azure.net/");
+    expect(await claudeMdSettings(devIdentity("alice"))).toMatchObject({ available: false, reason: expect.stringContaining("development identity") });
+
+    vi.stubEnv("CREDENTIALS_VAULT_URL", "");
+    vi.stubEnv("SESSION_SECRET", "");
+    expect(await claudeMdSettings(devIdentity("alice"))).toMatchObject({ available: false });
+  });
+
+  it("should leave it out of the credentials the settings list shows when one is stored", async () => {
+    await put(ALICE, "claude_md", { value: TEXT });
+
+    const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" });
+
+    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "bedrock", "jenkins"]);
+  });
+
+  it("should not be pasteable as an ordinary credential when the credentials form names it", async () => {
+    actAs("alice");
+
+    expect(await saveCredential(form({ kind: "claude_md", value: TEXT }))).toMatchObject({ ok: false, error: expect.stringContaining("can be pasted here") });
   });
 });

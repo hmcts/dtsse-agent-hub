@@ -2,29 +2,32 @@
 
 import { revalidatePath } from "next/cache";
 import { sessionSecret } from "@/auth/settings";
+import { credentialBackend } from "@/credentials/backend";
 import { isCredentialKind } from "@/credentials/names";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
-import { storePastedCode } from "@/virtual-agents/logins";
+import { isSignInKind, reconnectSignIn as reconnect, storePastedCode } from "@/virtual-agents/logins";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { createVirtualAgent as create, renameVirtualAgent as rename, setDesired, setVirtualAgentSize } from "@/virtual-agents/store";
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
- * Creating, starting, stopping, renaming, resizing and deleting the signed-in person's own virtual agents, and
- * pasting a login code back to one. The owner is always the session's identity; an id from the form names an agent,
- * and `setDesired`, `renameVirtualAgent`, `setVirtualAgentSize` and `storePastedCode` refuse one that is not the
- * viewer's.
+ * Creating, starting, stopping, renaming, resizing and deleting the signed-in person's own virtual agents, pasting a
+ * login code back to one, and having one sign in again. The owner is always the session's identity; an id from the
+ * form names an agent, and `setDesired`, `renameVirtualAgent`, `setVirtualAgentSize`, `storePastedCode` and
+ * `reconnectSignIn` refuse one that is not the viewer's.
  */
 
 const LIST_PATH = "/virtual";
+
+const PAGE_PATH = "/agents";
 
 const OFF: { ok: false; error: string } = { ok: false, error: "virtual agents are not available on this deployment" };
 
 function revalidate(id?: string): void {
   revalidatePath(LIST_PATH);
   if (id !== undefined) {
-    revalidatePath(`${LIST_PATH}/${id}`);
+    revalidatePath(`${PAGE_PATH}/${id}`);
   }
 }
 
@@ -119,5 +122,36 @@ export async function pasteLoginCode(form: FormData): Promise<ActionResult<{ con
     await storePastedCode(prisma, viewer.oid, id, kind, form.get("code"), secret);
     revalidate(id);
     return { ok: true, confirmation: "Sent to your virtual agent" };
+  });
+}
+
+/**
+ * Signs the owner in to GitHub or Azure again: their stored credential goes, and the agent, if running, restarts so
+ * its pod relays a fresh sign-in. The credential is the owner's, so their other virtual agents lose it too.
+ */
+export async function reconnectSignIn(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("reconnect sign-in", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const id = text(form.get("id"));
+    const kind = text(form.get("kind"));
+    if (id === "" || !isSignInKind(kind)) {
+      return { ok: false, error: "no sign-in was named" };
+    }
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      return { ok: false, error: backend.reason };
+    }
+    const row = await reconnect(prisma, backend.store, viewer.oid, id, kind);
+    revalidate(id);
+    revalidatePath("/settings/credentials");
+    const title = kind === "github" ? "GitHub" : "Azure";
+    return {
+      ok: true,
+      confirmation:
+        row.desired === "running" ? `${row.name} is restarting to sign in to ${title} again` : `${row.name} signs in to ${title} when it next starts`
+    };
   });
 }

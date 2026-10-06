@@ -13,9 +13,12 @@ import {
   canOwnerReadCredential,
   canPersonMessageAgent,
   canReadMessage,
+  canSeeAgentSkills,
   canUseCredentialRoutes,
   canViewAgent,
   canViewTranscript,
+  canViewVirtualAgent,
+  canVirtualAgentStoreCredential,
   type Grant,
   grantLevel,
   type MessageRef,
@@ -54,16 +57,33 @@ interface Expectation {
   viewAgent: boolean;
   viewTranscript: boolean;
   messageAsPerson: boolean;
+  seeSkills: boolean;
   messageAsAgent: boolean;
   readDirect: boolean;
   manageGrants: boolean;
 }
 
 const MATRIX: Record<Role, Expectation> = {
-  owner: { viewAgent: true, viewTranscript: true, messageAsPerson: true, messageAsAgent: true, readDirect: true, manageGrants: true },
-  "read grantee": { viewAgent: true, viewTranscript: true, messageAsPerson: false, messageAsAgent: false, readDirect: true, manageGrants: false },
-  "write grantee": { viewAgent: true, viewTranscript: true, messageAsPerson: true, messageAsAgent: true, readDirect: true, manageGrants: false },
-  stranger: { viewAgent: false, viewTranscript: false, messageAsPerson: false, messageAsAgent: false, readDirect: false, manageGrants: false }
+  owner: { viewAgent: true, viewTranscript: true, messageAsPerson: true, seeSkills: true, messageAsAgent: true, readDirect: true, manageGrants: true },
+  "read grantee": {
+    viewAgent: true,
+    viewTranscript: true,
+    messageAsPerson: false,
+    seeSkills: false,
+    messageAsAgent: false,
+    readDirect: true,
+    manageGrants: false
+  },
+  "write grantee": {
+    viewAgent: true,
+    viewTranscript: true,
+    messageAsPerson: true,
+    seeSkills: true,
+    messageAsAgent: true,
+    readDirect: true,
+    manageGrants: false
+  },
+  stranger: { viewAgent: false, viewTranscript: false, messageAsPerson: false, seeSkills: false, messageAsAgent: false, readDirect: false, manageGrants: false }
 };
 
 /** A direct message from a third party's agent to the owner's agent. */
@@ -82,6 +102,10 @@ describe.each(Object.entries(MATRIX) as [Role, Expectation][])("access for the %
 
   it(`should ${expected.messageAsPerson ? "" : "not "}let a person message the agent when they are the ${role}`, () => {
     expect(canPersonMessageAgent(oid, TARGET, GRANTS)).toBe(expected.messageAsPerson);
+  });
+
+  it(`should ${expected.seeSkills ? "" : "not "}offer the agent's skills when the viewer is the ${role}`, () => {
+    expect(canSeeAgentSkills(oid, TARGET, GRANTS)).toBe(expected.seeSkills);
   });
 
   it(`should ${expected.messageAsAgent ? "" : "not "}let an agent message the agent when its owner is the ${role}`, () => {
@@ -104,6 +128,10 @@ describe.each(Object.entries(MATRIX) as [Role, Expectation][])("access for the %
     expect(canReadMessage(oid, { kind: "post", authorOid: ELSEWHERE, authorAgent: agentOf(ELSEWHERE), targetAgent: null, parentAuthorOid: null }, [])).toBe(
       true
     );
+  });
+
+  it(`should ${expected.seeSkills ? "" : "not "}offer the agent's skills when the viewer is the ${role}`, () => {
+    expect(canSeeAgentSkills(oid, TARGET, GRANTS)).toBe(expected.seeSkills);
   });
 
   it(`should ${expected.messageAsAgent ? "" : "not "}route a private reply to the owner's post when the replying agent's owner is the ${role}`, () => {
@@ -253,6 +281,17 @@ describe("canManageVirtualAgent", () => {
   });
 });
 
+describe("canViewVirtualAgent", () => {
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [true, "read grantee"],
+    [true, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s views the owner's virtual agent", (expected, role) => {
+    expect(canViewVirtualAgent(ROLES[role], { id: "va-1", ownerOid: OWNER }, GRANTS)).toBe(expected);
+  });
+});
+
 describe("canLaunchTokenActForAgent", () => {
   it("should allow a launch token to act when its own virtual agent registered the agent", () => {
     expect(canLaunchTokenActForAgent("va-1", { virtualAgentId: "va-1" })).toBe(true);
@@ -296,8 +335,22 @@ describe("canOwnerReadCredential", () => {
     expect(canOwnerReadCredential("bedrock")).toBe(true);
   });
 
-  it.each(["github", "azure", "claude", "Bedrock", ""])("should keep %j write-only when it is any other kind", (kind) => {
+  it("should let the owner read their CLAUDE.md back when the page shows it for editing", () => {
+    expect(canOwnerReadCredential("claude_md")).toBe(true);
+  });
+
+  it.each(["github", "azure", "claude", "jenkins", "Bedrock", "claude-md", ""])("should keep %j write-only when it is any other kind", (kind) => {
     expect(canOwnerReadCredential(kind)).toBe(false);
+  });
+});
+
+describe("canVirtualAgentStoreCredential", () => {
+  it.each(["github", "azure", "claude", "bedrock", "jenkins"])("should let a pod store its owner's %s when it is a credential the pod signs in for", (kind) => {
+    expect(canVirtualAgentStoreCredential(kind)).toBe(true);
+  });
+
+  it("should refuse a pod when it would change its owner's CLAUDE.md", () => {
+    expect(canVirtualAgentStoreCredential("claude_md")).toBe(false);
   });
 });
 

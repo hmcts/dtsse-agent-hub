@@ -1,4 +1,4 @@
-import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { ActionForm } from "@/components/ActionForm";
 import { EmptyState } from "@/components/EmptyState";
 import { Section } from "@/components/Section";
 import { Timestamp } from "@/components/time/Timestamp";
@@ -6,8 +6,12 @@ import type { ModelRoute } from "@/viewer/identity";
 import { diskWarningDays } from "@/virtual-agents/cleanup";
 import { MAX_NAME_LENGTH, MAX_PER_USER, MAX_RUNNING_PER_USER } from "@/virtual-agents/limits";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
+import type { ActionResult } from "@/web/action";
 import { idleFor, statusLabel, stopReasonLabel } from "./labels";
 import { SizeSelect } from "./SizePanel";
+
+/** Creating one opens its page. */
+export type CreateAction = (form: FormData) => Promise<ActionResult<{ id: string; confirmation: string }>>;
 
 const INPUT = "mt-1 w-72 max-w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 font-mono text-sm text-hub-text";
 const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567] disabled:opacity-60";
@@ -48,7 +52,7 @@ function Row({ agent, now }: { agent: VirtualAgentCard; now: number }) {
   return (
     <li className="space-y-1 border-b border-hub-line px-4 py-3 last:border-b-0">
       <div className="flex flex-wrap items-baseline gap-x-3">
-        <a href={`/virtual/${agent.id}`} className="font-bold text-hub-link hover:underline">
+        <a href={`/agents/${agent.id}`} className="font-bold text-hub-link hover:underline">
           {agent.name}
         </a>
         <span className="text-xs text-hub-muted">{statusLabel(agent.status, agent.desired)}</span>
@@ -71,7 +75,7 @@ function Row({ agent, now }: { agent: VirtualAgentCard; now: number }) {
   );
 }
 
-export function CreateVirtualAgent({ route, create, refusal }: { route: ModelRoute; create: FormAction; refusal?: string }) {
+export function CreateVirtualAgent({ route, create, refusal }: { route: ModelRoute; create: CreateAction; refusal?: string }) {
   return (
     <Section heading="Create a virtual agent">
       <div className="space-y-3 text-sm">
@@ -82,7 +86,7 @@ export function CreateVirtualAgent({ route, create, refusal }: { route: ModelRou
         {refusal ? (
           <p className="text-hub-muted">{refusal}</p>
         ) : (
-          <ActionForm action={create} label="Create a virtual agent" className="flex flex-wrap items-end gap-3">
+          <ActionForm action={create} navigate={(created) => `/agents/${created.id}`} label="Create a virtual agent" className="flex flex-wrap items-end gap-3">
             <label className="block">
               <span className="block text-hub-text">Name</span>
               <input name="name" required maxLength={MAX_NAME_LENGTH} autoComplete="off" spellCheck={false} className={INPUT} />
@@ -110,7 +114,7 @@ export function createLimit(agents: readonly VirtualAgentCard[]): string | undef
   return undefined;
 }
 
-export function VirtualAgentsView({ agents, route, create, now }: { agents: VirtualAgentCard[]; route: ModelRoute; create: FormAction; now: number }) {
+export function VirtualAgentsView({ agents, route, create, now }: { agents: VirtualAgentCard[]; route: ModelRoute; create: CreateAction; now: number }) {
   return (
     <>
       <Section heading="Your virtual agents" detail={`${agents.length} of ${MAX_PER_USER}`}>

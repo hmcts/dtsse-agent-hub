@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { type Heard, onStatus } from "@/agents/liveness";
+import { agentPath } from "@/agents/path";
 import type { AgentCard } from "@/agents/views";
 import { Avatar } from "@/components/Avatar";
 import { HeardAge } from "@/components/agents/LastHeard";
@@ -27,9 +28,11 @@ function byStatusThenName(statusOf: (agent: AgentCard) => AgentStatus) {
 function Row({ agent, heard, showOwner }: { agent: AgentCard; heard: Heard; showOwner: boolean }) {
   const { status } = heard;
   const offline = status === "offline";
+  // The list, not the section, scrolls: every row is an h-7 NavLink whatever it shows, so 12.25rem is exactly 7 rows
+  // and never half of one. The section's 45% only bites on a short window, where the list shrinks to fit.
   return (
     <li>
-      <NavLink href={`/agents/${agent.id}`} className={offline ? "opacity-60" : ""}>
+      <NavLink href={agentPath(agent)} className={offline ? "opacity-60" : ""}>
         <span className="relative">
           <Avatar name={agent.name} size="sm" />
           <span
@@ -41,6 +44,7 @@ function Row({ agent, heard, showOwner }: { agent: AgentCard; heard: Heard; show
           />
         </span>
         <span className="truncate">{agent.name}</span>
+        {agent.virtualAgentId === null ? null : <span className="shrink-0 text-[10px] uppercase tracking-wide text-hub-muted">virtual</span>}
         <span className="sr-only">{status}</span>
         {showOwner || offline ? (
           <span className="ml-auto flex min-w-0 items-baseline gap-1.5 text-xs text-hub-muted">
@@ -84,16 +88,18 @@ export function AgentRoster({ mine, shared }: { mine: AgentCard[]; shared: Agent
   all.sort((left, right) => order(left.agent, right.agent));
   const connected = all.filter(({ agent }) => heardOf(agent).status !== "offline").length;
 
+  // The list, not the section, scrolls: every row is an h-7 NavLink whatever it shows, so 12.25rem is exactly 7 rows
+  // and never half of one. The section's 45% only bites on a short window, where the list shrinks to fit.
   return (
-    <section aria-labelledby="sidebar-agents" className="max-h-[45%] shrink-0 overflow-y-auto border-t border-hub-line py-3">
-      <h2 id="sidebar-agents" className="flex items-baseline gap-2 px-5 pb-1 text-[15px] text-hub-muted">
+    <section aria-labelledby="sidebar-agents" className="flex max-h-[45%] shrink-0 flex-col border-t border-hub-line py-3">
+      <h2 id="sidebar-agents" className="flex shrink-0 items-baseline gap-2 px-5 pb-1 text-[15px] text-hub-muted">
         Agents
         <span className="text-xs">{all.length === 0 ? "" : `${connected} connected`}</span>
       </h2>
-      {mine.length === 0 ? <p className="px-5 text-xs text-hub-muted">None yet. Run /enable-comms in a Claude Code session.</p> : null}
-      {all.length === 0 ? <p className="px-5 pt-1 text-xs text-hub-muted">Nobody has granted you access.</p> : null}
+      {mine.length === 0 ? <p className="shrink-0 px-5 text-xs text-hub-muted">None yet. Run /enable-comms in a Claude Code session.</p> : null}
+      {all.length === 0 ? <p className="shrink-0 px-5 pt-1 text-xs text-hub-muted">Nobody has granted you access.</p> : null}
       {all.length > 0 ? (
-        <ul aria-label="Agents">
+        <ul aria-label="Agents" className="max-h-[12.25rem] min-h-0 overflow-y-auto">
           {all.map(({ agent, shared: isShared }) => (
             <Row key={agent.id} agent={agent} heard={heardOf(agent)} showOwner={isShared} />
           ))}
