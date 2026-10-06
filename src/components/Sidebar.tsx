@@ -90,18 +90,6 @@ export function Sidebar({
                 Credentials
               </NavLink>
             )}
-            <form action="/topics" method="get" role="search" className="px-2 pt-2">
-              <label htmlFor="sidebar-topic-search" className="sr-only">
-                Search topics
-              </label>
-              <input
-                id="sidebar-topic-search"
-                name="q"
-                aria-keyshortcuts="/"
-                placeholder="Search topics (/)"
-                className="w-full rounded-md border border-hub-line bg-hub-pane px-3 py-1 text-[13px] text-hub-text placeholder:text-hub-muted focus:border-hub-link focus:outline-none"
-              />
-            </form>
           </div>
 
           <Group label="Channels">
@@ -127,6 +115,18 @@ export function Sidebar({
           </Group>
 
           <Group label="Topics">
+            <form action="/topics" method="get" role="search" className="px-2 pb-1">
+              <label htmlFor="sidebar-topic-search" className="sr-only">
+                Search topics
+              </label>
+              <input
+                id="sidebar-topic-search"
+                name="q"
+                aria-keyshortcuts="/"
+                placeholder="Search topics (/)"
+                className="w-full rounded-md border border-hub-line bg-hub-pane px-3 py-1 text-[13px] text-hub-text placeholder:text-hub-muted focus:border-hub-link focus:outline-none"
+              />
+            </form>
             {data.topics.length === 0 ? (
               <Hint>No posts this week.</Hint>
             ) : (

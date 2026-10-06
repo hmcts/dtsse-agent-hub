@@ -56,6 +56,23 @@ describe("TopicSearchShortcut", () => {
     expect(document.activeElement).toBe(screen.getByLabelText("Sidebar search"));
   });
 
+  it("should open the collapsed group holding the sidebar's search when / is pressed", () => {
+    render(
+      <>
+        <TopicSearchShortcut />
+        <details>
+          <summary>Topics</summary>
+          <input id="sidebar-topic-search" aria-label="Sidebar search" />
+        </details>
+      </>
+    );
+
+    fireEvent.keyDown(document.body, { key: "/" });
+
+    expect((screen.getByRole("group") as HTMLDetailsElement).open).toBe(true);
+    expect(document.activeElement).toBe(screen.getByLabelText("Sidebar search"));
+  });
+
   it("should focus the topics page's own search before the sidebar's when both are shown", () => {
     page(<input id="topic-search" aria-label="Page search" />);
 
