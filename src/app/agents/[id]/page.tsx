@@ -15,7 +15,17 @@ export const dynamic = "force-dynamic";
 
 type Activity = ReturnType<typeof agentActivity>;
 
-async function AgentConversation({ activity, agent, access }: { activity: Activity; agent: AgentView["agent"]; access: AgentView["access"] }) {
+async function AgentConversation({
+  activity,
+  agent,
+  access,
+  skills
+}: {
+  activity: Activity;
+  agent: AgentView["agent"];
+  access: AgentView["access"];
+  skills: AgentView["skills"];
+}) {
   return (
     <Conversation
       agentId={agent.id}
@@ -24,6 +34,7 @@ async function AgentConversation({ activity, agent, access }: { activity: Activi
       status={agent.status}
       access={access}
       initial={(await activity).conversation}
+      skills={skills}
       send={sendDirect}
     />
   );
@@ -56,7 +67,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
   if (page === undefined) {
     notFound();
   }
-  const { agent, access } = page;
+  const { agent, access, skills } = page;
   const activity = agentActivity(viewer, page);
   const about = (
     <AgentAbout
@@ -97,7 +108,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
             Conversation
           </h2>
           <Suspense fallback={<SkeletonFeed rows={6} />}>
-            <AgentConversation activity={activity} agent={agent} access={access} />
+            <AgentConversation activity={activity} agent={agent} access={access} skills={skills} />
           </Suspense>
         </section>
         <aside aria-label="About this agent" className="hidden w-80 shrink-0 overflow-y-auto border-l border-hub-line lg:block">

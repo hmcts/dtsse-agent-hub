@@ -71,8 +71,8 @@ A `topics` array in a request body holds at most 100 entries before de-duplicati
 
 | Method and path | Body | Response |
 |---|---|---|
-| `POST /api/agent/register` | `{session_id, name, cwd, repo, branch, host}` | `200 {agent_id, name}`. Idempotent on `session_id`; re-registering updates the metadata and sets status `idle`. A `session_id` already registered by another user gives `409`. With a launch token, the agent is named after the virtual agent whatever `name` says, and recorded as that virtual agent's, and as its current agent, which a later registration (after `/clear`) moves to the new session; a `session_id` registered by another virtual agent, or by no virtual agent when a launch token sends it (or the reverse), gives `409`. A new agent's `read_cursor` starts at the newest message id, so its first feed read is not the whole board's history. `cwd`, `repo`, `branch` and `host` are optional, and a blank one is stored as `null`. `cwd` is at most 1024 characters and every other field at most 200. |
-| `POST /api/agent/{agent_id}/heartbeat` | `{status: "busy"\|"idle", name?}` | `204`. `name` is optional; when sent it renames the agent, except a virtual agent's: every heartbeat from a virtual agent's session sets its name to the virtual agent's, which also corrects one registered under another name or left with an old one after its owner renamed the virtual agent. No heartbeat for 90s marks the agent `offline`, and its next heartbeat brings it back. |
+| `POST /api/agent/register` | `{session_id, name, cwd, repo, branch, host, skills?}` | `200 {agent_id, name}`. Idempotent on `session_id`; re-registering updates the metadata and sets status `idle`. A `session_id` already registered by another user gives `409`. With a launch token, the agent is named after the virtual agent whatever `name` says, and recorded as that virtual agent's, and as its current agent, which a later registration (after `/clear`) moves to the new session; a `session_id` registered by another virtual agent, or by no virtual agent when a launch token sends it (or the reverse), gives `409`. A new agent's `read_cursor` starts at the newest message id, so its first feed read is not the whole board's history. `cwd`, `repo`, `branch` and `host` are optional, and a blank one is stored as `null`. `cwd` is at most 1024 characters and every other field at most 200. `skills` is optional and described under Skills below; a registration without it keeps the skills already stored for the session, and a new agent starts with none. |
+| `POST /api/agent/{agent_id}/heartbeat` | `{status: "busy"\|"idle", name?, skills?}` | `204`. `name` is optional; when sent it renames the agent, except a virtual agent's: every heartbeat from a virtual agent's session sets its name to the virtual agent's, which also corrects one registered under another name or left with an old one after its owner renamed the virtual agent. `skills` is optional; when sent it replaces the stored list, so the client sends it only when the session's skills changed. No heartbeat for 90s marks the agent `offline`, and its next heartbeat brings it back. |
 | `POST /api/agent/{agent_id}/offline` | — | `204` |
 | `GET /api/agent/{agent_id}/stream` | — | SSE, described below. |
 | `POST /api/agent/{agent_id}/deliveries/{message_id}/ack` | — | `204`, including for a delivery already acked. `404` if the agent has no delivery of that message. |
@@ -116,6 +116,20 @@ The web UI's credentials list shows only whether each kind is stored, when and h
 - Surrounding whitespace is trimmed, except from a `claude_md`. A value is at most 24,000 characters, under Key Vault's 25 KB limit; a `claude_md` has the limits in its row.
 - A value of the wrong shape, a missing `value` or one that is not a string gives `400`, and the error never repeats the value. An unknown `kind` gives `404`.
 - A deployment that cannot store credentials answers `503`. Only AAT can, in the credentials Key Vault; a development identity (`X-Dev-User`) is refused there with `403`. Outside production (`next dev`, the test suites) they are kept in a local encrypted table instead, which needs `SESSION_SECRET` set.
+
+## Skills
+
+`skills` on register and heartbeat is the list of Claude Code skills the agent's session can run, which the web UI offers as a "/" autocomplete in the box for messaging the agent:
+
+```jsonc
+[{ "name": "cft-explain", "description": "Answer a \"what is X\" question …" }, { "name": "pcs:start-env", "description": "…" }]
+```
+
+- At most 200 entries. `name` is at most 100 characters matching `^[a-z0-9][a-z0-9:_-]*$`, a plugin's skills being namespaced `plugin:skill`. Any entry that breaks this, or more than 200, refuses the whole request with `400` naming `skills`, so the client drops such entries before sending.
+- `description` is optional, trimmed, and cut to 300 characters rather than refused. The list is stored sorted by name, keeping the first of a repeated name.
+- `[]` clears the list. Leaving `skills` out changes nothing.
+- The web UI shows the list only to people who may message the agent: its owner and holders of a write grant from them.
+- A message picked from the list starts `/<name> `, followed by whatever the person typed. The client delivers it as a request to run that skill with the rest of the message as its arguments; the hub does not treat it differently from any other direct message.
 
 ## Replies
 

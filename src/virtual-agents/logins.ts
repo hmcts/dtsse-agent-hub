@@ -7,7 +7,7 @@ import type { Database, PrismaClient } from "../store/prisma.ts";
 import { PASTED_CODE_TTL_MS } from "./cleanup.ts";
 import { MAX_PASTED_CODE_LENGTH, openPastedCode, sealPastedCode } from "./pasted-code.ts";
 import { announce } from "./stop.ts";
-import { findVirtualAgent, moveTo, type VirtualAgentRow } from "./store.ts";
+import { findVirtualAgent, moveTo, restartVirtualAgent, type VirtualAgentRow } from "./store.ts";
 
 /**
  * The logins a pod relays to its owner: a device code to enter at a URL (GitHub, Azure), or a URL whose page gives
@@ -211,6 +211,37 @@ export async function completeLogin(
     }
     await announce(tx, virtualAgent.id, virtualAgent.ownerOid);
   });
+}
+
+/** The kinds a virtual agent signs in to itself, relaying a device code to its owner, rather than being pasted. */
+export type SignInKind = "github" | "azure";
+
+export function isSignInKind(kind: string): kind is SignInKind {
+  return kind === "github" || kind === "azure";
+}
+
+/**
+ * The owner's request to sign in to `kind` again: their stored credential is deleted and the virtual agent, if it is
+ * running, restarted, so its new pod finds none and relays a fresh sign-in. A stopped one signs in when it next
+ * starts. The agent is checked first, so an id that is not the actor's deletes nothing.
+ */
+export async function reconnectSignIn(
+  prisma: PrismaClient,
+  store: SecretStore,
+  actorOid: string,
+  virtualAgentId: string,
+  kind: SignInKind,
+  now: Date = new Date()
+): Promise<VirtualAgentRow> {
+  const virtualAgent = await findVirtualAgent(prisma, virtualAgentId);
+  if (virtualAgent === undefined || !canManageVirtualAgent(actorOid, virtualAgent)) {
+    throw new HttpError(404, "no such virtual agent");
+  }
+  if (virtualAgent.desired === "deleted") {
+    throw new HttpError(409, "that virtual agent is being deleted");
+  }
+  await deleteCredential(prisma, store, { actorOid, ownerOid: virtualAgent.ownerOid, kind });
+  return await restartVirtualAgent(prisma, actorOid, virtualAgentId, `restarting to sign in to ${kind === "github" ? "GitHub" : "Azure"} again`, now);
 }
 
 export interface LoginView {

@@ -1759,3 +1759,80 @@ describe("a virtual agent's exposed ports", () => {
     }
   });
 });
+
+describe("signing in again", () => {
+  async function storedGithub(): Promise<void> {
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "github", value: GITHUB, via: "pod" });
+  }
+
+  it("should delete the credential and restart the pod with a fresh launch token when the agent is running", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await storedGithub();
+    const before = await row(id);
+
+    actAs("alice");
+    expect(await actions.reconnectSignIn(form({ id, kind: "github" }))).toEqual({
+      ok: true,
+      confirmation: "pcs-api is restarting to sign in to GitHub again"
+    });
+
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "github")).toBeUndefined();
+    expect(await prisma.credential.count({ where: { ownerOid: ALICE.oid, kind: "github" } })).toBe(0);
+    const after = await row(id);
+    expect(after.generation).toBe(before.generation + 1);
+    expect(after).toMatchObject({ desired: "running", status: "provisioning", statusDetail: "restarting to sign in to GitHub again" });
+    expect((await status(id, token, { phase: "running" })).status).toBe(401);
+    const claimed = (await claim()).find((entry) => entry.id === id);
+    expect(claimed).toMatchObject({ generation: after.generation, desired: "running" });
+    expect(claimed?.launch_token).toBeDefined();
+    expect((await status(id, claimed!.launch_token!, { phase: "awaiting_login" })).status).toBe(204);
+  });
+
+  it("should delete the credential and leave the generation alone when the agent is stopped", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "azure", value: AZURE, via: "pod" });
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+    const before = await row(id);
+
+    actAs("alice");
+    expect(await actions.reconnectSignIn(form({ id, kind: "azure" }))).toEqual({ ok: true, confirmation: "pcs-api signs in to Azure when it next starts" });
+
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBeUndefined();
+    expect(await row(id)).toMatchObject({ generation: before.generation, desired: "stopped", status: before.status });
+  });
+
+  it("should delete nothing and restart nothing when someone other than the owner asks", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await storedGithub();
+    await insertUser(BOB);
+    const before = await row(id);
+
+    actAs("bob");
+    expect(await actions.reconnectSignIn(form({ id, kind: "github" }))).toEqual({ ok: false, error: "no such virtual agent" });
+
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "github")).toBe(GITHUB);
+    expect((await row(id)).generation).toBe(before.generation);
+  });
+
+  it("should refuse when the kind is not a sign-in, or the agent is being deleted", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await storedGithub();
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "bedrock", value: BEDROCK, via: "web" });
+
+    actAs("alice");
+    expect(await actions.reconnectSignIn(form({ id, kind: "bedrock" }))).toEqual({ ok: false, error: "no sign-in was named" });
+    expect(await actions.reconnectSignIn(form({ id: "", kind: "github" }))).toEqual({ ok: false, error: "no sign-in was named" });
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "bedrock")).toBe(BEDROCK);
+
+    await setDesired(prisma, ALICE.oid, id, "deleted");
+    expect(await actions.reconnectSignIn(form({ id, kind: "github" }))).toMatchObject({ ok: false, error: expect.stringContaining("being deleted") });
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "github")).toBe(GITHUB);
+  });
+
+  it("should refuse when virtual agents are off", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
+    actAs("alice");
+
+    expect(await actions.reconnectSignIn(form({ id: "x", kind: "github" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+  });
+});

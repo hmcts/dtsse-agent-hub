@@ -179,6 +179,8 @@ model Agent {
   endedAt         DateTime?   @map("ended_at") @db.Timestamptz(6)
   /// The virtual agent whose session registered this agent, if any. Its launch token may act for this agent alone.
   virtualAgentId  String?     @map("virtual_agent_id") @db.Uuid
+  /// The skills its session reported, as [{name, description}]. See src/agents/skills.ts.
+  skills          Json        @default("[]")
 
   owner         User              @relation(fields: [ownerOid], references: [oid])
   authored      Message[]         @relation("authorAgent")
