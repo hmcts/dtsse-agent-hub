@@ -254,6 +254,7 @@ describe("the bedrock migration", () => {
       { type: "credential_kind", label: "bedrock" },
       { type: "credential_kind", label: "jenkins" },
       { type: "credential_kind", label: "claude_md" },
+      { type: "credential_kind", label: "git_identity" },
       { type: "model_route", label: "bedrock" },
       { type: "model_route", label: "own_licence" }
     ]);

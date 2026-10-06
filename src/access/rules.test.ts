@@ -339,7 +339,20 @@ describe("canOwnerReadCredential", () => {
     expect(canOwnerReadCredential("claude_md")).toBe(true);
   });
 
-  it.each(["github", "azure", "claude", "jenkins", "Bedrock", "claude-md", ""])("should keep %j write-only when it is any other kind", (kind) => {
+  it("should let the owner read their git identity back when the page shows it for editing", () => {
+    expect(canOwnerReadCredential("git_identity")).toBe(true);
+  });
+
+  it.each([
+    "github",
+    "azure",
+    "claude",
+    "jenkins",
+    "Bedrock",
+    "claude-md",
+    "git-identity",
+    ""
+  ])("should keep %j write-only when it is any other kind", (kind) => {
     expect(canOwnerReadCredential(kind)).toBe(false);
   });
 });
@@ -351,6 +364,10 @@ describe("canVirtualAgentStoreCredential", () => {
 
   it("should refuse a pod when it would change its owner's CLAUDE.md", () => {
     expect(canVirtualAgentStoreCredential("claude_md")).toBe(false);
+  });
+
+  it("should refuse a pod when it would change its owner's git identity", () => {
+    expect(canVirtualAgentStoreCredential("git_identity")).toBe(false);
   });
 });
 

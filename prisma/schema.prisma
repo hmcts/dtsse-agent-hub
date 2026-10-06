@@ -60,6 +60,7 @@ enum CredentialKind {
   bedrock
   jenkins
   claude_md
+  git_identity
 
   @@map("credential_kind")
 }

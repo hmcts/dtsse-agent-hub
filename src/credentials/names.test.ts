@@ -47,6 +47,7 @@ describe("isCredentialKind", () => {
     ["bedrock", true],
     ["jenkins", true],
     ["claude_md", true],
+    ["git_identity", true],
     ["claude-md", false],
     ["GitHub", false],
     ["", false],

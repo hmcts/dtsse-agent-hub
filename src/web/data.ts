@@ -7,6 +7,7 @@ import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
 import { DEFAULT_CLAUDE_MD } from "../credentials/claude-md.ts";
+import { type GitIdentity, readGitIdentity } from "../credentials/git-identity.ts";
 import { type CredentialStatus, credentialStatus, ownerRefusal, readCredential } from "../credentials/store.ts";
 import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
 import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
@@ -83,8 +84,8 @@ export type CredentialSettings =
   | { available: false; modelRoute: ModelRoute; reason: string };
 
 /**
- * What the viewer has stored, as metadata: nothing here carries a credential's value. Their CLAUDE.md is not among
- * them; `claudeMdSettings` reads it for its own section.
+ * What the viewer has stored, as metadata: nothing here carries a credential's value. Their CLAUDE.md and git identity
+ * are not among them; `claudeMdSettings` and `gitIdentitySettings` read those for their own forms.
  */
 export async function credentialSettings(viewer: Viewer): Promise<CredentialSettings> {
   const backend = credentialBackend(prisma);
@@ -96,7 +97,11 @@ export async function credentialSettings(viewer: Viewer): Promise<CredentialSett
     return { available: false, modelRoute: viewer.modelRoute, reason: refusal.message };
   }
   const statuses = await credentialStatus(prisma, viewer.oid);
-  return { available: true, modelRoute: viewer.modelRoute, statuses: statuses.filter((status) => status.kind !== "claude_md") };
+  return {
+    available: true,
+    modelRoute: viewer.modelRoute,
+    statuses: statuses.filter((status) => status.kind !== "claude_md" && status.kind !== "git_identity")
+  };
 }
 
 export type ClaudeMdSettings = { available: true; stored: boolean; text: string; updatedAt: string | null } | { available: false; reason: string };
@@ -121,6 +126,22 @@ export async function claudeMdSettings(viewer: Identity): Promise<ClaudeMdSettin
     text: stored ?? DEFAULT_CLAUDE_MD,
     updatedAt: stored === undefined ? null : (status?.updatedAt.toISOString() ?? null)
   };
+}
+
+export type GitIdentitySettings = { available: true; stored: boolean; identity: GitIdentity } | { available: false; reason: string };
+
+/** The viewer's own git identity override for editing, which `canOwnerReadCredential` lets them read back. */
+export async function gitIdentitySettings(viewer: Identity): Promise<GitIdentitySettings> {
+  const backend = credentialBackend(prisma);
+  if (!backend.available) {
+    return { available: false, reason: backend.reason };
+  }
+  const refusal = ownerRefusal(backend.store, viewer.oid);
+  if (refusal !== undefined || !canOwnerReadCredential("git_identity")) {
+    return { available: false, reason: refusal?.message ?? "your git identity cannot be shown" };
+  }
+  const stored = await readCredential(prisma, backend.store, viewer.oid, "git_identity");
+  return { available: true, stored: stored !== undefined, identity: readGitIdentity(stored) };
 }
 
 export interface MessagePageView {

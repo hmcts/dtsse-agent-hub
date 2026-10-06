@@ -17,8 +17,8 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * pasted: the Azure token cache comes from the virtual agent's own device-code login. A Bedrock key is accepted on
  * either route, since the workspace on a laptop reads it back too.
  *
- * A CLAUDE.md has its own two actions, because it is written and reset on the virtual agents page rather than pasted,
- * and only exists for virtual agents.
+ * A CLAUDE.md and a git identity each have their own two actions, because they are written and reset on the virtual
+ * agents page rather than pasted, and only exist for virtual agents.
  */
 
 /** The standalone page, and the virtual agents page that has them as a section when the feature is on. */
@@ -104,5 +104,38 @@ export async function resetClaudeMd(): Promise<ActionResult<{ confirmation: stri
     await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind: "claude_md" });
     revalidate();
     return { ok: true, confirmation: "Your CLAUDE.md is back to the default" };
+  });
+}
+
+export async function saveGitIdentity(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("save git identity", async () => {
+    if (!virtualAgentsEnabled()) {
+      return VIRTUAL_AGENTS_OFF;
+    }
+    const viewer = await requireViewer();
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      return { ok: false, error: backend.reason };
+    }
+    const value = JSON.stringify({ name: text(form.get("name")), email: text(form.get("email")) });
+    await putCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind: "git_identity", value, via: "web" });
+    revalidate();
+    return { ok: true, confirmation: "Your git identity is saved. Each agent uses it from its next Claude start" };
+  });
+}
+
+export async function clearGitIdentity(): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("clear git identity", async () => {
+    if (!virtualAgentsEnabled()) {
+      return VIRTUAL_AGENTS_OFF;
+    }
+    const viewer = await requireViewer();
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      return { ok: false, error: backend.reason };
+    }
+    await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind: "git_identity" });
+    revalidate();
+    return { ok: true, confirmation: "Your virtual agents are back to the default git identity" };
   });
 }

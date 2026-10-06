@@ -255,3 +255,13 @@ describe("checkCredential for claude_md", () => {
     expect(checkCredential("claude_md", "a\u0000")).toEqual({ ok: false, error: "your CLAUDE.md can only hold printable text, tabs and new lines" });
   });
 });
+
+describe("checkCredential for git_identity", () => {
+  it("should store the JSON of the fields set, unlabelled, when it is a valid git identity", () => {
+    expect(checkCredential("git_identity", '{"name":" Olive ","email":""}')).toEqual({ ok: true, value: '{"name":"Olive"}', accountLabel: null });
+  });
+
+  it("should refuse it with the git identity check's reason when the email is not an address", () => {
+    expect(checkCredential("git_identity", '{"email":"olive"}')).toEqual({ ok: false, error: "that is not an email address" });
+  });
+});
