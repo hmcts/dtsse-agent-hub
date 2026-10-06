@@ -366,6 +366,8 @@ model VirtualAgent {
   statusChangedAt     DateTime                @default(now()) @map("status_changed_at") @db.Timestamptz(6)
   generation          Int                     @default(1)
   observedGeneration  Int                     @default(0) @map("observed_generation")
+  /// How many claims in a row the orchestrator could not apply; 0 once one is observed.
+  applyFailures       Int                     @default(0) @map("apply_failures")
   claimedBy           String?                 @map("claimed_by")
   claimedAt           DateTime?               @map("claimed_at") @db.Timestamptz(6)
   /// The cluster its StatefulSet and disk are on; kept when the claim is released.

@@ -65,3 +65,8 @@ export const observedBody = z.object({
   reason: optionalText(200),
   disk_deleted: z.boolean().optional()
 });
+
+export const applyFailedBody = z.object({
+  generation: z.number().int().min(0),
+  error: z.string().trim().min(1).max(MAX_DETAIL)
+});

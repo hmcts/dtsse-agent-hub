@@ -21,7 +21,11 @@ export async function stopVirtualAgents(db: Database, ids: readonly string[], re
   const stopped = await db.$queryRaw<{ id: string; owner_oid: string }[]>`
     UPDATE virtual_agent
        SET desired = 'stopped', stop_reason = ${reason}::virtual_agent_stop_reason, generation = generation + 1,
-           launch_token_hash = NULL, launch_token_issued_at = NULL, updated_at = ${now}
+           launch_token_hash = NULL, launch_token_issued_at = NULL, apply_failures = 0,
+           status = CASE WHEN status = 'stopped' THEN status ELSE 'stopping' END,
+           status_detail = CASE WHEN status = 'stopped' THEN status_detail ELSE NULL END,
+           status_changed_at = CASE WHEN status = 'stopped' THEN status_changed_at ELSE ${now} END,
+           updated_at = ${now}
      WHERE id = ANY(${[...ids]}::uuid[]) AND desired = 'running'
     RETURNING id::text AS id, owner_oid
   `;
