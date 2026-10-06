@@ -172,18 +172,35 @@ describe("VirtualAgentsView", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("should offer no create form and say why when the viewer is at a limit", () => {
+  it("should still offer the create form when the viewer has two agents running", () => {
     render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b" })]} route="bedrock" create={created()} now={NOW} />);
 
+    expect(screen.getByRole("form", { name: "Create a virtual agent" })).toBeTruthy();
+    expect(screen.getByText("2 of 3")).toBeTruthy();
+  });
+
+  it("should offer no create form and say why when the viewer is at the limit", () => {
+    const agents = [card(), card({ id: "b", name: "b" }), card({ id: "c", name: "c" })];
+    render(<VirtualAgentsView agents={agents} route="bedrock" create={created()} now={NOW} />);
+
     expect(screen.queryByRole("form", { name: "Create a virtual agent" })).toBeNull();
-    expect(screen.getByText(/2 virtual agents running/)).toBeTruthy();
+    expect(screen.getByText("3 of 3")).toBeTruthy();
+    expect(screen.getByText(/You have 3 virtual agents, the most anyone may have/)).toBeTruthy();
+  });
+
+  it("should leave an agent being deleted out of the counter when the viewer has one", () => {
+    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b", desired: "deleted" })]} route="bedrock" create={created()} now={NOW} />);
+
+    expect(screen.getByText("1 of 3")).toBeTruthy();
   });
 });
 
 describe("createLimit", () => {
-  it("should refuse at the total limit, not counting agents being deleted", () => {
+  it("should refuse at the limit, whether the agents are running or stopped, not counting agents being deleted", () => {
     const stopped = card({ desired: "stopped" });
     expect(createLimit([stopped, stopped, stopped])).toContain("Delete one");
+    expect(createLimit([card(), card(), card()])).toContain("Delete one");
+    expect(createLimit([card(), card()])).toBeUndefined();
     expect(createLimit([stopped, stopped, card({ desired: "deleted" })])).toBeUndefined();
   });
 });

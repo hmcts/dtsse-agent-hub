@@ -23,7 +23,7 @@ import { directAsAgent, directAsPerson, postAs } from "../../src/messages/send.t
 import { queuedDeliveries, queuedDelivery } from "../../src/messages/store.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
-import { MAX_PER_USER, MAX_RUNNING_PER_USER } from "../../src/virtual-agents/limits.ts";
+import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { storePastedCode } from "../../src/virtual-agents/logins.ts";
 import { stopVirtualAgents } from "../../src/virtual-agents/stop.ts";
 import {
@@ -197,38 +197,48 @@ describe("creating virtual agents", () => {
     expect(agent.pvcName).toBe(`work-va-${agent.id.slice(0, 8)}-0`);
   });
 
-  it("should refuse more running than the running limit, and more in all than the total limit", async () => {
-    for (let index = 0; index < MAX_RUNNING_PER_USER; index += 1) {
+  it("should run every agent at once and refuse another create, running or stopped, when the owner is at the limit", async () => {
+    for (let index = 0; index < MAX_VIRTUAL_AGENTS_PER_USER; index += 1) {
       await create(ALICE, `agent-${index}`);
     }
-    await expect(create(ALICE, "one-too-many")).rejects.toMatchObject({ status: 409, message: expect.stringContaining("running") });
+    expect(await prisma.virtualAgent.count({ where: { ownerOid: ALICE.oid, desired: "running" } })).toBe(MAX_VIRTUAL_AGENTS_PER_USER);
+    const message = `you already have ${MAX_VIRTUAL_AGENTS_PER_USER} virtual agents; delete one first`;
+    await expect(create(ALICE, "one-too-many")).rejects.toMatchObject({ status: 409, message });
 
-    const first = (await prisma.virtualAgent.findFirstOrThrow({ where: { name: "agent-0" } })).id;
-    await setDesired(prisma, ALICE.oid, first, "stopped");
-    for (let index = MAX_RUNNING_PER_USER; index < MAX_PER_USER; index += 1) {
-      await create(ALICE, `agent-${index}`);
-    }
-    await setDesired(prisma, ALICE.oid, (await prisma.virtualAgent.findFirstOrThrow({ where: { name: "agent-1" } })).id, "stopped");
-    await expect(create(ALICE, "over-total")).rejects.toMatchObject({ status: 409, message: expect.stringContaining(`${MAX_PER_USER} virtual agents`) });
-    expect(await prisma.virtualAgent.count()).toBe(MAX_PER_USER);
+    await setDesired(prisma, ALICE.oid, (await prisma.virtualAgent.findFirstOrThrow({ where: { name: "agent-0" } })).id, "stopped");
+    await expect(create(ALICE, "still-too-many")).rejects.toMatchObject({ status: 409, message });
+    expect(await prisma.virtualAgent.count()).toBe(MAX_VIRTUAL_AGENTS_PER_USER);
   });
 
-  it("should refuse a start over the running limit", async () => {
-    await create(ALICE, "a");
-    const b = await create(ALICE, "b");
-    await setDesired(prisma, ALICE.oid, b.id, "stopped");
-    await create(ALICE, "c");
+  it("should give the place back when one of the owner's agents is deleted", async () => {
+    for (let index = 0; index < MAX_VIRTUAL_AGENTS_PER_USER; index += 1) {
+      await create(ALICE, `agent-${index}`);
+    }
 
-    await expect(setDesired(prisma, ALICE.oid, b.id, "running")).rejects.toMatchObject({ status: 409 });
+    await setDesired(prisma, ALICE.oid, (await prisma.virtualAgent.findFirstOrThrow({ where: { name: "agent-0" } })).id, "deleted");
+
+    await expect(create(ALICE, "replacement")).resolves.toMatchObject({ desired: "running" });
+  });
+
+  it("should start a stopped agent when every other agent the owner has is running", async () => {
+    const stopped = await create(ALICE, "stopped");
+    for (let index = 1; index < MAX_VIRTUAL_AGENTS_PER_USER; index += 1) {
+      await create(ALICE, `agent-${index}`);
+    }
+    await setDesired(prisma, ALICE.oid, stopped.id, "stopped");
+
+    await expect(setDesired(prisma, ALICE.oid, stopped.id, "running")).resolves.toMatchObject({ desired: "running" });
   });
 
   it("should let only one of two concurrent creates through when one place is left", async () => {
-    await create(ALICE, "first");
+    for (let index = 0; index < MAX_VIRTUAL_AGENTS_PER_USER - 1; index += 1) {
+      await create(ALICE, `agent-${index}`);
+    }
 
     const results = await Promise.allSettled([create(ALICE, "second"), create(ALICE, "third")]);
 
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(await prisma.virtualAgent.count({ where: { ownerOid: ALICE.oid } })).toBe(MAX_RUNNING_PER_USER);
+    expect(await prisma.virtualAgent.count({ where: { ownerOid: ALICE.oid } })).toBe(MAX_VIRTUAL_AGENTS_PER_USER);
   });
 
   it.each([
@@ -1461,14 +1471,17 @@ describe("the web UI's reads and actions", () => {
     expect(await actions.stopVirtualAgent(form({ id: "" }))).toEqual({ ok: false, error: "no virtual agent was named" });
   });
 
-  it("should refuse a create over the limits with a sentence the page shows", async () => {
+  it("should refuse a create with a sentence the page shows when the viewer is at the limit", async () => {
     actAs("alice");
     await insertUser(ALICE);
-    for (let index = 0; index < MAX_RUNNING_PER_USER; index += 1) {
+    for (let index = 0; index < MAX_VIRTUAL_AGENTS_PER_USER; index += 1) {
       await actions.createVirtualAgent(form({ name: `agent-${index}` }));
     }
 
-    expect(await actions.createVirtualAgent(form({ name: "one-more" }))).toMatchObject({ ok: false, error: expect.stringContaining("running") });
+    expect(await actions.createVirtualAgent(form({ name: "one-more" }))).toMatchObject({
+      ok: false,
+      error: expect.stringContaining(`${MAX_VIRTUAL_AGENTS_PER_USER} virtual agents`)
+    });
   });
 
   it("should capture the viewer's model route when the agent is created", async () => {

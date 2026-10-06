@@ -6,7 +6,7 @@ import type { ModelRoute } from "../viewer/identity.ts";
 import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
 import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken, withoutLaunchTokens } from "./launch-token.ts";
 import { afterApplyError, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
-import { checkName, createRefusal, startRefusal } from "./limits.ts";
+import { checkName, createRefusal } from "./limits.ts";
 import { normalisePorts, samePorts } from "./ports.ts";
 import { diskTtlDays, orchestratorLeaseSeconds } from "./settings.ts";
 import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
@@ -87,17 +87,13 @@ function toRow<R extends { modelRoute: StoredRoute }>(row: R): Omit<R, "modelRou
   return { ...row, modelRoute: toRoute(row.modelRoute) };
 }
 
-/** Holds the owner's `user` row until commit, so two creates or starts by one person cannot both pass the limits. */
+/** Holds the owner's `user` row until commit, so two creates by one person cannot both pass the limit, nor two renames take one name. */
 async function lockOwner(db: Database, ownerOid: string): Promise<void> {
   await db.$queryRaw`SELECT 1 FROM "user" WHERE oid = ${ownerOid} FOR UPDATE`;
 }
 
-async function counts(db: Database, ownerOid: string): Promise<{ total: number; running: number }> {
-  const [total, running] = await Promise.all([
-    db.virtualAgent.count({ where: { ownerOid, desired: { not: "deleted" } } }),
-    db.virtualAgent.count({ where: { ownerOid, desired: "running" } })
-  ]);
-  return { total, running };
+async function liveCount(db: Database, ownerOid: string): Promise<number> {
+  return await db.virtualAgent.count({ where: { ownerOid, desired: { not: "deleted" } } });
 }
 
 /** Locks the row for the rest of the transaction. */
@@ -132,7 +128,7 @@ export async function createVirtualAgent(prisma: PrismaClient, request: NewVirtu
   }
   return await prisma.$transaction(async (tx) => {
     await lockOwner(tx, request.owner.oid);
-    const refusal = createRefusal(await counts(tx, request.owner.oid));
+    const refusal = createRefusal(await liveCount(tx, request.owner.oid));
     if (refusal !== undefined) {
       throw new HttpError(409, refusal);
     }
@@ -205,11 +201,6 @@ export async function setDesired(
     }
     let data: Record<string, unknown>;
     if (desired === "running") {
-      await lockOwner(tx, row.ownerOid);
-      const refusal = startRefusal(await counts(tx, row.ownerOid));
-      if (refusal !== undefined) {
-        throw new HttpError(409, refusal);
-      }
       data = { startedAt: now, stoppedAt: null, stopReason: null, diskExpiresAt: null, diskDeletedAt: null, ...statusChange("requested", now) };
     } else {
       const settled = desired === "stopped" && row.status === "stopped";

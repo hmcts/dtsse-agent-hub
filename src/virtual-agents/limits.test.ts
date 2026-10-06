@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkName, createRefusal, MAX_NAME_LENGTH, MAX_PER_USER, MAX_RUNNING_PER_USER, startRefusal } from "./limits.ts";
+import { checkName, createRefusal, MAX_NAME_LENGTH, MAX_VIRTUAL_AGENTS_PER_USER } from "./limits.ts";
 
 describe("checkName", () => {
   it.each([
@@ -31,25 +31,11 @@ describe("checkName", () => {
 });
 
 describe("createRefusal", () => {
-  it("should allow a create when the person is under both limits", () => {
-    expect(createRefusal({ total: MAX_PER_USER - 1, running: MAX_RUNNING_PER_USER - 1 })).toBeUndefined();
+  it("should allow a create when the person has fewer than the limit", () => {
+    expect(createRefusal(MAX_VIRTUAL_AGENTS_PER_USER - 1)).toBeUndefined();
   });
 
   it("should refuse a create when the person already has the most agents allowed", () => {
-    expect(createRefusal({ total: MAX_PER_USER, running: 0 })).toContain(`already have ${MAX_PER_USER} virtual agents`);
-  });
-
-  it("should refuse a create when the person already runs the most agents allowed", () => {
-    expect(createRefusal({ total: MAX_RUNNING_PER_USER, running: MAX_RUNNING_PER_USER })).toContain(`${MAX_RUNNING_PER_USER} virtual agents running`);
-  });
-});
-
-describe("startRefusal", () => {
-  it("should allow a start when fewer than the limit are running", () => {
-    expect(startRefusal({ running: MAX_RUNNING_PER_USER - 1 })).toBeUndefined();
-  });
-
-  it("should refuse a start when the limit are already running", () => {
-    expect(startRefusal({ running: MAX_RUNNING_PER_USER })).toContain("stop one first");
+    expect(createRefusal(MAX_VIRTUAL_AGENTS_PER_USER)).toBe(`you already have ${MAX_VIRTUAL_AGENTS_PER_USER} virtual agents; delete one first`);
   });
 });
