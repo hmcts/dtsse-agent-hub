@@ -2,9 +2,10 @@ import { DEV_OID_PREFIX } from "../agent-auth/dev.ts";
 
 /**
  * What a person's virtual agent needs on their behalf: a GitHub token, an Azure CLI token cache, and the key to its
- * model, a Claude token or an Amazon Bedrock API key; and, if they want its Jenkins tools, a Jenkins API token.
+ * model, a Claude token or an Amazon Bedrock API key; if they want its Jenkins tools, a Jenkins API token; and their
+ * own CLAUDE.md, which is not a sign-in but is kept here because it may hold private context.
  */
-export const CREDENTIAL_KINDS = ["github", "azure", "claude", "bedrock", "jenkins"] as const;
+export const CREDENTIAL_KINDS = ["github", "azure", "claude", "bedrock", "jenkins", "claude_md"] as const;
 
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 
@@ -31,7 +32,7 @@ export class InvalidCredentialOwner extends Error {}
 /**
  * Where a person's credential of one kind is kept: `u-<oid>-<kind>`. Key Vault names allow only `[0-9a-zA-Z-]`, so
  * the owner is checked against the two oid shapes the hub issues rather than escaped, and a name can only ever be
- * one person's.
+ * one person's. A kind's underscore becomes a hyphen, which no kind contains.
  */
 export function secretName(oid: string, kind: CredentialKind): string {
   if (!isEntraOid(oid) && !isDevOid(oid)) {
@@ -40,5 +41,5 @@ export function secretName(oid: string, kind: CredentialKind): string {
   if (!isCredentialKind(kind)) {
     throw new InvalidCredentialOwner(`${String(kind)} is not a kind of credential`);
   }
-  return `u-${oid}-${kind}`;
+  return `u-${oid}-${kind.replaceAll("_", "-")}`;
 }

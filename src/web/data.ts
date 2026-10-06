@@ -1,12 +1,13 @@
 import "server-only";
 import { grantsHeldBy } from "../access/load.ts";
-import { canReadMessage } from "../access/rules.ts";
+import { canOwnerReadCredential, canReadMessage } from "../access/rules.ts";
 import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
-import { type CredentialStatus, credentialStatus, ownerRefusal } from "../credentials/store.ts";
+import { DEFAULT_CLAUDE_MD } from "../credentials/claude-md.ts";
+import { type CredentialStatus, credentialStatus, ownerRefusal, readCredential } from "../credentials/store.ts";
 import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
 import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
@@ -81,7 +82,10 @@ export type CredentialSettings =
   | { available: true; modelRoute: ModelRoute; statuses: CredentialStatus[] }
   | { available: false; modelRoute: ModelRoute; reason: string };
 
-/** What the viewer has stored, as metadata: nothing here, or anywhere the pages read, carries a credential's value. */
+/**
+ * What the viewer has stored, as metadata: nothing here carries a credential's value. Their CLAUDE.md is not among
+ * them; `claudeMdSettings` reads it for its own section.
+ */
 export async function credentialSettings(viewer: Viewer): Promise<CredentialSettings> {
   const backend = credentialBackend(prisma);
   if (!backend.available) {
@@ -91,7 +95,32 @@ export async function credentialSettings(viewer: Viewer): Promise<CredentialSett
   if (refusal !== undefined) {
     return { available: false, modelRoute: viewer.modelRoute, reason: refusal.message };
   }
-  return { available: true, modelRoute: viewer.modelRoute, statuses: await credentialStatus(prisma, viewer.oid) };
+  const statuses = await credentialStatus(prisma, viewer.oid);
+  return { available: true, modelRoute: viewer.modelRoute, statuses: statuses.filter((status) => status.kind !== "claude_md") };
+}
+
+export type ClaudeMdSettings = { available: true; stored: boolean; text: string; updatedAt: string | null } | { available: false; reason: string };
+
+/** The viewer's own CLAUDE.md for editing, which `canOwnerReadCredential` lets them read back, or the default. */
+export async function claudeMdSettings(viewer: Identity): Promise<ClaudeMdSettings> {
+  const backend = credentialBackend(prisma);
+  if (!backend.available) {
+    return { available: false, reason: backend.reason };
+  }
+  const refusal = ownerRefusal(backend.store, viewer.oid);
+  if (refusal !== undefined || !canOwnerReadCredential("claude_md")) {
+    return { available: false, reason: refusal?.message ?? "your CLAUDE.md cannot be shown" };
+  }
+  const [stored, status] = await Promise.all([
+    readCredential(prisma, backend.store, viewer.oid, "claude_md"),
+    prisma.credential.findUnique({ where: { ownerOid_kind: { ownerOid: viewer.oid, kind: "claude_md" } }, select: { updatedAt: true } })
+  ]);
+  return {
+    available: true,
+    stored: stored !== undefined,
+    text: stored ?? DEFAULT_CLAUDE_MD,
+    updatedAt: stored === undefined ? null : (status?.updatedAt.toISOString() ?? null)
+  };
 }
 
 export interface MessagePageView {

@@ -28,6 +28,11 @@ export function TopicSearchShortcut() {
       const search = TOPIC_SEARCH_IDS.map((id) => document.getElementById(id)).find((element) => element !== null);
       if (search) {
         event.preventDefault();
+        // The sidebar's search sits inside the collapsible Topics group, and a closed group cannot take focus.
+        const group = search.closest("details");
+        if (group !== null) {
+          group.open = true;
+        }
         search.focus();
       }
     }

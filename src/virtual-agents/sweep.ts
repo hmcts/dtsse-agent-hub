@@ -103,7 +103,9 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
     const idling = candidates
       .filter((candidate) => !evening.includes(candidate.id) && candidate.status === "running")
       .filter((candidate) => {
-        const active = lastActivity(candidate.status_changed_at, candidate.last_active_at, candidate.last_entry_at) ?? candidate.started_at;
+        // A start is activity: an agent started again after a night stopped has only yesterday's timestamps otherwise.
+        const active =
+          lastActivity(candidate.started_at, candidate.status_changed_at, candidate.last_active_at, candidate.last_entry_at) ?? candidate.started_at;
         return isIdle(candidate.agent_status, active, now, idle);
       })
       .map((candidate) => candidate.id);

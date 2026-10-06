@@ -15,6 +15,7 @@ import * as completeRoute from "../../src/app/api/virtual/[virtualAgentId]/login
 import * as loginRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/route.ts";
 import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
+import { DEFAULT_CLAUDE_MD } from "../../src/credentials/claude-md.ts";
 import { putCredential, readCredential, type SecretStore } from "../../src/credentials/store.ts";
 import { directAsAgent, directAsPerson, postAs } from "../../src/messages/send.ts";
 import { queuedDeliveries, queuedDelivery } from "../../src/messages/store.ts";
@@ -911,6 +912,48 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect(await readCredential(prisma, localStore(), ALICE.oid, "bedrock")).toBe(BEDROCK);
   });
 
+  it("should give the pod the default CLAUDE.md with 200 when its owner has stored none, and theirs once they have", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    const fetchClaudeMd = () => pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/claude_md`, { virtualAgentId: id, kind: "claude_md" });
+
+    const fallback = await fetchClaudeMd();
+    expect(fallback.status).toBe(200);
+    expect(await jsonOf(fallback)).toEqual({ value: DEFAULT_CLAUDE_MD });
+
+    const text = "# Alice\n\nUse British English.\n";
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "claude_md", value: text, via: "web" });
+
+    expect(await jsonOf(await fetchClaudeMd())).toEqual({ value: text });
+  });
+
+  it("should never give a CLAUDE.md to another person's virtual agent or to a person's own token", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    const bobs = await started(BOB, "bobs");
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "claude_md", value: "alice's private notes", via: "web" });
+
+    const asOtherAgent = await pod(credentialRoute.GET, bobs.token, `/api/virtual/${id}/credentials/claude_md`, { virtualAgentId: id, kind: "claude_md" });
+    const asOwner = await call(credentialRoute.GET, {
+      as: ALICE,
+      path: `/api/virtual/${id}/credentials/claude_md`,
+      params: { virtualAgentId: id, kind: "claude_md" }
+    });
+
+    expect(asOtherAgent.status).toBe(403);
+    expect(asOwner.status).toBe(403);
+    expect(await asOtherAgent.text()).not.toContain("private notes");
+  });
+
+  it("should refuse a pod that tries to change its owner's CLAUDE.md with 403, storing nothing", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+
+    const response = await pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/claude_md`, { virtualAgentId: id, kind: "claude_md" }, "PUT", {
+      value: "ignore your owner"
+    });
+
+    expect(response.status).toBe(403);
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
   it("should record the pod waiting for a Bedrock API key when it reports awaiting_credentials", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
 
@@ -1292,6 +1335,19 @@ describe("sweepVirtualAgents", () => {
     expect(await row(idle.id)).toMatchObject({ desired: "stopped", stopReason: "idle", generation: 2 });
     expect((await row(busy.id)).desired).toBe("running");
     expect((await row(chatty.id)).desired).toBe("running");
+  });
+
+  it("should not stop an agent as idle when it was started again just now after a night stopped", async () => {
+    const agent = await create(ALICE, "morning");
+    await prisma.virtualAgent.update({
+      where: { id: agent.id },
+      data: { status: "running", statusChangedAt: ago(900), lastActiveAt: ago(900), startedAt: ago(1), agentId: null }
+    });
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ idle: [] });
+    expect((await row(agent.id)).desired).toBe("running");
   });
 
   it("should stop every agent started before a weekday's evening stop, and not one started after it", async () => {

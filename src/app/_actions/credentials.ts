@@ -6,6 +6,7 @@ import { isCredentialKind } from "@/credentials/names";
 import { deleteCredential, putCredential } from "@/credentials/store";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
+import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
@@ -15,6 +16,9 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * A GitHub token, a Bedrock API key, a Jenkins API token and, for someone on their own licence, a Claude token can be
  * pasted: the Azure token cache comes from the virtual agent's own device-code login. A Bedrock key is accepted on
  * either route, since the workspace on a laptop reads it back too.
+ *
+ * A CLAUDE.md has its own two actions, because it is written and reset on the virtual agents page rather than pasted,
+ * and only exists for virtual agents.
  */
 
 /** The standalone page, and the virtual agents page that has them as a section when the feature is on. */
@@ -66,5 +70,39 @@ export async function removeCredential(form: FormData): Promise<ActionResult> {
     await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind });
     revalidate();
     return { ok: true };
+  });
+}
+
+const VIRTUAL_AGENTS_OFF: { ok: false; error: string } = { ok: false, error: "virtual agents are not available on this deployment" };
+
+export async function saveClaudeMd(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("save CLAUDE.md", async () => {
+    if (!virtualAgentsEnabled()) {
+      return VIRTUAL_AGENTS_OFF;
+    }
+    const viewer = await requireViewer();
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      return { ok: false, error: backend.reason };
+    }
+    await putCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind: "claude_md", value: form.get("value"), via: "web" });
+    revalidate();
+    return { ok: true, confirmation: "Your CLAUDE.md is saved. Each agent uses it from its next Claude start" };
+  });
+}
+
+export async function resetClaudeMd(): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("reset CLAUDE.md", async () => {
+    if (!virtualAgentsEnabled()) {
+      return VIRTUAL_AGENTS_OFF;
+    }
+    const viewer = await requireViewer();
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      return { ok: false, error: backend.reason };
+    }
+    await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind: "claude_md" });
+    revalidate();
+    return { ok: true, confirmation: "Your CLAUDE.md is back to the default" };
   });
 }
