@@ -4,7 +4,7 @@ import { Section } from "@/components/Section";
 import { Timestamp } from "@/components/time/Timestamp";
 import type { ModelRoute } from "@/viewer/identity";
 import { diskWarningDays } from "@/virtual-agents/cleanup";
-import { MAX_NAME_LENGTH, MAX_PER_USER, MAX_RUNNING_PER_USER } from "@/virtual-agents/limits";
+import { MAX_NAME_LENGTH, MAX_VIRTUAL_AGENTS_PER_USER } from "@/virtual-agents/limits";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 import type { ActionResult } from "@/web/action";
 import { idleFor, statusLabel, stopReasonLabel } from "./labels";
@@ -104,20 +104,21 @@ export function CreateVirtualAgent({ route, create, refusal }: { route: ModelRou
 
 /** Why another cannot be created, for the form to say instead of offering itself. */
 export function createLimit(agents: readonly VirtualAgentCard[]): string | undefined {
-  const live = agents.filter((agent) => agent.desired !== "deleted");
-  if (live.length >= MAX_PER_USER) {
-    return `You have ${MAX_PER_USER} virtual agents, the most anyone may have. Delete one to create another.`;
-  }
-  if (live.filter((agent) => agent.desired === "running").length >= MAX_RUNNING_PER_USER) {
-    return `You have ${MAX_RUNNING_PER_USER} virtual agents running, the most anyone may run at once. Stop one to create another.`;
+  if (liveCount(agents) >= MAX_VIRTUAL_AGENTS_PER_USER) {
+    return `You have ${MAX_VIRTUAL_AGENTS_PER_USER} virtual agents, the most anyone may have. Delete one to create another.`;
   }
   return undefined;
+}
+
+/** One being deleted no longer counts against the limit, so the counter leaves it out too. */
+function liveCount(agents: readonly VirtualAgentCard[]): number {
+  return agents.filter((agent) => agent.desired !== "deleted").length;
 }
 
 export function VirtualAgentsView({ agents, route, create, now }: { agents: VirtualAgentCard[]; route: ModelRoute; create: CreateAction; now: number }) {
   return (
     <>
-      <Section heading="Your virtual agents" detail={`${agents.length} of ${MAX_PER_USER}`}>
+      <Section heading="Your virtual agents" detail={`${liveCount(agents)} of ${MAX_VIRTUAL_AGENTS_PER_USER}`}>
         {agents.length === 0 ? (
           <EmptyState message="You have no virtual agents." detail="A virtual agent is a Claude Code session the hub runs for you in the cluster." />
         ) : (

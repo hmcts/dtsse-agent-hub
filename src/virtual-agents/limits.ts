@@ -1,13 +1,13 @@
 /**
  * How many virtual agents a person may have, and what they may be called. Each one is a pod and a disk in the
- * preview cluster, so the limits are about capacity rather than access.
+ * preview cluster, so the limit is about capacity rather than access.
  */
 
-/** Agents meant to be running at once, per person. */
-export const MAX_RUNNING_PER_USER = 2;
-
-/** Agents a person may have at all, running or stopped; one being deleted no longer counts. */
-export const MAX_PER_USER = 3;
+/**
+ * Agents a person may have, running or stopped; one being deleted no longer counts. All of them may run at once, so
+ * starting one needs no check of its own.
+ */
+export const MAX_VIRTUAL_AGENTS_PER_USER = 3;
 
 export const MAX_NAME_LENGTH = 64;
 
@@ -30,25 +30,10 @@ export function checkName(raw: unknown): CheckedName {
   return { ok: true, name };
 }
 
-export interface Counts {
-  /** Agents not being deleted. */
-  total: number;
-  /** Agents meant to be running. */
-  running: number;
-}
-
-/** Why the person cannot create another virtual agent, or `undefined` when they can. */
-export function createRefusal(counts: Counts): string | undefined {
-  if (counts.total >= MAX_PER_USER) {
-    return `you already have ${MAX_PER_USER} virtual agents; delete one first`;
-  }
-  return startRefusal(counts);
-}
-
-/** Why the person cannot start another virtual agent, or `undefined` when they can. */
-export function startRefusal(counts: Pick<Counts, "running">): string | undefined {
-  if (counts.running >= MAX_RUNNING_PER_USER) {
-    return `you already have ${MAX_RUNNING_PER_USER} virtual agents running; stop one first`;
+/** Why the person, with `live` agents not being deleted, cannot create another, or `undefined` when they can. */
+export function createRefusal(live: number): string | undefined {
+  if (live >= MAX_VIRTUAL_AGENTS_PER_USER) {
+    return `you already have ${MAX_VIRTUAL_AGENTS_PER_USER} virtual agents; delete one first`;
   }
   return undefined;
 }
