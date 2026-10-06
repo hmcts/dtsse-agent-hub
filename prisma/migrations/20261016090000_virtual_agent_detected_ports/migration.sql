@@ -21,4 +21,4 @@ ALTER TABLE "virtual_agent" ADD CONSTRAINT "virtual_agent_local_only_ports_check
 -- orchestrator applies to the Service and Ingress alone, so a server starting or stopping never restarts the pod.
 ALTER TABLE "virtual_agent" ADD COLUMN "pod_generation" integer NOT NULL DEFAULT 1;
 
-UPDATE "virtual_agent" SET "pod_generation" = "generation";
+UPDATE "virtual_agent" SET "pod_generation" = "generation" WHERE "pod_generation" IS DISTINCT FROM "generation";
