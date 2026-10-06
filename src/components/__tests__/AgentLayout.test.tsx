@@ -53,7 +53,8 @@ const LINKED: AgentView = {
     createdAt: "2026-10-05T10:00:00.000Z"
   },
   access: "read",
-  grants: []
+  grants: [],
+  skills: []
 };
 
 function page(overrides: Partial<VirtualAgentPageView> = {}): VirtualAgentPageView {
@@ -78,6 +79,7 @@ const ACTIONS: VirtualAgentActions = {
   resize: ok(),
   ports: { expose: ok(), unexpose: ok() },
   paste: ok(),
+  reconnect: ok(),
   save: ok()
 };
 

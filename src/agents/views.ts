@@ -1,9 +1,10 @@
 import { agentsVisibleTo, grantsHeldBy } from "../access/load.ts";
-import { type AgentAccess, agentAccess, type Grant } from "../access/rules.ts";
+import { type AgentAccess, agentAccess, canSeeAgentSkills, type Grant } from "../access/rules.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import type { Database } from "../store/prisma.ts";
 import { byCodePoint } from "../topics/slug.ts";
 import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
+import { type Skill, storedSkills } from "./skills.ts";
 import { isUuid } from "./store.ts";
 
 /** Agents as the web UI lists and shows them: only those the viewer may see, which `agentsVisibleTo` decides. */
@@ -86,6 +87,8 @@ export interface AgentView {
   agent: AgentDetail;
   access: Exclude<AgentAccess, "none">;
   grants: Grant[];
+  /** Empty unless the viewer may message the agent. */
+  skills: Skill[];
 }
 
 /** The agent and what the viewer may do with it, or `undefined` when there is no such agent or they may not see it. */
@@ -95,19 +98,21 @@ export async function agentView(db: Database, viewerOid: string, id: string): Pr
   }
   const row = await db.agent.findUnique({
     where: { id },
-    select: { ...CARD, ownerOid: true, cwd: true, host: true, createdAt: true }
+    select: { ...CARD, ownerOid: true, cwd: true, host: true, createdAt: true, skills: true }
   });
   if (row === null) {
     return undefined;
   }
   const grants = await grantsHeldBy(db, viewerOid);
-  const access = agentAccess(viewerOid, { id: row.id, ownerOid: row.ownerOid }, grants);
+  const ref = { id: row.id, ownerOid: row.ownerOid };
+  const access = agentAccess(viewerOid, ref, grants);
   if (access === "none") {
     return undefined;
   }
   return {
     agent: { ...toCard(row), cwd: row.cwd, host: row.host, createdAt: row.createdAt.toISOString() },
     access,
-    grants
+    grants,
+    skills: canSeeAgentSkills(viewerOid, ref, grants) ? storedSkills(row.skills) : []
   };
 }

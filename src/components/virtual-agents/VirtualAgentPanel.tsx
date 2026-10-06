@@ -16,6 +16,7 @@ export interface VirtualAgentActions {
   resize: FormAction;
   ports: { expose: FormAction; unexpose: FormAction };
   paste: FormAction;
+  reconnect: FormAction;
   save: FormAction;
 }
 
@@ -31,12 +32,14 @@ function OwnerPanels({ manage, actions, now }: { manage: NonNullable<VirtualAgen
       <PortsPanel agent={agent} actions={actions.ports} />
       <OnboardingChecklist
         virtualAgentId={agent.id}
+        desired={agent.desired}
         needed={detail.needed}
         optional={detail.optional}
         statuses={credentials.available ? credentials.statuses : []}
         logins={detail.logins}
         paste={actions.paste}
         save={actions.save}
+        reconnect={actions.reconnect}
         now={now}
         {...(credentials.available ? {} : { unavailable: credentials.reason })}
       />

@@ -106,3 +106,19 @@ export function CloseIcon() {
     </Icon>
   );
 }
+
+export function PencilIcon() {
+  return (
+    <Icon>
+      <path d="M13.5 3.5a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2L7 16l-3.5 1 1-3.5 9-10ZM12 5l3 3" />
+    </Icon>
+  );
+}
+
+export function ReconnectIcon() {
+  return (
+    <Icon>
+      <path d="M16 10a6 6 0 0 1-10.5 4M4 10a6 6 0 0 1 10.5-4M14.5 2.5V6H11M5.5 17.5V14H9" />
+    </Icon>
+  );
+}

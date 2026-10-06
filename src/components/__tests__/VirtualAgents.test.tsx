@@ -409,11 +409,13 @@ describe("PortsPanel", () => {
 });
 
 describe("the optional Jenkins API token", () => {
-  it("should come after the needed sign-ins with a box to paste it, a link to make one, and not count towards what is stored", async () => {
+  it("should come after the needed sign-ins with a box to paste it, a link to make one, and count towards what is stored when it is not stored yet", async () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "Your Jenkins API token is stored" }));
     render(
       <OnboardingChecklist
         virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
         needed={["github"]}
         optional={["jenkins"]}
         statuses={[stored("github")]}
@@ -426,7 +428,7 @@ describe("the optional Jenkins API token", () => {
 
     const items = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem");
     expect(items.map((item) => item.querySelector("h3")?.textContent)).toEqual(["GitHub", "Jenkins API token"]);
-    expect(screen.getByText("1 of 1 stored")).toBeTruthy();
+    expect(screen.getByText("1 of 2 stored")).toBeTruthy();
     expect(items[1]!.textContent).toContain("Optional");
     expect(within(items[1]!).getByRole("link", { name: "your Jenkins user's Configure page" }).getAttribute("href")).toBe(
       "https://build.hmcts.net/me/configure"
@@ -473,10 +475,12 @@ describe("checklistState", () => {
 });
 
 describe("OnboardingChecklist", () => {
-  it("should show a card for each credential needed, with stored ones ticked", () => {
+  it("should show a card for each credential needed, with stored sign-ins connected and no account label, when one is stored", () => {
     render(
       <OnboardingChecklist
         virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
         needed={["github", "azure"]}
         statuses={[stored("azure", "alice@justice.gov.uk")]}
         logins={[]}
@@ -489,13 +493,25 @@ describe("OnboardingChecklist", () => {
     const items = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem");
     expect(items.map((item) => item.querySelector("h3")?.textContent)).toEqual(["GitHub", "Azure"]);
     expect(items[0]!.textContent).toContain("Waiting for your virtual agent to ask");
-    expect(items[1]!.textContent).toContain("✓ Stored");
-    expect(items[1]!.textContent).toContain("for alice@justice.gov.uk");
+    expect(items[1]!.textContent).toContain("✓ Connected");
+    expect(items[1]!.textContent).not.toContain("alice@justice.gov.uk");
     expect(screen.getByText("1 of 2 stored")).toBeTruthy();
   });
 
   it("should show a device code, its link and how long it lasts when a device-code login is pending", () => {
-    render(<OnboardingChecklist virtualAgentId="va-1" needed={["github"]} statuses={[]} logins={[login()]} paste={ok()} save={ok()} now={NOW} />);
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["github"]}
+        statuses={[]}
+        logins={[login()]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
 
     const link = screen.getByRole("link", { name: "https://github.com/login/device" });
     expect(link.getAttribute("rel")).toContain("noopener");
@@ -508,6 +524,8 @@ describe("OnboardingChecklist", () => {
     render(
       <OnboardingChecklist
         virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
         needed={["github", "azure", "claude"]}
         statuses={[]}
         logins={[login({ kind: "claude", prompt: "paste_code", userCode: null, verificationUri: "https://claude.ai/oauth/authorize?x=1" })]}
@@ -533,6 +551,8 @@ describe("OnboardingChecklist", () => {
     render(
       <OnboardingChecklist
         virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
         needed={["claude"]}
         statuses={[]}
         logins={[login({ kind: "claude", prompt: "paste_code", codeWaiting: true })]}
@@ -548,7 +568,19 @@ describe("OnboardingChecklist", () => {
 
   it("should offer a password box for the Bedrock API key and save it as the owner's credential when it is not stored", async () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "Your Bedrock API key is stored" }));
-    render(<OnboardingChecklist virtualAgentId="va-1" needed={["github", "azure", "bedrock"]} statuses={[]} logins={[]} paste={ok()} save={save} now={NOW} />);
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["github", "azure", "bedrock"]}
+        statuses={[]}
+        logins={[]}
+        paste={ok()}
+        save={save}
+        now={NOW}
+      />
+    );
 
     const item = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem")[2]!;
     expect(item.querySelector("h3")?.textContent).toBe("Bedrock API key");
@@ -565,10 +597,12 @@ describe("OnboardingChecklist", () => {
     expect(within(item).getByRole("status").textContent).toBe("Your Bedrock API key is stored");
   });
 
-  it("should tick a stored Bedrock API key, count it and offer to replace it without showing it when it is stored", () => {
+  it("should tick a stored Bedrock API key, count it and not ask for it again when it is stored", () => {
     render(
       <OnboardingChecklist
         virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
         needed={["github", "azure", "bedrock"]}
         statuses={[stored("bedrock")]}
         logins={[]}
@@ -580,14 +614,223 @@ describe("OnboardingChecklist", () => {
 
     const item = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem")[2]!;
     expect(item.textContent).toContain("✓ Stored");
-    expect(within(item).getByLabelText("Replace your Bedrock API key")).toHaveProperty("value", "");
+    expect(within(item).queryByRole("form")).toBeNull();
+    expect(within(item).queryByRole("textbox")).toBeNull();
+    expect(item.querySelector("input")).toBeNull();
+    expect(within(item).getByRole("button", { name: "Replace your Bedrock API key" }).querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
     expect(screen.getByText("1 of 3 stored")).toBeTruthy();
+  });
+
+  it("should open the box to replace a stored key and close it again when the pencil and then Cancel are pressed", async () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Your Jenkins API token is stored" }));
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={[]}
+        optional={["jenkins"]}
+        statuses={[stored("jenkins")]}
+        logins={[]}
+        paste={ok()}
+        save={save}
+        now={NOW}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Replace your Jenkins API token" }));
+    expect(screen.queryByRole("button", { name: "Replace your Jenkins API token" })).toBeNull();
+    const input = screen.getByLabelText("Replace your Jenkins API token");
+    expect(input).toHaveProperty("type", "password");
+    expect(input).toHaveProperty("value", "");
+    fireEvent.change(input, { target: { value: "11a2b3c4d5e6f708192a3b4c5d" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Save your Jenkins API token" }));
+    });
+    expect((save.mock.calls[0] as unknown as [FormData])[0].get("kind")).toBe("jenkins");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("form")).toBeNull();
+    expect(screen.getByRole("button", { name: "Replace your Jenkins API token" })).toBeTruthy();
+  });
+
+  it("should offer a box to paste a Claude token when it is not stored and no sign-in is waiting", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["claude"]}
+        statuses={[]}
+        logins={[]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.getByText("Not stored")).toBeTruthy();
+    expect(screen.getByLabelText("Paste your Claude token")).toHaveProperty("type", "password");
+  });
+
+  it("should count every card shown, the optional ones included, when some are stored", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["github", "azure", "bedrock"]}
+        optional={["jenkins"]}
+        statuses={[stored("github"), stored("azure"), stored("bedrock")]}
+        logins={[]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.getByText("3 of 4 stored")).toBeTruthy();
+    const jenkins = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem")[3]!;
+    expect(jenkins.textContent).toContain("Optional");
+    expect(within(jenkins).getByLabelText("Paste your Jenkins API token")).toBeTruthy();
+  });
+
+  it("should keep every field in the panel to the panel's width when it is narrow", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["github", "claude", "bedrock"]}
+        optional={["jenkins"]}
+        statuses={[]}
+        logins={[login({ kind: "claude", prompt: "paste_code", userCode: null })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    const fields = Array.from(document.querySelectorAll("input:not([type=hidden])"));
+    expect(fields).toHaveLength(3);
+    for (const field of fields) {
+      expect(field.className).toContain("w-full");
+      expect(field.className).toContain("min-w-0");
+      expect(field.className).not.toMatch(/(^|\s)w-(\d|\[)/);
+      expect(field.closest("label")?.className).toContain("min-w-0");
+      expect(field.closest("form")?.className).toContain("min-w-0");
+    }
+  });
+
+  it.each([
+    ["github", "GitHub"],
+    ["azure", "Azure"]
+  ] as const)("should show a stored %s sign-in as connected with a reconnect button rather than a form when it is stored", (kind, title) => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={[kind]}
+        statuses={[stored(kind, "alice@justice.gov.uk")]}
+        logins={[]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.getByText("✓ Connected")).toBeTruthy();
+    expect(screen.queryByRole("form")).toBeNull();
+    expect(screen.queryByText(/alice@justice\.gov\.uk/)).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: `Reconnect ${title}` })
+        .querySelector("svg")
+        ?.getAttribute("aria-hidden")
+    ).toBe("true");
+  });
+
+  it("should ask before reconnecting, send the agent and kind, and say it restarts when the agent is running", async () => {
+    const reconnect = vi.fn(async () => ({ ok: true as const, confirmation: "pcs-api is restarting to sign in to GitHub again" }));
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={reconnect}
+        needed={["github"]}
+        statuses={[stored("github")]}
+        logins={[]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect GitHub" }));
+    const confirm = screen.getByRole("group", { name: "Confirm reconnecting GitHub" });
+    expect(confirm.textContent).toContain("restart this one");
+    expect(reconnect).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole("button", { name: "Reconnect GitHub" }));
+    });
+
+    const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("kind")]).toEqual(["va-1", "github"]);
+  });
+
+  it("should say a stopped agent signs in when it next starts, and send nothing on Cancel, when the agent is stopped", () => {
+    const reconnect = vi.fn(async () => ({ ok: true as const }));
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="stopped"
+        reconnect={reconnect}
+        needed={["azure"]}
+        statuses={[stored("azure")]}
+        logins={[]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect Azure" }));
+    const confirm = screen.getByRole("group", { name: "Confirm reconnecting Azure" });
+    expect(confirm.textContent).toContain("when it next starts");
+    expect(within(confirm).getByRole("button", { name: "Delete Azure sign-in" })).toBeTruthy();
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("group")).toBeNull();
+    expect(screen.getByRole("button", { name: "Reconnect Azure" })).toBeTruthy();
+    expect(reconnect).not.toHaveBeenCalled();
+  });
+
+  it("should offer no reconnect when the agent is being deleted", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="deleted"
+        reconnect={ok()}
+        needed={["github"]}
+        statuses={[stored("github")]}
+        logins={[]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.getByText("✓ Connected")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("should say the last sign-in failed when it did", () => {
     render(
       <OnboardingChecklist
         virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
         needed={["azure"]}
         statuses={[]}
         logins={[login({ kind: "azure", state: "failed" })]}
@@ -602,7 +845,18 @@ describe("OnboardingChecklist", () => {
 
   it("should say why credentials cannot be stored when the deployment has nowhere to keep them", () => {
     render(
-      <OnboardingChecklist virtualAgentId="va-1" needed={["github"]} statuses={[]} logins={[]} paste={ok()} save={ok()} now={NOW} unavailable="no vault here" />
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["github"]}
+        statuses={[]}
+        logins={[]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+        unavailable="no vault here"
+      />
     );
 
     expect(screen.getByText("no vault here")).toBeTruthy();

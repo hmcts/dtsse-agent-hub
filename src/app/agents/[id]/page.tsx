@@ -7,6 +7,7 @@ import {
   deleteVirtualAgent,
   exposePort,
   pasteLoginCode,
+  reconnectSignIn,
   renameVirtualAgent,
   resizeVirtualAgent,
   startVirtualAgent,
@@ -36,11 +37,12 @@ const VIRTUAL_AGENT_ACTIONS: VirtualAgentActions = {
   resize: resizeVirtualAgent,
   ports: { expose: exposePort, unexpose: unexposePort },
   paste: pasteLoginCode,
+  reconnect: reconnectSignIn,
   save: saveCredential
 };
 
 async function AgentConversation({ activity, view }: { activity: Activity; view: AgentView }) {
-  const { agent, access } = view;
+  const { agent, access, skills } = view;
   return (
     <Conversation
       agentId={agent.id}
@@ -49,6 +51,7 @@ async function AgentConversation({ activity, view }: { activity: Activity; view:
       status={agent.status}
       access={access}
       initial={(await activity).conversation}
+      skills={skills}
       send={sendDirect}
     />
   );
