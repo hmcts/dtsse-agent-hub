@@ -9,6 +9,7 @@ export function DeleteChannel({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   return (
     <form
+      method="post"
       className="flex items-center"
       onSubmit={async (event) => {
         event.preventDefault();

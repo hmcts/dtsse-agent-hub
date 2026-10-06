@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { exempt } from "@/auth/guard";
+import { carriesSecret, exempt } from "@/auth/guard";
 import { readSession, SESSION_COOKIE } from "@/auth/session";
 import { authRequired, sessionSecret } from "@/auth/settings";
 
@@ -11,6 +11,10 @@ import { authRequired, sessionSecret } from "@/auth/settings";
  * proxy would take `/health` down too. The login route calls it, where the error is visible without costing probes.
  */
 export async function proxy(request: NextRequest): Promise<NextResponse> {
+  // Ahead of the sign-in check, which would otherwise copy the query into the login's `redirect=`.
+  if (carriesSecret(request.method, request.nextUrl.pathname, request.nextUrl.searchParams)) {
+    return NextResponse.redirect(new URL(request.nextUrl.pathname, request.nextUrl.origin), 303);
+  }
   if (!authRequired() || exempt(request.nextUrl.pathname)) {
     return NextResponse.next();
   }
