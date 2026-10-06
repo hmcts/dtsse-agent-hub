@@ -18,7 +18,8 @@ import type { LoginView } from "@/virtual-agents/logins";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/" }));
+const push = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push }), usePathname: () => "/" }));
 
 const hubHandlers = new Map<string, (data: unknown) => void>();
 vi.mock("@/components/live/HubStream", () => ({
@@ -29,6 +30,7 @@ vi.mock("@/components/live/HubStream", () => ({
 afterEach(() => {
   cleanup();
   refresh.mockReset();
+  push.mockReset();
   hubHandlers.clear();
   vi.useRealTimers();
 });
@@ -58,6 +60,10 @@ function card(overrides: Partial<VirtualAgentCard> = {}): VirtualAgentCard {
 
 function ok() {
   return vi.fn(async () => ({ ok: true as const }));
+}
+
+function created() {
+  return vi.fn(async () => ({ ok: true as const, id: "0f8a6a1e-0000-4000-8000-000000000009", confirmation: "created" }));
 }
 
 describe("labels", () => {
@@ -105,10 +111,10 @@ describe("labels", () => {
 
 describe("VirtualAgentsView", () => {
   it("should list the viewer's agents with their status, idle time and a link to each", () => {
-    render(<VirtualAgentsView agents={[card()]} route="bedrock" create={ok()} now={NOW} />);
+    render(<VirtualAgentsView agents={[card()]} route="bedrock" create={created()} now={NOW} />);
 
     const list = screen.getByRole("list", { name: "Your virtual agents" });
-    expect(within(list).getByRole("link", { name: "pcs-api" }).getAttribute("href")).toBe("/virtual/0f8a6a1e-0000-4000-8000-000000000001");
+    expect(within(list).getByRole("link", { name: "pcs-api" }).getAttribute("href")).toBe("/agents/0f8a6a1e-0000-4000-8000-000000000001");
     expect(list.textContent).toContain("Running");
     expect(list.textContent).toContain("idle for 1 h 5 min");
   });
@@ -126,7 +132,7 @@ describe("VirtualAgentsView", () => {
           })
         ]}
         route="bedrock"
-        create={ok()}
+        create={created()}
         now={NOW}
       />
     );
@@ -137,7 +143,7 @@ describe("VirtualAgentsView", () => {
   });
 
   it("should warn that a virtual agent acts with the viewer's access and name the model route when it offers to create one", () => {
-    render(<VirtualAgentsView agents={[]} route="own-licence" create={ok()} now={NOW} />);
+    render(<VirtualAgentsView agents={[]} route="own-licence" create={created()} now={NOW} />);
 
     expect(screen.getByText("A virtual agent acts with your GitHub and Azure access.")).toBeTruthy();
     expect(screen.getByText(/your own Claude licence/)).toBeTruthy();
@@ -146,13 +152,13 @@ describe("VirtualAgentsView", () => {
   });
 
   it("should name Amazon Bedrock and the viewer's Bedrock API key when the viewer is on the Bedrock route", () => {
-    render(<VirtualAgentsView agents={[]} route="bedrock" create={ok()} now={NOW} />);
+    render(<VirtualAgentsView agents={[]} route="bedrock" create={created()} now={NOW} />);
 
     expect(screen.getByText("Model: Amazon Bedrock, with your Bedrock API key")).toBeTruthy();
   });
 
-  it("should send the name to the create action when the form is submitted", async () => {
-    const create = vi.fn(async () => ({ ok: true as const, confirmation: "pcs-api is starting" }));
+  it("should send the name to the create action and open the new agent's page when the form is submitted", async () => {
+    const create = vi.fn(async () => ({ ok: true as const, id: "0f8a6a1e-0000-4000-8000-000000000009", confirmation: "pcs-api is starting" }));
     render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} />);
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "pcs-api" } });
@@ -161,11 +167,12 @@ describe("VirtualAgentsView", () => {
     });
 
     expect((create.mock.calls[0] as unknown as [FormData])[0].get("name")).toBe("pcs-api");
-    expect(screen.getByRole("status").textContent).toBe("pcs-api is starting");
+    expect(push).toHaveBeenCalledWith("/agents/0f8a6a1e-0000-4000-8000-000000000009");
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("should offer no create form and say why when the viewer is at a limit", () => {
-    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b" })]} route="bedrock" create={ok()} now={NOW} />);
+    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b" })]} route="bedrock" create={created()} now={NOW} />);
 
     expect(screen.queryByRole("form", { name: "Create a virtual agent" })).toBeNull();
     expect(screen.getByText(/2 virtual agents running/)).toBeTruthy();
@@ -305,7 +312,7 @@ describe("RenameVirtualAgent", () => {
 describe("running agent detail", () => {
   it("should show what a running agent's pod last said, such as its background clone", () => {
     const detail = "Claude is ready; cloning repositories (12/241)";
-    render(<VirtualAgentsView agents={[card({ statusDetail: detail })]} route="bedrock" create={ok()} now={NOW} />);
+    render(<VirtualAgentsView agents={[card({ statusDetail: detail })]} route="bedrock" create={created()} now={NOW} />);
     render(<LifecyclePanel agent={card({ statusDetail: detail })} actions={{ start: ok(), stop: ok(), remove: ok() }} />);
 
     expect(screen.getAllByText(detail)).toHaveLength(2);
@@ -324,7 +331,7 @@ describe("running agent detail", () => {
 
 describe("the size choice", () => {
   it("should offer every size on the create form, small first, and send the one chosen", async () => {
-    const create = vi.fn(async () => ({ ok: true as const, confirmation: "big is starting" }));
+    const create = vi.fn(async () => ({ ok: true as const, id: "0f8a6a1e-0000-4000-8000-000000000009", confirmation: "big is starting" }));
     render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} />);
 
     const size = screen.getByLabelText("Size") as HTMLSelectElement;

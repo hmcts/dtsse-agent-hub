@@ -1,4 +1,5 @@
 import { gunzipSync } from "node:zlib";
+import { checkClaudeMd } from "./claude-md.ts";
 import type { CredentialKind } from "./names.ts";
 
 /** A Key Vault secret value is at most 25 KB; this leaves room for the encoding overhead. */
@@ -44,7 +45,8 @@ const LABELS: Record<CredentialKind, string> = {
   azure: "an Azure token cache",
   claude: "a Claude token",
   bedrock: "an Amazon Bedrock API key",
-  jenkins: "a Jenkins API token"
+  jenkins: "a Jenkins API token",
+  claude_md: "your CLAUDE.md"
 };
 
 /** The username of the first account an MSAL token cache holds, as the `az` login it came from shows it. */
@@ -122,10 +124,14 @@ export function checkAzureCacheOwner(raw: unknown, ownerOid: string, tenantId: s
 }
 
 /**
- * Whether `raw` is a credential of `kind`, trimmed. The value never appears in a refusal, which is shown to the
- * person and may be logged.
+ * Whether `raw` is a credential of `kind`, trimmed, except a CLAUDE.md, which is text kept as written. The value
+ * never appears in a refusal, which is shown to the person and may be logged.
  */
 export function checkCredential(kind: CredentialKind, raw: unknown): CheckedCredential {
+  if (kind === "claude_md") {
+    const checked = checkClaudeMd(raw);
+    return checked.ok ? { ok: true, value: checked.value, accountLabel: null } : checked;
+  }
   const value = typeof raw === "string" ? raw.trim() : "";
   if (value === "") {
     return { ok: false, error: `paste ${LABELS[kind]}` };

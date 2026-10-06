@@ -241,3 +241,17 @@ describe("checkCredential for jenkins", () => {
     expect(checkCredential("jenkins", "  ")).toEqual({ ok: false, error: "paste a Jenkins API token" });
   });
 });
+
+describe("checkCredential for claude_md", () => {
+  it("should keep the text as written, untrimmed and unlabelled, when it is a valid CLAUDE.md", () => {
+    expect(checkCredential("claude_md", "  # Notes\n\nBe brief.\n")).toEqual({ ok: true, value: "  # Notes\n\nBe brief.\n", accountLabel: null });
+  });
+
+  it("should refuse it with the CLAUDE.md byte limit's reason when it is over that", () => {
+    expect(checkCredential("claude_md", "é".repeat(MAX_CREDENTIAL_LENGTH / 2 + 1))).toMatchObject({ ok: false, error: expect.stringContaining("bytes") });
+  });
+
+  it("should refuse it with the CLAUDE.md check's reason when it holds a control character", () => {
+    expect(checkCredential("claude_md", "a\u0000")).toEqual({ ok: false, error: "your CLAUDE.md can only hold printable text, tabs and new lines" });
+  });
+});

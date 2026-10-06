@@ -16,7 +16,8 @@ const TITLES: Record<CredentialKind, string> = {
   azure: "Azure",
   claude: "Claude",
   bedrock: "Bedrock API key",
-  jenkins: "Jenkins API token"
+  jenkins: "Jenkins API token",
+  claude_md: "CLAUDE.md"
 };
 
 /** The kinds the owner can paste here; GitHub and Azure come only from the virtual agent's own sign-in. */

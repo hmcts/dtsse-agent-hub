@@ -18,7 +18,8 @@ const TITLES: Record<CredentialKind, string> = {
   azure: "Azure sign-in",
   claude: "Claude token",
   bedrock: "Bedrock API key",
-  jenkins: "Jenkins API token"
+  jenkins: "Jenkins API token",
+  claude_md: "CLAUDE.md"
 };
 
 const VIA: Record<CredentialVia, string> = {

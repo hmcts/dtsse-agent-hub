@@ -1,11 +1,13 @@
 import "server-only";
 import { grantsHeldBy } from "../access/load.ts";
-import { canReadMessage } from "../access/rules.ts";
+import { canOwnerReadCredential, canReadMessage } from "../access/rules.ts";
 import { grantsGiven, grantsReceived } from "../access/views.ts";
+import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
-import { type CredentialStatus, credentialStatus, ownerRefusal } from "../credentials/store.ts";
+import { DEFAULT_CLAUDE_MD } from "../credentials/claude-md.ts";
+import { type CredentialStatus, credentialStatus, ownerRefusal, readCredential } from "../credentials/store.ts";
 import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
 import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
@@ -13,11 +15,18 @@ import { parseMessageRef } from "../messages/permalink.ts";
 import { prisma } from "../store/prisma.ts";
 import { hiddenTopicPrefix } from "../topics/slug.ts";
 import { listTopics, mostActiveTopics } from "../topics/store.ts";
-import type { ConversationPage } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
-import { type VirtualAgentCard, type VirtualAgentDetail, virtualAgentCards, virtualAgentDetail } from "../virtual-agents/views.ts";
+import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
+import {
+  type VirtualAgentCard,
+  type VirtualAgentDetail,
+  type VirtualAgentSummary,
+  virtualAgentCards,
+  virtualAgentDetail,
+  virtualAgentSummary
+} from "../virtual-agents/views.ts";
 
 /**
  * The reads the pages make, in one place. `server-only` so a client component importing it fails the build rather
@@ -53,12 +62,7 @@ export async function channel(viewer: Identity, id: string) {
   return await findChannel(prisma, viewer.oid, id);
 }
 
-/** The agent and the viewer's access to it, or `undefined` for the not-found the page answers. */
-export async function agentPage(viewer: Identity, id: string): Promise<AgentView | undefined> {
-  return await agentView(prisma, viewer.oid, id);
-}
-
-/** The rest of an agent's page, which it streams in once `agentPage` has decided the viewer may see the agent. */
+/** The rest of an agent's page, which it streams in once `agentRoute` has decided the viewer may see the agent. */
 export async function agentActivity(viewer: Identity, view: AgentView) {
   const agent = { id: view.agent.id, ownerOid: view.agent.owner.oid };
   const [conversation, posts] = await Promise.all([agentConversation(prisma, viewer.oid, agent, view.grants), agentPosts(prisma, view.agent.id, 20)]);
@@ -78,7 +82,10 @@ export type CredentialSettings =
   | { available: true; modelRoute: ModelRoute; statuses: CredentialStatus[] }
   | { available: false; modelRoute: ModelRoute; reason: string };
 
-/** What the viewer has stored, as metadata: nothing here, or anywhere the pages read, carries a credential's value. */
+/**
+ * What the viewer has stored, as metadata: nothing here carries a credential's value. Their CLAUDE.md is not among
+ * them; `claudeMdSettings` reads it for its own section.
+ */
 export async function credentialSettings(viewer: Viewer): Promise<CredentialSettings> {
   const backend = credentialBackend(prisma);
   if (!backend.available) {
@@ -88,7 +95,32 @@ export async function credentialSettings(viewer: Viewer): Promise<CredentialSett
   if (refusal !== undefined) {
     return { available: false, modelRoute: viewer.modelRoute, reason: refusal.message };
   }
-  return { available: true, modelRoute: viewer.modelRoute, statuses: await credentialStatus(prisma, viewer.oid) };
+  const statuses = await credentialStatus(prisma, viewer.oid);
+  return { available: true, modelRoute: viewer.modelRoute, statuses: statuses.filter((status) => status.kind !== "claude_md") };
+}
+
+export type ClaudeMdSettings = { available: true; stored: boolean; text: string; updatedAt: string | null } | { available: false; reason: string };
+
+/** The viewer's own CLAUDE.md for editing, which `canOwnerReadCredential` lets them read back, or the default. */
+export async function claudeMdSettings(viewer: Identity): Promise<ClaudeMdSettings> {
+  const backend = credentialBackend(prisma);
+  if (!backend.available) {
+    return { available: false, reason: backend.reason };
+  }
+  const refusal = ownerRefusal(backend.store, viewer.oid);
+  if (refusal !== undefined || !canOwnerReadCredential("claude_md")) {
+    return { available: false, reason: refusal?.message ?? "your CLAUDE.md cannot be shown" };
+  }
+  const [stored, status] = await Promise.all([
+    readCredential(prisma, backend.store, viewer.oid, "claude_md"),
+    prisma.credential.findUnique({ where: { ownerOid_kind: { ownerOid: viewer.oid, kind: "claude_md" } }, select: { updatedAt: true } })
+  ]);
+  return {
+    available: true,
+    stored: stored !== undefined,
+    text: stored ?? DEFAULT_CLAUDE_MD,
+    updatedAt: stored === undefined ? null : (status?.updatedAt.toISOString() ?? null)
+  };
 }
 
 export interface MessagePageView {
@@ -133,23 +165,45 @@ export async function virtualAgentsPage(viewer: Viewer): Promise<VirtualAgentsPa
 }
 
 export interface VirtualAgentPageView {
-  detail: VirtualAgentDetail;
-  credentials: CredentialSettings;
-  /** The agent its current session registered, with its conversation, once there is one. */
-  linked: { view: AgentView; conversation: ConversationPage } | null;
+  summary: VirtualAgentSummary;
+  /** Its lifecycle, settings and sign-ins, for its owner; `null` for anyone else. */
+  manage: { detail: VirtualAgentDetail; credentials: CredentialSettings } | null;
+  /** The agent its current session registered, once there is one. */
+  linked: AgentView | null;
 }
 
-/** One of the viewer's own virtual agents, or `undefined` for the not-found the page answers. */
+/** A virtual agent the viewer may see, or `undefined` for the not-found the page answers. */
 export async function virtualAgentPage(viewer: Viewer, id: string): Promise<VirtualAgentPageView | undefined> {
-  const detail = await virtualAgentDetail(prisma, viewer.oid, id);
-  if (detail === undefined) {
+  const summary = await virtualAgentSummary(prisma, viewer.oid, id);
+  if (summary === undefined) {
     return undefined;
   }
-  const agentId = detail.card.agentId;
-  const [credentials, view] = await Promise.all([credentialSettings(viewer), agentId === null ? undefined : agentView(prisma, viewer.oid, agentId)]);
-  if (view === undefined) {
-    return { detail, credentials, linked: null };
+  const [detail, linked] = await Promise.all([
+    virtualAgentDetail(prisma, viewer.oid, id),
+    summary.agentId === null ? undefined : agentView(prisma, viewer.oid, summary.agentId)
+  ]);
+  const manage = detail === undefined ? null : { detail, credentials: await credentialSettings(viewer) };
+  return { summary, manage, linked: linked ?? null };
+}
+
+export type AgentRoute = { variant: "virtual"; page: VirtualAgentPageView } | { variant: "local"; view: AgentView } | { variant: "moved"; to: string };
+
+/**
+ * What `/agents/{id}` shows. A virtual agent's id is its page. An agent one of its sessions registered moves there,
+ * since a virtual agent registers a new agent on every `/clear` and its page always shows the current one. Any other
+ * agent is shown as itself. `undefined` is the not-found for an id that is none of these, or that the viewer may not
+ * see.
+ */
+export async function agentRoute(viewer: Viewer, id: string): Promise<AgentRoute | undefined> {
+  if (virtualAgentsEnabled()) {
+    const page = await virtualAgentPage(viewer, id);
+    if (page !== undefined) {
+      return { variant: "virtual", page };
+    }
   }
-  const conversation = await agentConversation(prisma, viewer.oid, { id: view.agent.id, ownerOid: view.agent.owner.oid }, view.grants);
-  return { detail, credentials, linked: { view, conversation } };
+  const view = await agentView(prisma, viewer.oid, id);
+  if (view === undefined) {
+    return undefined;
+  }
+  return view.agent.virtualAgentId === null ? { variant: "local", view } : { variant: "moved", to: agentPath(view.agent) };
 }

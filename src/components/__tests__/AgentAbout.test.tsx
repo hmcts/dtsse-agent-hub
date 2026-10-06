@@ -19,6 +19,7 @@ const AGENT: AgentDetail = {
   branch: null,
   lastHeartbeatAt: "2026-09-29T09:00:00.000Z",
   owner: { oid: "owner-oid", tid: DEV_TENANT, name: "Bob", email: null },
+  virtualAgentId: null,
   cwd: "/work/pcs-api",
   host: null,
   createdAt: "2026-09-28T09:00:00.000Z"

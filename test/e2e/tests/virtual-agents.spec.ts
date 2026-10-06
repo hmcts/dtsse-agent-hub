@@ -15,11 +15,14 @@ test.describe("virtual agents @regression", () => {
       const name = unique("e2e").toLowerCase();
       await page.getByLabel("Name").fill(name);
       await page.getByRole("button", { name: "Create" }).click();
-      await expect(page.getByRole("status").filter({ hasText: `${name} is starting` })).toBeVisible();
-
-      await page.getByRole("link", { name }).click();
-      await page.waitForURL(/\/virtual\/[0-9a-f-]{36}$/);
+      await page.waitForURL(/\/agents\/[0-9a-f-]{36}$/);
       const id = new URL(page.url()).pathname.split("/").at(-1)!;
+      await expect(page.getByText("Starting…")).toBeVisible();
+
+      await page.goto("/virtual");
+      expect(await page.getByRole("link", { name }).getAttribute("href")).toBe(`/agents/${id}`);
+      await page.goto(`/virtual/${id}`);
+      await page.waitForURL(new RegExp(`/agents/${id}$`));
       await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
       await expect(page.getByRole("list", { name: "Sign-ins" }).getByRole("heading", { name: "GitHub" })).toBeVisible();
 
@@ -69,8 +72,7 @@ test.describe("virtual agents @regression", () => {
       const name = unique("mine").toLowerCase();
       await page.getByLabel("Name").fill(name);
       await page.getByRole("button", { name: "Create" }).click();
-      await page.getByRole("link", { name }).click();
-      await page.waitForURL(/\/virtual\/[0-9a-f-]{36}$/);
+      await page.waitForURL(/\/agents\/[0-9a-f-]{36}$/);
       const path = new URL(page.url()).pathname;
 
       const theirs = await other.newPage();

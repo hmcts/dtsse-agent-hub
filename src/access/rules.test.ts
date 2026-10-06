@@ -17,6 +17,8 @@ import {
   canUseCredentialRoutes,
   canViewAgent,
   canViewTranscript,
+  canViewVirtualAgent,
+  canVirtualAgentStoreCredential,
   type Grant,
   grantLevel,
   type MessageRef,
@@ -279,6 +281,17 @@ describe("canManageVirtualAgent", () => {
   });
 });
 
+describe("canViewVirtualAgent", () => {
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [true, "read grantee"],
+    [true, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s views the owner's virtual agent", (expected, role) => {
+    expect(canViewVirtualAgent(ROLES[role], { id: "va-1", ownerOid: OWNER }, GRANTS)).toBe(expected);
+  });
+});
+
 describe("canLaunchTokenActForAgent", () => {
   it("should allow a launch token to act when its own virtual agent registered the agent", () => {
     expect(canLaunchTokenActForAgent("va-1", { virtualAgentId: "va-1" })).toBe(true);
@@ -322,8 +335,22 @@ describe("canOwnerReadCredential", () => {
     expect(canOwnerReadCredential("bedrock")).toBe(true);
   });
 
-  it.each(["github", "azure", "claude", "Bedrock", ""])("should keep %j write-only when it is any other kind", (kind) => {
+  it("should let the owner read their CLAUDE.md back when the page shows it for editing", () => {
+    expect(canOwnerReadCredential("claude_md")).toBe(true);
+  });
+
+  it.each(["github", "azure", "claude", "jenkins", "Bedrock", "claude-md", ""])("should keep %j write-only when it is any other kind", (kind) => {
     expect(canOwnerReadCredential(kind)).toBe(false);
+  });
+});
+
+describe("canVirtualAgentStoreCredential", () => {
+  it.each(["github", "azure", "claude", "bedrock", "jenkins"])("should let a pod store its owner's %s when it is a credential the pod signs in for", (kind) => {
+    expect(canVirtualAgentStoreCredential(kind)).toBe(true);
+  });
+
+  it("should refuse a pod when it would change its owner's CLAUDE.md", () => {
+    expect(canVirtualAgentStoreCredential("claude_md")).toBe(false);
   });
 });
 
