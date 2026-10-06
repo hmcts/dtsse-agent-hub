@@ -32,12 +32,12 @@ export const GET = virtualRoute<{ virtualAgentId: string; kind: string }>(async 
 /**
  * An Azure token cache must be signed in as the owner alone. One that is not is refused with 409, never stored, and
  * fails the agent, as a `complete` naming another account does; one that does not decode is left to the ordinary
- * value check's 400. A CLAUDE.md is refused with 403 (`canVirtualAgentStoreCredential`).
+ * value check's 400. A CLAUDE.md or a git identity is refused with 403 (`canVirtualAgentStoreCredential`).
  */
 export const PUT = virtualRoute<{ virtualAgentId: string; kind: string }>(async ({ virtualAgent, request, params }) => {
   const kind = pathKind(params.kind);
   if (!canVirtualAgentStoreCredential(kind)) {
-    throw new HttpError(403, "only its owner can change their CLAUDE.md, on agent-hub's virtual agents page");
+    throw new HttpError(403, `only its owner can change their ${kind === "claude_md" ? "CLAUDE.md" : "git identity"}, on agent-hub's virtual agents page`);
   }
   const { value } = parse(credentialValueBody, await readJson(request));
   const owner = virtualAgent.ownerOid;

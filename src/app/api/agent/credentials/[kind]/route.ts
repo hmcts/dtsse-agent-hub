@@ -36,8 +36,9 @@ function available(backend: CredentialBackend) {
 
 /**
  * A person reading back their own stored credential, which only `canOwnerReadCredential` allows: their Bedrock API
- * key, for the workspace launcher on their laptop, and their CLAUDE.md. Every other kind is write-only and answers
- * 405. Nothing stored answers 404, a CLAUDE.md included: the default is what a pod gets, not what this person wrote.
+ * key, for the workspace launcher on their laptop, their CLAUDE.md and their git identity. Every other kind is
+ * write-only and answers 405. Nothing stored answers 404, a CLAUDE.md included: the default is what a pod gets, not
+ * what this person wrote.
  */
 export const GET = agentRoute<{ kind: string }>(async ({ caller, params }) => {
   personal(caller);

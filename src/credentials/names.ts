@@ -2,10 +2,11 @@ import { DEV_OID_PREFIX } from "../agent-auth/dev.ts";
 
 /**
  * What a person's virtual agent needs on their behalf: a GitHub token, an Azure CLI token cache, and the key to its
- * model, a Claude token or an Amazon Bedrock API key; if they want its Jenkins tools, a Jenkins API token; and their
- * own CLAUDE.md, which is not a sign-in but is kept here because it may hold private context.
+ * model, a Claude token or an Amazon Bedrock API key; if they want its Jenkins tools, a Jenkins API token; their
+ * own CLAUDE.md, which is not a sign-in but is kept here because it may hold private context; and, if they want to
+ * override the default, the git identity their agents commit as.
  */
-export const CREDENTIAL_KINDS = ["github", "azure", "claude", "bedrock", "jenkins", "claude_md"] as const;
+export const CREDENTIAL_KINDS = ["github", "azure", "claude", "bedrock", "jenkins", "claude_md", "git_identity"] as const;
 
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 

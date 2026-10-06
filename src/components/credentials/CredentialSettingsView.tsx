@@ -19,7 +19,8 @@ const TITLES: Record<CredentialKind, string> = {
   claude: "Claude token",
   bedrock: "Bedrock API key",
   jenkins: "Jenkins API token",
-  claude_md: "CLAUDE.md"
+  claude_md: "CLAUDE.md",
+  git_identity: "Git identity"
 };
 
 const VIA: Record<CredentialVia, string> = {
@@ -128,8 +129,8 @@ export function CredentialSettingsView({ settings, actions }: { settings: Creden
 
 export const CREDENTIALS_ANCHOR = "credentials";
 
-/** The credentials as a part of the virtual agents page, which `/settings/credentials` sends people to. */
-export function CredentialsSection({ settings, actions }: { settings: CredentialSettings; actions: CredentialActions }) {
+/** The credentials as a part of the virtual agents page, which `/settings/credentials` sends people to, with `children` after them. */
+export function CredentialsSection({ settings, actions, children }: { settings: CredentialSettings; actions: CredentialActions; children?: React.ReactNode }) {
   return (
     <section id={CREDENTIALS_ANCHOR} aria-labelledby="credentials-heading" className="scroll-mt-5 space-y-6">
       <div>
@@ -139,6 +140,7 @@ export function CredentialsSection({ settings, actions }: { settings: Credential
         <p className="text-[13px] text-hub-muted">What your virtual agents use on your behalf</p>
       </div>
       <CredentialSettingsView settings={settings} actions={actions} />
+      {children}
     </section>
   );
 }
