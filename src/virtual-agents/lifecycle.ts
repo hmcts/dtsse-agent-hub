@@ -51,6 +51,8 @@ export const POD_TRANSITIONS: Readonly<Record<VirtualAgentStatus, readonly PodPh
 export interface Current {
   status: VirtualAgentStatus;
   desired: VirtualAgentDesired;
+  /** How many claims in a row the orchestrator could not apply; none when absent. */
+  applyFailures?: number;
 }
 
 export interface PodReport {
@@ -107,14 +109,22 @@ function fromPod(current: Current, report: PodReport): Outcome {
   return { status: report.phase, detail: report.detail ?? null };
 }
 
+/**
+ * An observation follows a successful apply, so it clears the orchestrator's apply error from the detail, and an
+ * agent failed for that error starts again.
+ */
 function fromOrchestrator(current: Current, observation: Observation): Outcome {
+  const applyFailed = (current.applyFailures ?? 0) > 0;
   switch (current.desired) {
     case "running": {
       const reason = observation.reason ?? "";
       if (FAILING_REASONS.has(reason) || observation.podPhase === "Failed") {
         return { status: "failed", detail: `the pod is not starting: ${reason || "its phase is Failed"}` };
       }
-      return NOT_YET_STARTED.includes(current.status) ? { status: "provisioning", detail: null } : { status: current.status };
+      if (NOT_YET_STARTED.includes(current.status) || (applyFailed && current.status === "failed")) {
+        return { status: "provisioning", detail: null };
+      }
+      return applyFailed ? { status: current.status, detail: null } : { status: current.status };
     }
     case "stopped":
       return observation.replicasReady === 0 && !observation.podPhase ? { status: "stopped", detail: null } : { status: "stopping", detail: null };
@@ -123,6 +133,22 @@ function fromOrchestrator(current: Current, observation: Observation): Outcome {
         ? { remove: true }
         : { status: "stopping", detail: null };
   }
+}
+
+/**
+ * How many claims in a row the orchestrator may fail to apply, about ten minutes at one claim per two-minute claim
+ * timeout, before the agent is failed rather than left looking as if it is on its way.
+ */
+export const APPLY_FAILURES_BEFORE_FAILED = 5;
+
+/** The status and detail once the orchestrator reports that it could not apply the agent's latest generation. */
+export function afterApplyError(current: Current, error: string): { status: VirtualAgentStatus; detail: string; applyFailures: number } {
+  const applyFailures = (current.applyFailures ?? 0) + 1;
+  return {
+    status: applyFailures >= APPLY_FAILURES_BEFORE_FAILED ? "failed" : current.status,
+    detail: `the orchestrator couldn't apply this agent: ${error}`,
+    applyFailures
+  };
 }
 
 export function nextStatus(current: Current, report: PodReport | Observation): Outcome {
