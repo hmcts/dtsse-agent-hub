@@ -68,8 +68,10 @@ export function ActionForm<T extends object & { confirmation?: string }>({
     }
   }
 
+  // A submit React does not intercept (before hydration, or when the page's script failed to load) is a native one,
+  // and a native GET would put every field, a pasted credential included, in the URL.
   return (
-    <form onSubmit={submit} aria-label={label} aria-busy={pending} className={className}>
+    <form method="post" onSubmit={submit} aria-label={label} aria-busy={pending} className={className}>
       {children}
       {signedOut ? (
         <p role="status" className="text-xs text-red-300">

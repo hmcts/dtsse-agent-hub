@@ -14,6 +14,9 @@ const nextConfig = {
   // holds `/api/agent/*/stream` events and pings back from the client.
   compress: false,
   poweredByHeader: false,
+  // `next dev` prints every request's URL, query included; `next start` prints none. The proxy redirects these away,
+  // but only after the original URL has been printed. Matches the names `carriesSecret` in src/auth/guard.ts refuses.
+  logging: { incomingRequests: { ignore: [/[?&](value|token|code|password|secret)=/i] } },
   // The sidebar's agent list is pinned to the bottom left, where the dev indicator sits by default.
   devIndicators: { position: "bottom-right" },
   experimental: {
