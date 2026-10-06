@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { hashLaunchToken, isWellFormedLaunchToken, LAUNCH_TOKEN_PREFIX, launchTokenMatches, looksLikeLaunchToken, mintLaunchToken } from "./launch-token.ts";
+import {
+  hashLaunchToken,
+  isWellFormedLaunchToken,
+  LAUNCH_TOKEN_PREFIX,
+  launchTokenMatches,
+  looksLikeLaunchToken,
+  mintLaunchToken,
+  withoutLaunchTokens
+} from "./launch-token.ts";
 
 describe("mintLaunchToken", () => {
   it("should mint ahv_ and 32 random bytes as base64url when called", () => {
@@ -53,5 +61,17 @@ describe("looksLikeLaunchToken and isWellFormedLaunchToken", () => {
     expect(isWellFormedLaunchToken(mintLaunchToken().token)).toBe(true);
     expect(isWellFormedLaunchToken("ahv_short")).toBe(false);
     expect(isWellFormedLaunchToken(`ahv_${"a".repeat(42)}+`)).toBe(false);
+  });
+});
+
+describe("withoutLaunchTokens", () => {
+  it("should replace every launch token when the text quotes some", () => {
+    const { token } = mintLaunchToken();
+
+    expect(withoutLaunchTokens(`env AGENT_HUB_TOKEN=${token} and ${token}`)).toBe("env AGENT_HUB_TOKEN=ahv_[redacted] and ahv_[redacted]");
+  });
+
+  it("should leave text alone when it quotes none", () => {
+    expect(withoutLaunchTokens("GET services/va-1: 403 forbidden")).toBe("GET services/va-1: 403 forbidden");
   });
 });

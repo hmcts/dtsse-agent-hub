@@ -73,6 +73,21 @@ describe("labels", () => {
   });
 
   it.each([
+    ["running", "Stopping"],
+    ["requested", "Stopping"],
+    ["awaiting_login", "Stopping"],
+    ["stopping", "Stopping"],
+    ["stopped", "Stopped"],
+    ["failed", "Failed"]
+  ] as const)("should read a %s agent as %s when it is meant to be stopped", (status, label) => {
+    expect(statusLabel(status, "stopped")).toBe(label);
+  });
+
+  it("should read a just-started agent as requested when the orchestrator has yet to apply it", () => {
+    expect(statusLabel("requested", "running")).toBe("Requested");
+  });
+
+  it.each([
     ["user", "You stopped it"],
     ["idle", "Stopped after being idle"],
     ["evening", "Stopped for the evening"],
@@ -301,6 +316,16 @@ describe("running agent detail", () => {
     render(<LifecyclePanel agent={card({ statusDetail: detail })} actions={{ start: ok(), stop: ok(), remove: ok() }} />);
 
     expect(screen.getAllByText(detail)).toHaveLength(2);
+  });
+
+  it.each([
+    ["stopping", "stopped"],
+    ["failed", "running"]
+  ] as const)("should show the orchestrator's apply error when the agent is %s", (status, desired) => {
+    const detail = "the orchestrator couldn't apply this agent: GET services/va-0f8a6a1e: 403 forbidden";
+    render(<LifecyclePanel agent={card({ status, desired, statusDetail: detail })} actions={{ start: ok(), stop: ok(), remove: ok() }} />);
+
+    expect(screen.getByText(detail)).toBeTruthy();
   });
 });
 

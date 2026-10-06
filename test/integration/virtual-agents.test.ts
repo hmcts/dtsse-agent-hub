@@ -8,6 +8,7 @@ import * as messageRoute from "../../src/app/api/agent/messages/[id]/route.ts";
 import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as liveRoute from "../../src/app/api/orchestrator/live/route.ts";
+import * as applyFailedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/apply-failed/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
 import * as credentialRoute from "../../src/app/api/virtual/[virtualAgentId]/credentials/[kind]/route.ts";
 import * as codeRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/code/route.ts";
@@ -20,6 +21,7 @@ import { putCredential, readCredential, type SecretStore } from "../../src/crede
 import { directAsAgent, directAsPerson, postAs } from "../../src/messages/send.ts";
 import { queuedDeliveries, queuedDelivery } from "../../src/messages/store.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
+import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
 import { MAX_PER_USER, MAX_RUNNING_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { storePastedCode } from "../../src/virtual-agents/logins.ts";
 import {
@@ -29,7 +31,9 @@ import {
   createVirtualAgent,
   findVirtualAgent,
   observeVirtualAgent,
+  recordApplyError,
   renameVirtualAgent,
+  reportStatus,
   setDesired,
   setExposedPort,
   setVirtualAgentSize,
@@ -1949,5 +1953,177 @@ describe("signing in again", () => {
     actAs("alice");
 
     expect(await actions.reconnectSignIn(form({ id: "x", kind: "github" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+  });
+});
+
+describe("the status across start and stop", () => {
+  const NOW = new Date("2026-10-27T08:30:00.000Z");
+  const YESTERDAY = new Date(NOW.getTime() - 24 * 60 * 60_000);
+  const SWEEP = { idleMinutes: 120, eveningStop: { hour: 19, minute: 0 } };
+
+  /** An agent whose last pod said it was running yesterday, and whose session wrote a transcript entry then. */
+  async function ranYesterday(name = "pcs-api"): Promise<string> {
+    const agent = await create(ALICE, name);
+    const session = await insertAgent(ALICE, `${name}-session`, { status: "idle" });
+    await prisma.transcriptEntry.create({
+      data: { agentId: session, sessionId: "s", entryKey: "k", role: "assistant", content: { text: "hi" }, occurredAt: YESTERDAY, createdAt: YESTERDAY }
+    });
+    await prisma.virtualAgent.update({
+      where: { id: agent.id },
+      data: {
+        status: "running",
+        statusDetail: "Claude is ready; repositories ready",
+        statusChangedAt: YESTERDAY,
+        lastActiveAt: YESTERDAY,
+        startedAt: YESTERDAY,
+        agentId: session
+      }
+    });
+    return agent.id;
+  }
+
+  it("should be stopping as soon as the owner stops it, and requested as of the start when they start it again, before any observation", async () => {
+    const id = await ranYesterday();
+
+    expect(await setDesired(prisma, ALICE.oid, id, "stopped", NOW)).toMatchObject({ status: "stopping", statusDetail: null, statusChangedAt: NOW });
+    const later = new Date(NOW.getTime() + 60_000);
+    expect(await setDesired(prisma, ALICE.oid, id, "running", later)).toMatchObject({ status: "requested", statusChangedAt: later, startedAt: later });
+
+    const result = await sweepVirtualAgents(prisma, { ...SWEEP, now: new Date(later.getTime() + 60_000) });
+
+    expect(result).toMatchObject({ idle: [], evening: [], failed: [] });
+    expect(await row(id)).toMatchObject({ desired: "running", status: "requested" });
+  });
+
+  it("should leave a stopped agent stopped, with its time, when it is stopped", async () => {
+    const id = await ranYesterday();
+    await prisma.virtualAgent.update({ where: { id }, data: { status: "stopped" } });
+
+    expect(await setDesired(prisma, ALICE.oid, id, "stopped", NOW)).toMatchObject({ status: "stopped", statusChangedAt: YESTERDAY });
+  });
+
+  it("should be stopping as soon as the owner deletes it", async () => {
+    const id = await ranYesterday();
+
+    expect(await setDesired(prisma, ALICE.oid, id, "deleted", NOW)).toMatchObject({ desired: "deleted", status: "stopping", statusChangedAt: NOW });
+  });
+
+  it("should be stopping as soon as the sweep stops it as idle", async () => {
+    const id = await ranYesterday();
+    await prisma.virtualAgent.update({ where: { id }, data: { startedAt: new Date(NOW.getTime() - 3 * 60 * 60_000) } });
+
+    expect(await sweepVirtualAgents(prisma, { ...SWEEP, now: NOW })).toMatchObject({ idle: [id] });
+    expect(await row(id)).toMatchObject({ desired: "stopped", stopReason: "idle", status: "stopping", statusDetail: null, statusChangedAt: NOW });
+  });
+
+  it("should refuse the old pod's report after a stop, so it cannot put the agent back to running", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+
+    expect((await status(id, token, { phase: "running" })).status).toBe(401);
+    await expect(reportStatus(prisma, id, "running", null)).rejects.toMatchObject({ status: 409 });
+    expect((await row(id)).status).toBe("stopping");
+
+    await setDesired(prisma, ALICE.oid, id, "running");
+    expect((await status(id, token, { phase: "running" })).status).toBe(401);
+    const [starting] = await claim();
+    expect((await observe(id, { generation: starting!.generation, replicas_ready: 0, pod_phase: "Pending" })).status).toBe(204);
+    expect((await row(id)).status).toBe("provisioning");
+    expect((await status(id, starting!.launch_token!, { phase: "running" })).status).toBe(204);
+    expect((await row(id)).status).toBe("running");
+  });
+});
+
+describe("POST /api/orchestrator/virtual-agents/{id}/apply-failed", () => {
+  const ERROR = 'services "va-0f8a6a1e" is forbidden: User "system:serviceaccount:dtsse:orchestrator" cannot get resource "services"';
+
+  function applyFailed(id: string, body: unknown): Promise<Response> {
+    return orchestrator(applyFailedRoute.POST, `/api/orchestrator/virtual-agents/${id}/apply-failed`, { id }, "POST", body);
+  }
+
+  it("should keep the error as the detail without touching the generations or the claim, and with no launch token in it", async () => {
+    const agent = await create(ALICE, "pcs-api");
+    const [claimed] = await claim();
+    const before = await row(agent.id);
+
+    const response = await applyFailed(agent.id, { generation: claimed!.generation, error: `${ERROR}; env AGENT_HUB_TOKEN=${claimed!.launch_token}` });
+
+    expect(response.status).toBe(204);
+    const stored = await prisma.virtualAgent.findUniqueOrThrow({ where: { id: agent.id } });
+    expect(stored).toMatchObject({
+      status: "requested",
+      statusDetail: `the orchestrator couldn't apply this agent: ${ERROR}; env AGENT_HUB_TOKEN=ahv_[redacted]`,
+      applyFailures: 1,
+      generation: before.generation,
+      observedGeneration: before.observedGeneration,
+      claimedBy: "preview-01"
+    });
+    expect(JSON.stringify(stored, (_key, value) => (value instanceof Uint8Array ? "bytes" : value))).not.toContain(claimed!.launch_token!.slice(4));
+  });
+
+  it("should fail the agent after five claims in a row it could not apply, and start it again once an apply works", async () => {
+    const agent = await create(ALICE, "pcs-api");
+    let at = Date.now();
+    let claimed: ClaimedVirtualAgent | undefined;
+    for (let attempt = 1; attempt <= APPLY_FAILURES_BEFORE_FAILED; attempt += 1) {
+      [claimed] = await claimedBy("preview-01", new Date(at));
+      expect(claimed?.launch_token).toBeDefined();
+      await recordApplyError(prisma, agent.id, { generation: claimed!.generation, error: ERROR }, new Date(at));
+      expect((await row(agent.id)).status).toBe(attempt < APPLY_FAILURES_BEFORE_FAILED ? "requested" : "failed");
+      at += 3 * 60_000;
+    }
+    expect(await row(agent.id)).toMatchObject({ status: "failed", statusDetail: `the orchestrator couldn't apply this agent: ${ERROR}`, applyFailures: 5 });
+
+    [claimed] = await claimedBy("preview-01", new Date(at));
+    expect(claimed?.launch_token).toBeDefined();
+    await observeVirtualAgent(prisma, agent.id, { generation: claimed!.generation, replicasReady: 0, podPhase: "Pending" });
+
+    expect(await row(agent.id)).toMatchObject({ status: "provisioning", statusDetail: null, applyFailures: 0, observedGeneration: claimed!.generation });
+    expect((await status(agent.id, claimed!.launch_token!, { phase: "running" })).status).toBe(204);
+  });
+
+  it("should fail a stop it could not apply, and settle it as stopped once one works", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+    let at = Date.now();
+    let claimed: ClaimedVirtualAgent | undefined;
+    for (let attempt = 1; attempt <= APPLY_FAILURES_BEFORE_FAILED; attempt += 1) {
+      [claimed] = await claimedBy("preview-01", new Date(at));
+      await recordApplyError(prisma, id, { generation: claimed!.generation, error: ERROR }, new Date(at));
+      at += 3 * 60_000;
+    }
+    expect(await row(id)).toMatchObject({ desired: "stopped", status: "failed" });
+
+    [claimed] = await claimedBy("preview-01", new Date(at));
+    await observeVirtualAgent(prisma, id, { generation: claimed!.generation, replicasReady: 0 });
+
+    expect(await row(id)).toMatchObject({ status: "stopped", statusDetail: null, applyFailures: 0 });
+  });
+
+  it("should give the owner's next start a fresh run of claims before it fails", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await prisma.virtualAgent.update({ where: { id }, data: { applyFailures: APPLY_FAILURES_BEFORE_FAILED - 1 } });
+
+    expect(await setDesired(prisma, ALICE.oid, id, "stopped")).toMatchObject({ applyFailures: 0 });
+  });
+
+  it("should ignore an error about a generation older than the latest", async () => {
+    const agent = await create(ALICE, "pcs-api");
+    await claim();
+    await setVirtualAgentSize(prisma, ALICE.oid, agent.id, "large");
+
+    expect((await applyFailed(agent.id, { generation: 1, error: ERROR })).status).toBe(204);
+    expect(await row(agent.id)).toMatchObject({ statusDetail: null, applyFailures: 0 });
+  });
+
+  it("should refuse a generation not yet asked for, an unknown agent and a malformed body", async () => {
+    const agent = await create(ALICE, "pcs-api");
+
+    expect((await applyFailed(agent.id, { generation: 9, error: ERROR })).status).toBe(409);
+    expect((await applyFailed("0f8a6a1e-1234-4000-8000-000000000009", { generation: 1, error: ERROR })).status).toBe(404);
+    expect((await applyFailed("not-a-uuid", { generation: 1, error: ERROR })).status).toBe(404);
+    expect((await applyFailed(agent.id, { generation: 1, error: "x".repeat(501) })).status).toBe(400);
+    expect((await applyFailed(agent.id, { generation: 1 })).status).toBe(400);
+    expect(await row(agent.id)).toMatchObject({ statusDetail: null, applyFailures: 0 });
   });
 });

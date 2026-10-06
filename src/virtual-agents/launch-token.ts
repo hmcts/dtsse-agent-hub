@@ -43,3 +43,10 @@ export function launchTokenMatches(token: string, stored: Uint8Array | null): bo
   }
   return timingSafeEqual(hashLaunchToken(token), stored);
 }
+
+const ANY_LAUNCH_TOKEN = /ahv_[A-Za-z0-9_-]+/g;
+
+/** `text` with anything shaped like a launch token replaced, for an error that may quote the spec it was applying. */
+export function withoutLaunchTokens(text: string): string {
+  return text.replace(ANY_LAUNCH_TOKEN, `${LAUNCH_TOKEN_PREFIX}[redacted]`);
+}

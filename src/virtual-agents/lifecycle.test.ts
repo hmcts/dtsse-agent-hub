@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { byCodePoint } from "../topics/slug.ts";
 import {
+  APPLY_FAILURES_BEFORE_FAILED,
+  afterApplyError,
   type Current,
   isPodPhase,
   nextStatus,
@@ -119,5 +121,41 @@ describe("isPodPhase", () => {
 describe("VIRTUAL_AGENT_DESIRED", () => {
   it("should be the three things a person can ask for when it is listed", () => {
     expect(VIRTUAL_AGENT_DESIRED).toEqual(["running", "stopped", "deleted"]);
+  });
+});
+
+describe("nextStatus from the orchestrator after apply errors", () => {
+  it("should start an agent again when it was failed by apply errors and an apply has now worked", () => {
+    expect(nextStatus({ status: "failed", desired: "running", applyFailures: 5 }, observed({ podPhase: "Pending" }))).toEqual({
+      status: "provisioning",
+      detail: null
+    });
+  });
+
+  it("should leave a pod's own failure as it is when there were no apply errors", () => {
+    expect(nextStatus({ status: "failed", desired: "running", applyFailures: 0 }, observed({ podPhase: "Pending" }))).toEqual({ status: "failed" });
+  });
+
+  it("should clear the apply error from a running agent's detail when an apply has now worked", () => {
+    expect(nextStatus({ status: "running", desired: "running", applyFailures: 2 }, observed({ replicasReady: 1, podPhase: "Running" }))).toEqual({
+      status: "running",
+      detail: null
+    });
+  });
+});
+
+describe("afterApplyError", () => {
+  it("should keep the status and say what the orchestrator could not do when the errors are fewer than the limit", () => {
+    expect(afterApplyError({ status: "stopping", desired: "stopped" }, "GET services/va-1: 403 forbidden")).toEqual({
+      status: "stopping",
+      detail: "the orchestrator couldn't apply this agent: GET services/va-1: 403 forbidden",
+      applyFailures: 1
+    });
+  });
+
+  it("should fail the agent when the errors reach the limit", () => {
+    const current: Current = { status: "requested", desired: "running", applyFailures: APPLY_FAILURES_BEFORE_FAILED - 1 };
+
+    expect(afterApplyError(current, "boom")).toMatchObject({ status: "failed", applyFailures: APPLY_FAILURES_BEFORE_FAILED });
   });
 });
