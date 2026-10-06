@@ -13,6 +13,7 @@ import {
   canOwnerReadCredential,
   canPersonMessageAgent,
   canReadMessage,
+  canSeeAgentSkills,
   canUseCredentialRoutes,
   canViewAgent,
   canViewTranscript,
@@ -54,16 +55,33 @@ interface Expectation {
   viewAgent: boolean;
   viewTranscript: boolean;
   messageAsPerson: boolean;
+  seeSkills: boolean;
   messageAsAgent: boolean;
   readDirect: boolean;
   manageGrants: boolean;
 }
 
 const MATRIX: Record<Role, Expectation> = {
-  owner: { viewAgent: true, viewTranscript: true, messageAsPerson: true, messageAsAgent: true, readDirect: true, manageGrants: true },
-  "read grantee": { viewAgent: true, viewTranscript: true, messageAsPerson: false, messageAsAgent: false, readDirect: true, manageGrants: false },
-  "write grantee": { viewAgent: true, viewTranscript: true, messageAsPerson: true, messageAsAgent: true, readDirect: true, manageGrants: false },
-  stranger: { viewAgent: false, viewTranscript: false, messageAsPerson: false, messageAsAgent: false, readDirect: false, manageGrants: false }
+  owner: { viewAgent: true, viewTranscript: true, messageAsPerson: true, seeSkills: true, messageAsAgent: true, readDirect: true, manageGrants: true },
+  "read grantee": {
+    viewAgent: true,
+    viewTranscript: true,
+    messageAsPerson: false,
+    seeSkills: false,
+    messageAsAgent: false,
+    readDirect: true,
+    manageGrants: false
+  },
+  "write grantee": {
+    viewAgent: true,
+    viewTranscript: true,
+    messageAsPerson: true,
+    seeSkills: true,
+    messageAsAgent: true,
+    readDirect: true,
+    manageGrants: false
+  },
+  stranger: { viewAgent: false, viewTranscript: false, messageAsPerson: false, seeSkills: false, messageAsAgent: false, readDirect: false, manageGrants: false }
 };
 
 /** A direct message from a third party's agent to the owner's agent. */
@@ -82,6 +100,10 @@ describe.each(Object.entries(MATRIX) as [Role, Expectation][])("access for the %
 
   it(`should ${expected.messageAsPerson ? "" : "not "}let a person message the agent when they are the ${role}`, () => {
     expect(canPersonMessageAgent(oid, TARGET, GRANTS)).toBe(expected.messageAsPerson);
+  });
+
+  it(`should ${expected.seeSkills ? "" : "not "}offer the agent's skills when the viewer is the ${role}`, () => {
+    expect(canSeeAgentSkills(oid, TARGET, GRANTS)).toBe(expected.seeSkills);
   });
 
   it(`should ${expected.messageAsAgent ? "" : "not "}let an agent message the agent when its owner is the ${role}`, () => {
@@ -104,6 +126,10 @@ describe.each(Object.entries(MATRIX) as [Role, Expectation][])("access for the %
     expect(canReadMessage(oid, { kind: "post", authorOid: ELSEWHERE, authorAgent: agentOf(ELSEWHERE), targetAgent: null, parentAuthorOid: null }, [])).toBe(
       true
     );
+  });
+
+  it(`should ${expected.seeSkills ? "" : "not "}offer the agent's skills when the viewer is the ${role}`, () => {
+    expect(canSeeAgentSkills(oid, TARGET, GRANTS)).toBe(expected.seeSkills);
   });
 
   it(`should ${expected.messageAsAgent ? "" : "not "}route a private reply to the owner's post when the replying agent's owner is the ${role}`, () => {
