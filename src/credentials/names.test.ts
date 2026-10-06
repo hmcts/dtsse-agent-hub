@@ -5,7 +5,12 @@ const OID = "0f8a3c1e-1b2d-4e5f-8a9b-0c1d2e3f4a5b";
 
 describe("secretName", () => {
   it.each(CREDENTIAL_KINDS)("should name the %s credential u-<oid>-<kind> when the owner is an Entra oid", (kind) => {
-    expect(secretName(OID, kind)).toBe(`u-${OID}-${kind}`);
+    expect(secretName(OID, kind)).toBe(`u-${OID}-${kind.replaceAll("_", "-")}`);
+  });
+
+  it("should name a CLAUDE.md with a hyphen when the kind has an underscore a vault name refuses", () => {
+    expect(secretName(OID, "claude_md")).toBe(`u-${OID}-claude-md`);
+    expect(secretName(OID, "claude_md")).toMatch(/^[0-9a-zA-Z-]{1,127}$/);
   });
 
   it("should name a development identity's credential the same way when the owner is a persona", () => {
@@ -40,6 +45,9 @@ describe("isCredentialKind", () => {
     ["azure", true],
     ["claude", true],
     ["bedrock", true],
+    ["jenkins", true],
+    ["claude_md", true],
+    ["claude-md", false],
     ["GitHub", false],
     ["", false],
     [undefined, false],

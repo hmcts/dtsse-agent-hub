@@ -59,6 +59,7 @@ enum CredentialKind {
   claude
   bedrock
   jenkins
+  claude_md
 
   @@map("credential_kind")
 }
