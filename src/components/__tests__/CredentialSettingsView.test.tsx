@@ -166,3 +166,34 @@ describe("the Jenkins API token card", () => {
     expect(within(jenkins).getByRole("form", { name: "Save Jenkins API token" })).toBeTruthy();
   });
 });
+
+describe("the Atlassian sign-in card", () => {
+  it("should say it is optional and never offer to paste it when it comes from the virtual agent", () => {
+    show({ available: true, modelRoute: "bedrock", statuses: [...NOTHING_STORED, status("atlassian")] });
+
+    const atlassian = card("Atlassian sign-in (Jira & Confluence)");
+    expect(atlassian.textContent).toContain("Optional");
+    expect(atlassian.textContent).toContain("device-code");
+    expect(within(atlassian).getByRole("link").getAttribute("href")).toBe("https://hmcts.atlassian.net");
+    expect(within(atlassian).queryByRole("form")).toBeNull();
+  });
+
+  it("should name the account and offer only to delete it when it is stored", () => {
+    show({
+      available: true,
+      modelRoute: "bedrock",
+      statuses: [
+        ...NOTHING_STORED,
+        status("atlassian", { stored: true, accountLabel: "alice@justice.gov.uk", updatedAt: "2026-10-05T11:00:00.000Z", updatedVia: "pod" })
+      ]
+    });
+
+    const atlassian = card("Atlassian sign-in (Jira & Confluence)");
+    expect(atlassian.textContent).toContain("for alice@justice.gov.uk");
+    expect(
+      within(atlassian)
+        .getAllByRole("form")
+        .map((form) => form.getAttribute("aria-label"))
+    ).toEqual(["Delete Atlassian sign-in (Jira & Confluence)"]);
+  });
+});

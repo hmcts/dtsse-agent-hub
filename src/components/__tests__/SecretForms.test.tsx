@@ -157,7 +157,7 @@ describe("a form carrying a credential", () => {
   });
 
   it("should post every form on the credentials page whatever is stored", () => {
-    const kinds: CredentialStatus["kind"][] = ["github", "azure", "claude", "bedrock", "jenkins"];
+    const kinds: CredentialStatus["kind"][] = ["github", "azure", "claude", "bedrock", "jenkins", "atlassian"];
     for (const statuses of [kinds.map(missing), kinds.map(stored)]) {
       const { container, unmount } = render(
         <CredentialSettingsView settings={{ available: true, modelRoute: "own-licence", statuses }} actions={{ save: ok(), remove: ok() }} />

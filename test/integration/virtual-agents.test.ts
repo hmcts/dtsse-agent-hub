@@ -80,6 +80,10 @@ function azureCacheFor(oid: string): string {
 
 const AZURE = azureCacheFor(ALICE.oid);
 
+function atlassianAuthFor(user: string, refreshToken: string): string {
+  return `# twg authentication configuration\nuser=${user}\ntoken=oauth-managed\nsite=hmcts.atlassian.net\noauth-refresh-token=${refreshToken}`;
+}
+
 type Handler<P> = (request: Request, context: { params: Promise<P> }) => Promise<Response>;
 
 /** A request as a virtual agent's pod makes it: its launch token and nothing else. */
@@ -813,7 +817,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     const found = await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/jenkins`, { virtualAgentId: id, kind: "jenkins" });
 
     expect(await jsonOf(found)).toEqual({ value: jenkins });
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.optional).toEqual(["jenkins"]);
+    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.optional).toEqual(["jenkins", "atlassian"]);
   });
 
   it("should give the pod its owner's stored credential, and 404 when there is none", async () => {
@@ -859,6 +863,38 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
       updatedVia: "pod",
       accountLabel: "alice@example.com"
     });
+  });
+
+  it("should store each twg sign-in the pod saves, labelled with its user, as twg replaces its refresh token", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    const save = (value: string) =>
+      pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/atlassian`, { virtualAgentId: id, kind: "atlassian" }, "PUT", { value });
+    const first = atlassianAuthFor("alice@justice.gov.uk", "refresh-one");
+    const second = atlassianAuthFor("alice@justice.gov.uk", "refresh-two");
+
+    expect((await save(first)).status).toBe(204);
+    expect((await save(second)).status).toBe(204);
+
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "atlassian")).toBe(second);
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
+      kind: "atlassian",
+      secretName: `u-${ALICE.oid}-atlassian`,
+      updatedVia: "pod",
+      accountLabel: "alice@justice.gov.uk"
+    });
+  });
+
+  it("should refuse a twg auth.conf with no refresh token with 400 and never echo it", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    const value = "user=alice@justice.gov.uk\ntoken=oauth-managed\noauth-access-token=secret-access";
+
+    const response = await pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/atlassian`, { virtualAgentId: id, kind: "atlassian" }, "PUT", {
+      value
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).not.toContain("secret-access");
+    expect(await prisma.credential.count()).toBe(0);
   });
 
   it("should refuse an Azure token cache signed in as someone else with 409, store nothing and fail the agent", async () => {
@@ -1225,6 +1261,26 @@ describe("logins", () => {
 
     expect((await complete(id, token, "github", { account_label: "alice-gh" })).status).toBe(204);
     expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("completed");
+  });
+
+  it("should complete an Atlassian login as an account other than the owner's, label it, and never fail the agent", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await startLogin(id, token, "atlassian", {
+      prompt: "device_code",
+      verification_uri: "https://auth.atlassian.com/activate",
+      user_code: "WXYZ-9876",
+      expires_in: 600
+    });
+    const saved = await pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/atlassian`, { virtualAgentId: id, kind: "atlassian" }, "PUT", {
+      value: atlassianAuthFor("someone@example.com", "refresh-one")
+    });
+
+    expect(saved.status).toBe(204);
+    expect((await complete(id, token, "atlassian", { account_label: "someone@example.com" })).status).toBe(204);
+
+    expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("completed");
+    expect((await prisma.credential.findFirstOrThrow()).accountLabel).toBe("someone@example.com");
+    expect((await row(id)).status).not.toBe("failed");
   });
 
   it("should answer 404 when there is no login of that kind to complete", async () => {
@@ -2049,6 +2105,21 @@ describe("signing in again", () => {
 
     expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBeUndefined();
     expect(await row(id)).toMatchObject({ generation: before.generation, desired: "stopped", status: before.status });
+  });
+
+  it("should delete the Atlassian sign-in and restart the agent when the owner signs in to Atlassian again", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    const value = atlassianAuthFor("alice@justice.gov.uk", "refresh-one");
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "atlassian", value, via: "pod" });
+
+    actAs("alice");
+    expect(await actions.reconnectSignIn(form({ id, kind: "atlassian" }))).toEqual({
+      ok: true,
+      confirmation: "pcs-api is restarting to sign in to Atlassian again"
+    });
+
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "atlassian")).toBeUndefined();
+    expect(await row(id)).toMatchObject({ desired: "running", status: "provisioning", statusDetail: "restarting to sign in to Atlassian again" });
   });
 
   it("should delete nothing and restart nothing when someone other than the owner asks", async () => {

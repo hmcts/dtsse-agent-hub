@@ -152,7 +152,7 @@ export function canManageCredential(actorOid: string, ownerOid: string): boolean
  * or the web UI. An Amazon Bedrock API key, because the workspace's launcher on their laptop fetches it to call
  * Bedrock; and their CLAUDE.md and git identity, because the page that edits them has to show them. Anyone holding
  * that person's agent-hub token can therefore read all three. Every other kind acts as the person in GitHub, Azure,
- * Claude or Jenkins, and stays write-only.
+ * Claude, Jenkins or Atlassian, and stays write-only.
  */
 export function canOwnerReadCredential(kind: string): boolean {
   return kind === "bedrock" || kind === "claude_md" || kind === "git_identity";
@@ -161,7 +161,8 @@ export function canOwnerReadCredential(kind: string): boolean {
 /**
  * Whether a virtual agent's pod may store its owner's credential of `kind`. Not their CLAUDE.md or git identity:
  * every one of the owner's agents follows them, so one agent rewriting either would steer, or commit as someone
- * else for, all the others. Only the owner changes them.
+ * else for, all the others. Only the owner changes them. Any other kind it may store, and an Atlassian sign-in it
+ * has to, again each time `twg` replaces the refresh token in it.
  */
 export function canVirtualAgentStoreCredential(kind: string): boolean {
   return kind !== "claude_md" && kind !== "git_identity";

@@ -1,4 +1,5 @@
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { AtlassianHint } from "@/components/credentials/AtlassianHint";
 import { JenkinsHint } from "@/components/credentials/JenkinsHint";
 import { EmptyState } from "@/components/EmptyState";
 import { Section } from "@/components/Section";
@@ -20,7 +21,8 @@ const TITLES: Record<CredentialKind, string> = {
   bedrock: "Bedrock API key",
   jenkins: "Jenkins API token",
   claude_md: "CLAUDE.md",
-  git_identity: "Git identity"
+  git_identity: "Git identity",
+  atlassian: "Atlassian sign-in (Jira & Confluence)"
 };
 
 const VIA: Record<CredentialVia, string> = {
@@ -53,6 +55,9 @@ function notPasteable(kind: CredentialKind, route: ModelRoute): string | undefin
   if (kind === "azure") {
     return "This comes from your virtual agent's own Azure device-code sign-in, and cannot be pasted here.";
   }
+  if (kind === "atlassian") {
+    return "This comes from your virtual agent's own Atlassian device-code sign-in, and cannot be pasted here.";
+  }
   if (kind === "claude" && route === "bedrock") {
     return "Not needed: your virtual agents use Amazon Bedrock, with your Bedrock API key.";
   }
@@ -66,6 +71,7 @@ export function CredentialCard({ status, route, actions }: { status: CredentialS
     <Section heading={title} detail={status.stored ? "Stored" : "Not stored"}>
       <div className="space-y-3 text-sm">
         {status.kind === "jenkins" ? <JenkinsHint /> : null}
+        {status.kind === "atlassian" ? <AtlassianHint /> : null}
         {status.stored ? (
           <div className="flex flex-wrap items-center gap-3">
             <p className="text-hub-text">

@@ -138,7 +138,7 @@ describe("checkCredential for azure", () => {
 });
 
 describe("checkCredential limits", () => {
-  it.each(["github", "azure", "claude", "bedrock"] as const)("should refuse a %s value over the length limit when it is too long", (kind) => {
+  it.each(["github", "azure", "claude", "bedrock", "atlassian"] as const)("should refuse a %s value over the length limit when it is too long", (kind) => {
     expect(checkCredential(kind, "a".repeat(MAX_CREDENTIAL_LENGTH + 1))).toMatchObject({
       ok: false,
       error: expect.stringContaining(String(MAX_CREDENTIAL_LENGTH))
@@ -263,5 +263,78 @@ describe("checkCredential for git_identity", () => {
 
   it("should refuse it with the git identity check's reason when the email is not an address", () => {
     expect(checkCredential("git_identity", '{"email":"olive"}')).toEqual({ ok: false, error: "that is not an email address" });
+  });
+});
+
+describe("checkCredential for atlassian", () => {
+  const REFRESH = `eyJraWQiOiJyZWZyZXNoIn0.${"r".repeat(60)}`;
+  const AUTH_CONF = [
+    "# twg authentication configuration",
+    "user=a.person@justice.gov.uk",
+    "token=oauth-managed",
+    "site=hmcts.atlassian.net",
+    "domain=atlassian.net",
+    "cloud-id=0f8a3c1e-1b2d-4e5f-8a9b-0c1d2e3f4a5b",
+    "user-id=712020:0f8a3c1e-1b2d-4e5f-8a9b-0c1d2e3f4a5b",
+    "auth-method=oauth",
+    `oauth-refresh-token=${REFRESH}`,
+    "oauth-refresh-at=2026-10-06T12:00:00Z"
+  ].join("\n");
+
+  it("should accept it trimmed and labelled with its user when it is a twg auth.conf", () => {
+    expect(checkCredential("atlassian", `\n${AUTH_CONF}\n\n`)).toEqual({ ok: true, value: AUTH_CONF, accountLabel: "a.person@justice.gov.uk" });
+  });
+
+  it("should accept it unlabelled when it names no user", () => {
+    const value = `oauth-refresh-token=${REFRESH}`;
+
+    expect(checkCredential("atlassian", value)).toEqual({ ok: true, value, accountLabel: null });
+  });
+
+  it("should accept it when its lines end CRLF and it has blank lines and comments between settings", () => {
+    const value = `# twg\r\nuser=someone@example.com\r\n\r\n  # comment\r\noauth-refresh-token=${REFRESH}`;
+
+    expect(checkCredential("atlassian", value)).toEqual({ ok: true, value, accountLabel: "someone@example.com" });
+  });
+
+  it("should accept any site and any account when they are not the owner's or HMCTS's", () => {
+    const value = `user=someone@example.com\nsite=example.atlassian.net\noauth-refresh-token=${REFRESH}`;
+
+    expect(checkCredential("atlassian", value)).toMatchObject({ ok: true, accountLabel: "someone@example.com" });
+  });
+
+  it.each([
+    ["no refresh token", "user=a.person@justice.gov.uk\ntoken=oauth-managed"],
+    ["an empty refresh token", "user=a.person@justice.gov.uk\noauth-refresh-token=  "],
+    ["only comments", "# twg authentication configuration"]
+  ])("should refuse it without echoing it when it has %s", (_label, value) => {
+    const checked = checkCredential("atlassian", value);
+
+    expect(checked).toEqual({ ok: false, error: "that twg auth.conf has no oauth-refresh-token: sign in to twg with OAuth again" });
+    expect(JSON.stringify(checked)).not.toContain("a.person");
+  });
+
+  it.each([
+    ["a line that is not a setting", `${AUTH_CONF}\njust-a-word`, 11],
+    ["an uppercase key", `User=x\noauth-refresh-token=${REFRESH}`, 1],
+    ["a key with an underscore", `oauth_refresh_token=${REFRESH}`, 1],
+    ["a key with a space before its =", `user =x\noauth-refresh-token=${REFRESH}`, 1],
+    ["a line with no key", `=x\noauth-refresh-token=${REFRESH}`, 1]
+  ])("should refuse %s naming its line but never its value when it is not key=value", (_label, value, line) => {
+    const checked = checkCredential("atlassian", value);
+
+    expect(checked).toEqual({ ok: false, error: `that is not a twg auth.conf: line ${line} is not a key=value setting or a # comment` });
+    expect(JSON.stringify(checked)).not.toContain(REFRESH);
+  });
+
+  it.each([
+    ["GitHub token", `ghp_${"a".repeat(36)}`],
+    ["Claude token", `sk-ant-oat01-${"a".repeat(40)}`]
+  ])("should refuse a %s naming what it is when one is sent by mistake", (kind, value) => {
+    expect(checkCredential("atlassian", value)).toEqual({ ok: false, error: `that is a ${kind}, not an Atlassian twg sign-in` });
+  });
+
+  it("should ask for the sign-in when the value is empty", () => {
+    expect(checkCredential("atlassian", " \n ")).toEqual({ ok: false, error: "paste an Atlassian twg sign-in" });
   });
 });

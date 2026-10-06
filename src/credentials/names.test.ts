@@ -48,6 +48,7 @@ describe("isCredentialKind", () => {
     ["jenkins", true],
     ["claude_md", true],
     ["git_identity", true],
+    ["atlassian", true],
     ["claude-md", false],
     ["GitHub", false],
     ["", false],

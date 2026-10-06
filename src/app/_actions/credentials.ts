@@ -14,8 +14,8 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * from the form. Neither action returns a value, and no action reads one.
  *
  * A GitHub token, a Bedrock API key, a Jenkins API token and, for someone on their own licence, a Claude token can be
- * pasted: the Azure token cache comes from the virtual agent's own device-code login. A Bedrock key is accepted on
- * either route, since the workspace on a laptop reads it back too.
+ * pasted: the Azure token cache and the Atlassian sign-in come from the virtual agent's own device-code logins. A
+ * Bedrock key is accepted on either route, since the workspace on a laptop reads it back too.
  *
  * A CLAUDE.md and a git identity each have their own two actions, because they are written and reset on the virtual
  * agents page rather than pasted, and only exist for virtual agents.
