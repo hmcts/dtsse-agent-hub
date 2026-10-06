@@ -78,7 +78,7 @@ export function orchestratorRole(env: Environment = process.env): string | null 
   return role || null;
 }
 
-/** The domain each exposed port's host is under; the orchestrator reads the same variable for its Ingress hosts. */
+/** The domain each reported port's host is under; the orchestrator reads the same variable for its Ingress hosts. */
 export function publicDomain(env: Environment = process.env): string {
   return env.VIRTUAL_AGENT_PUBLIC_DOMAIN?.trim() || DEFAULT_PUBLIC_DOMAIN;
 }

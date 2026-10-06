@@ -14,7 +14,6 @@ export interface VirtualAgentActions {
   lifecycle: LifecycleActions;
   rename: FormAction;
   resize: FormAction;
-  ports: { expose: FormAction; unexpose: FormAction };
   paste: FormAction;
   reconnect: FormAction;
   save: FormAction;
@@ -29,7 +28,7 @@ function OwnerPanels({ manage, actions, now }: { manage: NonNullable<VirtualAgen
       {agent.desired === "stopped" ? <DiskNotice agent={agent} now={now} /> : null}
       <RenameVirtualAgent agent={agent} rename={actions.rename} />
       <SizePanel agent={agent} resize={actions.resize} />
-      <PortsPanel agent={agent} actions={actions.ports} />
+      <PortsPanel agent={agent} />
       <OnboardingChecklist
         virtualAgentId={agent.id}
         desired={agent.desired}

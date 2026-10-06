@@ -2,6 +2,23 @@ import { expect, test } from "@playwright/test";
 import { asPersona, unique } from "./hub";
 
 test.describe("virtual agents @regression", () => {
+  test("should offer the create form when the person has no virtual agents @regression", async ({ browser, baseURL }) => {
+    const context = await asPersona(browser, unique("va-none"), baseURL!);
+    try {
+      const page = await context.newPage();
+      const response = await page.goto("/virtual");
+      test.skip(response?.status() === 404, "virtual agents are off on this deployment");
+
+      expect(response?.status()).toBe(200);
+      await expect(page.getByText("You have no virtual agents.")).toBeVisible();
+      const form = page.getByRole("form", { name: "Create a virtual agent" });
+      await expect(form.getByLabel("Name")).toBeVisible();
+      await expect(form.getByRole("button", { name: "Create" })).toBeEnabled();
+    } finally {
+      await context.close();
+    }
+  });
+
   test("should create a virtual agent, show a sign-in its pod relays, rename it and delete it @regression", async ({ browser, baseURL, request }) => {
     const persona = unique("va");
     const context = await asPersona(browser, persona, baseURL!);
@@ -25,6 +42,7 @@ test.describe("virtual agents @regression", () => {
       await page.waitForURL(new RegExp(`/agents/${id}$`));
       await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
       await expect(page.getByRole("list", { name: "Sign-ins" }).getByRole("heading", { name: "GitHub" })).toBeVisible();
+      await expect(page.getByText("No web servers running")).toBeVisible();
 
       // Only a development build accepts X-Dev-Orchestrator; anywhere else the orchestrator's own token is needed.
       const claim = await request.post("/api/orchestrator/claim", { headers: { "x-dev-orchestrator": "e2e" }, data: { cluster: "e2e" } });
@@ -38,6 +56,16 @@ test.describe("virtual agents @regression", () => {
         expect(login.status()).toBe(204);
         await expect(page.getByText("WXYZ-9876")).toBeVisible({ timeout: 15_000 });
         await expect(page.getByRole("link", { name: "https://github.com/login/device" })).toBeVisible();
+
+        const ports = await request.put(`/api/virtual/${id}/ports`, {
+          headers: { authorization: `Bearer ${claimed!.launch_token}` },
+          data: { ports: [3000], local_only: [5173] }
+        });
+        expect(ports.status()).toBe(204);
+        await expect(page.getByRole("list", { name: "Web server URLs" }).getByRole("link", { name: /^https:\/\/va-[0-9a-f]{8}-3000\./ })).toBeVisible({
+          timeout: 15_000
+        });
+        await expect(page.getByText("port 5173 is listening on 127.0.0.1 only — start it on 0.0.0.0 to open it here")).toBeVisible();
       }
 
       const renamed = `${name}-renamed`;
@@ -45,11 +73,6 @@ test.describe("virtual agents @regression", () => {
       await rename.getByLabel("New name").fill(renamed);
       await rename.getByRole("button", { name: "Rename" }).click();
       await expect(page.getByRole("heading", { level: 1, name: renamed })).toBeVisible();
-
-      const expose = page.getByRole("form", { name: "Expose a port" });
-      await expose.getByLabel("Port").fill("3000");
-      await expose.getByRole("button", { name: "Expose" }).click();
-      await expect(page.getByRole("list", { name: "Exposed ports" }).getByRole("link", { name: /^https:\/\/va-[0-9a-f]{8}-3000\./ })).toBeVisible();
 
       await page.getByRole("button", { name: "Delete" }).click();
       await page

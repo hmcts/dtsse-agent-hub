@@ -14,6 +14,7 @@ import * as credentialRoute from "../../src/app/api/virtual/[virtualAgentId]/cre
 import * as codeRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/code/route.ts";
 import * as completeRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/complete/route.ts";
 import * as loginRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/route.ts";
+import * as portsRoute from "../../src/app/api/virtual/[virtualAgentId]/ports/route.ts";
 import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
 import { DEFAULT_CLAUDE_MD } from "../../src/credentials/claude-md.ts";
@@ -24,6 +25,7 @@ import { byCodePoint } from "../../src/topics/slug.ts";
 import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { storePastedCode } from "../../src/virtual-agents/logins.ts";
+import { stopVirtualAgents } from "../../src/virtual-agents/stop.ts";
 import {
   type ClaimedVirtualAgent,
   type ClaimResult,
@@ -33,9 +35,9 @@ import {
   observeVirtualAgent,
   recordApplyError,
   renameVirtualAgent,
+  reportPorts,
   reportStatus,
   setDesired,
-  setExposedPort,
   setVirtualAgentSize,
   type VirtualAgentRow
 } from "../../src/virtual-agents/store.ts";
@@ -140,6 +142,10 @@ async function started(owner: Person, name: string, modelRoute: "bedrock" | "own
 
 function status(id: string, token: string, body: unknown): Promise<Response> {
   return pod(statusRoute.POST, token, `/api/virtual/${id}/status`, { virtualAgentId: id }, "POST", body);
+}
+
+function ports(id: string, token: string, body: unknown): Promise<Response> {
+  return pod(portsRoute.PUT, token, `/api/virtual/${id}/ports`, { virtualAgentId: id }, "PUT", body);
 }
 
 function register(token: string, sessionId: string): Promise<Response> {
@@ -300,6 +306,7 @@ describe("POST /api/orchestrator/claim", () => {
     expect(claimed).toEqual({
       id: agent.id,
       generation: 1,
+      pod_generation: 1,
       desired: "running",
       statefulset_name: agent.statefulsetName,
       pvc_name: agent.pvcName,
@@ -1744,19 +1751,17 @@ describe("a virtual agent's size", () => {
   });
 });
 
-describe("a virtual agent's exposed ports", () => {
-  it("should expose and remove ports in any state, bump the generation each time, and claim the agent with them", async () => {
-    const { id } = await started(ALICE, "pcs-api");
+describe("PUT /api/virtual/{id}/ports", () => {
+  it("should store the ports the pod reports, bump the generation but not the pod generation, tell the owner, and claim the agent with them", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
     const before = await row(id);
-    actAs("alice");
     const listener = await connect();
     try {
       const payloads: string[] = [];
       listener.on("notification", (message) => payloads.push(message.payload ?? ""));
       await listener.query("LISTEN hub_events");
 
-      expect(await actions.exposePort(form({ id, port: "8080" }))).toEqual({ ok: true });
-      expect(await actions.exposePort(form({ id, port: "3000" }))).toEqual({ ok: true });
+      expect((await ports(id, token, { ports: [8080, 3000] })).status).toBe(204);
 
       await expect
         .poll(() => payloads.map((payload) => JSON.parse(payload)))
@@ -1764,72 +1769,144 @@ describe("a virtual agent's exposed ports", () => {
     } finally {
       await listener.end();
     }
-    expect(await row(id)).toMatchObject({ exposedPorts: [3000, 8080], generation: before.generation + 2 });
-    expect((await claim()).find((entry) => entry.id === id)).toMatchObject({ exposed_ports: [3000, 8080] });
-
-    expect(await actions.unexposePort(form({ id, port: "8080" }))).toEqual({ ok: true });
-    expect(await row(id)).toMatchObject({ exposedPorts: [3000], generation: before.generation + 3 });
+    expect(await row(id)).toMatchObject({
+      exposedPorts: [3000, 8080],
+      localOnlyPorts: [],
+      generation: before.generation + 1,
+      podGeneration: before.podGeneration
+    });
+    const claimed = (await claim()).find((entry) => entry.id === id);
+    expect(claimed).toMatchObject({ exposed_ports: [3000, 8080], generation: before.generation + 1, pod_generation: before.podGeneration });
+    expect(claimed?.launch_token).toBeUndefined();
   });
 
-  it("should show each port's URL under the configured domain on the owner's page", async () => {
-    vi.stubEnv("VIRTUAL_AGENT_PUBLIC_DOMAIN", "example.net");
-    const agent = await create(ALICE, "pcs-api");
-    await setExposedPort(prisma, ALICE.oid, agent.id, 5173, true);
+  it("should store loopback-only ports without bumping the generation when only they change", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    expect((await ports(id, token, { ports: [3000] })).status).toBe(204);
+    const before = await row(id);
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.card.exposedPorts).toEqual([
-      { port: 5173, url: `https://${agent.statefulsetName}-5173.example.net` }
-    ]);
+    expect((await ports(id, token, { ports: [3000], local_only: [5173, 3000] })).status).toBe(204);
+
+    expect(await row(id)).toMatchObject({ exposedPorts: [3000], localOnlyPorts: [5173], generation: before.generation, podGeneration: before.podGeneration });
   });
 
-  it("should refuse a port out of range, a port twice and a fourth port with a sentence the page shows", async () => {
-    const agent = await create(ALICE, "pcs-api");
-    actAs("alice");
+  it("should write nothing when the pod reports what is already stored", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    expect((await ports(id, token, { ports: [3000], local_only: [5173] })).status).toBe(204);
+    const before = await prisma.virtualAgent.findUniqueOrThrow({ where: { id } });
 
-    expect(await actions.exposePort(form({ id: agent.id, port: "80" }))).toEqual({ ok: false, error: "a port is a whole number from 1024 to 65535" });
-    for (const port of ["3000", "4000", "5000"]) {
-      expect(await actions.exposePort(form({ id: agent.id, port }))).toEqual({ ok: true });
+    expect((await ports(id, token, { ports: [3000], local_only: [5173] })).status).toBe(204);
+
+    expect(await prisma.virtualAgent.findUniqueOrThrow({ where: { id } })).toEqual(before);
+  });
+
+  it("should keep the pod generation through any number of port changes, so the orchestrator never restarts the pod for them", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    const before = await row(id);
+
+    for (const reported of [[3000], [3000, 8080], [], [5173]]) {
+      expect((await ports(id, token, { ports: reported })).status).toBe(204);
     }
-    expect(await actions.exposePort(form({ id: agent.id, port: "3000" }))).toEqual({ ok: false, error: "port 3000 is already exposed" });
-    expect(await actions.exposePort(form({ id: agent.id, port: "6000" }))).toMatchObject({ ok: false, error: expect.stringContaining("at most 3") });
-    expect((await row(agent.id)).exposedPorts).toEqual([3000, 4000, 5000]);
+
+    expect(await row(id)).toMatchObject({ generation: before.generation + 4, podGeneration: before.podGeneration, exposedPorts: [5173] });
   });
 
-  it("should refuse a stranger as if there were no such agent, and a deleted agent", async () => {
-    const agent = await create(ALICE, "pcs-api");
-    actAs("bob");
+  it("should forget the reported ports and move the pod generation when the owner or the sweep stops the agent", async () => {
+    const first = await started(ALICE, "first");
+    const second = await started(ALICE, "second");
+    for (const { id, token } of [first, second]) {
+      expect((await ports(id, token, { ports: [3000], local_only: [5173] })).status).toBe(204);
+    }
+    const before = [await row(first.id), await row(second.id)];
 
-    expect(await actions.exposePort(form({ id: agent.id, port: "3000" }))).toEqual({ ok: false, error: "no such virtual agent" });
-    expect(await actions.unexposePort(form({ id: "", port: "3000" }))).toEqual({ ok: false, error: "no virtual agent was named" });
-    await setDesired(prisma, ALICE.oid, agent.id, "deleted");
-    await expect(setExposedPort(prisma, ALICE.oid, agent.id, 3000, true)).rejects.toMatchObject({ status: 409 });
+    await setDesired(prisma, ALICE.oid, first.id, "stopped");
+    await stopVirtualAgents(prisma, [second.id], "idle", new Date());
+
+    for (const id of [first.id, second.id]) {
+      expect(await row(id)).toMatchObject({ desired: "stopped", exposedPorts: [], localOnlyPorts: [] });
+    }
+    expect([(await row(first.id)).podGeneration, (await row(second.id)).podGeneration]).toEqual(before.map((agent) => agent.podGeneration + 1));
   });
 
-  it("should leave the generation alone when a port that is not exposed is removed", async () => {
-    const agent = await create(ALICE, "pcs-api");
+  it("should take a report only with the agent's own launch token", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    const other = await started(ALICE, "other");
 
-    expect(await setExposedPort(prisma, ALICE.oid, agent.id, 3000, false)).toMatchObject({ generation: agent.generation, exposedPorts: [] });
+    expect((await ports(id, other.token, { ports: [3000] })).status).toBe(403);
+    const asPerson = await call(portsRoute.PUT, {
+      as: ALICE,
+      path: `/api/virtual/${id}/ports`,
+      params: { virtualAgentId: id },
+      method: "PUT",
+      body: { ports: [3000] }
+    });
+    expect(asPerson.status).toBe(403);
+    expect((await ports(id, `ahv_${"x".repeat(43)}`, { ports: [3000] })).status).toBe(401);
+    expect((await row(id)).exposedPorts).toEqual([]);
+  });
+
+  it("should refuse a report from a pod whose agent has been stopped, since its token is dropped", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+
+    expect((await ports(id, token, { ports: [3000] })).status).toBe(401);
+  });
+
+  it.each([
+    ["a port below 1024", { ports: [80] }],
+    ["a port twice", { ports: [3000, 3000] }],
+    ["11 ports", { ports: Array.from({ length: 11 }, (_unused, index) => 3000 + index) }],
+    ["a loopback-only port out of range", { ports: [], local_only: [70000] }]
+  ])("should refuse %s with 400", async (_label, body) => {
+    const { id, token } = await started(ALICE, "pcs-api");
+
+    expect((await ports(id, token, body)).status).toBe(400);
+    expect((await row(id)).exposedPorts).toEqual([]);
+  });
+
+  it("should answer 404 for an agent the hub no longer has", async () => {
+    await expect(reportPorts(prisma, "00000000-0000-4000-8000-000000000000", { ports: [3000], localOnly: [] })).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("should show each URL under the configured domain and the loopback-only ports to the owner, and nothing to a stranger", async () => {
+    vi.stubEnv("VIRTUAL_AGENT_PUBLIC_DOMAIN", "example.net");
+    const { id, token } = await started(ALICE, "pcs-api");
+    const agent = await row(id);
+    expect((await ports(id, token, { ports: [5173], local_only: [9229] })).status).toBe(204);
+
+    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.card).toMatchObject({
+      exposedPorts: [{ port: 5173, url: `https://${agent.statefulsetName}-5173.example.net` }],
+      localOnlyPorts: [9229]
+    });
+    expect(await virtualAgentDetail(prisma, BOB.oid, id)).toBeUndefined();
   });
 
   it("should refuse an unservable port list in the database too, whatever writes it", async () => {
     const agent = await create(ALICE, "pcs-api");
+    const ten = Array.from({ length: 10 }, (_unused, index) => 3000 + index);
 
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { exposedPorts: ten, localOnlyPorts: ten } });
     await expect(prisma.virtualAgent.update({ where: { id: agent.id }, data: { exposedPorts: [80] } })).rejects.toThrow(/virtual_agent_exposed_ports_check/);
-    await expect(prisma.virtualAgent.update({ where: { id: agent.id }, data: { exposedPorts: [3000, 4000, 5000, 6000] } })).rejects.toThrow(
+    await expect(prisma.virtualAgent.update({ where: { id: agent.id }, data: { exposedPorts: [...ten, 4000] } })).rejects.toThrow(
       /virtual_agent_exposed_ports_check/
+    );
+    await expect(prisma.virtualAgent.update({ where: { id: agent.id }, data: { localOnlyPorts: [22] } })).rejects.toThrow(
+      /virtual_agent_local_only_ports_check/
     );
   });
 
-  it("should refuse every port and size action when virtual agents are off", async () => {
+  it("should refuse the size action when virtual agents are off", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
     actAs("alice");
 
-    for (const result of [
-      await actions.exposePort(form({ id: "x", port: "3000" })),
-      await actions.unexposePort(form({ id: "x", port: "3000" })),
-      await actions.resizeVirtualAgent(form({ id: "x", size: "large" }))
-    ]) {
-      expect(result).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
-    }
+    expect(await actions.resizeVirtualAgent(form({ id: "x", size: "large" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+  });
+
+  it("should answer 404 when virtual agents are off", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
+
+    expect((await ports(id, token, { ports: [3000] })).status).toBe(404);
   });
 });
 
@@ -1952,11 +2029,11 @@ describe("signing in again", () => {
     expect(await readCredential(prisma, localStore(), ALICE.oid, "github")).toBeUndefined();
     expect(await prisma.credential.count({ where: { ownerOid: ALICE.oid, kind: "github" } })).toBe(0);
     const after = await row(id);
-    expect(after.generation).toBe(before.generation + 1);
+    expect([after.generation, after.podGeneration]).toEqual([before.generation + 1, before.podGeneration + 1]);
     expect(after).toMatchObject({ desired: "running", status: "provisioning", statusDetail: "restarting to sign in to GitHub again" });
     expect((await status(id, token, { phase: "running" })).status).toBe(401);
     const claimed = (await claim()).find((entry) => entry.id === id);
-    expect(claimed).toMatchObject({ generation: after.generation, desired: "running" });
+    expect(claimed).toMatchObject({ generation: after.generation, pod_generation: after.podGeneration, desired: "running" });
     expect(claimed?.launch_token).toBeDefined();
     expect((await status(id, claimed!.launch_token!, { phase: "awaiting_login" })).status).toBe(204);
   });

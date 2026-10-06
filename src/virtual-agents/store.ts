@@ -7,7 +7,7 @@ import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
 import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken, withoutLaunchTokens } from "./launch-token.ts";
 import { afterApplyError, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
 import { checkName, createRefusal } from "./limits.ts";
-import { checkPort, exposeRefusal, withoutPort, withPort } from "./ports.ts";
+import { normalisePorts, samePorts } from "./ports.ts";
 import { diskTtlDays, orchestratorLeaseSeconds } from "./settings.ts";
 import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
 import { announce, type StopReason } from "./stop.ts";
@@ -34,6 +34,8 @@ export interface VirtualAgentRow {
   modelRoute: ModelRoute;
   size: VirtualAgentSize;
   exposedPorts: number[];
+  localOnlyPorts: number[];
+  podGeneration: number;
   startedAt: Date;
   lastActiveAt: Date | null;
   stoppedAt: Date | null;
@@ -60,6 +62,8 @@ const SELECT = {
   modelRoute: true,
   size: true,
   exposedPorts: true,
+  localOnlyPorts: true,
+  podGeneration: true,
   startedAt: true,
   lastActiveAt: true,
   stoppedAt: true,
@@ -155,14 +159,21 @@ export async function listVirtualAgents(db: Database, ownerOid: string): Promise
 
 const NO_TOKEN = { launchTokenHash: null, launchTokenIssuedAt: null } as const;
 
+/** A pod that is shut down listens on nothing, so what it last reported would only list dead URLs. */
+const NO_PORTS = { exposedPorts: [], localOnlyPorts: [] } as const;
+
+/** A change the pod template carries, so the orchestrator applies the StatefulSet again. */
+const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1 } } as const;
+
 function statusChange(status: VirtualAgentStatus, now: Date) {
   return { status, statusDetail: null, statusChangedAt: now };
 }
 
 /**
- * What the owner asks for: start, stop or delete. Each bumps `generation`, so the orchestrator claims the agent and
- * applies it. Stopping or deleting drops the launch token at once, so the pod is shut out before it is shut down;
- * starting again clears the last stop and the disk's expiry, and the next claim mints a fresh token.
+ * What the owner asks for: start, stop or delete. Each bumps `generation` and `pod_generation`, so the orchestrator
+ * claims the agent and applies it. Stopping or deleting drops the launch token at once, so the pod is shut out before
+ * it is shut down, and its reported ports with it; starting again clears the last stop and the disk's expiry, and the
+ * next claim mints a fresh token.
  *
  * The status follows at once, `requested` on a start and `stopping` on a stop or delete (a stopped agent stays
  * `stopped`), so it never shows the last pod's state while the orchestrator has yet to apply the change, or cannot.
@@ -193,12 +204,12 @@ export async function setDesired(
       data = { startedAt: now, stoppedAt: null, stopReason: null, diskExpiresAt: null, diskDeletedAt: null, ...statusChange("requested", now) };
     } else {
       const settled = desired === "stopped" && row.status === "stopped";
-      data = { ...NO_TOKEN, ...(desired === "stopped" ? { stopReason: "user" } : {}), ...(settled ? {} : statusChange("stopping", now)) };
+      data = { ...NO_TOKEN, ...NO_PORTS, ...(desired === "stopped" ? { stopReason: "user" } : {}), ...(settled ? {} : statusChange("stopping", now)) };
     }
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
-        data: { ...data, desired, generation: { increment: 1 }, applyFailures: 0, updatedAt: now },
+        data: { ...data, desired, ...POD_CHANGE, applyFailures: 0, updatedAt: now },
         select: SELECT
       })
     );
@@ -240,8 +251,9 @@ export async function renameVirtualAgent(prisma: PrismaClient, actorOid: string,
 }
 
 /**
- * A new size, bumping `generation` so the orchestrator applies the StatefulSet again with its resources. Refused
- * while a pod may be running, per `sizeChangeRefusal`; someone other than the owner is told there is no such agent.
+ * A new size, bumping `generation` and `pod_generation` so the orchestrator applies the StatefulSet again with its
+ * resources. Refused while a pod may be running, per `sizeChangeRefusal`; someone other than the owner is told there
+ * is no such agent.
  */
 export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string, id: string, size: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
   const checked = checkSize(size);
@@ -260,50 +272,40 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
     if (row.size === checked.size) {
       return row;
     }
-    const updated = toRow(
-      await tx.virtualAgent.update({ where: { id }, data: { size: checked.size, generation: { increment: 1 }, updatedAt: now }, select: SELECT })
-    );
+    const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { size: checked.size, ...POD_CHANGE, updatedAt: now }, select: SELECT }));
     await announce(tx, id, row.ownerOid);
     return updated;
   });
 }
 
+export interface ReportedPorts {
+  ports: readonly number[];
+  localOnly: readonly number[];
+}
+
 /**
- * Exposes or stops exposing one of the agent's web ports, in any state but deleted, bumping `generation` so the
- * orchestrator applies its Service, Ingress and pod again. Someone other than the owner is told there is no such
- * agent.
+ * What the pod found listening, which only its own launch token can report. A change to `ports` bumps `generation`
+ * but not `pod_generation`, so the orchestrator applies the Service and Ingress and leaves the pod running. A port
+ * in both lists is taken as reachable. An unchanged report writes nothing and tells nobody.
  */
-export async function setExposedPort(
-  prisma: PrismaClient,
-  actorOid: string,
-  id: string,
-  port: unknown,
-  exposed: boolean,
-  now: Date = new Date()
-): Promise<VirtualAgentRow> {
-  const checked = checkPort(port);
-  if (!checked.ok) {
-    throw new HttpError(400, checked.error);
-  }
+export async function reportPorts(prisma: PrismaClient, id: string, report: ReportedPorts, now: Date = new Date()): Promise<VirtualAgentRow> {
+  const ports = normalisePorts(report.ports);
+  const localOnly = normalisePorts(report.localOnly).filter((port) => !ports.includes(port));
   return await prisma.$transaction(async (tx) => {
     const row = await lockVirtualAgent(tx, id);
-    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
+    if (row === undefined) {
       throw new HttpError(404, "no such virtual agent");
     }
-    if (row.desired === "deleted") {
-      throw new HttpError(409, "that virtual agent is being deleted");
-    }
-    if (exposed) {
-      const refusal = exposeRefusal(row.exposedPorts, checked.port);
-      if (refusal !== undefined) {
-        throw new HttpError(409, refusal);
-      }
-    } else if (!row.exposedPorts.includes(checked.port)) {
+    const exposedChanged = !samePorts(row.exposedPorts, ports);
+    if (!exposedChanged && samePorts(row.localOnlyPorts, localOnly)) {
       return row;
     }
-    const ports = exposed ? withPort(row.exposedPorts, checked.port) : withoutPort(row.exposedPorts, checked.port);
     const updated = toRow(
-      await tx.virtualAgent.update({ where: { id }, data: { exposedPorts: ports, generation: { increment: 1 }, updatedAt: now }, select: SELECT })
+      await tx.virtualAgent.update({
+        where: { id },
+        data: { exposedPorts: ports, localOnlyPorts: localOnly, ...(exposedChanged ? { generation: { increment: 1 } } : {}), updatedAt: now },
+        select: SELECT
+      })
     );
     await announce(tx, id, row.ownerOid);
     return updated;
@@ -311,10 +313,10 @@ export async function setExposedPort(
 }
 
 /**
- * Replaces a running agent's pod, so it boots again and fetches its owner's credentials afresh. The generation is
- * bumped, which the pod template carries, and the launch token dropped, so the old pod is shut out at once and the
- * next claim mints a token for the new one. An agent not meant to be running is left as it is: it boots afresh when
- * it next starts. Someone other than the owner is told there is no such agent.
+ * Replaces a running agent's pod, so it boots again and fetches its owner's credentials afresh. The generation and
+ * the pod generation the pod template carries are bumped, and the launch token dropped, so the old pod is shut out at
+ * once and the next claim mints a token for the new one. An agent not meant to be running is left as it is: it boots
+ * afresh when it next starts. Someone other than the owner is told there is no such agent.
  */
 export async function restartVirtualAgent(
   prisma: PrismaClient,
@@ -336,7 +338,7 @@ export async function restartVirtualAgent(
         where: { id },
         data: {
           ...NO_TOKEN,
-          generation: { increment: 1 },
+          ...POD_CHANGE,
           status: "provisioning",
           statusDetail: detail,
           ...(row.status === "provisioning" ? {} : { statusChangedAt: now }),
@@ -423,6 +425,7 @@ export async function moveTo(db: Database, row: VirtualAgentRow, phase: PodPhase
 export interface ClaimedVirtualAgent {
   id: string;
   generation: number;
+  pod_generation: number;
   desired: VirtualAgentDesired;
   statefulset_name: string;
   pvc_name: string;
@@ -443,6 +446,7 @@ const STARTING_FROM: readonly VirtualAgentStatus[] = ["requested", "stopping", "
 interface ClaimRow {
   id: string;
   generation: number;
+  pod_generation: number;
   desired: VirtualAgentDesired;
   status: VirtualAgentStatus;
   statefulset_name: string;
@@ -528,7 +532,7 @@ async function takeOver(db: Database, cluster: string, now: Date): Promise<void>
          FOR UPDATE SKIP LOCKED
     )
     UPDATE virtual_agent v
-       SET cluster = ${cluster}, generation = v.generation + 1, status = 'provisioning',
+       SET cluster = ${cluster}, generation = v.generation + 1, pod_generation = v.pod_generation + 1, status = 'provisioning',
            status_detail = 'moved from ' || moving.from_cluster || ' to ' || ${cluster} || '; starting on a fresh disk',
            status_changed_at = ${now}, launch_token_hash = NULL, launch_token_issued_at = NULL, claimed_by = NULL, claimed_at = NULL,
            updated_at = ${now}
@@ -579,7 +583,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
          SET claimed_by = ${cluster}, claimed_at = ${now}, cluster = ${cluster}
         FROM due
        WHERE v.id = due.id
-      RETURNING v.id::text AS id, v.generation, v.desired::text AS desired, v.status::text AS status, v.statefulset_name, v.pvc_name,
+      RETURNING v.id::text AS id, v.generation, v.pod_generation, v.desired::text AS desired, v.status::text AS status, v.statefulset_name, v.pvc_name,
                 v.model_route::text AS model_route, v.size::text AS size, v.exposed_ports, v.owner_oid, v.launch_token_hash IS NOT NULL AS has_token, v.apply_failures,
                 COALESCE(v.desired <> 'running' AND v.disk_expires_at <= ${now} AND v.disk_deleted_at IS NULL, false) AS disk_due
     `;
@@ -594,6 +598,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
       claimed.push({
         id: row.id,
         generation: row.generation,
+        pod_generation: row.pod_generation,
         desired: row.desired,
         statefulset_name: row.statefulset_name,
         pvc_name: row.pvc_name,

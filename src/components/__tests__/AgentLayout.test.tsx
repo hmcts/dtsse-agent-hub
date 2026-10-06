@@ -29,6 +29,7 @@ const CARD: VirtualAgentCard = {
   modelRoute: "bedrock",
   size: "small",
   exposedPorts: [],
+  localOnlyPorts: [],
   stopReason: null,
   lastActivityAt: null,
   stoppedAt: null,
@@ -77,7 +78,6 @@ const ACTIONS: VirtualAgentActions = {
   lifecycle: { start: ok(), stop: ok(), remove: ok() },
   rename: ok(),
   resize: ok(),
-  ports: { expose: ok(), unexpose: ok() },
   paste: ok(),
   reconnect: ok(),
   save: ok()
