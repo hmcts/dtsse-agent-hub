@@ -217,7 +217,12 @@ export function DirectComposer({
   }
 
   return (
-    <form onSubmit={submit} className="rounded-lg border border-hub-line bg-hub-pane focus-within:border-hub-muted" aria-label="Message this agent">
+    <form
+      method="post"
+      onSubmit={submit}
+      className="rounded-lg border border-hub-line bg-hub-pane focus-within:border-hub-muted"
+      aria-label="Message this agent"
+    >
       {status === "offline" ? (
         <p id={noteId} className="rounded-t-lg bg-hub-raised px-3 py-1.5 text-xs text-amber-300">
           {offlineNote(agentName)}

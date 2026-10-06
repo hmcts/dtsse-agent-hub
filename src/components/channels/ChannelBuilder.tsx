@@ -97,7 +97,7 @@ export function ChannelBuilder({
   const errors = check.ok ? {} : check.errors;
 
   return (
-    <form onSubmit={submit} className="space-y-5" aria-label="Build a channel">
+    <form method="post" onSubmit={submit} className="space-y-5" aria-label="Build a channel">
       <div className="space-y-2">
         <label htmlFor={`${ids}-search`} className="block text-sm font-medium text-hub-text">
           Topics <span className="text-hub-muted">(1 to {MAX_POST_TOPICS})</span>

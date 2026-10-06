@@ -48,3 +48,25 @@ export function safeReturnTo(value: string | null | undefined): string {
   }
   return value;
 }
+
+/** Query parameters that only a mistaken native form submit or a hand-edited link would put a secret in. */
+const SECRET_PARAMETERS = new Set(["value", "token", "code", "password", "secret"]);
+
+/** The OpenID Connect callback, whose authorisation `code` arrives in the query by design. */
+const CALLBACK_PATH = "/auth/callback";
+
+/**
+ * Whether a GET or HEAD carries what looks like a secret in its query string. The proxy answers one with a redirect
+ * to the bare path, so the page never renders the value into links, `redirect=` parameters or its own logs.
+ */
+export function carriesSecret(method: string, pathname: string, search: URLSearchParams): boolean {
+  if ((method !== "GET" && method !== "HEAD") || pathname === CALLBACK_PATH) {
+    return false;
+  }
+  for (const name of search.keys()) {
+    if (SECRET_PARAMETERS.has(name.toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
+}
