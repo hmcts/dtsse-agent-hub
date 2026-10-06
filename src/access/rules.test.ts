@@ -17,6 +17,7 @@ import {
   canUseCredentialRoutes,
   canViewAgent,
   canViewTranscript,
+  canVirtualAgentStoreCredential,
   type Grant,
   grantLevel,
   type MessageRef,
@@ -322,8 +323,22 @@ describe("canOwnerReadCredential", () => {
     expect(canOwnerReadCredential("bedrock")).toBe(true);
   });
 
-  it.each(["github", "azure", "claude", "Bedrock", ""])("should keep %j write-only when it is any other kind", (kind) => {
+  it("should let the owner read their CLAUDE.md back when the page shows it for editing", () => {
+    expect(canOwnerReadCredential("claude_md")).toBe(true);
+  });
+
+  it.each(["github", "azure", "claude", "jenkins", "Bedrock", "claude-md", ""])("should keep %j write-only when it is any other kind", (kind) => {
     expect(canOwnerReadCredential(kind)).toBe(false);
+  });
+});
+
+describe("canVirtualAgentStoreCredential", () => {
+  it.each(["github", "azure", "claude", "bedrock", "jenkins"])("should let a pod store its owner's %s when it is a credential the pod signs in for", (kind) => {
+    expect(canVirtualAgentStoreCredential(kind)).toBe(true);
+  });
+
+  it("should refuse a pod when it would change its owner's CLAUDE.md", () => {
+    expect(canVirtualAgentStoreCredential("claude_md")).toBe(false);
   });
 });
 
