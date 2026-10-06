@@ -6,7 +6,7 @@ import { credentialBackend } from "@/credentials/backend";
 import { isCredentialKind } from "@/credentials/names";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
-import { isSignInKind, reconnectSignIn as reconnect, storePastedCode } from "@/virtual-agents/logins";
+import { isSignInKind, reconnectSignIn as reconnect, SIGN_IN_TITLES, storePastedCode } from "@/virtual-agents/logins";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { createVirtualAgent as create, renameVirtualAgent as rename, setDesired, setVirtualAgentSize } from "@/virtual-agents/store";
 import { type ActionResult, runAction, text } from "@/web/action";
@@ -126,8 +126,9 @@ export async function pasteLoginCode(form: FormData): Promise<ActionResult<{ con
 }
 
 /**
- * Signs the owner in to GitHub or Azure again: their stored credential goes, and the agent, if running, restarts so
- * its pod relays a fresh sign-in. The credential is the owner's, so their other virtual agents lose it too.
+ * Signs the owner in to GitHub, Azure or Atlassian again: their stored credential goes, and the agent, if running,
+ * restarts so its pod relays a fresh sign-in. The credential is the owner's, so their other virtual agents lose it
+ * too.
  */
 export async function reconnectSignIn(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
   return await runAction<{ confirmation: string }>("reconnect sign-in", async () => {
@@ -147,7 +148,7 @@ export async function reconnectSignIn(form: FormData): Promise<ActionResult<{ co
     const row = await reconnect(prisma, backend.store, viewer.oid, id, kind);
     revalidate(id);
     revalidatePath("/settings/credentials");
-    const title = kind === "github" ? "GitHub" : "Azure";
+    const title = SIGN_IN_TITLES[kind];
     return {
       ok: true,
       confirmation:

@@ -348,6 +348,7 @@ describe("canOwnerReadCredential", () => {
     "azure",
     "claude",
     "jenkins",
+    "atlassian",
     "Bedrock",
     "claude-md",
     "git-identity",
@@ -358,7 +359,14 @@ describe("canOwnerReadCredential", () => {
 });
 
 describe("canVirtualAgentStoreCredential", () => {
-  it.each(["github", "azure", "claude", "bedrock", "jenkins"])("should let a pod store its owner's %s when it is a credential the pod signs in for", (kind) => {
+  it.each([
+    "github",
+    "azure",
+    "claude",
+    "bedrock",
+    "jenkins",
+    "atlassian"
+  ])("should let a pod store its owner's %s when it is a credential the pod signs in for", (kind) => {
     expect(canVirtualAgentStoreCredential(kind)).toBe(true);
   });
 

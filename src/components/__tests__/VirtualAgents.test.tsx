@@ -488,6 +488,57 @@ describe("the optional Jenkins API token", () => {
   });
 });
 
+describe("the optional Atlassian sign-in", () => {
+  it("should come after the needed sign-ins with no box to paste into and say what it is for when it is not stored yet", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["github"]}
+        optional={["jenkins", "atlassian"]}
+        statuses={[stored("github")]}
+        logins={[]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    const items = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem");
+    expect(items.map((item) => item.querySelector("h3")?.textContent)).toEqual(["GitHub", "Jenkins API token", "Atlassian (Jira & Confluence)"]);
+    expect(screen.getByText("1 of 3 stored")).toBeTruthy();
+    const atlassian = items[2]!;
+    expect(atlassian.textContent).toContain("Optional");
+    expect(atlassian.textContent).toContain("twg");
+    expect(atlassian.textContent).toContain("Waiting for your virtual agent to ask");
+    expect(within(atlassian).getByRole("link", { name: "hmcts.atlassian.net" }).getAttribute("href")).toBe("https://hmcts.atlassian.net");
+    expect(within(atlassian).queryByRole("form")).toBeNull();
+  });
+
+  it("should show its device code when the agent has relayed one", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["github"]}
+        optional={["atlassian"]}
+        statuses={[stored("github")]}
+        logins={[login({ kind: "atlassian", userCode: "WXYZ-9876", verificationUri: "https://auth.atlassian.com/activate" })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    const atlassian = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem")[1]!;
+    expect(atlassian.textContent).toContain("Sign-in waiting for you");
+    expect(within(atlassian).getByRole("link", { name: "https://auth.atlassian.com/activate" })).toBeTruthy();
+    expect(atlassian.textContent).toContain("WXYZ-9876");
+  });
+});
+
 function login(overrides: Partial<LoginView> = {}): LoginView {
   return {
     kind: "github",
@@ -770,7 +821,8 @@ describe("OnboardingChecklist", () => {
 
   it.each([
     ["github", "GitHub"],
-    ["azure", "Azure"]
+    ["azure", "Azure"],
+    ["atlassian", "Atlassian (Jira & Confluence)"]
   ] as const)("should show a stored %s sign-in as connected with a reconnect button rather than a form when it is stored", (kind, title) => {
     render(
       <OnboardingChecklist

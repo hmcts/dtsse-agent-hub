@@ -61,6 +61,7 @@ enum CredentialKind {
   jenkins
   claude_md
   git_identity
+  atlassian
 
   @@map("credential_kind")
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { AtlassianHint } from "@/components/credentials/AtlassianHint";
 import { JenkinsHint } from "@/components/credentials/JenkinsHint";
 import { Section } from "@/components/Section";
 import { PencilIcon, ReconnectIcon } from "@/components/sidebar/icons";
@@ -18,10 +19,11 @@ const TITLES: Record<CredentialKind, string> = {
   bedrock: "Bedrock API key",
   jenkins: "Jenkins API token",
   claude_md: "CLAUDE.md",
-  git_identity: "Git identity"
+  git_identity: "Git identity",
+  atlassian: "Atlassian (Jira & Confluence)"
 };
 
-/** The kinds the owner can paste here; GitHub and Azure come only from the virtual agent's own sign-in. */
+/** The kinds the owner can paste here; GitHub, Azure and Atlassian come only from the virtual agent's own sign-in. */
 function isPasted(kind: CredentialKind): boolean {
   return kind === "bedrock" || kind === "jenkins" || kind === "claude";
 }
@@ -225,11 +227,14 @@ function Card({
     body = <PastedCard kind={kind} stored={stored} save={save} />;
   } else {
     body = (
-      <Header kind={kind} detail={stored ? "✓ Connected" : "Waiting for your virtual agent to ask"} ticked={stored}>
-        {stored && desired !== "deleted" ? (
-          <Reconnect virtualAgentId={virtualAgentId} kind={kind} running={desired === "running"} reconnect={reconnect} />
-        ) : null}
-      </Header>
+      <>
+        <Header kind={kind} detail={stored ? "✓ Connected" : "Waiting for your virtual agent to ask"} ticked={stored}>
+          {stored && desired !== "deleted" ? (
+            <Reconnect virtualAgentId={virtualAgentId} kind={kind} running={desired === "running"} reconnect={reconnect} />
+          ) : null}
+        </Header>
+        {kind === "atlassian" ? <AtlassianHint /> : null}
+      </>
     );
   }
   return (
@@ -247,8 +252,8 @@ function Card({
 /**
  * What the virtual agent needs before it can work, one card per credential: stored, a sign-in waiting for the owner
  * with its code or a box to paste one into, or nothing yet. A key the owner pastes (Bedrock, Claude, the optional
- * Jenkins token) offers its box until it is stored; GitHub and Azure come from the agent's own sign-in, which the
- * owner can have it do again. Only the owner ever sees this page.
+ * Jenkins token) offers its box until it is stored; GitHub, Azure and the optional Atlassian come from the agent's own
+ * sign-in, which the owner can have it do again. Only the owner ever sees this page.
  */
 export function OnboardingChecklist({
   virtualAgentId,

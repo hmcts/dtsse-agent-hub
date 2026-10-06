@@ -10,9 +10,9 @@ import { announce } from "./stop.ts";
 import { findVirtualAgent, moveTo, restartVirtualAgent, type VirtualAgentRow } from "./store.ts";
 
 /**
- * The logins a pod relays to its owner: a device code to enter at a URL (GitHub, Azure), or a URL whose page gives
- * the owner a code to paste back (`claude setup-token`). The owner alone sees them; the pod fetches a pasted code
- * once, and the hub forgets it.
+ * The logins a pod relays to its owner: a device code to enter at a URL (GitHub, Azure, Atlassian), or a URL whose
+ * page gives the owner a code to paste back (`claude setup-token`). The owner alone sees them; the pod fetches a
+ * pasted code once, and the hub forgets it.
  */
 
 export type LoginPrompt = "device_code" | "paste_code";
@@ -171,7 +171,8 @@ export interface LoginCompletion {
 /**
  * The pod's word that a login finished. An Azure login must be the owner's own account: anything else is a sign-in
  * as someone else, so the token cache it produced is deleted, the agent is failed and the login with it, and the
- * pod is answered 409. A GitHub or Claude login is simply marked done.
+ * pod is answered 409. A GitHub, Claude or Atlassian login is simply marked done: an Atlassian account other than the
+ * owner's own may be the one they mean their agents to use.
  */
 export async function completeLogin(
   prisma: PrismaClient,
@@ -214,11 +215,16 @@ export async function completeLogin(
 }
 
 /** The kinds a virtual agent signs in to itself, relaying a device code to its owner, rather than being pasted. */
-export type SignInKind = "github" | "azure";
+export const SIGN_IN_KINDS = ["github", "azure", "atlassian"] as const satisfies readonly CredentialKind[];
+
+export type SignInKind = (typeof SIGN_IN_KINDS)[number];
 
 export function isSignInKind(kind: string): kind is SignInKind {
-  return kind === "github" || kind === "azure";
+  return (SIGN_IN_KINDS as readonly string[]).includes(kind);
 }
+
+/** What the owner is told they are signing in to again. */
+export const SIGN_IN_TITLES: Record<SignInKind, string> = { github: "GitHub", azure: "Azure", atlassian: "Atlassian" };
 
 /**
  * The owner's request to sign in to `kind` again: their stored credential is deleted and the virtual agent, if it is
@@ -241,7 +247,7 @@ export async function reconnectSignIn(
     throw new HttpError(409, "that virtual agent is being deleted");
   }
   await deleteCredential(prisma, store, { actorOid, ownerOid: virtualAgent.ownerOid, kind });
-  return await restartVirtualAgent(prisma, actorOid, virtualAgentId, `restarting to sign in to ${kind === "github" ? "GitHub" : "Azure"} again`, now);
+  return await restartVirtualAgent(prisma, actorOid, virtualAgentId, `restarting to sign in to ${SIGN_IN_TITLES[kind]} again`, now);
 }
 
 export interface LoginView {

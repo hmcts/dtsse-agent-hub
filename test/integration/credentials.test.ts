@@ -33,6 +33,7 @@ const GITHUB_AGAIN = `ghp_${"Z9y8".repeat(9)}`;
 const CLAUDE = `sk-ant-oat01-${"Qw_-".repeat(12)}`;
 const BEDROCK = `ABSK${"QmVkcm9ja0FQSUtleS1leGFtcGxl".repeat(4)}`;
 const JENKINS = "11a2b3c4d5e6f708192a3b4c5d6e7f8091";
+const ATLASSIAN = "user=alice@justice.gov.uk\ntoken=oauth-managed\noauth-refresh-token=refresh-0123456789abcdef";
 const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
 
 function azureCacheFor(oid: string): string {
@@ -299,8 +300,14 @@ describe("reading credentials back", () => {
     expect((await read(BOB, "bedrock")).status).toBe(404);
   });
 
-  it.each(["github", "azure", "claude", "jenkins"])("should answer 405 and never the value when the owner asks for their stored %s", async (kind) => {
-    const values: Record<string, string> = { github: GITHUB, azure: AZURE, claude: CLAUDE, jenkins: JENKINS };
+  it.each([
+    "github",
+    "azure",
+    "claude",
+    "jenkins",
+    "atlassian"
+  ])("should answer 405 and never the value when the owner asks for their stored %s", async (kind) => {
+    const values: Record<string, string> = { github: GITHUB, azure: AZURE, claude: CLAUDE, jenkins: JENKINS, atlassian: ATLASSIAN };
     expect((await put(ALICE, kind, { value: values[kind] })).status).toBe(204);
 
     const response = await read(ALICE, kind);
@@ -328,7 +335,8 @@ describe("reading credentials back", () => {
       ["bedrock", false],
       ["jenkins", false],
       ["claude_md", false],
-      ["git_identity", false]
+      ["git_identity", false],
+      ["atlassian", false]
     ]);
     expect(JSON.stringify(statuses)).not.toContain(GITHUB);
     expect(JSON.stringify(statuses)).not.toContain(AZURE);
@@ -645,7 +653,7 @@ describe("a CLAUDE.md", () => {
 
     const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" });
 
-    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "bedrock", "jenkins"]);
+    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "bedrock", "jenkins", "atlassian"]);
   });
 
   it("should not be pasteable as an ordinary credential when the credentials form names it", async () => {
@@ -770,7 +778,7 @@ describe("a git identity", () => {
 
     const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" });
 
-    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "bedrock", "jenkins"]);
+    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "bedrock", "jenkins", "atlassian"]);
   });
 
   it("should not be pasteable as an ordinary credential when the credentials form names it", async () => {

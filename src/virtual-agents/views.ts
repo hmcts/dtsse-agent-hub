@@ -91,8 +91,11 @@ export async function virtualAgentCards(db: Database, ownerOid: string): Promise
   return rows.map((row) => toCard(row, newest));
 }
 
-/** A Jenkins API token only adds the Jenkins tools, so the pod never waits for one. */
-export const OPTIONAL_CREDENTIALS: CredentialKind[] = ["jenkins"];
+/**
+ * A Jenkins API token only adds the Jenkins tools, and an Atlassian sign-in only the `twg` CLI for Jira and
+ * Confluence, so the pod never waits for either.
+ */
+export const OPTIONAL_CREDENTIALS: CredentialKind[] = ["jenkins", "atlassian"];
 
 export function neededCredentials(route: ModelRoute): CredentialKind[] {
   return route === "own-licence" ? ["github", "azure", "claude"] : ["github", "azure", "bedrock"];

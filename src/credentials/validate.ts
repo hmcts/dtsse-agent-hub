@@ -37,6 +37,15 @@ const NOT_JENKINS: readonly (readonly [RegExp, string])[] = [
   [/^(AKIA|ASIA)[A-Z0-9]{16}$/, "that is an AWS access key id, not a Jenkins API token"]
 ];
 
+/** Tokens pasted or sent by mistake for a `twg` sign-in. */
+const NOT_ATLASSIAN: readonly (readonly [RegExp, string])[] = [
+  [/^(gh[a-z]_|github_pat_)/, "that is a GitHub token, not an Atlassian twg sign-in"],
+  [/^sk-ant-/, "that is a Claude token, not an Atlassian twg sign-in"]
+];
+
+/** One setting of `twg`'s `auth.conf`. Its keys are lowercase words joined by hyphens, such as `oauth-refresh-token`. */
+const AUTH_CONF_LINE = /^([a-z0-9-]+)=(.*)$/;
+
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export type CheckedCredential = { ok: true; value: string; accountLabel: string | null } | { ok: false; error: string };
@@ -48,7 +57,8 @@ const LABELS: Record<CredentialKind, string> = {
   bedrock: "an Amazon Bedrock API key",
   jenkins: "a Jenkins API token",
   claude_md: "your CLAUDE.md",
-  git_identity: "a git identity"
+  git_identity: "a git identity",
+  atlassian: "an Atlassian twg sign-in"
 };
 
 /** The username of the first account an MSAL token cache holds, as the `az` login it came from shows it. */
@@ -161,7 +171,37 @@ export function checkCredential(kind: CredentialKind, raw: unknown): CheckedCred
       return checkJenkinsToken(value);
     case "azure":
       return checkAzureCache(value);
+    case "atlassian":
+      return checkAtlassianAuth(value);
   }
+}
+
+/**
+ * `twg`'s `auth.conf` as the pod sends it, without its short-lived access token: `#` comments and `key=value` lines,
+ * which must include the refresh token `twg` signs in again with. Any site and any account are accepted, because
+ * which Atlassian account an agent uses is its owner's choice; the account becomes the label, from `user=`.
+ */
+function checkAtlassianAuth(value: string): CheckedCredential {
+  const mistake = NOT_ATLASSIAN.find(([shape]) => shape.test(value));
+  if (mistake !== undefined) {
+    return { ok: false, error: mistake[1] };
+  }
+  const settings = new Map<string, string>();
+  for (const [index, raw] of value.split(/\r?\n/).entries()) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) {
+      continue;
+    }
+    const setting = AUTH_CONF_LINE.exec(line);
+    if (setting === null) {
+      return { ok: false, error: `that is not a twg auth.conf: line ${index + 1} is not a key=value setting or a # comment` };
+    }
+    settings.set(setting[1] as string, (setting[2] as string).trim());
+  }
+  if (!settings.get("oauth-refresh-token")) {
+    return { ok: false, error: "that twg auth.conf has no oauth-refresh-token: sign in to twg with OAuth again" };
+  }
+  return { ok: true, value, accountLabel: settings.get("user") || null };
 }
 
 function checkBedrockKey(value: string): CheckedCredential {
