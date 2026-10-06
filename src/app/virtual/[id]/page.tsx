@@ -1,16 +1,7 @@
 import { notFound } from "next/navigation";
 import { saveCredential } from "@/app/_actions/credentials";
 import { sendDirect } from "@/app/_actions/direct";
-import {
-  deleteVirtualAgent,
-  exposePort,
-  pasteLoginCode,
-  renameVirtualAgent,
-  resizeVirtualAgent,
-  startVirtualAgent,
-  stopVirtualAgent,
-  unexposePort
-} from "@/app/_actions/virtual-agents";
+import { deleteVirtualAgent, pasteLoginCode, renameVirtualAgent, resizeVirtualAgent, startVirtualAgent, stopVirtualAgent } from "@/app/_actions/virtual-agents";
 import { Conversation } from "@/components/agents/Conversation";
 import { EmptyState } from "@/components/EmptyState";
 import { PaneHeader } from "@/components/Pane";
@@ -52,7 +43,7 @@ export default async function VirtualAgentPage({ params }: { params: Promise<{ i
       {agent.desired === "stopped" ? <DiskNotice agent={agent} now={now} /> : null}
       <RenameVirtualAgent agent={agent} rename={renameVirtualAgent} />
       <SizePanel agent={agent} resize={resizeVirtualAgent} />
-      <PortsPanel agent={agent} actions={{ expose: exposePort, unexpose: unexposePort }} />
+      <PortsPanel agent={agent} />
       <OnboardingChecklist
         virtualAgentId={agent.id}
         needed={detail.needed}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ClaimedAgent } from "./hub.ts";
 import type { StatefulSet } from "./kube.ts";
-import { carriedOver, exposedPorts, ingress, podName, resources, service, statefulSet } from "./manifests.ts";
+import { carriedOver, exposedPorts, ingress, podGeneration, podName, resources, runsPodOf, service, statefulSet } from "./manifests.ts";
 import type { VirtualAgentSpec } from "./settings.ts";
 
 const ID = "0f8a6a1e-1234-4000-8000-000000000001";
@@ -129,6 +129,7 @@ describe("statefulSet", () => {
       { name: "AZURE_TENANT_ID", value: "tenant" },
       { name: "DISABLE_AUTOUPDATER", value: "1" },
       { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
+      { name: "VIRTUAL_AGENT_PUBLIC_DOMAIN", value: "preview.platform.hmcts.net" },
       { name: "AGENT_HUB_LAUNCH_TOKEN", value: TOKEN }
     ]);
   });
@@ -236,18 +237,15 @@ describe("exposed ports", () => {
     expect(exposedPorts({ exposed_ports: [3000] })).toEqual([3000]);
   });
 
-  it("should give the pod each port's public URL when it exposes ports", () => {
-    const [container] = podSpec(statefulSet(EXPOSED, SPEC, TOKEN)).containers;
-
-    expect(container!.env.at(-1)).toEqual({
-      name: "AGENT_HUB_PUBLIC_URLS",
-      value: "3000=https://va-0f8a6a1e-3000.preview.platform.hmcts.net,8080=https://va-0f8a6a1e-8080.preview.platform.hmcts.net"
-    });
+  it("should build the same StatefulSet whatever ports the pod reports, so a change of ports never restarts it", () => {
+    expect(statefulSet(EXPOSED, SPEC, TOKEN)).toEqual(statefulSet(AGENT, SPEC, TOKEN));
+    expect(statefulSet({ ...EXPOSED, generation: 4, pod_generation: 3 }, SPEC, TOKEN)).toEqual(statefulSet({ ...AGENT, generation: 3 }, SPEC, TOKEN));
   });
 
-  it("should give the pod no public URLs when it exposes no ports", () => {
-    const [container] = podSpec(statefulSet(AGENT, SPEC, TOKEN)).containers;
+  it("should give the pod its public domain and no per-port URLs when it reports ports", () => {
+    const [container] = podSpec(statefulSet(EXPOSED, { ...SPEC, publicDomain: "example.net" }, TOKEN)).containers;
 
+    expect(container!.env).toContainEqual({ name: "VIRTUAL_AGENT_PUBLIC_DOMAIN", value: "example.net" });
     expect(container!.env.map((entry) => entry.name)).not.toContain("AGENT_HUB_PUBLIC_URLS");
   });
 
@@ -280,5 +278,46 @@ describe("exposed ports", () => {
         }))
       }
     });
+  });
+});
+
+describe("podGeneration", () => {
+  it("should be the claim's pod generation when it carries one", () => {
+    expect(podGeneration({ generation: 7, pod_generation: 5 })).toBe(5);
+  });
+
+  it("should be the generation when the claim carries no pod generation", () => {
+    expect(podGeneration({ generation: 7 })).toBe(7);
+  });
+
+  it("should stamp the pod template with the pod generation rather than the generation", () => {
+    const set = statefulSet({ ...AGENT, generation: 7, pod_generation: 5 }, SPEC, TOKEN);
+
+    expect(set.spec).toMatchObject({ template: { metadata: { annotations: { "agent-hub.hmcts.net/generation": "5" } } } });
+  });
+});
+
+describe("runsPodOf", () => {
+  const RUNNING = statefulSet({ ...AGENT, pod_generation: 2 }, SPEC, TOKEN);
+
+  it("should be true when one replica runs a template stamped with the claim's pod generation", () => {
+    expect(runsPodOf(RUNNING, { generation: 9, pod_generation: 2 })).toBe(true);
+  });
+
+  it("should be false when the template carries another pod generation", () => {
+    expect(runsPodOf(RUNNING, { generation: 9, pod_generation: 3 })).toBe(false);
+  });
+
+  it("should be false when the StatefulSet is scaled to zero", () => {
+    expect(runsPodOf(statefulSet({ ...AGENT, desired: "stopped", pod_generation: 2 }, SPEC, TOKEN), { generation: 9, pod_generation: 2 })).toBe(false);
+  });
+
+  it("should be false when there is no StatefulSet", () => {
+    expect(runsPodOf(null, { generation: 2 })).toBe(false);
+  });
+
+  it("should be false when the StatefulSet has no template annotations", () => {
+    expect(runsPodOf(statefulSetWith({ replicas: 1, template: {} }), { generation: 1 })).toBe(false);
+    expect(runsPodOf(statefulSetWith(undefined), { generation: 1 })).toBe(false);
   });
 });

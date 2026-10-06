@@ -36,7 +36,7 @@ export interface VirtualAgentSpec {
   storageClass: string | null;
   /** Extra `/etc/hosts` entries for the pod, grouped by address. */
   hostAliases: HostAlias[];
-  /** Each exposed port's Ingress host is `<statefulset>-<port>.<publicDomain>`. */
+  /** Each reported port's Ingress host is `<statefulset>-<port>.<publicDomain>`, and the pod is given it to work its URLs out. */
   publicDomain: string;
 }
 

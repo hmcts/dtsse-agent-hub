@@ -786,6 +786,50 @@ describe("exposed ports", () => {
     ]);
   });
 
+  it("should apply the Service and the Ingress without applying the StatefulSet again when only a running agent's ports change", async () => {
+    const t = setup([[agent({ launch_token: "ahv_new" })], [agent({ ...PORTS, generation: 2, pod_generation: 1 })]]);
+    await t.pass();
+    const running = t.store.statefulsets.get(STS);
+
+    expect(await t.pass()).toMatchObject({ claimed: 1, errors: 0 });
+
+    expect(t.calls.filter((call) => call === `apply statefulsets ${STS}`)).toHaveLength(1);
+    expect(t.store.statefulsets.get(STS)).toBe(running);
+    expect(t.store.services.get(STS)).toEqual(service(agent(PORTS), SETTINGS.agent));
+    expect(t.store.ingresses.get(STS)).toEqual(ingress(agent(PORTS), SETTINGS.agent));
+  });
+
+  it("should keep the pod and change nothing when a running agent is claimed again with the same ports", async () => {
+    const t = setup([[agent({ ...PORTS, launch_token: "ahv_new" })], [agent({ ...PORTS, generation: 2, pod_generation: 1 })]]);
+    await t.pass();
+    const before = structuredClone({ sts: t.store.statefulsets.get(STS), service: t.store.services.get(STS), ingress: t.store.ingresses.get(STS) });
+
+    await t.pass();
+
+    expect(t.calls.filter((call) => call.startsWith("apply statefulsets"))).toHaveLength(1);
+    expect(t.calls.some((call) => call.startsWith("delete ") || call.startsWith("scale "))).toBe(false);
+    expect({ sts: t.store.statefulsets.get(STS), service: t.store.services.get(STS), ingress: t.store.ingresses.get(STS) }).toEqual(before);
+  });
+
+  it("should apply the StatefulSet again when the claim moves the pod generation", async () => {
+    const t = setup([[agent({ launch_token: "ahv_new" })], [agent({ generation: 2, pod_generation: 2 })]]);
+    await t.pass();
+
+    await t.pass();
+
+    expect(t.calls.filter((call) => call === `apply statefulsets ${STS}`)).toHaveLength(2);
+    expect(envOf(t.store.statefulsets.get(STS)).AGENT_HUB_LAUNCH_TOKEN).toBe("ahv_new");
+  });
+
+  it("should apply the StatefulSet again when the claim mints a token, whatever its pod generation", async () => {
+    const t = setup([[agent({ launch_token: "ahv_first" })], [agent({ pod_generation: 1, launch_token: "ahv_second" })]]);
+    await t.pass();
+
+    await t.pass();
+
+    expect(envOf(t.store.statefulsets.get(STS)).AGENT_HUB_LAUNCH_TOKEN).toBe("ahv_second");
+  });
+
   it("should delete nothing when an agent that never exposed ports exposes none", async () => {
     const t = setup([[agent({ launch_token: "ahv_new" })]]);
 

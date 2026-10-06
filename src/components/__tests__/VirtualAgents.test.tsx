@@ -45,6 +45,7 @@ function card(overrides: Partial<VirtualAgentCard> = {}): VirtualAgentCard {
     modelRoute: "bedrock",
     size: "small",
     exposedPorts: [],
+    localOnlyPorts: [],
     stopReason: null,
     lastActivityAt: "2026-10-05T10:55:00.000Z",
     stoppedAt: null,
@@ -352,50 +353,53 @@ describe("the size choice", () => {
 
 describe("PortsPanel", () => {
   const URL_3000 = "https://va-0f8a6a1e-3000.preview.platform.hmcts.net";
+  const URL_8080 = "https://va-0f8a6a1e-8080.preview.platform.hmcts.net";
 
-  function actions() {
-    return { expose: ok(), unexpose: ok() };
-  }
+  it("should say no web servers are running and offer no form when the pod reports none", () => {
+    render(<PortsPanel agent={card()} />);
 
-  it("should warn who can open the URLs and offer to expose a port when there are none", async () => {
-    const given = actions();
-    render(<PortsPanel agent={card()} actions={given} />);
-
-    expect(screen.getByRole("note").textContent).toBe("Anyone on the HMCTS VPN can open these URLs. Servers must listen on 0.0.0.0.");
-    expect(screen.queryByRole("list", { name: "Exposed ports" })).toBeNull();
-    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "3000" } });
-    await act(async () => {
-      fireEvent.submit(screen.getByRole("form", { name: "Expose a port" }));
-    });
-
-    const sent = (given.expose.mock.calls[0] as unknown as [FormData])[0];
-    expect([sent.get("id"), sent.get("port")]).toEqual([card().id, "3000"]);
+    expect(screen.getByText("No web servers running")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Web server URLs" })).toBeNull();
+    expect(screen.queryByRole("form")).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("should link each exposed port at its URL and remove the one asked for", async () => {
-    const given = actions();
-    render(<PortsPanel agent={card({ exposedPorts: [{ port: 3000, url: URL_3000 }] })} actions={given} />);
+  it("should link each detected port at its URL when the pod reports some", () => {
+    render(
+      <PortsPanel
+        agent={card({
+          exposedPorts: [
+            { port: 3000, url: URL_3000 },
+            { port: 8080, url: URL_8080 }
+          ]
+        })}
+      />
+    );
 
-    const link = within(screen.getByRole("list", { name: "Exposed ports" })).getByRole("link", { name: URL_3000 });
-    expect(link.getAttribute("href")).toBe(URL_3000);
-    expect(link.getAttribute("rel")).toContain("noopener");
-    await act(async () => {
-      fireEvent.submit(screen.getByRole("form", { name: "Stop exposing port 3000" }));
-    });
-
-    expect((given.unexpose.mock.calls[0] as unknown as [FormData])[0].get("port")).toBe("3000");
+    const links = within(screen.getByRole("list", { name: "Web server URLs" })).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([URL_3000, URL_8080]);
+    expect(links[0]!.getAttribute("rel")).toContain("noopener");
+    expect(screen.queryByText("No web servers running")).toBeNull();
   });
 
-  it("should offer no more ports when three are exposed", () => {
-    const exposedPorts = [3000, 4000, 5000].map((port) => ({ port, url: `https://va-x-${port}.example.net` }));
-    render(<PortsPanel agent={card({ exposedPorts })} actions={actions()} />);
+  it("should not say who can open the URLs or how servers must listen when there are URLs", () => {
+    render(<PortsPanel agent={card({ exposedPorts: [{ port: 3000, url: URL_3000 }] })} />);
 
-    expect(screen.queryByRole("form", { name: "Expose a port" })).toBeNull();
-    expect(screen.getByText("3 of 3")).toBeTruthy();
+    expect(screen.queryByRole("note")).toBeNull();
+    expect(document.body.textContent).not.toContain("HMCTS VPN");
+    expect(document.body.textContent).not.toContain("Servers must listen on 0.0.0.0");
+  });
+
+  it("should say how to open each port that is listening on loopback only when the pod reports some", () => {
+    render(<PortsPanel agent={card({ exposedPorts: [{ port: 3000, url: URL_3000 }], localOnlyPorts: [5173] })} />);
+
+    expect(within(screen.getByRole("list", { name: "Ports listening on 127.0.0.1 only" })).getByRole("listitem").textContent).toBe(
+      "port 5173 is listening on 127.0.0.1 only — start it on 0.0.0.0 to open it here"
+    );
   });
 
   it("should show nothing when the agent is being deleted", () => {
-    const { container } = render(<PortsPanel agent={card({ desired: "deleted" })} actions={actions()} />);
+    const { container } = render(<PortsPanel agent={card({ desired: "deleted" })} />);
 
     expect(container.textContent).toBe("");
   });
