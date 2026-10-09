@@ -38,6 +38,7 @@ import {
   reportPorts,
   reportStatus,
   setDesired,
+  setVirtualAgentPlugins,
   setVirtualAgentSize,
   type VirtualAgentRow
 } from "../../src/virtual-agents/store.ts";
@@ -318,6 +319,7 @@ describe("POST /api/orchestrator/claim", () => {
       model_route: "own_licence",
       size: "small",
       exposed_ports: [],
+      plugins: [],
       owner: { oid: ALICE.oid },
       launch_token: expect.stringMatching(/^ahv_[A-Za-z0-9_-]{43}$/)
     });
@@ -1804,6 +1806,146 @@ describe("a virtual agent's size", () => {
     const agent = await create(ALICE, "pcs-api");
 
     expect(await setVirtualAgentSize(prisma, ALICE.oid, agent.id, "small")).toMatchObject({ generation: agent.generation });
+  });
+});
+
+describe("a virtual agent's plugins", () => {
+  const OFFERED = "pcs=PCS team workflows,dtsse=DTSSE docs,wa";
+
+  /** A form as the plugin checkboxes send it: one `plugins` field per ticked box. */
+  function ticked(values: Record<string, string>, plugins: readonly string[]): FormData {
+    const data = form(values);
+    for (const name of plugins) {
+      data.append("plugins", name);
+    }
+    return data;
+  }
+
+  async function createWith(plugins: readonly string[]): Promise<VirtualAgentRow> {
+    await insertUser(ALICE);
+    return await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "pcs-api", plugins });
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", OFFERED);
+  });
+
+  it("should create an agent with the ticked plugins, sorted, and claim it with them", async () => {
+    await insertUser(ALICE);
+    actAs("alice");
+
+    const created = (await actions.createVirtualAgent(ticked({ name: "pcs-api" }, ["wa", "pcs"]))) as { id: string };
+
+    expect((await row(created.id)).plugins).toEqual(["pcs", "wa"]);
+    expect((await claim()).find((entry) => entry.id === created.id)).toMatchObject({ plugins: ["pcs", "wa"] });
+  });
+
+  it("should create an agent with no plugins when none are ticked", async () => {
+    await insertUser(ALICE);
+    actAs("alice");
+
+    const created = (await actions.createVirtualAgent(form({ name: "pcs-api" }))) as { id: string };
+
+    expect((await row(created.id)).plugins).toEqual([]);
+  });
+
+  it("should refuse to create an agent with a plugin the hub does not offer, and create nothing", async () => {
+    await insertUser(ALICE);
+    actAs("alice");
+
+    expect(await actions.createVirtualAgent(ticked({ name: "pcs-api" }, ["pcs", "civil"]))).toEqual({
+      ok: false,
+      error: "civil is not a plugin this hub offers"
+    });
+    expect(await prisma.virtualAgent.count()).toBe(0);
+  });
+
+  it("should change a running agent's plugins, bumping both generations so the next claim replaces its pod", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    const before = await row(id);
+    actAs("alice");
+
+    expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["dtsse"]))).toEqual({ ok: true, confirmation: "pcs-api is restarting with its new plugins" });
+
+    expect(await row(id)).toMatchObject({ plugins: ["dtsse"], generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
+    expect((await claim()).find((entry) => entry.id === id)).toMatchObject({
+      plugins: ["dtsse"],
+      generation: before.generation + 1,
+      pod_generation: before.podGeneration + 1
+    });
+  });
+
+  it("should change a stopped agent's plugins for its next start", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+    actAs("alice");
+
+    expect(await actions.setVirtualAgentPlugins(ticked({ id }, ["pcs"]))).toEqual({
+      ok: true,
+      confirmation: "pcs-api loads its new plugins when it next starts"
+    });
+    expect((await row(id)).plugins).toEqual(["pcs"]);
+  });
+
+  it("should leave the generations alone and say so when the set is the one it has", async () => {
+    const agent = await createWith(["pcs"]);
+    actAs("alice");
+
+    expect(await actions.setVirtualAgentPlugins(ticked({ id: agent.id }, ["pcs"]))).toEqual({ ok: true, confirmation: "Its plugins are unchanged" });
+    expect(await row(agent.id)).toMatchObject({ generation: agent.generation, podGeneration: agent.podGeneration });
+  });
+
+  it("should clear every plugin when none are ticked", async () => {
+    const agent = await createWith(["pcs", "wa"]);
+
+    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, [])).toMatchObject({ plugins: [], generation: agent.generation + 1 });
+  });
+
+  it("should refuse a plugin the hub does not offer with 400, and change nothing", async () => {
+    const agent = await create(ALICE, "pcs-api");
+
+    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["civil"])).rejects.toMatchObject({ status: 400 });
+    expect(await row(agent.id)).toMatchObject({ plugins: [], generation: agent.generation });
+  });
+
+  it("should keep a plugin no longer offered when the owner leaves it ticked, but not let it be added again once unticked", async () => {
+    const agent = await createWith(["pcs"]);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "dtsse");
+
+    expect((await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "dtsse"])).plugins).toEqual(["dtsse", "pcs"]);
+    expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ plugins: ["dtsse", "pcs"] });
+    await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse"]);
+    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["dtsse", "pcs"])).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("should refuse someone other than the owner as if there were no such agent", async () => {
+    const agent = await create(ALICE, "pcs-api");
+
+    await expect(setVirtualAgentPlugins(prisma, BOB.oid, agent.id, ["pcs"])).rejects.toMatchObject({ status: 404 });
+    expect((await row(agent.id)).plugins).toEqual([]);
+  });
+
+  it("should refuse a change while the agent is being deleted", async () => {
+    const agent = await create(ALICE, "pcs-api");
+    await setDesired(prisma, ALICE.oid, agent.id, "deleted");
+
+    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs"])).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("should refuse the plugins action when virtual agents are off", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
+    actAs("alice");
+
+    expect(await actions.setVirtualAgentPlugins(ticked({ id: "x" }, ["pcs"]))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+  });
+
+  it("should refuse more plugins than the most an agent may have in the database too, whatever writes it", async () => {
+    const agent = await create(ALICE, "pcs-api");
+
+    await expect(
+      prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: Array.from({ length: 21 }, (_unused, index) => `p-${index}`) } })
+    ).rejects.toThrow(/virtual_agent_plugins_check/);
+    await expect(prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: { pcs: true } } })).rejects.toThrow(/virtual_agent_plugins_check/);
   });
 });
 

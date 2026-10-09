@@ -7,6 +7,7 @@ import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
 import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken, withoutLaunchTokens } from "./launch-token.ts";
 import { afterApplyError, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
 import { checkName, createRefusal } from "./limits.ts";
+import { availablePlugins, checkPlugins, samePlugins, storedPlugins } from "./plugins.ts";
 import { normalisePorts, samePorts } from "./ports.ts";
 import { diskTtlDays, orchestratorLeaseSeconds } from "./settings.ts";
 import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
@@ -35,6 +36,7 @@ export interface VirtualAgentRow {
   size: VirtualAgentSize;
   exposedPorts: number[];
   localOnlyPorts: number[];
+  plugins: string[];
   podGeneration: number;
   startedAt: Date;
   lastActiveAt: Date | null;
@@ -63,6 +65,7 @@ const SELECT = {
   size: true,
   exposedPorts: true,
   localOnlyPorts: true,
+  plugins: true,
   podGeneration: true,
   startedAt: true,
   lastActiveAt: true,
@@ -83,8 +86,14 @@ function fromRoute(route: ModelRoute): StoredRoute {
   return route === "own-licence" ? "own_licence" : "bedrock";
 }
 
-function toRow<R extends { modelRoute: StoredRoute }>(row: R): Omit<R, "modelRoute"> & { modelRoute: ModelRoute } {
-  return { ...row, modelRoute: toRoute(row.modelRoute) };
+function toRow<R extends { modelRoute: StoredRoute; plugins: unknown }>(
+  row: R
+): Omit<R, "modelRoute" | "plugins"> & { modelRoute: ModelRoute; plugins: string[] } {
+  return { ...row, modelRoute: toRoute(row.modelRoute), plugins: storedPlugins(row.plugins) };
+}
+
+function offeredPlugins(): string[] {
+  return availablePlugins().map((option) => option.name);
 }
 
 /** Holds the owner's `user` row until commit, so two creates by one person cannot both pass the limit, nor two renames take one name. */
@@ -111,6 +120,8 @@ export interface NewVirtualAgent {
   name: unknown;
   /** `small` when not given. */
   size?: unknown;
+  /** Names from `VIRTUAL_AGENT_PLUGINS`; none when not given. */
+  plugins?: unknown;
 }
 
 /**
@@ -126,6 +137,10 @@ export async function createVirtualAgent(prisma: PrismaClient, request: NewVirtu
   if (!size.ok) {
     throw new HttpError(400, size.error);
   }
+  const plugins = checkPlugins(request.plugins, offeredPlugins());
+  if (!plugins.ok) {
+    throw new HttpError(400, plugins.error);
+  }
   return await prisma.$transaction(async (tx) => {
     await lockOwner(tx, request.owner.oid);
     const refusal = createRefusal(await liveCount(tx, request.owner.oid));
@@ -137,7 +152,7 @@ export async function createVirtualAgent(prisma: PrismaClient, request: NewVirtu
     }
     const row = toRow(
       await tx.virtualAgent.create({
-        data: { ownerOid: request.owner.oid, name: checked.name, modelRoute: fromRoute(request.modelRoute), size: size.size },
+        data: { ownerOid: request.owner.oid, name: checked.name, modelRoute: fromRoute(request.modelRoute), size: size.size, plugins: plugins.plugins },
         select: SELECT
       })
     );
@@ -273,6 +288,41 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
       return row;
     }
     const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { size: checked.size, ...POD_CHANGE, updatedAt: now }, select: SELECT }));
+    await announce(tx, id, row.ownerOid);
+    return updated;
+  });
+}
+
+/**
+ * The plugins the pod loads, any of those `VIRTUAL_AGENT_PLUGINS` offers. A name no longer offered may be kept, so the
+ * owner can save other changes without first unticking it, but not added. A change bumps `generation` and
+ * `pod_generation`, as a resize does, so the orchestrator applies the StatefulSet with the new `AGENT_HUB_PLUGINS`:
+ * a running pod is replaced, and the conversation continues on its disk; a stopped one picks the change up when it
+ * next starts. Refused while the agent is being deleted; someone other than the owner is told there is no such agent.
+ */
+export async function setVirtualAgentPlugins(
+  prisma: PrismaClient,
+  actorOid: string,
+  id: string,
+  plugins: unknown,
+  now: Date = new Date()
+): Promise<VirtualAgentRow> {
+  return await prisma.$transaction(async (tx) => {
+    const row = await lockVirtualAgent(tx, id);
+    if (row === undefined || !canManageVirtualAgent(actorOid, row)) {
+      throw new HttpError(404, "no such virtual agent");
+    }
+    if (row.desired === "deleted") {
+      throw new HttpError(409, "that virtual agent is being deleted");
+    }
+    const checked = checkPlugins(plugins, [...offeredPlugins(), ...row.plugins]);
+    if (!checked.ok) {
+      throw new HttpError(400, checked.error);
+    }
+    if (samePlugins(row.plugins, checked.plugins)) {
+      return row;
+    }
+    const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { plugins: checked.plugins, ...POD_CHANGE, updatedAt: now }, select: SELECT }));
     await announce(tx, id, row.ownerOid);
     return updated;
   });
@@ -433,6 +483,8 @@ export interface ClaimedVirtualAgent {
   model_route: StoredRoute;
   size: VirtualAgentSize;
   exposed_ports: number[];
+  /** The plugins the pod loads, in code-point order; empty for none. */
+  plugins: string[];
   owner: { oid: string };
   /** Only when this claim minted one. It is never stored and never returned again. */
   launch_token?: string;
@@ -454,6 +506,7 @@ interface ClaimRow {
   model_route: StoredRoute;
   size: VirtualAgentSize;
   exposed_ports: number[];
+  plugins: unknown;
   owner_oid: string;
   has_token: boolean;
   apply_failures: number;
@@ -584,7 +637,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         FROM due
        WHERE v.id = due.id
       RETURNING v.id::text AS id, v.generation, v.pod_generation, v.desired::text AS desired, v.status::text AS status, v.statefulset_name, v.pvc_name,
-                v.model_route::text AS model_route, v.size::text AS size, v.exposed_ports, v.owner_oid, v.launch_token_hash IS NOT NULL AS has_token, v.apply_failures,
+                v.model_route::text AS model_route, v.size::text AS size, v.exposed_ports, v.plugins, v.owner_oid, v.launch_token_hash IS NOT NULL AS has_token, v.apply_failures,
                 COALESCE(v.desired <> 'running' AND v.disk_expires_at <= ${now} AND v.disk_deleted_at IS NULL, false) AS disk_due
     `;
     const claimed: ClaimedVirtualAgent[] = [];
@@ -606,6 +659,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         model_route: row.model_route,
         size: row.size,
         exposed_ports: row.exposed_ports,
+        plugins: storedPlugins(row.plugins),
         owner: { oid: row.owner_oid },
         ...(launchToken === undefined ? {} : { launch_token: launchToken })
       });

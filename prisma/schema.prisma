@@ -386,6 +386,8 @@ model VirtualAgent {
   exposedPorts        Int[]                   @default([]) @map("exposed_ports")
   /// The ports the pod reports listening on loopback only, which the Service cannot reach; as `exposedPorts`.
   localOnlyPorts      Int[]                   @default([]) @map("local_only_ports")
+  /// The workspace plugins the pod loads, as a sorted array of at most 20 names. See src/virtual-agents/plugins.ts.
+  plugins             Json                    @default("[]")
   /// Stamped on the pod template; moved with `generation` by everything but a change of ports.
   podGeneration       Int                     @default(1) @map("pod_generation")
   startedAt           DateTime                @default(now()) @map("started_at") @db.Timestamptz(6)

@@ -25,6 +25,8 @@ export interface ClaimedAgent {
   size?: VirtualAgentSize;
   /** The ports the pod reports listening on beyond loopback, ascending; treated as none when absent. */
   exposed_ports?: number[];
+  /** The workspace plugins the pod loads; treated as none when absent. */
+  plugins?: string[];
   owner: { oid: string };
   launch_token?: string;
 }

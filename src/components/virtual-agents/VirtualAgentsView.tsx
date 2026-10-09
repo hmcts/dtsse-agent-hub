@@ -4,6 +4,7 @@ import { Timestamp } from "@/components/time/Timestamp";
 import type { ModelRoute } from "@/viewer/identity";
 import { diskWarningDays } from "@/virtual-agents/cleanup";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "@/virtual-agents/limits";
+import type { PluginOption } from "@/virtual-agents/plugins";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 import { type CreateAction, CreateVirtualAgentForm } from "./CreateVirtualAgentForm";
 import { idleFor, statusLabel, stopReasonLabel } from "./labels";
@@ -67,7 +68,17 @@ function Row({ agent, now }: { agent: VirtualAgentCard; now: number }) {
   );
 }
 
-export function CreateVirtualAgent({ route, create, refusal }: { route: ModelRoute; create: CreateAction; refusal?: string }) {
+export function CreateVirtualAgent({
+  route,
+  create,
+  refusal,
+  plugins = []
+}: {
+  route: ModelRoute;
+  create: CreateAction;
+  refusal?: string;
+  plugins?: readonly PluginOption[];
+}) {
   return (
     <Section heading="Create a virtual agent">
       <div className="space-y-3 text-sm">
@@ -75,7 +86,7 @@ export function CreateVirtualAgent({ route, create, refusal }: { route: ModelRou
           A virtual agent acts with your GitHub and Azure access.
         </p>
         <ModelRouteLine route={route} />
-        {refusal ? <p className="text-hub-muted">{refusal}</p> : <CreateVirtualAgentForm create={create} />}
+        {refusal ? <p className="text-hub-muted">{refusal}</p> : <CreateVirtualAgentForm create={create} plugins={plugins} />}
       </div>
     </Section>
   );
@@ -94,7 +105,20 @@ function liveCount(agents: readonly VirtualAgentCard[]): number {
   return agents.filter((agent) => agent.desired !== "deleted").length;
 }
 
-export function VirtualAgentsView({ agents, route, create, now }: { agents: VirtualAgentCard[]; route: ModelRoute; create: CreateAction; now: number }) {
+/** `plugins` is what `VIRTUAL_AGENT_PLUGINS` offers, for the create form to tick. */
+export function VirtualAgentsView({
+  agents,
+  route,
+  create,
+  now,
+  plugins = []
+}: {
+  agents: VirtualAgentCard[];
+  route: ModelRoute;
+  create: CreateAction;
+  now: number;
+  plugins?: readonly PluginOption[];
+}) {
   return (
     <>
       <Section heading="Your virtual agents" detail={`${liveCount(agents)} of ${MAX_VIRTUAL_AGENTS_PER_USER}`}>
@@ -108,7 +132,7 @@ export function VirtualAgentsView({ agents, route, create, now }: { agents: Virt
           </ul>
         )}
       </Section>
-      <CreateVirtualAgent route={route} create={create} refusal={createLimit(agents)} />
+      <CreateVirtualAgent route={route} create={create} refusal={createLimit(agents)} plugins={plugins} />
     </>
   );
 }

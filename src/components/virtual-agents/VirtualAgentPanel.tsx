@@ -3,23 +3,36 @@ import { DevBadge } from "@/components/DevBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { type LifecycleActions, LifecyclePanel } from "@/components/virtual-agents/LifecyclePanel";
 import { OnboardingChecklist } from "@/components/virtual-agents/OnboardingChecklist";
+import { PluginsPanel } from "@/components/virtual-agents/PluginsPanel";
 import { PortsPanel } from "@/components/virtual-agents/PortsPanel";
 import { RenameVirtualAgent } from "@/components/virtual-agents/RenameVirtualAgent";
 import { SizePanel } from "@/components/virtual-agents/SizePanel";
 import { DiskNotice, ModelRouteLine } from "@/components/virtual-agents/VirtualAgentsView";
 import type { VirtualAgentDesired } from "@/virtual-agents/lifecycle";
+import type { PluginOption } from "@/virtual-agents/plugins";
 import type { VirtualAgentPageView } from "@/web/data";
 
 export interface VirtualAgentActions {
   lifecycle: LifecycleActions;
   rename: FormAction;
   resize: FormAction;
+  plugins: FormAction;
   paste: FormAction;
   reconnect: FormAction;
   save: FormAction;
 }
 
-function OwnerPanels({ manage, actions, now }: { manage: NonNullable<VirtualAgentPageView["manage"]>; actions: VirtualAgentActions; now: number }) {
+function OwnerPanels({
+  manage,
+  actions,
+  now,
+  plugins
+}: {
+  manage: NonNullable<VirtualAgentPageView["manage"]>;
+  actions: VirtualAgentActions;
+  now: number;
+  plugins: readonly PluginOption[];
+}) {
   const { detail, credentials } = manage;
   const agent = detail.card;
   return (
@@ -28,6 +41,7 @@ function OwnerPanels({ manage, actions, now }: { manage: NonNullable<VirtualAgen
       {agent.desired === "stopped" ? <DiskNotice agent={agent} now={now} /> : null}
       <RenameVirtualAgent agent={agent} rename={actions.rename} />
       <SizePanel agent={agent} resize={actions.resize} />
+      <PluginsPanel agent={agent} available={plugins} save={actions.plugins} />
       <PortsPanel agent={agent} />
       <OnboardingChecklist
         virtualAgentId={agent.id}
@@ -48,19 +62,22 @@ function OwnerPanels({ manage, actions, now }: { manage: NonNullable<VirtualAgen
 }
 
 /**
- * A virtual agent's side panel. Its owner gets its lifecycle, name, size, ports and sign-ins; anyone else who may see
- * it is told whose it is. Either way the current session's details follow, once a session has registered.
+ * A virtual agent's side panel. Its owner gets its lifecycle, name, size, plugins (from `plugins`, what
+ * `VIRTUAL_AGENT_PLUGINS` offers), ports and sign-ins; anyone else who may see it is told whose it is. Either way the
+ * current session's details follow, once a session has registered.
  */
 export function VirtualAgentPanel({
   page,
   actions,
   now,
-  session
+  session,
+  plugins = []
 }: {
   page: VirtualAgentPageView;
   actions: VirtualAgentActions;
   now: number;
   session: React.ReactNode;
+  plugins?: readonly PluginOption[];
 }) {
   const { summary, manage } = page;
   return (
@@ -72,7 +89,7 @@ export function VirtualAgentPanel({
             <DevBadge tid={summary.owner.tid} />
           </p>
         ) : (
-          <OwnerPanels manage={manage} actions={actions} now={now} />
+          <OwnerPanels manage={manage} actions={actions} now={now} plugins={plugins} />
         )}
       </div>
       {session}

@@ -8,14 +8,21 @@ import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { isSignInKind, reconnectSignIn as reconnect, SIGN_IN_TITLES, storePastedCode } from "@/virtual-agents/logins";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
-import { createVirtualAgent as create, renameVirtualAgent as rename, setDesired, setVirtualAgentSize } from "@/virtual-agents/store";
+import {
+  createVirtualAgent as create,
+  findVirtualAgent,
+  renameVirtualAgent as rename,
+  setDesired,
+  setVirtualAgentPlugins as setPlugins,
+  setVirtualAgentSize
+} from "@/virtual-agents/store";
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
- * Creating, starting, stopping, renaming, resizing and deleting the signed-in person's own virtual agents, pasting a
- * login code back to one, and having one sign in again. The owner is always the session's identity; an id from the
- * form names an agent, and `setDesired`, `renameVirtualAgent`, `setVirtualAgentSize`, `storePastedCode` and
- * `reconnectSignIn` refuse one that is not the viewer's.
+ * Creating, starting, stopping, renaming, resizing and deleting the signed-in person's own virtual agents, choosing
+ * their plugins, pasting a login code back to one, and having one sign in again. The owner is always the session's
+ * identity; an id from the form names an agent, and `setDesired`, `renameVirtualAgent`, `setVirtualAgentSize`,
+ * `setVirtualAgentPlugins`, `storePastedCode` and `reconnectSignIn` refuse one that is not the viewer's.
  */
 
 const LIST_PATH = "/virtual";
@@ -37,7 +44,13 @@ export async function createVirtualAgent(form: FormData): Promise<ActionResult<{
       return OFF;
     }
     const viewer = await requireViewer();
-    const row = await create(prisma, { owner: viewer, modelRoute: viewer.modelRoute, name: form.get("name"), size: form.get("size") });
+    const row = await create(prisma, {
+      owner: viewer,
+      modelRoute: viewer.modelRoute,
+      name: form.get("name"),
+      size: form.get("size"),
+      plugins: form.getAll("plugins")
+    });
     revalidate();
     return { ok: true, id: row.id, confirmation: `${row.name} is starting` };
   });
@@ -100,6 +113,33 @@ export async function resizeVirtualAgent(form: FormData): Promise<ActionResult<{
     const row = await setVirtualAgentSize(prisma, viewer.oid, id, form.get("size"));
     revalidate(id);
     return { ok: true, confirmation: `${row.name} is now ${row.size}` };
+  });
+}
+
+/**
+ * Every ticked box is a `plugins` field, so a form with none ticked sends none, and the agent loads none. The row is
+ * read first only to tell the owner whether anything changed; `setVirtualAgentPlugins` decides who may change it.
+ */
+export async function setVirtualAgentPlugins(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("set virtual agent plugins", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const id = text(form.get("id"));
+    if (id === "") {
+      return { ok: false, error: "no virtual agent was named" };
+    }
+    const before = await findVirtualAgent(prisma, id);
+    const row = await setPlugins(prisma, viewer.oid, id, form.getAll("plugins"));
+    revalidate(id);
+    if (row.generation === before?.generation) {
+      return { ok: true, confirmation: "Its plugins are unchanged" };
+    }
+    return {
+      ok: true,
+      confirmation: row.desired === "running" ? `${row.name} is restarting with its new plugins` : `${row.name} loads its new plugins when it next starts`
+    };
   });
 }
 

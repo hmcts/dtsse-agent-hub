@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ClaimedAgent } from "./hub.ts";
 import type { StatefulSet } from "./kube.ts";
-import { carriedOver, exposedPorts, ingress, podGeneration, podName, resources, runsPodOf, service, statefulSet } from "./manifests.ts";
+import { carriedOver, exposedPorts, ingress, plugins, podGeneration, podName, resources, runsPodOf, service, statefulSet } from "./manifests.ts";
 import type { VirtualAgentSpec } from "./settings.ts";
 
 const ID = "0f8a6a1e-1234-4000-8000-000000000001";
@@ -118,7 +118,7 @@ describe("statefulSet", () => {
     ]);
   });
 
-  it("should give the pod its hub, identity, model route and launch token as plain values", () => {
+  it("should give the pod its hub, identity, model route, plugins and launch token as plain values", () => {
     const [container] = podSpec(statefulSet({ ...AGENT, model_route: "own_licence" }, SPEC, TOKEN)).containers;
 
     expect(container!.env).toEqual([
@@ -126,6 +126,7 @@ describe("statefulSet", () => {
       { name: "AGENT_HUB_VIRTUAL", value: "1" },
       { name: "AGENT_HUB_VIRTUAL_AGENT_ID", value: ID },
       { name: "AGENT_HUB_MODEL_ROUTE", value: "own_licence" },
+      { name: "AGENT_HUB_PLUGINS", value: "" },
       { name: "AZURE_TENANT_ID", value: "tenant" },
       { name: "DISABLE_AUTOUPDATER", value: "1" },
       { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
@@ -214,6 +215,23 @@ describe("resources", () => {
     const [container] = podSpec(statefulSet({ ...AGENT, size: "large" }, SPEC, TOKEN)).containers;
 
     expect(container!.resources).toEqual(resources({ size: "large" }));
+  });
+});
+
+describe("plugins", () => {
+  it("should treat a claim with no plugins as loading none", () => {
+    expect(plugins(AGENT)).toEqual([]);
+    expect(plugins({ plugins: ["pcs"] })).toEqual(["pcs"]);
+  });
+
+  it("should give the pod the claim's plugins comma-joined when it has some", () => {
+    const [container] = podSpec(statefulSet({ ...AGENT, plugins: ["dtsse", "pcs"] }, SPEC, TOKEN)).containers;
+
+    expect(container!.env).toContainEqual({ name: "AGENT_HUB_PLUGINS", value: "dtsse,pcs" });
+  });
+
+  it("should change the pod template when the plugins change, so the pod rolls", () => {
+    expect(statefulSet({ ...AGENT, plugins: ["pcs"] }, SPEC, TOKEN)).not.toEqual(statefulSet(AGENT, SPEC, TOKEN));
   });
 });
 
