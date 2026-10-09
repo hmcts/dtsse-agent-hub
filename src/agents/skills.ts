@@ -44,6 +44,17 @@ export function storedSkills(value: unknown): Skill[] {
 }
 
 /**
+ * Whether a reported list differs from the stored one, so only a real change is announced. Both are normalised, so
+ * they are in the same order and compare entry by entry.
+ */
+export function skillsChanged(stored: readonly Skill[], reported: readonly Skill[]): boolean {
+  return (
+    stored.length !== reported.length ||
+    stored.some((skill, index) => skill.name !== reported[index]?.name || skill.description !== reported[index]?.description)
+  );
+}
+
+/**
  * The skill name being typed: the text after a "/" that starts the message, while the caret is inside that leading
  * token. `null` when the message does not start with one or the caret has moved past it.
  */

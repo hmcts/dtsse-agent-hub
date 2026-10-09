@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchSkills, pickSkill, skillQuery, storedSkills } from "./skills.ts";
+import { matchSkills, pickSkill, type Skill, skillQuery, skillsChanged, storedSkills } from "./skills.ts";
 
 describe("skillQuery", () => {
   it("should give the text after the slash when the caret is in a leading slash token", () => {
@@ -62,5 +62,26 @@ describe("storedSkills", () => {
   it("should give no skills when the stored value is not a list", () => {
     expect(storedSkills({})).toEqual([]);
     expect(storedSkills(null)).toEqual([]);
+  });
+});
+
+describe("skillsChanged", () => {
+  const A = { name: "a", description: "first" };
+  const B = { name: "b", description: "second" };
+  const STORED = [A, B];
+
+  it("should be false when the reported list is the stored one", () => {
+    expect(skillsChanged(STORED, [{ ...A }, { ...B }])).toBe(false);
+    expect(skillsChanged([], [])).toBe(false);
+  });
+
+  it.each<[string, Skill[]]>([
+    ["a skill was added", [A, B, { name: "c", description: "" }]],
+    ["a skill was removed", [A]],
+    ["a skill was replaced", [A, { name: "c", description: "second" }]],
+    ["a description changed", [A, { name: "b", description: "changed" }]],
+    ["the list was cleared", []]
+  ])("should be true when %s", (_label, reported) => {
+    expect(skillsChanged(STORED, reported)).toBe(true);
   });
 });

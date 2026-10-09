@@ -4,7 +4,7 @@ import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { upsertUser } from "../users/store.ts";
-import type { Skill } from "./skills.ts";
+import { normaliseSkills, type Skill, skillsChanged, storedSkills } from "./skills.ts";
 
 export interface Registration {
   sessionId: string;
@@ -34,7 +34,8 @@ export class SessionOwnedElsewhere extends Error {}
  * re-registration after `/clear` moves to the new session. Its owner's `user` row is not rewritten.
  * It is named after the virtual agent, whatever the session calls itself.
  *
- * Skills change no one's view live, so they are not announced; the agent's page reads them when it renders.
+ * A re-registration whose skills differ from the stored ones announces them, so an open agent page re-reads its
+ * composer's "/" autocomplete. A new agent's are not announced: no page can be showing it yet.
  */
 export async function registerAgent(prisma: PrismaClient, owner: Caller, registration: Registration): Promise<{ id: string; name: string }> {
   const virtualAgentId = owner.virtualAgentId ?? null;
@@ -43,6 +44,13 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
     if (virtualAgentId === null) {
       await upsertUser(tx, owner);
     }
+    // Locked so a heartbeat cannot change the skills between this read and the upsert, which would announce wrongly.
+    const [existing] =
+      skills === null
+        ? []
+        : await tx.$queryRaw<
+            { id: string; skills: unknown }[]
+          >`SELECT id::text AS id, skills FROM agent WHERE session_id = ${registration.sessionId} FOR UPDATE`;
     const [agent] = await tx.$queryRaw<{ id: string; name: string }[]>`
       INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills)
       VALUES (
@@ -62,6 +70,9 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
       throw new SessionOwnedElsewhere("that session id is registered to someone else");
     }
     await notify(tx, { type: "agent_status", agent_id: agent.id, owner_oid: owner.oid, status: "idle" });
+    if (existing?.id === agent.id && registration.skills !== undefined && skillsChanged(storedSkills(existing.skills), normaliseSkills(registration.skills))) {
+      await notify(tx, { type: "agent_skills", agent_id: agent.id, owner_oid: owner.oid });
+    }
     if (virtualAgentId !== null) {
       await tx.virtualAgent.update({ where: { id: virtualAgentId }, data: { agentId: agent.id, lastActiveAt: new Date(), updatedAt: new Date() } });
       await notify(tx, { type: "virtual_agent", virtual_agent_id: virtualAgentId, owner_oid: owner.oid });
@@ -84,21 +95,25 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
   return row ?? undefined;
 }
 
-/** Locks the agent's row for the rest of the transaction, and reads what a status change is compared against. */
-async function lockAgent(db: Database, agentId: string): Promise<{ status: AgentStatus; ownerOid: string; virtualName: string | null } | undefined> {
-  const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string; virtual_name: string | null }[]>`
-    SELECT a.status::text AS status, a.owner_oid, v.name AS virtual_name
+/** Locks the agent's row for the rest of the transaction, and reads what a status or skills change is compared against. */
+async function lockAgent(
+  db: Database,
+  agentId: string
+): Promise<{ status: AgentStatus; ownerOid: string; virtualName: string | null; skills: Skill[] } | undefined> {
+  const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string; virtual_name: string | null; skills: unknown }[]>`
+    SELECT a.status::text AS status, a.owner_oid, v.name AS virtual_name, a.skills
       FROM agent a LEFT JOIN virtual_agent v ON v.id = a.virtual_agent_id
      WHERE a.id = ${agentId}::uuid
        FOR UPDATE OF a
   `;
-  return row === undefined ? undefined : { status: row.status, ownerOid: row.owner_oid, virtualName: row.virtual_name };
+  return row === undefined ? undefined : { status: row.status, ownerOid: row.owner_oid, virtualName: row.virtual_name, skills: storedSkills(row.skills) };
 }
 
 /**
  * Records a heartbeat, and announces the status when it changed. An agent the sweep marked offline comes back
  * with its next heartbeat. A virtual agent's session takes the name its owner gave the virtual agent, which also corrects one registered
- * under another name. `skills`, sent only when the session's list changed, replaces the stored list.
+ * under another name. `skills`, sent only when the session's list changed, replaces the stored list, and is announced
+ * when it differs from it, so an open agent page re-reads its composer's "/" autocomplete.
  */
 export async function heartbeat(
   prisma: PrismaClient,
@@ -124,6 +139,9 @@ export async function heartbeat(
     });
     if (before.status !== status) {
       await notify(tx, { type: "agent_status", agent_id: agentId, owner_oid: before.ownerOid, status });
+    }
+    if (skills !== undefined && skillsChanged(before.skills, normaliseSkills(skills))) {
+      await notify(tx, { type: "agent_skills", agent_id: agentId, owner_oid: before.ownerOid });
     }
   });
 }
