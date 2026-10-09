@@ -30,6 +30,7 @@ const CARD: VirtualAgentCard = {
   size: "small",
   exposedPorts: [],
   localOnlyPorts: [],
+  plugins: [],
   stopReason: null,
   lastActivityAt: null,
   stoppedAt: null,
@@ -78,6 +79,7 @@ const ACTIONS: VirtualAgentActions = {
   lifecycle: { start: ok(), stop: ok(), remove: ok() },
   rename: ok(),
   resize: ok(),
+  plugins: ok(),
   paste: ok(),
   reconnect: ok(),
   save: ok()

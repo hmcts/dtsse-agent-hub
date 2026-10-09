@@ -85,9 +85,14 @@ export function carriedOver(existing: StatefulSet | null): Carried {
   return { ...(disk === undefined ? {} : { disk }), ...(launchToken === undefined ? {} : { launchToken }) };
 }
 
+export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
+  return Array.isArray(agent.plugins) ? agent.plugins : [];
+}
+
 /**
  * The pod is given its public domain rather than its URLs, so that a server starting or stopping changes the Service
- * and Ingress and never the pod template.
+ * and Ingress and never the pod template. Its plugins are in the template, empty for none, so a change of them rolls
+ * the pod, as the `pod_generation` bump that comes with it asks.
  */
 function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
   return [
@@ -95,6 +100,7 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
     { name: "AGENT_HUB_VIRTUAL", value: "1" },
     { name: "AGENT_HUB_VIRTUAL_AGENT_ID", value: agent.id },
     { name: "AGENT_HUB_MODEL_ROUTE", value: agent.model_route },
+    { name: "AGENT_HUB_PLUGINS", value: plugins(agent).join(",") },
     { name: "AZURE_TENANT_ID", value: spec.tenantId },
     { name: "DISABLE_AUTOUPDATER", value: "1" },
     { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },

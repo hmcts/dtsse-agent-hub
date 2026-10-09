@@ -8,6 +8,7 @@ import { PaneBody, PaneHeader } from "@/components/Pane";
 import { VirtualAgentRefresh } from "@/components/virtual-agents/VirtualAgentRefresh";
 import { VirtualAgentsView } from "@/components/virtual-agents/VirtualAgentsView";
 import { requireViewer } from "@/viewer/current";
+import { availablePlugins } from "@/virtual-agents/plugins";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { claudeMdSettings, credentialSettings, gitIdentitySettings, virtualAgentsPage } from "@/web/data";
 
@@ -33,7 +34,7 @@ export default async function VirtualAgentsPage() {
       <VirtualAgentRefresh />
       <PaneHeader title="Virtual agents" subtitle="Claude Code sessions the hub runs for you" />
       <PaneBody>
-        <VirtualAgentsView agents={page.agents} route={page.modelRoute} create={createVirtualAgent} now={Date.now()} />
+        <VirtualAgentsView agents={page.agents} route={page.modelRoute} create={createVirtualAgent} now={Date.now()} plugins={availablePlugins()} />
         <CredentialsSection settings={credentials} actions={{ save: saveCredential, remove: removeCredential }}>
           <GitIdentityCard settings={gitIdentity} actions={{ save: saveGitIdentity, clear: clearGitIdentity }} />
         </CredentialsSection>

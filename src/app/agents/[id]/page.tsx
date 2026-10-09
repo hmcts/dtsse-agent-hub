@@ -9,6 +9,7 @@ import {
   reconnectSignIn,
   renameVirtualAgent,
   resizeVirtualAgent,
+  setVirtualAgentPlugins,
   startVirtualAgent,
   stopVirtualAgent
 } from "@/app/_actions/virtual-agents";
@@ -23,6 +24,7 @@ import { type VirtualAgentActions, VirtualAgentPanel, VirtualAgentPending } from
 import { VirtualAgentRefresh } from "@/components/virtual-agents/VirtualAgentRefresh";
 import { requireViewer } from "@/viewer/current";
 import type { Viewer } from "@/viewer/identity";
+import { availablePlugins } from "@/virtual-agents/plugins";
 import { agentActivity, agentRoute, type VirtualAgentPageView } from "@/web/data";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +35,7 @@ const VIRTUAL_AGENT_ACTIONS: VirtualAgentActions = {
   lifecycle: { start: startVirtualAgent, stop: stopVirtualAgent, remove: deleteVirtualAgent },
   rename: renameVirtualAgent,
   resize: resizeVirtualAgent,
+  plugins: setVirtualAgentPlugins,
   paste: pasteLoginCode,
   reconnect: reconnectSignIn,
   save: saveCredential
@@ -143,6 +146,7 @@ function VirtualAgent({ viewer, page }: { viewer: Viewer; page: VirtualAgentPage
             page={page}
             actions={VIRTUAL_AGENT_ACTIONS}
             now={Date.now()}
+            plugins={availablePlugins()}
             session={linked === null || activity === null ? null : <About viewer={viewer} view={linked} activity={activity} />}
           />
         }

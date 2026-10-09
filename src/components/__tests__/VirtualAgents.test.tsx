@@ -8,6 +8,7 @@ import { LifecyclePanel } from "@/components/virtual-agents/LifecyclePanel";
 import { LoginCountdown, remaining } from "@/components/virtual-agents/LoginCountdown";
 import { idleFor, statusLabel, stopReasonLabel } from "@/components/virtual-agents/labels";
 import { checklistState, OnboardingChecklist } from "@/components/virtual-agents/OnboardingChecklist";
+import { PluginsPanel } from "@/components/virtual-agents/PluginsPanel";
 import { PortsPanel } from "@/components/virtual-agents/PortsPanel";
 import { RenameVirtualAgent } from "@/components/virtual-agents/RenameVirtualAgent";
 import { SizePanel } from "@/components/virtual-agents/SizePanel";
@@ -48,6 +49,7 @@ function card(overrides: Partial<VirtualAgentCard> = {}): VirtualAgentCard {
     size: "small",
     exposedPorts: [],
     localOnlyPorts: [],
+    plugins: [],
     stopReason: null,
     lastActivityAt: "2026-10-05T10:55:00.000Z",
     stoppedAt: null,
@@ -344,6 +346,97 @@ describe("running agent detail", () => {
     render(<LifecyclePanel agent={card({ status, desired, statusDetail: detail })} actions={{ start: ok(), stop: ok(), remove: ok() }} />);
 
     expect(screen.getByText(detail)).toBeTruthy();
+  });
+});
+
+describe("the plugins choice", () => {
+  const OFFERED = [
+    { name: "dtsse", description: "DTSSE docs" },
+    { name: "pcs", description: "" }
+  ];
+
+  it("should offer a checkbox per plugin with its description on the create form and send the ticked ones", async () => {
+    const create = created();
+    render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} plugins={OFFERED} />);
+
+    const group = screen.getByRole("group", { name: "Plugins" });
+    expect(
+      within(group)
+        .getAllByRole("checkbox")
+        .map((box) => (box as HTMLInputElement).value)
+    ).toEqual(["dtsse", "pcs"]);
+    expect(within(group).getByText("DTSSE docs")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "pcs-api" } });
+    fireEvent.click(within(group).getByRole("checkbox", { name: /pcs/ }));
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Create a virtual agent" }));
+    });
+
+    expect((create.mock.calls[0] as unknown as [FormData])[0].getAll("plugins")).toEqual(["pcs"]);
+  });
+
+  it("should leave plugins off the create form when the hub offers none", () => {
+    render(<VirtualAgentsView agents={[]} route="bedrock" create={created()} now={NOW} />);
+
+    expect(screen.queryByRole("group", { name: "Plugins" })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("should show the ticked plugins, say a save restarts the agent, and send the new set when the agent is running", async () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "pcs-api is restarting with its new plugins" }));
+    render(<PluginsPanel agent={card({ plugins: ["pcs"] })} available={OFFERED} save={save} />);
+
+    expect((screen.getByRole("checkbox", { name: /pcs/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /dtsse/ }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText("Saving restarts the agent; the conversation continues.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /dtsse/ }));
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Change the plugins of pcs-api" }));
+    });
+
+    const sent = (save.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.getAll("plugins")]).toEqual([card().id, ["dtsse", "pcs"]]);
+    expect(screen.getByRole("status").textContent).toBe("pcs-api is restarting with its new plugins");
+  });
+
+  it("should send no plugins when every box is unticked", async () => {
+    const save = ok();
+    render(<PluginsPanel agent={card({ plugins: ["pcs"] })} available={OFFERED} save={save} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /pcs/ }));
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Change the plugins of pcs-api" }));
+    });
+
+    expect((save.mock.calls[0] as unknown as [FormData])[0].getAll("plugins")).toEqual([]);
+  });
+
+  it.each([
+    ["requested", "running"],
+    ["stopped", "stopped"]
+  ] as const)("should not warn of a restart when the agent is %s", (status, desired) => {
+    render(<PluginsPanel agent={card({ status, desired })} available={OFFERED} save={ok()} />);
+
+    expect(screen.queryByText(/Saving restarts/)).toBeNull();
+    expect(screen.getByRole("form", { name: "Change the plugins of pcs-api" })).toBeTruthy();
+  });
+
+  it("should list a ticked plugin the hub no longer offers as unavailable so it can be unticked", () => {
+    render(<PluginsPanel agent={card({ plugins: ["civil", "pcs"] })} available={OFFERED} save={ok()} />);
+
+    const civil = screen.getByRole("checkbox", { name: /civil/ }) as HTMLInputElement;
+    expect(civil.checked).toBe(true);
+    expect(screen.getByText("no longer offered; untick it to stop loading it")).toBeTruthy();
+    expect(screen.getAllByRole("checkbox").map((box) => (box as HTMLInputElement).value)).toEqual(["dtsse", "pcs", "civil"]);
+  });
+
+  it.each([
+    ["the agent is being deleted", card({ desired: "deleted", plugins: ["pcs"] }), OFFERED],
+    ["the hub offers none and the agent has none", card(), []]
+  ])("should show nothing when %s", (_label, agent, available) => {
+    const { container } = render(<PluginsPanel agent={agent} available={available} save={ok()} />);
+
+    expect(container.textContent).toBe("");
   });
 });
 

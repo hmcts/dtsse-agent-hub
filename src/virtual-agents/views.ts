@@ -30,6 +30,8 @@ export interface VirtualAgentCard {
   exposedPorts: { port: number; url: string }[];
   /** The ports the pod reports listening on loopback only, which no URL can reach. */
   localOnlyPorts: number[];
+  /** The workspace plugins its pod loads, in code-point order. */
+  plugins: string[];
   stopReason: StopReason | null;
   /** The latest pod report or transcript entry, or `null` before there has been either. */
   lastActivityAt: string | null;
@@ -72,6 +74,7 @@ function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCa
     size: row.size,
     exposedPorts: row.exposedPorts.map((port) => ({ port, url: publicUrl(row.statefulsetName, port, publicDomain()) })),
     localOnlyPorts: row.localOnlyPorts,
+    plugins: row.plugins,
     stopReason: row.stopReason,
     lastActivityAt: iso(lastActivity(row.lastActiveAt, row.agentId === null ? undefined : newest.get(row.agentId))),
     stoppedAt: iso(row.stoppedAt),
