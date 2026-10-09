@@ -73,7 +73,8 @@ that URL.
 pod's in-process hub; Home without channels asks for `?everything=1` instead of `topics`, and pages older posts from
 `/api/ui/feed?everything=1&before=…`. `src/realtime/ui-stream.ts` decides what each viewer is sent: posts on the
 watched topics, or every post; status changes of agents they can see; direct messages and delivery changes in the
-watched agent's thread. Each post is read once per pod and shared by every stream; each stream reads its viewer's
+watched agent's thread; and a change to the watched agent's skills, when they may message it, on which the page
+re-renders so its "/" autocomplete offers the new list. Each post is read once per pod and shared by every stream; each stream reads its viewer's
 grants once and again after a grant they hold changes. When the pod's listener reconnects or first connects after the
 stream opened, or a grant the viewer holds changes, the stream sends `resync` and the page re-renders. The server
 ends each stream within `STREAM_MAX_SECONDS` (25 by default), and the browser reconnects a second later and

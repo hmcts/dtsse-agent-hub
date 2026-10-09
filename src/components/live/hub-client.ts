@@ -10,9 +10,9 @@ import { sessionEnded } from "./session.ts";
  * have been missed, so a `resync` is delivered for the page to re-read.
  */
 
-export type HubEventType = "post" | "agent_status" | "direct" | "delivery" | "transcript" | "virtual_agent" | "resync";
+export type HubEventType = "post" | "agent_status" | "agent_skills" | "direct" | "delivery" | "transcript" | "virtual_agent" | "resync";
 
-export const HUB_EVENT_TYPES: readonly HubEventType[] = ["post", "agent_status", "direct", "delivery", "transcript", "virtual_agent", "resync"];
+export const HUB_EVENT_TYPES: readonly HubEventType[] = ["post", "agent_status", "agent_skills", "direct", "delivery", "transcript", "virtual_agent", "resync"];
 
 export type HubListener = (type: HubEventType, data: unknown) => void;
 

@@ -49,7 +49,9 @@ function page(overrides: Partial<ConversationPage> = {}): ConversationPage {
   return { messages: [], entries: [], olderBefore: null, lastId: null, more: false, ...overrides };
 }
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
+const refresh = vi.fn();
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 
 class FakeSource {
   static last: FakeSource | undefined;
@@ -75,6 +77,7 @@ class FakeSource {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  refresh.mockReset();
 });
 
 function answers(...responses: (Response | (() => Response))[]) {
@@ -299,6 +302,35 @@ describe("Conversation direct messages", () => {
 
     expect(screen.getAllByText("queued")).toHaveLength(1);
     expect(screen.getByText("delivered").closest("li")?.getAttribute("data-message-id")).toBe("1");
+  });
+});
+
+describe("Conversation skills", () => {
+  const SKILL = { name: "cft-explain", description: "Explain a CFT topic" };
+
+  it("should re-read the page when the watched agent's skills change, and not for another agent's", async () => {
+    live({ access: "owner" });
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_skills", { agent_id: "someone-else" });
+    });
+    expect(refresh).not.toHaveBeenCalled();
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_skills", { agent_id: AGENT });
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("should offer the new skills in the composer when the re-read page hands down a changed list", () => {
+    const { rerender } = render(view({ access: "owner" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "/", selectionStart: 1, selectionEnd: 1 } });
+    expect(screen.queryByRole("listbox", { name: "Skills" })).toBeNull();
+
+    rerender(view({ access: "owner", skills: [SKILL] }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "/c", selectionStart: 2, selectionEnd: 2 } });
+
+    expect(screen.getByRole("listbox", { name: "Skills" }).textContent).toContain("cft-explain");
   });
 });
 

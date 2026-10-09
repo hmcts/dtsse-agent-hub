@@ -45,6 +45,7 @@ function sources(grants: Grant[], messages: { posts?: ApiMessage[]; directs?: Lo
 const LISTENING = { ready: async () => undefined, connected: () => true };
 
 const READ: Grant[] = [{ ownerOid: OWNER, granteeOid: VIEWER, level: "read" }];
+const WRITE: Grant[] = [{ ownerOid: OWNER, granteeOid: VIEWER, level: "write" }];
 const TOPICS: UiWatch = { topics: ["pcs-api", "database"], match: "any", agent: null };
 const THREAD: UiWatch = { topics: [], match: "any", agent: AGENT };
 const EVERYTHING: UiWatch = { topics: "everything", match: "any", agent: null };
@@ -206,6 +207,21 @@ describe("selectFrame", () => {
     ["the viewer can no longer read the transcript", THREAD, []]
   ])("should not send a transcript change when %s", async (_label, watch, grants) => {
     expect(await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: OWNER, last_id: "21" }, watch, sources(grants))).toBeUndefined();
+  });
+
+  it("should name the watched agent whose skills changed when the viewer may see its skills", async () => {
+    const frame = await selectFrame({ type: "agent_skills", agent_id: AGENT.id, owner_oid: OWNER }, THREAD, sources(WRITE));
+
+    expect(frame).toBe(`event: agent_skills\ndata: ${JSON.stringify({ agent_id: AGENT.id })}\n\n`);
+  });
+
+  it.each<[string, UiWatch, Grant[]]>([
+    ["no agent is watched", TOPICS, WRITE],
+    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: OWNER } }, WRITE],
+    ["the viewer may only read the agent", THREAD, READ],
+    ["the viewer can no longer see the agent", THREAD, []]
+  ])("should not send a skills change when %s", async (_label, watch, grants) => {
+    expect(await selectFrame({ type: "agent_skills", agent_id: AGENT.id, owner_oid: OWNER }, watch, sources(grants))).toBeUndefined();
   });
 
   it("should tell the page to re-read when the listener resyncs", async () => {

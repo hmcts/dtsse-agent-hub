@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { AgentAccess } from "@/access/rules";
 import type { Skill } from "@/agents/skills";
@@ -30,7 +31,8 @@ class SignedOut extends Error {}
 /**
  * An agent's conversation, updated live: the direct messages to and from it and its session's transcript, in time
  * order. A `transcript` event names the newest entry, and the entries after the newest shown are read then; earlier
- * entries are read a page at a time above. The composer appears only with write access.
+ * entries are read a page at a time above. The composer appears only with write access. An `agent_skills` event
+ * re-reads the page, since it carries only the id, so the composer's "/" autocomplete offers the agent's new skills.
  */
 export function Conversation({
   agentId,
@@ -65,6 +67,7 @@ export function Conversation({
   const scroller = useStickToBottom<HTMLDivElement>(items.length);
   const endSession = useEndSession();
   const arrivals = useAnnouncer("messages");
+  const router = useRouter();
 
   useWatch([], "any", agentId);
 
@@ -120,6 +123,12 @@ export function Conversation({
     }
     wanted.current = newerId(wanted.current, last_id);
     void topUp();
+  });
+
+  useHubEvent<{ agent_id: string }>("agent_skills", ({ agent_id }) => {
+    if (agent_id === agentId) {
+      router.refresh();
+    }
   });
 
   useHubEvent<{ message: ThreadMessage }>("direct", ({ message }) => {
