@@ -78,7 +78,18 @@ const MAX_TABLE_COLUMNS = 64;
 // padded to the header's width, so without this a short body of one-cell rows under a wide header multiplies into
 // millions of cells: 64 columns over 16,000 such rows is a 32KB body and a 68MB render. Tables stop opening once a
 // body has spent it, and the lines that would have been rows stay text, so nothing an author wrote is dropped.
-const MAX_TABLE_CELLS = 4096;
+//
+// Padding is the one place in the subset where what a body renders is not proportional to what it holds, so this is
+// also what bounds a table's share of a page: `MessageBody` renders once per message and a page renders up to
+// `CONVERSATION_PAGE_SIZE` of them, appending older pages into the same DOM. The number is therefore what a table can
+// plausibly be, not what fits in a time budget. Across 1,337 tables in the workspace's own markdown the largest is
+// 1,615 cells in a generated index, the largest hand-written one 186, and the 99th percentile 78; 1,024 leaves a
+// hand-written table five times its room. Measured per body with `renderToStaticMarkup`, this holds a table's own
+// contribution — what it renders beyond what its cells' contents would cost in a paragraph — to about 70KB: a
+// 384-byte body of 64 empty columns over 63 one-cell rows renders 73KB, where 4,096 cells rendered 284KB. The worst
+// body in the subset stays a pre-existing one, a 32KB paragraph of inline code spans at 32x, or `#1` references at
+// 24x; the worst table body, 64 columns of code spans, is 34x and within a tenth of it.
+const MAX_TABLE_CELLS = 1024;
 const LANGUAGE = /^[\w+#.-]{1,32}$/;
 const DELIMITER_CELL = /^:?-+:?$/;
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(\S.*)$/;
@@ -315,46 +326,62 @@ function fitRow(cells: string[], columns: number): string[] {
 }
 
 /**
- * Whether a line below a table's rows opens a block of its own instead of being another row, given its first cell. A
- * heading does: a row carrying its outer pipes cannot read as one, and `#` and a space is not how a cell's value
- * starts. A list item does unless its first cell is a marker and at most one word, which is a cell's worth of content:
- * `- | none` is a column of flags and `1. open | the page` a column of steps, while `- use \`a | b\` for X` is a
- * bullet that happens to hold a pipe.
+ * Whether the run of list items starting at `from` is rows of the table above it rather than the list an author wrote.
+ * It is where every line in the run holds a cell break and a first cell that is a marker and at most one word, which
+ * is a cell's worth of content: `- | none` is a column of flags and `1. open | the page` a column of steps, while
+ * `- use \`a | b\` for X` is a bullet that happens to hold a pipe.
+ *
+ * The whole run answers at once, because a list is written as a run. Asked line by line, the two bullets of
+ * `- see | below` over `- use \`a | b\` for X` answer differently, and one authored list comes out as a row and a
+ * one-item list below it.
  */
-function endsRows(line: string, first: string): boolean {
-  if (HEADING.test(line)) {
-    return true;
+function markerRows(lines: string[], from: number): boolean {
+  for (let i = from; i < lines.length && listItem(lines[i]!) !== null; i++) {
+    if (!hasCellBreak(lines[i]!) || !MARKER_CELL.test(rowCells(lines[i]!)[0]!.trim())) {
+      return false;
+    }
   }
-  return listItem(line) !== null && !MARKER_CELL.test(first.trim());
+  return true;
 }
 
 /**
  * The table these lines open, from the header at `from`, and the cells it holds. It takes no more cells than `budget`,
  * which is what is left of the body's `MAX_TABLE_CELLS`.
  *
- * What ends the table is a line that cannot be one of its rows, or the budget running out: a blank line, a fence, a
- * line with no cell break, a heading, or a list item that `endsRows` reads as prose rather than a cell. Short of
- * those a cell break wins, so `- | none` is a column of flags and not a bullet. GFM ends a table at the beginning of
- * any block-level structure, which would make that line a bullet holding `| none`. A line with more cells than the table
- * has columns is still a row: its overflow stays in its last cell, pipes and all, so the one likely mistake here, an
- * unescaped `|` in a cell, costs that cell its spacing rather than ending the table and leaving every row below it as
- * literal text. GFM truncates such a row, which would drop the author's words.
+ * What ends the table is a line that cannot be one of its rows, or the budget running out. Each of those is a rule of
+ * its own: a blank line, a fence, a line with no cell break, a heading — a row carrying its outer pipes cannot read as
+ * one, and `#` and a space is not how a cell's value starts — or a run of list items that `markerRows` reads as prose
+ * rather than cells. Short of those a cell break wins, so `- | none` is a column of flags and not a bullet. GFM ends a
+ * table at the beginning of any block-level structure, which would make that line a bullet holding `| none`. A line
+ * with more cells than the table has columns is still a row: its overflow stays in its last cell, pipes and all, so the
+ * one likely mistake here, an unescaped `|` in a cell, costs that cell its spacing rather than ending the table and
+ * leaving every row below it as literal text. GFM truncates such a row, which would drop the author's words.
  */
 function parseTable(lines: string[], from: number, align: Alignment[], budget: number): { table: TableBlock; next: number; cells: number } {
   const columns = align.length;
   const table: TableBlock = { type: "table", align, header: rowCells(lines[from]!).map(cellInlines), rows: [] };
   let cells = columns;
   let i = from + 2;
+  // The run of list items being read, answered once at its first line and spent on every line of it.
+  let inRun = false;
+  let runIsRows = false;
   while (i < lines.length) {
     const line = lines[i]!;
-    if (isBlank(line) || openFence(line) !== null || !hasCellBreak(line) || cells + columns > budget) {
+    if (isBlank(line) || openFence(line) !== null || !hasCellBreak(line) || HEADING.test(line) || cells + columns > budget) {
       break;
     }
-    const split = rowCells(line);
-    if (endsRows(line, split[0]!)) {
-      break;
+    if (listItem(line) === null) {
+      inRun = false;
+    } else {
+      if (!inRun) {
+        inRun = true;
+        runIsRows = markerRows(lines, i);
+      }
+      if (!runIsRows) {
+        break;
+      }
     }
-    const row = fitRow(split, columns).map(cellInlines);
+    const row = fitRow(rowCells(line), columns).map(cellInlines);
     // GFM pads a short row, so every row is as wide as the header.
     while (row.length < columns) {
       row.push([]);

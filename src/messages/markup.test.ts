@@ -495,6 +495,48 @@ describe("parseMarkup tables", () => {
     ]);
   });
 
+  it("should keep one list whole when some of its items read as cells and some as prose", () => {
+    // Asked line by line, `- see` is a marker and one word and `- use \`a` is a marker and two, so the first bullet
+    // was a row and the second a one-item list below the table: one list the author wrote, rendered as neither.
+    expect(parseMarkup("| x | y |\n| - | - |\n| 1 | 2 |\n- see | below\n- use `a | b` for X")).toEqual([
+      table([null, null], [[text("x")], [text("y")]], [[text("1")], [text("2")]]),
+      {
+        type: "list",
+        ordered: false,
+        start: 1,
+        items: [
+          { children: [text("see | below")], lists: [] },
+          { children: [text("use "), code("a | b"), text(" for X")], lists: [] }
+        ]
+      }
+    ]);
+  });
+
+  it("should keep one list whole when an item of it holds no pipe at all", () => {
+    expect(parseMarkup("| x | y |\n| - | - |\n- | a\n- plain bullet")).toEqual([
+      table([null, null], [[text("x")], [text("y")]]),
+      {
+        type: "list",
+        ordered: false,
+        start: 1,
+        items: [
+          { children: [text("| a")], lists: [] },
+          { children: [text("plain bullet")], lists: [] }
+        ]
+      }
+    ]);
+  });
+
+  it("should read a second run of list items on its own when a row sits between the two", () => {
+    const blocks = parseMarkup("| x | y |\n| - | - |\n- | a\n| 1 | 2 |\n- use `a | b` for X");
+
+    expect(blocks.map((block) => block.type)).toEqual(["table", "list"]);
+    expect((blocks[0] as Extract<Block, { type: "table" }>).rows).toEqual([
+      [[text("-")], [text("a")]],
+      [[text("1")], [text("2")]]
+    ]);
+  });
+
   it("should keep the lines a paragraph when the delimiter row is missing, mismatched or not a delimiter", () => {
     for (const plain of ["| a | b |\n| c | d |", "| a | b |\n| --- |", "| a | b |\n| --- | x |", "a | b\n---", "| a | b |"]) {
       expect(parseMarkup(plain)).toEqual([paragraph(text(plain))]);
@@ -583,16 +625,18 @@ describe("parseMarkup tables", () => {
     const blocks = parseMarkup(`${"|h".repeat(64)}\n${"|-".repeat(64)}\n${"|\n".repeat(16_000)}`);
 
     expect(blocks.map((block) => block.type)).toEqual(["table", "paragraph"]);
-    expect(tableCells(blocks)).toBe(4_096);
-    // The header and 63 rows of 64 columns spend the cap; every line the table did not take is still in the output.
-    expect(flatten((blocks[1] as Extract<Block, { type: "paragraph" }>).children)).toBe(Array.from({ length: 15_937 }, () => "|").join("\n"));
+    expect(tableCells(blocks)).toBe(1_024);
+    // The header and 15 rows of 64 columns spend the cap; every line the table did not take is still in the output.
+    expect(flatten((blocks[1] as Extract<Block, { type: "paragraph" }>).children)).toBe(Array.from({ length: 15_985 }, () => "|").join("\n"));
   });
 
   it("should share the cell cap across the tables in one body", () => {
-    const wide = `${"|h".repeat(64)}\n${"|-".repeat(64)}\n${"|\n".repeat(63)}`;
+    // A header of 64 columns over 15 one-cell rows spends the cap exactly, so the first of these tables takes all of
+    // its own lines and the nine below it have none left.
+    const wide = `${"|h".repeat(64)}\n${"|-".repeat(64)}\n${"|\n".repeat(15)}`;
     const blocks = parseMarkup(wide.repeat(10));
 
-    expect(tableCells(blocks)).toBe(4_096);
+    expect(tableCells(blocks)).toBe(1_024);
     expect(blocks.filter((block) => block.type === "table")).toHaveLength(1);
     // The nine tables the cap left out are text, header rows and all: a paragraph each, because a header line still
     // reads as the start of a block.
@@ -631,6 +675,10 @@ describe("parseMarkup on hostile and huge inputs", () => {
     "table rows": `| a | b |\n| - | - |\n${"| 1 | 2 |\n".repeat(LIMIT / 10)}`,
     "a wide table with one-cell rows": `${"| h ".repeat(64)}|\n${"| - ".repeat(64)}|\n${"|x|\n".repeat(LIMIT / 4)}`,
     "near-miss delimiter rows": "|-x|\n".repeat(LIMIT / 5),
+    // A run of list items is read ahead of the rows, once, so the table pays for the run it takes and for the one it
+    // stops at. The second of these stops at the last line, having looked over every line above it.
+    "a table over a run of marker list items": `| a | b |\n| - | - |\n${"- | x\n".repeat(LIMIT / 6)}`,
+    "a table over a run of list items that ends in prose": `| a | b |\n| - | - |\n${"- | x\n".repeat(LIMIT / 6)}- use \`a | b\` for X`,
     "message references": "#1 ".repeat(LIMIT / 3),
     "long digit runs": `#${"9".repeat(LIMIT - 1)}`,
     "nested emphasis": "**_*".repeat(LIMIT / 8) + "*_**".repeat(LIMIT / 8)

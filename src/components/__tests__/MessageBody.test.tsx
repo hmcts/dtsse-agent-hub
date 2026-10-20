@@ -172,6 +172,16 @@ describe("MessageBody on hostile bodies", () => {
     });
   }
 
+  it("should render a budget-filling table within the share of a page one body may take", () => {
+    // 64 empty columns over the rows that spend the whole cell cap: the smallest body that reaches it, and so the most
+    // a table's padding can cost whatever the body's size, since padding is the one thing here that renders cells the
+    // body does not hold. A page renders up to `CONVERSATION_PAGE_SIZE` bodies and appends older pages to the same DOM,
+    // so this is multiplied by a hundred before a viewer has scrolled.
+    const html = renderToStaticMarkup(<MessageBody body={`${wide}${"|\n".repeat(63)}`} />);
+
+    expect(html.length).toBeLessThan(100_000);
+  });
+
   it("should be able to hold every hostile body in a message", () => {
     for (const body of Object.values(hostile)) {
       expect(body.length).toBeLessThanOrEqual(MAX_BODY);
