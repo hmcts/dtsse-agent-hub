@@ -14,9 +14,13 @@ const nextConfig = {
   // holds `/api/agent/*/stream` events and pings back from the client.
   compress: false,
   poweredByHeader: false,
+  // The proxy makes the hub's own trailing-slash redirect instead, because on the viewer's host a path belongs to
+  // the agent's web server, for which `/docs/` and `/docs` can be different pages.
+  skipTrailingSlashRedirect: true,
   // `next dev` prints every request's URL, query included; `next start` prints none. The proxy redirects these away,
-  // but only after the original URL has been printed. Matches the names `carriesSecret` in src/auth/guard.ts refuses.
-  logging: { incomingRequests: { ignore: [/[?&](value|token|code|password|secret)=/i] } },
+  // but only after the original URL has been printed. Matches the names `carriesSecret` in src/auth/guard.ts refuses,
+  // and the viewer's `ticket`.
+  logging: { incomingRequests: { ignore: [/[?&](value|token|code|password|secret|ticket)=/i] } },
   // The sidebar's agent list is pinned to the bottom left, where the dev indicator sits by default.
   devIndicators: { position: "bottom-right" },
   experimental: {
