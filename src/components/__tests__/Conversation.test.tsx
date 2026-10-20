@@ -450,6 +450,50 @@ describe("Conversation transcript entries", () => {
     expect(details?.querySelector("strong")).toBeNull();
   });
 
+  it("should show what a monitor saw, and not call it finished, when a turn reports an event", () => {
+    const text = [
+      "<task-notification>",
+      "<task-id>b1ako8104</task-id>",
+      '<summary>Monitor event: "hmcts-claude-provider apply completion"</summary>',
+      "<event>RUN COMPLETED: failure\napply job: failure</event>",
+      "</task-notification>"
+    ].join("\n");
+    render(view({ initial: page({ entries: [entry("1", { role: "user", content: { text } })] }) }));
+
+    const details = screen.getByText("Task").closest("details");
+    expect(details?.textContent).not.toContain("finished");
+    expect(details?.textContent).toContain("update");
+    expect(details?.querySelector("pre")?.textContent).toBe("RUN COMPLETED: failure\napply job: failure");
+  });
+
+  it("should read a truncated task notification's fields, and not its cut off report, when the upload limit cut the turn", () => {
+    const text = [
+      "<task-notification>",
+      "<status>completed</status>",
+      '<summary>Agent "Design decay detection" finished</summary>',
+      "<result>## Layer 1 — the first thing it found"
+    ].join("\n");
+    render(view({ initial: page({ entries: [entry("1", { role: "user", truncated: true, content: { text } })] }) }));
+
+    const item = screen.getByText("Task").closest("li");
+    expect(item?.textContent).toContain("completed");
+    expect(item?.textContent).toContain('Agent "Design decay detection" finished');
+    expect(item?.textContent).toContain("truncated");
+    expect(item?.textContent).not.toContain("<task-notification>");
+    expect(item?.textContent).not.toContain("Layer 1");
+    expect(item?.querySelector("details")).toBeNull();
+  });
+
+  it("should offer the whole summary when one line of it does not fit", () => {
+    const summary = `Agent "Port the metrics dashboard" finished: ${"it rewrote the loader and ".repeat(12)}and stopped there`;
+    const text = `<task-notification>\n<status>completed</status>\n<summary>${summary}</summary>\n</task-notification>`;
+    render(view({ initial: page({ entries: [entry("1", { role: "user", content: { text } })] }) }));
+
+    const details = screen.getByText("Task").closest("details");
+    expect(details?.querySelector("summary")?.textContent).toContain("…");
+    expect(details?.querySelector("p")?.textContent).toBe(summary);
+  });
+
   it("should keep the owner's turn when the text only looks like a task notification", () => {
     const quoted = "Summarise this:\n\n<task-notification>\n<status>completed</status>\n<summary>something</summary>\n</task-notification>";
     render(

@@ -106,31 +106,39 @@ function Tool({ entry }: { entry: TranscriptEntryView }) {
 }
 
 /**
- * The background tasks a turn reported: how each ended, and a subagent's report where it gave one. Shown like a tool
- * call rather than a turn, because the harness wrote it into the session and the owner did not type it.
+ * The background tasks a turn reported: how each ended, what a monitor saw, and a subagent's report where it gave
+ * one. Shown like a tool call rather than a turn, because the harness wrote it into the session and the owner did not
+ * type it.
  */
 function Tasks({ entry, tasks }: { entry: TranscriptEntryView; tasks: readonly TaskNotification[] }) {
   return (
     <li className="px-5 py-0.5 pl-16 text-hub-muted" data-entry-id={entry.id}>
       {tasks.map((task, index) => {
         const failed = taskFailed(task.status);
+        const summary = task.summary ?? "";
+        const short = oneLine(summary);
+        // The summary is nowhere else, so when one line left any of it out the whole of it goes in the disclosure.
+        const whole = short === summary ? null : summary;
         const line = (
           <>
             <span className="shrink-0">Task</span>
-            <span className={`shrink-0 ${failed ? "text-red-300" : "text-hub-text"}`}>{task.status ?? "finished"}</span>
-            <span className="truncate">{oneLine(task.summary ?? "")}</span>
+            {/* A monitor's event reports a task still running, so it has no status and has not finished. */}
+            <span className={`shrink-0 ${failed ? "text-red-300" : "text-hub-text"}`}>{task.status ?? (task.event === null ? "finished" : "update")}</span>
+            <span className="truncate">{short}</span>
             {/* The chip marks the whole entry, so it belongs to the first task alone. */}
             {index === 0 ? <Truncated entry={entry} /> : null}
           </>
         );
-        return task.result === null ? (
+        return whole === null && task.event === null && task.result === null ? (
           <p key={index} className="flex min-w-0 items-baseline gap-2 text-[13px]">
             {line}
           </p>
         ) : (
           <details key={index} className={`rounded border-l-2 pl-2 ${failed ? "border-red-800" : "border-hub-line"}`}>
             <summary className="flex min-w-0 cursor-pointer items-baseline gap-2 text-[13px] hover:bg-hub-raised">{line}</summary>
-            <Output text={task.result} error={failed} />
+            {whole === null ? null : <p className="mt-1 whitespace-pre-wrap break-words text-[13px] text-hub-text">{whole}</p>}
+            {task.event === null ? null : <Output text={task.event} />}
+            {task.result === null ? null : <Output text={task.result} error={failed} />}
           </details>
         );
       })}
@@ -157,7 +165,7 @@ export function TranscriptEntry({ entry, agentName, ownerName }: { entry: Transc
   switch (entry.role) {
     case "user": {
       // A redacted entry has no text to read, so it stays a turn and shows the pattern that hid it.
-      const tasks = entry.redacted ? null : taskNotifications((entry.content as TextContent).text);
+      const tasks = entry.redacted ? null : taskNotifications((entry.content as TextContent).text, { truncated: entry.truncated });
       return tasks === null ? <Turn entry={entry} name={ownerName} label="in the session" /> : <Tasks entry={entry} tasks={tasks} />;
     }
     case "assistant":
