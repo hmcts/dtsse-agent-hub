@@ -159,6 +159,8 @@ function useSkillMenu(skills: readonly Skill[], body: string, setBody: (body: st
 export function DirectComposer({
   agentId,
   agentName,
+  virtualAgentId = null,
+  viewerOid,
   status: initialStatus,
   access,
   skills = [],
@@ -167,6 +169,10 @@ export function DirectComposer({
 }: {
   agentId: string;
   agentName?: string;
+  /** The virtual agent whose session this agent is, or `null` for a session on a laptop. */
+  virtualAgentId?: string | null;
+  /** Who is reading, so one person's draft cannot show up in the next person to sign in on this tab. */
+  viewerOid: string;
   status: AgentStatus;
   access: Exclude<AgentAccess, "none">;
   /** The agent's skills, offered when the message starts with "/". */
@@ -174,7 +180,9 @@ export function DirectComposer({
   send: SendAction;
   onSent: (message: ThreadMessage) => void;
 }) {
-  const { body, setBody, discard } = useDirectDraft(agentId);
+  // The message is sent to the session agent, but kept under the virtual agent: a `/clear` replaces the session while
+  // the person is still typing on the same page, and the draft has to outlive that.
+  const { body, setBody, discard } = useDirectDraft({ viewerOid, draftId: virtualAgentId ?? agentId });
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const endSession = useEndSession();
@@ -193,7 +201,7 @@ export function DirectComposer({
     try {
       const result = await send({ agentId, body });
       if (result.ok) {
-        discard();
+        discard(body);
         onSent(result.message);
       } else {
         setError(result.error);

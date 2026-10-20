@@ -41,13 +41,15 @@ const VIRTUAL_AGENT_ACTIONS: VirtualAgentActions = {
   save: saveCredential
 };
 
-async function AgentConversation({ activity, view }: { activity: Activity; view: AgentView }) {
+async function AgentConversation({ viewer, activity, view }: { viewer: Viewer; activity: Activity; view: AgentView }) {
   const { agent, access, skills } = view;
   return (
     <Conversation
       agentId={agent.id}
       agentName={agent.name}
       ownerName={agent.owner.name}
+      virtualAgentId={agent.virtualAgentId}
+      viewerOid={viewer.oid}
       status={agent.status}
       access={access}
       initial={(await activity).conversation}
@@ -110,7 +112,7 @@ function LocalAgent({ viewer, view }: { viewer: Viewer; view: AgentView }) {
       narrow="disclosure"
     >
       <Suspense fallback={<SkeletonFeed rows={6} />}>
-        <AgentConversation activity={activity} view={view} />
+        <AgentConversation viewer={viewer} activity={activity} view={view} />
       </Suspense>
     </AgentLayout>
   );
@@ -157,7 +159,7 @@ function VirtualAgent({ viewer, page }: { viewer: Viewer; page: VirtualAgentPage
           <VirtualAgentPending desired={summary.desired} />
         ) : (
           <Suspense key={linked.agent.id} fallback={<SkeletonFeed rows={6} />}>
-            <AgentConversation activity={activity} view={linked} />
+            <AgentConversation viewer={viewer} activity={activity} view={linked} />
           </Suspense>
         )}
       </AgentLayout>

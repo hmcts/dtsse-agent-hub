@@ -38,6 +38,8 @@ export function Conversation({
   agentId,
   agentName,
   ownerName,
+  virtualAgentId = null,
+  viewerOid,
   status,
   access,
   initial,
@@ -47,6 +49,10 @@ export function Conversation({
   agentId: string;
   agentName: string;
   ownerName: string;
+  /** The virtual agent whose session this agent is, or `null` for a session on a laptop. */
+  virtualAgentId?: string | null;
+  /** Who is reading, which the composer keys its draft on. */
+  viewerOid: string;
   status: AgentStatus;
   access: Exclude<AgentAccess, "none">;
   initial: ConversationPage;
@@ -209,6 +215,8 @@ export function Conversation({
         <DirectComposer
           agentId={agentId}
           agentName={agentName}
+          virtualAgentId={virtualAgentId}
+          viewerOid={viewerOid}
           status={status}
           access={access}
           skills={skills}

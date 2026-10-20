@@ -12,6 +12,9 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined
 
 const AGENT = "11111111-1111-1111-1111-111111111111";
 const OTHER_AGENT = "22222222-2222-2222-2222-222222222222";
+const VIRTUAL_AGENT = "33333333-3333-3333-3333-333333333333";
+const VIEWER = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const OTHER_VIEWER = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
 const SKILLS: Skill[] = [
   { name: "cft-explain", description: "Answer a what is X question" },
@@ -39,8 +42,24 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function composer(skills: Skill[] = SKILLS, send: SendAction = vi.fn(async () => ({ ok: true as const, message: SENT })), agentId = AGENT) {
-  render(<DirectComposer agentId={agentId} agentName="pcs" status="idle" access="owner" skills={skills} send={send} onSent={vi.fn()} />);
+function composer(
+  skills: Skill[] = SKILLS,
+  send: SendAction = vi.fn(async () => ({ ok: true as const, message: SENT })),
+  overrides: Partial<React.ComponentProps<typeof DirectComposer>> = {}
+) {
+  render(
+    <DirectComposer
+      agentId={AGENT}
+      agentName="pcs"
+      viewerOid={VIEWER}
+      status="idle"
+      access="owner"
+      skills={skills}
+      send={send}
+      onSent={vi.fn()}
+      {...overrides}
+    />
+  );
   return send;
 }
 
@@ -224,7 +243,7 @@ describe("DirectComposer draft", () => {
     composer();
 
     expect(field().value).toBe("half a thought about CDAM");
-    expect(sessionStorage.getItem(draftKey(AGENT))).toBe("half a thought about CDAM");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBe("half a thought about CDAM");
   });
 
   it("should start empty when the agent has no draft of its own", () => {
@@ -232,24 +251,48 @@ describe("DirectComposer draft", () => {
     type("meant for pcs");
     cleanup();
 
-    composer(SKILLS, undefined, OTHER_AGENT);
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT });
 
     expect(field().value).toBe("");
-    expect(sessionStorage.getItem(draftKey(OTHER_AGENT))).toBeNull();
+    expect(sessionStorage.getItem(draftKey(VIEWER, OTHER_AGENT))).toBeNull();
   });
 
   it("should keep each agent's draft apart when both have one", () => {
     composer();
     type("meant for pcs");
     cleanup();
-    composer(SKILLS, undefined, OTHER_AGENT);
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT });
     type("meant for the other agent");
     cleanup();
 
     composer();
 
     expect(field().value).toBe("meant for pcs");
-    expect(sessionStorage.getItem(draftKey(OTHER_AGENT))).toBe("meant for the other agent");
+    expect(sessionStorage.getItem(draftKey(VIEWER, OTHER_AGENT))).toBe("meant for the other agent");
+  });
+
+  it("should keep the draft under the virtual agent when its session is replaced by a clear", () => {
+    composer(SKILLS, undefined, { agentId: AGENT, virtualAgentId: VIRTUAL_AGENT });
+    type("half a thought about CDAM");
+
+    // The page remounts the composer with the agent the new session registered, on the page the person never left.
+    cleanup();
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT, virtualAgentId: VIRTUAL_AGENT });
+
+    expect(field().value).toBe("half a thought about CDAM");
+    expect(sessionStorage.getItem(draftKey(VIEWER, VIRTUAL_AGENT))).toBe("half a thought about CDAM");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+  });
+
+  it("should show no draft of the person who signed out when someone else signs in on the same tab", () => {
+    composer();
+    type("not for anyone else to see");
+    cleanup();
+
+    composer(SKILLS, undefined, { viewerOid: OTHER_VIEWER });
+
+    expect(field().value).toBe("");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBe("not for anyone else to see");
   });
 
   it("should forget the draft when the message is sent", async () => {
@@ -261,10 +304,30 @@ describe("DirectComposer draft", () => {
     });
 
     expect(field().value).toBe("");
-    expect(sessionStorage.getItem(draftKey(AGENT))).toBeNull();
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
     cleanup();
     composer();
     expect(field().value).toBe("");
+  });
+
+  it("should keep the next message when it was typed while the send was in flight", async () => {
+    // The box is not disabled while the send is in flight, so the next message is typed before the send resolves.
+    const send: SendAction = vi.fn(async () => {
+      type("and the next thought");
+      return { ok: true as const, message: SENT };
+    });
+    composer(SKILLS, send);
+    type("all finished");
+
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+
+    expect(send).toHaveBeenCalledWith({ agentId: AGENT, body: "all finished" });
+    expect(field().value).toBe("and the next thought");
+    cleanup();
+    composer();
+    expect(field().value).toBe("and the next thought");
   });
 
   it("should keep the draft when the send is refused", async () => {
@@ -292,7 +355,7 @@ describe("DirectComposer draft", () => {
     composer();
 
     expect(field().value).toBe("");
-    expect(sessionStorage.getItem(draftKey(AGENT))).toBeNull();
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
   });
 
   it("should still send when storage refuses to answer", async () => {
