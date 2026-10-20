@@ -494,6 +494,34 @@ describe("Conversation transcript entries", () => {
     expect(details?.querySelector("p")?.textContent).toBe(summary);
   });
 
+  it("should not offer the summary again when one line of it only collapsed its whitespace", () => {
+    const summary = 'Agent "Fix the gate" finished:  it  reran the suite';
+    const text = `<task-notification>\n<status>completed</status>\n<summary>${summary}</summary>\n</task-notification>`;
+    render(view({ initial: page({ entries: [entry("1", { role: "user", content: { text } })] }) }));
+
+    const item = screen.getByText("Task").closest("li");
+    expect(item?.textContent).toContain('Agent "Fix the gate" finished: it reran the suite');
+    expect(item?.querySelector("details")).toBeNull();
+  });
+
+  it("should mark the task the turn was cut inside when a truncated entry reports more than one", () => {
+    const text = [
+      "<task-notification>",
+      "<status>completed</status>",
+      "<summary>Background command finished first</summary>",
+      "</task-notification>",
+      "<task-notification>",
+      "<status>completed</status>",
+      "<summary>Agent cut part way through its report</summary>",
+      "<result>## Layer 1 — the first thing it found"
+    ].join("\n");
+    render(view({ initial: page({ entries: [entry("1", { role: "user", truncated: true, content: { text } })] }) }));
+
+    const marked = screen.getByText("truncated").closest("p, summary");
+    expect(marked?.textContent).toContain("Agent cut part way through its report");
+    expect(marked?.textContent).not.toContain("Background command finished first");
+  });
+
   it("should keep the owner's turn when the text only looks like a task notification", () => {
     const quoted = "Summarise this:\n\n<task-notification>\n<status>completed</status>\n<summary>something</summary>\n</task-notification>";
     render(

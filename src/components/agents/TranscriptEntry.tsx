@@ -1,7 +1,7 @@
 import { Avatar } from "@/components/Avatar";
 import { MessageBody } from "@/components/feed/MessageBody";
 import { Timestamp } from "@/components/time/Timestamp";
-import { oneLine, type TranscriptEntryView, toolSummary } from "@/transcripts/conversation";
+import { collapse, oneLine, type TranscriptEntryView, toolSummary } from "@/transcripts/conversation";
 import type { RedactedContent, TextContent, ToolResultContent, ToolUseContent } from "@/transcripts/schema";
 import { type TaskNotification, taskFailed, taskNotifications } from "@/transcripts/task-notification";
 
@@ -118,15 +118,16 @@ function Tasks({ entry, tasks }: { entry: TranscriptEntryView; tasks: readonly T
         const summary = task.summary ?? "";
         const short = oneLine(summary);
         // The summary is nowhere else, so when one line left any of it out the whole of it goes in the disclosure.
-        const whole = short === summary ? null : summary;
+        // Compared after collapsing, because collapsing whitespace changes the line without leaving anything out.
+        const whole = short === collapse(summary) ? null : summary;
         const line = (
           <>
             <span className="shrink-0">Task</span>
             {/* A monitor's event reports a task still running, so it has no status and has not finished. */}
             <span className={`shrink-0 ${failed ? "text-red-300" : "text-hub-text"}`}>{task.status ?? (task.event === null ? "finished" : "update")}</span>
             <span className="truncate">{short}</span>
-            {/* The chip marks the whole entry, so it belongs to the first task alone. */}
-            {index === 0 ? <Truncated entry={entry} /> : null}
+            {/* Truncation cuts the end of the turn, so the last task is the one that lost what it was going to say. */}
+            {index === tasks.length - 1 ? <Truncated entry={entry} /> : null}
           </>
         );
         return whole === null && task.event === null && task.result === null ? (

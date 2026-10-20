@@ -63,6 +63,33 @@ describe("taskNotifications", () => {
     ]);
   });
 
+  it("should report the tasks that said something when another block in the turn said nothing it shows", () => {
+    const text = `${block("<task-id>abc</task-id>\n<output-file>/tmp/abc.output</output-file>")}\n${REPORTED}`;
+
+    expect(taskNotifications(text)?.map((task) => task.status)).toEqual(["completed"]);
+  });
+
+  it("should read the status from the block's own field when a subagent's report quotes one", () => {
+    const report = "The row shows <status>failed</status> for a task that is still running.";
+    const text = block(`<task-id>b1ako8104</task-id>\n<summary>Agent "Review the notification parser" finished</summary>\n<result>${report}</result>`);
+
+    expect(taskNotifications(text)).toEqual([{ status: null, summary: 'Agent "Review the notification parser" finished', event: null, result: report }]);
+  });
+
+  it("should read the summary from the block's own field when a subagent's report quotes one", () => {
+    const report = "It wrote <summary>Agent finished</summary> into the fixture.";
+    const text = block(`<status>completed</status>\n<result>${report}</result>`);
+
+    expect(taskNotifications(text)).toEqual([{ status: "completed", summary: null, event: null, result: report }]);
+  });
+
+  it("should read the status from the block's own field when a monitor's event quotes one", () => {
+    const event = "grep hit: <status>failed</status>";
+    const text = block(`<summary>Monitor event: "apply completion"</summary>\n<event>${event}</event>`);
+
+    expect(taskNotifications(text)).toEqual([{ status: null, summary: 'Monitor event: "apply completion"', event, result: null }]);
+  });
+
   it("should read the fields whatever their order and ignore tags it does not show", () => {
     const text = block("<summary>out of order</summary>\n<note>boilerplate</note>\n<usage>1 token</usage>\n<status>stopped</status>\n<worktree>/w</worktree>");
 
@@ -103,6 +130,10 @@ describe("taskNotifications", () => {
     ["the block has no closing tag", REPORTED.replace("</task-notification>", "")],
     ["the block was cut mid field", "<task-notification>\n<status>comple"],
     ["the block has no status, summary or event", block("<task-id>abc</task-id>\n<output-file>/tmp/abc.output</output-file>")],
+    [
+      "a report quotes the closing tag, which ends the block early and leaves the rest as text",
+      block("<status>completed</status>\n<summary>s</summary>\n<result>the tag is </task-notification> in prose</result>")
+    ],
     ["the tag is a different one", "<system-reminder>something else</system-reminder>"],
     ["the tag only starts the same way", "<task-notifications>\n<status>completed</status>\n</task-notifications>"]
   ])("should report no task when %s", (_label, text) => {
@@ -144,6 +175,13 @@ describe("taskNotifications", () => {
         'Background command "Run the unit and integration suites" completed (exit code 0)',
         'Agent "Design decay detection and FDR control" finished'
       ]);
+    });
+
+    it("should keep the blocks that closed when the prefix cut the next one before any field it shows", () => {
+      // The harness writes the ids and the output file before the status, so a prefix can end inside all of those.
+      const text = `${REPORTED}\n<task-notification>\n<task-id>aadecd3c1b44da27e</task-id>\n<output-file>/tmp/claude-1000/-home-linus/42f0b3`;
+
+      expect(taskNotifications(text, { truncated: true })?.map((task) => task.status)).toEqual(["completed"]);
     });
 
     it("should keep the blocks that closed when the prefix stops part way through the next open tag", () => {

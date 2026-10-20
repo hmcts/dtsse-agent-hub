@@ -88,9 +88,14 @@ const SUMMARY_LENGTH = 120;
 /** The input fields that say what a tool call did, most telling first, as Claude Code's tools name them. */
 const SUMMARY_FIELDS = ["description", "command", "file_path", "path", "pattern", "url", "query", "prompt"];
 
-/** `text` on one line, cut to `max` characters. */
+/** `text` with its whitespace collapsed to single spaces: the whole of it, on one line. */
+export function collapse(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** `text` on one line, cut to `max` characters. Compare with `collapse` to tell whether the cut left anything out. */
 export function oneLine(text: string, max: number = SUMMARY_LENGTH): string {
-  const line = text.replace(/\s+/g, " ").trim();
+  const line = collapse(text);
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
