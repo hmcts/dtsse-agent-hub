@@ -9,7 +9,9 @@ function renderInline(nodes: Inline[]): ReactNode[] {
         return node.text;
       case "code":
         return (
-          <code key={index} className="rounded border border-hub-line bg-hub-raised px-1 font-mono text-[13px] text-hub-text">
+          // A code span keeps its own spacing wherever it sits, so the same span reads the same in a paragraph and in
+          // a table cell, which sets `whitespace-normal` for its text.
+          <code key={index} className="whitespace-pre-wrap rounded border border-hub-line bg-hub-raised px-1 font-mono text-[13px] text-hub-text">
             {node.text}
           </code>
         );
@@ -58,7 +60,7 @@ function Table({ table }: { table: TableBlock }) {
   return (
     // biome-ignore lint/a11y/noNoninteractiveTabindex: a keyboard user needs focus to scroll a wide table into view, which axe checks as scrollable-region-focusable
     <div tabIndex={0} className="overflow-x-auto rounded-md">
-      {/* Cells wrap as normal text: the body's `whitespace-pre-wrap` would keep the runs of spaces an author padded their pipes with. */}
+      {/* Cell text wraps as normal text: the body's `whitespace-pre-wrap` would keep the runs of spaces an author padded their pipes with. A code span sets its own, so only the padding collapses. */}
       <table className="min-w-full border-collapse whitespace-normal text-[13px] leading-5">
         <thead>
           <tr>

@@ -71,7 +71,8 @@ const MAX_LIST_DEPTH = 4;
 const MAX_INLINE_DEPTH = 3;
 // Bounds the work a run of `[x](` openers sharing one distant `)` can cause.
 const MAX_LINK_URL = 2048;
-// Bounds the padding a header of many columns and a body of many one-cell rows would otherwise cost.
+// Bounds the padding a header of many columns and a body of many one-cell rows would otherwise cost. A header with
+// more columns than this opens no table at all, because truncating it would drop the columns it names.
 const MAX_TABLE_COLUMNS = 64;
 const LANGUAGE = /^[\w+#.-]{1,32}$/;
 const DELIMITER_CELL = /^:?-+:?$/;
@@ -166,23 +167,36 @@ function listItem(line: string): FlatItem | null {
   return null;
 }
 
-/** Whether the line holds a cell break: a `|` that the character before it does not escape. */
+/**
+ * Whether the backslash at `at` escapes the character after it. A cell has two escapes, `\|` and `\\`, so a backslash
+ * can itself be escaped and a cell ending in one does not swallow its closing pipe.
+ */
+function escapesNext(line: string, at: number): boolean {
+  const next = line[at + 1];
+  return line[at] === "\\" && (next === "|" || next === "\\");
+}
+
+/** Whether the line holds a cell break: a `|` that no backslash before it escapes. */
 function hasCellBreak(line: string): boolean {
   for (let i = 0; i < line.length; i++) {
-    if (line[i] === "|" && line[i - 1] !== "\\") {
+    if (escapesNext(line, i)) {
+      i++;
+    } else if (line[i] === "|") {
       return true;
     }
   }
   return false;
 }
 
-/** The row's cells, split on its cell breaks, with the optional outer pipes dropped. */
+/** The row's cells, split on the breaks `hasCellBreak` counts, with the optional outer pipes dropped. */
 function rowCells(line: string): string[] {
   const row = line.trim();
   const cells: string[] = [];
   let from = 0;
   for (let i = 0; i < row.length; i++) {
-    if (row[i] === "|" && row[i - 1] !== "\\") {
+    if (escapesNext(row, i)) {
+      i++;
+    } else if (row[i] === "|") {
       cells.push(row.slice(from, i));
       from = i + 1;
     }
@@ -199,24 +213,35 @@ function rowCells(line: string): string[] {
 
 /**
  * A `|` inside a cell has to be written `\|`, inline code included: cells are split before anything inline is parsed,
- * as GFM does, so a bare `|` in a code span ends its cell. Unlike GFM the escape is undone inside code spans too,
- * because the subset has no other backslash escape and `` `a \| b` `` is meant as one cell holding `a | b`.
+ * as GFM does, so a bare `|` in a code span ends its cell. A literal backslash in front of one is written `\\`, which
+ * is why the escaping backslash is taken off here at the same positions the split skipped. Unlike GFM the escapes are
+ * undone inside code spans too, because the subset has no other backslash escape and `` `a \| b` `` is meant as one
+ * cell holding `a | b`.
  */
 function cellInlines(raw: string): Inline[] {
-  return parseInline(raw.trim().replaceAll("\\|", "|"));
+  const cell = raw.trim();
+  let text = "";
+  for (let i = 0; i < cell.length; i++) {
+    if (escapesNext(cell, i)) {
+      i++;
+    }
+    text += cell[i]!;
+  }
+  return parseInline(text);
 }
 
 /**
  * The columns' alignments when these two lines open a table: a row of cells over a delimiter row of `-` runs with
  * optional colons. GFM only starts a table when the delimiter row has exactly as many cells as the header, and that is
- * what keeps a paragraph of pipe-separated prose a paragraph.
+ * what keeps a paragraph of pipe-separated prose a paragraph. Past `MAX_TABLE_COLUMNS` columns the lines stay a
+ * paragraph, so every cell an author wrote is still in the output.
  */
 function tableHead(header: string, delimiter: string | undefined): Alignment[] | null {
   if (delimiter === undefined || !hasCellBreak(header) || !hasCellBreak(delimiter)) {
     return null;
   }
   const cells = rowCells(delimiter);
-  if (cells.length !== rowCells(header).length) {
+  if (cells.length !== rowCells(header).length || cells.length > MAX_TABLE_COLUMNS) {
     return null;
   }
   const align: Alignment[] = [];
@@ -241,23 +266,29 @@ function startsBlock(line: string, next?: string): boolean {
 }
 
 function parseTable(lines: string[], from: number, align: Alignment[]): { table: TableBlock; next: number } {
-  const columns = Math.min(align.length, MAX_TABLE_COLUMNS);
-  const table: TableBlock = {
-    type: "table",
-    align: align.slice(0, columns),
-    header: rowCells(lines[from]!).slice(0, columns).map(cellInlines),
-    rows: []
-  };
+  const columns = align.length;
+  const table: TableBlock = { type: "table", align, header: rowCells(lines[from]!).map(cellInlines), rows: [] };
   let i = from + 2;
-  // A line with no cell break ends the table rather than becoming a one-cell row as it would in GFM, so prose
-  // written straight under a table reads as the paragraph its author meant.
-  while (i < lines.length && !isBlank(lines[i]!) && !startsBlock(lines[i]!) && hasCellBreak(lines[i]!)) {
-    const cells = rowCells(lines[i]!).slice(0, columns).map(cellInlines);
-    // GFM pads a short row and drops a long one's extra cells, so every row is as wide as the header.
-    while (cells.length < columns) {
-      cells.push([]);
+  // Within the rows a cell break wins, so a row is still a row when its first cell reads as a list marker or a
+  // heading: `- | none` is a column of flags, not a bullet. What ends the table instead is a line that cannot be one
+  // of its rows: a blank line, a fence, a line with no cell break, or a line with more cells than the table has
+  // columns. The last two are prose rather than a row — GFM would make a one-cell row of the first and truncate the
+  // second — and reading them as rows is what would drop the author's words.
+  while (i < lines.length) {
+    const line = lines[i]!;
+    if (isBlank(line) || openFence(line) !== null || !hasCellBreak(line)) {
+      break;
     }
-    table.rows.push(cells);
+    const cells = rowCells(line);
+    if (cells.length > columns) {
+      break;
+    }
+    const row = cells.map(cellInlines);
+    // GFM pads a short row, so every row is as wide as the header.
+    while (row.length < columns) {
+      row.push([]);
+    }
+    table.rows.push(row);
     i++;
   }
   return { table, next: i };

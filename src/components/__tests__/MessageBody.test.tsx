@@ -107,6 +107,16 @@ describe("MessageBody", () => {
     expect(container.querySelector("td strong")!.textContent).toBe("bold");
   });
 
+  it("should keep a code span's own spacing when it sits in a table cell", () => {
+    const container = renderBody("| cmd |\n| --- |\n| `git log  --oneline` |");
+
+    const span = container.querySelector("td code")!;
+    expect(span.textContent).toBe("git log  --oneline");
+    // No stylesheet runs here, so the classes are what carry it: the cell's text collapses its pipe padding, the span does not.
+    expect(span.className).toContain("whitespace-pre-wrap");
+    expect(container.querySelector("table")!.className).toContain("whitespace-normal");
+  });
+
   it("should render no table when the delimiter row is missing", () => {
     const container = renderBody("| a | b |\n| c | d |");
 
