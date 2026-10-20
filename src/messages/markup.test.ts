@@ -470,6 +470,31 @@ describe("parseMarkup tables", () => {
     ]);
   });
 
+  it("should keep an escaped backslash escaped when a row's overflow is merged into its last cell", () => {
+    // The cell break after the backslash is shown again, so the backslash has to keep its escape: bare, it would read
+    // as escaping that pipe rather than as the character the author wrote.
+    expect(parseMarkup("| a |\n| - |\n| x \\\\| y |")).toEqual([table([null], [[text("a")]], [[text("x \\\\| y")]])]);
+  });
+
+  it("should end the table at a bullet or a heading below it when the line is prose holding a pipe", () => {
+    expect(parseMarkup("| flag | note |\n| --- | --- |\n| -v | loud |\n- use `a | b` for X\n- and `c | d`")).toEqual([
+      table([null, null], [[text("flag")], [text("note")]], [[text("-v")], [text("loud")]]),
+      {
+        type: "list",
+        ordered: false,
+        start: 1,
+        items: [
+          { children: [text("use "), code("a | b"), text(" for X")], lists: [] },
+          { children: [text("and "), code("c | d")], lists: [] }
+        ]
+      }
+    ]);
+    expect(parseMarkup("| flag | note |\n| --- | --- |\n| -v | loud |\n## Caveats | read these")).toEqual([
+      table([null, null], [[text("flag")], [text("note")]], [[text("-v")], [text("loud")]]),
+      { type: "heading", level: 2, children: [text("Caveats | read these")] }
+    ]);
+  });
+
   it("should keep the lines a paragraph when the delimiter row is missing, mismatched or not a delimiter", () => {
     for (const plain of ["| a | b |\n| c | d |", "| a | b |\n| --- |", "| a | b |\n| --- | x |", "a | b\n---", "| a | b |"]) {
       expect(parseMarkup(plain)).toEqual([paragraph(text(plain))]);
@@ -493,6 +518,14 @@ describe("parseMarkup tables", () => {
   it("should leave a backslash alone when it is not escaping a pipe or a backslash", () => {
     expect(parseMarkup("| path | note |\n| - | - |\n| C:\\Users\\me | home |")).toEqual([
       table([null, null], [[text("path")], [text("note")]], [[text("C:\\Users\\me")], [text("home")]])
+    ]);
+  });
+
+  it("should keep both backslashes of a pair when the pair is not guarding a pipe", () => {
+    // A body is written by agents pasting real content, so a UNC path, a doubled Windows path and a regex all arrive
+    // in cells, and a cell is the only place the subset reads a backslash as an escape at all.
+    expect(parseMarkup("| path | pattern |\n| - | - |\n| C:\\\\Users\\\\me | `\\\\d+` |\n| `\\\\server\\share` | one |")).toEqual([
+      table([null, null], [[text("path")], [text("pattern")]], [[text("C:\\\\Users\\\\me")], [code("\\\\d+")]], [[code("\\\\server\\share")], [text("one")]])
     ]);
   });
 

@@ -84,6 +84,10 @@ const DELIMITER_CELL = /^:?-+:?$/;
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(\S.*)$/;
 const BULLET = /^([ \t]*)[-*+][ \t]+(\S.*)$/;
 const NUMBERED = /^([ \t]*)(\d{1,9})[.)][ \t]+(\S.*)$/;
+// A cell holds a value, and a value can start with one of the markers above: `-` for none, or `1. open` for a step.
+// A marker and more than one word reads as a sentence instead.
+const MARKER_CELL = /^([-*+]|\d{1,9}[.)])([ \t]+\S+)?$/;
+const TRAILING_BACKSLASHES = /\\+$/;
 
 function isBlank(line: string): boolean {
   return line.trim() === "";
@@ -172,41 +176,80 @@ function listItem(line: string): FlatItem | null {
   return null;
 }
 
+interface Backslashes {
+  /** The literal backslashes the run stands for. */
+  text: string;
+  /** Whether the run spends its odd backslash escaping the `|` after it, so that pipe is content and not a break. */
+  pipe: boolean;
+  /** Where the line carries on, past everything the run accounts for. */
+  next: number;
+}
+
 /**
- * Whether the backslash at `at` escapes the character after it. A cell has two escapes, `\|` and `\\`, so a backslash
- * can itself be escaped and a cell ending in one does not swallow its closing pipe.
+ * What the run of backslashes at `at` means. A cell's escapes exist only to hold a `|`, which has to be written `\|`
+ * because cells are split before anything inline is parsed, as GFM does, so a bare `|` in a code span ends its cell.
+ * A run therefore only escapes anything where it ends at a `|`: each pair there stands for one literal backslash, and
+ * an odd backslash left over escapes the pipe. A run anywhere else is content and is kept exactly as it was written,
+ * so a cell holding `C:\\Users\me` or `` `\\d+` `` reaches the reader with every backslash the author typed.
  */
-function escapesNext(line: string, at: number): boolean {
-  const next = line[at + 1];
-  return line[at] === "\\" && (next === "|" || next === "\\");
+function backslashes(line: string, at: number): Backslashes {
+  let end = at;
+  while (line[end] === "\\") {
+    end++;
+  }
+  if (line[end] !== "|") {
+    return { text: line.slice(at, end), pipe: false, next: end };
+  }
+  const pipe = (end - at) % 2 === 1;
+  return { text: "\\".repeat((end - at) >> 1), pipe, next: pipe ? end + 1 : end };
 }
 
 /** Whether the line holds a cell break: a `|` that no backslash before it escapes. */
 function hasCellBreak(line: string): boolean {
-  for (let i = 0; i < line.length; i++) {
-    if (escapesNext(line, i)) {
-      i++;
-    } else if (line[i] === "|") {
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === "\\") {
+      i = backslashes(line, i).next;
+      continue;
+    }
+    if (line[i] === "|") {
       return true;
     }
+    i++;
   }
   return false;
 }
 
-/** The row's cells, split on the breaks `hasCellBreak` counts, with the optional outer pipes dropped. */
+/**
+ * The row's cells, each with its escapes resolved, split on the breaks `hasCellBreak` counts and with the optional
+ * outer pipes dropped. One scan both splits and resolves, so where a break is and what a backslash before it meant
+ * are the same decision. Unlike GFM the escapes are undone inside code spans too, because the subset has no other
+ * backslash escape and `` `a \| b` `` is meant as one cell holding `a | b`.
+ */
 function rowCells(line: string): string[] {
   const row = line.trim();
   const cells: string[] = [];
+  let text = "";
   let from = 0;
-  for (let i = 0; i < row.length; i++) {
-    if (escapesNext(row, i)) {
-      i++;
-    } else if (row[i] === "|") {
-      cells.push(row.slice(from, i));
-      from = i + 1;
+  let i = 0;
+  while (i < row.length) {
+    if (row[i] === "\\") {
+      const run = backslashes(row, i);
+      text += row.slice(from, i) + run.text + (run.pipe ? "|" : "");
+      i = run.next;
+      from = i;
+      continue;
     }
+    if (row[i] === "|") {
+      cells.push(text + row.slice(from, i));
+      text = "";
+      i++;
+      from = i;
+      continue;
+    }
+    i++;
   }
-  cells.push(row.slice(from));
+  cells.push(text + row.slice(from));
   if (cells.length > 1 && cells[0] === "" && row.startsWith("|")) {
     cells.shift();
   }
@@ -216,23 +259,9 @@ function rowCells(line: string): string[] {
   return cells;
 }
 
-/**
- * A `|` inside a cell has to be written `\|`, inline code included: cells are split before anything inline is parsed,
- * as GFM does, so a bare `|` in a code span ends its cell. A literal backslash in front of one is written `\\`, which
- * is why the escaping backslash is taken off here at the same positions the split skipped. Unlike GFM the escapes are
- * undone inside code spans too, because the subset has no other backslash escape and `` `a \| b` `` is meant as one
- * cell holding `a | b`.
- */
-function cellInlines(raw: string): Inline[] {
-  const cell = raw.trim();
-  let text = "";
-  for (let i = 0; i < cell.length; i++) {
-    if (escapesNext(cell, i)) {
-      i++;
-    }
-    text += cell[i]!;
-  }
-  return parseInline(text);
+/** A cell's inline markup. `rowCells` has resolved its escapes; the spaces its pipes were padded with go here. */
+function cellInlines(cell: string): Inline[] {
+  return parseInline(cell.trim());
 }
 
 /**
@@ -270,21 +299,43 @@ function startsBlock(line: string, next?: string): boolean {
   return openFence(line) !== null || HEADING.test(line) || listItem(line) !== null || tableHead(line, next) !== null;
 }
 
-/** The row's cells, with any past the table's width merged back into its last cell, the pipes between them included. */
+/**
+ * The row's cells, with any past the table's width merged back into its last cell, the pipes between them included.
+ * A merged cell is shown as the author wrote it, so a backslash run that ends one is escaped again: left as the single
+ * backslash it resolved to, it would read as escaping the pipe that now follows it.
+ */
 function fitRow(cells: string[], columns: number): string[] {
   if (cells.length <= columns) {
     return cells;
   }
-  return [...cells.slice(0, columns - 1), cells.slice(columns - 1).join("|")];
+  const overflow = cells.slice(columns - 1);
+  const last = overflow.pop()!;
+  const merged = [...overflow.map((cell) => cell.replace(TRAILING_BACKSLASHES, (run) => run.repeat(2))), last].join("|");
+  return [...cells.slice(0, columns - 1), merged];
+}
+
+/**
+ * Whether a line below a table's rows opens a block of its own instead of being another row, given its first cell. A
+ * heading does: a row carrying its outer pipes cannot read as one, and `#` and a space is not how a cell's value
+ * starts. A list item does unless its first cell is a marker and at most one word, which is a cell's worth of content:
+ * `- | none` is a column of flags and `1. open | the page` a column of steps, while `- use \`a | b\` for X` is a
+ * bullet that happens to hold a pipe.
+ */
+function endsRows(line: string, first: string): boolean {
+  if (HEADING.test(line)) {
+    return true;
+  }
+  return listItem(line) !== null && !MARKER_CELL.test(first.trim());
 }
 
 /**
  * The table these lines open, from the header at `from`, and the cells it holds. It takes no more cells than `budget`,
  * which is what is left of the body's `MAX_TABLE_CELLS`.
  *
- * Within the rows a cell break wins, so a row is still a row when its first cell reads as a list marker or a heading:
- * `- | none` is a column of flags, not a bullet. What ends the table is a line that cannot be one of its rows — a
- * blank line, a fence, or a line with no cell break — or the budget running out. A line with more cells than the table
+ * What ends the table is a line that cannot be one of its rows, or the budget running out: a blank line, a fence, a
+ * line with no cell break, a heading, or a list item that `endsRows` reads as prose rather than a cell. Short of
+ * those a cell break wins, so `- | none` is a column of flags and not a bullet. GFM ends a table at the beginning of
+ * any block-level structure, which would make that line a bullet holding `| none`. A line with more cells than the table
  * has columns is still a row: its overflow stays in its last cell, pipes and all, so the one likely mistake here, an
  * unescaped `|` in a cell, costs that cell its spacing rather than ending the table and leaving every row below it as
  * literal text. GFM truncates such a row, which would drop the author's words.
@@ -299,7 +350,11 @@ function parseTable(lines: string[], from: number, align: Alignment[], budget: n
     if (isBlank(line) || openFence(line) !== null || !hasCellBreak(line) || cells + columns > budget) {
       break;
     }
-    const row = fitRow(rowCells(line), columns).map(cellInlines);
+    const split = rowCells(line);
+    if (endsRows(line, split[0]!)) {
+      break;
+    }
+    const row = fitRow(split, columns).map(cellInlines);
     // GFM pads a short row, so every row is as wide as the header.
     while (row.length < columns) {
       row.push([]);
