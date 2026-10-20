@@ -417,6 +417,57 @@ describe("Conversation transcript entries", () => {
     expect(screen.getByText("compacted").closest("li")?.textContent).toContain("System");
   });
 
+  it("should show a background task's status and summary, and not its ids or output file, when a turn reports one", () => {
+    const text = [
+      "<task-notification>",
+      "<task-id>bohu4iyck</task-id>",
+      "<tool-use-id>toolu_bdrk_01MiSSuFVL3TcKiNnDeNbvc7</tool-use-id>",
+      "<output-file>/tmp/claude-1000/-home-linus/d8f088b7/tasks/bohu4iyck.output</output-file>",
+      "<status>completed</status>",
+      '<summary>Background command "Run the unit suite" completed (exit code 0)</summary>',
+      "</task-notification>"
+    ].join("\n");
+    render(view({ initial: page({ entries: [entry("1", { role: "user", content: { text } })] }) }));
+
+    const item = screen.getByText("Task").closest("li");
+    expect(item?.textContent).toContain("completed");
+    expect(item?.textContent).toContain('Background command "Run the unit suite" completed');
+    expect(item?.textContent).not.toContain("bohu4iyck");
+    expect(item?.textContent).not.toContain("/tmp/claude-1000");
+    expect(item?.textContent).not.toContain("Alice");
+    expect(item?.querySelector("details")).toBeNull();
+  });
+
+  it("should mark a failed task and offer a subagent's report when a turn reports one", () => {
+    const text =
+      '<task-notification>\n<status>failed</status>\n<summary>Agent "Fix the build" finished</summary>\n<result>**step one**\nexit 1</result>\n</task-notification>';
+    render(view({ initial: page({ entries: [entry("1", { role: "user", content: { text } })] }) }));
+
+    const details = screen.getByText("failed").closest("details");
+    expect(details?.open).toBe(false);
+    expect(details?.className).toContain("border-red-800");
+    expect(details?.querySelector("pre")?.textContent).toBe("**step one**\nexit 1");
+    expect(details?.querySelector("strong")).toBeNull();
+  });
+
+  it("should keep the owner's turn when the text only looks like a task notification", () => {
+    const quoted = "Summarise this:\n\n<task-notification>\n<status>completed</status>\n<summary>something</summary>\n</task-notification>";
+    render(
+      view({
+        initial: page({
+          entries: [
+            entry("1", { role: "user", content: { text: quoted } }),
+            entry("2", { role: "user", truncated: true, content: { text: "<task-notification>\n<status>comple" }, occurred_at: "2026-09-29T09:02:00.000Z" })
+          ]
+        })
+      })
+    );
+
+    expect(screen.queryByText("Task")).toBeNull();
+    expect(screen.getAllByText("Alice")).toHaveLength(2);
+    expect(screen.getByText("truncated").closest("li")?.textContent).toContain("<task-notification>");
+  });
+
   it("should show a received message once when the transcript also records it", () => {
     render(
       view({
