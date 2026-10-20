@@ -94,7 +94,19 @@ function answers(...responses: (Response | (() => Response))[]) {
 }
 
 function view(props: Partial<Parameters<typeof Conversation>[0]> = {}) {
-  return <Conversation agentId={AGENT} agentName="pcs" ownerName="Alice" status="idle" access="read" initial={page()} send={vi.fn()} {...props} />;
+  return (
+    <Conversation
+      agentId={AGENT}
+      agentName="pcs"
+      ownerName="Alice"
+      viewerOid="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+      status="idle"
+      access="read"
+      initial={page()}
+      send={vi.fn()}
+      {...props}
+    />
+  );
 }
 
 function live(props: Partial<Parameters<typeof Conversation>[0]> = {}) {

@@ -5,6 +5,7 @@ import type { AgentAccess } from "@/access/rules";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import { matchSkills, pickSkill, type Skill, skillQuery } from "@/agents/skills";
 import { useLiveStatus } from "@/components/agents/LiveStatus";
+import { useDirectDraft } from "@/components/agents/useDirectDraft";
 import { SEND_BUTTON, submitOnEnter } from "@/components/feed/Composer";
 import { useEndSession } from "@/components/live/HubStream";
 import { SessionEndedMessage } from "@/components/live/SessionEnded";
@@ -152,11 +153,14 @@ function useSkillMenu(skills: readonly Skill[], body: string, setBody: (body: st
 
 /**
  * The box for a direct message to an agent, which appears only with write access; a person with read access sees why
- * it is missing. While the agent is offline the box says what happens to the message.
+ * it is missing. While the agent is offline the box says what happens to the message. An unsent message is kept as a
+ * per-agent draft, so going to another agent and back finds it where it was.
  */
 export function DirectComposer({
   agentId,
   agentName,
+  virtualAgentId = null,
+  viewerOid,
   status: initialStatus,
   access,
   skills = [],
@@ -165,6 +169,10 @@ export function DirectComposer({
 }: {
   agentId: string;
   agentName?: string;
+  /** The virtual agent whose session this agent is, or `null` for a session on a laptop. */
+  virtualAgentId?: string | null;
+  /** Who is reading, so the box never shows the draft of whoever signed in on this tab before them. */
+  viewerOid: string;
   status: AgentStatus;
   access: Exclude<AgentAccess, "none">;
   /** The agent's skills, offered when the message starts with "/". */
@@ -172,7 +180,9 @@ export function DirectComposer({
   send: SendAction;
   onSent: (message: ThreadMessage) => void;
 }) {
-  const [body, setBody] = useState("");
+  // The message is sent to the session agent, but kept under the virtual agent: a `/clear` replaces the session while
+  // the person is still typing on the same page, and the draft has to outlive that.
+  const { body, setBody, discard } = useDirectDraft({ viewerOid, draftId: virtualAgentId ?? agentId });
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const endSession = useEndSession();
@@ -191,7 +201,9 @@ export function DirectComposer({
     try {
       const result = await send({ agentId, body });
       if (result.ok) {
-        setBody("");
+        // This submit's `discard`, so it forgets the draft under the key the message was sent from even where the
+        // page has since remounted or re-keyed the box: a `/clear` arriving mid-send does both.
+        discard(body);
         onSent(result.message);
       } else {
         setError(result.error);

@@ -4,12 +4,17 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Skill } from "@/agents/skills";
-import { DirectComposer } from "@/components/agents/DirectComposer";
+import { DirectComposer, type SendAction } from "@/components/agents/DirectComposer";
+import { draftKey } from "@/components/agents/useDirectDraft";
 import type { ThreadMessage } from "@/messages/direct-thread";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
 
 const AGENT = "11111111-1111-1111-1111-111111111111";
+const OTHER_AGENT = "22222222-2222-2222-2222-222222222222";
+const VIRTUAL_AGENT = "33333333-3333-3333-3333-333333333333";
+const VIEWER = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const OTHER_VIEWER = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
 const SKILLS: Skill[] = [
   { name: "cft-explain", description: "Answer a what is X question" },
@@ -33,10 +38,28 @@ const SENT: ThreadMessage = {
 
 afterEach(() => {
   cleanup();
+  sessionStorage.clear();
+  vi.restoreAllMocks();
 });
 
-function composer(skills: Skill[] = SKILLS, send = vi.fn(async () => ({ ok: true as const, message: SENT }))) {
-  render(<DirectComposer agentId={AGENT} agentName="pcs" status="idle" access="owner" skills={skills} send={send} onSent={vi.fn()} />);
+function composer(
+  skills: Skill[] = SKILLS,
+  send: SendAction = vi.fn(async () => ({ ok: true as const, message: SENT })),
+  overrides: Partial<React.ComponentProps<typeof DirectComposer>> = {}
+) {
+  render(
+    <DirectComposer
+      agentId={AGENT}
+      agentName="pcs"
+      viewerOid={VIEWER}
+      status="idle"
+      access="owner"
+      skills={skills}
+      send={send}
+      onSent={vi.fn()}
+      {...overrides}
+    />
+  );
   return send;
 }
 
@@ -46,6 +69,32 @@ function field(): HTMLTextAreaElement {
 
 function type(value: string): void {
   fireEvent.change(field(), { target: { value } });
+}
+
+/** A send that is still in flight, so what the page does before it comes back can be set up in between. */
+function deferredSend(): { send: SendAction; resolve: () => Promise<void> } {
+  let settle: ((result: Awaited<ReturnType<SendAction>>) => void) | undefined;
+  const send: SendAction = vi.fn(
+    () =>
+      new Promise<Awaited<ReturnType<SendAction>>>((done) => {
+        settle = done;
+      })
+  );
+  return {
+    send,
+    resolve: async () => {
+      await act(async () => {
+        settle?.({ ok: true, message: SENT });
+      });
+    }
+  };
+}
+
+/** Starts the send without resolving it, so the box is left as it is while the message is in flight. */
+async function pressEnter(): Promise<void> {
+  await act(async () => {
+    fireEvent.keyDown(field(), { key: "Enter" });
+  });
 }
 
 function options(): string[] {
@@ -207,5 +256,253 @@ describe("DirectComposer skill autocomplete", () => {
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.queryAllByRole("option")).toEqual([]);
+  });
+});
+
+/** Unmounting flushes whatever the throttle still owes, so none of these has to wait on its timer. */
+describe("DirectComposer draft", () => {
+  it("should restore the unsent message when the composer mounts again for the same agent", () => {
+    composer();
+    type("half a thought about CDAM");
+
+    cleanup();
+    composer();
+
+    expect(field().value).toBe("half a thought about CDAM");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBe("half a thought about CDAM");
+  });
+
+  it("should start empty when the agent has no draft of its own", () => {
+    composer();
+    type("meant for pcs");
+    cleanup();
+
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT });
+
+    expect(field().value).toBe("");
+    expect(sessionStorage.getItem(draftKey(VIEWER, OTHER_AGENT))).toBeNull();
+  });
+
+  it("should keep each agent's draft apart when both have one", () => {
+    composer();
+    type("meant for pcs");
+    cleanup();
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT });
+    type("meant for the other agent");
+    cleanup();
+
+    composer();
+
+    expect(field().value).toBe("meant for pcs");
+    expect(sessionStorage.getItem(draftKey(VIEWER, OTHER_AGENT))).toBe("meant for the other agent");
+  });
+
+  it("should keep the draft under the virtual agent when its session is replaced by a clear", () => {
+    composer(SKILLS, undefined, { agentId: AGENT, virtualAgentId: VIRTUAL_AGENT });
+    type("half a thought about CDAM");
+
+    // The page remounts the composer with the agent the new session registered, on the page the person never left.
+    cleanup();
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT, virtualAgentId: VIRTUAL_AGENT });
+
+    expect(field().value).toBe("half a thought about CDAM");
+    expect(sessionStorage.getItem(draftKey(VIEWER, VIRTUAL_AGENT))).toBe("half a thought about CDAM");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+  });
+
+  it("should show no draft of the person who signed out when someone else signs in on the same tab", () => {
+    composer();
+    type("not for anyone else to see");
+    cleanup();
+
+    composer(SKILLS, undefined, { viewerOid: OTHER_VIEWER });
+
+    expect(field().value).toBe("");
+  });
+
+  it("should leave none of the signed-out person's drafts in the tab when someone else signs in", () => {
+    composer();
+    type("not for anyone else to see");
+    cleanup();
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT });
+    type("nor this one");
+    cleanup();
+    sessionStorage.setItem("agent-hub:something-else", "not a draft");
+
+    composer(SKILLS, undefined, { viewerOid: OTHER_VIEWER });
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+    expect(sessionStorage.getItem(draftKey(VIEWER, OTHER_AGENT))).toBeNull();
+    expect(sessionStorage.getItem("agent-hub:something-else")).toBe("not a draft");
+  });
+
+  it("should keep the drafts of the person who is reading when their composer mounts", () => {
+    composer();
+    type("meant for pcs");
+    cleanup();
+
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT });
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBe("meant for pcs");
+  });
+
+  it("should forget the draft when the message is sent", async () => {
+    composer();
+    type("all finished");
+
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+
+    expect(field().value).toBe("");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+    cleanup();
+    composer();
+    expect(field().value).toBe("");
+  });
+
+  it("should keep the next message when it was typed while the send was in flight", async () => {
+    // The box is not disabled while the send is in flight, so the next message is typed before the send resolves.
+    const send: SendAction = vi.fn(async () => {
+      type("and the next thought");
+      return { ok: true as const, message: SENT };
+    });
+    composer(SKILLS, send);
+    type("all finished");
+
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+
+    expect(send).toHaveBeenCalledWith({ agentId: AGENT, body: "all finished" });
+    expect(field().value).toBe("and the next thought");
+    cleanup();
+    composer();
+    expect(field().value).toBe("and the next thought");
+  });
+
+  it("should keep the draft when the send is refused", async () => {
+    const refused: SendAction = vi.fn(async () => ({ ok: false as const, error: "that agent is not accepting messages" }));
+    composer(SKILLS, refused);
+    type("worth keeping");
+
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("that agent is not accepting messages");
+    expect(field().value).toBe("worth keeping");
+    cleanup();
+    composer();
+    expect(field().value).toBe("worth keeping");
+  });
+
+  it("should empty the box that replaced the composer when the message sent from it succeeds", async () => {
+    // A virtual_agent event arrives before the send resolves, so the page remounts the conversation under the agent
+    // the new session registered and the box the message was typed in is gone by the time the send comes back.
+    const { send, resolve } = deferredSend();
+    composer(SKILLS, send, { agentId: AGENT, virtualAgentId: VIRTUAL_AGENT });
+    type("all finished");
+    await pressEnter();
+
+    cleanup();
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT, virtualAgentId: VIRTUAL_AGENT });
+    expect(field().value).toBe("all finished");
+    await resolve();
+
+    expect(field().value).toBe("");
+    expect(sessionStorage.getItem(draftKey(VIEWER, VIRTUAL_AGENT))).toBeNull();
+  });
+
+  it("should forget the draft under the key the message was sent from when the key changes mid-send", async () => {
+    // The page learns this agent is a virtual agent's session while the send is in flight, so the still-mounted box
+    // is re-keyed onto the virtual agent before the message it was holding is accounted for.
+    const { send, resolve } = deferredSend();
+    const props = {
+      agentId: AGENT,
+      agentName: "pcs",
+      viewerOid: VIEWER,
+      status: "idle" as const,
+      access: "owner" as const,
+      skills: SKILLS,
+      send,
+      onSent: vi.fn()
+    };
+    const view = render(<DirectComposer {...props} />);
+    type("all finished");
+    await pressEnter();
+
+    await act(async () => {
+      view.rerender(<DirectComposer {...props} virtualAgentId={VIRTUAL_AGENT} />);
+    });
+    await resolve();
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+    expect(field().value).toBe("");
+  });
+
+  it("should keep the draft when the page is hidden before the throttle has written it", () => {
+    // React cleanup does not run on a page unload, so without a flush on hide the first 300ms of a message is lost.
+    composer();
+    type("quick");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+
+    fireEvent(window, new Event("pagehide"));
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBe("quick");
+  });
+
+  it("should keep the draft when the tab is backgrounded before the throttle has written it", () => {
+    composer();
+    type("quick");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+
+    vi.spyOn(Document.prototype, "visibilityState", "get").mockReturnValue("hidden");
+    fireEvent(document, new Event("visibilitychange"));
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBe("quick");
+  });
+
+  it("should leave the draft alone when the tab comes back to the foreground", () => {
+    composer();
+    type("quick");
+
+    fireEvent(document, new Event("visibilitychange"));
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+    expect(field().value).toBe("quick");
+  });
+
+  it("should leave no draft behind when the box is emptied by hand", () => {
+    composer();
+    type("second thoughts");
+    type("");
+
+    cleanup();
+    composer();
+
+    expect(field().value).toBe("");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+  });
+
+  it("should still send when storage refuses to answer", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("the operation is insecure");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("the quota has been exceeded");
+    });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("the operation is insecure");
+    });
+    const send = composer();
+
+    type("still typable");
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+
+    expect(send).toHaveBeenCalledWith({ agentId: AGENT, body: "still typable" });
+    expect(field().value).toBe("");
   });
 });
