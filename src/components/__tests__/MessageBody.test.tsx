@@ -83,6 +83,37 @@ describe("MessageBody", () => {
     expect(paragraphs[0]!.className).toContain("font-bold");
   });
 
+  it("should render a focusable, scrollable table with aligned column headers when a body has a pipe table", () => {
+    const container = renderBody("| left | centre | right |\n| :--- | :----: | -----: |\n| a | b | c |\n| d |");
+
+    const node = container.querySelector("table")!;
+    expect(node.parentElement!.tabIndex).toBe(0);
+    expect(node.parentElement!.className).toContain("overflow-x-auto");
+    const headers = [...node.querySelectorAll("thead th")];
+    expect(headers.map((header) => header.textContent)).toEqual(["left", "centre", "right"]);
+    expect(headers.map((header) => header.getAttribute("scope"))).toEqual(["col", "col", "col"]);
+    expect(headers.map((header) => header.className.match(/text-(?:left|center|right)/)![0])).toEqual(["text-left", "text-center", "text-right"]);
+    const rows = [...node.querySelectorAll("tbody tr")].map((row) => [...row.querySelectorAll("td")].map((cell) => cell.textContent));
+    expect(rows).toEqual([
+      ["a", "b", "c"],
+      ["d", "", ""]
+    ]);
+  });
+
+  it("should render a cell's own markup when a table cell holds a link or bold text", () => {
+    const container = renderBody("| a | b |\n| - | - |\n| [docs](https://example.com/docs) | **bold** |");
+
+    expect(screen.getByRole("link", { name: "docs" }).getAttribute("href")).toBe("https://example.com/docs");
+    expect(container.querySelector("td strong")!.textContent).toBe("bold");
+  });
+
+  it("should render no table when the delimiter row is missing", () => {
+    const container = renderBody("| a | b |\n| c | d |");
+
+    expect(container.querySelector("table")).toBeNull();
+    expect(container.textContent).toBe("| a | b |\n| c | d |");
+  });
+
   it("should render bullet and numbered lists with nesting and the start number", () => {
     const container = renderBody("3. three\n   - nested\n4. four\n\n- bullet");
 

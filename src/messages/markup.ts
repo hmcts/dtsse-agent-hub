@@ -30,11 +30,23 @@ export interface ListBlock {
   items: ListItem[];
 }
 
+/** A column's alignment, from the delimiter row's colons, or null when it asked for none. */
+export type Alignment = "left" | "center" | "right" | null;
+
+export interface TableBlock {
+  type: "table";
+  /** One entry per column, so a row's cells and the alignments line up by index. */
+  align: Alignment[];
+  header: Inline[][];
+  rows: Inline[][][];
+}
+
 export type Block =
   | { type: "paragraph"; children: Inline[] }
   | { type: "heading"; level: number; children: Inline[] }
   | { type: "code"; language: string | null; text: string }
-  | ListBlock;
+  | ListBlock
+  | TableBlock;
 
 const SAFE_SCHEMES = new Set(["http:", "https:", "mailto:"]);
 
@@ -59,7 +71,10 @@ const MAX_LIST_DEPTH = 4;
 const MAX_INLINE_DEPTH = 3;
 // Bounds the work a run of `[x](` openers sharing one distant `)` can cause.
 const MAX_LINK_URL = 2048;
+// Bounds the padding a header of many columns and a body of many one-cell rows would otherwise cost.
+const MAX_TABLE_COLUMNS = 64;
 const LANGUAGE = /^[\w+#.-]{1,32}$/;
+const DELIMITER_CELL = /^:?-+:?$/;
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(\S.*)$/;
 const BULLET = /^([ \t]*)[-*+][ \t]+(\S.*)$/;
 const NUMBERED = /^([ \t]*)(\d{1,9})[.)][ \t]+(\S.*)$/;
@@ -151,8 +166,101 @@ function listItem(line: string): FlatItem | null {
   return null;
 }
 
-function startsBlock(line: string): boolean {
-  return openFence(line) !== null || HEADING.test(line) || listItem(line) !== null;
+/** Whether the line holds a cell break: a `|` that the character before it does not escape. */
+function hasCellBreak(line: string): boolean {
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === "|" && line[i - 1] !== "\\") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The row's cells, split on its cell breaks, with the optional outer pipes dropped. */
+function rowCells(line: string): string[] {
+  const row = line.trim();
+  const cells: string[] = [];
+  let from = 0;
+  for (let i = 0; i < row.length; i++) {
+    if (row[i] === "|" && row[i - 1] !== "\\") {
+      cells.push(row.slice(from, i));
+      from = i + 1;
+    }
+  }
+  cells.push(row.slice(from));
+  if (cells.length > 1 && cells[0] === "" && row.startsWith("|")) {
+    cells.shift();
+  }
+  if (cells.length > 1 && cells[cells.length - 1] === "" && row.endsWith("|")) {
+    cells.pop();
+  }
+  return cells;
+}
+
+/**
+ * A `|` inside a cell has to be written `\|`, inline code included: cells are split before anything inline is parsed,
+ * as GFM does, so a bare `|` in a code span ends its cell. Unlike GFM the escape is undone inside code spans too,
+ * because the subset has no other backslash escape and `` `a \| b` `` is meant as one cell holding `a | b`.
+ */
+function cellInlines(raw: string): Inline[] {
+  return parseInline(raw.trim().replaceAll("\\|", "|"));
+}
+
+/**
+ * The columns' alignments when these two lines open a table: a row of cells over a delimiter row of `-` runs with
+ * optional colons. GFM only starts a table when the delimiter row has exactly as many cells as the header, and that is
+ * what keeps a paragraph of pipe-separated prose a paragraph.
+ */
+function tableHead(header: string, delimiter: string | undefined): Alignment[] | null {
+  if (delimiter === undefined || !hasCellBreak(header) || !hasCellBreak(delimiter)) {
+    return null;
+  }
+  const cells = rowCells(delimiter);
+  if (cells.length !== rowCells(header).length) {
+    return null;
+  }
+  const align: Alignment[] = [];
+  for (const cell of cells) {
+    const text = cell.trim();
+    if (!DELIMITER_CELL.test(text)) {
+      return null;
+    }
+    const left = text.startsWith(":");
+    const right = text.endsWith(":");
+    align.push(left && right ? "center" : left ? "left" : right ? "right" : null);
+  }
+  return align;
+}
+
+/**
+ * Whether the line starts a block of its own, ending any paragraph above it. A table also needs the line after it,
+ * so it only opens where a caller passes one: an indented pipe table inside a list item stays part of its item.
+ */
+function startsBlock(line: string, next?: string): boolean {
+  return openFence(line) !== null || HEADING.test(line) || listItem(line) !== null || tableHead(line, next) !== null;
+}
+
+function parseTable(lines: string[], from: number, align: Alignment[]): { table: TableBlock; next: number } {
+  const columns = Math.min(align.length, MAX_TABLE_COLUMNS);
+  const table: TableBlock = {
+    type: "table",
+    align: align.slice(0, columns),
+    header: rowCells(lines[from]!).slice(0, columns).map(cellInlines),
+    rows: []
+  };
+  let i = from + 2;
+  // A line with no cell break ends the table rather than becoming a one-cell row as it would in GFM, so prose
+  // written straight under a table reads as the paragraph its author meant.
+  while (i < lines.length && !isBlank(lines[i]!) && !startsBlock(lines[i]!) && hasCellBreak(lines[i]!)) {
+    const cells = rowCells(lines[i]!).slice(0, columns).map(cellInlines);
+    // GFM pads a short row and drops a long one's extra cells, so every row is as wide as the header.
+    while (cells.length < columns) {
+      cells.push([]);
+    }
+    table.rows.push(cells);
+    i++;
+  }
+  return { table, next: i };
 }
 
 interface Level {
@@ -225,7 +333,7 @@ function parseList(lines: string[], from: number, blocks: Block[]): number {
   return i;
 }
 
-/** A body as blocks: fenced code, headings, lists and paragraphs. A paragraph keeps its line breaks. */
+/** A body as blocks: fenced code, headings, lists, pipe tables and paragraphs. A paragraph keeps its line breaks. */
 export function parseMarkup(source: string): Block[] {
   const lines = source.split(/\r?\n/);
   const blocks: Block[] = [];
@@ -259,9 +367,16 @@ export function parseMarkup(source: string): Block[] {
       i = parseList(lines, i, blocks);
       continue;
     }
+    const align = tableHead(line, lines[i + 1]);
+    if (align) {
+      const { table, next } = parseTable(lines, i, align);
+      blocks.push(table);
+      i = next;
+      continue;
+    }
     const start = i;
     i++;
-    while (i < lines.length && !isBlank(lines[i]!) && !startsBlock(lines[i]!)) {
+    while (i < lines.length && !isBlank(lines[i]!) && !startsBlock(lines[i]!, lines[i + 1])) {
       i++;
     }
     blocks.push({ type: "paragraph", children: parseInline(lines.slice(start, i).join("\n")) });
