@@ -417,6 +417,129 @@ describe("Conversation transcript entries", () => {
     expect(screen.getByText("compacted").closest("li")?.textContent).toContain("System");
   });
 
+  it("should show a background task's status and summary, and not its ids or output file, when a turn reports one", () => {
+    const text = [
+      "<task-notification>",
+      "<task-id>bohu4iyck</task-id>",
+      "<tool-use-id>toolu_bdrk_01MiSSuFVL3TcKiNnDeNbvc7</tool-use-id>",
+      "<output-file>/tmp/claude-1000/-home-linus/d8f088b7/tasks/bohu4iyck.output</output-file>",
+      "<status>completed</status>",
+      '<summary>Background command "Run the unit suite" completed (exit code 0)</summary>',
+      "</task-notification>"
+    ].join("\n");
+    render(view({ initial: page({ entries: [entry("1", { role: "user", content: { text } })] }) }));
+
+    const item = screen.getByText("Task").closest("li");
+    expect(item?.textContent).toContain("completed");
+    expect(item?.textContent).toContain('Background command "Run the unit suite" completed');
+    expect(item?.textContent).not.toContain("bohu4iyck");
+    expect(item?.textContent).not.toContain("/tmp/claude-1000");
+    expect(item?.textContent).not.toContain("Alice");
+    expect(item?.querySelector("details")).toBeNull();
+  });
+
+  it("should mark a failed task and offer a subagent's report when a turn reports one", () => {
+    const text =
+      '<task-notification>\n<status>failed</status>\n<summary>Agent "Fix the build" finished</summary>\n<result>**step one**\nexit 1</result>\n</task-notification>';
+    render(view({ initial: page({ entries: [entry("1", { role: "user", content: { text } })] }) }));
+
+    const details = screen.getByText("failed").closest("details");
+    expect(details?.open).toBe(false);
+    expect(details?.className).toContain("border-red-800");
+    expect(details?.querySelector("pre")?.textContent).toBe("**step one**\nexit 1");
+    expect(details?.querySelector("strong")).toBeNull();
+  });
+
+  it("should show what a monitor saw, and not call it finished, when a turn reports an event", () => {
+    const text = [
+      "<task-notification>",
+      "<task-id>b1ako8104</task-id>",
+      '<summary>Monitor event: "hmcts-claude-provider apply completion"</summary>',
+      "<event>RUN COMPLETED: failure\napply job: failure</event>",
+      "</task-notification>"
+    ].join("\n");
+    render(view({ initial: page({ entries: [entry("1", { role: "user", content: { text } })] }) }));
+
+    const details = screen.getByText("Task").closest("details");
+    expect(details?.textContent).not.toContain("finished");
+    expect(details?.textContent).toContain("update");
+    expect(details?.querySelector("pre")?.textContent).toBe("RUN COMPLETED: failure\napply job: failure");
+  });
+
+  it("should read a truncated task notification's fields, and not its cut off report, when the upload limit cut the turn", () => {
+    const text = [
+      "<task-notification>",
+      "<status>completed</status>",
+      '<summary>Agent "Design decay detection" finished</summary>',
+      "<result>## Layer 1 — the first thing it found"
+    ].join("\n");
+    render(view({ initial: page({ entries: [entry("1", { role: "user", truncated: true, content: { text } })] }) }));
+
+    const item = screen.getByText("Task").closest("li");
+    expect(item?.textContent).toContain("completed");
+    expect(item?.textContent).toContain('Agent "Design decay detection" finished');
+    expect(item?.textContent).toContain("truncated");
+    expect(item?.textContent).not.toContain("<task-notification>");
+    expect(item?.textContent).not.toContain("Layer 1");
+    expect(item?.querySelector("details")).toBeNull();
+  });
+
+  it("should offer the whole summary when one line of it does not fit", () => {
+    const summary = `Agent "Port the metrics dashboard" finished: ${"it rewrote the loader and ".repeat(12)}and stopped there`;
+    const text = `<task-notification>\n<status>completed</status>\n<summary>${summary}</summary>\n</task-notification>`;
+    render(view({ initial: page({ entries: [entry("1", { role: "user", content: { text } })] }) }));
+
+    const details = screen.getByText("Task").closest("details");
+    expect(details?.querySelector("summary")?.textContent).toContain("…");
+    expect(details?.querySelector("p")?.textContent).toBe(summary);
+  });
+
+  it("should not offer the summary again when one line of it only collapsed its whitespace", () => {
+    const summary = 'Agent "Fix the gate" finished:  it  reran the suite';
+    const text = `<task-notification>\n<status>completed</status>\n<summary>${summary}</summary>\n</task-notification>`;
+    render(view({ initial: page({ entries: [entry("1", { role: "user", content: { text } })] }) }));
+
+    const item = screen.getByText("Task").closest("li");
+    expect(item?.textContent).toContain('Agent "Fix the gate" finished: it reran the suite');
+    expect(item?.querySelector("details")).toBeNull();
+  });
+
+  it("should mark the task the turn was cut inside when a truncated entry reports more than one", () => {
+    const text = [
+      "<task-notification>",
+      "<status>completed</status>",
+      "<summary>Background command finished first</summary>",
+      "</task-notification>",
+      "<task-notification>",
+      "<status>completed</status>",
+      "<summary>Agent cut part way through its report</summary>",
+      "<result>## Layer 1 — the first thing it found"
+    ].join("\n");
+    render(view({ initial: page({ entries: [entry("1", { role: "user", truncated: true, content: { text } })] }) }));
+
+    const marked = screen.getByText("truncated").closest("p, summary");
+    expect(marked?.textContent).toContain("Agent cut part way through its report");
+    expect(marked?.textContent).not.toContain("Background command finished first");
+  });
+
+  it("should keep the owner's turn when the text only looks like a task notification", () => {
+    const quoted = "Summarise this:\n\n<task-notification>\n<status>completed</status>\n<summary>something</summary>\n</task-notification>";
+    render(
+      view({
+        initial: page({
+          entries: [
+            entry("1", { role: "user", content: { text: quoted } }),
+            entry("2", { role: "user", truncated: true, content: { text: "<task-notification>\n<status>comple" }, occurred_at: "2026-09-29T09:02:00.000Z" })
+          ]
+        })
+      })
+    );
+
+    expect(screen.queryByText("Task")).toBeNull();
+    expect(screen.getAllByText("Alice")).toHaveLength(2);
+    expect(screen.getByText("truncated").closest("li")?.textContent).toContain("<task-notification>");
+  });
+
   it("should show a received message once when the transcript also records it", () => {
     render(
       view({
