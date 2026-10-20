@@ -171,7 +171,7 @@ export function DirectComposer({
   agentName?: string;
   /** The virtual agent whose session this agent is, or `null` for a session on a laptop. */
   virtualAgentId?: string | null;
-  /** Who is reading, so one person's draft cannot show up in the next person to sign in on this tab. */
+  /** Who is reading, so the box never shows the draft of whoever signed in on this tab before them. */
   viewerOid: string;
   status: AgentStatus;
   access: Exclude<AgentAccess, "none">;
@@ -201,6 +201,8 @@ export function DirectComposer({
     try {
       const result = await send({ agentId, body });
       if (result.ok) {
+        // This submit's `discard`, so it forgets the draft under the key the message was sent from even where the
+        // page has since remounted or re-keyed the box: a `/clear` arriving mid-send does both.
         discard(body);
         onSent(result.message);
       } else {

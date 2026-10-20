@@ -71,6 +71,32 @@ function type(value: string): void {
   fireEvent.change(field(), { target: { value } });
 }
 
+/** A send that is still in flight, so what the page does before it comes back can be set up in between. */
+function deferredSend(): { send: SendAction; resolve: () => Promise<void> } {
+  let settle: ((result: Awaited<ReturnType<SendAction>>) => void) | undefined;
+  const send: SendAction = vi.fn(
+    () =>
+      new Promise<Awaited<ReturnType<SendAction>>>((done) => {
+        settle = done;
+      })
+  );
+  return {
+    send,
+    resolve: async () => {
+      await act(async () => {
+        settle?.({ ok: true, message: SENT });
+      });
+    }
+  };
+}
+
+/** Starts the send without resolving it, so the box is left as it is while the message is in flight. */
+async function pressEnter(): Promise<void> {
+  await act(async () => {
+    fireEvent.keyDown(field(), { key: "Enter" });
+  });
+}
+
 function options(): string[] {
   return screen.queryAllByRole("option").map((option) => option.querySelector(".font-mono")?.textContent ?? "");
 }
@@ -292,7 +318,32 @@ describe("DirectComposer draft", () => {
     composer(SKILLS, undefined, { viewerOid: OTHER_VIEWER });
 
     expect(field().value).toBe("");
-    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBe("not for anyone else to see");
+  });
+
+  it("should leave none of the signed-out person's drafts in the tab when someone else signs in", () => {
+    composer();
+    type("not for anyone else to see");
+    cleanup();
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT });
+    type("nor this one");
+    cleanup();
+    sessionStorage.setItem("agent-hub:something-else", "not a draft");
+
+    composer(SKILLS, undefined, { viewerOid: OTHER_VIEWER });
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+    expect(sessionStorage.getItem(draftKey(VIEWER, OTHER_AGENT))).toBeNull();
+    expect(sessionStorage.getItem("agent-hub:something-else")).toBe("not a draft");
+  });
+
+  it("should keep the drafts of the person who is reading when their composer mounts", () => {
+    composer();
+    type("meant for pcs");
+    cleanup();
+
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT });
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBe("meant for pcs");
   });
 
   it("should forget the draft when the message is sent", async () => {
@@ -344,6 +395,82 @@ describe("DirectComposer draft", () => {
     cleanup();
     composer();
     expect(field().value).toBe("worth keeping");
+  });
+
+  it("should empty the box that replaced the composer when the message sent from it succeeds", async () => {
+    // A virtual_agent event arrives before the send resolves, so the page remounts the conversation under the agent
+    // the new session registered and the box the message was typed in is gone by the time the send comes back.
+    const { send, resolve } = deferredSend();
+    composer(SKILLS, send, { agentId: AGENT, virtualAgentId: VIRTUAL_AGENT });
+    type("all finished");
+    await pressEnter();
+
+    cleanup();
+    composer(SKILLS, undefined, { agentId: OTHER_AGENT, virtualAgentId: VIRTUAL_AGENT });
+    expect(field().value).toBe("all finished");
+    await resolve();
+
+    expect(field().value).toBe("");
+    expect(sessionStorage.getItem(draftKey(VIEWER, VIRTUAL_AGENT))).toBeNull();
+  });
+
+  it("should forget the draft under the key the message was sent from when the key changes mid-send", async () => {
+    // The page learns this agent is a virtual agent's session while the send is in flight, so the still-mounted box
+    // is re-keyed onto the virtual agent before the message it was holding is accounted for.
+    const { send, resolve } = deferredSend();
+    const props = {
+      agentId: AGENT,
+      agentName: "pcs",
+      viewerOid: VIEWER,
+      status: "idle" as const,
+      access: "owner" as const,
+      skills: SKILLS,
+      send,
+      onSent: vi.fn()
+    };
+    const view = render(<DirectComposer {...props} />);
+    type("all finished");
+    await pressEnter();
+
+    await act(async () => {
+      view.rerender(<DirectComposer {...props} virtualAgentId={VIRTUAL_AGENT} />);
+    });
+    await resolve();
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+    expect(field().value).toBe("");
+  });
+
+  it("should keep the draft when the page is hidden before the throttle has written it", () => {
+    // React cleanup does not run on a page unload, so without a flush on hide the first 300ms of a message is lost.
+    composer();
+    type("quick");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+
+    fireEvent(window, new Event("pagehide"));
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBe("quick");
+  });
+
+  it("should keep the draft when the tab is backgrounded before the throttle has written it", () => {
+    composer();
+    type("quick");
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+
+    vi.spyOn(Document.prototype, "visibilityState", "get").mockReturnValue("hidden");
+    fireEvent(document, new Event("visibilitychange"));
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBe("quick");
+  });
+
+  it("should leave the draft alone when the tab comes back to the foreground", () => {
+    composer();
+    type("quick");
+
+    fireEvent(document, new Event("visibilitychange"));
+
+    expect(sessionStorage.getItem(draftKey(VIEWER, AGENT))).toBeNull();
+    expect(field().value).toBe("quick");
   });
 
   it("should leave no draft behind when the box is emptied by hand", () => {
