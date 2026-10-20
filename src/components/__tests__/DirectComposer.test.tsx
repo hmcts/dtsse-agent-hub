@@ -4,12 +4,14 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Skill } from "@/agents/skills";
-import { DirectComposer } from "@/components/agents/DirectComposer";
+import { DirectComposer, type SendAction } from "@/components/agents/DirectComposer";
+import { draftKey } from "@/components/agents/useDirectDraft";
 import type { ThreadMessage } from "@/messages/direct-thread";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
 
 const AGENT = "11111111-1111-1111-1111-111111111111";
+const OTHER_AGENT = "22222222-2222-2222-2222-222222222222";
 
 const SKILLS: Skill[] = [
   { name: "cft-explain", description: "Answer a what is X question" },
@@ -33,10 +35,12 @@ const SENT: ThreadMessage = {
 
 afterEach(() => {
   cleanup();
+  sessionStorage.clear();
+  vi.restoreAllMocks();
 });
 
-function composer(skills: Skill[] = SKILLS, send = vi.fn(async () => ({ ok: true as const, message: SENT }))) {
-  render(<DirectComposer agentId={AGENT} agentName="pcs" status="idle" access="owner" skills={skills} send={send} onSent={vi.fn()} />);
+function composer(skills: Skill[] = SKILLS, send: SendAction = vi.fn(async () => ({ ok: true as const, message: SENT })), agentId = AGENT) {
+  render(<DirectComposer agentId={agentId} agentName="pcs" status="idle" access="owner" skills={skills} send={send} onSent={vi.fn()} />);
   return send;
 }
 
@@ -207,5 +211,108 @@ describe("DirectComposer skill autocomplete", () => {
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.queryAllByRole("option")).toEqual([]);
+  });
+});
+
+/** Unmounting flushes whatever the throttle still owes, so none of these has to wait on its timer. */
+describe("DirectComposer draft", () => {
+  it("should restore the unsent message when the composer mounts again for the same agent", () => {
+    composer();
+    type("half a thought about CDAM");
+
+    cleanup();
+    composer();
+
+    expect(field().value).toBe("half a thought about CDAM");
+    expect(sessionStorage.getItem(draftKey(AGENT))).toBe("half a thought about CDAM");
+  });
+
+  it("should start empty when the agent has no draft of its own", () => {
+    composer();
+    type("meant for pcs");
+    cleanup();
+
+    composer(SKILLS, undefined, OTHER_AGENT);
+
+    expect(field().value).toBe("");
+    expect(sessionStorage.getItem(draftKey(OTHER_AGENT))).toBeNull();
+  });
+
+  it("should keep each agent's draft apart when both have one", () => {
+    composer();
+    type("meant for pcs");
+    cleanup();
+    composer(SKILLS, undefined, OTHER_AGENT);
+    type("meant for the other agent");
+    cleanup();
+
+    composer();
+
+    expect(field().value).toBe("meant for pcs");
+    expect(sessionStorage.getItem(draftKey(OTHER_AGENT))).toBe("meant for the other agent");
+  });
+
+  it("should forget the draft when the message is sent", async () => {
+    composer();
+    type("all finished");
+
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+
+    expect(field().value).toBe("");
+    expect(sessionStorage.getItem(draftKey(AGENT))).toBeNull();
+    cleanup();
+    composer();
+    expect(field().value).toBe("");
+  });
+
+  it("should keep the draft when the send is refused", async () => {
+    const refused: SendAction = vi.fn(async () => ({ ok: false as const, error: "that agent is not accepting messages" }));
+    composer(SKILLS, refused);
+    type("worth keeping");
+
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("that agent is not accepting messages");
+    expect(field().value).toBe("worth keeping");
+    cleanup();
+    composer();
+    expect(field().value).toBe("worth keeping");
+  });
+
+  it("should leave no draft behind when the box is emptied by hand", () => {
+    composer();
+    type("second thoughts");
+    type("");
+
+    cleanup();
+    composer();
+
+    expect(field().value).toBe("");
+    expect(sessionStorage.getItem(draftKey(AGENT))).toBeNull();
+  });
+
+  it("should still send when storage refuses to answer", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("the operation is insecure");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("the quota has been exceeded");
+    });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("the operation is insecure");
+    });
+    const send = composer();
+
+    type("still typable");
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+
+    expect(send).toHaveBeenCalledWith({ agentId: AGENT, body: "still typable" });
+    expect(field().value).toBe("");
   });
 });

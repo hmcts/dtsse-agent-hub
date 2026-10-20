@@ -5,6 +5,7 @@ import type { AgentAccess } from "@/access/rules";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import { matchSkills, pickSkill, type Skill, skillQuery } from "@/agents/skills";
 import { useLiveStatus } from "@/components/agents/LiveStatus";
+import { useDirectDraft } from "@/components/agents/useDirectDraft";
 import { SEND_BUTTON, submitOnEnter } from "@/components/feed/Composer";
 import { useEndSession } from "@/components/live/HubStream";
 import { SessionEndedMessage } from "@/components/live/SessionEnded";
@@ -152,7 +153,8 @@ function useSkillMenu(skills: readonly Skill[], body: string, setBody: (body: st
 
 /**
  * The box for a direct message to an agent, which appears only with write access; a person with read access sees why
- * it is missing. While the agent is offline the box says what happens to the message.
+ * it is missing. While the agent is offline the box says what happens to the message. An unsent message is kept as a
+ * per-agent draft, so going to another agent and back finds it where it was.
  */
 export function DirectComposer({
   agentId,
@@ -172,7 +174,7 @@ export function DirectComposer({
   send: SendAction;
   onSent: (message: ThreadMessage) => void;
 }) {
-  const [body, setBody] = useState("");
+  const { body, setBody, discard } = useDirectDraft(agentId);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const endSession = useEndSession();
@@ -191,7 +193,7 @@ export function DirectComposer({
     try {
       const result = await send({ agentId, body });
       if (result.ok) {
-        setBody("");
+        discard();
         onSent(result.message);
       } else {
         setError(result.error);
