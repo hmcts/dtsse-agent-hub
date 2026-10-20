@@ -524,6 +524,15 @@ describe("PortsPanel", () => {
     expect(screen.queryByText("No web servers running")).toBeNull();
   });
 
+  it("should link each port on the viewer first and on the VPN after it when the viewer is on", () => {
+    const viewerUrl = "https://agent-hub-viewer.example/va-1/3000/";
+    render(<PortsPanel agent={card({ exposedPorts: [{ port: 3000, url: URL_3000, viewerUrl }] })} />);
+
+    const links = within(screen.getByRole("list", { name: "Web server URLs" })).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([viewerUrl, URL_3000]);
+    expect(screen.getByText(/on the VPN:/)).toBeTruthy();
+  });
+
   it("should not say who can open the URLs or how servers must listen when there are URLs", () => {
     render(<PortsPanel agent={card({ exposedPorts: [{ port: 3000, url: URL_3000 }] })} />);
 

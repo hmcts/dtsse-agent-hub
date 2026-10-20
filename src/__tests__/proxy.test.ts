@@ -169,3 +169,62 @@ describe("proxy secret-in-query guard", () => {
     expect((await proxy(askWith("GET", path))).status).toBe(200);
   });
 });
+
+describe("proxy for the viewer's host", () => {
+  const VIEWER = "agent-hub-viewer.example";
+
+  function onHost(host: string, path: string, method = "GET"): NextRequest {
+    return new NextRequest(new URL(path, `https://${host}`), { method, headers: { host } });
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("AUTH_DISABLED", "");
+    vi.stubEnv("SESSION_SECRET", SECRET);
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", VIEWER);
+    vi.stubEnv("ENTRA_REDIRECT_URI", "https://agent-hub.example/auth/callback");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("should rewrite every request on the viewer's host to the viewer's route, carrying the path and query asked for", async () => {
+    const response = await proxy(onHost(VIEWER, "/3fa85f64-5717-4562-b3fc-2c963f66afa6/8080/docs/?token=pods-own"));
+
+    expect(response.headers.get("x-middleware-rewrite")).toBe(`https://${VIEWER}/viewer-proxy`);
+    expect(response.headers.get("x-middleware-request-x-agent-hub-viewer-url")).toBe("/3fa85f64-5717-4562-b3fc-2c963f66afa6/8080/docs/?token=pods-own");
+  });
+
+  it("should neither sign a person in nor serve a hub page on the viewer's host", async () => {
+    const response = await proxy(onHost(VIEWER, "/settings/credentials"));
+
+    expect(response.headers.get("x-middleware-rewrite")).toBe(`https://${VIEWER}/viewer-proxy`);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("should answer 404 on the viewer's host when the rest of the viewer's settings are missing", async () => {
+    vi.stubEnv("ENTRA_REDIRECT_URI", "");
+
+    const response = await proxy(onHost(VIEWER, "/settings/credentials"));
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+  });
+
+  it.each(["/viewer-proxy", "/viewer-proxy/anything"])("should answer 404 for %s on the hub's host, so the route is only ever the viewer's", async (path) => {
+    expect((await proxy(onHost("agent-hub.example", path))).status).toBe(404);
+  });
+
+  it("should answer 404 for the viewer's route when the viewer is off", async () => {
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", "");
+
+    expect((await proxy(onHost("agent-hub.example", "/viewer-proxy"))).status).toBe(404);
+  });
+
+  it("should drop a trailing slash on the hub's host, as Next did before the viewer needed it kept", async () => {
+    const response = await proxy(onHost("agent-hub.example", "/agents/va-1/?tab=x"));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/agents/va-1?tab=x");
+    expect((await proxy(onHost("agent-hub.example", "https://agent-hub.example//"))).headers.get("location")).toBe("https://agent-hub.example/");
+  });
+});

@@ -10,6 +10,7 @@ import {
   canManageCredential,
   canManageGrants,
   canManageVirtualAgent,
+  canOpenVirtualAgentPort,
   canOwnerReadCredential,
   canPersonMessageAgent,
   canReadMessage,
@@ -278,6 +279,17 @@ describe("canManageVirtualAgent", () => {
     [false, "stranger"]
   ])("should answer %s when the %s manages the owner's virtual agent", (expected, role) => {
     expect(canManageVirtualAgent(ROLES[role], { id: "va-1", ownerOid: OWNER })).toBe(expected);
+  });
+});
+
+describe("canOpenVirtualAgentPort", () => {
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s opens a web server on the owner's virtual agent", (expected, role) => {
+    expect(canOpenVirtualAgentPort(ROLES[role], { id: "va-1", ownerOid: OWNER })).toBe(expected);
   });
 });
 
