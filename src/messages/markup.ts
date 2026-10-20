@@ -71,9 +71,14 @@ const MAX_LIST_DEPTH = 4;
 const MAX_INLINE_DEPTH = 3;
 // Bounds the work a run of `[x](` openers sharing one distant `)` can cause.
 const MAX_LINK_URL = 2048;
-// Bounds the padding a header of many columns and a body of many one-cell rows would otherwise cost. A header with
-// more columns than this opens no table at all, because truncating it would drop the columns it names.
+// Bounds how wide one row can get. A header with more columns than this opens no table at all, because truncating it
+// would drop the columns it names.
 const MAX_TABLE_COLUMNS = 64;
+// Bounds the cells every table in one body holds between them, and so the elements the UI renders for it. Rows are
+// padded to the header's width, so without this a short body of one-cell rows under a wide header multiplies into
+// millions of cells: 64 columns over 16,000 such rows is a 32KB body and a 68MB render. Tables stop opening once a
+// body has spent it, and the lines that would have been rows stay text, so nothing an author wrote is dropped.
+const MAX_TABLE_CELLS = 4096;
 const LANGUAGE = /^[\w+#.-]{1,32}$/;
 const DELIMITER_CELL = /^:?-+:?$/;
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(\S.*)$/;
@@ -265,33 +270,45 @@ function startsBlock(line: string, next?: string): boolean {
   return openFence(line) !== null || HEADING.test(line) || listItem(line) !== null || tableHead(line, next) !== null;
 }
 
-function parseTable(lines: string[], from: number, align: Alignment[]): { table: TableBlock; next: number } {
+/** The row's cells, with any past the table's width merged back into its last cell, the pipes between them included. */
+function fitRow(cells: string[], columns: number): string[] {
+  if (cells.length <= columns) {
+    return cells;
+  }
+  return [...cells.slice(0, columns - 1), cells.slice(columns - 1).join("|")];
+}
+
+/**
+ * The table these lines open, from the header at `from`, and the cells it holds. It takes no more cells than `budget`,
+ * which is what is left of the body's `MAX_TABLE_CELLS`.
+ *
+ * Within the rows a cell break wins, so a row is still a row when its first cell reads as a list marker or a heading:
+ * `- | none` is a column of flags, not a bullet. What ends the table is a line that cannot be one of its rows — a
+ * blank line, a fence, or a line with no cell break — or the budget running out. A line with more cells than the table
+ * has columns is still a row: its overflow stays in its last cell, pipes and all, so the one likely mistake here, an
+ * unescaped `|` in a cell, costs that cell its spacing rather than ending the table and leaving every row below it as
+ * literal text. GFM truncates such a row, which would drop the author's words.
+ */
+function parseTable(lines: string[], from: number, align: Alignment[], budget: number): { table: TableBlock; next: number; cells: number } {
   const columns = align.length;
   const table: TableBlock = { type: "table", align, header: rowCells(lines[from]!).map(cellInlines), rows: [] };
+  let cells = columns;
   let i = from + 2;
-  // Within the rows a cell break wins, so a row is still a row when its first cell reads as a list marker or a
-  // heading: `- | none` is a column of flags, not a bullet. What ends the table instead is a line that cannot be one
-  // of its rows: a blank line, a fence, a line with no cell break, or a line with more cells than the table has
-  // columns. The last two are prose rather than a row — GFM would make a one-cell row of the first and truncate the
-  // second — and reading them as rows is what would drop the author's words.
   while (i < lines.length) {
     const line = lines[i]!;
-    if (isBlank(line) || openFence(line) !== null || !hasCellBreak(line)) {
+    if (isBlank(line) || openFence(line) !== null || !hasCellBreak(line) || cells + columns > budget) {
       break;
     }
-    const cells = rowCells(line);
-    if (cells.length > columns) {
-      break;
-    }
-    const row = cells.map(cellInlines);
+    const row = fitRow(rowCells(line), columns).map(cellInlines);
     // GFM pads a short row, so every row is as wide as the header.
     while (row.length < columns) {
       row.push([]);
     }
     table.rows.push(row);
+    cells += columns;
     i++;
   }
-  return { table, next: i };
+  return { table, next: i, cells };
 }
 
 interface Level {
@@ -368,6 +385,8 @@ function parseList(lines: string[], from: number, blocks: Block[]): number {
 export function parseMarkup(source: string): Block[] {
   const lines = source.split(/\r?\n/);
   const blocks: Block[] = [];
+  // Shared by every table in the body, so a run of wide tables cannot cost more than one of them.
+  let budget = MAX_TABLE_CELLS;
   let i = 0;
   while (i < lines.length) {
     const line = lines[i]!;
@@ -399,9 +418,11 @@ export function parseMarkup(source: string): Block[] {
       continue;
     }
     const align = tableHead(line, lines[i + 1]);
-    if (align) {
-      const { table, next } = parseTable(lines, i, align);
+    // A table only opens while the body has room for its header; once the budget is spent the lines stay text.
+    if (align && align.length <= budget) {
+      const { table, next, cells } = parseTable(lines, i, align, budget);
       blocks.push(table);
+      budget -= cells;
       i = next;
       continue;
     }

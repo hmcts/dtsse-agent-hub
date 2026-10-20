@@ -30,6 +30,16 @@ function links(nodes: Inline[]): string[] {
   });
 }
 
+/** Every cell in every table a body parsed to, header cells included: what the UI pays to render them. */
+function tableCells(blocks: Block[]): number {
+  return blocks.reduce((total, block) => {
+    if (block.type !== "table") {
+      return total;
+    }
+    return total + block.header.length + block.rows.reduce((cells, row) => cells + row.length, 0);
+  }, 0);
+}
+
 function timed(run: () => unknown): number {
   const started = performance.now();
   run();
@@ -424,10 +434,9 @@ describe("parseMarkup tables", () => {
     ]);
   });
 
-  it("should pad a short row and end the table at a long one when the rows are ragged", () => {
+  it("should pad a short row and keep a long row's overflow in its last cell when the rows are ragged", () => {
     expect(parseMarkup("| a | b | c |\n| - | - | - |\n| 1 |\n| 1 | 2 | 3 | 4 |")).toEqual([
-      table([null, null, null], [[text("a")], [text("b")], [text("c")]], [[text("1")], [], []]),
-      paragraph(text("| 1 | 2 | 3 | 4 |"))
+      table([null, null, null], [[text("a")], [text("b")], [text("c")]], [[text("1")], [], []], [[text("1")], [text("2")], [text("3 | 4")]])
     ]);
   });
 
@@ -440,10 +449,24 @@ describe("parseMarkup tables", () => {
     ]);
   });
 
-  it("should end the table and keep the whole line when a line under it holds more cells than there are columns", () => {
+  it("should read a line with more cells than there are columns as a row and keep the whole line in it", () => {
     expect(parseMarkup("| Status |\n| ------ |\n| ok |\nCheck with `ps | grep x` before asking.")).toEqual([
-      table([null], [[text("Status")]], [[text("ok")]]),
-      paragraph(text("Check with "), code("ps | grep x"), text(" before asking."))
+      table([null], [[text("Status")]], [[text("ok")]], [[text("Check with "), code("ps | grep x"), text(" before asking.")]])
+    ]);
+  });
+
+  it("should keep the rows below a row that has more cells than there are columns", () => {
+    expect(parseMarkup("| cmd | note |\n| --- | ---- |\n| a | first |\n| `ps | grep` | stray pipe |\n| c | third |\n| d | fourth |")).toEqual([
+      table(
+        [null, null],
+        [[text("cmd")], [text("note")]],
+        [[text("a")], [text("first")]],
+        // The cells are split before anything inline is parsed, so the code span straddles the two: what matters is
+        // that every word is in a cell and the two rows below are still rows.
+        [[text("`ps")], [text("grep` | stray pipe")]],
+        [[text("c")], [text("third")]],
+        [[text("d")], [text("fourth")]]
+      )
     ]);
   });
 
@@ -521,6 +544,27 @@ describe("parseMarkup tables", () => {
     const body = `${row(" h ")}\n${row(" - ")}\n${row(" c ")}`;
 
     expect(parseMarkup(body)).toEqual([paragraph(text(body))]);
+  });
+
+  it("should end a table at the cell cap and keep the rows below it as text", () => {
+    const blocks = parseMarkup(`${"|h".repeat(64)}\n${"|-".repeat(64)}\n${"|\n".repeat(16_000)}`);
+
+    expect(blocks.map((block) => block.type)).toEqual(["table", "paragraph"]);
+    expect(tableCells(blocks)).toBe(4_096);
+    // The header and 63 rows of 64 columns spend the cap; every line the table did not take is still in the output.
+    expect(flatten((blocks[1] as Extract<Block, { type: "paragraph" }>).children)).toBe(Array.from({ length: 15_937 }, () => "|").join("\n"));
+  });
+
+  it("should share the cell cap across the tables in one body", () => {
+    const wide = `${"|h".repeat(64)}\n${"|-".repeat(64)}\n${"|\n".repeat(63)}`;
+    const blocks = parseMarkup(wide.repeat(10));
+
+    expect(tableCells(blocks)).toBe(4_096);
+    expect(blocks.filter((block) => block.type === "table")).toHaveLength(1);
+    // The nine tables the cap left out are text, header rows and all: a paragraph each, because a header line still
+    // reads as the start of a block.
+    expect(blocks.filter((block) => block.type === "paragraph")).toHaveLength(9);
+    expect(flatten((blocks[1] as Extract<Block, { type: "paragraph" }>).children)).toContain("|h".repeat(64));
   });
 });
 

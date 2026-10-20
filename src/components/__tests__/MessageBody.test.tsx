@@ -2,13 +2,21 @@
  * @vitest-environment jsdom
  */
 import { cleanup, render, screen } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { MessageBody } from "@/components/feed/MessageBody";
+import { MAX_BODY } from "@/messages/limits";
 
 afterEach(cleanup);
 
 function renderBody(body: string): HTMLElement {
   return render(<MessageBody body={body} />).container;
+}
+
+function timed(run: () => unknown): number {
+  const started = performance.now();
+  run();
+  return performance.now() - started;
 }
 
 describe("MessageBody", () => {
@@ -132,6 +140,42 @@ describe("MessageBody", () => {
     expect(ordered.querySelectorAll(":scope > li")).toHaveLength(2);
     expect(ordered.querySelector("li ul li")!.textContent).toBe("nested");
     expect(container.querySelectorAll(":scope > div > ul > li")).toHaveLength(1);
+  });
+});
+
+/**
+ * A body is rendered on the server for a topic's first payload and again on the client, for every viewer, every load,
+ * so what a body costs to render matters as much as what it costs to parse. Table rows are padded to the header's
+ * width, which is the one place in the subset where a short body can multiply into a large tree, so these measure the
+ * markup and not just the time: a parse-time budget alone passed while a 32KB body rendered 68MB of HTML.
+ */
+describe("MessageBody on hostile bodies", () => {
+  // A header of 64 columns, the widest a table opens with, and its delimiter row.
+  const wide = `${"|h".repeat(64)}\n${"|-".repeat(64)}\n`;
+  const hostile: Record<string, string> = {
+    "a wide header over rows of one empty cell": `${wide}${"|\n".repeat((MAX_BODY - wide.length) / 2)}`,
+    "a wide header over rows of one cell": `${wide}${"|x|\n".repeat((MAX_BODY - wide.length) / 4)}`,
+    "a run of wide tables": `${wide}${"|\n".repeat(63)}`.repeat(Math.floor(MAX_BODY / (wide.length + 126))),
+    "rows with far more cells than there are columns": `| a | b |\n| - | - |\n${`${"|".repeat(399)}\n`.repeat(79)}`,
+    "rows of two cells": `| a | b |\n| - | - |\n${"| 1 | 2 |\n".repeat((MAX_BODY - 20) / 10)}`
+  };
+
+  for (const [name, body] of Object.entries(hostile)) {
+    it(`should render within the cost budget when given ${name}`, () => {
+      let html = "";
+      const elapsed = timed(() => {
+        html = renderToStaticMarkup(<MessageBody body={body} />);
+      });
+
+      expect(html.length).toBeLessThan(1_000_000);
+      expect(elapsed).toBeLessThan(500);
+    });
+  }
+
+  it("should be able to hold every hostile body in a message", () => {
+    for (const body of Object.values(hostile)) {
+      expect(body.length).toBeLessThanOrEqual(MAX_BODY);
+    }
   });
 });
 
