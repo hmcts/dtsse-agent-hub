@@ -52,6 +52,7 @@ it needs ownership or a write grant. The rules are in `src/access/rules.ts`.
 | `/agents/[id]` | an agent you may see: its status, details, posts and direct-message thread. A virtual agent's id shows the virtual agent instead, with its current session's conversation and details, and, to its owner alone, its lifecycle, its name (rename it, and its session with it), its size, its plugins, its exposed web ports and the sign-ins it is waiting on. Someone holding a grant from its owner sees its name, state and session. The id of an agent a virtual agent's session registered, including one a `/clear` has superseded, redirects to the virtual agent |
 | `/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
 | `/access` | the grants you have given and hold; grant or revoke read or write by email |
+| `/assistant`, `/assistant/[id]` | with the HMCTS Assistant on: a plain-language chat for people who are not engineers, full screen and without the hub's sidebar. Opening it creates the viewer's one assistant (a virtual agent in assistant mode) on their first visit and starts it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). The id of a conversation's agent redirects here |
 | `/virtual` | with virtual agents on: your virtual agents, creating one (which opens its page), your credentials (the section `/settings/credentials` redirects to), with your git identity, and your CLAUDE.md. `/virtual/[id]` redirects to `/agents/[id]` |
 | `/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Bedrock API key, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/virtual#credentials`, the same section there |
 
@@ -116,6 +117,30 @@ the `-staging` release.
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
 | `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain a reported port's URL is under, as `https://<statefulset_name>-<port>.<domain>`; the orchestrator reads it too |
 | `VIRTUAL_AGENT_PLUGINS` | none | The workspace marketplace plugins an owner can tick, comma-separated `name` or `name=description`, as `pcs=PCS team workflows,dtsse=DTSSE docs`. A name is lowercase letters, digits and hyphens; any other makes the pages that read it fail. With none, the create form and the agent's page offer no plugins |
+
+### HMCTS Assistant
+
+Off unless `ASSISTANT_ENABLED=true` as well as `VIRTUAL_AGENTS_ENABLED=true`; off, `/assistant` is not found and its
+actions refuse. The contract with the pod is the Assistant mode section of [`docs/agent-api.md`](docs/agent-api.md).
+
+- **One assistant per person**, outside the limit of 3 virtual agents: `virtual_agent.mode = 'assistant'`, named
+  `assistant`. The orchestrator passes the mode to the pod as `AGENT_HUB_VIRTUAL_MODE`, and `AGENT_HUB_MAX_SESSIONS`
+  from its size (2, 4 or 6). Its pod runs a supervisor, not a session of its own.
+- **A conversation's agent is created with it**, offline, under a session id the hub chose, so the person's messages
+  queue as ordinary deliveries before any session runs. A message to an offline conversation sets a wake; the pod
+  hears it on `GET /api/virtual/{id}/sessions`, starts `claude --session-id` (or `--resume`) in a tmux session of its
+  own, and the session's registration with `conversation_id` adopts the agent and clears the wake.
+- **Owner only.** No grant reaches a conversation's agent, and it is left out of the roster, the sidebar and
+  `GET /api/agent/agents`. Deleting a conversation deletes its agents, transcripts and direct messages.
+- **The document** (`assistant_conversation.artefact_*`) is versioned: the person's autosave and the session's
+  `scripts/agent-hub artefact put` both write against the version they read, and a stale one is refused with the
+  current document, which the panel offers as "Use theirs" or "Keep mine".
+- **The thread** shows only what the person and the assistant said (`src/assistant/thread.ts`); tool calls become one
+  line of what it is doing.
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `ASSISTANT_ENABLED` | off | `true` turns the HMCTS Assistant on, when virtual agents are on too |
 
 ### Model routes
 

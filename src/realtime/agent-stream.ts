@@ -16,7 +16,8 @@ export interface AgentStreamSources {
 export const RECONNECT_FRAME = sseEvent({ event: "reconnect", data: "{}" });
 
 export function directFrame(direct: StreamedDirect): string {
-  return sseEvent({ id: direct.message.id, event: "direct", data: JSON.stringify({ message: direct.message, from_owner: direct.from_owner }) });
+  const data = { message: direct.message, from_owner: direct.from_owner, ...(direct.assistant === undefined ? {} : { assistant: direct.assistant }) };
+  return sseEvent({ id: direct.message.id, event: "direct", data: JSON.stringify(data) });
 }
 
 /**

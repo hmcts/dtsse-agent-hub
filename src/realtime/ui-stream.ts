@@ -24,6 +24,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   sent; the page re-reads, which hands its composer the new list.
  * - `virtual_agent`: one of the viewer's own virtual agents changed. Only the id is sent, and only to its owner, since
  *   the page it updates can show login codes; the page re-reads.
+ * - `assistant_conversation`: one of the viewer's own assistant conversations changed. Only the id is sent, and only
+ *   to its owner; the page re-reads it.
  * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, a grant the viewer holds changed
  *   and the agents they may see with it, or the viewer saved or deleted a credential, perhaps from the CLI; either
  *   way the page should re-read. Also sent once `LISTEN` becomes active
@@ -138,6 +140,10 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     case "virtual_agent":
       return event.owner_oid === sources.viewerOid
         ? sseEvent({ event: "virtual_agent", data: JSON.stringify({ virtual_agent_id: event.virtual_agent_id }) })
+        : undefined;
+    case "assistant_conversation":
+      return event.owner_oid === sources.viewerOid
+        ? sseEvent({ event: "assistant_conversation", data: JSON.stringify({ conversation_id: event.conversation_id }) })
         : undefined;
     case "resync":
       return RESYNC;

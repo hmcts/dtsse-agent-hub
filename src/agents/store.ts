@@ -1,5 +1,6 @@
 import { agentsMessageableBy } from "../access/load.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
+import { linkSession } from "../assistant/store.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
@@ -15,6 +16,8 @@ export interface Registration {
   host: string | null;
   /** Left as stored when `undefined`: not every registration carries them. */
   skills?: Skill[];
+  /** The assistant conversation this session is for, sent by an assistant pod's conversation sessions only. */
+  conversationId?: string | null;
 }
 
 export class SessionOwnedElsewhere extends Error {}
@@ -34,15 +37,33 @@ export class SessionOwnedElsewhere extends Error {}
  * re-registration after `/clear` moves to the new session. Its owner's `user` row is not rewritten.
  * It is named after the virtual agent, whatever the session calls itself.
  *
+ * A session for an assistant conversation (`conversationId` set) must come from that conversation's own virtual
+ * agent. It adopts the agent the hub created with the conversation, or, after `/clear`, becomes the conversation's
+ * current agent, and its wake is cleared; it never becomes the virtual agent's current agent, which an assistant
+ * does not have.
+ *
  * A re-registration whose skills differ from the stored ones announces them, so an open agent page re-reads its
  * composer's "/" autocomplete. A new agent's are not announced: no page can be showing it yet.
  */
 export async function registerAgent(prisma: PrismaClient, owner: Caller, registration: Registration): Promise<{ id: string; name: string }> {
   const virtualAgentId = owner.virtualAgentId ?? null;
   const skills = registration.skills === undefined ? null : JSON.stringify(registration.skills);
+  const conversationId = registration.conversationId ?? null;
   return await prisma.$transaction(async (tx) => {
     if (virtualAgentId === null) {
       await upsertUser(tx, owner);
+    }
+    if (conversationId !== null) {
+      const [conversation] =
+        virtualAgentId === null || !isUuid(conversationId)
+          ? []
+          : await tx.$queryRaw<{ id: string }[]>`
+              SELECT id::text AS id FROM assistant_conversation
+               WHERE id = ${conversationId}::uuid AND virtual_agent_id = ${virtualAgentId}::uuid
+                 FOR UPDATE`;
+      if (conversation === undefined) {
+        throw new SessionOwnedElsewhere("that conversation is not one of this virtual agent's");
+      }
     }
     // Locked so a heartbeat cannot change the skills between this read and the upsert, which would announce wrongly.
     const [existing] =
@@ -52,18 +73,19 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
             { id: string; skills: unknown }[]
           >`SELECT id::text AS id, skills FROM agent WHERE session_id = ${registration.sessionId} FOR UPDATE`;
     const [agent] = await tx.$queryRaw<{ id: string; name: string }[]>`
-      INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills)
+      INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills, assistant_conversation_id)
       VALUES (
         ${owner.oid}, ${registration.sessionId},
         COALESCE((SELECT name FROM virtual_agent WHERE id = ${virtualAgentId}::uuid), ${registration.name}),
         ${registration.cwd}, ${registration.repo},
         ${registration.branch}, ${registration.host}, 'idle', now(), (SELECT COALESCE(max(id), 0) FROM message), ${virtualAgentId}::uuid,
-        COALESCE(${skills}::jsonb, '[]'::jsonb)
+        COALESCE(${skills}::jsonb, '[]'::jsonb), ${conversationId}::uuid
       )
       ON CONFLICT (session_id) DO UPDATE
         SET name = EXCLUDED.name, cwd = EXCLUDED.cwd, repo = EXCLUDED.repo, branch = EXCLUDED.branch, host = EXCLUDED.host,
             status = 'idle', last_heartbeat_at = now(), ended_at = NULL, skills = COALESCE(${skills}::jsonb, agent.skills)
         WHERE agent.owner_oid = EXCLUDED.owner_oid AND agent.virtual_agent_id IS NOT DISTINCT FROM EXCLUDED.virtual_agent_id
+          AND agent.assistant_conversation_id IS NOT DISTINCT FROM EXCLUDED.assistant_conversation_id
       RETURNING id::text AS id, name
     `;
     if (agent === undefined) {
@@ -73,7 +95,9 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
     if (existing?.id === agent.id && registration.skills !== undefined && skillsChanged(storedSkills(existing.skills), normaliseSkills(registration.skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agent.id, owner_oid: owner.oid });
     }
-    if (virtualAgentId !== null) {
+    if (virtualAgentId !== null && conversationId !== null) {
+      await linkSession(tx, { conversationId, virtualAgentId, ownerOid: owner.oid, agentId: agent.id });
+    } else if (virtualAgentId !== null) {
       await tx.virtualAgent.update({ where: { id: virtualAgentId }, data: { agentId: agent.id, lastActiveAt: new Date(), updatedAt: new Date() } });
       await notify(tx, { type: "virtual_agent", virtual_agent_id: virtualAgentId, owner_oid: owner.oid });
     }
@@ -88,11 +112,20 @@ export interface AgentRow {
   status: AgentStatus;
   /** The virtual agent whose session registered it, if any. */
   virtualAgentId: string | null;
+  /** An assistant conversation's agent, which no grant extends to. */
+  ownerOnly: boolean;
 }
 
 export async function findAgent(db: Database, id: string): Promise<AgentRow | undefined> {
-  const row = await db.agent.findUnique({ where: { id }, select: { id: true, ownerOid: true, name: true, status: true, virtualAgentId: true } });
-  return row ?? undefined;
+  const row = await db.agent.findUnique({
+    where: { id },
+    select: { id: true, ownerOid: true, name: true, status: true, virtualAgentId: true, assistantConversationId: true }
+  });
+  if (row === null) {
+    return undefined;
+  }
+  const { assistantConversationId, ...agent } = row;
+  return { ...agent, ownerOnly: assistantConversationId !== null };
 }
 
 /** Locks the agent's row for the rest of the transaction, and reads what a status or skills change is compared against. */

@@ -56,5 +56,5 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   } catch (error) {
     return errorResponse(400, error instanceof HttpError ? error.message : "bad request");
   }
-  return json(await agentConversation(prisma, viewer.oid, { id: agent.id, ownerOid: agent.ownerOid }, grants, cursor));
+  return json(await agentConversation(prisma, viewer.oid, { id: agent.id, ownerOid: agent.ownerOid, ownerOnly: agent.ownerOnly }, grants, cursor));
 }

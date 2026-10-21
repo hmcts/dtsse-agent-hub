@@ -93,8 +93,13 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
     }
 
     const candidates = await tx.$queryRaw<Candidate[]>`
-      SELECT v.id::text AS id, v.status::text AS status, v.started_at, v.status_changed_at, v.last_active_at, a.status::text AS agent_status,
-             (SELECT max(t.created_at) FROM transcript_entry t WHERE t.agent_id = v.agent_id) AS last_entry_at
+      SELECT v.id::text AS id, v.status::text AS status, v.started_at, v.status_changed_at, v.last_active_at,
+             CASE WHEN v.mode = 'assistant'
+                  THEN CASE WHEN EXISTS (SELECT 1 FROM agent s WHERE s.virtual_agent_id = v.id AND s.status = 'busy') THEN 'busy' ELSE 'idle' END
+                  ELSE a.status::text END AS agent_status,
+             CASE WHEN v.mode = 'assistant'
+                  THEN (SELECT max(t.created_at) FROM transcript_entry t JOIN agent s ON s.id = t.agent_id WHERE s.virtual_agent_id = v.id)
+                  ELSE (SELECT max(t.created_at) FROM transcript_entry t WHERE t.agent_id = v.agent_id) END AS last_entry_at
         FROM virtual_agent v
         LEFT JOIN agent a ON a.id = v.agent_id
        WHERE v.desired = 'running'

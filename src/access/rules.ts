@@ -13,6 +13,8 @@
  * - A virtual agent is visible to whoever may see its owner's agents, since its sessions are among them. Only that
  *   person manages it and sees its login codes. A virtual agent's launch token acts
  *   as its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.
+ * - An HMCTS Assistant conversation's agent is its owner's alone: no grant extends to it, since the conversation is
+ *   a private chat rather than a session they chose to share.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
  */
@@ -28,6 +30,8 @@ export interface Grant {
 export interface AgentRef {
   id: string;
   ownerOid: string;
+  /** An assistant conversation's agent, which no grant extends to. */
+  ownerOnly?: boolean;
 }
 
 export interface MessageRef {
@@ -37,6 +41,11 @@ export interface MessageRef {
   targetAgent: AgentRef | null;
   /** Who wrote the message this one replies to, if it is a reply. */
   parentAuthorOid: string | null;
+}
+
+/** The level a grant gives `viewerOid` over `agent`: none for an owner-only agent, whatever they were granted. */
+function grantOver(grants: readonly Grant[], agent: AgentRef, viewerOid: string): GrantLevel | undefined {
+  return agent.ownerOnly === true ? undefined : grantLevel(grants, agent.ownerOid, viewerOid);
 }
 
 /** The level `granteeOid` holds over `ownerOid`'s agents, if any. */
@@ -54,7 +63,7 @@ export function grantLevel(grants: readonly Grant[], ownerOid: string, granteeOi
 }
 
 export function canViewAgent(viewerOid: string, agent: AgentRef, grants: readonly Grant[]): boolean {
-  return viewerOid === agent.ownerOid || grantLevel(grants, agent.ownerOid, viewerOid) !== undefined;
+  return viewerOid === agent.ownerOid || grantOver(grants, agent, viewerOid) !== undefined;
 }
 
 /**
@@ -66,7 +75,7 @@ export function canViewTranscript(viewerOid: string, agent: AgentRef, grants: re
 }
 
 export function canPersonMessageAgent(senderOid: string, target: AgentRef, grants: readonly Grant[]): boolean {
-  return senderOid === target.ownerOid || grantLevel(grants, target.ownerOid, senderOid) === "write";
+  return senderOid === target.ownerOid || grantOver(grants, target, senderOid) === "write";
 }
 
 /**
@@ -175,7 +184,7 @@ export function agentAccess(viewerOid: string, agent: AgentRef, grants: readonly
   if (viewerOid === agent.ownerOid) {
     return "owner";
   }
-  return grantLevel(grants, agent.ownerOid, viewerOid) ?? "none";
+  return grantOver(grants, agent, viewerOid) ?? "none";
 }
 
 export interface VirtualAgentRef {

@@ -253,6 +253,18 @@ describe("selectFrame", () => {
   it("should send nothing about a virtual agent when it is someone else's, whatever the grants", async () => {
     expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: OWNER }, TOPICS, sources([]))).toBeUndefined();
   });
+
+  it("should tell the owner which of their assistant conversations changed when it is theirs", async () => {
+    expect(
+      await selectFrame({ type: "assistant_conversation", conversation_id: "c-1", virtual_agent_id: "va-1", owner_oid: VIEWER }, TOPICS, sources([]))
+    ).toBe(`event: assistant_conversation\ndata: ${JSON.stringify({ conversation_id: "c-1" })}\n\n`);
+  });
+
+  it("should send nothing about an assistant conversation when it is someone else's, whatever the grants", async () => {
+    expect(
+      await selectFrame({ type: "assistant_conversation", conversation_id: "c-1", virtual_agent_id: "va-1", owner_oid: OWNER }, TOPICS, sources(READ))
+    ).toBeUndefined();
+  });
 });
 
 describe("cachedGrants", () => {

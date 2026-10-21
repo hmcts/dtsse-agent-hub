@@ -59,9 +59,9 @@ vi.mock("next/cache", async () => {
 const { actAs, revalidated } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/virtual-agents.ts");
 const { agentActivity, agentRoute, virtualAgentPage, virtualAgentsPage } = await import("../../src/web/data.ts");
-const credentialsPage = await import("../../src/app/settings/credentials/page.tsx");
-const agentsPage = await import("../../src/app/agents/[id]/page.tsx");
-const oldVirtualAgentPage = await import("../../src/app/virtual/[id]/page.tsx");
+const credentialsPage = await import("../../src/app/(hub)/settings/credentials/page.tsx");
+const agentsPage = await import("../../src/app/(hub)/agents/[id]/page.tsx");
+const oldVirtualAgentPage = await import("../../src/app/(hub)/virtual/[id]/page.tsx");
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
 
@@ -318,6 +318,7 @@ describe("POST /api/orchestrator/claim", () => {
       delete_disk: false,
       model_route: "own_licence",
       size: "small",
+      mode: "standard",
       exposed_ports: [],
       plugins: [],
       owner: { oid: ALICE.oid },

@@ -40,7 +40,8 @@ export const registerBody = z.object({
   repo: optionalText(MAX_NAME),
   branch: optionalText(MAX_NAME),
   host: optionalText(MAX_NAME),
-  skills
+  skills,
+  conversation_id: z.string().trim().min(1).max(MAX_NAME).nullish()
 });
 
 export const heartbeatBody = z.object({

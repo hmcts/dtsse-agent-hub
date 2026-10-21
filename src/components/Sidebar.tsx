@@ -4,7 +4,7 @@ import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
 import { NavLink } from "@/components/NavLink";
 import { AgentRoster } from "@/components/sidebar/AgentRoster";
 import { SidebarClose, SidebarDrawer } from "@/components/sidebar/Drawer";
-import { CaretIcon, HashIcon, HomeIcon, KeyIcon, LockIcon, PlusIcon, ServerIcon, StackIcon } from "@/components/sidebar/icons";
+import { CaretIcon, ChatIcon, HashIcon, HomeIcon, KeyIcon, LockIcon, PlusIcon, ServerIcon, StackIcon } from "@/components/sidebar/icons";
 import { TopicSearchShortcut } from "@/components/sidebar/TopicSearchShortcut";
 import type { TopicSummary } from "@/topics/store";
 import type { Identity } from "@/users/identity";
@@ -40,12 +40,15 @@ export function Sidebar({
   data,
   viewer,
   signInDisabled,
-  virtualAgents = false
+  virtualAgents = false,
+  assistant = false
 }: {
   data: SidebarData;
   viewer: Identity;
   signInDisabled: boolean;
   virtualAgents?: boolean;
+  /** Links the HMCTS Assistant, the plain-language chat on the viewer's own assistant. */
+  assistant?: boolean;
 }) {
   const channels = [...data.channels.mine, ...data.channels.shared];
   return (
@@ -90,6 +93,12 @@ export function Sidebar({
                 Credentials
               </NavLink>
             )}
+            {assistant ? (
+              <NavLink href="/assistant">
+                <ChatIcon />
+                HMCTS Assistant
+              </NavLink>
+            ) : null}
           </div>
 
           <Group label="Channels">

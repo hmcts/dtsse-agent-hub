@@ -183,7 +183,7 @@ describe("a form carrying a credential", () => {
 });
 
 /** The topic searches, whose one field is the search itself and belongs in a shareable URL. */
-const GET_FORMS = new Set(["src/app/topics/page.tsx", "src/components/Sidebar.tsx"]);
+const GET_FORMS = new Set(["src/app/(hub)/topics/page.tsx", "src/components/Sidebar.tsx"]);
 
 function sources(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

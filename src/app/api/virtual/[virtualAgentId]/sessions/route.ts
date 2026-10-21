@@ -1,0 +1,47 @@
+import { HttpError, noContent, parse, readJson } from "@/agent-api/http";
+import { virtualRoute } from "@/agent-api/route";
+import { sessionsReportBody } from "@/assistant/schemas";
+import { sessionStream } from "@/assistant/session-stream";
+import { pendingWake, pendingWakes, reportSessions } from "@/assistant/store";
+import { RECONNECT_FRAME } from "@/realtime/agent-stream";
+import { realtime } from "@/realtime/process";
+import { openSseStream, SSE_HEADERS } from "@/realtime/sse";
+import { streamLimits } from "@/realtime/stream-slots";
+import { prisma } from "@/store/prisma";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+function requireAssistant(mode: string): void {
+  if (mode !== "assistant") {
+    throw new HttpError(403, "only an assistant runs a session per conversation");
+  }
+}
+
+/** The assistant's wakes and closes, counted against its owner's agent streams. */
+export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgent, request }) => {
+  requireAssistant(virtualAgent.mode);
+  const { hub, listener } = realtime();
+  const release = streamLimits().agent.take(virtualAgent.ownerOid);
+  if (release === undefined) {
+    throw new HttpError(429, "too many open streams for this person");
+  }
+  const body = openSseStream({
+    signal: request.signal,
+    onClose: release,
+    closingFrame: RECONNECT_FRAME,
+    onOpen: sessionStream(virtualAgent.id, {
+      hub,
+      ready: listener.ready,
+      wakes: () => pendingWakes(prisma, virtualAgent.id),
+      wake: (conversationId) => pendingWake(prisma, virtualAgent.id, conversationId)
+    })
+  });
+  return new Response(body, { headers: SSE_HEADERS });
+});
+
+export const PUT = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgent, request }) => {
+  requireAssistant(virtualAgent.mode);
+  await reportSessions(prisma, virtualAgent.id, parse(sessionsReportBody, await readJson(request)));
+  return noContent();
+});
