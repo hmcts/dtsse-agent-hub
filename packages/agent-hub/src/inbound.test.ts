@@ -64,7 +64,17 @@ const userSettings = () => path.join(home.claude, "settings.json");
 function fakeClaude(...args: string[]): number {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "--", ...args], { stdio: "ignore" });
   children.push(child);
-  return child.pid as number;
+  const pid = child.pid as number;
+  // execve has not necessarily happened yet, and until it has the cmdline is empty.
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      if (fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("setInterval")) {
+        return pid;
+      }
+    } catch {}
+  }
+  throw new Error(`the fake Claude process ${pid} never exec'd`);
 }
 
 function registerSession(sid: string, pid: number, cwd = home.root) {

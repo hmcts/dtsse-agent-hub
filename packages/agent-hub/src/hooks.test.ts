@@ -608,6 +608,14 @@ describe("virtualAgentStateDir", () => {
 });
 
 describe("the bash bins under bash 3.2", () => {
+  // Pull first: on a cold cache `docker run` writes its download progress to stderr, which would
+  // otherwise read as bash objecting to the script.
+  beforeAll(() => {
+    if (dockerAvailable) {
+      spawnSync("docker", ["pull", "bash:3.2"], { encoding: "utf8", timeout: 120000, stdio: "ignore" });
+    }
+  }, 130000);
+
   // macOS still ships bash 3.2, and `bin/agent-hub` runs on every prompt there. Local bash is 5.x, so only a
   // container can prove they parse; `bin.test.ts` covers the local-bash half.
   it.skipIf(!dockerAvailable).each(["bin/agent-hub", "bin/virtual-agent-boot"])("should parse %s, so it runs on macOS", (bin) => {
