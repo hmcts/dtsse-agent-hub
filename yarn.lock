@@ -902,6 +902,14 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@hmcts-cft/agent-hub@workspace:packages/agent-hub":
+  version: 0.0.0-use.local
+  resolution: "@hmcts-cft/agent-hub@workspace:packages/agent-hub"
+  bin:
+    agent-hub: bin/agent-hub
+  languageName: unknown
+  linkType: soft
+
 "@hmcts-cft/cloud-native-platform@npm:2.0.0":
   version: 2.0.0
   resolution: "@hmcts-cft/cloud-native-platform@npm:2.0.0"

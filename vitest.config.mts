@@ -18,7 +18,8 @@ export default defineConfig({
     // Component tests opt into jsdom with a `@vitest-environment jsdom` docblock.
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-    exclude: ["node_modules", "dist", ".next", "test"],
+    // The published client has its own config, thresholds and lcov report: `packages/agent-hub/vitest.config.mts`.
+    exclude: ["node_modules", "dist", ".next", "test", "packages"],
     coverage: {
       provider: "v8",
       include: ["src/**"],

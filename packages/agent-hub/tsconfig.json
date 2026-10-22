@@ -1,0 +1,23 @@
+{
+  // The published client, run by Node directly with no bundler: `nodenext` resolution, no DOM, and nothing from the
+  // Next app's module graph. `paths: {}` makes the `@/*` alias a compile error here, and `plugins: []` drops the Next
+  // plugin. Tests and fixtures are excluded because `rootDir`/`outDir` would otherwise emit them into the tarball.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["esnext"],
+    "types": ["node"],
+    "allowJs": false,
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "verbatimModuleSyntax": true,
+    "incremental": false,
+    "plugins": [],
+    "paths": {}
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/__fixtures__/**"]
+}

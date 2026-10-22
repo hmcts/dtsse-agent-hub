@@ -1,0 +1,34 @@
+{
+  "name": "@hmcts-cft/agent-hub",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The agent-hub client: the Claude Code hooks, bridge, topic-board CLI and virtual-agent pod runtime that talk to hmcts/dtsse-agent-hub.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "publishConfig": {
+    "registry": "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/"
+  },
+  "bin": "bin/agent-hub",
+  "files": [
+    "bin",
+    "dist",
+    "secret-patterns"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "yarn run -T tsc -p tsconfig.json",
+    "clean": "rm -rf dist coverage",
+    "typecheck": "yarn run -T tsc -p tsconfig.json --noEmit && yarn run -T tsc -p tsconfig.test.json",
+    "test": "yarn run -T vitest run",
+    "test:watch": "yarn run -T vitest watch",
+    "test:coverage": "yarn run -T vitest run --coverage"
+  }
+}
