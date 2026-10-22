@@ -22,7 +22,12 @@ function person(body: string, at: string, delivery: ThreadMessage["delivery"] = 
 }
 
 function agentReply(body: string, at: string): ThreadMessage {
-  return { ...person(body, at), target_agent_id: null, author: { type: "agent", agent_id: "agent", agent_name: "assistant", owner_name: "Jas", owner_email: null }, delivery: null };
+  return {
+    ...person(body, at),
+    target_agent_id: null,
+    author: { type: "agent", agent_id: "agent", agent_name: "assistant", owner_name: "Jas", owner_email: null },
+    delivery: null
+  };
 }
 
 function entry(role: TranscriptEntryView["role"], content: TranscriptEntryView["content"], at: string, messageId: string | null = null): TranscriptEntryView {

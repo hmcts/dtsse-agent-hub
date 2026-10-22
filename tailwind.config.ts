@@ -24,31 +24,32 @@ const config: Config = {
           muted: "#ababad",
           link: "#1d9bd1"
         },
-        // The HMCTS Assistant's own theme, from its prototype: cool greys with one teal accent. Text on `asst-bg` is at
-        // least 4.5:1 down to `asst-faint`; `asst-ink` is the text on the accent.
+        // The HMCTS Assistant's own theme, from its prototype: cool greys with one teal accent, dark or light. Each colour is
+        // a CSS variable set by `.asst-theme` in globals.css. Text on `asst-bg` is at least 4.5:1 down to `asst-faint`
+        // in both themes; `asst-ink` is the text on the accent.
         asst: {
-          rail: "oklch(0.17 0.006 240)",
-          bg: "oklch(0.205 0.006 240)",
-          panel: "oklch(0.185 0.006 240)",
-          raised: "oklch(0.225 0.007 240)",
-          hover: "oklch(0.235 0.007 240)",
-          field: "oklch(0.25 0.007 240)",
-          active: "oklch(0.27 0.008 240)",
-          bubble: "oklch(0.28 0.008 240)",
-          line: "oklch(0.3 0.008 240)",
-          strong: "oklch(0.36 0.008 240)",
-          text: "oklch(0.96 0.004 240)",
-          body: "oklch(0.93 0.005 240)",
-          muted: "oklch(0.76 0.01 240)",
-          faint: "oklch(0.7 0.01 240)",
-          accent: "oklch(0.78 0.12 185)",
-          "accent-hover": "oklch(0.84 0.11 185)",
-          "accent-soft": "oklch(0.84 0.1 185)",
-          "accent-line": "oklch(0.5 0.08 185)",
-          ink: "oklch(0.18 0.02 185)",
-          ok: "oklch(0.82 0.12 160)",
-          warn: "oklch(0.82 0.12 70)",
-          error: "oklch(0.78 0.13 25)"
+          rail: "oklch(var(--asst-rail) / <alpha-value>)",
+          bg: "oklch(var(--asst-bg) / <alpha-value>)",
+          panel: "oklch(var(--asst-panel) / <alpha-value>)",
+          raised: "oklch(var(--asst-raised) / <alpha-value>)",
+          hover: "oklch(var(--asst-hover) / <alpha-value>)",
+          field: "oklch(var(--asst-field) / <alpha-value>)",
+          active: "oklch(var(--asst-active) / <alpha-value>)",
+          bubble: "oklch(var(--asst-bubble) / <alpha-value>)",
+          line: "oklch(var(--asst-line) / <alpha-value>)",
+          strong: "oklch(var(--asst-strong) / <alpha-value>)",
+          text: "oklch(var(--asst-text) / <alpha-value>)",
+          body: "oklch(var(--asst-body) / <alpha-value>)",
+          muted: "oklch(var(--asst-muted) / <alpha-value>)",
+          faint: "oklch(var(--asst-faint) / <alpha-value>)",
+          accent: "oklch(var(--asst-accent) / <alpha-value>)",
+          "accent-hover": "oklch(var(--asst-accent-hover) / <alpha-value>)",
+          "accent-soft": "oklch(var(--asst-accent-soft) / <alpha-value>)",
+          "accent-line": "oklch(var(--asst-accent-line) / <alpha-value>)",
+          ink: "oklch(var(--asst-ink) / <alpha-value>)",
+          ok: "oklch(var(--asst-ok) / <alpha-value>)",
+          warn: "oklch(var(--asst-warn) / <alpha-value>)",
+          error: "oklch(var(--asst-error) / <alpha-value>)"
         }
       },
       fontFamily: {

@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { Mark } from "@/components/assistant/AssistantShell";
+import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { LoginCountdown } from "@/components/virtual-agents/LoginCountdown";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import type { CredentialKind } from "@/credentials/names";
@@ -172,7 +174,8 @@ export function GettingReady({
   unavailable,
   paste,
   save,
-  onDone
+  onDone,
+  theme = "system"
 }: {
   assistant: AssistantSummary;
   statuses: CredentialStatus[];
@@ -180,6 +183,8 @@ export function GettingReady({
   paste: FormAction;
   save: FormAction;
   onDone: () => void;
+  /** The appearance the person chose; the screen offers the switch, since it covers the sidebar's. */
+  theme?: Theme;
 }) {
   const now = useNow();
   const stored = (kind: CredentialKind) => statuses.some((status) => status.kind === kind && status.stored);
@@ -194,6 +199,9 @@ export function GettingReady({
       aria-labelledby="getting-ready-title"
       className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-asst-rail p-6 font-plex text-[15px] text-asst-text"
     >
+      <div className="absolute right-4 top-4">
+        <ThemeSwitch initial={theme} />
+      </div>
       <div className="flex w-full max-w-[480px] flex-col gap-7">
         <div className="flex flex-col items-start gap-4">
           <Mark size="lg" />

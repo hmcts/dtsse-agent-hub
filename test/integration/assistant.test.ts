@@ -64,11 +64,16 @@ async function startedAssistant(): Promise<{ id: string; token: string; claimed:
   const assistant = await ensureAssistant(prisma, VIEWER);
   const response = await orchestrator(claimRoute.POST, "/api/orchestrator/claim", {}, { cluster: "preview-01" });
   const claimed = (await jsonOf<ClaimResult>(response)).virtual_agents.find((entry) => entry.id === assistant.id)!;
-  await orchestrator(observedRoute.POST, `/api/orchestrator/virtual-agents/${assistant.id}/observed`, { id: assistant.id }, {
-    generation: claimed.generation,
-    replicas_ready: 1,
-    pod_phase: "Running"
-  });
+  await orchestrator(
+    observedRoute.POST,
+    `/api/orchestrator/virtual-agents/${assistant.id}/observed`,
+    { id: assistant.id },
+    {
+      generation: claimed.generation,
+      replicas_ready: 1,
+      pod_phase: "Running"
+    }
+  );
   return { id: assistant.id, token: claimed.launch_token!, claimed };
 }
 
@@ -81,7 +86,10 @@ function register(token: string, sessionId: string, conversationId?: string): Pr
 }
 
 async function sessionOf(conversationId: string): Promise<{ agentId: string; sessionId: string }> {
-  const conversation = await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversationId }, select: { agent: { select: { id: true, sessionId: true } } } });
+  const conversation = await prisma.assistantConversation.findUniqueOrThrow({
+    where: { id: conversationId },
+    select: { agent: { select: { id: true, sessionId: true } } }
+  });
   return { agentId: conversation.agent!.id, sessionId: conversation.agent!.sessionId };
 }
 
@@ -113,7 +121,9 @@ describe("the person's assistant", () => {
     const second = await openAssistant(VIEWER);
 
     expect(second.assistant.id).toBe(first.assistant.id);
-    expect(await prisma.virtualAgent.findMany({ where: { ownerOid: ALICE.oid }, select: { name: true, mode: true } })).toEqual([{ name: "assistant", mode: "assistant" }]);
+    expect(await prisma.virtualAgent.findMany({ where: { ownerOid: ALICE.oid }, select: { name: true, mode: true } })).toEqual([
+      { name: "assistant", mode: "assistant" }
+    ]);
     expect(first.assistant).toMatchObject({ needed: ["github", "azure", "claude"], onboarded: false, readiness: { percent: 10 } });
   });
 
@@ -139,7 +149,9 @@ describe("the person's assistant", () => {
     const [one, two] = await Promise.all([ensureAssistant(prisma, VIEWER), ensureAssistant(prisma, VIEWER)]);
 
     expect(one.id).toBe(two.id);
-    await expect(createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "another", mode: "assistant" })).rejects.toMatchObject({ status: 409 });
+    await expect(createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "another", mode: "assistant" })).rejects.toMatchObject({
+      status: 409
+    });
   });
 
   it("should start a stopped assistant when the person comes back", async () => {
@@ -367,10 +379,26 @@ describe("the sessions stream and report", () => {
     const second = ((await actions.startConversation({ product: "other", body: "two" })) as { id: string }).id;
     const put = (body: unknown) => pod(sessionsRoute.PUT, token, `/api/virtual/${assistantId}/sessions`, { virtualAgentId: assistantId }, "PUT", body);
 
-    expect((await put({ sessions: [{ conversation_id: first, state: "live" }, { conversation_id: second, state: "queued", detail: "2 of 2 busy" }], max: 2 })).status).toBe(204);
+    expect(
+      (
+        await put({
+          sessions: [
+            { conversation_id: first, state: "live" },
+            { conversation_id: second, state: "queued", detail: "2 of 2 busy" }
+          ],
+          max: 2
+        })
+      ).status
+    ).toBe(204);
     expect(await findConversation(prisma, ALICE.oid, second)).toMatchObject({ sessionState: "queued", sessionDetail: "2 of 2 busy" });
 
-    await put({ sessions: [{ conversation_id: second, state: "live" }, { conversation_id: "unknown", state: "live" }], max: 2 });
+    await put({
+      sessions: [
+        { conversation_id: second, state: "live" },
+        { conversation_id: "unknown", state: "live" }
+      ],
+      max: 2
+    });
     expect(await findConversation(prisma, ALICE.oid, first)).toMatchObject({ sessionState: null });
     expect((await put({ sessions: [], max: 0 })).status).toBe(400);
   });
@@ -381,7 +409,9 @@ describe("the sessions stream and report", () => {
     const response = await orchestrator(claimRoute.POST, "/api/orchestrator/claim", {}, { cluster: "preview-01" });
     const token = (await jsonOf<ClaimResult>(response)).virtual_agents.find((entry) => entry.id === standard.id)!.launch_token!;
 
-    expect((await pod(sessionsRoute.PUT, token, `/api/virtual/${standard.id}/sessions`, { virtualAgentId: standard.id }, "PUT", { sessions: [], max: 1 })).status).toBe(403);
+    expect(
+      (await pod(sessionsRoute.PUT, token, `/api/virtual/${standard.id}/sessions`, { virtualAgentId: standard.id }, "PUT", { sessions: [], max: 1 })).status
+    ).toBe(403);
   });
 });
 
@@ -408,7 +438,11 @@ describe("artefacts", () => {
     const { agentId, sessionId } = await sessionOf(id);
     await register(token, sessionId, id);
 
-    expect(await actions.saveArtefact({ conversationId: id, title: "Plan", markdown: "one\r\ntwo", baseVersion: 0 })).toEqual({ ok: true, saved: true, version: 1 });
+    expect(await actions.saveArtefact({ conversationId: id, title: "Plan", markdown: "one\r\ntwo", baseVersion: 0 })).toEqual({
+      ok: true,
+      saved: true,
+      version: 1
+    });
     await pod(artefactRoute.PUT, token, `/api/agent/${agentId}/artefact`, { agentId }, "PUT", { markdown: "agent", base_version: 1 });
 
     expect(await actions.saveArtefact({ conversationId: id, title: "Plan", markdown: "mine", baseVersion: 1 })).toEqual({
@@ -453,7 +487,9 @@ describe("the idle sweep", () => {
 
   it("should refuse to link a session when called for a conversation that is not there", async () => {
     await expect(
-      prisma.$transaction(async (tx) => linkSession(tx, { conversationId: "00000000-0000-0000-0000-000000000000", virtualAgentId: "x", ownerOid: "o", agentId: "a" }))
+      prisma.$transaction(async (tx) =>
+        linkSession(tx, { conversationId: "00000000-0000-0000-0000-000000000000", virtualAgentId: "x", ownerOid: "o", agentId: "a" })
+      )
     ).rejects.toBeDefined();
   });
 });

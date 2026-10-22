@@ -1,8 +1,10 @@
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { deleteConversation, renameConversation, saveArtefact, sendAssistantMessage, setConversationProduct, warmConversation } from "@/app/_actions/assistant";
 import { saveCredential } from "@/app/_actions/credentials";
 import { pasteLoginCode } from "@/app/_actions/virtual-agents";
 import { TEMPLATES } from "@/assistant/starters";
+import { THEME_COOKIE, themeOf } from "@/assistant/theme";
 import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
@@ -23,13 +25,14 @@ const ACTIONS: ChatActions = {
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */
 export default async function ConversationPage({ params }: { params: Promise<{ conversationId: string }> }) {
   const viewer = await requireViewer();
+  const theme = themeOf((await cookies()).get(THEME_COOKIE)?.value);
   const { conversationId } = await params;
   const [home, view] = await Promise.all([openAssistant(viewer), assistantConversation(viewer, conversationId)]);
   if (view === undefined) {
     notFound();
   }
   return (
-    <AssistantShell viewerName={viewer.name} groups={home.conversations} activeId={view.id} hubLink>
+    <AssistantShell viewerName={viewer.name} groups={home.conversations} activeId={view.id} hubLink theme={theme}>
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
       <ChatView key={view.agentId} view={view} templates={TEMPLATES} actions={ACTIONS} />
       <OnboardingGate
@@ -38,6 +41,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
         unavailable={home.credentials.available ? null : home.credentials.reason}
         paste={pasteLoginCode}
         save={saveCredential}
+        theme={theme}
       />
     </AssistantShell>
   );
