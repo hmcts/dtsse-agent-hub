@@ -4,10 +4,22 @@ import { canOwnerReadCredential, canReadMessage } from "../access/rules.ts";
 import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
+import type { DateGroup } from "../assistant/grouping.ts";
+import { conversationAgent, ensureAssistant, findAssistant, findConversation } from "../assistant/store.ts";
+import {
+  type AssistantSummary,
+  assistantSummary,
+  type ConversationLink,
+  type ConversationView,
+  conversationGroups,
+  conversationLinks,
+  conversationView
+} from "../assistant/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
 import { DEFAULT_CLAUDE_MD } from "../credentials/claude-md.ts";
 import { type GitIdentity, readGitIdentity } from "../credentials/git-identity.ts";
+import type { CredentialKind } from "../credentials/names.ts";
 import { type CredentialStatus, credentialStatus, ownerRefusal, readCredential } from "../credentials/store.ts";
 import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
 import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
@@ -188,7 +200,7 @@ export async function virtualAgentsPage(viewer: Viewer): Promise<VirtualAgentsPa
 export interface VirtualAgentPageView {
   summary: VirtualAgentSummary;
   /** Its lifecycle, settings and sign-ins, for its owner; `null` for anyone else. */
-  manage: { detail: VirtualAgentDetail; credentials: CredentialSettings } | null;
+  manage: { detail: VirtualAgentDetail; credentials: CredentialSettings; chats: ConversationLink[] } | null;
   /** The agent its current session registered, once there is one. */
   linked: AgentView | null;
 }
@@ -203,7 +215,8 @@ export async function virtualAgentPage(viewer: Viewer, id: string): Promise<Virt
     virtualAgentDetail(prisma, viewer.oid, id),
     summary.agentId === null ? undefined : agentView(prisma, viewer.oid, summary.agentId)
   ]);
-  const manage = detail === undefined ? null : { detail, credentials: await credentialSettings(viewer) };
+  const manage =
+    detail === undefined ? null : { detail, credentials: await credentialSettings(viewer), chats: await conversationLinks(prisma, viewer.oid, detail.card.id) };
   return { summary, manage, linked: linked ?? null };
 }
 
@@ -226,5 +239,50 @@ export async function agentRoute(viewer: Viewer, id: string): Promise<AgentRoute
   if (view === undefined) {
     return undefined;
   }
-  return view.agent.virtualAgentId === null ? { variant: "local", view } : { variant: "moved", to: agentPath(view.agent) };
+  if (view.agent.virtualAgentId === null) {
+    return { variant: "local", view };
+  }
+  // A conversation's agent is a chat in the HMCTS Assistant, and is shown there rather than as a session.
+  const agent = await prisma.agent.findUnique({ where: { id: view.agent.id }, select: { assistantConversationId: true } });
+  const conversationId = agent?.assistantConversationId ?? null;
+  return { variant: "moved", to: conversationId === null ? agentPath(view.agent) : `/assistant/${conversationId}` };
+}
+
+export interface AssistantHome {
+  assistant: AssistantSummary;
+  credentials: CredentialSettings;
+  conversations: { label: DateGroup; items: ConversationLink[] }[];
+}
+
+function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
+  return new Set(credentials.available ? credentials.statuses.filter((status) => status.stored).map((status) => status.kind) : []);
+}
+
+/**
+ * Opening the Assistant: the viewer's assistant, created on their first visit and started if it has stopped, so it is
+ * warming up while they sign in or type; what it still needs from them; and their conversations.
+ */
+export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
+  const assistant = await ensureAssistant(prisma, viewer);
+  const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
+  return { assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)), credentials, conversations };
+}
+
+/** The sidebar and the assistant's state alone, for pages that must not start or create it. */
+export async function assistantSidebar(viewer: Viewer): Promise<AssistantHome | undefined> {
+  const assistant = await findAssistant(prisma, viewer.oid);
+  if (assistant === undefined) {
+    return undefined;
+  }
+  const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
+  return { assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)), credentials, conversations };
+}
+
+/** One of the viewer's conversations, or `undefined` for the not-found the page answers. */
+export async function assistantConversation(viewer: Viewer, id: string): Promise<ConversationView | undefined> {
+  const conversation = await findConversation(prisma, viewer.oid, id);
+  if (conversation === undefined) {
+    return undefined;
+  }
+  return await conversationView(prisma, conversation, await conversationAgent(prisma, conversation));
 }

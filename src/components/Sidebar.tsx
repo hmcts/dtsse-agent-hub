@@ -4,7 +4,7 @@ import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
 import { NavLink } from "@/components/NavLink";
 import { AgentRoster } from "@/components/sidebar/AgentRoster";
 import { SidebarClose, SidebarDrawer } from "@/components/sidebar/Drawer";
-import { CaretIcon, HashIcon, HomeIcon, KeyIcon, LockIcon, PlusIcon, ServerIcon, StackIcon } from "@/components/sidebar/icons";
+import { CaretIcon, ChatIcon, HashIcon, HomeIcon, KeyIcon, LockIcon, PlusIcon, ServerIcon, StackIcon } from "@/components/sidebar/icons";
 import { TopicSearchShortcut } from "@/components/sidebar/TopicSearchShortcut";
 import type { TopicSummary } from "@/topics/store";
 import type { Identity } from "@/users/identity";
@@ -90,6 +90,13 @@ export function Sidebar({
                 Credentials
               </NavLink>
             )}
+            {/* The HMCTS Assistant runs on the viewer's virtual agent, so it is offered wherever they are. */}
+            {virtualAgents ? (
+              <NavLink href="/assistant">
+                <ChatIcon />
+                HMCTS Assistant
+              </NavLink>
+            ) : null}
           </div>
 
           <Group label="Channels">

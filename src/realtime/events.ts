@@ -28,6 +28,11 @@ export type HubEvent =
   /** `owner_oid`'s virtual agent changed: what they asked for, its status, its logins or its linked agent. */
   | { type: "virtual_agent"; virtual_agent_id: string; owner_oid: string }
   /**
+   * `owner_oid`'s assistant conversation changed: created, renamed, deleted, its product, its artefact, its session or
+   * a wake. `virtual_agent_id` is the assistant's, so its pod's sessions stream hears of wakes and deletions.
+   */
+  | { type: "assistant_conversation"; conversation_id: string; virtual_agent_id: string; owner_oid: string }
+  /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
    */
@@ -93,6 +98,10 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
     case "virtual_agent":
       return isId(event.virtual_agent_id) && isId(event.owner_oid)
         ? { type: "virtual_agent", virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
+        : undefined;
+    case "assistant_conversation":
+      return isId(event.conversation_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)
+        ? { type: "assistant_conversation", conversation_id: event.conversation_id, virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
         : undefined;
     default:
       return undefined;

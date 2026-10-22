@@ -122,3 +122,11 @@ export function ReconnectIcon() {
     </Icon>
   );
 }
+
+export function ChatIcon() {
+  return (
+    <Icon>
+      <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v6a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5v-6Z" />
+    </Icon>
+  );
+}

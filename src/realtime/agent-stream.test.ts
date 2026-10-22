@@ -182,3 +182,15 @@ describe("agentStream", () => {
     expect(frames).toEqual([]);
   });
 });
+
+describe("directFrame for an assistant conversation", () => {
+  it("should carry the conversation's context when the direct has one", () => {
+    const assistant = { conversation_id: "c1", product: "ccd", product_label: "CCD", artefact_version: 2, artefact_updated_by: "user" };
+
+    expect(JSON.parse(directFrame({ ...message("7", true), assistant }).split("data: ")[1]!)).toEqual({
+      message: message("7").message,
+      from_owner: true,
+      assistant
+    });
+  });
+});

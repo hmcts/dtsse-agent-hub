@@ -1,5 +1,7 @@
 import { HttpError } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
+import { assistantFrame } from "@/assistant/store";
+import type { StreamedDirect } from "@/messages/shape";
 import { queuedDeliveries, queuedDelivery } from "@/messages/store";
 import { agentStream, RECONNECT_FRAME } from "@/realtime/agent-stream";
 import { realtime } from "@/realtime/process";
@@ -21,6 +23,15 @@ export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
   if (release === undefined) {
     throw new HttpError(429, "too many open streams for this person");
   }
+  // A conversation's session is told the conversation's product and document version with every message, read as
+  // each is sent, so a change of product reaches the next message whether it was queued before or after it.
+  const withAssistant = async (direct: StreamedDirect): Promise<StreamedDirect> => {
+    if (!agent.ownerOnly) {
+      return direct;
+    }
+    const assistant = await assistantFrame(prisma, agent.id);
+    return assistant === undefined ? direct : { ...direct, assistant: { ...assistant } };
+  };
   const body = openSseStream({
     signal: request.signal,
     onClose: release,
@@ -28,8 +39,11 @@ export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
     onOpen: agentStream(agent.id, {
       hub,
       ready: listener.ready,
-      queued: () => queuedDeliveries(prisma, agent.id),
-      queuedOne: (messageId) => queuedDelivery(prisma, agent.id, messageId)
+      queued: async () => await Promise.all((await queuedDeliveries(prisma, agent.id)).map(withAssistant)),
+      queuedOne: async (messageId) => {
+        const direct = await queuedDelivery(prisma, agent.id, messageId);
+        return direct === undefined ? undefined : await withAssistant(direct);
+      }
     })
   });
   return new Response(body, { headers: SSE_HEADERS });
