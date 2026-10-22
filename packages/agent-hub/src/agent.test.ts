@@ -275,6 +275,27 @@ describe("touchPlace", () => {
     expect(touchPlace("/r/scripts/agent-hub", "/r", null)).toBeNull();
     expect(touchPlace("/r/apps/ccd/CLAUDE.md", "/r", null)).toBeNull();
   });
+
+  // With no manifest above it the root comes from the git toplevel, which git reports realpathed, while the
+  // paths in the session's transcript keep the symlinked spelling the session used. Compared raw, every one of
+  // them sat outside the root, so the stop worker saw no touches and offered no topics.
+  it("should attribute a path under a symlinked root when no manifest sits above the session", () => {
+    // Arrange
+    const real = path.join(home.root, "ws-symlinked");
+    const clone = path.join(real, "apps", "pcs", "pcs-api");
+    fs.mkdirSync(path.join(clone, "src"), { recursive: true });
+    gitRepo(real, "master");
+    const link = path.join(home.root, "ws-through-a-link");
+    fs.symlinkSync(real, link);
+
+    // Act
+    const root = workspaceRoot(path.join(link, "apps", "pcs"));
+    const place = touchPlace(path.join(link, "apps", "pcs", "pcs-api", "src", "a.java"), root, "cft-workspace");
+
+    // Assert
+    expect(root).toBe(fs.realpathSync(real));
+    expect(place).toEqual({ repo: "pcs-api", product: "pcs", dir: path.join(root, "apps", "pcs", "pcs-api") });
+  });
 });
 
 describe("workspaceRepoName", () => {

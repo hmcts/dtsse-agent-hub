@@ -85,8 +85,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The tip of the branch, not the commit that triggered this run: on a `push` event those differ as soon
+      # as a second merge lands, and committing the bump onto a tree that is missing the previous one's would
+      # make the push a non-fast-forward.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - name: Enable corepack
@@ -102,13 +106,6 @@ jobs:
 
       - name: Build the client
         run: yarn workspace @hmcts-cft/agent-hub run build
-
-      - name: Bump the patch version
-        id: bump
-        working-directory: packages/agent-hub
-        run: |
-          npm version patch --no-git-tag-version
-          echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
 
       # Kept line-for-line from cnp-githubactions-library/npm-publish-library so that moving to
       # the shared action later is a straight substitution.
@@ -135,6 +132,47 @@ jobs:
           # over the default `registry=` line.
           echo "@${NPM_SCOPE#@}:registry=${feed}" >> "$HOME/.npmrc"
 
+      # The next version is derived from the feed rather than from package.json, so that a bump this job failed
+      # to push — it is a direct push to a protected branch — cannot leave every later run re-publishing a
+      # version that is already taken, with nothing to do about it but bump by hand. Reads need no credential,
+      # but this runs after the npmrc is written so that it reads the same feed publishing will write to. A
+      # committed version ahead of the feed is a deliberate minor or major bump and is published as it stands.
+      - name: Work out the next version
+        id: bump
+        working-directory: packages/agent-hub
+        run: |
+          if published="$(npm view "$(node -p 'require("./package.json").name')" versions --json 2>/dev/null)"; then
+            echo "the feed holds: $published"
+          else
+            # Nothing readable on the feed: the first-ever publish starts at the committed version.
+            echo "the feed answered for no published version"
+            published="[]"
+          fi
+          # The node script is single-quoted so that the shell leaves its `$` anchors alone (SC2016); the one
+          # value it needs comes in through the environment.
+          # shellcheck disable=SC2016
+          version="$(PUBLISHED="$published" node -e '
+            const committed = require("./package.json").version;
+            const parse = (v) => (/^\d+\.\d+\.\d+$/.test(v) ? v.split(".").map(Number) : null);
+            const order = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+            let raw = [];
+            try {
+              raw = JSON.parse(process.env.PUBLISHED);
+            } catch {}
+            // `npm view` answers with a bare string when the feed holds exactly one version, and prereleases
+            // are not ours to patch, so anything that is not a plain x.y.z is dropped.
+            const released = (Array.isArray(raw) ? raw : [raw]).map(parse).filter((v) => v !== null).sort(order);
+            const highest = released[released.length - 1];
+            if (!highest) {
+              console.log(committed);
+            } else {
+              const ours = parse(committed);
+              console.log(ours && order(ours, highest) > 0 ? committed : [highest[0], highest[1], highest[2] + 1].join("."));
+            }
+          ')"
+          npm version "$version" --no-git-tag-version --allow-same-version
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Publish
         working-directory: packages/agent-hub
         run: npm publish
@@ -147,8 +185,10 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add packages/agent-hub/package.json
+          # The computed version is already the committed one on the first publish and on a minor or major
+          # bump made by hand, and `git commit` with nothing staged fails.
           # This cannot loop: pushes made with GITHUB_TOKEN do not trigger workflows.
-          git commit -m "chore: release @hmcts-cft/agent-hub v${VERSION} [skip ci]"
+          git diff --cached --quiet || git commit -m "chore: release @hmcts-cft/agent-hub v${VERSION} [skip ci]"
           git tag "agent-hub-v${VERSION}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
           git push origin "agent-hub-v${VERSION}"

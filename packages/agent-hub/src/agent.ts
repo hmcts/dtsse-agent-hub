@@ -127,16 +127,31 @@ function findWorkspaceRoot(start: string): string {
   return dir;
 }
 
+// The longest existing prefix of a path, resolved, with the rest of it appended. `fs.realpathSync` answers for
+// the whole path or not at all, and a path taken from a transcript can name a file a tool has since deleted or
+// is about to write; resolving the directories above it is enough to compare it with the workspace root.
 function realpath(p: string): string {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return path.resolve(p);
+  const resolved = path.resolve(p);
+  const rest: string[] = [];
+  let dir = resolved;
+  while (dir !== path.dirname(dir)) {
+    try {
+      return path.join(fs.realpathSync(dir), ...rest);
+    } catch {
+      rest.unshift(path.basename(dir));
+      dir = path.dirname(dir);
+    }
   }
+  return resolved;
 }
 
+// Both sides are resolved, because the root is not always spelled the way the paths compared against it are:
+// with no `workspace.yaml` above the session, `workspaceRoot` falls back to the git toplevel, which git reports
+// realpathed, while the paths in a transcript keep whatever symlinked spelling the session used. Comparing the
+// two raw put every one of them outside the root. Resolving is a no-op for a path that is already real, and
+// `realpath` falls back to `path.resolve` for one that does not exist.
 function relativeTo(root: string, p: string): string | null {
-  const rel = path.relative(root, p);
+  const rel = path.relative(realpath(root), realpath(p));
   return rel.startsWith("..") || path.isAbsolute(rel) ? null : rel;
 }
 
@@ -159,7 +174,7 @@ export type GatherMetadataOptions = {
 export function gatherMetadata(sid: string, { cwd, root = workspaceRoot() }: GatherMetadataOptions = {}): AgentMetadata {
   const info = sessionInfo(sid);
   const dir = cwd || info.cwd || process.cwd();
-  const rel = relativeTo(realpath(root), realpath(dir));
+  const rel = relativeTo(root, dir);
   const repoDir = rel === null ? dir : cloneDir(rel, root);
   return {
     session_id: sid,

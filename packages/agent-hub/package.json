@@ -1,6 +1,6 @@
 {
   "name": "@hmcts-cft/agent-hub",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "description": "The agent-hub client: the Claude Code hooks, bridge, topic-board CLI and virtual-agent pod runtime that talk to hmcts/dtsse-agent-hub.",
   "license": "MIT",

@@ -29,9 +29,17 @@ done
 HERE="$(cd "$(dirname "$target")" && pwd)"
 CLI="${AGENT_HUB_CLI_JS:-$HERE/../dist/cli.js}"
 # How the CLI names itself in the commands it tells anyone to run. A wrapper that wants its own spelling sets
-# this before calling; `${0##*/}` is a parameter expansion rather than a basename fork, so the hook path below
-# pays nothing for it.
-export AGENT_HUB_INVOKED_AS="${AGENT_HUB_INVOKED_AS:-${0##*/}}"
+# this before calling. Otherwise the bare name is used only when it resolves to something: a machine whose only
+# agent-hub is cft-workspace's `scripts/agent-hub` shim was told to run `agent-hub reply …`, which is not a
+# command it has, so the path it was invoked by is kept instead. Both tests are parameter expansions or shell
+# builtins, so the hook path below pays no fork for this.
+if [ -z "${AGENT_HUB_INVOKED_AS:-}" ]; then
+    AGENT_HUB_INVOKED_AS="${0##*/}"
+    case "$0" in
+        */*) command -v "$AGENT_HUB_INVOKED_AS" >/dev/null 2>&1 || AGENT_HUB_INVOKED_AS="$0" ;;
+    esac
+fi
+export AGENT_HUB_INVOKED_AS
 
 if [ "${1:-}" = "hook" ]; then
     # A hook must never fail or slow the session: every exit below is 0.

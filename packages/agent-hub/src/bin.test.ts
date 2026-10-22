@@ -83,6 +83,7 @@ describe("bin/agent-hub", () => {
 // the layout is assembled here instead and the published tarball is proved by the release workflow.
 describe("bin/agent-hub reached through a symlink", () => {
   let installed: string;
+  let sandbox: string;
   let via: { relative: string; absolute: string; chained: string };
 
   beforeAll(() => {
@@ -106,6 +107,15 @@ describe("bin/agent-hub reached through a symlink", () => {
     fs.symlinkSync(path.join("..", "..", "pkg", "bin", "agent-hub"), via.relative);
     fs.symlinkSync(path.join(installed, "pkg", "bin", "agent-hub"), via.absolute);
     fs.symlinkSync(path.join("..", "bin", "agent-hub"), via.chained);
+    // A PATH holding everything the gate itself runs and no agent-hub, so that the bare name resolves to
+    // nothing here exactly as it does on a workstation whose only agent-hub is cft-workspace's shim. The
+    // runner's own PATH cannot say that: a global install, or yarn's node_modules/.bin, would be on it.
+    sandbox = path.join(installed, "sandbox-bin");
+    fs.mkdirSync(sandbox);
+    fs.symlinkSync(process.execPath, path.join(sandbox, "node"));
+    for (const tool of ["bash", "dirname", "readlink"]) {
+      fs.symlinkSync(spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim(), path.join(sandbox, tool));
+    }
   });
 
   afterAll(() => {
@@ -144,14 +154,34 @@ describe("bin/agent-hub reached through a symlink", () => {
     expect(result.status).toBe(0);
   });
 
-  it("should pass on the name it was invoked as, and keep one a wrapper set", () => {
+  // Every hint the CLI prints quotes a command the reader is told to run, so it has to be one the machine has.
+  // The bare name is the right spelling for a global install and the wrong one everywhere else: a workstation
+  // whose only agent-hub is cft-workspace's `scripts/agent-hub` shim was told to run `agent-hub reply …`.
+  it("should pass on the bare name when it was invoked as a command on PATH", () => {
+    // Arrange
+    const env = { PATH: `${path.dirname(via.absolute)}:${sandbox}` };
+
     // Act
-    const own = run(via.absolute, ["help"]);
-    const wrapped = run(via.relative, ["help"], { env: { AGENT_HUB_INVOKED_AS: "scripts/agent-hub" } });
+    const result = run(via.absolute, ["help"], { env });
 
     // Assert
-    expect(own.cli?.invokedAs).toBe("agent-hub-absolute");
-    expect(wrapped.cli?.invokedAs).toBe("scripts/agent-hub");
+    expect(result.cli?.invokedAs).toBe("agent-hub-absolute");
+  });
+
+  it("should pass on the whole path when it was invoked by one and the bare name is not installed", () => {
+    // Act
+    const result = run(via.chained, ["help"], { env: { PATH: sandbox } });
+
+    // Assert
+    expect(result.cli?.invokedAs).toBe(via.chained);
+  });
+
+  it("should keep the name a wrapper set when it set one itself", () => {
+    // Act
+    const result = run(via.relative, ["help"], { env: { PATH: sandbox, AGENT_HUB_INVOKED_AS: "scripts/agent-hub" } });
+
+    // Assert
+    expect(result.cli?.invokedAs).toBe("scripts/agent-hub");
   });
 });
 
