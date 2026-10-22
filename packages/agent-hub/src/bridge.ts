@@ -533,7 +533,8 @@ export async function runBridge({
   }, heartbeatMs);
   transcriptTimer = setInterval(() => {
     statusChanged();
-    syncTranscript();
+    // syncTranscript settles its own errors into the log, so there is nothing here to catch.
+    void syncTranscript();
   }, transcriptMs);
 
   let retry: ReconnectDecision = { delay: 0, backoff: 0, rapidCloses: 0 };
