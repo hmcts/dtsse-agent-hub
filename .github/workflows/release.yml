@@ -36,7 +36,10 @@ jobs:
       # The hmcts-lib feed allows anonymous reads, so this needs no credential. Only publishing
       # does; see the release job.
       - name: Install
-        run: yarn install --immutable
+        # --mode=skip-build: do not run dependencies' lifecycle scripts. Nothing here needs them, and the
+        # release job holds the credential that can publish, so an install is the wrong place to execute
+        # third-party code. Verified: install and the client build both succeed without them.
+        run: yarn install --immutable --mode=skip-build
 
       # `yarn typecheck` covers the app as well as the package, and the app's types do not exist
       # until the Prisma client is generated.
@@ -102,13 +105,18 @@ jobs:
           cache: yarn
 
       - name: Install
-        run: yarn install --immutable
+        # --mode=skip-build: do not run dependencies' lifecycle scripts. Nothing here needs them, and the
+        # release job holds the credential that can publish, so an install is the wrong place to execute
+        # third-party code. Verified: install and the client build both succeed without them.
+        run: yarn install --immutable --mode=skip-build
 
       - name: Build the client
         run: yarn workspace @hmcts-cft/agent-hub run build
 
       # Kept line-for-line from cnp-githubactions-library/npm-publish-library so that moving to
       # the shared action later is a straight substitution.
+      # Deliberately after the install: until this step runs, the publish credential is neither on disk nor
+      # in any step's environment, so nothing that an install executes could read it. Keep it in this order.
       - name: Configure npm authentication for Azure Artifacts
         env:
           AZURE_DEVOPS_ARTIFACT_USERNAME: ${{ secrets.AZURE_DEVOPS_ARTIFACT_USERNAME }}
