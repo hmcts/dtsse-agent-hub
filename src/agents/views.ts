@@ -74,7 +74,8 @@ export function byLiveness<A extends { status: AgentStatus; lastHeartbeatAt: str
 /** The viewer's own agents, and those shared with them through a grant. */
 export async function visibleAgents(db: Database, oid: string): Promise<{ mine: AgentCard[]; shared: AgentCard[] }> {
   const rows = await db.agent.findMany({
-    where: agentsVisibleTo(oid),
+    // A conversation's agent is shown in the HMCTS Assistant, not among the viewer's sessions.
+    where: { AND: [agentsVisibleTo(oid), { assistantConversationId: null }] },
     select: CARD,
     orderBy: [{ lastHeartbeatAt: "desc" }, { id: "asc" }],
     take: MAX_SIDEBAR_AGENTS
@@ -98,13 +99,13 @@ export async function agentView(db: Database, viewerOid: string, id: string): Pr
   }
   const row = await db.agent.findUnique({
     where: { id },
-    select: { ...CARD, ownerOid: true, cwd: true, host: true, createdAt: true, skills: true }
+    select: { ...CARD, ownerOid: true, cwd: true, host: true, createdAt: true, skills: true, assistantConversationId: true }
   });
   if (row === null) {
     return undefined;
   }
   const grants = await grantsHeldBy(db, viewerOid);
-  const ref = { id: row.id, ownerOid: row.ownerOid };
+  const ref = { id: row.id, ownerOid: row.ownerOid, ownerOnly: row.assistantConversationId !== null };
   const access = agentAccess(viewerOid, ref, grants);
   if (access === "none") {
     return undefined;

@@ -39,7 +39,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     if (found === undefined || !canViewAgent(viewer.oid, found, await grantsHeldBy(prisma, viewer.oid))) {
       return errorResponse(404, "no such agent");
     }
-    agent = { id: found.id, ownerOid: found.ownerOid };
+    agent = { id: found.id, ownerOid: found.ownerOid, ownerOnly: found.ownerOnly };
   }
 
   const { hub, listener } = realtime();

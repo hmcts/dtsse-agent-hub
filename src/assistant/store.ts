@@ -1,0 +1,500 @@
+import { HttpError } from "../agent-api/http.ts";
+import { notify } from "../realtime/notify.ts";
+import type { Database, PrismaClient } from "../store/prisma.ts";
+import type { ModelRoute } from "../viewer/identity.ts";
+import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
+import { DEFAULT_PRODUCT, isProduct, productLabel } from "./products.ts";
+import type { SessionsReport } from "./schemas.ts";
+
+/**
+ * The HMCTS Assistant: each person's one assistant virtual agent, and its conversations.
+ *
+ * A conversation's agent is created with it, offline and with a session id the hub chose, so a message can queue for
+ * it before any session runs. The pod's supervisor starts a session under that id when the conversation is woken,
+ * and the session's registration adopts the agent (`linkSession`). Every change is announced to the owner's UI and
+ * to the assistant's sessions stream with an `assistant_conversation` event, inside the transaction that made it.
+ */
+
+export const ASSISTANT_NAME = "assistant";
+
+/** A new conversation's title is the start of its first message, until the person renames it. */
+export const TITLE_FROM_MESSAGE = 60;
+
+const MAX_PRODUCT_HISTORY = 50;
+
+export class ConversationNotFound extends HttpError {
+  constructor() {
+    super(404, "no such conversation");
+  }
+}
+
+export interface ConversationRow {
+  id: string;
+  ownerOid: string;
+  virtualAgentId: string;
+  agentId: string | null;
+  title: string | null;
+  product: string;
+  productHistory: ProductChange[];
+  wakeRequestedAt: Date | null;
+  sessionState: SessionState | null;
+  sessionDetail: string | null;
+  lastActiveAt: Date;
+  createdAt: Date;
+}
+
+export type SessionState = "starting" | "live" | "queued";
+
+export interface ProductChange {
+  product: string;
+  at: string;
+}
+
+export interface Artefact {
+  title: string | null;
+  markdown: string;
+  version: number;
+  updatedBy: "user" | "agent" | null;
+  updatedAt: Date | null;
+}
+
+const SELECT = {
+  id: true,
+  ownerOid: true,
+  virtualAgentId: true,
+  agentId: true,
+  title: true,
+  product: true,
+  productHistory: true,
+  wakeRequestedAt: true,
+  sessionState: true,
+  sessionDetail: true,
+  lastActiveAt: true,
+  createdAt: true
+} as const;
+
+function storedHistory(value: unknown): ProductChange[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(
+    (change): change is ProductChange => typeof change === "object" && change !== null && typeof change.product === "string" && typeof change.at === "string"
+  );
+}
+
+function toRow(row: {
+  id: string;
+  ownerOid: string;
+  virtualAgentId: string;
+  agentId: string | null;
+  title: string | null;
+  product: string;
+  productHistory: unknown;
+  wakeRequestedAt: Date | null;
+  sessionState: string | null;
+  sessionDetail: string | null;
+  lastActiveAt: Date;
+  createdAt: Date;
+}): ConversationRow {
+  const state = row.sessionState;
+  return {
+    ...row,
+    productHistory: storedHistory(row.productHistory),
+    sessionState: state === "starting" || state === "live" || state === "queued" ? state : null
+  };
+}
+
+async function announce(db: Database, conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">): Promise<void> {
+  await notify(db, {
+    type: "assistant_conversation",
+    conversation_id: conversation.id,
+    virtual_agent_id: conversation.virtualAgentId,
+    owner_oid: conversation.ownerOid
+  });
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/**
+ * The virtual agent the person's Assistant runs on: their first, the oldest not being deleted. Any virtual agent can
+ * hold conversations; the Assistant always uses the same one, so a person's chats are in one place.
+ */
+export async function findAssistant(db: Database, ownerOid: string): Promise<VirtualAgentRow | undefined> {
+  const row = await db.virtualAgent.findFirst({
+    where: { ownerOid, desired: { not: "deleted" } },
+    select: { id: true },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+  });
+  return row === null ? undefined : await findVirtualAgent(db, row.id);
+}
+
+/** `assistant`, or `assistant-2` and on when an earlier one of that name is still being deleted. */
+async function freeName(db: Database, ownerOid: string): Promise<string> {
+  const taken = new Set((await db.virtualAgent.findMany({ where: { ownerOid }, select: { name: true } })).map((row) => row.name));
+  for (let n = 1; ; n += 1) {
+    const name = n === 1 ? ASSISTANT_NAME : `${ASSISTANT_NAME}-${n}`;
+    if (!taken.has(name)) {
+      return name;
+    }
+  }
+}
+
+/**
+ * The virtual agent the person's Assistant runs on: their first, created as `assistant` when they have none, and
+ * started whenever they come back to it stopped, so the pod is warming up while they sign in or type. It is an
+ * ordinary virtual agent and counts towards their limit. Two tabs racing to create one are settled by the unique
+ * name: the loser reads the winner's.
+ */
+export async function ensureAssistant(prisma: PrismaClient, owner: { oid: string; modelRoute: ModelRoute }): Promise<VirtualAgentRow> {
+  const existing = await findAssistant(prisma, owner.oid);
+  if (existing !== undefined) {
+    return existing.desired === "stopped" ? await setDesired(prisma, owner.oid, existing.id, "running") : existing;
+  }
+  try {
+    return await createVirtualAgent(prisma, { owner, modelRoute: owner.modelRoute, name: await freeName(prisma, owner.oid) });
+  } catch (error) {
+    const raced = await findAssistant(prisma, owner.oid);
+    if (raced !== undefined) {
+      return raced;
+    }
+    throw error;
+  }
+}
+
+/** The conversation, if `ownerOid` owns it. Someone else's is reported as missing. */
+export async function findConversation(db: Database, ownerOid: string, id: string): Promise<ConversationRow | undefined> {
+  if (!isUuid(id)) {
+    return undefined;
+  }
+  const row = await db.assistantConversation.findUnique({ where: { id }, select: SELECT });
+  return row === null || row.ownerOid !== ownerOid ? undefined : toRow(row);
+}
+
+/** The owner's conversations, most recently active first; only those on `virtualAgentId` when it is given. */
+export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationRow[]> {
+  const rows = await db.assistantConversation.findMany({
+    where: { ownerOid, virtualAgent: { desired: { not: "deleted" } }, ...(virtualAgentId === undefined ? {} : { virtualAgentId }) },
+    select: SELECT,
+    orderBy: [{ lastActiveAt: "desc" }, { id: "asc" }],
+    take: limit
+  });
+  return rows.map(toRow);
+}
+
+/** Creates the conversation's agent: offline, the assistant's, under a session id the pod will start a session as. */
+async function createConversationAgent(db: Database, conversation: Pick<ConversationRow, "id" | "ownerOid" | "virtualAgentId">): Promise<string> {
+  const [agent] = await db.$queryRaw<{ id: string }[]>`
+    INSERT INTO agent (owner_oid, session_id, name, status, last_heartbeat_at, read_cursor, virtual_agent_id, assistant_conversation_id)
+    SELECT ${conversation.ownerOid}, gen_random_uuid()::text, v.name, 'offline', now(), (SELECT COALESCE(max(id), 0) FROM message),
+           v.id, ${conversation.id}::uuid
+      FROM virtual_agent v
+     WHERE v.id = ${conversation.virtualAgentId}::uuid
+    RETURNING id::text AS id
+  `;
+  if (agent === undefined) {
+    throw new HttpError(409, "the assistant has gone");
+  }
+  await db.assistantConversation.update({ where: { id: conversation.id }, data: { agentId: agent.id } });
+  return agent.id;
+}
+
+export async function createConversation(
+  prisma: PrismaClient,
+  ownerOid: string,
+  request: { product?: unknown; title?: string | null }
+): Promise<ConversationRow> {
+  const product = request.product === undefined ? DEFAULT_PRODUCT : request.product;
+  if (!isProduct(product)) {
+    throw new HttpError(400, "pick a product from the list");
+  }
+  const assistant = await findAssistant(prisma, ownerOid);
+  if (assistant === undefined) {
+    throw new HttpError(409, "open the Assistant first, so it can be set up");
+  }
+  const title = request.title?.trim().slice(0, TITLE_FROM_MESSAGE) || null;
+  return await prisma.$transaction(async (tx) => {
+    const created = await tx.assistantConversation.create({
+      data: { ownerOid, virtualAgentId: assistant.id, product, title },
+      select: SELECT
+    });
+    const agentId = await createConversationAgent(tx, created);
+    await announce(tx, created);
+    return { ...toRow(created), agentId };
+  });
+}
+
+/**
+ * Marks the conversation as needing a session, and starts its assistant if it is stopped. A wake already pending
+ * keeps its time, so the sessions stream replays wakes in the order they were asked for.
+ */
+export async function requestWake(prisma: PrismaClient, conversation: ConversationRow, now: Date = new Date()): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      UPDATE assistant_conversation
+         SET wake_requested_at = COALESCE(wake_requested_at, ${now}), last_active_at = ${now}, updated_at = ${now}
+       WHERE id = ${conversation.id}::uuid
+    `;
+    await announce(tx, conversation);
+  });
+  const assistant = await findVirtualAgent(prisma, conversation.virtualAgentId);
+  if (assistant?.desired === "stopped") {
+    await setDesired(prisma, conversation.ownerOid, assistant.id, "running", now);
+  }
+}
+
+/** The conversation's agent, created again if it has none, so there is always somewhere for a message to queue. */
+export async function conversationAgent(prisma: PrismaClient, conversation: ConversationRow): Promise<string> {
+  if (conversation.agentId !== null) {
+    return conversation.agentId;
+  }
+  return await prisma.$transaction(async (tx) => {
+    const agentId = await createConversationAgent(tx, conversation);
+    await announce(tx, conversation);
+    return agentId;
+  });
+}
+
+/** Activity on the conversation: it moves up the list, and a first message names it. */
+export async function touchConversation(prisma: PrismaClient, conversation: ConversationRow, firstMessage: string, now: Date = new Date()): Promise<void> {
+  const title = conversation.title ?? (firstMessage.trim().replace(/\s+/g, " ").slice(0, TITLE_FROM_MESSAGE) || null);
+  await prisma.$transaction(async (tx) => {
+    await tx.assistantConversation.update({ where: { id: conversation.id }, data: { title, lastActiveAt: now, updatedAt: now } });
+    await announce(tx, conversation);
+  });
+}
+
+/**
+ * A session registered for the conversation: its agent becomes the conversation's current one, the wake is
+ * answered, and the session counts as activity for the assistant's idle stop. Called inside the registration's
+ * transaction, which has already checked that the conversation is the registering virtual agent's.
+ */
+export async function linkSession(
+  db: Database,
+  session: { conversationId: string; virtualAgentId: string; ownerOid: string; agentId: string },
+  now: Date = new Date()
+): Promise<void> {
+  await db.assistantConversation.update({
+    where: { id: session.conversationId },
+    data: { agentId: session.agentId, wakeRequestedAt: null, sessionState: "live", sessionDetail: null, updatedAt: now }
+  });
+  await db.virtualAgent.update({ where: { id: session.virtualAgentId }, data: { lastActiveAt: now, updatedAt: now } });
+  await announce(db, { id: session.conversationId, virtualAgentId: session.virtualAgentId, ownerOid: session.ownerOid });
+}
+
+/**
+ * What the pod's supervisor runs, replacing its last report: every conversation of the assistant it leaves out has
+ * no session. Only conversations whose state changed are announced. Not activity for the idle stop, which a pod
+ * reporting every minute would otherwise never reach.
+ */
+export async function reportSessions(prisma: PrismaClient, virtualAgentId: string, report: SessionsReport, now: Date = new Date()): Promise<void> {
+  const reported = new Map(report.sessions.map((session) => [session.conversation_id, session]));
+  await prisma.$transaction(async (tx) => {
+    const rows = await tx.assistantConversation.findMany({
+      where: { virtualAgentId },
+      select: { id: true, ownerOid: true, virtualAgentId: true, sessionState: true, sessionDetail: true }
+    });
+    for (const row of rows) {
+      const session = reported.get(row.id);
+      const state = session?.state ?? null;
+      const detail = session?.detail ?? null;
+      if (row.sessionState !== state || row.sessionDetail !== detail) {
+        await tx.assistantConversation.update({ where: { id: row.id }, data: { sessionState: state, sessionDetail: detail, updatedAt: now } });
+        await announce(tx, row);
+      }
+    }
+  });
+}
+
+export async function renameConversation(prisma: PrismaClient, ownerOid: string, id: string, title: string): Promise<void> {
+  const trimmed = title.trim().replace(/\s+/g, " ");
+  if (trimmed === "" || trimmed.length > 200) {
+    throw new HttpError(400, "a title is 1 to 200 characters");
+  }
+  const conversation = await findConversation(prisma, ownerOid, id);
+  if (conversation === undefined) {
+    throw new ConversationNotFound();
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.assistantConversation.update({ where: { id }, data: { title: trimmed, updatedAt: new Date() } });
+    await announce(tx, conversation);
+  });
+}
+
+/**
+ * The product the conversation is about from now on. Each change is kept, so the thread can show where it changed;
+ * the session is told with the next message it is sent, in that message's frame.
+ */
+export async function setProduct(prisma: PrismaClient, ownerOid: string, id: string, product: unknown, now: Date = new Date()): Promise<void> {
+  if (!isProduct(product)) {
+    throw new HttpError(400, "pick a product from the list");
+  }
+  const conversation = await findConversation(prisma, ownerOid, id);
+  if (conversation === undefined) {
+    throw new ConversationNotFound();
+  }
+  if (conversation.product === product) {
+    return;
+  }
+  const history = [...conversation.productHistory, { product, at: now.toISOString() }].slice(-MAX_PRODUCT_HISTORY);
+  await prisma.$transaction(async (tx) => {
+    await tx.assistantConversation.update({
+      where: { id },
+      data: { product, productHistory: history.map((change) => ({ product: change.product, at: change.at })), updatedAt: now }
+    });
+    await announce(tx, conversation);
+  });
+}
+
+/**
+ * Deletes the conversation with everything it holds: its agents (and with them their transcripts, deliveries and
+ * subscriptions) and every direct message to or from them, since the chat was the person's alone. The announcement
+ * tells the pod to stop the conversation's session.
+ */
+export async function deleteConversation(prisma: PrismaClient, ownerOid: string, id: string): Promise<void> {
+  const conversation = await findConversation(prisma, ownerOid, id);
+  if (conversation === undefined) {
+    throw new ConversationNotFound();
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      DELETE FROM message
+       WHERE kind = 'direct'
+         AND (target_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = ${id}::uuid)
+              OR author_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = ${id}::uuid))
+    `;
+    await tx.assistantConversation.delete({ where: { id } });
+    await announce(tx, conversation);
+  });
+}
+
+const EMPTY_ARTEFACT: Artefact = { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null };
+
+function toArtefact(row: {
+  artefactTitle: string | null;
+  artefactMarkdown: string;
+  artefactVersion: number;
+  artefactUpdatedBy: string | null;
+  artefactUpdatedAt: Date | null;
+}): Artefact {
+  const by = row.artefactUpdatedBy;
+  return {
+    title: row.artefactTitle,
+    markdown: row.artefactMarkdown,
+    version: row.artefactVersion,
+    updatedBy: by === "user" || by === "agent" ? by : null,
+    updatedAt: row.artefactUpdatedAt
+  };
+}
+
+const ARTEFACT_SELECT = { artefactTitle: true, artefactMarkdown: true, artefactVersion: true, artefactUpdatedBy: true, artefactUpdatedAt: true } as const;
+
+export async function readArtefact(db: Database, conversationId: string): Promise<Artefact> {
+  const row = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: ARTEFACT_SELECT });
+  return row === null ? EMPTY_ARTEFACT : toArtefact(row);
+}
+
+/** The conversation an agent is a session of, for the agent API's artefact routes. */
+export async function conversationOfAgent(db: Database, agentId: string): Promise<ConversationRow | undefined> {
+  const row = await db.agent.findUnique({ where: { id: agentId }, select: { assistantConversation: { select: SELECT } } });
+  return row?.assistantConversation === null || row?.assistantConversation === undefined ? undefined : toRow(row.assistantConversation);
+}
+
+export class ArtefactConflict extends Error {
+  readonly current: Artefact;
+
+  constructor(current: Artefact) {
+    super("the document has changed since that version");
+    this.current = current;
+  }
+}
+
+/**
+ * Writes the conversation's artefact if `baseVersion` is still its version, and answers the new one. Otherwise
+ * nothing is written and `ArtefactConflict` carries what is there now, for the writer to merge into. A title left
+ * `null` keeps the current one.
+ */
+export async function writeArtefact(
+  prisma: PrismaClient,
+  conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
+  write: { title: string | null; markdown: string; baseVersion: number; by: "user" | "agent" },
+  now: Date = new Date()
+): Promise<number> {
+  return await prisma.$transaction(async (tx) => {
+    const updated = await tx.$queryRaw<{ version: number }[]>`
+      UPDATE assistant_conversation
+         SET artefact_title = COALESCE(${write.title}, artefact_title, 'Untitled document'),
+             artefact_markdown = ${write.markdown},
+             artefact_version = artefact_version + 1,
+             artefact_updated_by = ${write.by},
+             artefact_updated_at = ${now},
+             updated_at = ${now}
+       WHERE id = ${conversation.id}::uuid AND artefact_version = ${write.baseVersion}::int
+      RETURNING artefact_version AS version
+    `;
+    const [row] = updated;
+    if (row === undefined) {
+      throw new ArtefactConflict(await readArtefact(tx, conversation.id));
+    }
+    await announce(tx, conversation);
+    return row.version;
+  });
+}
+
+/** What a direct frame to a conversation's agent carries, or `undefined` for any other agent. */
+export interface AssistantFrame {
+  conversation_id: string;
+  product: string;
+  product_label: string;
+  artefact_version: number;
+  artefact_updated_by: "user" | "agent" | null;
+}
+
+export async function assistantFrame(db: Database, agentId: string): Promise<AssistantFrame | undefined> {
+  const row = await db.agent.findUnique({
+    where: { id: agentId },
+    select: { assistantConversation: { select: { id: true, product: true, ...ARTEFACT_SELECT } } }
+  });
+  const conversation = row?.assistantConversation;
+  if (conversation === null || conversation === undefined) {
+    return undefined;
+  }
+  const artefact = toArtefact(conversation);
+  return {
+    conversation_id: conversation.id,
+    product: conversation.product,
+    product_label: productLabel(conversation.product),
+    artefact_version: artefact.version,
+    artefact_updated_by: artefact.updatedBy
+  };
+}
+
+/** A wake on the sessions stream: the conversation needs a session, under this session id. */
+export interface Wake {
+  conversation_id: string;
+  session_id: string;
+  resume: boolean;
+  product: string;
+}
+
+/** Every pending wake of the assistant, oldest first. `resume` once the session has sent a transcript entry. */
+export async function pendingWakes(db: Database, virtualAgentId: string): Promise<Wake[]> {
+  return await db.$queryRaw<Wake[]>`
+    SELECT c.id::text AS conversation_id, a.session_id, EXISTS (SELECT 1 FROM transcript_entry t WHERE t.agent_id = a.id) AS resume, c.product
+      FROM assistant_conversation c
+      JOIN agent a ON a.id = c.agent_id
+     WHERE c.virtual_agent_id = ${virtualAgentId}::uuid AND c.wake_requested_at IS NOT NULL
+     ORDER BY c.wake_requested_at, c.id
+  `;
+}
+
+/** The wake for one conversation, if it has one pending; `null` when the conversation is gone. */
+export async function pendingWake(db: Database, virtualAgentId: string, conversationId: string): Promise<Wake | undefined | null> {
+  const exists = await db.assistantConversation.count({ where: { id: conversationId, virtualAgentId } });
+  if (exists === 0) {
+    return null;
+  }
+  const wakes = await pendingWakes(db, virtualAgentId);
+  return wakes.find((wake) => wake.conversation_id === conversationId);
+}

@@ -12,14 +12,20 @@ export async function grantsHeldBy(db: Database, oid: string): Promise<Grant[]> 
   return rows.map((row) => ({ ownerOid: row.ownerOid, granteeOid: row.granteeOid, level: row.level }));
 }
 
-/** Agents `oid` may see: `canViewAgent`, as a query. */
+/** Agents `oid` may see: `canViewAgent`, as a query. No grant reaches an assistant conversation's agent. */
 export function agentsVisibleTo(oid: string): Prisma.AgentWhereInput {
-  return { OR: [{ ownerOid: oid }, { owner: { grantsGiven: { some: { granteeOid: oid } } } }] };
+  return { OR: [{ ownerOid: oid }, { assistantConversationId: null, owner: { grantsGiven: { some: { granteeOid: oid } } } }] };
 }
 
-/** Agents `oid`, or any agent `oid` owns, may message: `canPersonMessageAgent`, as a query. */
+/**
+ * Agents `oid`, or any agent `oid` owns, may message by name or pick from a list: `canPersonMessageAgent`, as a
+ * query, less every assistant conversation's agent, which only its own conversation's page messages.
+ */
 export function agentsMessageableBy(oid: string): Prisma.AgentWhereInput {
-  return { OR: [{ ownerOid: oid }, { owner: { grantsGiven: { some: { granteeOid: oid, level: "write" } } } }] };
+  return {
+    assistantConversationId: null,
+    OR: [{ ownerOid: oid }, { owner: { grantsGiven: { some: { granteeOid: oid, level: "write" } } } }]
+  };
 }
 
 export interface LoadedMessageRef extends MessageRef {

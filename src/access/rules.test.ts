@@ -259,6 +259,35 @@ describe("agentAccess", () => {
   });
 });
 
+describe("an assistant conversation's agent", () => {
+  const CONVERSATION: AgentRef = { id: "agent-conversation", ownerOid: OWNER, ownerOnly: true };
+
+  it.each<[Role, ReturnType<typeof agentAccess>]>([
+    ["owner", "owner"],
+    ["read grantee", "none"],
+    ["write grantee", "none"],
+    ["stranger", "none"]
+  ])("should give the %s %s access when the agent is owner-only, whatever their grants", (role, access) => {
+    expect(agentAccess(ROLES[role], CONVERSATION, GRANTS)).toBe(access);
+  });
+
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"]
+  ])("should answer %s when the %s views, reads or messages an owner-only agent", (expected, role) => {
+    expect(canViewAgent(ROLES[role], CONVERSATION, GRANTS)).toBe(expected);
+    expect(canViewTranscript(ROLES[role], CONVERSATION, GRANTS)).toBe(expected);
+    expect(canPersonMessageAgent(ROLES[role], CONVERSATION, GRANTS)).toBe(expected);
+    expect(canSeeAgentSkills(ROLES[role], CONVERSATION, GRANTS)).toBe(expected);
+  });
+
+  it("should not let a write grantee's agent message an owner-only agent when it holds the grant", () => {
+    expect(canAgentMessageAgent(agentOf(WRITER), CONVERSATION, GRANTS)).toBe(false);
+    expect(canAgentMessageAgent(agentOf(OWNER), CONVERSATION, GRANTS)).toBe(true);
+  });
+});
+
 describe("canManageCredential", () => {
   it.each<[boolean, Role]>([
     [true, "owner"],

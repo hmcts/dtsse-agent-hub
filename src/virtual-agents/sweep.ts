@@ -92,11 +92,13 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
       await announce(tx, row.id, row.owner_oid);
     }
 
+    // A virtual agent is busy while any of its sessions is, its own or a conversation's, and active as of the latest
+    // transcript entry from any of them.
     const candidates = await tx.$queryRaw<Candidate[]>`
-      SELECT v.id::text AS id, v.status::text AS status, v.started_at, v.status_changed_at, v.last_active_at, a.status::text AS agent_status,
-             (SELECT max(t.created_at) FROM transcript_entry t WHERE t.agent_id = v.agent_id) AS last_entry_at
+      SELECT v.id::text AS id, v.status::text AS status, v.started_at, v.status_changed_at, v.last_active_at,
+             CASE WHEN EXISTS (SELECT 1 FROM agent s WHERE (s.virtual_agent_id = v.id OR s.id = v.agent_id) AND s.status = 'busy') THEN 'busy' ELSE 'idle' END AS agent_status,
+             (SELECT max(t.created_at) FROM transcript_entry t JOIN agent s ON s.id = t.agent_id WHERE s.virtual_agent_id = v.id OR s.id = v.agent_id) AS last_entry_at
         FROM virtual_agent v
-        LEFT JOIN agent a ON a.id = v.agent_id
        WHERE v.desired = 'running'
     `;
     const evening = candidates.filter((candidate) => dueEveningStop(candidate.started_at, now, stop)).map((candidate) => candidate.id);

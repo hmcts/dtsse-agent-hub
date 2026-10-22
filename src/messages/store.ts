@@ -167,7 +167,9 @@ export async function ackDelivery(prisma: PrismaClient, agentId: string, message
  * a transaction, so the NOTIFYs go out only if the expiry commits.
  *
  * An offline agent's heartbeat revives it, so the cut-off is measured from the later of its last heartbeat and its
- * end. `SKIP LOCKED` leaves a delivery being acked to the ack. Returns how many expired.
+ * end. An assistant conversation's agent is offline whenever its session is idle, and a message to it is what wakes
+ * one, so its deliveries expire only once they have themselves been queued that long. `SKIP LOCKED` leaves a delivery
+ * being acked to the ack. Returns how many expired.
  */
 export async function expireDeliveries(db: Database, offlineForSeconds: number, limit: number): Promise<number> {
   const expired = await db.$queryRaw<{ message_id: string; agent_id: string }[]>`
@@ -178,6 +180,7 @@ export async function expireDeliveries(db: Database, offlineForSeconds: number, 
        WHERE d.state = 'queued'
          AND a.status = 'offline'
          AND GREATEST(a.last_heartbeat_at, a.ended_at) < now() - make_interval(secs => ${offlineForSeconds}::double precision)
+         AND (a.assistant_conversation_id IS NULL OR d.created_at < now() - make_interval(secs => ${offlineForSeconds}::double precision))
        ORDER BY d.message_id
        LIMIT ${limit}::int
          FOR UPDATE OF d SKIP LOCKED

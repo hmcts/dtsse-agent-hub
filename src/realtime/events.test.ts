@@ -13,7 +13,8 @@ describe("encodeEvent and decodeEvent", () => {
     { type: "grant", owner_oid: "oid-a", grantee_oid: "oid-b" },
     { type: "transcript", agent_id: "agent-a", owner_oid: "oid-a", last_id: "17" },
     { type: "credential", owner_oid: "oid-a", kind: "github" },
-    { type: "virtual_agent", virtual_agent_id: "va-a", owner_oid: "oid-a" }
+    { type: "virtual_agent", virtual_agent_id: "va-a", owner_oid: "oid-a" },
+    { type: "assistant_conversation", conversation_id: "c-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }
   ])("should carry a $type event across unchanged", (event) => {
     expect(decodeEvent(encodeEvent(event))).toEqual(event);
   });
@@ -44,7 +45,10 @@ describe("encodeEvent and decodeEvent", () => {
     ["a credential without a kind", JSON.stringify({ type: "credential", owner_oid: "o" })],
     ["a credential without an owner", JSON.stringify({ type: "credential", kind: "github" })],
     ["a virtual agent without an id", JSON.stringify({ type: "virtual_agent", owner_oid: "o" })],
-    ["a virtual agent without an owner", JSON.stringify({ type: "virtual_agent", virtual_agent_id: "va" })]
+    ["a virtual agent without an owner", JSON.stringify({ type: "virtual_agent", virtual_agent_id: "va" })],
+    ["a conversation without an id", JSON.stringify({ type: "assistant_conversation", virtual_agent_id: "va", owner_oid: "o" })],
+    ["a conversation without its assistant", JSON.stringify({ type: "assistant_conversation", conversation_id: "c", owner_oid: "o" })],
+    ["a conversation without an owner", JSON.stringify({ type: "assistant_conversation", conversation_id: "c", virtual_agent_id: "va" })]
   ])("should ignore %s", (_label, payload) => {
     expect(decodeEvent(payload)).toBeUndefined();
   });

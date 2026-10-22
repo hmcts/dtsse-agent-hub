@@ -62,6 +62,8 @@ export function toApiMessage(row: MessageRow): ApiMessage {
 export interface StreamedDirect {
   message: ApiMessage;
   from_owner: boolean;
+  /** For an assistant conversation's agent: what its session is told about the conversation with each message. */
+  assistant?: Record<string, unknown>;
 }
 
 /** The columns `isFromOwner` reads. */

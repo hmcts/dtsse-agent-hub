@@ -55,6 +55,7 @@ describe("migrate", () => {
       "_prisma_migrations",
       "agent",
       "agent_grant",
+      "assistant_conversation",
       "channel",
       "credential",
       "delivery",
