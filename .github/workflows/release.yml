@@ -129,8 +129,11 @@ jobs:
           feed="${FEED_URL%/}/"
           # Strip the scheme to build the npm-style "//host/path/" auth keys.
           feed_no_scheme="${feed#https:}"
+          # Deliberately no default `registry=` line. The feed hosts only @hmcts-cft/*, so making it the
+          # default sends every public package there and npm 404s on the first one it cannot find — which is
+          # what broke the first release run. The scoped entry below, plus publishConfig.registry in
+          # package.json, is all a publish needs.
           cat > "$HOME/.npmrc" <<EOF
-          registry=${feed}
           always-auth=true
           ${feed_no_scheme}:username=${username}
           ${feed_no_scheme}:_password=${token_b64}
@@ -178,7 +181,10 @@ jobs:
               console.log(ours && order(ours, highest) > 0 ? committed : [highest[0], highest[1], highest[2] + 1].join("."));
             }
           ')"
-          npm version "$version" --no-git-tag-version --allow-same-version
+          # `npm pkg set` edits the manifest and nothing else. `npm version` also reifies the dependency
+          # tree, which in a Yarn workspace with no package-lock.json resolves every dependency for no reason
+          # and fails on the first public one the feed does not hold.
+          npm pkg set version="$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Publish
