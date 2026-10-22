@@ -30,11 +30,23 @@ export interface ListBlock {
   items: ListItem[];
 }
 
+/** A column's alignment, from the delimiter row's colons, or null when it asked for none. */
+export type Alignment = "left" | "center" | "right" | null;
+
+export interface TableBlock {
+  type: "table";
+  /** One entry per column, so a row's cells and the alignments line up by index. */
+  align: Alignment[];
+  header: Inline[][];
+  rows: Inline[][][];
+}
+
 export type Block =
   | { type: "paragraph"; children: Inline[] }
   | { type: "heading"; level: number; children: Inline[] }
   | { type: "code"; language: string | null; text: string }
-  | ListBlock;
+  | ListBlock
+  | TableBlock;
 
 const SAFE_SCHEMES = new Set(["http:", "https:", "mailto:"]);
 
@@ -59,10 +71,34 @@ const MAX_LIST_DEPTH = 4;
 const MAX_INLINE_DEPTH = 3;
 // Bounds the work a run of `[x](` openers sharing one distant `)` can cause.
 const MAX_LINK_URL = 2048;
+// Bounds how wide one row can get. A header with more columns than this opens no table at all, because truncating it
+// would drop the columns it names.
+const MAX_TABLE_COLUMNS = 64;
+// Bounds the cells every table in one body holds between them, and so the elements the UI renders for it. Rows are
+// padded to the header's width, so without this a short body of one-cell rows under a wide header multiplies into
+// millions of cells: 64 columns over 16,000 such rows is a 32KB body and a 68MB render. Tables stop opening once a
+// body has spent it, and the lines that would have been rows stay text, so nothing an author wrote is dropped.
+//
+// Padding is the one place in the subset where what a body renders is not proportional to what it holds, so this is
+// also what bounds a table's share of a page: `MessageBody` renders once per message and a page renders up to
+// `CONVERSATION_PAGE_SIZE` of them, appending older pages into the same DOM. The number is therefore what a table can
+// plausibly be, not what fits in a time budget. Across 1,337 tables in the workspace's own markdown the largest is
+// 1,615 cells in a generated index, the largest hand-written one 186, and the 99th percentile 78; 1,024 leaves a
+// hand-written table five times its room. Measured per body with `renderToStaticMarkup`, this holds a table's own
+// contribution — what it renders beyond what its cells' contents would cost in a paragraph — to about 70KB: a
+// 384-byte body of 64 empty columns over 63 one-cell rows renders 73KB, where 4,096 cells rendered 284KB. The worst
+// body in the subset stays a pre-existing one, a 32KB paragraph of inline code spans at 32x, or `#1` references at
+// 24x; the worst table body, 64 columns of code spans, is 34x and within a tenth of it.
+const MAX_TABLE_CELLS = 1024;
 const LANGUAGE = /^[\w+#.-]{1,32}$/;
+const DELIMITER_CELL = /^:?-+:?$/;
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(\S.*)$/;
 const BULLET = /^([ \t]*)[-*+][ \t]+(\S.*)$/;
 const NUMBERED = /^([ \t]*)(\d{1,9})[.)][ \t]+(\S.*)$/;
+// A cell holds a value, and a value can start with one of the markers above: `-` for none, or `1. open` for a step.
+// A marker and more than one word reads as a sentence instead.
+const MARKER_CELL = /^([-*+]|\d{1,9}[.)])([ \t]+\S+)?$/;
+const TRAILING_BACKSLASHES = /\\+$/;
 
 function isBlank(line: string): boolean {
   return line.trim() === "";
@@ -151,8 +187,210 @@ function listItem(line: string): FlatItem | null {
   return null;
 }
 
-function startsBlock(line: string): boolean {
-  return openFence(line) !== null || HEADING.test(line) || listItem(line) !== null;
+interface Backslashes {
+  /** The literal backslashes the run stands for. */
+  text: string;
+  /** Whether the run spends its odd backslash escaping the `|` after it, so that pipe is content and not a break. */
+  pipe: boolean;
+  /** Where the line carries on, past everything the run accounts for. */
+  next: number;
+}
+
+/**
+ * What the run of backslashes at `at` means. A cell's escapes exist only to hold a `|`, which has to be written `\|`
+ * because cells are split before anything inline is parsed, as GFM does, so a bare `|` in a code span ends its cell.
+ * A run therefore only escapes anything where it ends at a `|`: each pair there stands for one literal backslash, and
+ * an odd backslash left over escapes the pipe. A run anywhere else is content and is kept exactly as it was written,
+ * so a cell holding `C:\\Users\me` or `` `\\d+` `` reaches the reader with every backslash the author typed.
+ */
+function backslashes(line: string, at: number): Backslashes {
+  let end = at;
+  while (line[end] === "\\") {
+    end++;
+  }
+  if (line[end] !== "|") {
+    return { text: line.slice(at, end), pipe: false, next: end };
+  }
+  const pipe = (end - at) % 2 === 1;
+  return { text: "\\".repeat((end - at) >> 1), pipe, next: pipe ? end + 1 : end };
+}
+
+/** Whether the line holds a cell break: a `|` that no backslash before it escapes. */
+function hasCellBreak(line: string): boolean {
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === "\\") {
+      i = backslashes(line, i).next;
+      continue;
+    }
+    if (line[i] === "|") {
+      return true;
+    }
+    i++;
+  }
+  return false;
+}
+
+/**
+ * The row's cells, each with its escapes resolved, split on the breaks `hasCellBreak` counts and with the optional
+ * outer pipes dropped. One scan both splits and resolves, so where a break is and what a backslash before it meant
+ * are the same decision. Unlike GFM the escapes are undone inside code spans too, because the subset has no other
+ * backslash escape and `` `a \| b` `` is meant as one cell holding `a | b`.
+ */
+function rowCells(line: string): string[] {
+  const row = line.trim();
+  const cells: string[] = [];
+  let text = "";
+  let from = 0;
+  let i = 0;
+  while (i < row.length) {
+    if (row[i] === "\\") {
+      const run = backslashes(row, i);
+      text += row.slice(from, i) + run.text + (run.pipe ? "|" : "");
+      i = run.next;
+      from = i;
+      continue;
+    }
+    if (row[i] === "|") {
+      cells.push(text + row.slice(from, i));
+      text = "";
+      i++;
+      from = i;
+      continue;
+    }
+    i++;
+  }
+  cells.push(text + row.slice(from));
+  if (cells.length > 1 && cells[0] === "" && row.startsWith("|")) {
+    cells.shift();
+  }
+  if (cells.length > 1 && cells[cells.length - 1] === "" && row.endsWith("|")) {
+    cells.pop();
+  }
+  return cells;
+}
+
+/** A cell's inline markup. `rowCells` has resolved its escapes; the spaces its pipes were padded with go here. */
+function cellInlines(cell: string): Inline[] {
+  return parseInline(cell.trim());
+}
+
+/**
+ * The columns' alignments when these two lines open a table: a row of cells over a delimiter row of `-` runs with
+ * optional colons. GFM only starts a table when the delimiter row has exactly as many cells as the header, and that is
+ * what keeps a paragraph of pipe-separated prose a paragraph. Past `MAX_TABLE_COLUMNS` columns the lines stay a
+ * paragraph, so every cell an author wrote is still in the output.
+ */
+function tableHead(header: string, delimiter: string | undefined): Alignment[] | null {
+  if (delimiter === undefined || !hasCellBreak(header) || !hasCellBreak(delimiter)) {
+    return null;
+  }
+  const cells = rowCells(delimiter);
+  if (cells.length !== rowCells(header).length || cells.length > MAX_TABLE_COLUMNS) {
+    return null;
+  }
+  const align: Alignment[] = [];
+  for (const cell of cells) {
+    const text = cell.trim();
+    if (!DELIMITER_CELL.test(text)) {
+      return null;
+    }
+    const left = text.startsWith(":");
+    const right = text.endsWith(":");
+    align.push(left && right ? "center" : left ? "left" : right ? "right" : null);
+  }
+  return align;
+}
+
+/**
+ * Whether the line starts a block of its own, ending any paragraph above it. A table also needs the line after it,
+ * so it only opens where a caller passes one: an indented pipe table inside a list item stays part of its item.
+ */
+function startsBlock(line: string, next?: string): boolean {
+  return openFence(line) !== null || HEADING.test(line) || listItem(line) !== null || tableHead(line, next) !== null;
+}
+
+/**
+ * The row's cells, with any past the table's width merged back into its last cell, the pipes between them included.
+ * A merged cell is shown as the author wrote it, so a backslash run that ends one is escaped again: left as the single
+ * backslash it resolved to, it would read as escaping the pipe that now follows it.
+ */
+function fitRow(cells: string[], columns: number): string[] {
+  if (cells.length <= columns) {
+    return cells;
+  }
+  const overflow = cells.slice(columns - 1);
+  const last = overflow.pop()!;
+  const merged = [...overflow.map((cell) => cell.replace(TRAILING_BACKSLASHES, (run) => run.repeat(2))), last].join("|");
+  return [...cells.slice(0, columns - 1), merged];
+}
+
+/**
+ * Whether the run of list items starting at `from` is rows of the table above it rather than the list an author wrote.
+ * It is where every line in the run holds a cell break and a first cell that is a marker and at most one word, which
+ * is a cell's worth of content: `- | none` is a column of flags and `1. open | the page` a column of steps, while
+ * `- use \`a | b\` for X` is a bullet that happens to hold a pipe.
+ *
+ * The whole run answers at once, because a list is written as a run. Asked line by line, the two bullets of
+ * `- see | below` over `- use \`a | b\` for X` answer differently, and one authored list comes out as a row and a
+ * one-item list below it.
+ */
+function markerRows(lines: string[], from: number): boolean {
+  for (let i = from; i < lines.length && listItem(lines[i]!) !== null; i++) {
+    if (!hasCellBreak(lines[i]!) || !MARKER_CELL.test(rowCells(lines[i]!)[0]!.trim())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The table these lines open, from the header at `from`, and the cells it holds. It takes no more cells than `budget`,
+ * which is what is left of the body's `MAX_TABLE_CELLS`.
+ *
+ * What ends the table is a line that cannot be one of its rows, or the budget running out. Each of those is a rule of
+ * its own: a blank line, a fence, a line with no cell break, a heading — a row carrying its outer pipes cannot read as
+ * one, and `#` and a space is not how a cell's value starts — or a run of list items that `markerRows` reads as prose
+ * rather than cells. Short of those a cell break wins, so `- | none` is a column of flags and not a bullet. GFM ends a
+ * table at the beginning of any block-level structure, which would make that line a bullet holding `| none`. A line
+ * with more cells than the table has columns is still a row: its overflow stays in its last cell, pipes and all, so the
+ * one likely mistake here, an unescaped `|` in a cell, costs that cell its spacing rather than ending the table and
+ * leaving every row below it as literal text. GFM truncates such a row, which would drop the author's words.
+ */
+function parseTable(lines: string[], from: number, align: Alignment[], budget: number): { table: TableBlock; next: number; cells: number } {
+  const columns = align.length;
+  const table: TableBlock = { type: "table", align, header: rowCells(lines[from]!).map(cellInlines), rows: [] };
+  let cells = columns;
+  let i = from + 2;
+  // The run of list items being read, answered once at its first line and spent on every line of it.
+  let inRun = false;
+  let runIsRows = false;
+  while (i < lines.length) {
+    const line = lines[i]!;
+    if (isBlank(line) || openFence(line) !== null || !hasCellBreak(line) || HEADING.test(line) || cells + columns > budget) {
+      break;
+    }
+    if (listItem(line) === null) {
+      inRun = false;
+    } else {
+      if (!inRun) {
+        inRun = true;
+        runIsRows = markerRows(lines, i);
+      }
+      if (!runIsRows) {
+        break;
+      }
+    }
+    const row = fitRow(rowCells(line), columns).map(cellInlines);
+    // GFM pads a short row, so every row is as wide as the header.
+    while (row.length < columns) {
+      row.push([]);
+    }
+    table.rows.push(row);
+    cells += columns;
+    i++;
+  }
+  return { table, next: i, cells };
 }
 
 interface Level {
@@ -225,10 +463,12 @@ function parseList(lines: string[], from: number, blocks: Block[]): number {
   return i;
 }
 
-/** A body as blocks: fenced code, headings, lists and paragraphs. A paragraph keeps its line breaks. */
+/** A body as blocks: fenced code, headings, lists, pipe tables and paragraphs. A paragraph keeps its line breaks. */
 export function parseMarkup(source: string): Block[] {
   const lines = source.split(/\r?\n/);
   const blocks: Block[] = [];
+  // Shared by every table in the body, so a run of wide tables cannot cost more than one of them.
+  let budget = MAX_TABLE_CELLS;
   let i = 0;
   while (i < lines.length) {
     const line = lines[i]!;
@@ -259,9 +499,18 @@ export function parseMarkup(source: string): Block[] {
       i = parseList(lines, i, blocks);
       continue;
     }
+    const align = tableHead(line, lines[i + 1]);
+    // A table only opens while the body has room for its header; once the budget is spent the lines stay text.
+    if (align && align.length <= budget) {
+      const { table, next, cells } = parseTable(lines, i, align, budget);
+      blocks.push(table);
+      budget -= cells;
+      i = next;
+      continue;
+    }
     const start = i;
     i++;
-    while (i < lines.length && !isBlank(lines[i]!) && !startsBlock(lines[i]!)) {
+    while (i < lines.length && !isBlank(lines[i]!) && !startsBlock(lines[i]!, lines[i + 1])) {
       i++;
     }
     blocks.push({ type: "paragraph", children: parseInline(lines.slice(start, i).join("\n")) });

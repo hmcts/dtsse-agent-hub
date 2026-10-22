@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Block, type Inline, parseInline, parseMarkup, safeHref } from "./markup.ts";
+import { type Alignment, type Block, type Inline, parseInline, parseMarkup, safeHref } from "./markup.ts";
 
 const text = (value: string): Inline => ({ type: "text", text: value });
 const code = (value: string): Inline => ({ type: "code", text: value });
@@ -8,6 +8,7 @@ const em = (...children: Inline[]): Inline => ({ type: "emphasis", children });
 const link = (href: string, ...children: Inline[]): Inline => ({ type: "link", href, children });
 const ref = (id: string): Inline => ({ type: "message", id });
 const paragraph = (...children: Inline[]): Block => ({ type: "paragraph", children });
+const table = (align: Alignment[], header: Inline[][], ...rows: Inline[][][]): Block => ({ type: "table", align, header, rows });
 
 function flatten(nodes: Inline[]): string {
   return nodes
@@ -27,6 +28,16 @@ function links(nodes: Inline[]): string[] {
     }
     return node.type === "text" || node.type === "code" || node.type === "message" ? [] : links(node.children);
   });
+}
+
+/** Every cell in every table a body parsed to, header cells included: what the UI pays to render them. */
+function tableCells(blocks: Block[]): number {
+  return blocks.reduce((total, block) => {
+    if (block.type !== "table") {
+      return total;
+    }
+    return total + block.header.length + block.rows.reduce((cells, row) => cells + row.length, 0);
+  }, 0);
 }
 
 function timed(run: () => unknown): number {
@@ -410,6 +421,230 @@ describe("parseMarkup", () => {
   });
 });
 
+describe("parseMarkup tables", () => {
+  it("should parse a pipe table with its header and rows when a delimiter row follows the header", () => {
+    expect(parseMarkup("| one | two |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |")).toEqual([
+      table([null, null], [[text("one")], [text("two")]], [[text("1")], [text("2")]], [[text("3")], [text("4")]])
+    ]);
+  });
+
+  it("should read each column's alignment from the delimiter row's colons when the outer pipes are left out", () => {
+    expect(parseMarkup("left | centre | right\n:--- | :-: | ---:\n1 | 2 | 3")).toEqual([
+      table(["left", "center", "right"], [[text("left")], [text("centre")], [text("right")]], [[text("1")], [text("2")], [text("3")]])
+    ]);
+  });
+
+  it("should pad a short row and keep a long row's overflow in its last cell when the rows are ragged", () => {
+    expect(parseMarkup("| a | b | c |\n| - | - | - |\n| 1 |\n| 1 | 2 | 3 | 4 |")).toEqual([
+      table([null, null, null], [[text("a")], [text("b")], [text("c")]], [[text("1")], [], []], [[text("1")], [text("2")], [text("3 | 4")]])
+    ]);
+  });
+
+  it("should read a row as a row when its first cell reads as a bullet or a number", () => {
+    expect(parseMarkup("Flag | Default\n---- | -------\n- | none\n-v | verbose")).toEqual([
+      table([null, null], [[text("Flag")], [text("Default")]], [[text("-")], [text("none")]], [[text("-v")], [text("verbose")]])
+    ]);
+    expect(parseMarkup("Step | Action\n---- | ------\n1. open | the page\n2. click | submit")).toEqual([
+      table([null, null], [[text("Step")], [text("Action")]], [[text("1. open")], [text("the page")]], [[text("2. click")], [text("submit")]])
+    ]);
+  });
+
+  it("should read a line with more cells than there are columns as a row and keep the whole line in it", () => {
+    expect(parseMarkup("| Status |\n| ------ |\n| ok |\nCheck with `ps | grep x` before asking.")).toEqual([
+      table([null], [[text("Status")]], [[text("ok")]], [[text("Check with "), code("ps | grep x"), text(" before asking.")]])
+    ]);
+  });
+
+  it("should keep the rows below a row that has more cells than there are columns", () => {
+    expect(parseMarkup("| cmd | note |\n| --- | ---- |\n| a | first |\n| `ps | grep` | stray pipe |\n| c | third |\n| d | fourth |")).toEqual([
+      table(
+        [null, null],
+        [[text("cmd")], [text("note")]],
+        [[text("a")], [text("first")]],
+        // The cells are split before anything inline is parsed, so the code span straddles the two: what matters is
+        // that every word is in a cell and the two rows below are still rows.
+        [[text("`ps")], [text("grep` | stray pipe")]],
+        [[text("c")], [text("third")]],
+        [[text("d")], [text("fourth")]]
+      )
+    ]);
+  });
+
+  it("should keep an escaped backslash escaped when a row's overflow is merged into its last cell", () => {
+    // The cell break after the backslash is shown again, so the backslash has to keep its escape: bare, it would read
+    // as escaping that pipe rather than as the character the author wrote.
+    expect(parseMarkup("| a |\n| - |\n| x \\\\| y |")).toEqual([table([null], [[text("a")]], [[text("x \\\\| y")]])]);
+  });
+
+  it("should end the table at a bullet or a heading below it when the line is prose holding a pipe", () => {
+    expect(parseMarkup("| flag | note |\n| --- | --- |\n| -v | loud |\n- use `a | b` for X\n- and `c | d`")).toEqual([
+      table([null, null], [[text("flag")], [text("note")]], [[text("-v")], [text("loud")]]),
+      {
+        type: "list",
+        ordered: false,
+        start: 1,
+        items: [
+          { children: [text("use "), code("a | b"), text(" for X")], lists: [] },
+          { children: [text("and "), code("c | d")], lists: [] }
+        ]
+      }
+    ]);
+    expect(parseMarkup("| flag | note |\n| --- | --- |\n| -v | loud |\n## Caveats | read these")).toEqual([
+      table([null, null], [[text("flag")], [text("note")]], [[text("-v")], [text("loud")]]),
+      { type: "heading", level: 2, children: [text("Caveats | read these")] }
+    ]);
+  });
+
+  it("should keep one list whole when some of its items read as cells and some as prose", () => {
+    // Asked line by line, `- see` is a marker and one word and `- use \`a` is a marker and two, so the first bullet
+    // was a row and the second a one-item list below the table: one list the author wrote, rendered as neither.
+    expect(parseMarkup("| x | y |\n| - | - |\n| 1 | 2 |\n- see | below\n- use `a | b` for X")).toEqual([
+      table([null, null], [[text("x")], [text("y")]], [[text("1")], [text("2")]]),
+      {
+        type: "list",
+        ordered: false,
+        start: 1,
+        items: [
+          { children: [text("see | below")], lists: [] },
+          { children: [text("use "), code("a | b"), text(" for X")], lists: [] }
+        ]
+      }
+    ]);
+  });
+
+  it("should keep one list whole when an item of it holds no pipe at all", () => {
+    expect(parseMarkup("| x | y |\n| - | - |\n- | a\n- plain bullet")).toEqual([
+      table([null, null], [[text("x")], [text("y")]]),
+      {
+        type: "list",
+        ordered: false,
+        start: 1,
+        items: [
+          { children: [text("| a")], lists: [] },
+          { children: [text("plain bullet")], lists: [] }
+        ]
+      }
+    ]);
+  });
+
+  it("should read a second run of list items on its own when a row sits between the two", () => {
+    const blocks = parseMarkup("| x | y |\n| - | - |\n- | a\n| 1 | 2 |\n- use `a | b` for X");
+
+    expect(blocks.map((block) => block.type)).toEqual(["table", "list"]);
+    expect((blocks[0] as Extract<Block, { type: "table" }>).rows).toEqual([
+      [[text("-")], [text("a")]],
+      [[text("1")], [text("2")]]
+    ]);
+  });
+
+  it("should keep the lines a paragraph when the delimiter row is missing, mismatched or not a delimiter", () => {
+    for (const plain of ["| a | b |\n| c | d |", "| a | b |\n| --- |", "| a | b |\n| --- | x |", "a | b\n---", "| a | b |"]) {
+      expect(parseMarkup(plain)).toEqual([paragraph(text(plain))]);
+    }
+  });
+
+  it("should end a cell at a pipe inside inline code, because cells are split before anything inline is parsed", () => {
+    expect(parseMarkup("| a | b |\n| - | - |\n| `x | y` |")).toEqual([table([null, null], [[text("a")], [text("b")]], [[text("`x")], [text("y`")]])]);
+  });
+
+  it("should keep an escaped pipe inside its cell, code spans included, when a cell needs a literal pipe", () => {
+    expect(parseMarkup("| a \\| b | c |\n| - | - |\n| `x \\| y` | z |")).toEqual([
+      table([null, null], [[text("a | b")], [text("c")]], [[code("x | y")], [text("z")]])
+    ]);
+  });
+
+  it("should end a cell at the pipe after it when the cell ends in an escaped backslash", () => {
+    expect(parseMarkup("| a \\\\| b |\n| - | - |\n| c \\\\| d |")).toEqual([table([null, null], [[text("a \\")], [text("b")]], [[text("c \\")], [text("d")]])]);
+  });
+
+  it("should leave a backslash alone when it is not escaping a pipe or a backslash", () => {
+    expect(parseMarkup("| path | note |\n| - | - |\n| C:\\Users\\me | home |")).toEqual([
+      table([null, null], [[text("path")], [text("note")]], [[text("C:\\Users\\me")], [text("home")]])
+    ]);
+  });
+
+  it("should keep both backslashes of a pair when the pair is not guarding a pipe", () => {
+    // A body is written by agents pasting real content, so a UNC path, a doubled Windows path and a regex all arrive
+    // in cells, and a cell is the only place the subset reads a backslash as an escape at all.
+    expect(parseMarkup("| path | pattern |\n| - | - |\n| C:\\\\Users\\\\me | `\\\\d+` |\n| `\\\\server\\share` | one |")).toEqual([
+      table([null, null], [[text("path")], [text("pattern")]], [[text("C:\\\\Users\\\\me")], [code("\\\\d+")]], [[code("\\\\server\\share")], [text("one")]])
+    ]);
+  });
+
+  it("should parse each cell's own inline markup when cells hold links, bold, code or references", () => {
+    expect(parseMarkup("| **bold** | [docs](https://example.com/docs) |\n| :-- | --: |\n| #12 | `code` |")).toEqual([
+      table(["left", "right"], [[strong(text("bold"))], [link("https://example.com/docs", text("docs"))]], [[ref("12")], [code("code")]])
+    ]);
+  });
+
+  it("should start a table under a paragraph line and end it at the first line without a cell break", () => {
+    expect(parseMarkup("intro\n| a |\n| - |\n| 1 |\nafter")).toEqual([
+      paragraph(text("intro")),
+      table([null], [[text("a")]], [[text("1")]]),
+      paragraph(text("after"))
+    ]);
+  });
+
+  it("should end a table at a blank line, a heading, a list or a fence", () => {
+    expect(parseMarkup("| a |\n| - |\n| 1 |\n# head\n- item\n\n| b |\n| - |\n```\nx\n```").map((block) => block.type)).toEqual([
+      "table",
+      "heading",
+      "list",
+      "table",
+      "code"
+    ]);
+  });
+
+  it("should keep a table's lines inside a list item when they are indented under one", () => {
+    const blocks = parseMarkup("- item\n  | a | b |\n  | - | - |");
+
+    expect(blocks).toEqual([{ type: "list", ordered: false, start: 1, items: [{ children: [text("item\n| a | b |\n| - | - |")], lists: [] }] }]);
+  });
+
+  it("should keep a table's lines as code when they are inside a fence", () => {
+    expect(parseMarkup("```\n| a |\n| - |\n| 1 |\n```")).toEqual([{ type: "code", language: null, text: "| a |\n| - |\n| 1 |" }]);
+  });
+
+  it("should parse the table when its header has as many columns as the limit", () => {
+    const row = (cell: string) => `|${Array.from({ length: 64 }, () => cell).join("|")}|`;
+    const [only] = parseMarkup(`${row(" h ")}\n${row(" - ")}\n${row(" c ")}`) as Extract<Block, { type: "table" }>[];
+
+    expect(only!.header).toHaveLength(64);
+    expect(only!.align).toHaveLength(64);
+    expect(only!.rows[0]).toHaveLength(64);
+  });
+
+  it("should keep the lines a paragraph when a header has more columns than the limit", () => {
+    const row = (cell: string) => `|${Array.from({ length: 65 }, () => cell).join("|")}|`;
+    const body = `${row(" h ")}\n${row(" - ")}\n${row(" c ")}`;
+
+    expect(parseMarkup(body)).toEqual([paragraph(text(body))]);
+  });
+
+  it("should end a table at the cell cap and keep the rows below it as text", () => {
+    const blocks = parseMarkup(`${"|h".repeat(64)}\n${"|-".repeat(64)}\n${"|\n".repeat(16_000)}`);
+
+    expect(blocks.map((block) => block.type)).toEqual(["table", "paragraph"]);
+    expect(tableCells(blocks)).toBe(1_024);
+    // The header and 15 rows of 64 columns spend the cap; every line the table did not take is still in the output.
+    expect(flatten((blocks[1] as Extract<Block, { type: "paragraph" }>).children)).toBe(Array.from({ length: 15_985 }, () => "|").join("\n"));
+  });
+
+  it("should share the cell cap across the tables in one body", () => {
+    // A header of 64 columns over 15 one-cell rows spends the cap exactly, so the first of these tables takes all of
+    // its own lines and the nine below it have none left.
+    const wide = `${"|h".repeat(64)}\n${"|-".repeat(64)}\n${"|\n".repeat(15)}`;
+    const blocks = parseMarkup(wide.repeat(10));
+
+    expect(tableCells(blocks)).toBe(1_024);
+    expect(blocks.filter((block) => block.type === "table")).toHaveLength(1);
+    // The nine tables the cap left out are text, header rows and all: a paragraph each, because a header line still
+    // reads as the start of a block.
+    expect(blocks.filter((block) => block.type === "paragraph")).toHaveLength(9);
+    expect(flatten((blocks[1] as Extract<Block, { type: "paragraph" }>).children)).toContain("|h".repeat(64));
+  });
+});
+
 describe("parseMarkup on hostile and huge inputs", () => {
   const LIMIT = 32_000;
   const cases: Record<string, string> = {
@@ -434,6 +669,16 @@ describe("parseMarkup on hostile and huge inputs", () => {
     "fence openers": "```\n".repeat(LIMIT / 4),
     "blank lines between items": "- a\n\n\n".repeat(LIMIT / 7),
     "mixed markers": "*_`[**__``((]])".repeat(LIMIT / 15),
+    // Two lines, so the second is read as a delimiter row and the cell-break scan and the split run over the first.
+    "cell breaks": `${"|".repeat(LIMIT / 2)}\n${"|-".repeat(LIMIT / 4)}`,
+    "escaped backslashes": `${"\\\\|".repeat(LIMIT / 6)}\n${"-|".repeat(LIMIT / 6)}`,
+    "table rows": `| a | b |\n| - | - |\n${"| 1 | 2 |\n".repeat(LIMIT / 10)}`,
+    "a wide table with one-cell rows": `${"| h ".repeat(64)}|\n${"| - ".repeat(64)}|\n${"|x|\n".repeat(LIMIT / 4)}`,
+    "near-miss delimiter rows": "|-x|\n".repeat(LIMIT / 5),
+    // A run of list items is read ahead of the rows, once, so the table pays for the run it takes and for the one it
+    // stops at. The second of these stops at the last line, having looked over every line above it.
+    "a table over a run of marker list items": `| a | b |\n| - | - |\n${"- | x\n".repeat(LIMIT / 6)}`,
+    "a table over a run of list items that ends in prose": `| a | b |\n| - | - |\n${"- | x\n".repeat(LIMIT / 6)}- use \`a | b\` for X`,
     "message references": "#1 ".repeat(LIMIT / 3),
     "long digit runs": `#${"9".repeat(LIMIT - 1)}`,
     "nested emphasis": "**_*".repeat(LIMIT / 8) + "*_**".repeat(LIMIT / 8)

@@ -47,11 +47,12 @@ test.describe("accessibility @nightly", () => {
   test("should raise no WCAG A or AA violations on a saved channel with posts @nightly @a11y", async ({ page }) => {
     const topic = unique("e2e");
     const path = await buildChannel(page, `A11y ${topic}`, [topic]);
-    await page
-      .getByPlaceholder("Write a post")
-      .fill(
-        '# An accessibility check post\n\nWith `code`, **bold**, _italics_ and https://example.com\n\n- a list item\n\n```ts\nconst line = "long enough to scroll";\n```'
-      );
+    await page.getByPlaceholder("Write a post").fill(
+      // Every block of the subset, so the gate audits what a body renders: the table covers its `th scope="col"`
+      // header, an aligned column, and the focusable wrapper a keyboard user scrolls a wide table with, which is
+      // why its last cell is long enough to overflow the column the table sits in.
+      '# An accessibility check post\n\nWith `code`, **bold**, _italics_ and https://example.com\n\n- a list item\n\n```ts\nconst line = "long enough to scroll";\n```\n\n| Flag | Count | Note |\n| :--- | ----: | ---- |\n| -v | 2 | a note long enough that the table has to scroll sideways in the column it sits in |'
+    );
     await page.getByRole("button", { name: "Post" }).click();
     await expect(page.getByRole("list", { name: "Posts" })).toBeVisible();
 

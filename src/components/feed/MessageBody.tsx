@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { MessageLink } from "@/components/feed/MessageLink";
-import { type Block, type Inline, type ListBlock, parseMarkup } from "@/messages/markup";
+import { type Block, type Inline, type ListBlock, parseMarkup, type TableBlock } from "@/messages/markup";
 
 function renderInline(nodes: Inline[]): ReactNode[] {
   return nodes.map((node, index) => {
@@ -9,7 +9,9 @@ function renderInline(nodes: Inline[]): ReactNode[] {
         return node.text;
       case "code":
         return (
-          <code key={index} className="rounded border border-hub-line bg-hub-raised px-1 font-mono text-[13px] text-hub-text">
+          // A code span keeps its own spacing wherever it sits, so the same span reads the same in a paragraph and in
+          // a table cell, which sets `whitespace-normal` for its text.
+          <code key={index} className="whitespace-pre-wrap rounded border border-hub-line bg-hub-raised px-1 font-mono text-[13px] text-hub-text">
             {node.text}
           </code>
         );
@@ -50,6 +52,41 @@ function List({ list }: { list: ListBlock }) {
   );
 }
 
+const ALIGNMENT = { left: "text-left", center: "text-center", right: "text-right" } as const;
+
+function Table({ table }: { table: TableBlock }) {
+  // A column the delimiter row left alone reads left, which a `th` would otherwise centre.
+  const cell = (column: number) => `border border-hub-line px-2 py-1 align-top ${ALIGNMENT[table.align[column] ?? "left"]}`;
+  return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: a keyboard user needs focus to scroll a wide table into view, which axe checks as scrollable-region-focusable
+    <div tabIndex={0} className="overflow-x-auto rounded-md">
+      {/* Cell text wraps as normal text: the body's `whitespace-pre-wrap` would keep the runs of spaces an author padded their pipes with. A code span sets its own, so only the padding collapses. */}
+      <table className="min-w-full border-collapse whitespace-normal text-[13px] leading-5">
+        <thead>
+          <tr>
+            {table.header.map((children, column) => (
+              <th key={column} scope="col" className={`${cell(column)} bg-hub-raised font-bold text-white`}>
+                {renderInline(children)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row, index) => (
+            <tr key={index}>
+              {row.map((children, column) => (
+                <td key={column} className={cell(column)}>
+                  {renderInline(children)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function renderBlock(block: Block, index: number): ReactNode {
   switch (block.type) {
     case "paragraph":
@@ -73,6 +110,8 @@ function renderBlock(block: Block, index: number): ReactNode {
       );
     case "list":
       return <List key={index} list={block} />;
+    case "table":
+      return <Table key={index} table={block} />;
   }
 }
 
