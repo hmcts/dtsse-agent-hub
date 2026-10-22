@@ -104,13 +104,6 @@ enum VirtualAgentSize {
   @@map("virtual_agent_size")
 }
 
-/// `assistant`: the HMCTS Assistant's virtual agent, whose pod runs one Claude session per conversation.
-enum VirtualAgentMode {
-  standard
-  assistant
-
-  @@map("virtual_agent_mode")
-}
 
 enum ModelRoute {
   bedrock
@@ -395,7 +388,6 @@ model VirtualAgent {
   agentId             String?                 @map("agent_id") @db.Uuid
   modelRoute          ModelRoute              @map("model_route")
   size                VirtualAgentSize        @default(small)
-  mode                VirtualAgentMode        @default(standard)
   /// The ports the pod reports listening on beyond loopback: at most 10 distinct, from 1024 to 65535, ascending.
   exposedPorts        Int[]                   @default([]) @map("exposed_ports")
   /// The ports the pod reports listening on loopback only, which the Service cannot reach; as `exposedPorts`.

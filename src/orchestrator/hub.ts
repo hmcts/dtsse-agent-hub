@@ -27,8 +27,6 @@ export interface ClaimedAgent {
   exposed_ports?: number[];
   /** The workspace plugins the pod loads; treated as none when absent. */
   plugins?: string[];
-  /** `standard` when absent or not a mode it knows. */
-  mode?: "standard" | "assistant";
   owner: { oid: string };
   launch_token?: string;
 }

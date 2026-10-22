@@ -40,15 +40,12 @@ export function Sidebar({
   data,
   viewer,
   signInDisabled,
-  virtualAgents = false,
-  assistant = false
+  virtualAgents = false
 }: {
   data: SidebarData;
   viewer: Identity;
   signInDisabled: boolean;
   virtualAgents?: boolean;
-  /** Links the HMCTS Assistant, the plain-language chat on the viewer's own assistant. */
-  assistant?: boolean;
 }) {
   const channels = [...data.channels.mine, ...data.channels.shared];
   return (
@@ -93,7 +90,8 @@ export function Sidebar({
                 Credentials
               </NavLink>
             )}
-            {assistant ? (
+            {/* The HMCTS Assistant runs on the viewer's virtual agent, so it is offered wherever they are. */}
+            {virtualAgents ? (
               <NavLink href="/assistant">
                 <ChatIcon />
                 HMCTS Assistant

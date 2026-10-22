@@ -318,7 +318,6 @@ describe("POST /api/orchestrator/claim", () => {
       delete_disk: false,
       model_route: "own_licence",
       size: "small",
-      mode: "standard",
       exposed_ports: [],
       plugins: [],
       owner: { oid: ALICE.oid },

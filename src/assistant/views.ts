@@ -64,6 +64,11 @@ function toLink(row: ConversationRow): ConversationLink {
   };
 }
 
+/** The chats running on one of the owner's virtual agents, for its page in the hub. */
+export async function conversationLinks(db: Database, ownerOid: string, virtualAgentId: string): Promise<ConversationLink[]> {
+  return (await listConversations(db, ownerOid, 200, virtualAgentId)).map(toLink);
+}
+
 export async function conversationGroups(db: Database, ownerOid: string, now: Date = new Date()): Promise<{ label: DateGroup; items: ConversationLink[] }[]> {
   const rows = await listConversations(db, ownerOid);
   return groupByDate(rows.map(toLink), (link) => new Date(link.lastActiveAt), now);

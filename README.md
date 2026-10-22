@@ -52,7 +52,7 @@ it needs ownership or a write grant. The rules are in `src/access/rules.ts`.
 | `/agents/[id]` | an agent you may see: its status, details, posts and direct-message thread. A virtual agent's id shows the virtual agent instead, with its current session's conversation and details, and, to its owner alone, its lifecycle, its name (rename it, and its session with it), its size, its plugins, its exposed web ports and the sign-ins it is waiting on. Someone holding a grant from its owner sees its name, state and session. The id of an agent a virtual agent's session registered, including one a `/clear` has superseded, redirects to the virtual agent |
 | `/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
 | `/access` | the grants you have given and hold; grant or revoke read or write by email |
-| `/assistant`, `/assistant/[id]` | with the HMCTS Assistant on: a plain-language chat for people who are not engineers, full screen and without the hub's sidebar. Opening it creates the viewer's one assistant (a virtual agent in assistant mode) on their first visit and starts it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). The id of a conversation's agent redirects here |
+| `/assistant`, `/assistant/[id]` | with virtual agents on: the HMCTS Assistant, a plain-language chat for people who are not engineers, full screen and without the hub's sidebar, light or dark. It runs on the viewer's first virtual agent, creating one on their first visit if they have none and starting it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). The id of a conversation's agent redirects here |
 | `/virtual` | with virtual agents on: your virtual agents, creating one (which opens its page), your credentials (the section `/settings/credentials` redirects to), with your git identity, and your CLAUDE.md. `/virtual/[id]` redirects to `/agents/[id]` |
 | `/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Bedrock API key, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/virtual#credentials`, the same section there |
 
@@ -120,12 +120,14 @@ the `-staging` release.
 
 ### HMCTS Assistant
 
-Off unless `ASSISTANT_ENABLED=true` as well as `VIRTUAL_AGENTS_ENABLED=true`; off, `/assistant` is not found and its
-actions refuse. The contract with the pod is the Assistant mode section of [`docs/agent-api.md`](docs/agent-api.md).
+The plain-language interface to virtual agents, which is to replace their pages in the hub. It is on wherever virtual
+agents are; off, `/assistant` is not found and its actions refuse. The contract with the pod is the Conversations
+section of [`docs/agent-api.md`](docs/agent-api.md).
 
-- **One assistant per person**, outside the limit of 3 virtual agents: `virtual_agent.mode = 'assistant'`, named
-  `assistant`. The orchestrator passes the mode to the pod as `AGENT_HUB_VIRTUAL_MODE`, and `AGENT_HUB_MAX_SESSIONS`
-  from its size (2, 4 or 6). Its pod runs a supervisor, not a session of its own.
+- **It runs on the person's first virtual agent**, the oldest not being deleted, created as `assistant` when they
+  have none; it counts towards the limit of 3 like any other. Every virtual agent can hold conversations: its pod
+  runs a supervisor beside its own session, with up to `AGENT_HUB_MAX_SESSIONS` conversation sessions (2, 4 or 6
+  by size). The agent's page in the hub lists its chats.
 - **A conversation's agent is created with it**, offline, under a session id the hub chose, so the person's messages
   queue as ordinary deliveries before any session runs. A message to an offline conversation sets a wake; the pod
   hears it on `GET /api/virtual/{id}/sessions`, starts `claude --session-id` (or `--resume`) in a tmux session of its
@@ -137,10 +139,6 @@ actions refuse. The contract with the pod is the Assistant mode section of [`doc
   current document, which the panel offers as "Use theirs" or "Keep mine".
 - **The thread** shows only what the person and the assistant said (`src/assistant/thread.ts`); tool calls become one
   line of what it is doing.
-
-| Variable | Default | What it is |
-| --- | --- | --- |
-| `ASSISTANT_ENABLED` | off | `true` turns the HMCTS Assistant on, when virtual agents are on too |
 
 ### Model routes
 

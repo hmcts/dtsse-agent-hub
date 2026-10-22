@@ -117,13 +117,20 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
-/** The owner's assistant not being deleted, if they have one. */
+/**
+ * The virtual agent the person's Assistant runs on: their first, the oldest not being deleted. Any virtual agent can
+ * hold conversations; the Assistant always uses the same one, so a person's chats are in one place.
+ */
 export async function findAssistant(db: Database, ownerOid: string): Promise<VirtualAgentRow | undefined> {
-  const row = await db.virtualAgent.findFirst({ where: { ownerOid, mode: "assistant", desired: { not: "deleted" } }, select: { id: true } });
+  const row = await db.virtualAgent.findFirst({
+    where: { ownerOid, desired: { not: "deleted" } },
+    select: { id: true },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+  });
   return row === null ? undefined : await findVirtualAgent(db, row.id);
 }
 
-/** `assistant`, or `assistant-2` and on when the person already has a standard virtual agent of that name. */
+/** `assistant`, or `assistant-2` and on when an earlier one of that name is still being deleted. */
 async function freeName(db: Database, ownerOid: string): Promise<string> {
   const taken = new Set((await db.virtualAgent.findMany({ where: { ownerOid }, select: { name: true } })).map((row) => row.name));
   for (let n = 1; ; n += 1) {
@@ -135,9 +142,10 @@ async function freeName(db: Database, ownerOid: string): Promise<string> {
 }
 
 /**
- * The person's assistant, created the first time they open the Assistant and started whenever they come back to a
- * stopped one, so the pod is warming up while they sign in or type. Two tabs racing to create one are settled by the
- * database's one-assistant index: the loser reads the winner's.
+ * The virtual agent the person's Assistant runs on: their first, created as `assistant` when they have none, and
+ * started whenever they come back to it stopped, so the pod is warming up while they sign in or type. It is an
+ * ordinary virtual agent and counts towards their limit. Two tabs racing to create one are settled by the unique
+ * name: the loser reads the winner's.
  */
 export async function ensureAssistant(prisma: PrismaClient, owner: { oid: string; modelRoute: ModelRoute }): Promise<VirtualAgentRow> {
   const existing = await findAssistant(prisma, owner.oid);
@@ -145,7 +153,7 @@ export async function ensureAssistant(prisma: PrismaClient, owner: { oid: string
     return existing.desired === "stopped" ? await setDesired(prisma, owner.oid, existing.id, "running") : existing;
   }
   try {
-    return await createVirtualAgent(prisma, { owner, modelRoute: owner.modelRoute, name: await freeName(prisma, owner.oid), mode: "assistant" });
+    return await createVirtualAgent(prisma, { owner, modelRoute: owner.modelRoute, name: await freeName(prisma, owner.oid) });
   } catch (error) {
     const raced = await findAssistant(prisma, owner.oid);
     if (raced !== undefined) {
@@ -164,10 +172,10 @@ export async function findConversation(db: Database, ownerOid: string, id: strin
   return row === null || row.ownerOid !== ownerOid ? undefined : toRow(row);
 }
 
-/** The owner's conversations, most recently active first. */
-export async function listConversations(db: Database, ownerOid: string, limit = 200): Promise<ConversationRow[]> {
+/** The owner's conversations, most recently active first; only those on `virtualAgentId` when it is given. */
+export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationRow[]> {
   const rows = await db.assistantConversation.findMany({
-    where: { ownerOid, virtualAgent: { desired: { not: "deleted" } } },
+    where: { ownerOid, virtualAgent: { desired: { not: "deleted" } }, ...(virtualAgentId === undefined ? {} : { virtualAgentId }) },
     select: SELECT,
     orderBy: [{ lastActiveAt: "desc" }, { id: "asc" }],
     take: limit

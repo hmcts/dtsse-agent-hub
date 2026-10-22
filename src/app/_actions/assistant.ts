@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
-import { assistantEnabled } from "@/assistant/settings";
 import {
   type Artefact,
   ArtefactConflict,
@@ -22,6 +21,7 @@ import { MAX_BODY } from "@/messages/limits";
 import { directAsPerson } from "@/messages/send";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
+import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
@@ -30,6 +30,7 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * `directAsPerson` as the hub's composer, followed by a wake when no session is running for it.
  */
 
+// The Assistant runs on a virtual agent, so it is available exactly where they are.
 const OFF: { ok: false; error: string } = { ok: false, error: "the HMCTS Assistant is not available on this deployment" };
 
 const MISSING: { ok: false; error: string } = { ok: false, error: "that conversation no longer exists" };
@@ -60,7 +61,7 @@ async function send(oid: string, conversation: ConversationRow, body: string): P
 /** A new conversation, started with its first message: a starter card's prompt, or what the person typed. */
 export async function startConversation(input: { product: unknown; body: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("start conversation", async () => {
-    if (!assistantEnabled()) {
+    if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
@@ -77,7 +78,7 @@ export async function startConversation(input: { product: unknown; body: unknown
 
 export async function sendAssistantMessage(input: { conversationId: unknown; body: unknown }): Promise<ActionResult<{ message: ThreadMessage }>> {
   return await runAction<{ message: ThreadMessage }>("assistant message", async () => {
-    if (!assistantEnabled()) {
+    if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
@@ -96,7 +97,7 @@ export async function sendAssistantMessage(input: { conversationId: unknown; bod
 /** Asks for a session before the person has finished typing, so the first answer comes sooner. Says nothing back. */
 export async function warmConversation(input: { conversationId: unknown }): Promise<ActionResult> {
   return await runAction("warm conversation", async () => {
-    if (!assistantEnabled()) {
+    if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
@@ -115,7 +116,7 @@ export async function warmConversation(input: { conversationId: unknown }): Prom
 
 export async function setConversationProduct(input: { conversationId: unknown; product: unknown }): Promise<ActionResult> {
   return await runAction("set conversation product", async () => {
-    if (!assistantEnabled()) {
+    if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
@@ -126,7 +127,7 @@ export async function setConversationProduct(input: { conversationId: unknown; p
 
 export async function renameConversation(input: { conversationId: unknown; title: unknown }): Promise<ActionResult> {
   return await runAction("rename conversation", async () => {
-    if (!assistantEnabled()) {
+    if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
@@ -138,7 +139,7 @@ export async function renameConversation(input: { conversationId: unknown; title
 
 export async function deleteConversation(input: { conversationId: unknown }): Promise<ActionResult> {
   return await runAction("delete conversation", async () => {
-    if (!assistantEnabled()) {
+    if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
@@ -168,7 +169,7 @@ export async function saveArtefact(input: {
   baseVersion: unknown;
 }): Promise<ActionResult<SaveArtefactResult>> {
   return await runAction<SaveArtefactResult>("save artefact", async () => {
-    if (!assistantEnabled()) {
+    if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();

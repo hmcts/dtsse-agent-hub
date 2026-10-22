@@ -99,7 +99,6 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
-  vi.stubEnv("ASSISTANT_ENABLED", "true");
   vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
   await resetDatabase();
   actAs("alice");
@@ -115,43 +114,50 @@ afterAll(async () => {
 });
 
 describe("the person's assistant", () => {
-  it("should create one assistant on the first visit and reuse it on the next", async () => {
+  it("should create a virtual agent on the first visit of someone who has none, and reuse it on the next", async () => {
     await insertUser(ALICE);
     const first = await openAssistant(VIEWER);
     const second = await openAssistant(VIEWER);
 
     expect(second.assistant.id).toBe(first.assistant.id);
-    expect(await prisma.virtualAgent.findMany({ where: { ownerOid: ALICE.oid }, select: { name: true, mode: true } })).toEqual([
-      { name: "assistant", mode: "assistant" }
-    ]);
+    expect(await prisma.virtualAgent.findMany({ where: { ownerOid: ALICE.oid }, select: { name: true } })).toEqual([{ name: "assistant" }]);
     expect(first.assistant).toMatchObject({ needed: ["github", "azure", "claude"], onboarded: false, readiness: { percent: 10 } });
   });
 
-  it("should not count the assistant against the limit when the person also has standard virtual agents", async () => {
+  it("should use the person's first virtual agent when they already have several", async () => {
+    await insertUser(ALICE);
+    const first = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "pcs-api" });
+    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "ccd" });
+
+    expect((await ensureAssistant(prisma, VIEWER)).id).toBe(first.id);
+    expect(await prisma.virtualAgent.count({ where: { ownerOid: ALICE.oid } })).toBe(2);
+  });
+
+  it("should count the virtual agent it creates towards the person's limit", async () => {
     await insertUser(ALICE);
     await ensureAssistant(prisma, VIEWER);
-    for (let index = 0; index < MAX_VIRTUAL_AGENTS_PER_USER; index += 1) {
+    for (let index = 1; index < MAX_VIRTUAL_AGENTS_PER_USER; index += 1) {
       await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: `agent-${index}` });
     }
 
-    expect(await prisma.virtualAgent.count({ where: { ownerOid: ALICE.oid } })).toBe(MAX_VIRTUAL_AGENTS_PER_USER + 1);
+    await expect(createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "one-too-many" })).rejects.toMatchObject({ status: 409 });
   });
 
-  it("should name the assistant apart when a standard virtual agent already has its name", async () => {
+  it("should move to the next virtual agent when the first is being deleted", async () => {
     await insertUser(ALICE);
-    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "assistant" });
+    const first = await ensureAssistant(prisma, VIEWER);
+    const second = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "second" });
+    await setDesired(prisma, ALICE.oid, first.id, "deleted");
 
-    expect((await ensureAssistant(prisma, VIEWER)).name).toBe("assistant-2");
+    expect((await ensureAssistant(prisma, VIEWER)).id).toBe(second.id);
   });
 
-  it("should refuse a second assistant when one exists, and settle a race on the one", async () => {
+  it("should create one virtual agent when two tabs race to open the Assistant", async () => {
     await insertUser(ALICE);
     const [one, two] = await Promise.all([ensureAssistant(prisma, VIEWER), ensureAssistant(prisma, VIEWER)]);
 
     expect(one.id).toBe(two.id);
-    await expect(createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "another", mode: "assistant" })).rejects.toMatchObject({
-      status: 409
-    });
+    expect(await prisma.virtualAgent.count({ where: { ownerOid: ALICE.oid } })).toBe(1);
   });
 
   it("should start a stopped assistant when the person comes back", async () => {
@@ -160,12 +166,6 @@ describe("the person's assistant", () => {
     await setDesired(prisma, ALICE.oid, assistant.id, "stopped");
 
     expect((await ensureAssistant(prisma, VIEWER)).desired).toBe("running");
-  });
-
-  it("should give the orchestrator the assistant's mode when it claims it", async () => {
-    const { claimed } = await startedAssistant();
-
-    expect(claimed.mode).toBe("assistant");
   });
 });
 
@@ -403,15 +403,14 @@ describe("the sessions stream and report", () => {
     expect((await put({ sessions: [], max: 0 })).status).toBe(400);
   });
 
-  it("should refuse the sessions routes to a standard virtual agent's pod", async () => {
-    await insertUser(ALICE);
-    const standard = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "standard" });
-    const response = await orchestrator(claimRoute.POST, "/api/orchestrator/claim", {}, { cluster: "preview-01" });
-    const token = (await jsonOf<ClaimResult>(response)).virtual_agents.find((entry) => entry.id === standard.id)!.launch_token!;
+  it("should refuse the sessions routes to another virtual agent's launch token", async () => {
+    const { token } = await startedAssistant();
+    await insertUser(BOB);
+    const bobs = await createVirtualAgent(prisma, { owner: BOB, modelRoute: "bedrock", name: "bobs" });
 
-    expect(
-      (await pod(sessionsRoute.PUT, token, `/api/virtual/${standard.id}/sessions`, { virtualAgentId: standard.id }, "PUT", { sessions: [], max: 1 })).status
-    ).toBe(403);
+    expect((await pod(sessionsRoute.PUT, token, `/api/virtual/${bobs.id}/sessions`, { virtualAgentId: bobs.id }, "PUT", { sessions: [], max: 1 })).status).toBe(
+      403
+    );
   });
 });
 

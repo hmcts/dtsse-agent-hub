@@ -12,15 +12,8 @@ import { prisma } from "@/store/prisma";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function requireAssistant(mode: string): void {
-  if (mode !== "assistant") {
-    throw new HttpError(403, "only an assistant runs a session per conversation");
-  }
-}
-
-/** The assistant's wakes and closes, counted against its owner's agent streams. */
+/** The virtual agent's conversation wakes and closes, counted against its owner's agent streams. */
 export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgent, request }) => {
-  requireAssistant(virtualAgent.mode);
   const { hub, listener } = realtime();
   const release = streamLimits().agent.take(virtualAgent.ownerOid);
   if (release === undefined) {
@@ -41,7 +34,6 @@ export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgen
 });
 
 export const PUT = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgent, request }) => {
-  requireAssistant(virtualAgent.mode);
   await reportSessions(prisma, virtualAgent.id, parse(sessionsReportBody, await readJson(request)));
   return noContent();
 });

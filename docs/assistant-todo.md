@@ -2,8 +2,10 @@
 
 The HMCTS Assistant (`/assistant`) is built across two repositories, each on a branch named `feat/hmcts-assistant`:
 
-- **`hmcts/dtsse-agent-hub`** (this repo): the UI, the stores, the routes and the contract (`docs/agent-api.md`, Assistant mode).
-- **`hmcts/cft-workspace`**: the pod side. That's the supervisor (`scripts/lib/agent-hub/assistant.mjs`), the `artefact` CLI, the assistant envelope, `.devcontainer/virtual-agent/entrypoint.sh` assistant mode and `assistant-prompt.md`.
+- **`hmcts/dtsse-agent-hub`** (this repo): the UI, the stores, the routes and the contract (`docs/agent-api.md`, Conversations).
+- **`hmcts/cft-workspace`**: the pod side. That's the supervisor (`scripts/lib/agent-hub/assistant.mjs`), which every virtual agent's pod runs beside its own session (`.devcontainer/virtual-agent/entrypoint.sh`), the `artefact` CLI, the conversation envelope and `assistant-prompt.md`.
+
+There is no separate kind of "assistant" agent: the Assistant is an interface to the person's first virtual agent. The plan is for it to replace the hub's virtual-agent pages, leaving the hub as the background comms layer.
 
 Delete this file once everything below is done or has moved to Jira.
 
@@ -22,13 +24,15 @@ Delete this file once everything below is done or has moved to Jira.
   - a third queues on `small`;
   - a reopened chat resumes the same session id;
   - `scripts/agent-hub artefact put` updates the panel live.
-- [ ] Check memory and CPU with several sessions running at once on each size. The caps of 2, 4 and 6 (`ASSISTANT_SESSIONS` in `src/orchestrator/manifests.ts`) are guesses.
+- [ ] Check memory and CPU with several sessions running at once on each size. The caps of 2, 4 and 6 (`CONVERSATION_SESSIONS` in `src/orchestrator/manifests.ts`) are guesses. They are on top of the pod's own session.
+- [ ] Tell Linus's `move-agent-hub-client` session what changed: `assistant.mjs` and the `artefact` commands still need absorbing into `packages/agent-hub`, there is no `AGENT_HUB_VIRTUAL_MODE` now, and `entrypoint.sh` always starts the supervisor.
 
 ## Rollout
 
-- [ ] Release the hub first. Next comes the orchestrator, which ships in the same image, and then the workspace entrypoint, which pods pick up from the workspace checkout.
-- [ ] Only then set `ASSISTANT_ENABLED: "true"` in the chart, and bump `Chart.yaml`'s version in the same commit. An orchestrator older than the hub ignores `mode`, so the assistant's pod would start one standard session.
+- [ ] **Merge the cft-workspace PR first.** Pods clone workspace `master` when they boot, so from then on every pod runs the supervisor. Until the hub has the sessions route, the supervisor gets 404s and keeps retrying, which is harmless.
+- [ ] **Then merge the hub PR.** The Assistant has no flag of its own. It appears wherever `VIRTUAL_AGENTS_ENABLED` is on, including AAT, as soon as the hub deploys, so the pod side must already be live.
 - [ ] Decide who gets the Assistant. Today anyone signed in can open it. Should it be the default home for some people, chosen by role?
+- [ ] Move what the hub's virtual-agent pages do into the Assistant (start and stop, size, plugins, ports, sign-ins, CLAUDE.md, git identity), then remove those pages from the hub.
 
 ## Gaps in v1
 

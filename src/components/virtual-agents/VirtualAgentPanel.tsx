@@ -1,6 +1,7 @@
 import type { FormAction } from "@/components/ActionForm";
 import { DevBadge } from "@/components/DevBadge";
 import { EmptyState } from "@/components/EmptyState";
+import { AssistantChatsPanel } from "@/components/virtual-agents/AssistantChatsPanel";
 import { type LifecycleActions, LifecyclePanel } from "@/components/virtual-agents/LifecyclePanel";
 import { OnboardingChecklist } from "@/components/virtual-agents/OnboardingChecklist";
 import { PluginsPanel } from "@/components/virtual-agents/PluginsPanel";
@@ -43,6 +44,7 @@ function OwnerPanels({
       <SizePanel agent={agent} resize={actions.resize} />
       <PluginsPanel agent={agent} available={plugins} save={actions.plugins} />
       <PortsPanel agent={agent} />
+      <AssistantChatsPanel chats={manage.chats} />
       <OnboardingChecklist
         virtualAgentId={agent.id}
         desired={agent.desired}

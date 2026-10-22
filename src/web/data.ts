@@ -12,6 +12,7 @@ import {
   type ConversationLink,
   type ConversationView,
   conversationGroups,
+  conversationLinks,
   conversationView
 } from "../assistant/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
@@ -199,7 +200,7 @@ export async function virtualAgentsPage(viewer: Viewer): Promise<VirtualAgentsPa
 export interface VirtualAgentPageView {
   summary: VirtualAgentSummary;
   /** Its lifecycle, settings and sign-ins, for its owner; `null` for anyone else. */
-  manage: { detail: VirtualAgentDetail; credentials: CredentialSettings } | null;
+  manage: { detail: VirtualAgentDetail; credentials: CredentialSettings; chats: ConversationLink[] } | null;
   /** The agent its current session registered, once there is one. */
   linked: AgentView | null;
 }
@@ -214,7 +215,8 @@ export async function virtualAgentPage(viewer: Viewer, id: string): Promise<Virt
     virtualAgentDetail(prisma, viewer.oid, id),
     summary.agentId === null ? undefined : agentView(prisma, viewer.oid, summary.agentId)
   ]);
-  const manage = detail === undefined ? null : { detail, credentials: await credentialSettings(viewer) };
+  const manage =
+    detail === undefined ? null : { detail, credentials: await credentialSettings(viewer), chats: await conversationLinks(prisma, viewer.oid, detail.card.id) };
   return { summary, manage, linked: linked ?? null };
 }
 

@@ -1,12 +1,5 @@
--- An assistant is a virtual agent the HMCTS Assistant UI runs for a person: its pod runs one Claude session per
--- conversation instead of one session of its own. Each person has at most one not being deleted.
-CREATE TYPE "virtual_agent_mode" AS ENUM ('standard', 'assistant');
-
-ALTER TABLE "virtual_agent" ADD COLUMN "mode" "virtual_agent_mode" NOT NULL DEFAULT 'standard';
-
-CREATE UNIQUE INDEX "virtual_agent_one_assistant_idx" ON "virtual_agent" ("owner_oid")
-  WHERE "mode" = 'assistant' AND "desired" <> 'deleted';
-
+-- HMCTS Assistant conversations. Any virtual agent can hold them: its pod runs a Claude session per conversation, as
+-- the conversation needs one, alongside its own session.
 CREATE TABLE "assistant_conversation" (
   "id"                  UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   "owner_oid"           TEXT        NOT NULL REFERENCES "user" ("oid"),

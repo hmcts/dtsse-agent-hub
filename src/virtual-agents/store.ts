@@ -13,9 +13,6 @@ import { diskTtlDays, orchestratorLeaseSeconds } from "./settings.ts";
 import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
 import { announce, type StopReason } from "./stop.ts";
 
-/** `assistant`: the HMCTS Assistant's, whose pod runs one Claude session per conversation. */
-export type VirtualAgentMode = "standard" | "assistant";
-
 /**
  * Virtual agents: what each person asked for, what the orchestrator and the pod last reported, and the launch token
  * the pod authenticates with. Every change is announced to the owner's UI streams with a `virtual_agent` event.
@@ -37,7 +34,6 @@ export interface VirtualAgentRow {
   agentId: string | null;
   modelRoute: ModelRoute;
   size: VirtualAgentSize;
-  mode: VirtualAgentMode;
   exposedPorts: number[];
   localOnlyPorts: number[];
   plugins: string[];
@@ -67,7 +63,6 @@ const SELECT = {
   agentId: true,
   modelRoute: true,
   size: true,
-  mode: true,
   exposedPorts: true,
   localOnlyPorts: true,
   plugins: true,
@@ -106,9 +101,8 @@ async function lockOwner(db: Database, ownerOid: string): Promise<void> {
   await db.$queryRaw`SELECT 1 FROM "user" WHERE oid = ${ownerOid} FOR UPDATE`;
 }
 
-/** Standard agents only: a person's one assistant is outside the limit. */
 async function liveCount(db: Database, ownerOid: string): Promise<number> {
-  return await db.virtualAgent.count({ where: { ownerOid, mode: "standard", desired: { not: "deleted" } } });
+  return await db.virtualAgent.count({ where: { ownerOid, desired: { not: "deleted" } } });
 }
 
 /** Locks the row for the rest of the transaction. */
@@ -128,8 +122,6 @@ export interface NewVirtualAgent {
   size?: unknown;
   /** Names from `VIRTUAL_AGENT_PLUGINS`; none when not given. */
   plugins?: unknown;
-  /** `standard` when not given. An assistant is created by `ensureAssistant` alone. */
-  mode?: VirtualAgentMode;
 }
 
 /**
@@ -151,13 +143,7 @@ export async function createVirtualAgent(prisma: PrismaClient, request: NewVirtu
   }
   return await prisma.$transaction(async (tx) => {
     await lockOwner(tx, request.owner.oid);
-    const mode = request.mode ?? "standard";
-    const refusal =
-      mode === "assistant"
-        ? (await tx.virtualAgent.count({ where: { ownerOid: request.owner.oid, mode: "assistant", desired: { not: "deleted" } } })) > 0
-          ? "you already have an assistant"
-          : undefined
-        : createRefusal(await liveCount(tx, request.owner.oid));
+    const refusal = createRefusal(await liveCount(tx, request.owner.oid));
     if (refusal !== undefined) {
       throw new HttpError(409, refusal);
     }
@@ -166,7 +152,7 @@ export async function createVirtualAgent(prisma: PrismaClient, request: NewVirtu
     }
     const row = toRow(
       await tx.virtualAgent.create({
-        data: { ownerOid: request.owner.oid, name: checked.name, modelRoute: fromRoute(request.modelRoute), size: size.size, plugins: plugins.plugins, mode },
+        data: { ownerOid: request.owner.oid, name: checked.name, modelRoute: fromRoute(request.modelRoute), size: size.size, plugins: plugins.plugins },
         select: SELECT
       })
     );
@@ -496,7 +482,6 @@ export interface ClaimedVirtualAgent {
   delete_disk: boolean;
   model_route: StoredRoute;
   size: VirtualAgentSize;
-  mode: VirtualAgentMode;
   exposed_ports: number[];
   /** The plugins the pod loads, in code-point order; empty for none. */
   plugins: string[];
@@ -520,7 +505,6 @@ interface ClaimRow {
   pvc_name: string;
   model_route: StoredRoute;
   size: VirtualAgentSize;
-  mode: VirtualAgentMode;
   exposed_ports: number[];
   plugins: unknown;
   owner_oid: string;
@@ -653,7 +637,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         FROM due
        WHERE v.id = due.id
       RETURNING v.id::text AS id, v.generation, v.pod_generation, v.desired::text AS desired, v.status::text AS status, v.statefulset_name, v.pvc_name,
-                v.model_route::text AS model_route, v.size::text AS size, v.mode::text AS mode, v.exposed_ports, v.plugins, v.owner_oid, v.launch_token_hash IS NOT NULL AS has_token, v.apply_failures,
+                v.model_route::text AS model_route, v.size::text AS size, v.exposed_ports, v.plugins, v.owner_oid, v.launch_token_hash IS NOT NULL AS has_token, v.apply_failures,
                 COALESCE(v.desired <> 'running' AND v.disk_expires_at <= ${now} AND v.disk_deleted_at IS NULL, false) AS disk_due
     `;
     const claimed: ClaimedVirtualAgent[] = [];
@@ -674,7 +658,6 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         delete_disk: row.desired === "deleted" || row.disk_due,
         model_route: row.model_route,
         size: row.size,
-        mode: row.mode,
         exposed_ports: row.exposed_ports,
         plugins: storedPlugins(row.plugins),
         owner: { oid: row.owner_oid },

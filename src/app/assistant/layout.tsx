@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import { assistantEnabled } from "@/assistant/settings";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
+import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +14,10 @@ export const metadata: Metadata = {
 
 /**
  * The HMCTS Assistant's area: full screen, without the hub's sidebar, in the theme the person chose. Not found while
- * the feature is off.
+ * virtual agents are off, since it runs on one.
  */
 export default async function AssistantLayout({ children }: { children: React.ReactNode }) {
-  if (!assistantEnabled()) {
+  if (!virtualAgentsEnabled()) {
     notFound();
   }
   const theme = themeOf((await cookies()).get(THEME_COOKIE)?.value);

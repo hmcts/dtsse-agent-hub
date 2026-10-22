@@ -89,12 +89,11 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
   return Array.isArray(agent.plugins) ? agent.plugins : [];
 }
 
-/** How many conversation sessions an assistant's pod runs at once, by size: each is a Claude process of its own. */
-export const ASSISTANT_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 2, medium: 4, large: 6 };
-
-export function mode(agent: Pick<ClaimedAgent, "mode">): "standard" | "assistant" {
-  return agent.mode === "assistant" ? "assistant" : "standard";
-}
+/**
+ * How many HMCTS Assistant conversation sessions a pod runs at once beside its own, by size: each is a Claude
+ * process of its own.
+ */
+export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 2, medium: 4, large: 6 };
 
 /**
  * The pod is given its public domain rather than its URLs, so that a server starting or stopping changes the Service
@@ -108,8 +107,7 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
     { name: "AGENT_HUB_VIRTUAL_AGENT_ID", value: agent.id },
     { name: "AGENT_HUB_MODEL_ROUTE", value: agent.model_route },
     { name: "AGENT_HUB_PLUGINS", value: plugins(agent).join(",") },
-    { name: "AGENT_HUB_VIRTUAL_MODE", value: mode(agent) },
-    { name: "AGENT_HUB_MAX_SESSIONS", value: String(ASSISTANT_SESSIONS[isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE]) },
+    { name: "AGENT_HUB_MAX_SESSIONS", value: String(CONVERSATION_SESSIONS[isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE]) },
     { name: "AZURE_TENANT_ID", value: spec.tenantId },
     { name: "DISABLE_AUTOUPDATER", value: "1" },
     { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
