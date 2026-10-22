@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+# Stage 0 of an agent-hub virtual agent pod. It only gets the workspace onto the volume: GitHub auth,
+# then a clone or fast-forward of cft-workspace, then hands over to the versioned
+# .devcontainer/virtual-agent/entrypoint.sh in that checkout.
+#
+# The pod's `command` is this bin's name, resolved by the kubelet with no shell against the image's
+# PATH, and npm's global bin directory is not on it (the devcontainer image reaches node through
+# nvm, sourced by .bashrc). cft-workspace's Dockerfile therefore symlinks this script into
+# /usr/local/bin after installing the package.
+#
+# Needs AGENT_HUB_URL, AGENT_HUB_VIRTUAL_AGENT_ID and AGENT_HUB_LAUNCH_TOKEN. Never prints a secret:
+# the launch token goes to curl through a 0600 header file, the GitHub token through stdin.
+
+set -euo pipefail
+
+WORKSPACE="${VIRTUAL_AGENT_WORKSPACE:-/workspace/cft-workspace}"
+REPO_URL="${VIRTUAL_AGENT_REPO:-git@github.com:hmcts/cft-workspace.git}"
+# Every required variable is checked before it is used: under `set -u` an expansion of an unset one aborts with
+# bash's own "unbound variable" instead of the message here.
+: "${AGENT_HUB_URL:?AGENT_HUB_URL is not set}"
+VID="${AGENT_HUB_VIRTUAL_AGENT_ID:?AGENT_HUB_VIRTUAL_AGENT_ID is not set}"
+: "${AGENT_HUB_LAUNCH_TOKEN:?AGENT_HUB_LAUNCH_TOKEN is not set}"
+# Every trailing slash goes, as the TS client strips them: one `%/` would leave `https://hub//api/…`.
+HUB="$AGENT_HUB_URL"
+while [ "${HUB%/}" != "$HUB" ]; do HUB="${HUB%/}"; done
+: "${HUB:?AGENT_HUB_URL is only slashes}"
+export GIT_TERMINAL_PROMPT=0
+
+log() { printf '%s virtual-agent-boot: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
+
+TMP="$(mktemp -d)"
+chmod 700 "$TMP"
+trap 'rm -rf "$TMP"' EXIT
+trap 'log "terminated during boot"; exit 0' TERM INT
+printf 'Authorization: Bearer %s\n' "$AGENT_HUB_LAUNCH_TOKEN" >"$TMP/auth"
+chmod 600 "$TMP/auth"
+
+HUB_STATUS=""
+
+# hub_call METHOD PATH [JSON]: the response body goes to $TMP/body, the HTTP status to HUB_STATUS
+# ("000" when the hub was not reached).
+hub_call() {
+    local args=(-sS -o "$TMP/body" -w '%{http_code}' --max-time 20 -X "$1" -H @"$TMP/auth")
+    [[ $# -ge 3 ]] && args+=(-H 'Content-Type: application/json' --data-binary "$3")
+    HUB_STATUS=$(curl "${args[@]}" "$HUB$2" 2>"$TMP/curl.err") || HUB_STATUS="000"
+}
+
+# Retries until the hub answers something other than a network error, 429 or 5xx, at most $1 times
+# (0: forever), backing off from 2s to a minute.
+hub_retry() {
+    local max="$1" attempt=0 delay=2
+    shift
+    while :; do
+        hub_call "$@"
+        case "$HUB_STATUS" in
+            000 | 429 | 5??) ;;
+            *) return 0 ;;
+        esac
+        attempt=$((attempt + 1))
+        if [[ "$max" -gt 0 && "$attempt" -ge "$max" ]]; then
+            log "$1 $2: giving up after $attempt attempts (last status $HUB_STATUS)"
+            return 1
+        fi
+        log "$1 $2: hub answered $HUB_STATUS; retrying in ${delay}s"
+        sleep "$delay"
+        delay=$((delay * 2 > 60 ? 60 : delay * 2))
+    done
+}
+
+report() {
+    local body
+    if [[ $# -ge 2 ]]; then
+        body=$(jq -cn --arg phase "$1" --arg detail "$2" '{phase: $phase, detail: $detail}')
+    else
+        body=$(jq -cn --arg phase "$1" '{phase: $phase}')
+    fi
+    hub_retry 8 POST "/api/virtual/$VID/status" "$body" || true
+    [[ "$HUB_STATUS" == "204" ]] || log "status $1 not recorded (hub answered $HUB_STATUS)"
+}
+
+github_credential() {
+    hub_retry 0 GET "/api/virtual/$VID/credentials/github"
+    case "$HUB_STATUS" in
+        200) jq -r '.value // empty' "$TMP/body" ;;
+        404) return 0 ;;
+        *) log "github credential: hub answered $HUB_STATUS"; return 1 ;;
+    esac
+}
+
+# workspace.yaml's clone URLs are SSH; the pod has no key, so git fetches them over HTTPS with gh's token.
+configure_git() {
+    local from
+    for from in "git@github.com:" "ssh://git@github.com/"; do
+        git config --global --get-all url."https://github.com/".insteadOf 2>/dev/null | grep -qxF "$from" ||
+            git config --global --add url."https://github.com/".insteadOf "$from"
+    done
+}
+
+# gh validates the token as it stores it, so a revoked one fails here.
+gh_login_with_token() {
+    if printf '%s\n' "$1" | env -u GH_TOKEN -u GITHUB_TOKEN gh auth login --hostname github.com --git-protocol https --with-token >/dev/null 2>"$TMP/gh.err"; then
+        gh auth setup-git --hostname github.com
+        return 0
+    fi
+    log "the stored GitHub token was refused: $(head -c 300 "$TMP/gh.err")"
+    return 1
+}
+
+sync_detail=""
+
+# What git says when GitHub will not let the signed-in account read the repo. For a repo the
+# account cannot see, GitHub answers "Repository not found" rather than 403.
+git_auth_error() {
+    grep -qiE 'could not read (Username|Password)|terminal prompts disabled|Authentication failed|Invalid username or (password|token)|Repository not found|returned error: 40[13]' "$1"
+}
+
+checkout_workspace() {
+    local delay=5 err reported=""
+    if [[ ! -d "$WORKSPACE/.git" ]]; then
+        mkdir -p "$(dirname "$WORKSPACE")"
+        until git clone --quiet --filter=blob:none "$REPO_URL" "$WORKSPACE" 2>"$TMP/git.err"; do
+            err=$(head -c 300 "$TMP/git.err" | tr '\n' ' ')
+            log "clone of $REPO_URL failed: $err; retrying in ${delay}s"
+            # The owner has to act on this one (the GitHub account needs access to the repo), so they
+            # are told once per distinct error rather than left watching "Starting".
+            if git_auth_error "$TMP/git.err" && [[ "$err" != "$reported" ]]; then
+                report awaiting_credentials "github: the signed-in GitHub account cannot clone $REPO_URL; it needs read access to the repo ($err)"
+                reported="$err"
+            fi
+            rm -rf "$WORKSPACE"
+            sleep "$delay"
+            delay=$((delay * 2 > 120 ? 120 : delay * 2))
+        done
+        log "cloned $REPO_URL into $WORKSPACE"
+        [[ -z "$reported" ]] || report provisioning "cloned cft-workspace"
+        return 0
+    fi
+    if ! git -C "$WORKSPACE" fetch --quiet origin 2>"$TMP/git.err"; then
+        sync_detail="cft-workspace: fetch failed, kept the local checkout ($(head -c 200 "$TMP/git.err"))"
+        return 0
+    fi
+    local branch default
+    branch=$(git -C "$WORKSPACE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+    default=$(git -C "$WORKSPACE" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/master)
+    default="${default#origin/}"
+    if [[ -n "$(git -C "$WORKSPACE" status --porcelain 2>/dev/null)" ]]; then
+        sync_detail="cft-workspace: local changes on $branch, not updated"
+    elif [[ "$branch" != "$default" ]]; then
+        sync_detail="cft-workspace: on branch $branch, not updated from $default"
+    elif ! git -C "$WORKSPACE" merge --ff-only --quiet "origin/$default" 2>"$TMP/git.err"; then
+        sync_detail="cft-workspace: $branch cannot fast-forward to origin/$default, kept the local checkout"
+    else
+        log "fast-forwarded $WORKSPACE to origin/$default"
+    fi
+}
+
+load_node() {
+    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+    set +u
+    # shellcheck disable=SC1091
+    [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
+    set -u
+    command -v node >/dev/null
+}
+
+log "virtual agent $VID booting"
+report provisioning
+
+# The checkout's shim comes first so a checkout can pin an older client than the image carries; otherwise the
+# installed package's own bin, which is all there is before the first clone. The shim has to answer `help`
+# before it is preferred: a volume may hold a checkout whose shim needs an install this stage has not done, and
+# a sign-in run through a broken client never completes, so the pod would back off forever in
+# `awaiting_credentials` while a working client sat on PATH.
+agent_hub_client() {
+    local shim="$WORKSPACE/scripts/agent-hub"
+    if [[ -x "$shim" ]] && "$shim" help >/dev/null 2>&1; then
+        printf '%s\n' "$shim"
+        return 0
+    fi
+    command -v agent-hub
+}
+
+configure_git
+token=""
+until token=$(github_credential); do sleep 10; done
+github_missing="no GitHub token stored"
+if [[ -n "$token" ]]; then
+    if gh_login_with_token "$token"; then
+        github_missing=""
+    else
+        github_missing="the stored GitHub token was refused"
+    fi
+fi
+unset token
+
+# cft-workspace is internal, so the clone needs GitHub auth: without a usable stored token, the
+# device-code sign-in runs first, from the installed client if there is no checkout yet.
+if [[ -n "$github_missing" ]]; then
+    report awaiting_credentials "github: $github_missing; relaying a device-code sign-in to the owner"
+    load_node || { report failed "node is not installed in the image"; exit 1; }
+    client=$(agent_hub_client) ||
+        { report failed "the image has no agent-hub client: neither $WORKSPACE/scripts/agent-hub nor an agent-hub on PATH"; exit 1; }
+    log "signing in to GitHub with $client"
+    delay=30
+    until "$client" virtual github-login; do
+        log "github sign-in did not complete; retrying in ${delay}s"
+        sleep "$delay"
+        delay=$((delay * 2 > 300 ? 300 : delay * 2))
+    done
+    gh auth setup-git --hostname github.com
+    report provisioning
+fi
+
+checkout_workspace
+[[ -n "$sync_detail" ]] && { log "$sync_detail"; report provisioning "$sync_detail"; }
+
+entrypoint="$WORKSPACE/.devcontainer/virtual-agent/entrypoint.sh"
+if [[ ! -x "$entrypoint" ]]; then
+    report failed "the cft-workspace checkout has no executable .devcontainer/virtual-agent/entrypoint.sh"
+    exit 1
+fi
+rm -rf "$TMP"
+trap - EXIT TERM INT
+exec "$entrypoint"

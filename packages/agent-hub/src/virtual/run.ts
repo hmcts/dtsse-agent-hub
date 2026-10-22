@@ -15,8 +15,6 @@ import { readStdinText, runCredentialCommand } from "./credentials.ts";
 import { EXIT_FATAL, EXIT_NO_CREDENTIAL, FatalError, isVirtualPhase, PHASES, say } from "./phases.ts";
 import { azureLogin, claudeLogin, githubLogin, run } from "./sign-in.ts";
 
-// The workspace keeps `scripts/agent-hub` as a thin shim onto this package's bin, so the command named here is
-// the one a pod's entrypoint and its operator type.
 export const VIRTUAL_USAGE = `usage: ${CLI} virtual <command>
 
   status <phase> [detail…]    report a phase (${PHASES.join(", ")})

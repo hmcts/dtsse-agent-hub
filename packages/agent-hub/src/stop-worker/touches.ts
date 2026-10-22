@@ -1,8 +1,7 @@
 // What the main thread's tool calls touched, by repo and product. The summariser uses this twice: as the
 // topic candidates it offers the model, and as the signal that the session has moved to a different repo.
 import path from "node:path";
-import { touchPlace, workspaceRepoName } from "../agent.ts";
-import { projectDir } from "../session.ts";
+import { touchPlace, workspaceRepoName, workspaceRoot } from "../agent.ts";
 
 const EDIT_TOOLS = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
 const READ_TOOLS = new Set(["Read", "Grep", "Glob"]);
@@ -243,7 +242,7 @@ function toolUses(line: string): ToolUse[] {
 // What the main thread's tool calls touched, by repo and product, heaviest first. Edits weigh 3,
 // Bash 2 and reads 1, each counted once per tool call. A repo or product is worked in when an
 // edit or a Bash command touched it; `edited` is for edits alone.
-export function extractTouches(jsonl: string, { root = projectDir(), workspaceRepo = workspaceRepoName(root) }: ExtractTouchesOptions = {}): Touches {
+export function extractTouches(jsonl: string, { root = workspaceRoot(), workspaceRepo = workspaceRepoName(root) }: ExtractTouchesOptions = {}): Touches {
   const repos = new Map<string, RepoEntry>();
   const products = new Map<string, ProductTouch>();
   for (const line of jsonl.split("\n")) {

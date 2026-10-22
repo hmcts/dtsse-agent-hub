@@ -184,7 +184,8 @@ rotate() {
 }
 echo "$*" >>"$SHIM_STATE/twg.log"
 case "$1 $2" in
-  "auth refresh") valid || { echo "Error: Authentication failed." >&2; exit 77; }
+  "auth refresh") [ -n "$FAKE_TWG_REFRESH_WIPES" ] && { rm -f "$auth"; echo "Error: could not write the credentials file." >&2; exit 1; }
+      valid || { echo "Error: Authentication failed." >&2; exit 77; }
       { [ "$3" = --force ] || [ -f "$SHIM_STATE/twg-due" ]; } && rotate; exit 0 ;;
   "doctor -o") if [ -z "$FAKE_TWG_DOCTOR_FAILS" ] && valid && grep -q '^oauth-access-token=' "$auth"; then ok=true; else ok=false; fi
       printf '{"apiVersion":"v2","data":{"connectivity":{"attempted":true,"ok":%s}}}\\n' "$ok"; [ "$ok" = true ] ;;

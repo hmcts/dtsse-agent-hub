@@ -148,12 +148,22 @@ export function virtualAgentStateDir(env: Env = process.env): string {
   return env.VIRTUAL_AGENT_STATE || path.join(path.dirname(projectDir()), ".virtual-agent");
 }
 
+// Said when `repos-state` names a state but carries no `note=` line. Deliberately generic: this package knows
+// nothing about the workspace layout or the entrypoint's scripts, so it names no directory and no command, and
+// says only what a session has to know — that a repository it cannot find may still be on its way or may have
+// failed to arrive, and that nothing is gained by starting a second fetch.
+const REPOS_ARRIVING =
+  "agent-hub: this agent's repositories are still arriving in the background, so one you cannot find may simply not have arrived yet. Something is already fetching them: wait for it rather than starting a second fetch or sync yourself.";
+const REPOS_FAILED =
+  "agent-hub: the background fetch of this agent's repositories finished with failures, so some of them did not arrive. A repository you cannot find may be one of those, rather than one that does not exist.";
+const REPOS_FALLBACK: Record<string, string> = { cloning: REPOS_ARRIVING, syncing: REPOS_ARRIVING, failed: REPOS_FAILED };
+
 /**
  * A virtual agent's entrypoint starts Claude before its background clone or sync of the workspace repos has
- * finished, and keeps `repos-state` up to date until it has. The wording is the entrypoint's: it writes the
- * `note=` line beside `state=`, so the sentence lives with the code that does the cloning and this client
- * knows nothing about the workspace layout. A file with no `note=` — one an older entrypoint wrote — says
- * nothing, which is better than this client repeating a message that may no longer be true.
+ * finished, and keeps `repos-state` up to date until it has. The entrypoint owns the wording when it writes a
+ * `note=` line beside `state=`, so the sentence can live with the code that does the cloning; an entrypoint
+ * that writes only `state=` gets the generic fallback above, because a session told nothing goes looking for
+ * repositories that have not arrived and starts a second sync of its own.
  */
 export function reposNote(env: Env = process.env): string {
   if (!virtualAgent(env)) {
@@ -164,7 +174,7 @@ export function reposNote(env: Env = process.env): string {
   if (!state || state === "done") {
     return "";
   }
-  return /^note=(.*)$/m.exec(text)?.[1]?.trim() || "";
+  return /^note=(.*)$/m.exec(text)?.[1]?.trim() || REPOS_FALLBACK[state] || "";
 }
 
 export function webServersNote(env: Env = process.env): string {

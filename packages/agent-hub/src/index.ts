@@ -31,7 +31,8 @@ export {
   TOPIC_RE,
   touchPlace,
   workspacePlace,
-  workspaceRepoName
+  workspaceRepoName,
+  workspaceRoot
 } from "./agent.ts";
 export type {
   AgentSummary,
@@ -143,7 +144,17 @@ export {
 export type { Env, EnvKey } from "./env.ts";
 export { ENV_KEYS } from "./env.ts";
 export type { AssistantFrame, AssistantProduct, EnvelopeAuthor, EnvelopeMessage, EnvelopeOptions } from "./envelope.ts";
-export { assistantEnvelope, CLI, describeAuthor, directEnvelope, formatMessage, leadingSkill, ownerDirectEnvelope, ownerEnvelope } from "./envelope.ts";
+export {
+  assistantEnvelope,
+  CLI,
+  cliName,
+  describeAuthor,
+  directEnvelope,
+  formatMessage,
+  leadingSkill,
+  ownerDirectEnvelope,
+  ownerEnvelope
+} from "./envelope.ts";
 export type {
   ChooseIdentityOptions,
   ChosenIdentity,

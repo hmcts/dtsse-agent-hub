@@ -13,7 +13,7 @@ import { runBridge } from "./bridge.ts";
 import { type DirectEntry, type DirectPeer, peerOf, peerOfReply, readDirects, recordDirect } from "./directs.ts";
 import { clearOptOut, type EnableSessionResult, enableSession, markOptedOut, runAutoEnable } from "./enable.ts";
 import type { Env } from "./env.ts";
-import { formatMessage } from "./envelope.ts";
+import { CLI, formatMessage } from "./envelope.ts";
 import { type HookPayload, runHook } from "./hooks.ts";
 import { describeInbound, inboundAccepted, inboundFix, setupInbound } from "./inbound.ts";
 import { MAX_POST_TOPICS } from "./limits.ts";
@@ -25,7 +25,7 @@ import { fastForward, parseSavedState, setTranscriptOff, syncStatePath, transcri
 import { EXIT_NO_CREDENTIAL, isCredentialKind, OWNER_READABLE, runVirtual } from "./virtual/index.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
-export const USAGE = `usage: scripts/agent-hub <command> [args]
+export const USAGE = `usage: ${CLI} <command> [args]
 
   enable [topics…]            connect this session to agent-hub and subscribe to topics
   disable                     disconnect this session (stops the bridge, marks it offline)
@@ -63,7 +63,7 @@ export const USAGE = `usage: scripts/agent-hub <command> [args]
                               store a credential read from stdin (--from-gh: github, from gh auth token)
   credentials delete <kind>   forget a stored credential (kinds: ${CREDENTIAL_KINDS.join(", ")})
   virtual <command>           inside a virtual agent's pod: phase reports, credentials and
-                              relayed sign-ins (scripts/agent-hub virtual help)
+                              relayed sign-ins (${CLI} virtual help)
   hook <SessionStart|UserPromptSubmit|UserPromptContext|Stop|SessionEnd>
                               Claude Code hook entry point (reads hook JSON on stdin)
 
@@ -140,7 +140,7 @@ type EnabledAgent = StoredAgent & { agent_id: string };
 function requireAgent(sid: string): EnabledAgent {
   const agent = loadAgent(sid);
   if (!agent?.agent_id || !isEnabled(sid)) {
-    throw new Error("agent-hub is not enabled for this session. Run /enable-comms (scripts/agent-hub enable) first.");
+    throw new Error(`agent-hub is not enabled for this session. Run /enable-comms (${CLI} enable) first.`);
   }
   return { ...agent, agent_id: agent.agent_id };
 }
@@ -302,7 +302,7 @@ const status: Command = async (cli) => {
   cli.print(`agent:    @${agent.name} (${agent.agent_id})`);
   cli.print(`bridge:   ${bridgePid(sid) ? `running (pid ${bridgePid(sid)})` : "not running"}`);
   cli.print(`status:   ${readText(statePath(sid, "status")) || "idle"}`);
-  cli.print(`upload:   transcript ${transcriptOffByEnv(cli.env) || transcriptOffBySession(sid) ? "off" : "on"} (scripts/agent-hub transcript status)`);
+  cli.print(`upload:   transcript ${transcriptOffByEnv(cli.env) || transcriptOffBySession(sid) ? "off" : "on"} (${CLI} transcript status)`);
   try {
     const subs = await cli.api().subscriptions(agent.agent_id);
     cli.print(`topics:   ${subs.topics.join(", ") || "(none)"}`);
@@ -338,7 +338,7 @@ const transcript: Command = async (cli, args) => {
     if (offEnv) {
       state = "off (AGENT_HUB_TRANSCRIPT=off)";
     } else if (offSession) {
-      state = "off for this session (scripts/agent-hub transcript on to resume)";
+      state = `off for this session (${CLI} transcript on to resume)`;
     }
     cli.print(`transcript: ${state}`);
     cli.print(`comms:      ${isEnabled(sid) ? "enabled" : "not enabled"}`);
@@ -373,7 +373,7 @@ const setup: Command = async (cli, args) => {
   }
   cli.print("Every Claude Code session you run now accepts messages from your other sessions and from agent-hub.");
   cli.print(
-    "A session that is already running may need restarting to pick it up (exit, then claude --resume); scripts/agent-hub status in it says whether messages are still held."
+    `A session that is already running may need restarting to pick it up (exit, then claude --resume); ${CLI} status in it says whether messages are still held.`
   );
   return 0;
 };
@@ -619,7 +619,7 @@ const artefact: Command = async (cli, argv) => {
     const by = current?.updated_by ? `, last written by ${current.updated_by === "user" ? "the user" : "this conversation"}` : "";
     cli.printError(`agent-hub artefact: the document has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
     cli.printError(
-      `Read it with scripts/agent-hub artefact get, merge your change into it, and put it again${current?.version !== undefined ? ` with --base ${current.version}` : ""}.`
+      `Read it with ${CLI} artefact get, merge your change into it, and put it again${current?.version !== undefined ? ` with --base ${current.version}` : ""}.`
     );
     return 1;
   }

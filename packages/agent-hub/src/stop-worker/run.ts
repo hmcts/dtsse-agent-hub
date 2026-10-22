@@ -3,7 +3,7 @@
 // in. Everything it may do is rate limited by `cursors.json`, which is also the only state it keeps.
 import fs from "node:fs";
 import os from "node:os";
-import { gitBranch, loadAgent, repoName, type StoredAgent, slugify, TOPIC_RE, workspaceRepoName } from "../agent.ts";
+import { gitBranch, loadAgent, repoName, type StoredAgent, slugify, TOPIC_RE, workspaceRepoName, workspaceRoot } from "../agent.ts";
 import { type Api, createApi } from "../api.ts";
 import { holdNote } from "../held-notes.ts";
 import { findSecret } from "../secret-scan.ts";
@@ -13,7 +13,6 @@ import {
   DEFAULT_CONFIG,
   isEnabled,
   log,
-  projectDir,
   readJson,
   releasePidFile,
   removeFile,
@@ -126,7 +125,7 @@ export type PassContext = {
 
 export async function runPass(ctx: PassContext): Promise<void> {
   const { sid } = ctx;
-  const root = ctx.root || projectDir();
+  const root = ctx.root || workspaceRoot();
   const agent = loadAgent(sid);
   if (!isRegistered(agent)) {
     log(sid, "stop-worker: not registered; skipping");
@@ -309,7 +308,7 @@ export async function runStopWorker({
   haiku = (prompt) => runHaiku(prompt),
   now = Date.now,
   config = DEFAULT_CONFIG,
-  root = projectDir(),
+  root = workspaceRoot(),
   branchOf = gitBranch
 }: RunStopWorkerOptions): Promise<void> {
   const lock = statePath(sid, "worker.lock");

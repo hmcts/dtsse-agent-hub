@@ -300,7 +300,7 @@ describe("runHook", () => {
 
     // Assert
     expect(first).toMatch(/comms are enabled for this session/);
-    expect(first).toMatch(/being held on agent-hub, undelivered\. Tell your user this once, with the fix: run scripts\/agent-hub setup inbound/);
+    expect(first).toMatch(/being held on agent-hub, undelivered\. Tell your user this once, with the fix: run agent-hub setup inbound/);
     expect(first).toMatch(/Do not run the fix yourself unless they ask/);
 
     // Act
@@ -452,9 +452,37 @@ describe("runHook in a virtual agent", () => {
     }
   });
 
-  it("should say nothing about the repos when an older entrypoint wrote a repos-state with no note", async () => {
+  // No entrypoint writes a `note=` line today, so this is the message a pod running this package actually gets.
+  it.each([
+    ["va-no-note", "cloning", /still arriving in the background/],
+    ["va-syncing-no-note", "syncing", /still arriving in the background/],
+    ["va-failed-no-note", "failed", /finished with failures, so some of them did not arrive/]
+  ])("should fall back to a generic note for %s when an entrypoint wrote a repos-state with no note", async (sid, state, expected) => {
     // Act
-    const out = await virtualStart("va-no-note", reposState("cloning"));
+    const out = await virtualStart(sid, reposState(state));
+
+    // Assert
+    expect(out).toHaveLength(4);
+    expect(out[2]).toMatch(expected);
+    expect(out[3]).toMatch(/^agent-hub: Web servers/);
+  });
+
+  it("should keep the fallback free of the layout and the scripts the entrypoint owns", () => {
+    // Act
+    const arriving = reposNote(reposState("cloning"));
+    const failed = reposNote(reposState("failed"));
+
+    // Assert
+    for (const note of [arriving, failed]) {
+      expect(note).toMatch(/^agent-hub: /);
+      expect(note).not.toMatch(/apps\/|libs\/|platops\/|scripts\/|bootstrap|cft-workspace/);
+    }
+    expect(arriving).toMatch(/wait for it rather than starting a second fetch or sync yourself/);
+  });
+
+  it("should say nothing about the repos for a state it does not recognise and has no note for", async () => {
+    // Act
+    const out = await virtualStart("va-odd-state", reposState("rearranging"));
 
     // Assert
     expect(out).toHaveLength(3);
@@ -566,7 +594,7 @@ describe("runHook in an assistant conversation", () => {
 
     // Assert
     expect(out[0]).toMatch(/^agent-hub: this session is one conversation of the HMCTS Assistant, connected as @conv-sta\./);
-    expect(out[0]).toMatch(/scripts\/agent-hub artefact get/);
+    expect(out[0]).toMatch(/agent-hub artefact get/);
     expect(out.some((l) => /^This is a virtual agent/.test(l))).toBe(false);
   });
 });
@@ -579,12 +607,12 @@ describe("virtualAgentStateDir", () => {
   });
 });
 
-describe("bin/agent-hub under bash 3.2", () => {
+describe("the bash bins under bash 3.2", () => {
   // macOS still ships bash 3.2, and `bin/agent-hub` runs on every prompt there. Local bash is 5.x, so only a
-  // container can prove the gate parses; `bin.test.ts` covers the local-bash half.
-  it.skipIf(!dockerAvailable)("should parse, so the hook gate runs on macOS", () => {
+  // container can prove they parse; `bin.test.ts` covers the local-bash half.
+  it.skipIf(!dockerAvailable).each(["bin/agent-hub", "bin/virtual-agent-boot"])("should parse %s, so it runs on macOS", (bin) => {
     // Act
-    const result = spawnSync("docker", ["run", "--rm", "-v", `${PACKAGE_ROOT}:/w`, "-w", "/w", "bash:3.2", "bash", "-n", "bin/agent-hub"], {
+    const result = spawnSync("docker", ["run", "--rm", "-v", `${PACKAGE_ROOT}:/w`, "-w", "/w", "bash:3.2", "bash", "-n", bin], {
       encoding: "utf8",
       timeout: 120000
     });

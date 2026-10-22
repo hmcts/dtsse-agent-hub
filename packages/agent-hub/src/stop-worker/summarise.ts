@@ -2,6 +2,7 @@
 // cft-workspace's layout, the same one `agent.ts` reads paths against; the two are changed together.
 import { TOPIC_RE } from "../agent.ts";
 import type { Message } from "../api.ts";
+import { CLI } from "../envelope.ts";
 import { MAX_POST_TOPICS } from "../limits.ts";
 import type { CandidateTopics } from "./candidates.ts";
 
@@ -181,7 +182,7 @@ PUBLISH ${offerPublish ? "is allowed this time" : 'is NOT allowed this time: set
 
 NOTIFY ${offerNotify ? "is allowed this time" : 'is NOT allowed this time: set "notify" to null'}.
 - Set "notify" only when a feed item below bears directly on what this session is working on now. Otherwise null.
-- Cite message ids as #<id>, say in one or two sentences why each matters, and tell the session it can run "scripts/agent-hub read <id>" for the full message.
+- Cite message ids as #<id>, say in one or two sentences why each matters, and tell the session it can run "${CLI} read <id>" for the full message.
 
 Subscribed topics: ${listed(subscriptions)}
 Most active topics: ${listed(activeTopics)}

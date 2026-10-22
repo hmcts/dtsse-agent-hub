@@ -21,8 +21,19 @@ agent-hub help
 ```
 
 `bin/agent-hub` is bash, not Node. Its first half is a gate that decides whether a hook needs to start Node at all;
-only past that gate does it `exec` the compiled CLI. Point `AGENT_HUB_CLI_JS` at a different `cli.js` to override which
-one it runs.
+only past that gate does it `exec` the compiled CLI, which it finds beside itself after following every symlink in the
+way — npm installs a bin as a symlink from `<prefix>/bin`. Point `AGENT_HUB_CLI_JS` at a different `cli.js` to override
+which one it runs.
+
+Every command the CLI quotes back — reply hints, `setup inbound`, the usage text — is spelled with the name the bin was
+invoked as, `agent-hub` by default. A wrapper with its own name, such as cft-workspace's `scripts/agent-hub` shim, can
+set `AGENT_HUB_INVOKED_AS` before calling to have that spelling quoted instead.
+
+`bin/virtual-agent-boot` is the other bash bin: stage 0 of a virtual agent's pod, which authenticates to GitHub through
+a device code relayed by the hub, clones or fast-forwards cft-workspace, and hands over to the
+`.devcontainer/virtual-agent/entrypoint.sh` in that checkout. cft-workspace's Dockerfile symlinks it into
+`/usr/local/bin`: the kubelet resolves a pod's `command` with no shell, and npm's global bin directory is not on the
+image's `PATH`.
 
 ## Develop
 

@@ -1,6 +1,5 @@
 // The topics a turn could be filed under, found mechanically so the model does not have to find them itself.
-import { jiraKey, slugify, TOPIC_RE, type WorkspacePlace, workspacePlace, workspaceRepoName } from "../agent.ts";
-import { projectDir } from "../session.ts";
+import { jiraKey, slugify, TOPIC_RE, type WorkspacePlace, workspacePlace, workspaceRepoName, workspaceRoot } from "../agent.ts";
 import { NO_TOUCHES, type Touches } from "./touches.ts";
 
 // Upper-case prefixes that look like Jira keys but are standards and algorithms.
@@ -54,7 +53,7 @@ export function candidateTopics({
   cwd = null,
   repo = null,
   branch = null,
-  root = projectDir(),
+  root = workspaceRoot(),
   workspaceRepo = workspaceRepoName(root)
 }: CandidateTopicsOptions = {}): CandidateTopics {
   const found: CandidateTopics = { repos: [], products: [], tickets: [], workedIn: { repos: [], products: [] } };

@@ -10,7 +10,10 @@
   "publishConfig": {
     "registry": "https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/"
   },
-  "bin": "bin/agent-hub",
+  "bin": {
+    "agent-hub": "bin/agent-hub",
+    "virtual-agent-boot": "bin/virtual-agent-boot"
+  },
   "files": [
     "bin",
     "dist",

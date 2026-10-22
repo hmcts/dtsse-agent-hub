@@ -1,0 +1,154 @@
+name: Release the client
+
+# The published client is one workspace package beside the app. The app is released as a Docker
+# image by Jenkins (Jenkinsfile_CNP); this publishes @hmcts-cft/agent-hub to Azure Artifacts, and
+# only when that package changed — otherwise every web-UI commit would cut a client release.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'packages/agent-hub/**'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+# Never cancel a release in progress: two overlapping publishes would race on the version number
+# and one of them would publish a version that is already taken.
+concurrency:
+  group: release-client-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Jenkins runs on pull requests, not on a push to master, so without this a direct push to
+  # master would publish whatever it was given.
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+
+      # The hmcts-lib feed allows anonymous reads, so this needs no credential. Only publishing
+      # does; see the release job.
+      - name: Install
+        run: yarn install --immutable
+
+      # `yarn typecheck` covers the app as well as the package, and the app's types do not exist
+      # until the Prisma client is generated.
+      - name: Generate the Prisma client
+        run: yarn db:generate
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Typecheck
+        run: yarn typecheck
+
+      # The package's own suite and thresholds. Not `yarn test`, which also runs the app's and
+      # needs a database.
+      - name: Test the client
+        run: yarn workspace @hmcts-cft/agent-hub run test:coverage
+
+      - name: Build the client
+        run: yarn workspace @hmcts-cft/agent-hub run build
+
+      # The bins are bash and are not compiled, so a packaging mistake is invisible to tsc.
+      - name: Check the tarball contents
+        working-directory: packages/agent-hub
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const pkg = require("./package.json");
+            const files = require("/tmp/pack.json")[0].files.map((f) => f.path);
+            // Derived from the manifest so a new bin is covered without touching this workflow.
+            const bins = typeof pkg.bin === "string" ? [pkg.bin] : Object.values(pkg.bin ?? {});
+            const required = [...bins, "secret-patterns", "dist/cli.js"];
+            const missing = required.filter((f) => !files.includes(f));
+            const leaked = files.filter((f) => /^src\/|\.test\.|__fixtures__/.test(f));
+            if (missing.length) throw new Error("missing from the tarball: " + missing.join(", "));
+            if (leaked.length) throw new Error("should not be published: " + leaked.join(", "));
+            console.log(files.length + " files, nothing leaked");
+          '
+
+      - name: Shellcheck the bins
+        run: shellcheck -s bash packages/agent-hub/bin/*
+
+  release:
+    needs: gates
+    runs-on: ubuntu-latest
+    # No id-token: npm provenance is npmjs.org-only and Azure Artifacts does not support it.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+
+      - name: Install
+        run: yarn install --immutable
+
+      - name: Build the client
+        run: yarn workspace @hmcts-cft/agent-hub run build
+
+      - name: Bump the patch version
+        id: bump
+        working-directory: packages/agent-hub
+        run: |
+          npm version patch --no-git-tag-version
+          echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
+      # Kept line-for-line from cnp-githubactions-library/npm-publish-library so that moving to
+      # the shared action later is a straight substitution.
+      - name: Configure npm authentication for Azure Artifacts
+        env:
+          AZURE_DEVOPS_ARTIFACT_USERNAME: ${{ secrets.AZURE_DEVOPS_ARTIFACT_USERNAME }}
+          AZURE_DEVOPS_ARTIFACT_TOKEN: ${{ secrets.AZURE_DEVOPS_ARTIFACT_TOKEN }}
+          FEED_URL: https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/
+          NPM_SCOPE: '@hmcts-cft'
+        run: |
+          token_b64="$(printf %s "$AZURE_DEVOPS_ARTIFACT_TOKEN" | base64 | tr -d '\n')"
+          username="${AZURE_DEVOPS_ARTIFACT_USERNAME:-github}"
+          feed="${FEED_URL%/}/"
+          # Strip the scheme to build the npm-style "//host/path/" auth keys.
+          feed_no_scheme="${feed#https:}"
+          cat > "$HOME/.npmrc" <<EOF
+          registry=${feed}
+          always-auth=true
+          ${feed_no_scheme}:username=${username}
+          ${feed_no_scheme}:_password=${token_b64}
+          ${feed_no_scheme}:email=github-actions@hmcts.net
+          EOF
+          # Defend against publishConfig.registry going missing — npm prefers @<scope>:registry
+          # over the default `registry=` line.
+          echo "@${NPM_SCOPE#@}:registry=${feed}" >> "$HOME/.npmrc"
+
+      - name: Publish
+        working-directory: packages/agent-hub
+        run: npm publish
+
+      # Publish first: a tag with no package behind it is worse than an unbumped master.
+      - name: Commit the bump and tag the release
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/agent-hub/package.json
+          # This cannot loop: pushes made with GITHUB_TOKEN do not trigger workflows.
+          git commit -m "chore: release @hmcts-cft/agent-hub v${VERSION} [skip ci]"
+          git tag "agent-hub-v${VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "agent-hub-v${VERSION}"

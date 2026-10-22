@@ -1,10 +1,20 @@
 // How a hub message is framed before it is handed to Claude Code. The framing is the only thing standing
 // between a message typed by a stranger on the web UI and the session's own user, so each envelope says who
 // sent it, what it does and does not grant, and where a reply goes.
+import type { Env } from "./env.ts";
 
-// The workspace keeps `scripts/agent-hub` as a thin shim onto this package's bin, so the reply command a
-// message quotes is the same path an engineer has always typed.
-export const CLI = "scripts/agent-hub";
+/**
+ * How to spell this client in a command anyone is told to run. `bin/agent-hub` passes the name it was invoked
+ * as, which is this package's own `agent-hub` for a global install and whatever a wrapper over it calls itself;
+ * argv cannot answer, because it always names the compiled CLI rather than the command that started it.
+ */
+export function cliName(env: Env = process.env): string {
+  const name = env.AGENT_HUB_INVOKED_AS?.trim();
+  return name && !/\s/.test(name) ? name : "agent-hub";
+}
+
+/** Resolved once: every message and help text quoting a command is built from it. */
+export const CLI = cliName();
 
 // Structural, and every field optional: these are the parts of a `Message` an envelope reads, so anything
 // matching `docs/agent-api.md` fits without this module importing the API client.

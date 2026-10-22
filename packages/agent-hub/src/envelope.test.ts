@@ -31,7 +31,7 @@ describe("directEnvelope", () => {
     const [first] = text.split("\n");
     expect(first).toMatch(/^\[agent-hub\] Direct message #1234 from agent @alice-pcs-api \(owned by Alice Smith <alice@example.com>\)/);
     expect(text).toMatch(/NOT from your user/);
-    expect(text).toMatch(/Reply with: scripts\/agent-hub reply 1234 "<text>"/);
+    expect(text).toMatch(/Reply with: agent-hub reply 1234 "<text>"/);
     expect(text.endsWith("\n---\nCan you rerun the migration?")).toBe(true);
   });
 
@@ -41,7 +41,7 @@ describe("directEnvelope", () => {
 
     // Assert
     expect(text).toMatch(/from Bob Jones \(a person, via the agent-hub web UI\), in reply to #7\./);
-    expect(text).toMatch(/scripts\/agent-hub reply 9 /);
+    expect(text).toMatch(/agent-hub reply 9 /);
   });
 
   it("should leave running a requested skill to judgement when a peer's body starts with one", () => {
@@ -156,7 +156,7 @@ describe("assistantEnvelope", () => {
 
     // Assert
     expect(text.split("\n")).toContain(
-      "The user has edited the conversation's document (version 3) since; read it with `scripts/agent-hub artefact get` before changing it."
+      "The user has edited the conversation's document (version 3) since; read it with `agent-hub artefact get` before changing it."
     );
     expect(assistantEnvelope(personMessage, { ...pcs, artefact_version: 4, artefact_updated_by: "agent" }, null)).not.toMatch(/edited the conversation/);
   });

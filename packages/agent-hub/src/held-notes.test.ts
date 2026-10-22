@@ -159,8 +159,8 @@ describe("heldNotesContext", () => {
     // Assert
     expect(text).toMatch(/NOT from the user/);
     expect(text).toMatch(/ignore them silently/);
-    expect(text).toMatch(/scripts\/agent-hub read <id>/);
-    expect(text).toMatch(/scripts\/agent-hub reply <id> "<text>"/);
+    expect(text).toMatch(/agent-hub read <id>/);
+    expect(text).toMatch(/agent-hub reply <id> "<text>"/);
     expect(text.endsWith("- (2026-10-09T00:00:00.000Z) #55 changes the schema you are editing.")).toBe(true);
   });
 

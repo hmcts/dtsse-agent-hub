@@ -14,8 +14,24 @@
 
 set -u
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The CLI is found relative to this file, so every symlink in the way has to be followed first: npm installs a
+# bin as a symlink from <prefix>/bin, and the unresolved directory holds no dist/. `readlink -f` would do it in
+# one call but macOS ships a BSD readlink without -f, so the loop walks the chain itself; it costs one `[ -L ]`
+# test for a real path, which is what the hooks always have.
+target="${BASH_SOURCE[0]}"
+while [ -L "$target" ]; do
+    link="$(readlink "$target")"
+    case "$link" in
+        /*) target="$link" ;;
+        *) target="$(cd "$(dirname "$target")" && pwd)/$link" ;;
+    esac
+done
+HERE="$(cd "$(dirname "$target")" && pwd)"
 CLI="${AGENT_HUB_CLI_JS:-$HERE/../dist/cli.js}"
+# How the CLI names itself in the commands it tells anyone to run. A wrapper that wants its own spelling sets
+# this before calling; `${0##*/}` is a parameter expansion rather than a basename fork, so the hook path below
+# pays nothing for it.
+export AGENT_HUB_INVOKED_AS="${AGENT_HUB_INVOKED_AS:-${0##*/}}"
 
 if [ "${1:-}" = "hook" ]; then
     # A hook must never fail or slow the session: every exit below is 0.

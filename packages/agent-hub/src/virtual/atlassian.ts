@@ -123,7 +123,13 @@ export async function syncAtlassianAuth({
       say(`atlassian: twg auth refresh exited ${r.code}; the Atlassian sign-in may need renewing`);
     }
   }
-  const { value, sha } = packAtlassianAuth(readAtlassianAuth(env) as string);
+  // A refresh that failed may have left no readable auth.conf at all, which is the same "no sign-in to store"
+  // the unrefreshed read above reports rather than a packing error about a file that is not there.
+  const refreshed = readAtlassianAuth(env);
+  if (!refreshed) {
+    return "no-login";
+  }
+  const { value, sha } = packAtlassianAuth(refreshed);
   if (!force && readText(atlassianShaFile()) === sha) {
     return "unchanged";
   }

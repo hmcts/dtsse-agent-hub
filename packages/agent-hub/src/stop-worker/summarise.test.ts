@@ -126,7 +126,7 @@ describe("buildPrompt", () => {
     expect(p).toMatch(/NOTIFY is allowed/);
     expect(p).toMatch(/Subscribed topics: pcs-api/);
     expect(p).toMatch(/Most active topics: ccd/);
-    expect(p).toMatch(/scripts\/agent-hub read <id>/);
+    expect(p).toMatch(/agent-hub read <id>/);
   });
 
   it("should explain the topic categories and vocabulary and pass the candidates", () => {

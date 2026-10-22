@@ -96,6 +96,37 @@ export function gitBranch(dir: string): string | null {
   return branch && branch !== "HEAD" ? branch : null;
 }
 
+const workspaceRoots = new Map<string, string>();
+
+// The workspace checkout every layout lookup below is relative to: the nearest directory at or above the
+// project directory holding `workspace.yaml`, cft-workspace's manifest of the repos it clones. The project
+// directory cannot stand in for it, because a session started inside a clone — `cd apps/pcs/pcs-api && claude`
+// — has that clone as its project directory, which is inside the layout rather than the top of it. Falls back
+// to the git toplevel, then to the project directory itself.
+export function workspaceRoot(start: string = projectDir()): string {
+  const cached = workspaceRoots.get(start);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const found = findWorkspaceRoot(start);
+  workspaceRoots.set(start, found);
+  return found;
+}
+
+function findWorkspaceRoot(start: string): string {
+  const from = path.resolve(start);
+  let dir = from;
+  let parent = path.dirname(dir);
+  while (!fs.existsSync(path.join(dir, "workspace.yaml"))) {
+    if (parent === dir) {
+      return git(from, ["rev-parse", "--show-toplevel"]) || from;
+    }
+    dir = parent;
+    parent = path.dirname(dir);
+  }
+  return dir;
+}
+
 function realpath(p: string): string {
   try {
     return fs.realpathSync(p);
@@ -123,9 +154,9 @@ export type GatherMetadataOptions = {
   root?: string;
 };
 
-// Sessions run from the workspace root to share history, so a cwd in the workspace but outside
-// a clone says nothing about the repo being worked on.
-export function gatherMetadata(sid: string, { cwd, root = projectDir() }: GatherMetadataOptions = {}): AgentMetadata {
+// A cwd in the workspace but outside a clone says nothing about the repo being worked on, which is the common
+// case: sessions are often run from the workspace root so that they share their history.
+export function gatherMetadata(sid: string, { cwd, root = workspaceRoot() }: GatherMetadataOptions = {}): AgentMetadata {
   const info = sessionInfo(sid);
   const dir = cwd || info.cwd || process.cwd();
   const rel = relativeTo(realpath(root), realpath(dir));
@@ -142,7 +173,7 @@ export function gatherMetadata(sid: string, { cwd, root = projectDir() }: Gather
 
 const workspaceNames = new Map<string, string | null>();
 
-export function workspaceRepoName(root: string = projectDir()): string | null {
+export function workspaceRepoName(root: string = workspaceRoot()): string | null {
   if (!workspaceNames.has(root)) {
     workspaceNames.set(root, slugify(repoName(root) || path.basename(root)));
   }
@@ -158,7 +189,7 @@ export type WorkspacePlace = {
 
 // Where a path sits in the workspace layout: apps/<product>/<repo>, libs/<repo> or platops/<repo>.
 // Relative paths are taken from the workspace root; absolute ones must be under it.
-export function workspacePlace(p: string | null | undefined, root: string = projectDir()): WorkspacePlace | null {
+export function workspacePlace(p: string | null | undefined, root: string = workspaceRoot()): WorkspacePlace | null {
   if (typeof p !== "string" || !p) {
     return null;
   }
@@ -198,7 +229,7 @@ function relParts(rel: string): string[] {
 }
 
 // The clone directory a workspace-relative path sits in, or null when it is not inside a clone.
-export function cloneDir(rel: string, root: string = projectDir()): string | null {
+export function cloneDir(rel: string, root: string = workspaceRoot()): string | null {
   const parts = relParts(rel);
   const depth = parts[0] === "apps" ? 3 : 2;
   if (parts.length < depth || !workspacePlace(parts.join("/"), root)?.repo) {
@@ -218,7 +249,7 @@ export type TouchPlace = {
 // directories are no one's, and paths outside the root are ignored.
 export function touchPlace(
   p: string | null | undefined,
-  root: string = projectDir(),
+  root: string = workspaceRoot(),
   workspaceRepo: string | null = workspaceRepoName(root)
 ): TouchPlace | null {
   if (typeof p !== "string" || !path.isAbsolute(p)) {

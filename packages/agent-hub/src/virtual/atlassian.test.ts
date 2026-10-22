@@ -209,6 +209,21 @@ describe("syncAtlassianAuth", () => {
     // Act & Assert
     expect(await syncAtlassianAuth({ api: api(), id: VID, env: pod.env(), force: true })).toBe("no-login");
   });
+
+  it("should report no login, not a packing error, when the refresh leaves no auth.conf behind", async () => {
+    // Arrange
+    const env = pod.env({ FAKE_TWG_REFRESH_WIPES: "1" });
+    pod.seedTwg(env);
+    await syncAtlassianAuth({ api: api(), id: VID, env: pod.env(), force: true });
+
+    // Act
+    const { result, stderr } = await captureStderr(() => syncAtlassianAuth({ api: api(), id: VID, env, refresh: true }));
+
+    // Assert
+    expect(result).toBe("no-login");
+    expect(stderr).toMatch(/twg auth refresh exited 1/);
+    expect(stderr).not.toMatch(/oauth-refresh-token/);
+  });
 });
 
 describe("atlassianLogin", () => {

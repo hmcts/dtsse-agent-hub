@@ -369,7 +369,7 @@ describe("runBridge", () => {
       expect(fromOwner).not.toMatch(/Reply with:/);
       expect(fromOwner).toMatch(/They read this session's transcript on agent-hub/);
       expect(fromPeer).toMatch(new RegExp(`Direct message #${peer.id} from Pat Peer`));
-      expect(fromPeer).toMatch(new RegExp(`Reply with: scripts/agent-hub reply ${peer.id} `));
+      expect(fromPeer).toMatch(new RegExp(`Reply with: agent-hub reply ${peer.id} `));
     } finally {
       await bridge.stop();
     }
@@ -388,7 +388,7 @@ describe("runBridge", () => {
       await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
 
       // Assert
-      expect(bridge.socketWrites[0]).toMatch(new RegExp(`Reply with: scripts/agent-hub reply ${own.id} `));
+      expect(bridge.socketWrites[0]).toMatch(new RegExp(`Reply with: agent-hub reply ${own.id} `));
       expect(bridge.socketWrites[0]).not.toMatch(/transcript/);
     } finally {
       setTranscriptOff(bridge.sid, false);
@@ -611,7 +611,7 @@ describe("runBridge", () => {
         expect(bridge.socketWrites).toHaveLength(0);
         expect(acks()).toHaveLength(0);
         expect(bridge.logText().match(/holding direct/g)).toHaveLength(1);
-        expect(bridge.logText()).toMatch(/Fix: run scripts\/agent-hub setup inbound/);
+        expect(bridge.logText()).toMatch(/Fix: run agent-hub setup inbound/);
 
         fs.writeFileSync(userSettings(), JSON.stringify({ crossSessionInbound: "accept" }));
         await waitUntil(

@@ -29,7 +29,8 @@ import {
   stopBridge,
   touchPlace,
   workspacePlace,
-  workspaceRepoName
+  workspaceRepoName,
+  workspaceRoot
 } from "./agent.ts";
 import { createApi } from "./api.ts";
 import { ensureStateDir, readJson, statePath, writeJson } from "./session.ts";
@@ -162,6 +163,60 @@ describe("autoTopics", () => {
     expect(autoTopics({ repo: "rse-cft-lib", branch: null, cwd: at("libs/rse-cft-lib") })).toEqual(["rse-cft-lib", "libs"]);
     expect(autoTopics({ repo: null, branch: null, cwd: home.root })).toEqual([]);
     expect(autoTopics({ repo: "x", branch: null, cwd: "/elsewhere/apps/pcs/x" })).toEqual(["x"]);
+  });
+});
+
+describe("workspaceRoot", () => {
+  it("should be the directory holding workspace.yaml, from the root and from inside a clone", () => {
+    // Arrange
+    const ws = path.join(home.root, "ws-manifest");
+    const inClone = path.join(ws, "apps", "pcs", "pcs-api", "src", "main");
+    fs.mkdirSync(inClone, { recursive: true });
+    fs.writeFileSync(path.join(ws, "workspace.yaml"), "repos: []\n");
+
+    // Act & Assert
+    expect(workspaceRoot(ws)).toBe(ws);
+    expect(workspaceRoot(inClone)).toBe(ws);
+  });
+
+  it("should fall back to the git toplevel, then to where it started, when there is no manifest", () => {
+    // Arrange
+    const repo = path.join(home.root, "ws-no-manifest");
+    const inside = path.join(repo, "a", "b");
+    fs.mkdirSync(inside, { recursive: true });
+    execFileSync("git", ["init", "-q", repo]);
+    const bare = path.join(home.root, "ws-nothing");
+    fs.mkdirSync(bare, { recursive: true });
+
+    // Act & Assert
+    expect(workspaceRoot(inside)).toBe(fs.realpathSync(repo));
+    expect(workspaceRoot(bare)).toBe(bare);
+  });
+
+  // `cd apps/pcs/pcs-api && claude` makes the clone the project directory, so rooting the layout there placed
+  // nothing: the agent registered no repo, no branch and no topics.
+  it("should let a session started inside a clone still register the clone and its topics", () => {
+    // Arrange
+    const ws = path.join(home.root, "ws-session");
+    const clone = path.join(ws, "apps", "pcs", "pcs-api");
+    fs.mkdirSync(path.join(clone, "src"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "workspace.yaml"), "repos: []\n");
+    gitRepo(clone, "HDPI-9-rename");
+    execFileSync("git", ["-C", clone, "remote", "add", "origin", "git@github.com:hmcts/pcs-api.git"]);
+    setEnv("CLAUDE_PROJECT_DIR", clone);
+
+    // Act
+    try {
+      const meta = gatherMetadata("clone-session", { cwd: path.join(clone, "src") });
+
+      // Assert
+      expect(meta).toMatchObject({ repo: "pcs-api", branch: "HDPI-9-rename" });
+      expect(autoTopics(meta)).toEqual(["pcs-api", "pcs", "hdpi-9"]);
+      expect(workspaceRepoName()).toBe("ws-session");
+      expect(touchPlace(path.join(clone, "src", "a.java"))).toEqual({ repo: "pcs-api", product: "pcs", dir: clone });
+    } finally {
+      setEnv("CLAUDE_PROJECT_DIR", home.root);
+    }
   });
 });
 

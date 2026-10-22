@@ -907,6 +907,7 @@ __metadata:
   resolution: "@hmcts-cft/agent-hub@workspace:packages/agent-hub"
   bin:
     agent-hub: bin/agent-hub
+    virtual-agent-boot: bin/virtual-agent-boot
   languageName: unknown
   linkType: soft
 

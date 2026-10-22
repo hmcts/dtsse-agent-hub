@@ -3,9 +3,10 @@
 // sessions stream in dtsse-agent-hub's docs/agent-api.md.
 import nodeFs from "node:fs";
 import path from "node:path";
+import { workspaceRoot } from "../agent.ts";
 import type { Api, SessionReport } from "../api.ts";
 import type { Env } from "../env.ts";
-import { hubHome, projectDir, projectTranscriptPath, statePath, validSessionId } from "../session.ts";
+import { hubHome, projectTranscriptPath, statePath, validSessionId } from "../session.ts";
 import { claudeCommand, createTmux, type Tmux, tmuxName } from "./tmux.ts";
 
 export const DEFAULT_MAX_SESSIONS = 2;
@@ -77,6 +78,8 @@ export type CreateAssistantSupervisorOptions = {
   fs?: SupervisorFs;
   now?: () => number;
   say?: (message: string) => void;
+  /** Where each conversation's session runs. The workspace checkout root, because `claudeCommand` reaches the
+   * launcher through a path relative to it. */
   cwd?: string;
   max?: number;
   idleMs?: number;
@@ -128,7 +131,7 @@ export function createAssistantSupervisor({
   fs = nodeFs,
   now = Date.now,
   say = () => {},
-  cwd = projectDir(),
+  cwd = workspaceRoot(),
   max = maxSessions(env),
   idleMs = idleMinutes(env) * 60000,
   exitGraceMs = EXIT_GRACE_MS,

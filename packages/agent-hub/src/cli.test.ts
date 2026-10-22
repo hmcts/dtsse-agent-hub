@@ -253,9 +253,7 @@ describe("the commands, in process against the mock hub", () => {
     expect(r.lines[1]).toBe("subscribed topics: hdpi-1234, pcs-api");
     expect(r.lines[2]).toBe(`bridge: already running (pid ${bridgeStandIn.pid}); log: ${path.join(home.hub, SID, "log")}`);
     expect(r.text()).toMatch(/warning: incoming messages are held: crossSessionInbound is not set and the session bypasses permissions/);
-    expect(r.text()).toMatch(
-      /fix: run scripts\/agent-hub setup inbound \(adds "crossSessionInbound": "accept" to .*settings\.json\), then restart the session/
-    );
+    expect(r.text()).toMatch(/fix: run agent-hub setup inbound \(adds "crossSessionInbound": "accept" to .*settings\.json\), then restart the session/);
     const register = await hub.waitFor((c) => c.path === "/api/agent/register");
     expect(register.body.session_id).toBe(SID);
     expect(register.body.name).toBe("cli-session");
@@ -272,11 +270,11 @@ describe("the commands, in process against the mock hub", () => {
     expect(r.lines[0]).toBe(`session:  ${SID}`);
     expect(r.lines[1]).toBe("enabled:  yes");
     expect(r.text()).toMatch(/incoming: held: /);
-    expect(r.text()).toMatch(/fix: {6}run scripts\/agent-hub setup inbound/);
+    expect(r.text()).toMatch(/fix: {6}run agent-hub setup inbound/);
     expect(r.text()).toMatch(new RegExp(`agent: {4}@cli-session \\(${agentId}\\)`));
     expect(r.text()).toMatch(new RegExp(`bridge: {3}running \\(pid ${bridgeStandIn.pid}\\)`));
     expect(r.text()).toMatch(/status: {3}busy/);
-    expect(r.text()).toMatch(/upload: {3}transcript on \(scripts\/agent-hub transcript status\)/);
+    expect(r.text()).toMatch(/upload: {3}transcript on \(agent-hub transcript status\)/);
     expect(r.text()).toMatch(/topics: {3}hdpi-1234, pcs-api/);
     expect(r.lines.at(-1)).toBe(`log:      ${path.join(home.hub, SID, "log")}`);
   });
@@ -621,7 +619,7 @@ describe("the commands, in process against the mock hub", () => {
 
     // Assert
     expect(r.code).toBe(1);
-    expect(r.errors).toEqual(["agent-hub subscribe: agent-hub is not enabled for this session. Run /enable-comms (scripts/agent-hub enable) first."]);
+    expect(r.errors).toEqual(["agent-hub subscribe: agent-hub is not enabled for this session. Run /enable-comms (agent-hub enable) first."]);
   });
 
   it("should print the virtual usage and refuse an unknown virtual command when virtual runs", async () => {
@@ -946,7 +944,7 @@ describe("the commands, in process against the mock hub", () => {
       expect(off.code).toBe(0);
       expect(off.lines).toEqual(["agent-hub: this session's transcript is no longer uploaded. What was already uploaded stays on agent-hub."]);
       expect(fs.existsSync(stateFile("transcript-off"))).toBe(true);
-      expect((await cli(["transcript", "status"])).text()).toMatch(/transcript: off for this session \(scripts\/agent-hub transcript on to resume\)/);
+      expect((await cli(["transcript", "status"])).text()).toMatch(/transcript: off for this session \(agent-hub transcript on to resume\)/);
 
       const on = await cli(["transcript", "on"]);
       expect(on.lines[0]).toBe("agent-hub: this session's transcript is uploaded again while comms are enabled, from now on (not the turns while it was off).");
@@ -1525,7 +1523,7 @@ describe("the CLI as a child process, through bin/agent-hub", () => {
       `#!/usr/bin/env node
 const fs = require('fs');
 fs.writeFileSync(${JSON.stringify(path.join(home.root, "haiku-call.json"))}, JSON.stringify({ argv: process.argv.slice(2), child: process.env.AGENT_HUB_CHILD, cwd: process.cwd() }));
-const result = { publish: { topics: ['pcs-api'], title: 'Claim table renamed', body: 'V030 renames cases to claim.' }, notify: '#' + process.env.ITEST_FEED_ID + ' is about the same table; run scripts/agent-hub read ' + process.env.ITEST_FEED_ID };
+const result = { publish: { topics: ['pcs-api'], title: 'Claim table renamed', body: 'V030 renames cases to claim.' }, notify: '#' + process.env.ITEST_FEED_ID + ' is about the same table; run agent-hub read ' + process.env.ITEST_FEED_ID };
 process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: JSON.stringify(result) }));
 `,
       { mode: 0o755 }
@@ -1584,7 +1582,7 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
     const message = lines[1]?.message as { role: string; content: string };
     expect(message.role).toBe("user");
     expect(message.content).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${msg.id} from Alice Smith <alice@example.com> \\(a person`));
-    expect(message.content).toMatch(new RegExp(`scripts/agent-hub reply ${msg.id} "<text>"`));
+    expect(message.content).toMatch(new RegExp(`agent-hub reply ${msg.id} "<text>"`));
     expect(message.content.endsWith("Please check the claim migration.")).toBe(true);
     await hub.waitFor((c) => c.method === "POST" && c.path === `/api/agent/${agentId}/deliveries/${msg.id}/ack`);
     expect(hub.deliveries.get(`${msg.id}:${agentId}`)?.state).toBe("delivered");

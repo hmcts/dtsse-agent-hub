@@ -4,12 +4,11 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { Env } from "./env.ts";
+import { CLI } from "./envelope.ts";
 import { claudeHome, projectDir, readJson, type SessionInfo, sessionInfo } from "./session.ts";
 
-// The workspace keeps `scripts/agent-hub` as a thin shim onto this package's bin, so the command quoted here is
-// the one an engineer has always typed.
-export const SETUP_COMMAND = "scripts/agent-hub setup inbound";
-export const RESTART_HINT = "restart the session (exit, then claude --resume) if scripts/agent-hub status still says messages are held";
+export const SETUP_COMMAND = `${CLI} setup inbound`;
+export const RESTART_HINT = `restart the session (exit, then claude --resume) if ${CLI} status still says messages are held`;
 
 export function userSettingsPath(): string {
   return path.join(claudeHome(), "settings.json");
