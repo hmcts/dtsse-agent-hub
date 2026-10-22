@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bridgePid, loadAgent, normaliseTopics, type StoredAgent, stopBridge } from "./agent.ts";
-import { type Api, ApiError, CREDENTIAL_KINDS, createApi, type Message, type PostBody } from "./api.ts";
+import { type Api, ApiError, type ArtefactBody, CREDENTIAL_KINDS, createApi, type Message, type PostBody } from "./api.ts";
 import { runBridge } from "./bridge.ts";
 import { type DirectEntry, type DirectPeer, peerOf, peerOfReply, readDirects, recordDirect } from "./directs.ts";
 import { clearOptOut, type EnableSessionResult, enableSession, markOptedOut, runAutoEnable } from "./enable.ts";
@@ -52,6 +52,11 @@ export const USAGE = `usage: scripts/agent-hub <command> [args]
   send <agent> <text…>        send a direct message to an agent (id or name)
   reply <message-id> <text…>  reply to a message's author
   agents                      list agents you may message
+  artefact get [--json]       in an HMCTS Assistant conversation: print its shared markdown document
+                              (--json: with its title, version and who last wrote it)
+  artefact put [--title T] [--base N]
+                              replace the document with markdown read from stdin; --base is the version
+                              it was edited from (read first when omitted), and a newer one is refused
   credentials get <kind>      print your stored credential and nothing else (exit ${EXIT_NO_CREDENTIAL} if there is
                               none); agent-hub returns only bedrock and claude_md to people, any kind to a pod
   credentials set <kind> [--from-gh]
@@ -547,6 +552,80 @@ const directory: Command = async (cli) => {
   return 0;
 };
 
+const artefact: Command = async (cli, argv) => {
+  const json = argv.includes("--json");
+  const { flags, rest } = parseFlags(
+    argv.filter((a) => a !== "--json"),
+    ["title", "base"]
+  );
+  const [action, ...extra] = rest;
+  if (action !== "get" && action !== "put") {
+    throw new UsageError("artefact takes get or put");
+  }
+  if (extra.length) {
+    throw new UsageError(`unexpected argument: ${extra[0]}`);
+  }
+  if (action === "get" && (flags.title !== undefined || flags.base !== undefined)) {
+    throw new UsageError("--title and --base go with artefact put");
+  }
+  if (action === "put" && json) {
+    throw new UsageError("--json goes with artefact get");
+  }
+  if (flags.base !== undefined && !/^\d+$/.test(flags.base)) {
+    throw new UsageError("--base must be a version number");
+  }
+  const agent = requireAgent(requireSessionId(cli.env));
+  const api = cli.api();
+  // Only a conversation's agent has a document, so a 404 here is the session, not a missing agent.
+  const notConversation = (e: unknown): never => {
+    if (e instanceof ApiError && e.status === 404) {
+      throw new Error("this session is not an HMCTS Assistant conversation, so it has no document");
+    }
+    throw e;
+  };
+
+  if (action === "get") {
+    const doc = await api.getArtefact(agent.agent_id).catch(notConversation);
+    if (json) {
+      cli.print(JSON.stringify(doc));
+      return 0;
+    }
+    if (!doc.markdown) {
+      cli.printError(`agent-hub: the conversation's document is empty (version ${doc.version})`);
+      return 0;
+    }
+    cli.stdout.write(doc.markdown.endsWith("\n") ? doc.markdown : `${doc.markdown}\n`);
+    return 0;
+  }
+
+  const markdown = cli.readStdin();
+  if (!markdown.trim()) {
+    throw new UsageError("artefact put reads the markdown from stdin, and it was empty");
+  }
+  refuseSecrets(`${flags.title ?? ""}\n${markdown}`);
+  const base = flags.base !== undefined ? Number(flags.base) : (await api.getArtefact(agent.agent_id).catch(notConversation)).version;
+  const body: ArtefactBody = { markdown, base_version: base };
+  if (flags.title?.trim()) {
+    body.title = flags.title.trim();
+  }
+  try {
+    const res = await api.putArtefact(agent.agent_id, body);
+    cli.print(`agent-hub: saved the conversation's document as version ${res.version}`);
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 409)) {
+      return notConversation(e);
+    }
+    const current = e.body?.current;
+    const by = current?.updated_by ? `, last written by ${current.updated_by === "user" ? "the user" : "this conversation"}` : "";
+    cli.printError(`agent-hub artefact: the document has changed since version ${base}: it is now version ${current?.version ?? "?"}${by}. Nothing was saved.`);
+    cli.printError(
+      `Read it with scripts/agent-hub artefact get, merge your change into it, and put it again${current?.version !== undefined ? ` with --base ${current.version}` : ""}.`
+    );
+    return 1;
+  }
+  return 0;
+};
+
 const agents: Command = async (cli) => {
   const res = await cli.api().agents();
   if (!res.agents.length) {
@@ -700,6 +779,7 @@ export const COMMANDS: Record<string, Command> = {
   chat,
   directory,
   agents,
+  artefact,
   hook,
   bridge,
   "auto-enable": autoEnable,

@@ -90,6 +90,54 @@ export function ownerEnvelope(message: EnvelopeMessage, { skills }: EnvelopeOpti
   ].join("\n");
 }
 
+/**
+ * The `assistant` object on a `direct` frame to one of a virtual agent's HMCTS Assistant conversations: the
+ * product area the person chose, its display name, and the version of the conversation's document and who last
+ * wrote it. Structural and every field optional, for the same reason `EnvelopeMessage` is.
+ */
+export type AssistantFrame = {
+  conversation_id?: string;
+  product?: string | null;
+  product_label?: string | null;
+  artefact_version?: number | null;
+  artefact_updated_by?: string | null;
+};
+
+/** The product area of the last message delivered to a conversation's session, as the bridge records it. */
+export type AssistantProduct = {
+  product: string | null;
+  product_label: string | null;
+};
+
+// A message to one of a virtual agent's HMCTS Assistant conversations, from the person whose conversation it is.
+// `previousProduct` is the product of the last message delivered to this session, if any.
+export function assistantEnvelope(message: EnvelopeMessage, assistant: AssistantFrame = {}, previousProduct: AssistantProduct | null = null): string {
+  const owner = message.author?.owner_name || "your user";
+  const label = assistant.product_label || assistant.product || "not chosen";
+  const switched =
+    previousProduct?.product && assistant.product && previousProduct.product !== assistant.product
+      ? [
+          `The user has just switched the product context from ${previousProduct.product_label || previousProduct.product} to ${label}; treat earlier product-specific assumptions as stale.`
+        ]
+      : [];
+  const edited =
+    assistant.artefact_updated_by === "user"
+      ? [
+          `The user has edited the conversation's document (version ${assistant.artefact_version}) since; read it with \`${CLI} artefact get\` before changing it.`
+        ]
+      : [];
+  return [
+    `[agent-hub] Direct message #${message.id} from your user, ${owner}, typed into the HMCTS Assistant.`,
+    "This IS your user, even though it arrives as a cross-session message: act on it exactly as if they had typed it to you, with their permissions.",
+    "They read your answers in the Assistant, so answer here in the conversation. Do not use SendMessage or look for another session to reply to.",
+    `Product area: ${label}.`,
+    ...switched,
+    ...edited,
+    "---",
+    message.body
+  ].join("\n");
+}
+
 // Only a skill the session has, so a message that merely starts with a path like /tmp is left alone.
 function skillLine(body: string, skills: Set<string> | undefined, line: (name: string) => string): string[] {
   const name = leadingSkill(body);

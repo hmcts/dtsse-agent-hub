@@ -187,6 +187,11 @@ export function findSessionEntry(sid: string): SessionEntry | null {
 // Title entries are re-appended throughout a transcript, so the tail holds the current ones.
 const TITLE_TAIL_BYTES = 256 * 1024;
 
+// Where Claude Code keeps the transcript of a session run from `cwd`.
+export function projectTranscriptPath(cwd: string, sid: string): string {
+  return path.join(claudeHome(), "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"), `${sid}.jsonl`);
+}
+
 export function transcriptPath(sid: string, entry: SessionEntry | null = findSessionEntry(sid)): string | null {
   const recorded = readText(statePath(sid, "transcript")).trim();
   if (recorded) {
@@ -199,7 +204,7 @@ export function transcriptPath(sid: string, entry: SessionEntry | null = findSes
   if (!entry?.cwd) {
     return null;
   }
-  return path.join(claudeHome(), "projects", entry.cwd.replace(/[^A-Za-z0-9]/g, "-"), `${sid}.jsonl`);
+  return projectTranscriptPath(entry.cwd, sid);
 }
 
 export type ConversationTitles = {
@@ -328,6 +333,12 @@ export function releasePidFile(file: string): void {
   if (readPidFile(file) === process.pid) {
     removeFile(file);
   }
+}
+
+// A virtual agent's conversation supervisor starts each conversation's session with the conversation's id in its
+// environment, which is what makes that session one of the HMCTS Assistant's conversations rather than the pod's own.
+export function conversationId(env: Env = process.env): string | null {
+  return env.AGENT_HUB_CONVERSATION_ID || null;
 }
 
 export function requireSessionId(env: Env = process.env): string {

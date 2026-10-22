@@ -7,9 +7,17 @@ import { loadAgent, registerAgent, type StoredAgent } from "./agent.ts";
 import { type Api, ApiError, createApi } from "./api.ts";
 import { peerOf, recordDirect } from "./directs.ts";
 import type { Env } from "./env.ts";
-import { directEnvelope, type EnvelopeOptions, ownerDirectEnvelope, ownerEnvelope } from "./envelope.ts";
+import {
+  type AssistantFrame,
+  type AssistantProduct,
+  assistantEnvelope,
+  directEnvelope,
+  type EnvelopeOptions,
+  ownerDirectEnvelope,
+  ownerEnvelope
+} from "./envelope.ts";
 import { describeInbound, type InboundOptions, type InboundResult, inboundAccepted, inboundFix } from "./inbound.ts";
-import { acquirePidFile, isEnabled, log, pidAlive, readText, releasePidFile, sessionInfo, statePath, writeJson } from "./session.ts";
+import { acquirePidFile, isEnabled, log, pidAlive, readJson, readText, releasePidFile, sessionInfo, statePath, writeJson } from "./session.ts";
 import { collectSkills, type SkillListing, skillsHash } from "./skills.ts";
 import { deliverToSocket, NO_MESSAGING_TOKEN } from "./socket.ts";
 import { createSseParser, type SseEvent } from "./sse.ts";
@@ -67,6 +75,9 @@ export function reconnectDelay({ backoff = 0, rapidCloses = 0 }: RetryState = {}
 export function readStatus(sid: string): "busy" | "idle" {
   return readText(statePath(sid, "status")) === "busy" ? "busy" : "idle";
 }
+
+// The product area of the last message delivered to an assistant conversation, to tell the session when it changes.
+const productPath = (sid: string) => statePath(sid, "assistant-product.json");
 
 // Structural, and every field optional: it is the shape both `directs` and `envelope` read, so a message
 // narrowed here fits either without this module choosing one of their author types over the other.
@@ -133,6 +144,37 @@ export function parseDirectEventMessage(value: unknown): DirectEventMessage | nu
     in_reply_to: asNullableString(raw.in_reply_to),
     created_at: asOptionalString(raw.created_at),
     author: parseAuthor(raw.author)
+  };
+}
+
+/**
+ * The `assistant` object on a `direct` frame, or null when the frame carries none. Every field the envelope and
+ * the recorded product read is listed here, so a hub that sends one this client does not know about is the only
+ * way a field goes missing.
+ */
+export function parseAssistantFrame(value: unknown): AssistantFrame | null {
+  const raw = asRecord(value);
+  if (!raw) {
+    return null;
+  }
+  return {
+    conversation_id: asOptionalString(raw.conversation_id),
+    product: asNullableString(raw.product),
+    product_label: asNullableString(raw.product_label),
+    artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
+    artefact_updated_by: asNullableString(raw.artefact_updated_by)
+  };
+}
+
+/** The recorded product of the last delivery, which only this module writes; null for anything else. */
+export function parseAssistantProduct(value: unknown): AssistantProduct | null {
+  const raw = asRecord(value);
+  if (!raw) {
+    return null;
+  }
+  return {
+    product: typeof raw.product === "string" ? raw.product : null,
+    product_label: typeof raw.product_label === "string" ? raw.product_label : null
   };
 }
 
@@ -335,6 +377,15 @@ export async function runBridge({
     return null;
   }
 
+  // The status the hub last heard, so a turn starting or ending is sent at once rather than on the next heartbeat.
+  let sentStatus: "busy" | "idle" | null = null;
+  function statusChanged(): void {
+    if (!agent?.agent_id || sentStatus === null || readStatus(sid) === sentStatus) {
+      return;
+    }
+    heartbeat().catch((e) => log(sid, `heartbeat error: ${(e as Error).message}`));
+  }
+
   async function heartbeat(): Promise<void> {
     const reason = shouldStop();
     if (reason) {
@@ -350,8 +401,10 @@ export async function runBridge({
     }
     const agentId = current.agent_id;
     const skills = changedSkills();
+    const status = readStatus(sid);
+    sentStatus = status;
     try {
-      await api.heartbeat(agentId, { status: readStatus(sid), name: sessionInfo(sid, env).name, ...(skills ? { skills } : {}) });
+      await api.heartbeat(agentId, { status, name: sessionInfo(sid, env).name, ...(skills ? { skills } : {}) });
       if (skills) {
         const hash = skillsHash(skills);
         agent = { ...current, skills_hash: hash };
@@ -394,14 +447,25 @@ export async function runBridge({
       // The owner reads this session's transcript on the hub, so a conversational answer reaches them and a
       // CLI reply would duplicate it — but only while the upload is on, or that reply is their only channel.
       const ownerReads = !fromUser && fromOwner && !transcriptOff(sid, env);
+      // Only the person whose conversation it is gets the assistant framing; anyone else is still a peer.
+      const assistant = fromUser ? parseAssistantFrame(payload.assistant) : null;
+      const previousProduct = assistant ? parseAssistantProduct(readJson(productPath(sid))) : null;
       const envelope: (message: DirectEventMessage, options?: EnvelopeOptions) => string = fromUser
         ? ownerEnvelope
         : ownerReads
           ? ownerDirectEnvelope
           : directEnvelope;
       try {
-        await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, envelope(message, { skills: skillNames() }));
+        const content = assistant ? assistantEnvelope(message, assistant, previousProduct) : envelope(message, { skills: skillNames() });
+        await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, content);
         remember(message.id);
+        if (assistant) {
+          try {
+            writeJson(productPath(sid), { product: assistant.product ?? null, product_label: assistant.product_label ?? null });
+          } catch (e) {
+            log(sid, `could not record the product of #${message.id}: ${(e as Error).message}`);
+          }
+        }
         if (!fromUser) {
           try {
             recordDirect(sid, message, { direction: "in", peer: peerOf(message.author) });
@@ -467,7 +531,10 @@ export async function runBridge({
   heartbeatTimer = setInterval(() => {
     heartbeat().catch((e) => log(sid, `heartbeat error: ${(e as Error).message}`));
   }, heartbeatMs);
-  transcriptTimer = setInterval(() => syncTranscript(), transcriptMs);
+  transcriptTimer = setInterval(() => {
+    statusChanged();
+    syncTranscript();
+  }, transcriptMs);
 
   let retry: ReconnectDecision = { delay: 0, backoff: 0, rapidCloses: 0 };
   let lastEventId = "";
@@ -483,7 +550,7 @@ export async function runBridge({
     clean = false;
     try {
       if (!agent?.agent_id) {
-        agent = (await registerAgent(api, sid, { cwd: agent?.cwd, collectSkills: listSkills })).agent;
+        agent = (await registerAgent(api, sid, { cwd: agent?.cwd, env, collectSkills: listSkills })).agent;
       }
       controller = new AbortController();
       const res = await api.stream(agent.agent_id as string, { signal: controller.signal, lastEventId });

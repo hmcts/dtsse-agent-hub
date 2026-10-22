@@ -527,6 +527,50 @@ describe("runHook in a virtual agent", () => {
   });
 });
 
+describe("runHook in an assistant conversation", () => {
+  const CONVERSATION: Env = { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: "0f8a6a1e-0000-4000-8000-000000000001" };
+
+  it("should record idle and start no stop worker when Stop runs in an assistant conversation", async () => {
+    // Arrange
+    const dir = enable("conv-stop");
+    fs.writeFileSync(path.join(dir, "status"), "busy\n");
+
+    // Act
+    const out = await hookText("Stop", { session_id: "conv-stop", transcript_path: "/nonexistent" }, CONVERSATION);
+
+    // Assert
+    expect(out).toBe("");
+    expect(fs.readFileSync(path.join(dir, "status"), "utf8")).toBe("idle\n");
+    const log = fs.existsSync(path.join(dir, "log")) ? fs.readFileSync(path.join(dir, "log"), "utf8") : "";
+    expect(log).not.toMatch(/stop-worker/);
+    expect(fs.existsSync(path.join(dir, "dirty"))).toBe(false);
+  });
+
+  it("should start a stop worker when Stop runs in a session that is not a conversation", async () => {
+    // Arrange
+    enable("plain-stop");
+    const { calls, spawn } = spawnStub();
+
+    // Act
+    const out = await hookText("Stop", { session_id: "plain-stop", transcript_path: "/nonexistent" }, {}, spawn);
+
+    // Assert
+    expect(out).toBe("");
+    expect(calls).toEqual([{ sid: "plain-stop", args: ["stop-worker", "--session", "plain-stop", "--transcript", "/nonexistent"] }]);
+    expect(fs.readFileSync(statePath("plain-stop", "log"), "utf8")).toMatch(/Stop: spawned stop-worker pid \d+/);
+  });
+
+  it("should give the assistant context, not the virtual agent one, when SessionStart runs in a conversation", async () => {
+    // Act
+    const out = await virtualStart("conv-start", { ...reposState(null), ...CONVERSATION });
+
+    // Assert
+    expect(out[0]).toMatch(/^agent-hub: this session is one conversation of the HMCTS Assistant, connected as @conv-sta\./);
+    expect(out[0]).toMatch(/scripts\/agent-hub artefact get/);
+    expect(out.some((l) => /^This is a virtual agent/.test(l))).toBe(false);
+  });
+});
+
 describe("virtualAgentStateDir", () => {
   it("should sit beside the project directory when the pod does not name one", () => {
     // Act & Assert

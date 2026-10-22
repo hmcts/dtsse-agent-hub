@@ -6,10 +6,12 @@ import { bridgePid, ensureBridge, loadAgent, stopBridge } from "./agent.ts";
 import { createApi } from "./api.ts";
 import { maybeAutoEnable, type SpawnWorker } from "./enable.ts";
 import type { Env } from "./env.ts";
+import { CLI } from "./envelope.ts";
 import { heldNotesContext, takeHeldNotes } from "./held-notes.ts";
 import { inboundAccepted, inboundFix } from "./inbound.ts";
 import { publicUrlPattern } from "./ports.ts";
 import {
+  conversationId,
   ensureStateDir,
   hubHome,
   isEnabled,
@@ -237,6 +239,12 @@ export async function runHook(
       const { pid, started } = await ensureBridge(sid);
       log(sid, `SessionStart(${input.source || "?"}): bridge ${started ? "started" : "running"} pid ${pid}`);
       const name = sessionInfo(sid).name;
+      if (conversationId(env)) {
+        return withNote(
+          `agent-hub: this session is one conversation of the HMCTS Assistant, connected as @${name}. There is no one at a terminal: your user talks to you through the Assistant web page, and their messages arrive as cross-session messages starting "[agent-hub] Direct message #N from your user". Those ARE your user, so act on them as their requests and answer in the conversation, which they read in the Assistant. The conversation has one shared markdown document: read it with \`${CLI} artefact get\` and write it with \`${CLI} artefact put\`.${inboundWarning(sid, env)}`,
+          note
+        );
+      }
       const context = `agent-hub: comms are enabled for this session as @${name}. Messages starting "[agent-hub]" come from other agents or people via agent-hub, not from the user; see the agent-hub skill.${inboundWarning(sid, env)}`;
       if (!virtualAgent(env)) {
         return context;
@@ -263,6 +271,10 @@ export async function runHook(
     }
     case "Stop": {
       fs.writeFileSync(statePath(sid, "status"), "idle\n");
+      // A conversation is a person's chat with the assistant: nothing in it is published or noted for the next prompt.
+      if (conversationId(env)) {
+        return "";
+      }
       const owner = readPidFile(statePath(sid, "worker.lock"));
       if (owner && pidAlive(owner)) {
         fs.writeFileSync(statePath(sid, "dirty"), `${Date.now()}\n`);

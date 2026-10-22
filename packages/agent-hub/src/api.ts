@@ -54,6 +54,8 @@ export type DirectCandidate = {
 export type ApiErrorBody = {
   error?: string;
   candidates?: DirectCandidate[];
+  /** A `409` from `putArtefact`: the document as `getArtefact` returns it, to merge the refused change into. */
+  current?: Artefact;
 };
 
 export type AgentSummary = {
@@ -85,6 +87,8 @@ export type RegisterBody = {
   branch?: string | null;
   host?: string | null;
   skills?: Skill[];
+  /** A pod's conversation session only: it adopts the agent the hub made with the conversation. */
+  conversation_id?: string;
 };
 
 export type HeartbeatBody = {
@@ -132,6 +136,35 @@ export type LoginCompleteBody = {
   account_oid?: string;
   account_label?: string;
 };
+
+/** What a conversation's session runs, as `PUT /api/virtual/{id}/sessions` takes it. */
+export type SessionReport = {
+  conversation_id: string;
+  state: "starting" | "live" | "queued";
+  detail?: string;
+};
+
+export type SessionsBody = {
+  sessions: SessionReport[];
+  max: number;
+};
+
+/** A conversation's one markdown document, which the person and the session both edit. */
+export type Artefact = {
+  title: string | null;
+  markdown: string;
+  version: number;
+  updated_by: "user" | "agent" | null;
+  updated_at: string | null;
+};
+
+export type ArtefactBody = {
+  title?: string;
+  markdown: string;
+  base_version: number;
+};
+
+export type ArtefactResponse = { version: number };
 
 export type RegisterResponse = { agent_id: string; name: string };
 export type MessageResponse = { message: Message };
@@ -262,6 +295,10 @@ export type Api = {
   loginPrompt: (id: string, kind: CredentialKind, body: LoginPromptBody) => Promise<null>;
   loginCode: (id: string, kind: CredentialKind) => Promise<string | null>;
   loginComplete: (id: string, kind: CredentialKind, body?: LoginCompleteBody) => Promise<null>;
+  sessionsStream: (id: string, opts?: StreamOptions) => Promise<Response>;
+  putSessions: (id: string, body: SessionsBody) => Promise<null>;
+  getArtefact: (agentId: string) => Promise<Artefact>;
+  putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
   stream: (id: string, opts?: StreamOptions) => Promise<Response>;
 };
 
@@ -335,6 +372,22 @@ export function createApi({
       }
       throw e;
     });
+  // Both streams are framed alike, so the agent stream and a pod's sessions stream open the same way.
+  async function openStream(path: string, { signal, lastEventId }: StreamOptions = {}): Promise<Response> {
+    const h = await headers({ Accept: "text/event-stream" });
+    if (lastEventId) {
+      h["Last-Event-ID"] = lastEventId;
+    }
+    const res = await fetchImpl(`${base}${path}`, { headers: h, signal });
+    if (!res.ok) {
+      let json: ApiErrorBody | null = null;
+      try {
+        json = (await res.json()) as ApiErrorBody;
+      } catch {}
+      throw new ApiError(res.status, json, "GET", path);
+    }
+    return res;
+  }
   const qs = (params: Record<string, string | number | undefined | null>) => {
     const q = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
@@ -376,20 +429,12 @@ export function createApi({
     loginPrompt: (id, kind, body) => request<null>("POST", v(id, `login/${k(kind)}`), body),
     loginCode: async (id, kind) => (await request<LoginCodeResponse | null>("GET", v(id, `login/${k(kind)}/code`)))?.code ?? null,
     loginComplete: (id, kind, body = {}) => request<null>("POST", v(id, `login/${k(kind)}/complete`), body),
-    async stream(id, { signal, lastEventId }: StreamOptions = {}) {
-      const h = await headers({ Accept: "text/event-stream" });
-      if (lastEventId) {
-        h["Last-Event-ID"] = lastEventId;
-      }
-      const res = await fetchImpl(`${base}${a(id)}/stream`, { headers: h, signal });
-      if (!res.ok) {
-        let json: ApiErrorBody | null = null;
-        try {
-          json = (await res.json()) as ApiErrorBody;
-        } catch {}
-        throw new ApiError(res.status, json, "GET", `${a(id)}/stream`);
-      }
-      return res;
-    }
+    // A virtual agent's HMCTS Assistant conversations: wakes and closes on the sessions stream, and what its
+    // supervisor runs.
+    sessionsStream: (id, opts) => openStream(v(id, "sessions"), opts),
+    putSessions: (id, body) => request<null>("PUT", v(id, "sessions"), body),
+    getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
+    putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
+    stream: (id, opts) => openStream(`${a(id)}/stream`, opts)
   };
 }

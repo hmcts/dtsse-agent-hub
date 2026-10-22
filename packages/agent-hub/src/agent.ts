@@ -9,7 +9,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Api } from "./api.ts";
-import { ensureStateDir, log, pidAlive, projectDir, readJson, readPidFile, removeFile, sessionInfo, spawnDetached, statePath, writeJson } from "./session.ts";
+import type { Env } from "./env.ts";
+import {
+  conversationId,
+  ensureStateDir,
+  log,
+  pidAlive,
+  projectDir,
+  readJson,
+  readPidFile,
+  removeFile,
+  sessionInfo,
+  spawnDetached,
+  statePath,
+  writeJson
+} from "./session.ts";
 import { collectSkills as collectSkillsDefault, type SkillListing, skillsHash } from "./skills.ts";
 
 export const TOPIC_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -256,6 +270,8 @@ export type StoredAgent = {
   topics?: string[];
   pending_subscribe?: string[];
   handed_off_from?: string;
+  /** Set only for a pod's HMCTS Assistant conversation session, which registers with it. */
+  conversation_id?: string;
 };
 
 /** What `registerAgent` writes: a saved agent the hub has answered for. */
@@ -299,7 +315,8 @@ export function parseAgent(value: unknown): StoredAgent | null {
     skills_hash: asString(raw.skills_hash),
     topics: asStrings(raw.topics),
     pending_subscribe: asStrings(raw.pending_subscribe),
-    handed_off_from: asString(raw.handed_off_from)
+    handed_off_from: asString(raw.handed_off_from),
+    conversation_id: asString(raw.conversation_id)
   };
 }
 
@@ -309,6 +326,8 @@ export function loadAgent(sid: string): StoredAgent | null {
 
 export type RegisterAgentOptions = GatherMetadataOptions & {
   collectSkills?: () => SkillListing[];
+  /** Only `AGENT_HUB_CONVERSATION_ID` is read from it: which conversation, if any, this session is. */
+  env?: Env;
 };
 
 export type RegisterAgentResult = {
@@ -319,7 +338,8 @@ export type RegisterAgentResult = {
 export async function registerAgent(api: Pick<Api, "register" | "subscribe">, sid: string, opts: RegisterAgentOptions = {}): Promise<RegisterAgentResult> {
   const meta = gatherMetadata(sid, opts);
   const skills = (opts.collectSkills || collectSkillsDefault)();
-  const res = await api.register({ ...meta, skills });
+  const conversation = conversationId(opts.env);
+  const res = await api.register({ ...meta, skills, ...(conversation ? { conversation_id: conversation } : {}) });
   ensureStateDir(sid);
   const previous = loadAgent(sid) || {};
   const agent: RegisteredAgent = {
@@ -334,6 +354,9 @@ export async function registerAgent(api: Pick<Api, "register" | "subscribe">, si
     registered_at: new Date().toISOString(),
     skills_hash: skillsHash(skills)
   };
+  if (conversation) {
+    agent.conversation_id = conversation;
+  }
   if (agent.pending_subscribe?.length) {
     await api.subscribe(agent.agent_id, agent.pending_subscribe);
     delete agent.pending_subscribe;

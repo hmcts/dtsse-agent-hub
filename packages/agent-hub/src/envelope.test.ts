@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { directEnvelope, type EnvelopeMessage, formatMessage, leadingSkill, ownerDirectEnvelope, ownerEnvelope } from "./envelope.ts";
+import {
+  type AssistantFrame,
+  assistantEnvelope,
+  directEnvelope,
+  type EnvelopeMessage,
+  formatMessage,
+  leadingSkill,
+  ownerDirectEnvelope,
+  ownerEnvelope
+} from "./envelope.ts";
+import { toEntries } from "./transcript-sync.ts";
 
 const agentMessage: EnvelopeMessage = {
   id: "1234",
@@ -95,6 +105,69 @@ describe("ownerEnvelope", () => {
 
     // Assert
     expect(text).toMatch(/from your user, your user, the owner of this virtual agent/);
+  });
+});
+
+describe("assistantEnvelope", () => {
+  const personMessage: EnvelopeMessage = {
+    id: "42",
+    body: "Can you draft user stories for paying a fee?",
+    author: { type: "user", owner_name: "Olive Owner", owner_email: "olive@example.com" }
+  };
+  const pcs: AssistantFrame = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
+
+  it("should name the user and the product area, and keep the prefix the transcript links by, when a message reaches an assistant conversation", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, pcs, null);
+
+    // Assert
+    const lines = text.split("\n");
+    expect(lines[0]).toMatch(/^\[agent-hub\] Direct message #42 from your user, Olive Owner, /);
+    expect(text).toMatch(/This IS your user/);
+    expect(lines).toContain("Product area: Possession claims.");
+    expect(text).not.toMatch(/switched the product context/);
+    expect(text).not.toMatch(/edited the conversation's document/);
+    expect(text.endsWith("\n---\nCan you draft user stories for paying a fee?")).toBe(true);
+    const [entry] = toEntries({ type: "user", uuid: "u1", timestamp: "2026-10-21T10:00:00Z", message: { role: "user", content: text } });
+    expect(entry?.message_id).toBe("42");
+  });
+
+  it("should say the product context changed when the previous message was about another product", () => {
+    // Act
+    const text = assistantEnvelope(
+      personMessage,
+      { ...pcs, product: "ccd", product_label: "Core Case Data" },
+      {
+        product: "pcs",
+        product_label: "Possession claims"
+      }
+    );
+
+    // Assert
+    expect(text.split("\n")).toContain(
+      "The user has just switched the product context from Possession claims to Core Case Data; treat earlier product-specific assumptions as stale."
+    );
+    expect(assistantEnvelope(personMessage, pcs, { product: "pcs", product_label: "Possession claims" })).not.toMatch(/switched/);
+  });
+
+  it("should tell the session to read the document first when the user last edited it", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, { ...pcs, artefact_version: 3, artefact_updated_by: "user" }, null);
+
+    // Assert
+    expect(text.split("\n")).toContain(
+      "The user has edited the conversation's document (version 3) since; read it with `scripts/agent-hub artefact get` before changing it."
+    );
+    expect(assistantEnvelope(personMessage, { ...pcs, artefact_version: 4, artefact_updated_by: "agent" }, null)).not.toMatch(/edited the conversation/);
+  });
+
+  it("should say the product is not chosen, and name the user generically, when the frame and the author are empty", () => {
+    // Act
+    const text = assistantEnvelope({ id: "7", body: "hello" });
+
+    // Assert
+    expect(text).toMatch(/^\[agent-hub\] Direct message #7 from your user, your user, typed into the HMCTS Assistant\.$/m);
+    expect(text.split("\n")).toContain("Product area: not chosen.");
   });
 });
 

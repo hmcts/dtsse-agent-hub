@@ -520,6 +520,72 @@ describe("createApi credentials", () => {
   });
 });
 
+describe("createApi conversations", () => {
+  it("should open the sessions stream as the agent stream is opened when the pod asks for it", async () => {
+    // Arrange
+    const controller = new AbortController();
+
+    // Act
+    const res = await pod.sessionsStream(VID, { signal: controller.signal });
+
+    // Assert
+    expect(res.ok).toBe(true);
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    expect(hub.calls.filter((c) => c.path === `/api/virtual/${VID}/sessions`).at(-1)?.headers.accept).toBe("text/event-stream");
+    controller.abort();
+  });
+
+  it("should throw an ApiError naming the sessions path when the hub refuses the stream", async () => {
+    // Act
+    const error = await api.sessionsStream(VID).catch((e) => e);
+
+    // Assert
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(403);
+    expect(error.message).toBe(`GET /api/virtual/${VID}/sessions failed: 403 forbidden`);
+  });
+
+  it("should put what the supervisor runs when it reports its sessions", async () => {
+    // Arrange
+    const body = { sessions: [{ conversation_id: "0f8a6a1e-0000-4000-8000-000000000001", state: "live" as const }], max: 4 };
+
+    // Act
+    await pod.putSessions(VID, body);
+
+    // Assert
+    expect(hub.virtuals.get(VID)?.sessionReports.at(-1)).toEqual(body);
+  });
+
+  it("should read the document back, save it with the base version and give the current one on a conflict", async () => {
+    // Arrange
+    const conversationAgent = (await pod.register({ session_id: "sid-api-conv", name: "conv", conversation_id: "0f8a6a1e-0000-4000-8000-00000000000b" }))
+      .agent_id;
+
+    // Act
+    const before = await pod.getArtefact(conversationAgent);
+    const saved = await pod.putArtefact(conversationAgent, { markdown: "# Plan\n", base_version: 0, title: "Plan" });
+    const after = await pod.getArtefact(conversationAgent);
+    const stale = await pod.putArtefact(conversationAgent, { markdown: "other", base_version: 0 }).catch((e) => e);
+
+    // Assert
+    expect(before).toEqual({ title: null, markdown: "", version: 0, updated_by: null, updated_at: null });
+    expect(saved).toEqual({ version: 1 });
+    expect(after).toMatchObject({ title: "Plan", markdown: "# Plan\n", version: 1, updated_by: "agent" });
+    expect(stale).toBeInstanceOf(ApiError);
+    expect(stale.status).toBe(409);
+    expect(stale.body.current).toMatchObject({ version: 1, updated_by: "agent" });
+  });
+
+  it("should give a 404 the caller can tell apart when the agent is not a conversation's", async () => {
+    // Act
+    const error = await api.getArtefact(agentId).catch((e) => e);
+
+    // Assert
+    expect(error.status).toBe(404);
+    expect(error.body).toEqual({ error: "not a conversation" });
+  });
+});
+
 describe("createApi stream", () => {
   it("should open the event stream and send Last-Event-ID when the client has one", async () => {
     // Arrange

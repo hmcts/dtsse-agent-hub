@@ -411,6 +411,48 @@ describe("enableSession", () => {
     expect(done?.subscribed).toEqual(["ccd"]);
   });
 
+  // The workspace suite drove this through `enableSession` from `agent.test.mjs`; it belongs beside `enableSession`.
+  it("should subscribe to no automatic topics when the session is an assistant conversation", async () => {
+    // Arrange
+    const launchToken = `launch-${"a".repeat(16)}`;
+    const hub = createMockHub({ launchTokens: { [launchToken]: { virtualId: "va-assist", owner: { oid: "oid-owner", name: "Olive Owner" } } } });
+    const url = await hub.listen();
+    const cwd = path.join(home.root, "apps", "pcs", "pcs-api");
+    fs.mkdirSync(cwd, { recursive: true });
+    // A pod, so no Azure sign-in is wanted: the single predicate needs the agent id as well as the token.
+    const env: Env = {
+      ...process.env,
+      AGENT_HUB_URL: url,
+      AGENT_HUB_VIRTUAL_AGENT_ID: "va-assist",
+      AGENT_HUB_LAUNCH_TOKEN: launchToken,
+      CLAUDE_CODE_MESSAGING_TOKEN: "tok"
+    };
+    const api = createApi({ baseUrl: url, launchToken });
+    registry("topics-plain", { kind: "interactive" });
+    registry("topics-conv", { kind: "interactive" });
+
+    try {
+      // Act
+      const plain = await enableSession("topics-plain", { cwd, env, api, proceed: () => false });
+      const conv = await enableSession("topics-conv", {
+        cwd,
+        env: { ...env, AGENT_HUB_CONVERSATION_ID: "0f8a6a1e-0000-4000-8000-000000000001" },
+        api,
+        proceed: () => false
+      });
+
+      // Assert
+      expect(plain).toBeNull();
+      expect(conv).toBeNull();
+      const subscribes = hub.calls.filter((c) => c.method === "PUT" && c.path.endsWith("/subscriptions"));
+      expect(subscribes, "the conversation subscribed to topics").toHaveLength(1);
+      expect(subscribes[0]?.body.topics).toContain("pcs");
+      expect(JSON.parse(fs.readFileSync(stateFile("topics-conv", "agent.json"), "utf8")).topics).toEqual([]);
+    } finally {
+      await hub.close();
+    }
+  });
+
   it("should return null without enabling the session when proceed says not to", async () => {
     // Arrange
     const sid = "enable-declined";

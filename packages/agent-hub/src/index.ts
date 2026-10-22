@@ -38,6 +38,9 @@ export type {
   AgentsResponse,
   Api,
   ApiErrorBody,
+  Artefact,
+  ArtefactBody,
+  ArtefactResponse,
   CreateApiOptions,
   CredentialKind,
   DirectBody,
@@ -55,6 +58,8 @@ export type {
   RegisterResponse,
   RequestOptions,
   RunAz,
+  SessionReport,
+  SessionsBody,
   Skill,
   StreamOptions,
   TopicListResponse,
@@ -66,8 +71,51 @@ export type {
   VirtualPhase
 } from "./api.ts";
 export { ApiError, CREDENTIAL_KINDS, createApi, createTokenProvider, DEFAULT_SCOPE, DEFAULT_URL, parseAzToken, requireAzureLogin } from "./api.ts";
+export type {
+  AssistantSupervisor,
+  ConversationSession,
+  CreateAssistantSupervisorOptions,
+  CreateTmuxOptions,
+  ReportOutcome,
+  RunAssistantSupervisorOptions,
+  SavedSession,
+  SessionPhase,
+  StartSessionOptions,
+  SupervisorFs,
+  Tmux,
+  TmuxExec,
+  TmuxResult,
+  Wake
+} from "./assistant/index.ts";
+export {
+  claudeCommand,
+  createAssistantSupervisor,
+  createTmux,
+  DEFAULT_IDLE_MINUTES,
+  DEFAULT_MAX_SESSIONS,
+  EXIT_GRACE_MS,
+  idleMinutes,
+  MAX_SESSIONS_LIMIT,
+  maxSessions,
+  PROMPT_FILE,
+  parseSavedSession,
+  parseWake,
+  REPORT_EVERY_MS,
+  runAssistantSupervisor,
+  tmuxName
+} from "./assistant/index.ts";
 export type { Deliver, DirectEventAuthor, DirectEventMessage, ReconnectDecision, RetryState, RunBridgeOptions, StreamEnd } from "./bridge.ts";
-export { nextBackoff, parseDirectEventMessage, RAPID_CLOSE_MS, RAPID_CLOSES_BEFORE_BACKOFF, readStatus, reconnectDelay, runBridge } from "./bridge.ts";
+export {
+  nextBackoff,
+  parseAssistantFrame,
+  parseAssistantProduct,
+  parseDirectEventMessage,
+  RAPID_CLOSE_MS,
+  RAPID_CLOSES_BEFORE_BACKOFF,
+  readStatus,
+  reconnectDelay,
+  runBridge
+} from "./bridge.ts";
 export type { DirectAuthor, DirectDirection, DirectEntry, DirectMessage, DirectPeer, RecordDirectOptions } from "./directs.ts";
 export { parseDirectEntry, peerOf, peerOfReply, readDirects, recordDirect } from "./directs.ts";
 export type {
@@ -94,8 +142,8 @@ export {
 } from "./enable.ts";
 export type { Env, EnvKey } from "./env.ts";
 export { ENV_KEYS } from "./env.ts";
-export type { EnvelopeAuthor, EnvelopeMessage, EnvelopeOptions } from "./envelope.ts";
-export { CLI, describeAuthor, directEnvelope, formatMessage, leadingSkill, ownerDirectEnvelope, ownerEnvelope } from "./envelope.ts";
+export type { AssistantFrame, AssistantProduct, EnvelopeAuthor, EnvelopeMessage, EnvelopeOptions } from "./envelope.ts";
+export { assistantEnvelope, CLI, describeAuthor, directEnvelope, formatMessage, leadingSkill, ownerDirectEnvelope, ownerEnvelope } from "./envelope.ts";
 export type {
   ChooseIdentityOptions,
   ChosenIdentity,
@@ -155,6 +203,7 @@ export {
   agentName,
   claudeHome,
   cliCommand,
+  conversationId,
   conversationTitles,
   DEFAULT_CONFIG,
   ensureStateDir,
@@ -167,6 +216,7 @@ export {
   parseSessionEntry,
   pidAlive,
   projectDir,
+  projectTranscriptPath,
   readJson,
   readPidFile,
   readText,

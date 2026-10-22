@@ -13,6 +13,8 @@ import { createMockHub, type MockHubOptions, type RecordedCall } from "./__fixtu
 import { createApi } from "./api.ts";
 import {
   nextBackoff,
+  parseAssistantFrame,
+  parseAssistantProduct,
   parseDirectEventMessage,
   RAPID_CLOSE_MS,
   RAPID_CLOSES_BEFORE_BACKOFF,
@@ -230,6 +232,60 @@ describe("parseDirectEventMessage", () => {
     // Assert
     expect(message?.in_reply_to).toBeNull();
     expect(message?.author).toEqual({ type: "user", agent_id: null, agent_name: null, owner_name: "Me", owner_email: null });
+  });
+});
+
+describe("parseAssistantFrame", () => {
+  it("should keep every field the envelope and the recorded product read when the frame is an assistant one", () => {
+    // Arrange
+    const sent = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 2, artefact_updated_by: "user" };
+
+    // Act & Assert
+    expect(parseAssistantFrame(sent)).toEqual(sent);
+    expect(parseAssistantFrame({ conversation_id: "c1", product: null, product_label: null, artefact_version: 0, artefact_updated_by: null })).toEqual({
+      conversation_id: "c1",
+      product: null,
+      product_label: null,
+      artefact_version: 0,
+      artefact_updated_by: null
+    });
+  });
+
+  it("should be null when the frame carries no assistant object, so the message is framed as the owner's", () => {
+    // Act & Assert
+    expect(parseAssistantFrame(undefined)).toBeNull();
+    expect(parseAssistantFrame(null)).toBeNull();
+    expect(parseAssistantFrame(5)).toBeNull();
+    expect(parseAssistantFrame(["c1"])).toBeNull();
+  });
+
+  it("should drop a field that is not what it should be when the frame is malformed", () => {
+    // Act
+    const frame = parseAssistantFrame({ conversation_id: 1, product: 2, product_label: 3, artefact_version: "4", artefact_updated_by: 5 });
+
+    // Assert
+    expect(frame).toEqual({
+      conversation_id: undefined,
+      product: undefined,
+      product_label: undefined,
+      artefact_version: null,
+      artefact_updated_by: undefined
+    });
+  });
+});
+
+describe("parseAssistantProduct", () => {
+  it("should keep the product and its label when the file is one the bridge wrote", () => {
+    // Act & Assert
+    expect(parseAssistantProduct({ product: "pcs", product_label: "Possession claims" })).toEqual({ product: "pcs", product_label: "Possession claims" });
+    expect(parseAssistantProduct({ product: null, product_label: null })).toEqual({ product: null, product_label: null });
+  });
+
+  it("should be null for a file that is not an object, and drop a field that is not a string", () => {
+    // Act & Assert
+    expect(parseAssistantProduct(null)).toBeNull();
+    expect(parseAssistantProduct("pcs")).toBeNull();
+    expect(parseAssistantProduct({ product: 7, product_label: ["x"] })).toEqual({ product: null, product_label: null });
   });
 });
 
@@ -609,6 +665,87 @@ describe("runBridge", () => {
         await hub.close();
       }
     });
+  });
+
+  it("should frame messages for the assistant, and say when the product changed, when direct frames carry assistant", async () => {
+    // Arrange
+    const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: "c1" } });
+    const assistant = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Act
+      const first = bridge.hub.sendDirectFromOwner(bridge.agentId, "what is a possession claim?", { assistant });
+      await waitUntil(() => bridge.socketWrites.length >= 1, "the first message");
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "and in CCD?", {
+        assistant: { ...assistant, product: "ccd", product_label: "Core Case Data", artefact_version: 2, artefact_updated_by: "user" }
+      });
+      await waitUntil(() => bridge.socketWrites.length >= 2, "the second message");
+
+      // Assert
+      const [one, two] = bridge.socketWrites as [string, string];
+      expect(one).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${first.id} from your user, Me Tester, `));
+      expect(one).toMatch(/\nProduct area: Possession claims\.\n/);
+      expect(one).not.toMatch(/switched/);
+      expect(two).toMatch(/\nProduct area: Core Case Data\.\n/);
+      expect(two).toMatch(/switched the product context from Possession claims to Core Case Data/);
+      expect(two).toMatch(/edited the conversation's document \(version 2\)/);
+      expect(JSON.parse(fs.readFileSync(statePath(bridge.sid, "assistant-product.json"), "utf8"))).toEqual({
+        product: "ccd",
+        product_label: "Core Case Data"
+      });
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  it("should keep the peer framing when an assistant frame comes from someone other than the owner", async () => {
+    // Arrange
+    const bridge = await startBridge({ pingMs: 5000 }, { env: VIRTUAL });
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+      const assistant = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
+
+      // Act
+      bridge.hub.sendDirectFromUser(bridge.agentId, "peer here", { oid: "u-peer", name: "Pat Peer", email: "pat@example.com" }, { assistant });
+      await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
+
+      // Assert
+      expect(bridge.socketWrites[0]).toMatch(/NOT from your user/);
+      expect(bridge.socketWrites[0]).not.toMatch(/Product area/);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  it("should send a heartbeat at once when the session turns busy or idle between heartbeats", async () => {
+    // Arrange: the short stream lifetime lets the bridge see it is stopped without waiting for a heartbeat.
+    const bridge = await startBridge({ pingMs: 5000, maxLifetimeMs: 500 }, { heartbeatMs: 60000, transcriptMs: 50 });
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
+
+    try {
+      await waitUntil(() => beats().length >= 1, "the heartbeat on connect");
+
+      // Act
+      fs.writeFileSync(statePath(bridge.sid, "status"), "busy\n");
+      await waitUntil(() => beats().length >= 2, "a heartbeat for busy", 2000);
+
+      // Assert
+      expect(beats()[1]?.body.status).toBe("busy");
+
+      // Act
+      fs.writeFileSync(statePath(bridge.sid, "status"), "idle\n");
+      await waitUntil(() => beats().length >= 3, "a heartbeat for idle", 2000);
+
+      // Assert
+      expect(beats()[2]?.body.status).toBe("idle");
+      await new Promise((r) => setTimeout(r, 300));
+      expect(beats(), "heartbeats sent with no change of status").toHaveLength(3);
+    } finally {
+      await bridge.stop();
+    }
   });
 
   it("should deliver as before when inbound is unset outside bypass-permissions mode", async () => {

@@ -29,7 +29,12 @@ export type StoredAgent = {
   skills?: Skill[];
   last_heartbeat_at?: string | null;
   read_cursor?: number;
+  conversation_id?: string;
 };
+
+export type Wake = { conversation_id: string; session_id: string; resume?: boolean };
+export type SessionsReport = { sessions: { conversation_id: string; state: string; detail?: string }[]; max: number };
+export type Artefact = { title: string | null; markdown: string; version: number; updated_by: string | null; updated_at: string | null };
 
 export type StoredMessage = {
   id: number;
@@ -43,6 +48,7 @@ export type StoredMessage = {
   body?: string;
   in_reply_to?: string | null;
   from_owner?: boolean;
+  assistant?: Record<string, unknown>;
 };
 
 export type VirtualRecord = {
@@ -53,6 +59,8 @@ export type VirtualRecord = {
   codes: Map<string, string>;
   completes: Record<string, unknown>[];
   ports: Record<string, unknown>[];
+  wakes: Wake[];
+  sessionReports: SessionsReport[];
 };
 
 export type RecordedCall = {
@@ -143,12 +151,26 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const streams = new Map<string, ServerResponse>();
   const calls: RecordedCall[] = [];
   const waiters: { match: (call: RecordedCall) => boolean; resolve: (call: RecordedCall) => void; timer?: NodeJS.Timeout }[] = [];
-  // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [] }
+  // virtual agent id → the open sessions stream
+  const sessionStreams = new Map<string, ServerResponse>();
+  // agent id → the conversation's document, for conversations' agents
+  const artefacts = new Map<string, Artefact>();
+  // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
   const virtuals = new Map<string, VirtualRecord>();
   // person oid → Map(kind → value), the /api/agent/credentials routes
   const personCredentials = new Map<string, Map<string, string>>();
   for (const { virtualId, owner } of Object.values(launchTokens)) {
-    virtuals.set(virtualId, { owner, status: [], credentials: new Map(), prompts: [], codes: new Map(), completes: [], ports: [] });
+    virtuals.set(virtualId, {
+      owner,
+      status: [],
+      credentials: new Map(),
+      prompts: [],
+      codes: new Map(),
+      completes: [],
+      ports: [],
+      wakes: [],
+      sessionReports: []
+    });
   }
   let nextId = 1000;
 
@@ -211,7 +233,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   function sendEvent(agentId: string, msg: StoredMessage | undefined) {
     const res = streams.get(agentId);
     if (res && msg) {
-      res.write(`id: ${msg.id}\nevent: direct\ndata: ${JSON.stringify({ message: view(msg), from_owner: msg.from_owner === true })}\n\n`);
+      const frame = { message: view(msg), from_owner: msg.from_owner === true, ...(msg.assistant ? { assistant: msg.assistant } : {}) };
+      res.write(`id: ${msg.id}\nevent: direct\ndata: ${JSON.stringify(frame)}\n\n`);
     }
   }
 
@@ -265,6 +288,56 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       }
       v.status.push(body.detail ? { phase: body.phase, detail: body.detail } : { phase: body.phase });
       return send(res, 204);
+    }
+    if (area === "sessions" && !kind) {
+      if (req.method === "PUT") {
+        const states = new Set(["starting", "live", "queued"]);
+        const ok =
+          Array.isArray(body.sessions) &&
+          body.sessions.length <= 50 &&
+          body.sessions.every(
+            (e: Body) =>
+              typeof e.conversation_id === "string" &&
+              states.has(e.state) &&
+              (e.detail === undefined || (typeof e.detail === "string" && e.detail.length <= 200))
+          ) &&
+          Number.isInteger(body.max) &&
+          body.max >= 1 &&
+          body.max <= 20;
+        if (!ok) {
+          return send(res, 400, { error: "bad sessions report" });
+        }
+        v.sessionReports.push(body as SessionsReport);
+        return send(res, 204);
+      }
+      if (req.method === "GET") {
+        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+        res.flushHeaders();
+        res.write(": connected\nretry: 1000\n\n");
+        sessionStreams.set(id, res);
+        const ping = setInterval(() => res.write(": ping\n\n"), pingMs);
+        const lifetime = options.maxLifetimeMs
+          ? setTimeout(() => {
+              if (options.reconnectEvent) {
+                res.write("event: reconnect\ndata: {}\n\n");
+              }
+              res.end();
+            }, options.maxLifetimeMs)
+          : null;
+        req.on("close", () => {
+          clearInterval(ping);
+          if (lifetime) {
+            clearTimeout(lifetime);
+          }
+          if (sessionStreams.get(id) === res) {
+            sessionStreams.delete(id);
+          }
+        });
+        for (const w of v.wakes) {
+          res.write(`event: wake\ndata: ${JSON.stringify(w)}\n\n`);
+        }
+        return;
+      }
     }
     if (req.method === "PUT" && area === "ports" && !kind) {
       const valid = (list: unknown) => Array.isArray(list) && list.length <= 10 && list.every((p) => Number.isInteger(p) && p >= 1024 && p <= 65535);
@@ -377,6 +450,14 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         host: body.host,
         status: "idle"
       });
+      if (body.conversation_id !== undefined) {
+        if (!launch) {
+          return send(res, 409, { error: "conversation_id needs a launch token" });
+        }
+        agent.conversation_id = body.conversation_id;
+        const v = virtuals.get(launch.virtualId) as VirtualRecord;
+        v.wakes = v.wakes.filter((w) => w.conversation_id !== body.conversation_id);
+      }
       if (body.skills !== undefined) {
         agent.skills = body.skills;
       } else {
@@ -605,6 +686,32 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       }
       return send(res, 200, { accepted });
     }
+    if (action === "artefact") {
+      if (!agent.conversation_id) {
+        return send(res, 404, { error: "not a conversation" });
+      }
+      const doc = artefacts.get(agent.id) || { title: null, markdown: "", version: 0, updated_by: null, updated_at: null };
+      if (req.method === "GET") {
+        return send(res, 200, doc);
+      }
+      if (req.method === "PUT") {
+        if (typeof body.markdown !== "string" || body.markdown.length > 100000 || !Number.isInteger(body.base_version)) {
+          return send(res, 400, { error: "bad artefact" });
+        }
+        if (body.base_version !== doc.version) {
+          return send(res, 409, { error: "version conflict", current: doc });
+        }
+        const next: Artefact = {
+          title: body.title ?? doc.title,
+          markdown: body.markdown,
+          version: doc.version + 1,
+          updated_by: "agent",
+          updated_at: new Date().toISOString()
+        };
+        artefacts.set(agent.id, next);
+        return send(res, 200, { version: next.version });
+      }
+    }
     if (action === "subscriptions") {
       const subs = subscriptions.get(agent.id) as Set<string>;
       if (req.method === "GET") {
@@ -639,6 +746,25 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     options,
     virtuals,
     personCredentials,
+    artefacts,
+    sessionStreams,
+    // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session
+    // registers for it.
+    sendWake(virtualId: string, data: Wake) {
+      const v = virtuals.get(virtualId) as VirtualRecord;
+      v.wakes.push(data);
+      sessionStreams.get(virtualId)?.write(`event: wake\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+    sendClose(virtualId: string, data: { conversation_id: string }) {
+      const v = virtuals.get(virtualId) as VirtualRecord;
+      v.wakes = v.wakes.filter((w) => w.conversation_id !== data.conversation_id);
+      sessionStreams.get(virtualId)?.write(`event: close\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+    // The person editing their conversation's document in the web UI.
+    editArtefactAsUser(agentId: string, markdown: string, title = "Draft") {
+      const doc = artefacts.get(agentId);
+      artefacts.set(agentId, { title, markdown, version: (doc?.version ?? 0) + 1, updated_by: "user", updated_at: new Date().toISOString() });
+    },
     // The next `count` stream requests, acks or transcript uploads answer `status` instead.
     failNextStreams(count: number, status = 500) {
       for (let i = 0; i < count; i++) {
@@ -662,7 +788,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       return `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     },
     async close(): Promise<void> {
-      for (const s of streams.values()) {
+      for (const s of [...streams.values(), ...sessionStreams.values()]) {
         s.destroy();
       }
       server.closeAllConnections?.();
@@ -671,14 +797,19 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       });
     },
     // Test hooks: a human (UI) or another agent sending to an agent.
-    sendDirectFromUser(targetAgentId: string, bodyText: string, user: Person = { oid: "u-alice", name: "Alice Smith", email: "alice@example.com" }) {
+    sendDirectFromUser(
+      targetAgentId: string,
+      bodyText: string,
+      user: Person = { oid: "u-alice", name: "Alice Smith", email: "alice@example.com" },
+      { assistant }: { assistant?: Record<string, unknown> } = {}
+    ) {
       users.set(user.oid, user);
-      return view(addMessage({ kind: "direct", author_oid: user.oid, target_agent_id: targetAgentId, body: bodyText }));
+      return view(addMessage({ kind: "direct", author_oid: user.oid, target_agent_id: targetAgentId, body: bodyText, assistant }));
     },
-    sendDirectFromOwner(targetAgentId: string, bodyText: string) {
+    sendDirectFromOwner(targetAgentId: string, bodyText: string, { assistant }: { assistant?: Record<string, unknown> } = {}) {
       const agent = agents.get(targetAgentId) as StoredAgent;
       const user = users.get(agent.owner_oid) || { oid: agent.owner_oid, name: "Owner", email: null };
-      return view(addMessage({ kind: "direct", author_oid: user.oid, target_agent_id: targetAgentId, body: bodyText, from_owner: true }));
+      return view(addMessage({ kind: "direct", author_oid: user.oid, target_agent_id: targetAgentId, body: bodyText, from_owner: true, assistant }));
     },
     addPost({
       topics,

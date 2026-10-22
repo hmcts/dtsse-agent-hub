@@ -19,9 +19,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
+import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
 import { captureStderr } from "./__fixtures__/pod-shims.ts";
+import { createApi, type RegisterBody } from "./api.ts";
 import { parseFlags, readStdinText, runCli, USAGE, UsageError } from "./cli.ts";
 import type { Env } from "./env.ts";
 import { VIRTUAL_USAGE } from "./virtual/index.ts";
@@ -1235,6 +1236,177 @@ printf '{"accessToken": "%s", "expires_on": "%s"}\\n' "${AZ_TOKEN}" "$(( $(date 
 function compareStrings(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
+
+// `artefact` needs a session registered for a conversation, which only a launch token can do, so it gets a hub
+// and a HOME of its own. The workspace suite ran these through the bin as a child process because its mock hub
+// shared the process; in process, `runCli` returns the same exit codes.
+describe("artefact, in an assistant conversation", () => {
+  const VID = "va-assist";
+  const LAUNCH = `launch-${"d".repeat(16)}`;
+  const OWNER = { oid: "oid-owner", name: "Olive Owner", email: "olive@example.com" };
+
+  let home: TempClaudeHome;
+  let hub: MockHub;
+  let url: string;
+  let nextSession = 0;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeAll(async () => {
+    home = tempClaudeHome();
+    for (const key of ["HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_PROJECT_DIR", "AGENT_HUB_URL", "AGENT_HUB_DEV_USER", "AGENT_HUB_LAUNCH_TOKEN"]) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    Object.assign(process.env, home.env, { CLAUDE_PROJECT_DIR: home.root });
+    hub = createMockHub({ launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    url = await hub.listen();
+  });
+
+  afterAll(async () => {
+    await hub.close();
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    home.cleanup();
+  });
+
+  // A session with comms enabled, registered for a conversation unless `conversation` is false.
+  async function session({ conversation = true }: { conversation?: boolean } = {}): Promise<{ sid: string; agentId: string }> {
+    const sid = `artefact-sess-${++nextSession}`;
+    const body: RegisterBody = { session_id: sid, name: sid };
+    if (conversation) {
+      body.conversation_id = `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`;
+    }
+    const { agent_id: agentId } = await createApi({ baseUrl: url, launchToken: LAUNCH }).register(body);
+    const dir = path.join(home.hub, sid);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "enabled"), "x");
+    fs.writeFileSync(path.join(dir, "agent.json"), JSON.stringify({ agent_id: agentId, session_id: sid, name: sid }));
+    return { sid, agentId };
+  }
+
+  async function cli(args: string[], { sid, input = "" }: { sid: string; input?: string }): Promise<Invocation> {
+    const out = sink();
+    // The single predicate wants the agent id as well as the token, where the workspace's `hasLaunchToken` took the token alone.
+    const env: Env = {
+      ...process.env,
+      AGENT_HUB_URL: url,
+      AGENT_HUB_VIRTUAL_AGENT_ID: VID,
+      AGENT_HUB_LAUNCH_TOKEN: LAUNCH,
+      CLAUDE_CODE_SESSION_ID: sid
+    };
+    const code = await runCli(args, { ...out.options, env, readStdin: () => input, cwd: () => home.root });
+    return { ...out, code };
+  }
+
+  const puts = (agentId: string) => hub.calls.filter((c) => c.method === "PUT" && c.path === `/api/agent/${agentId}/artefact`);
+
+  it("should print the markdown, or the whole document with --json, when artefact get runs in a conversation", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+
+    // Act
+    const empty = await cli(["artefact", "get"], { sid });
+
+    // Assert
+    expect(empty.code).toBe(0);
+    expect(empty.raw()).toBe("");
+    expect(empty.errors.join("\n")).toMatch(/document is empty \(version 0\)/);
+
+    // Act
+    hub.editArtefactAsUser(agentId, "# Stories\n\nAs a claimant…", "Fee stories");
+    const got = await cli(["artefact", "get"], { sid });
+    const json = await cli(["artefact", "get", "--json"], { sid });
+
+    // Assert
+    expect(got.code).toBe(0);
+    expect(got.raw()).toBe("# Stories\n\nAs a claimant…\n");
+    expect(json.code).toBe(0);
+    const { title, markdown, version, updated_by } = JSON.parse(json.lines[0] as string);
+    expect({ title, markdown, version, updated_by }).toEqual({ title: "Fee stories", markdown: "# Stories\n\nAs a claimant…", version: 1, updated_by: "user" });
+  });
+
+  it("should read the current version first and save stdin with the title when artefact put has no --base", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    hub.editArtefactAsUser(agentId, "first draft");
+
+    // Act
+    const r = await cli(["artefact", "put", "--title", "Research plan"], { sid, input: "# Research plan\n\n1. Recruit\n" });
+
+    // Assert
+    expect(r.code, r.errors.join("\n")).toBe(0);
+    expect(r.text()).toMatch(/saved the conversation's document as version 2/);
+    expect(puts(agentId)[0]?.body).toEqual({ markdown: "# Research plan\n\n1. Recruit\n", base_version: 1, title: "Research plan" });
+    expect(hub.artefacts.get(agentId)?.updated_by).toBe("agent");
+  });
+
+  it("should refuse to save, naming the current version, when the document changed since --base", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    hub.editArtefactAsUser(agentId, "one");
+    hub.editArtefactAsUser(agentId, "two");
+
+    // Act
+    const r = await cli(["artefact", "put", "--base", "1"], { sid, input: "my change" });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.errors.join("\n")).toMatch(/changed since version 1: it is now version 2, last written by the user\. Nothing was saved\./);
+    expect(r.errors.join("\n")).toMatch(/artefact get, merge your change into it, and put it again with --base 2/);
+    expect(hub.artefacts.get(agentId)?.markdown).toBe("two");
+  });
+
+  it("should refuse an empty document and a secret-shaped one when artefact put reads stdin", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+
+    // Act
+    const empty = await cli(["artefact", "put"], { sid, input: "  \n" });
+    const secret = await cli(["artefact", "put"], { sid, input: `token ${fakeSecrets.githubToken}` });
+
+    // Assert
+    expect(empty.code).toBe(2);
+    expect(empty.errors.join("\n")).toMatch(/reads the markdown from stdin, and it was empty/);
+    expect(secret.code).toBe(1);
+    expect(secret.errors.join("\n")).toMatch(/secret-shaped string/);
+    expect(puts(agentId)).toHaveLength(0);
+  });
+
+  it("should say the session has no document when artefact get runs outside a conversation", async () => {
+    // Arrange
+    const { sid } = await session({ conversation: false });
+
+    // Act
+    const r = await cli(["artefact", "get"], { sid });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.errors.join("\n")).toMatch(/not an HMCTS Assistant conversation/);
+  });
+
+  it("should refuse the arguments the other action takes, and a --base that is not a version", async () => {
+    // Arrange
+    const { sid } = await session();
+
+    // Act & Assert
+    for (const args of [
+      ["artefact"],
+      ["artefact", "edit"],
+      ["artefact", "get", "extra"],
+      ["artefact", "get", "--title", "T"],
+      ["artefact", "get", "--base", "1"],
+      ["artefact", "put", "--json"],
+      ["artefact", "put", "--base", "latest"]
+    ]) {
+      expect((await cli(args, { sid, input: "x" })).code, args.join(" ")).toBe(2);
+    }
+  });
+});
 
 describe("the CLI as a child process, through bin/agent-hub", () => {
   // enable → bridge → mock hub → fake inbox socket → ack, plus the Stop worker and SessionEnd, all against

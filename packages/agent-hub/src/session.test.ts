@@ -9,6 +9,7 @@ import {
   agentName,
   claudeHome,
   cliCommand,
+  conversationId,
   conversationTitles,
   DEFAULT_CONFIG,
   ensureStateDir,
@@ -21,6 +22,7 @@ import {
   parseSessionEntry,
   pidAlive,
   projectDir,
+  projectTranscriptPath,
   readJson,
   readPidFile,
   readText,
@@ -415,6 +417,22 @@ describe("transcriptPath", () => {
   it("should be null when nothing says where the transcript is", () => {
     expect(transcriptPath("sess-nowhere")).toBeNull();
     expect(transcriptPath("sess-nowhere", { sessionId: "sess-nowhere" })).toBeNull();
+  });
+});
+
+describe("projectTranscriptPath", () => {
+  it("should name the file Claude Code writes for a session run from a directory, whether or not it exists", () => {
+    // Act & Assert
+    expect(projectTranscriptPath("/workspace/cft-workspace", "sess-1")).toBe(path.join(home.claude, "projects", "-workspace-cft-workspace", "sess-1.jsonl"));
+  });
+});
+
+describe("conversationId", () => {
+  it("should be the conversation the supervisor started this session for, or null for every other session", () => {
+    // Act & Assert
+    expect(conversationId({ AGENT_HUB_CONVERSATION_ID: "0f8a6a1e-0000-4000-8000-000000000001" })).toBe("0f8a6a1e-0000-4000-8000-000000000001");
+    expect(conversationId({ AGENT_HUB_CONVERSATION_ID: "" })).toBeNull();
+    expect(conversationId({})).toBeNull();
   });
 });
 

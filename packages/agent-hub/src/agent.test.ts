@@ -374,6 +374,35 @@ describe("registerAgent", () => {
     }
   });
 
+  it("should register with the conversation id, and keep it in agent.json, when AGENT_HUB_CONVERSATION_ID is set", async () => {
+    // Arrange
+    const launchToken = `launch-${"a".repeat(16)}`;
+    const conversation = "0f8a6a1e-0000-4000-8000-000000000001";
+    const hub = createMockHub({ launchTokens: { [launchToken]: { virtualId: "va-assist", owner: { oid: "oid-owner", name: "Olive Owner" } } } });
+    const url = await hub.listen();
+    const api = createApi({ baseUrl: url, launchToken });
+    const registrations = () => hub.calls.filter((c) => c.path === "/api/agent/register");
+
+    try {
+      // Act
+      await registerAgent(api, "conv-sess", { cwd: home.root, env: { AGENT_HUB_CONVERSATION_ID: conversation }, collectSkills: () => [] });
+
+      // Assert
+      expect(registrations()[0]?.body.conversation_id).toBe(conversation);
+      expect(loadAgent("conv-sess")?.conversation_id).toBe(conversation);
+
+      // Act
+      await registerAgent(api, "plain-sess", { cwd: home.root, env: {}, collectSkills: () => [] });
+
+      // Assert: the whitelist parser answers `undefined` for a field it did not read, so the file is what to check.
+      expect(registrations()[1]?.body).not.toHaveProperty("conversation_id");
+      expect(loadAgent("plain-sess")?.conversation_id).toBeUndefined();
+      expect(readJson(statePath("plain-sess", "agent.json"))).not.toHaveProperty("conversation_id");
+    } finally {
+      await hub.close();
+    }
+  });
+
   it("should send the skills with the registration and remember their hash", async () => {
     // Arrange
     const hub = createMockHub();

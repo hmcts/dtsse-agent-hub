@@ -39,6 +39,8 @@ afterEach(() => {
   v.credentials.clear();
   v.codes.clear();
   v.ports.length = 0;
+  v.wakes.length = 0;
+  v.sessionReports.length = 0;
   pod.reset();
 });
 
@@ -251,6 +253,30 @@ describe("runVirtual watch-ports", () => {
   });
 });
 
+describe("runVirtual assistant-supervisor", () => {
+  it("should adopt nothing, report what it runs and exit 0 on SIGTERM when no conversation is waiting", async () => {
+    // Arrange: a tmux that answers as one with no server, so nothing running on the machine is touched.
+    pod.shim("tmux", "exit 1");
+    const env = pod.env({ AGENT_HUB_SUPERVISOR_TICK_MS: "50" });
+
+    // Act
+    const { result, stderr } = await captureStderr(async () => {
+      const running = runVirtual(["assistant-supervisor"], { api: api(), env });
+      const deadline = Date.now() + 10000;
+      while (virtual().sessionReports.length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      process.emit("SIGTERM");
+      return running;
+    });
+
+    // Assert
+    expect(result).toBe(0);
+    expect(virtual().sessionReports).toEqual([{ sessions: [], max: 2 }]);
+    expect(stderr).toMatch(/assistant supervisor started: at most 2 sessions at once, each stopped after 20 idle minutes/);
+  });
+});
+
 describe("runVirtual cache-sync", () => {
   it("should store nothing and exit 0 when --once finds neither sign-in", async () => {
     // Act
@@ -274,6 +300,8 @@ describe("runVirtual help", () => {
     expect(nothing.printed).toEqual([VIRTUAL_USAGE]);
     expect(VIRTUAL_USAGE).toContain("usage: scripts/agent-hub virtual <command>");
     expect(VIRTUAL_USAGE).toContain("Kinds: github, azure, claude, bedrock, jenkins, atlassian, claude_md, git_identity.");
+    expect(VIRTUAL_USAGE).toMatch(/assistant-supervisor {8}beside the main session: run one Claude session per HMCTS Assistant conversation/);
+    expect(VIRTUAL_USAGE).toContain("AGENT_HUB_MAX_SESSIONS");
   });
 
   it("should exit 1 with the usage when the command is not one of them", async () => {

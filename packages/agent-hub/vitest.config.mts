@@ -11,8 +11,8 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**"],
-      // The three barrels: each is re-exports only, so a line of either is only ever "reached" by importing it.
-      exclude: ["src/__fixtures__/**", "src/index.ts", "src/stop-worker/index.ts", "src/virtual/index.ts"],
+      // The four barrels: each is re-exports only, so a line of any is only ever "reached" by importing it.
+      exclude: ["src/__fixtures__/**", "src/index.ts", "src/assistant/index.ts", "src/stop-worker/index.ts", "src/virtual/index.ts"],
       reporter: ["lcov", "text"],
       reportsDirectory: "coverage",
       thresholds: {
