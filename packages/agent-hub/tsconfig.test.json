@@ -1,0 +1,11 @@
+{
+  // The tests and fixtures, which the emit project excludes to keep them out of the tarball. Vitest only transpiles,
+  // so without this project nothing typechecks them.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

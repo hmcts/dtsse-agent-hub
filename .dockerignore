@@ -19,6 +19,13 @@ allure-report/
 docs/
 test/e2e/
 
+# Docker patterns are path-anchored, so the rules above do not reach into a workspace. Only the published
+# client's package.json belongs in the build context; its sources never enter the image.
+packages/*/dist/
+packages/*/coverage/
+packages/*/node_modules/
+packages/*/*.tsbuildinfo
+
 # Credential material, mirroring .gitignore. These files are untracked, so they only ever exist in a
 # developer's working copy — but the build context is uploaded to the registry, so an ignore rule here
 # is the only thing keeping a GitHub App private key out of that upload.

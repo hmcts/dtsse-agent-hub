@@ -1,0 +1,202 @@
+name: Release the client
+
+# The published client is one workspace package beside the app. The app is released as a Docker
+# image by Jenkins (Jenkinsfile_CNP); this publishes @hmcts-cft/agent-hub to Azure Artifacts, and
+# only when that package changed — otherwise every web-UI commit would cut a client release.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'packages/agent-hub/**'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+# Never cancel a release in progress: two overlapping publishes would race on the version number
+# and one of them would publish a version that is already taken.
+concurrency:
+  group: release-client-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Jenkins runs on pull requests, not on a push to master, so without this a direct push to
+  # master would publish whatever it was given.
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+
+      # The hmcts-lib feed allows anonymous reads, so this needs no credential. Only publishing
+      # does; see the release job.
+      - name: Install
+        # --mode=skip-build: do not run dependencies' lifecycle scripts. Nothing here needs them, and the
+        # release job holds the credential that can publish, so an install is the wrong place to execute
+        # third-party code. Verified: install and the client build both succeed without them.
+        run: yarn install --immutable --mode=skip-build
+
+      # `yarn typecheck` covers the app as well as the package, and the app's types do not exist
+      # until the Prisma client is generated.
+      - name: Generate the Prisma client
+        run: yarn db:generate
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Typecheck
+        run: yarn typecheck
+
+      # The package's own suite and thresholds. Not `yarn test`, which also runs the app's and
+      # needs a database.
+      - name: Test the client
+        run: yarn workspace @hmcts-cft/agent-hub run test:coverage
+
+      - name: Build the client
+        run: yarn workspace @hmcts-cft/agent-hub run build
+
+      # The bins are bash and are not compiled, so a packaging mistake is invisible to tsc.
+      - name: Check the tarball contents
+        working-directory: packages/agent-hub
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const pkg = require("./package.json");
+            const files = require("/tmp/pack.json")[0].files.map((f) => f.path);
+            // Derived from the manifest so a new bin is covered without touching this workflow.
+            const bins = typeof pkg.bin === "string" ? [pkg.bin] : Object.values(pkg.bin ?? {});
+            const required = [...bins, "secret-patterns", "dist/cli.js"];
+            const missing = required.filter((f) => !files.includes(f));
+            const leaked = files.filter((f) => /^src\/|\.test\.|__fixtures__/.test(f));
+            if (missing.length) throw new Error("missing from the tarball: " + missing.join(", "));
+            if (leaked.length) throw new Error("should not be published: " + leaked.join(", "));
+            console.log(files.length + " files, nothing leaked");
+          '
+
+      - name: Shellcheck the bins
+        run: shellcheck -s bash packages/agent-hub/bin/*
+
+  release:
+    needs: gates
+    runs-on: ubuntu-latest
+    # No id-token: npm provenance is npmjs.org-only and Azure Artifacts does not support it.
+    permissions:
+      contents: write
+    steps:
+      # The tip of the branch, not the commit that triggered this run: on a `push` event those differ as soon
+      # as a second merge lands, and committing the bump onto a tree that is missing the previous one's would
+      # make the push a non-fast-forward.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+
+      - name: Install
+        # --mode=skip-build: do not run dependencies' lifecycle scripts. Nothing here needs them, and the
+        # release job holds the credential that can publish, so an install is the wrong place to execute
+        # third-party code. Verified: install and the client build both succeed without them.
+        run: yarn install --immutable --mode=skip-build
+
+      - name: Build the client
+        run: yarn workspace @hmcts-cft/agent-hub run build
+
+      # Kept line-for-line from cnp-githubactions-library/npm-publish-library so that moving to
+      # the shared action later is a straight substitution.
+      # Deliberately after the install: until this step runs, the publish credential is neither on disk nor
+      # in any step's environment, so nothing that an install executes could read it. Keep it in this order.
+      - name: Configure npm authentication for Azure Artifacts
+        env:
+          AZURE_DEVOPS_ARTIFACT_USERNAME: ${{ secrets.AZURE_DEVOPS_ARTIFACT_USERNAME }}
+          AZURE_DEVOPS_ARTIFACT_TOKEN: ${{ secrets.AZURE_DEVOPS_ARTIFACT_TOKEN }}
+          FEED_URL: https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/
+          NPM_SCOPE: '@hmcts-cft'
+        run: |
+          token_b64="$(printf %s "$AZURE_DEVOPS_ARTIFACT_TOKEN" | base64 | tr -d '\n')"
+          username="${AZURE_DEVOPS_ARTIFACT_USERNAME:-github}"
+          feed="${FEED_URL%/}/"
+          # Strip the scheme to build the npm-style "//host/path/" auth keys.
+          feed_no_scheme="${feed#https:}"
+          cat > "$HOME/.npmrc" <<EOF
+          registry=${feed}
+          always-auth=true
+          ${feed_no_scheme}:username=${username}
+          ${feed_no_scheme}:_password=${token_b64}
+          ${feed_no_scheme}:email=github-actions@hmcts.net
+          EOF
+          # Defend against publishConfig.registry going missing — npm prefers @<scope>:registry
+          # over the default `registry=` line.
+          echo "@${NPM_SCOPE#@}:registry=${feed}" >> "$HOME/.npmrc"
+
+      # The next version is derived from the feed rather than from package.json, so that a bump this job failed
+      # to push — it is a direct push to a protected branch — cannot leave every later run re-publishing a
+      # version that is already taken, with nothing to do about it but bump by hand. Reads need no credential,
+      # but this runs after the npmrc is written so that it reads the same feed publishing will write to. A
+      # committed version ahead of the feed is a deliberate minor or major bump and is published as it stands.
+      - name: Work out the next version
+        id: bump
+        working-directory: packages/agent-hub
+        run: |
+          if published="$(npm view "$(node -p 'require("./package.json").name')" versions --json 2>/dev/null)"; then
+            echo "the feed holds: $published"
+          else
+            # Nothing readable on the feed: the first-ever publish starts at the committed version.
+            echo "the feed answered for no published version"
+            published="[]"
+          fi
+          # The node script is single-quoted so that the shell leaves its `$` anchors alone (SC2016); the one
+          # value it needs comes in through the environment.
+          # shellcheck disable=SC2016
+          version="$(PUBLISHED="$published" node -e '
+            const committed = require("./package.json").version;
+            const parse = (v) => (/^\d+\.\d+\.\d+$/.test(v) ? v.split(".").map(Number) : null);
+            const order = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+            let raw = [];
+            try {
+              raw = JSON.parse(process.env.PUBLISHED);
+            } catch {}
+            // `npm view` answers with a bare string when the feed holds exactly one version, and prereleases
+            // are not ours to patch, so anything that is not a plain x.y.z is dropped.
+            const released = (Array.isArray(raw) ? raw : [raw]).map(parse).filter((v) => v !== null).sort(order);
+            const highest = released[released.length - 1];
+            if (!highest) {
+              console.log(committed);
+            } else {
+              const ours = parse(committed);
+              console.log(ours && order(ours, highest) > 0 ? committed : [highest[0], highest[1], highest[2] + 1].join("."));
+            }
+          ')"
+          npm version "$version" --no-git-tag-version --allow-same-version
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish
+        working-directory: packages/agent-hub
+        run: npm publish
+
+      # Publish first: a tag with no package behind it is worse than an unbumped master.
+      - name: Commit the bump and tag the release
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/agent-hub/package.json
+          # The computed version is already the committed one on the first publish and on a minor or major
+          # bump made by hand, and `git commit` with nothing staged fails.
+          # This cannot loop: pushes made with GITHUB_TOKEN do not trigger workflows.
+          git diff --cached --quiet || git commit -m "chore: release @hmcts-cft/agent-hub v${VERSION} [skip ci]"
+          git tag "agent-hub-v${VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "agent-hub-v${VERSION}"

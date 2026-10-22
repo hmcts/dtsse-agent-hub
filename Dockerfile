@@ -13,6 +13,10 @@ USER hmcts
 
 COPY --chown=hmcts:hmcts package.json yarn.lock .yarnrc.yml ./
 COPY --chown=hmcts:hmcts .yarn ./.yarn
+# Yarn builds the project graph from the lockfile and needs every workspace manifest present, so the published
+# client's package.json comes in even though the server does not consume the client: manifest only, never its
+# src/, bin/ or dist/.
+COPY --chown=hmcts:hmcts packages/agent-hub/package.json ./packages/agent-hub/
 
 RUN yarn install --immutable
 
@@ -39,6 +43,7 @@ ENV NODE_ENV=production
 
 COPY --chown=hmcts:hmcts package.json yarn.lock .yarnrc.yml ./
 COPY --chown=hmcts:hmcts .yarn ./.yarn
+COPY --chown=hmcts:hmcts packages/agent-hub/package.json ./packages/agent-hub/
 RUN yarn workspaces focus --production 2>/dev/null || yarn install --immutable
 
 COPY --from=build --chown=hmcts:hmcts /app/.next/standalone ./
