@@ -1,0 +1,95 @@
+name: Publish the virtual-agent image
+
+# The image a virtual agent's pod runs: the cft-workspace devcontainer image plus the published
+# @hmcts-cft/agent-hub client. Nothing consumes it yet — the orchestrator's `VIRTUAL_AGENT_IMAGE` is
+# pinned by digest in cnp-flux-config and still points at the devcontainer image; moving it is a
+# separate change.
+on:
+  # After the client is published, not alongside it. release.yml publishes on a push to master, so a
+  # build triggered by that same push would race the publish and bake the previous version — and the
+  # whole point of this image is to carry the newest one.
+  workflow_run:
+    workflows: ['Release the client']
+    types: [completed]
+  # A change to the image's own files does not wait for a client release.
+  push:
+    branches: [master]
+    paths:
+      - 'docker/virtual-agent/**'
+      - '.github/workflows/publish-virtual-agent-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+# Never two publishes at once: both push `latest`, and the one that finishes second would win
+# whichever client it happens to carry.
+concurrency:
+  group: publish-virtual-agent-image
+  cancel-in-progress: false
+
+env:
+  REGISTRY: hmctsprod
+  # The same dtsse/ prefix as the app's own image, hmctsprod.azurecr.io/dtsse/agent-hub, and named
+  # for what the image is rather than for this repository: it is what a virtual agent runs, not the
+  # hub.
+  IMAGE_NAME: dtsse/virtual-agent
+
+jobs:
+  publish:
+    # A release that failed, or one on a branch, must not publish an image. The push trigger is
+    # master-only already; a manual run is deliberately not restricted, since rebuilding to pick up
+    # a newer client is the one thing someone would want to do by hand.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute the tags
+        id: tags
+        run: |
+          set -euo pipefail
+          echo "sha=$(echo "${GITHUB_SHA}" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          echo "stamp=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      # No build cache, deliberately, and nothing here may add one. The action defaults both cache
+      # inputs to type=gha, so they are set empty rather than left out.
+      #
+      # Caching is what broke the arrangement this image replaces: a RUN layer's cache key is its
+      # instruction text plus its parent layer, neither of which changes between builds, so
+      # cft-workspace's `npm install -g @hmcts-cft/agent-hub@latest` layer was reused for every
+      # build after the first and the baked client froze at one version. The build here is one RUN
+      # on a pulled base, so a cache would save seconds and cost the only thing the image is for.
+      #
+      # `image-tags` goes to docker/metadata-action, which splits on newlines and not on commas
+      # (a tag pattern's own attributes are comma-separated), despite the input's description.
+      # `prod-<sha7>-<UTC timestamp>` is the time-sortable one: Flux image automation follows the
+      # pod image and its ImagePolicy sets no filterTags, so it orders on the tag string itself.
+      # The sha7 is this repository's commit; which client version an image carries is in its build
+      # log, from the `npm ls` at the end of the Dockerfile's RUN, or read back out of the image
+      # with `docker run --rm <image> bash -lc 'npm ls -g --depth=0 @hmcts-cft/agent-hub'`.
+      #
+      # linux/amd64 only. This image only ever runs as a pod in AKS; cft-workspace builds arm64 as
+      # well because engineers run that image on Apple silicon, and nobody runs this one locally. One
+      # architecture needs no per-arch job and no `docker buildx imagetools create` merge.
+      - name: Build and push
+        uses: hmcts/cnp-githubactions-library/container-build-push-openid@main
+        with:
+          registry-name: ${{ env.REGISTRY }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          image-name: ${{ env.IMAGE_NAME }}
+          dockerfile: docker/virtual-agent/Dockerfile
+          # The Dockerfile copies nothing in, so the context is its own directory and not the repository.
+          context: docker/virtual-agent
+          image-tags: |
+            latest
+            ${{ steps.tags.outputs.sha }}
+            prod-${{ steps.tags.outputs.sha }}-${{ steps.tags.outputs.stamp }}
+          platforms: linux/amd64
+          cache-from: ''
+          cache-to: ''

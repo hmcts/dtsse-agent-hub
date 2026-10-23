@@ -259,6 +259,17 @@ the namespace's `default` ServiceAccount, with no ServiceAccount token mounted a
 capability dropped, the CPU and memory of its size and 2–10Gi of ephemeral storage. `VIRTUAL_AGENT_HOST_ALIASES` become
 the pod's `hostAliases`.
 
+**The image.** `docker/virtual-agent/Dockerfile` is the image a pod is meant to run:
+`hmctsprod.azurecr.io/cft-workspace/devcontainer` with `@hmcts-cft/agent-hub` installed globally and both its bins
+linked into `/usr/local/bin`, where the kubelet finds `virtual-agent-boot` having no shell to source nvm with. It
+changes nothing else — the user, `HOME`, node, tmux, git, gh and curl are all the devcontainer's, and the pod depends
+on them. `.github/workflows/publish-virtual-agent-image.yml` publishes it to `hmctsprod.azurecr.io/dtsse/virtual-agent`
+for linux/amd64 after a client release succeeds on master, uncached so that every build reaches the feed, tagged
+`latest`, `<sha7>` and the time-sortable `prod-<sha7>-<UTC timestamp>`. Which client version a build baked in is in its
+log, or `npm ls -g --depth=0 @hmcts-cft/agent-hub` inside the image. `VIRTUAL_AGENT_IMAGE` is pinned by digest in
+cnp-flux-config and still points at the devcontainer image, which carries the same two things; moving it is its own
+change.
+
 **The client the pod boots on.** `virtual-agent-boot` installs `@hmcts-cft/agent-hub@latest` over the one its image
 carries before handing over to the checkout's entrypoint, so a client release reaches a pod without an image rebuild
 and a digest bump. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
