@@ -2,14 +2,14 @@
 // exit code rather than exiting, so the CLI stays the only place that touches the process.
 import type { Api } from "../api.ts";
 import { CREDENTIAL_KINDS, createApi } from "../api.ts";
-import { createJiraExporter, runAssistantSupervisor } from "../assistant/index.ts";
+import { runAssistantSupervisor } from "../assistant/index.ts";
 import type { Env } from "../env.ts";
 import { CLI } from "../envelope.ts";
 import { setGitIdentity } from "../git-identity.ts";
 import { watchPorts } from "../ports.ts";
 import { withRetry } from "../retry.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
-import { atlassianLogin, readAtlassianAuth } from "./atlassian.ts";
+import { atlassianLogin } from "./atlassian.ts";
 import { cacheSync } from "./cache-sync.ts";
 import { readStdinText, runCredentialCommand } from "./credentials.ts";
 import { EXIT_FATAL, EXIT_NO_CREDENTIAL, FatalError, isVirtualPhase, PHASES, say } from "./phases.ts";
@@ -28,8 +28,7 @@ export const VIRTUAL_USAGE = `usage: ${CLI} virtual <command>
   git-identity                set the global git user.name and user.email (and push/init defaults)
   watch-ports                 report the ports listening in the pod to agent-hub when they change (every 5s)
   assistant-supervisor        beside the main session: run one Claude session per HMCTS Assistant conversation
-                              the hub wakes, in tmux session c-<first 8 of its id>, and stop the idle ones;
-                              and export conversations' documents to Jira with the twg sign-in
+                              the hub wakes, in tmux session c-<first 8 of its id>, and stop the idle ones
   credential get <kind>       print a stored credential (exit ${EXIT_NO_CREDENTIAL} if there is none)
   credential put <kind>       store a credential read from stdin
 
@@ -85,20 +84,9 @@ export async function runVirtual(
       case "watch-ports":
         await watchPorts({ api: hub(), id: requireVirtualAgent(env).id, env, say });
         return 0;
-      case "assistant-supervisor": {
-        const api = hub();
-        const { id } = requireVirtualAgent(env);
-        const jira = createJiraExporter({
-          api,
-          id,
-          exec: (cmd, args, { timeoutMs }) => run(cmd, args, { env, timeoutMs }),
-          signedIn: () => readAtlassianAuth(env) !== null,
-          login: () => atlassianLogin({ api, env }),
-          say
-        });
-        await runAssistantSupervisor({ api, id, env, say, jira });
+      case "assistant-supervisor":
+        await runAssistantSupervisor({ api: hub(), id: requireVirtualAgent(env).id, env, say });
         return 0;
-      }
       case "credential":
         return await runCredentialCommand({ api: hub(), id: requireVirtualAgent(env).id, argv: rest, stdout, readStdin });
       case undefined:

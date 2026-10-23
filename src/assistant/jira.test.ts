@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isJiraProject, JIRA_EXPORT_TIMEOUT_MS, type JiraExportRow, jiraExportView, jiraIssueUrl } from "./jira.ts";
+import { isJiraProject, JIRA_EXPORT_TIMEOUT_MS, type JiraExportRow, jiraExportView, jiraIssueUrl, pendingJiraExport } from "./jira.ts";
 
 const NOW = new Date("2026-10-23T10:00:00.000Z");
 
@@ -63,5 +63,22 @@ describe("isJiraProject", () => {
 describe("jiraIssueUrl", () => {
   it("should link to the issue on the HMCTS site when given its key", () => {
     expect(jiraIssueUrl("VIBE-1")).toBe("https://hmcts.atlassian.net/browse/VIBE-1");
+  });
+});
+
+describe("pendingJiraExport", () => {
+  const EXPORT = "33333333-3333-4333-8333-333333333333";
+  const asked = row({ jiraExportId: EXPORT, jiraProject: "VIBE", jiraStatus: "pending", jiraRequestedAt: new Date(NOW.getTime() - 60_000) });
+
+  it("should give the session what to create and the id to report it under when an export is pending", () => {
+    expect(pendingJiraExport(asked, NOW)).toEqual({ export_id: EXPORT, project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] });
+  });
+
+  it.each([
+    ["reported", { jiraStatus: "done", jiraKey: "VIBE-1" }],
+    ["failed", { jiraStatus: "failed" }],
+    ["timed out", { jiraRequestedAt: new Date(NOW.getTime() - JIRA_EXPORT_TIMEOUT_MS - 1000) }]
+  ])("should give nothing when the export has %s", (_, change) => {
+    expect(pendingJiraExport({ ...asked, ...change }, NOW)).toBeUndefined();
   });
 });

@@ -13,6 +13,7 @@ import {
   assistantEnvelope,
   directEnvelope,
   type EnvelopeOptions,
+  type JiraExportFrame,
   ownerDirectEnvelope,
   ownerEnvelope
 } from "./envelope.ts";
@@ -162,8 +163,35 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     product: asNullableString(raw.product),
     product_label: asNullableString(raw.product_label),
     artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
-    artefact_updated_by: asNullableString(raw.artefact_updated_by)
+    artefact_updated_by: asNullableString(raw.artefact_updated_by),
+    jira_export: parseJiraExportFrame(raw.jira_export)
   };
+}
+
+const EXPORT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
+const WORD_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * A pending Jira export on the frame, or null. Its values go into the `twg` command the session is told to run, so
+ * anything but an id, a project key and plain words is dropped rather than passed on.
+ */
+export function parseJiraExportFrame(value: unknown): JiraExportFrame | null {
+  const raw = asRecord(value);
+  if (
+    !raw ||
+    typeof raw.export_id !== "string" ||
+    !EXPORT_ID_RE.test(raw.export_id) ||
+    typeof raw.project !== "string" ||
+    !PROJECT_RE.test(raw.project) ||
+    typeof raw.issue_type !== "string" ||
+    !WORD_RE.test(raw.issue_type) ||
+    !Array.isArray(raw.labels) ||
+    !raw.labels.every((label) => typeof label === "string" && WORD_RE.test(label))
+  ) {
+    return null;
+  }
+  return { export_id: raw.export_id, project: raw.project, issue_type: raw.issue_type, labels: raw.labels as string[] };
 }
 
 /** The recorded product of the last delivery, which only this module writes; null for anything else. */

@@ -169,6 +169,30 @@ describe("assistantEnvelope", () => {
     expect(text).toMatch(/^\[agent-hub\] Direct message #7 from your user, your user, typed into the HMCTS Assistant\.$/m);
     expect(text.split("\n")).toContain("Product area: not chosen.");
   });
+
+  it("should give the exact twg steps and the export id to report under when a Jira export is pending", () => {
+    // Arrange
+    const exportId = "5b0e7c1a-1111-4222-8333-444455556666";
+    const frame: AssistantFrame = { ...pcs, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] } };
+
+    // Act
+    const text = assistantEnvelope({ ...personMessage, body: "Please export this document to the VIBE backlog in Jira." }, frame, null);
+
+    // Assert
+    expect(text).toMatch(`export the conversation's document to the VIBE backlog in Jira (export ${exportId})`);
+    expect(text).toMatch(`If you have already created a ticket for export ${exportId}, do not create another`);
+    expect(text).toMatch(/virtual atlassian-login/);
+    expect(text).toContain(
+      `twg jira workitem create --space=VIBE --type=Story --summary="$(cat /tmp/jira-export-${exportId}/title)" --description="$(cat /tmp/jira-export-${exportId}/document.md)" --description-format=markdown --labels=hmcts-assistant --output=json --output-summary=none`
+    );
+    expect(text).toMatch(`jira report ${exportId} --key <KEY>`);
+    expect(text.endsWith("\n---\nPlease export this document to the VIBE backlog in Jira.")).toBe(true);
+  });
+
+  it("should say nothing of Jira when no export is pending", () => {
+    // Act & Assert
+    expect(assistantEnvelope(personMessage, { ...pcs, jira_export: null }, null)).not.toMatch(/Jira|twg/);
+  });
 });
 
 describe("envelopes", () => {

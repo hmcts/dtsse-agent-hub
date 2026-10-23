@@ -198,8 +198,10 @@ export async function saveArtefact(input: {
 }
 
 /**
- * Sends the conversation's saved document to the Jira backlog of `project`, as a Story the person's assistant creates
- * with their Atlassian sign-in. The panel follows the export through the conversation's events.
+ * Asks the person's assistant to create the conversation's saved document in the Jira backlog of `project`, as a Story
+ * it makes with `twg` and their Atlassian sign-in. The request is an ordinary message in the chat, so the person sees
+ * what was asked; how to carry it out goes to the session in the message's frame. The panel follows the export
+ * through the conversation's events.
  */
 export async function exportArtefactToJira(input: { conversationId: unknown; project: unknown }): Promise<ActionResult> {
   return await runAction("export artefact to jira", async () => {
@@ -212,6 +214,7 @@ export async function exportArtefactToJira(input: { conversationId: unknown; pro
       return MISSING;
     }
     await requestJiraExport(prisma, conversation, input.project);
+    await send(viewer.oid, conversation, `Please export this document to the ${String(input.project)} backlog in Jira.`);
     return { ok: true };
   });
 }

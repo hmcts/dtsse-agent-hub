@@ -1,8 +1,8 @@
 /**
- * Exporting a conversation's document to a Jira backlog, once: the boards on offer and what the panel shows. The
- * pod creates the issue with its owner's `twg` sign-in, so they are its reporter, and reports the key back; the hub
- * only records what was asked for and what came of it (`jira-store.ts`). See "Jira export" under Conversations in
- * docs/agent-api.md.
+ * Exporting a conversation's document to a Jira backlog, once: the boards on offer, what the panel shows, and what
+ * the conversation's session is told while an export is pending. The session creates the issue with `twg` and its
+ * owner's sign-in, so they are its reporter, and reports the key back; the hub only records what was asked for and
+ * what came of it (`jira-store.ts`). See "Jira export" under Conversations in docs/agent-api.md.
  */
 export const JIRA_SITE_URL = "https://hmcts.atlassian.net";
 
@@ -75,4 +75,30 @@ export function jiraExportView(row: JiraExportRow, now: Date = new Date()): Jira
     return { status: "failed", project: row.jiraProject, error: row.jiraError ?? "The ticket could not be created." };
   }
   return { status: "none" };
+}
+/** What a direct frame to the conversation's session carries while an export is pending: what to create, and the id to report it under. */
+export interface JiraExportFrame {
+  export_id: string;
+  project: string;
+  issue_type: string;
+  labels: string[];
+}
+
+/** The conversation's pending export, for its session's next message; none once reported or timed out. */
+export function pendingJiraExport(
+  row: { jiraExportId: string | null; jiraProject: string | null; jiraStatus: string | null; jiraKey: string | null; jiraRequestedAt: Date | null },
+  now: Date = new Date()
+): JiraExportFrame | undefined {
+  const requestedAt = row.jiraRequestedAt?.getTime();
+  if (
+    row.jiraStatus !== "pending" ||
+    row.jiraKey !== null ||
+    row.jiraExportId === null ||
+    row.jiraProject === null ||
+    requestedAt === undefined ||
+    now.getTime() - requestedAt > JIRA_EXPORT_TIMEOUT_MS
+  ) {
+    return undefined;
+  }
+  return { export_id: row.jiraExportId, project: row.jiraProject, issue_type: JIRA_ISSUE_TYPE, labels: [...JIRA_LABELS] };
 }

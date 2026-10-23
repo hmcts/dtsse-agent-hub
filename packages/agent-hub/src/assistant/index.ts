@@ -1,8 +1,5 @@
 // The pod side of the HMCTS Assistant's conversations: one interactive Claude session per conversation, beside
-// the virtual agent's own, and the export of their documents to Jira. Gathered for the CLI and the package's public
-// surface.
-export type { CreateJiraExporterOptions, JiraExport, JiraExporter, JiraExporterFs } from "./jira.ts";
-export { createJiraExporter, issueKey, MAX_DESCRIPTION, MAX_SUMMARY, parseJiraExport, twgCreateArgs, twgError } from "./jira.ts";
+// the virtual agent's own. Gathered for the CLI and the package's public surface.
 export type { RunAssistantSupervisorOptions } from "./run.ts";
 export { runAssistantSupervisor } from "./run.ts";
 export type {

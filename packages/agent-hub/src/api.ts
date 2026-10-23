@@ -149,7 +149,7 @@ export type SessionsBody = {
   max: number;
 };
 
-/** A Jira export's result, as a pod reports it: the issue key it created, or why it could not. */
+/** A conversation's Jira export result, as its session reports it: the issue key it created, or why it could not. */
 export type JiraExportReport = { export_id: string; key: string } | { export_id: string; error: string };
 
 /** A conversation's one markdown document, which the person and the session both edit. */
@@ -300,9 +300,9 @@ export type Api = {
   loginComplete: (id: string, kind: CredentialKind, body?: LoginCompleteBody) => Promise<null>;
   sessionsStream: (id: string, opts?: StreamOptions) => Promise<Response>;
   putSessions: (id: string, body: SessionsBody) => Promise<null>;
-  putJiraExport: (id: string, conversationId: string, body: JiraExportReport) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
+  putJiraExport: (agentId: string, body: JiraExportReport) => Promise<null>;
   stream: (id: string, opts?: StreamOptions) => Promise<Response>;
 };
 
@@ -437,9 +437,9 @@ export function createApi({
     // supervisor runs.
     sessionsStream: (id, opts) => openStream(v(id, "sessions"), opts),
     putSessions: (id, body) => request<null>("PUT", v(id, "sessions"), body),
-    putJiraExport: (id, conversationId, body) => request<null>("PUT", v(id, `conversations/${encodeURIComponent(conversationId)}/jira`), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
+    putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     stream: (id, opts) => openStream(`${a(id)}/stream`, opts)
   };
 }

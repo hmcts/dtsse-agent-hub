@@ -1,12 +1,13 @@
 import { HttpError } from "../agent-api/http.ts";
-import { isUuid } from "../agents/store.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { findVirtualAgent, setDesired } from "../virtual-agents/store.ts";
-import { isJiraProject, JIRA_EXPORT_TIMEOUT_MS, JIRA_ISSUE_TYPE, JIRA_LABELS, JIRA_SELECT, type JiraExportView, jiraExportView } from "./jira.ts";
+import { isJiraProject, JIRA_EXPORT_TIMEOUT_MS, JIRA_SELECT, type JiraExportView, jiraExportView } from "./jira.ts";
 import { MAX_JIRA_ERROR } from "./schemas.ts";
 import { announce, type ConversationRow } from "./store.ts";
 
-/** A conversation's Jira export as the hub keeps it: asked for by its owner, sent to its pod, reported back. */
+/**
+ * A conversation's Jira export as the hub keeps it: claimed when its owner asks, carried to the conversation's
+ * session with each message while it is pending, and recorded when the session reports what came of it.
+ */
 
 export async function readJiraExport(db: Database, conversationId: string, now: Date = new Date()): Promise<JiraExportView> {
   const row = await db.assistantConversation.findUnique({ where: { id: conversationId }, select: JIRA_SELECT });
@@ -14,9 +15,9 @@ export async function readJiraExport(db: Database, conversationId: string, now: 
 }
 
 /**
- * Asks the conversation's pod to create its document in `project`'s backlog, and starts the assistant if it is
- * stopped. Refused when the conversation already has a ticket, or an export still pending, so a second click or tab
- * cannot make a second issue: the check and the write are one statement.
+ * Starts an export of the conversation's document to `project`'s backlog, for its session to carry out. Refused when
+ * the conversation already has a ticket, or an export still pending, so a second click or tab cannot ask for a second
+ * issue: the check and the write are one statement. The caller then asks the session, which wakes it.
  */
 export async function requestJiraExport(
   prisma: PrismaClient,
@@ -53,80 +54,21 @@ export async function requestJiraExport(
     }
     await announce(tx, conversation);
   });
-  const assistant = await findVirtualAgent(prisma, conversation.virtualAgentId);
-  if (assistant?.desired === "stopped") {
-    await setDesired(prisma, conversation.ownerOid, assistant.id, "running", now);
-  }
-}
-
-/** A `jira_export` on the sessions stream: what to create, and the id the pod reports it under. */
-export interface JiraExportRequest {
-  conversation_id: string;
-  export_id: string;
-  project: string;
-  issue_type: string;
-  labels: string[];
-  summary: string;
-  description: string;
-}
-
-/** Every pending export of the virtual agent's conversations, oldest first. One timed out is not sent again. */
-export async function pendingJiraExports(db: Database, virtualAgentId: string, now: Date = new Date()): Promise<JiraExportRequest[]> {
-  const staleBefore = new Date(now.getTime() - JIRA_EXPORT_TIMEOUT_MS);
-  const rows = await db.assistantConversation.findMany({
-    where: { virtualAgentId, jiraStatus: "pending", jiraKey: null, jiraRequestedAt: { gte: staleBefore } },
-    select: { id: true, jiraExportId: true, jiraProject: true, artefactTitle: true, artefactMarkdown: true },
-    orderBy: [{ jiraRequestedAt: "asc" }, { id: "asc" }]
-  });
-  return rows.flatMap((row) =>
-    row.jiraExportId === null || row.jiraProject === null
-      ? []
-      : [
-          {
-            conversation_id: row.id,
-            export_id: row.jiraExportId,
-            project: row.jiraProject,
-            issue_type: JIRA_ISSUE_TYPE,
-            labels: [...JIRA_LABELS],
-            summary: row.artefactTitle ?? "Untitled document",
-            description: row.artefactMarkdown
-          }
-        ]
-  );
-}
-
-export async function pendingJiraExport(
-  db: Database,
-  virtualAgentId: string,
-  conversationId: string,
-  now: Date = new Date()
-): Promise<JiraExportRequest | undefined> {
-  return (await pendingJiraExports(db, virtualAgentId, now)).find((request) => request.conversation_id === conversationId);
 }
 
 export type JiraExportResult = { export_id: string; key: string } | { export_id: string; error: string };
 
 /**
- * The pod's result for an export. Kept only for the conversation's current export, and never over a key: a report
- * for an export the person has since retried, or a second report, changes nothing.
+ * The session's result for an export. Kept only for the conversation's current export, and never over a key: a
+ * report for an export the person has since retried, or a second report, changes nothing.
  */
 export async function recordJiraExport(
   prisma: PrismaClient,
-  virtualAgentId: string,
-  conversationId: string,
+  conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">,
   result: JiraExportResult,
   now: Date = new Date()
 ): Promise<void> {
-  const conversation = isUuid(conversationId)
-    ? await prisma.assistantConversation.findFirst({
-        where: { id: conversationId, virtualAgentId },
-        select: { id: true, virtualAgentId: true, ownerOid: true }
-      })
-    : null;
-  if (conversation === null) {
-    throw new HttpError(404, "no such conversation");
-  }
-  const where = { id: conversationId, jiraExportId: result.export_id, jiraKey: null };
+  const where = { id: conversation.id, jiraExportId: result.export_id, jiraKey: null };
   const data =
     "key" in result
       ? { jiraStatus: "done", jiraKey: result.key, jiraError: null, jiraExportedAt: now, updatedAt: now }
