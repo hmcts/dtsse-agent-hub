@@ -130,7 +130,7 @@ section of [`docs/agent-api.md`](docs/agent-api.md).
   by size). The agent's page in the hub lists its chats.
 - **A conversation's agent is created with it**, offline, under a session id the hub chose, so the person's messages
   queue as ordinary deliveries before any session runs. A message to an offline conversation sets a wake; the pod
-  hears it on `GET /api/virtual/{id}/sessions`, starts `claude --session-id` (or `--resume`) in a tmux session of its
+  hears it on `GET /api/virtual/{id}/sessions`, starts `hai --session-id` (or `--resume`) in a tmux session of its
   own, and the session's registration with `conversation_id` adopts the agent and clears the wake.
 - **Owner only.** No grant reaches a conversation's agent, and it is left out of the roster, the sidebar and
   `GET /api/agent/agents`. Deleting a conversation deletes its agents, transcripts and direct messages.
@@ -152,9 +152,9 @@ Each virtual agent has a model route, set from its owner's sign-in when it is cr
 
 The Bedrock API key is pasted, in the credentials section of `/virtual` (`/settings/credentials` with virtual agents off) or the agent's page, or sent with
 `PUT /api/agent/credentials/bedrock`; until it is stored the pod reports `awaiting_credentials` with `bedrock: …`.
-It is the one credential its owner can read back, with `GET /api/agent/credentials/bedrock`, because the
-workspace's `.claude/run.sh` on their laptop uses it too. Anyone holding a person's agent-hub token can therefore
-read their Bedrock key; `docs/agent-api.md` (Credentials) has the detail.
+It is the one credential its owner can read back, with `GET /api/agent/credentials/bedrock`, because `hai` on their
+laptop uses it too. Anyone holding a person's agent-hub token can therefore read their Bedrock key;
+`docs/agent-api.md` (Credentials) has the detail.
 
 A Jenkins API token (`jenkins`) is optional on either route: pasted in the same places, it enables an agent's Jenkins
 tools, and an agent starts without it. Like a GitHub token, only the owner's own virtual agent reads it back.
@@ -179,10 +179,10 @@ StatefulSet the new resources.
 
 **Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, when creating an
 agent or later on its page. The orchestrator passes the names to the pod as `AGENT_HUB_PLUGINS`, comma-separated, and
-the workspace's `.claude/run.sh` loads each from the checkout with `--plugin-dir`. A change bumps `generation` and
-`pod_generation`, so a running pod is replaced and the conversation continues; a stopped agent loads them when it next
-starts. A ticked plugin the hub no longer offers stays on the agent until its owner unticks it, and is shown as no
-longer offered; the pod skips any name its checkout does not have.
+`hai` loads each from the checkout with `--plugin-dir`. A change bumps `generation` and `pod_generation`, so a running
+pod is replaced and the conversation continues; a stopped agent loads them when it next starts. A ticked plugin the hub
+no longer offers stays on the agent until its owner unticks it, and is shown as no longer offered; the pod skips any
+name its checkout does not have.
 
 **Web ports.** The pod reports the ports it finds listening (`PUT /api/virtual/{id}/ports`), up to 10, 1024–65535; nobody
 chooses them. Each one bound beyond loopback is served at `https://<statefulset_name>-<port>.<VIRTUAL_AGENT_PUBLIC_DOMAIN>`

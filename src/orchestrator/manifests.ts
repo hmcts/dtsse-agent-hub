@@ -110,6 +110,18 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
     { name: "AGENT_HUB_MAX_SESSIONS", value: String(CONVERSATION_SESSIONS[isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE]) },
     { name: "AZURE_TENANT_ID", value: spec.tenantId },
     { name: "DISABLE_AUTOUPDATER", value: "1" },
+    // AKS runs containerd, which creates no `/.dockerenv`, and none of hai's other container signals are set in a
+    // pod either, so hai cannot infer that it is already containerised. Without this marker it decides it is on a
+    // bare host and tries `docker pull` and `docker run --privileged`, which a pod with no Docker socket and
+    // `allowPrivilegeEscalation: false` cannot do: it exits 1 and every session dies at launch. Not
+    // `HAI_ENV_READY` as well — the two together short-circuit the route resolution that builds the Bedrock
+    // environment the `bedrock` route needs.
+    { name: "HAI_IN_CONTAINER", value: "1" },
+    // A pod runs the hai its image was built with, for the same reason its settings pin an image digest. Left to
+    // itself hai checks npm on every session start, and `CONVERSATION_SESSIONS` starts enough of them at once that
+    // concurrent `npm install -g` runs would race on one nvm prefix. Claude Code's DISABLE_AUTOUPDATER is a
+    // different switch and does not cover this.
+    { name: "HAI_NO_UPDATE", value: "1" },
     { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
     { name: "VIRTUAL_AGENT_PUBLIC_DOMAIN", value: spec.publicDomain },
     { name: LAUNCH_TOKEN_ENV, value: launchToken }

@@ -130,10 +130,26 @@ describe("statefulSet", () => {
       { name: "AGENT_HUB_MAX_SESSIONS", value: "2" },
       { name: "AZURE_TENANT_ID", value: "tenant" },
       { name: "DISABLE_AUTOUPDATER", value: "1" },
+      { name: "HAI_IN_CONTAINER", value: "1" },
+      { name: "HAI_NO_UPDATE", value: "1" },
       { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
       { name: "VIRTUAL_AGENT_PUBLIC_DOMAIN", value: "preview.platform.hmcts.net" },
       { name: "AGENT_HUB_LAUNCH_TOKEN", value: TOKEN }
     ]);
+  });
+
+  // containerd writes no /.dockerenv, so hai would take itself for a bare host and try to start a container.
+  it("should tell hai it is already containerised and not to update itself when a pod is applied", () => {
+    const [container] = podSpec(statefulSet(AGENT, SPEC, TOKEN)).containers;
+
+    expect(container!.env).toContainEqual({ name: "HAI_IN_CONTAINER", value: "1" });
+    expect(container!.env).toContainEqual({ name: "HAI_NO_UPDATE", value: "1" });
+  });
+
+  it("should leave hai to resolve the model route in the pod when a pod is applied", () => {
+    const [container] = podSpec(statefulSet(AGENT, SPEC, TOKEN)).containers;
+
+    expect(container!.env.map((entry) => entry.name)).not.toContain("HAI_ENV_READY");
   });
 
   it.each([
