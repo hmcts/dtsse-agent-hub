@@ -62,6 +62,7 @@ describe("runAssistantSupervisor", () => {
       id: VID,
       env: {},
       tmux,
+      canRun: () => true,
       cwd: CWD,
       signal: stop.signal,
       tickMs: 50
@@ -123,6 +124,7 @@ describe("runAssistantSupervisor", () => {
       id: VID,
       env: {},
       tmux: fakeTmux(),
+      canRun: () => true,
       cwd: CWD,
       signal: stop.signal,
       tickMs: 50,
@@ -151,7 +153,17 @@ describe("runAssistantSupervisor", () => {
     const said: string[] = [];
     const stop = new AbortController();
     const api = { putSessions: async () => null, sessionsStream: async () => new Response("", { status: 200 }) };
-    const running = runAssistantSupervisor({ api, id: VID, env: {}, tmux: fakeTmux(), cwd: CWD, signal: stop.signal, tickMs: 50, say: (m) => said.push(m) });
+    const running = runAssistantSupervisor({
+      api,
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50,
+      say: (m) => said.push(m)
+    });
 
     try {
       // Act
@@ -222,7 +234,17 @@ describe("runAssistantSupervisor", () => {
       putSessions: async () => null,
       sessionsStream: async () => new Response("event: wake\ndata: {oops\n\nevent: close\ndata: nope\n\nevent: reconnect\ndata: {}\n\n", { status: 200 })
     };
-    const running = runAssistantSupervisor({ api, id: VID, env: {}, tmux: fakeTmux(), cwd: CWD, signal: stop.signal, tickMs: 50, say: (m) => said.push(m) });
+    const running = runAssistantSupervisor({
+      api,
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50,
+      say: (m) => said.push(m)
+    });
 
     try {
       // Act
