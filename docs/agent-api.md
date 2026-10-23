@@ -118,6 +118,8 @@ Every virtual agent can hold **conversations**: the chats of the HMCTS Assistant
 
 The person's edits in the web UI follow the same version rule, recorded as `updated_by: user`.
 
+**Launching a session.** The supervisor starts each one as `hai`, the HMCTS wrapper around `claude`, with `--dangerously-skip-permissions`: hai forwards the arguments it is given and adds none of its own, and nobody can answer a permission prompt in a pod. The orchestrator gives every pod `HAI_IN_CONTAINER=1`, because AKS runs containerd and so writes none of the `/.dockerenv` hai looks for, and without it hai takes itself for a bare host and tries to start a container of its own; and `HAI_NO_UPDATE=1`, so a pod keeps the hai its image was built with. It does not set `HAI_ENV_READY`: hai still resolves the model route in the pod, which is what builds the Bedrock environment on the `bedrock` route.
+
 **Capacity.** The supervisor runs at most `AGENT_HUB_MAX_SESSIONS` conversation sessions at once, beside the pod's own session: 2 on `small`, 4 on `medium` and 6 on `large`. A wake when that many run stops the least recently active idle one; when every one is busy, the wake waits and is reported `queued`. A session idle for `AGENT_HUB_SESSION_IDLE_MINUTES` (20 by default) is stopped. The sweep's idle stop treats a virtual agent as busy while any of its sessions is.
 
 ## Credentials

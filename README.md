@@ -130,7 +130,7 @@ section of [`docs/agent-api.md`](docs/agent-api.md).
   by size). The agent's page in the hub lists its chats.
 - **A conversation's agent is created with it**, offline, under a session id the hub chose, so the person's messages
   queue as ordinary deliveries before any session runs. A message to an offline conversation sets a wake; the pod
-  hears it on `GET /api/virtual/{id}/sessions`, starts `claude --session-id` (or `--resume`) in a tmux session of its
+  hears it on `GET /api/virtual/{id}/sessions`, starts `hai --session-id` (or `--resume`) in a tmux session of its
   own, and the session's registration with `conversation_id` adopts the agent and clears the wake.
 - **Owner only.** No grant reaches a conversation's agent, and it is left out of the roster, the sidebar and
   `GET /api/agent/agents`. Deleting a conversation deletes its agents, transcripts and direct messages.
