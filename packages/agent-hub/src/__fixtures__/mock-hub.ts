@@ -316,6 +316,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return send(res, 204);
       }
       if (req.method === "GET") {
+        beforeRespond?.();
         res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
         res.flushHeaders();
         res.write(": connected\nretry: 1000\n\n");
@@ -563,6 +564,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       if (status) {
         return send(res, status, { error: "stream refused" });
       }
+      beforeRespond?.();
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
       res.flushHeaders();
       streams.set(agent.id, res);
@@ -773,7 +775,9 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     // Runs as each response is written, before the caller can see it. A test that mirrors the hub's state
     // somewhere a process outside this one reads — `src/virtual-agent-boot.test.ts` writes a file the boot
     // script's jq asserts on — has to write it here: a write hung on the response's `finish` lands after the
-    // data has gone to the socket, so the caller can be reading one request behind.
+    // data has gone to the socket, so the caller can be reading one request behind. The stream handlers call
+    // it themselves, because they write their own head rather than going through `send`; a new response that
+    // does the same has to do likewise, or whatever it mutates is missing from the record.
     onBeforeRespond(hook: () => void) {
       beforeRespond = hook;
     },

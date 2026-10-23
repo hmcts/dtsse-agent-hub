@@ -158,12 +158,21 @@ jobs:
         id: bump
         working-directory: packages/agent-hub
         run: |
-          if published="$(npm view "$(node -p 'require("./package.json").name')" versions --json 2>/dev/null)"; then
+          err="$(mktemp)"
+          if published="$(npm view "$(node -p 'require("./package.json").name')" versions --json 2>"$err")"; then
             echo "the feed holds: $published"
-          else
-            # Nothing readable on the feed: the first-ever publish starts at the committed version.
-            echo "the feed answered for no published version"
+          elif grep -q 'E404' "$err"; then
+            # The package itself is unknown to the feed, so this is the first publish and the manifest's
+            # version is where it starts.
+            echo "the feed does not hold this package yet"
             published="[]"
+          else
+            # Any other answer is the feed failing to say what it holds, not an empty feed. Treating the two
+            # alike would fall back to the manifest, which is behind every version already published, and the
+            # publish below would die on a version that is taken.
+            cat "$err" >&2
+            echo "::error::could not read the published versions from the feed"
+            exit 1
           fi
           # The node script is single-quoted so that the shell leaves its `$` anchors alone (SC2016); the one
           # value it needs comes in through the environment.
