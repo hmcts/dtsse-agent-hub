@@ -7,6 +7,7 @@ import { conversation, fakeTmux } from "../__fixtures__/fake-tmux.ts";
 import { createMockHub } from "../__fixtures__/mock-hub.ts";
 import { ApiError, createApi } from "../api.ts";
 import { hubHome } from "../session.ts";
+import { createJiraExporter } from "./jira.ts";
 import { runAssistantSupervisor } from "./run.ts";
 import { tmuxName } from "./tmux.ts";
 
@@ -98,6 +99,50 @@ describe("runAssistantSupervisor", () => {
       // Assert
       await waitUntil(() => tmux.sent(tmuxName(live.conversation_id)).length === 1, "the closed conversation to be stopped");
       await waitUntil(() => reports().at(-1)?.sessions.length === 1, "the closed one left out of the report");
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
+    }
+  });
+
+  it("should hand a Jira export on the sessions stream to the exporter and report the key it created", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const api = createApi({ baseUrl: url, launchToken: LAUNCH });
+    const stop = new AbortController();
+    const created = JSON.stringify({ data: [{ key: "VIBE-702" }] });
+    const jira = createJiraExporter({
+      api,
+      id: VID,
+      exec: async () => ({ code: 0, stdout: created, stderr: "" }),
+      signedIn: () => true,
+      login: async () => "restored"
+    });
+    const running = runAssistantSupervisor({ api, id: VID, env: {}, tmux: fakeTmux(), cwd: CWD, signal: stop.signal, tickMs: 50, jira });
+    const opened = () => hub.calls.some((c) => c.method === "GET" && c.path === `/api/virtual/${VID}/sessions`);
+    const reports = () => hub.virtuals.get(VID)?.jiraReports ?? [];
+    const exported = {
+      conversation_id: conversation().conversation_id,
+      export_id: "44444444-4444-4444-8444-444444444444",
+      project: "VIBE",
+      issue_type: "Story",
+      labels: [],
+      summary: "S",
+      description: ""
+    };
+
+    try {
+      await waitUntil(opened, "the sessions stream to open");
+
+      // Act
+      hub.sendJiraExport(VID, exported);
+
+      // Assert
+      await waitUntil(() => reports().length === 1, "the export to be reported");
+      expect(reports()[0]).toEqual({ conversation_id: exported.conversation_id, export_id: exported.export_id, key: "VIBE-702" });
     } finally {
       stop.abort();
       await running;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { artefactPutBody, MAX_ARTEFACT_MARKDOWN, sessionsReportBody } from "./schemas.ts";
+import { artefactPutBody, jiraExportReportBody, MAX_ARTEFACT_MARKDOWN, MAX_JIRA_ERROR, sessionsReportBody } from "./schemas.ts";
 
 describe("artefactPutBody", () => {
   it("should accept markdown and a base version when the title is left out", () => {
@@ -35,5 +35,27 @@ describe("sessionsReportBody", () => {
     [{ sessions: Array.from({ length: 51 }, (_, index) => ({ conversation_id: `c${index}`, state: "live" })), max: 2 }]
   ])("should refuse %j when it breaks the contract's limits", (body) => {
     expect(sessionsReportBody.safeParse(body).success).toBe(false);
+  });
+});
+
+describe("jiraExportReportBody", () => {
+  const EXPORT = "33333333-3333-4333-8333-333333333333";
+
+  it.each([
+    [{ export_id: EXPORT, key: "VIBE-123" }],
+    [{ export_id: EXPORT, error: "Story is not an issue type of VIBE" }]
+  ])("should accept %j when it is a key or a reason", (body) => {
+    expect(jiraExportReportBody.parse(body)).toEqual(body);
+  });
+
+  it.each([
+    [{ export_id: EXPORT, key: "vibe-123" }],
+    [{ export_id: EXPORT, key: "VIBE-123", error: "both" }],
+    [{ export_id: EXPORT, error: " " }],
+    [{ export_id: EXPORT, error: "x".repeat(MAX_JIRA_ERROR + 1) }],
+    [{ export_id: "not-a-uuid", key: "VIBE-1" }],
+    [{ key: "VIBE-1" }]
+  ])("should refuse %j when it breaks the contract", (body) => {
+    expect(jiraExportReportBody.safeParse(body).success).toBe(false);
   });
 });

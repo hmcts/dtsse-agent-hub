@@ -1,5 +1,6 @@
 import { HttpError, noContent, parse, readJson } from "@/agent-api/http";
 import { virtualRoute } from "@/agent-api/route";
+import { pendingJiraExport, pendingJiraExports } from "@/assistant/jira-store";
 import { sessionsReportBody } from "@/assistant/schemas";
 import { sessionStream } from "@/assistant/session-stream";
 import { pendingWake, pendingWakes, reportSessions } from "@/assistant/store";
@@ -27,7 +28,9 @@ export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgen
       hub,
       ready: listener.ready,
       wakes: () => pendingWakes(prisma, virtualAgent.id),
-      wake: (conversationId) => pendingWake(prisma, virtualAgent.id, conversationId)
+      wake: (conversationId) => pendingWake(prisma, virtualAgent.id, conversationId),
+      jiraExports: () => pendingJiraExports(prisma, virtualAgent.id),
+      jiraExport: (conversationId) => pendingJiraExport(prisma, virtualAgent.id, conversationId)
     })
   });
   return new Response(body, { headers: SSE_HEADERS });

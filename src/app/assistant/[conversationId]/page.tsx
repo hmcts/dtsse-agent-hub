@@ -1,6 +1,14 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import { deleteConversation, renameConversation, saveArtefact, sendAssistantMessage, setConversationProduct, warmConversation } from "@/app/_actions/assistant";
+import {
+  deleteConversation,
+  exportArtefactToJira,
+  renameConversation,
+  saveArtefact,
+  sendAssistantMessage,
+  setConversationProduct,
+  warmConversation
+} from "@/app/_actions/assistant";
 import { saveCredential } from "@/app/_actions/credentials";
 import { pasteLoginCode } from "@/app/_actions/virtual-agents";
 import { TEMPLATES } from "@/assistant/starters";
@@ -19,7 +27,8 @@ const ACTIONS: ChatActions = {
   setProduct: setConversationProduct,
   rename: renameConversation,
   remove: deleteConversation,
-  saveArtefact
+  saveArtefact,
+  exportToJira: exportArtefactToJira
 };
 
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */
@@ -31,10 +40,14 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
   if (view === undefined) {
     notFound();
   }
+  const jira = {
+    connected: home.credentials.available && home.credentials.statuses.some((status) => status.kind === "atlassian" && status.stored),
+    login: home.assistant.logins.find((login) => login.kind === "atlassian") ?? null
+  };
   return (
     <AssistantShell viewerName={viewer.name} groups={home.conversations} activeId={view.id} hubLink theme={theme}>
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
-      <ChatView key={view.agentId} view={view} templates={TEMPLATES} actions={ACTIONS} />
+      <ChatView key={view.agentId} view={view} templates={TEMPLATES} actions={ACTIONS} jira={jira} />
       <OnboardingGate
         assistant={home.assistant}
         statuses={home.credentials.available ? home.credentials.statuses : []}

@@ -104,7 +104,7 @@ function toRow(row: {
   };
 }
 
-async function announce(db: Database, conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">): Promise<void> {
+export async function announce(db: Database, conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">): Promise<void> {
   await notify(db, {
     type: "assistant_conversation",
     conversation_id: conversation.id,

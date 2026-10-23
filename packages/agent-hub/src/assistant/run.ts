@@ -1,9 +1,10 @@
-// The long-lived half: consume the virtual agent's sessions stream, hand each wake and close to the supervisor,
-// and tick it so idle sessions stop and queued ones start. Reconnects as the bridge does, because the stream is
-// framed as the agent stream and ends the same way.
+// The long-lived half: consume the virtual agent's sessions stream, hand each wake and close to the supervisor and
+// each Jira export to the exporter, and tick the supervisor so idle sessions stop and queued ones start. Reconnects
+// as the bridge does, because the stream is framed as the agent stream and ends the same way.
 import type { Api } from "../api.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../bridge.ts";
 import { createSseParser, type SseEvent } from "../sse.ts";
+import type { JiraExporter } from "./jira.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
 
 const TICK_MS = 2000;
@@ -12,6 +13,8 @@ const STREAM_IDLE_MS = 45000;
 export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOptions, "api" | "id"> & {
   api: Pick<Api, "putSessions" | "sessionsStream">;
   id: string;
+  /** Handles the stream's Jira exports; without one they are ignored. */
+  jira?: JiraExporter;
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
   signal?: AbortSignal;
   tickMs?: number;
@@ -30,6 +33,7 @@ export async function runAssistantSupervisor({
   signal,
   tickMs = Number(env.AGENT_HUB_SUPERVISOR_TICK_MS) || TICK_MS,
   idleTimeoutMs = Number(env.AGENT_HUB_STREAM_IDLE_MS) || STREAM_IDLE_MS,
+  jira,
   ...options
 }: RunAssistantSupervisorOptions): Promise<void> {
   const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, ...options });
@@ -73,6 +77,20 @@ export async function runAssistantSupervisor({
           handle(supervisor.wake, event);
         } else if (event.event === "close") {
           handle(supervisor.close, event);
+        } else if (event.event === "jira_export") {
+          // Off the supervisor's chain: creating an issue, with a sign-in first, must not hold up wakes.
+          let data: unknown;
+          try {
+            data = JSON.parse(event.data);
+          } catch {
+            say("unparseable jira_export event");
+            return;
+          }
+          if (jira) {
+            void jira.export(data);
+          } else {
+            say("ignoring a jira_export: this supervisor has no exporter");
+          }
         } else if (event.event === "reconnect") {
           reconnect = true;
         }

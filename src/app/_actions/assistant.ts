@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requestJiraExport } from "@/assistant/jira-store";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import {
   type Artefact,
@@ -193,5 +194,24 @@ export async function saveArtefact(input: {
       }
       throw error;
     }
+  });
+}
+
+/**
+ * Sends the conversation's saved document to the Jira backlog of `project`, as a Story the person's assistant creates
+ * with their Atlassian sign-in. The panel follows the export through the conversation's events.
+ */
+export async function exportArtefactToJira(input: { conversationId: unknown; project: unknown }): Promise<ActionResult> {
+  return await runAction("export artefact to jira", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+    if (conversation === undefined) {
+      return MISSING;
+    }
+    await requestJiraExport(prisma, conversation, input.project);
+    return { ok: true };
   });
 }
