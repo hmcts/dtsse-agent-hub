@@ -142,6 +142,8 @@ export type MockHubOptions = {
 export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEvent = true, replayAcked = false, launchTokens = {} }: MockHubOptions = {}) {
   const options = { maxLifetimeMs, reconnectEvent, replayAcked };
   const failures: { stream: number[]; ack: number[]; transcript: number[] } = { stream: [], ack: [], transcript: [] };
+  // Set through onBeforeRespond, for a caller that keeps a copy of what the hub recorded.
+  let beforeRespond: (() => void) | null = null;
   const transcripts = new Map<string, Map<string, Record<string, unknown>>>();
   const users = new Map<string, Person>();
   const agents = new Map<string, StoredAgent>();
@@ -249,6 +251,9 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   }
 
   function send(res: ServerResponse, status: number, body?: unknown) {
+    // Before the response is written, so a caller that reads the hook's record the moment its own request
+    // returns cannot be a request behind.
+    beforeRespond?.();
     res.writeHead(status, body === undefined ? {} : { "Content-Type": "application/json" });
     res.end(body === undefined ? "" : JSON.stringify(body));
   }
@@ -764,6 +769,13 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     editArtefactAsUser(agentId: string, markdown: string, title = "Draft") {
       const doc = artefacts.get(agentId);
       artefacts.set(agentId, { title, markdown, version: (doc?.version ?? 0) + 1, updated_by: "user", updated_at: new Date().toISOString() });
+    },
+    // Runs as each response is written, before the caller can see it. A test that mirrors the hub's state
+    // somewhere a process outside this one reads — `src/virtual-agent-boot.test.ts` writes a file the boot
+    // script's jq asserts on — has to write it here: a write hung on the response's `finish` lands after the
+    // data has gone to the socket, so the caller can be reading one request behind.
+    onBeforeRespond(hook: () => void) {
+      beforeRespond = hook;
     },
     // The next `count` stream requests, acks or transcript uploads answer `status` instead.
     failNextStreams(count: number, status = 500) {

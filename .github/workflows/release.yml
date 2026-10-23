@@ -88,13 +88,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      # The tip of the branch, not the commit that triggered this run: on a `push` event those differ as soon
-      # as a second merge lands, and committing the bump onto a tree that is missing the previous one's would
-      # make the push a non-fast-forward.
+      # The commit the gates ran against, not the tip of the branch: on a `push` event those differ as soon as
+      # a second merge lands, and the tip is code that lint, the typecheck, the tests and the tarball check
+      # have never seen. Nothing in this job needs history behind that commit — the tag below names it, and
+      # the remote already has it — so the default shallow fetch is enough.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
-          fetch-depth: 0
+          ref: ${{ github.sha }}
 
       - name: Enable corepack
         run: corepack enable
@@ -143,10 +143,17 @@ jobs:
           # over the default `registry=` line.
           echo "@${NPM_SCOPE#@}:registry=${feed}" >> "$HOME/.npmrc"
 
-      # The next version comes from the feed, not from package.json: the bump is not committed back, so the
-      # manifest's version says nothing about what is published. Reads need no credential, but this runs after
-      # the npmrc is written so that it reads the same feed publishing will write to. A committed version
-      # ahead of the feed is a deliberate minor or major bump and is published as it stands.
+      # The next version is always the highest the feed holds with its patch raised by one. This workflow
+      # releases patches and nothing else: a minor or a major bump is not something it can express, and making
+      # one means publishing by hand or changing this step.
+      #
+      # packages/agent-hub/package.json's version is not what gets published, and is not maintained: the bump
+      # is never committed back (see the tag step), so nothing keeps it in step with the feed and nothing else
+      # in the repository reads it. The one thing it is still read for is the first-ever publish, when the
+      # feed holds no version to count from.
+      #
+      # Reads need no credential, but this runs after the npmrc is written so that it reads the same feed
+      # publishing will write to.
       - name: Work out the next version
         id: bump
         working-directory: packages/agent-hub
@@ -162,7 +169,6 @@ jobs:
           # value it needs comes in through the environment.
           # shellcheck disable=SC2016
           version="$(PUBLISHED="$published" node -e '
-            const committed = require("./package.json").version;
             const parse = (v) => (/^\d+\.\d+\.\d+$/.test(v) ? v.split(".").map(Number) : null);
             const order = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
             let raw = [];
@@ -173,12 +179,7 @@ jobs:
             // are not ours to patch, so anything that is not a plain x.y.z is dropped.
             const released = (Array.isArray(raw) ? raw : [raw]).map(parse).filter((v) => v !== null).sort(order);
             const highest = released[released.length - 1];
-            if (!highest) {
-              console.log(committed);
-            } else {
-              const ours = parse(committed);
-              console.log(ours && order(ours, highest) > 0 ? committed : [highest[0], highest[1], highest[2] + 1].join("."));
-            }
+            console.log(highest ? [highest[0], highest[1], highest[2] + 1].join(".") : require("./package.json").version);
           ')"
           # `npm pkg set` edits the manifest and nothing else. `npm version` also reifies the dependency
           # tree, which in a Yarn workspace with no package-lock.json resolves every dependency for no reason
@@ -194,9 +195,24 @@ jobs:
       # repository's record of what was published, because the bump is not committed back: master's ruleset
       # requires a pull request, which GITHUB_TOKEN cannot be granted a bypass from, and the version above
       # comes from the feed rather than the manifest.
+      #
+      # The push is retried rather than allowed to fail: the version is on the feed by the time it runs, so a
+      # re-run dies at `npm publish` with a 409 and the tag would never be written. A push that goes on
+      # failing still fails the job — a release nobody can trace back to a commit is what this step prevents.
       - name: Tag the release
         env:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
-          git tag "agent-hub-v${VERSION}"
-          git push origin "agent-hub-v${VERSION}"
+          tag="agent-hub-v${VERSION}"
+          git tag "$tag"
+          attempt=1 delay=5
+          until git push origin "$tag"; do
+            if [ "$attempt" -ge 5 ]; then
+              echo "::error::${VERSION} is published but ${tag} could not be pushed; tag ${GITHUB_SHA} by hand"
+              exit 1
+            fi
+            echo "pushing ${tag} failed (attempt ${attempt} of 5); retrying in ${delay}s"
+            sleep "$delay"
+            attempt=$((attempt + 1))
+            delay=$((delay * 2))
+          done
