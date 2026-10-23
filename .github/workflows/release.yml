@@ -143,11 +143,10 @@ jobs:
           # over the default `registry=` line.
           echo "@${NPM_SCOPE#@}:registry=${feed}" >> "$HOME/.npmrc"
 
-      # The next version is derived from the feed rather than from package.json, because the bump is never
-      # committed back — see the tag step for why — so the manifest's version says nothing about what is
-      # published. Reads need no credential, but this runs after the npmrc is written so that it reads the same
-      # feed publishing will write to. A committed version ahead of the feed is a deliberate minor or major
-      # bump and is published as it stands.
+      # The next version comes from the feed, not from package.json: the bump is not committed back, so the
+      # manifest's version says nothing about what is published. Reads need no credential, but this runs after
+      # the npmrc is written so that it reads the same feed publishing will write to. A committed version
+      # ahead of the feed is a deliberate minor or major bump and is published as it stands.
       - name: Work out the next version
         id: bump
         working-directory: packages/agent-hub
@@ -191,13 +190,10 @@ jobs:
         working-directory: packages/agent-hub
         run: npm publish
 
-      # Publish first: a tag with no package behind it is worse than an untagged release.
-      #
-      # The bump is not committed back to master, so these tags are the repository's record of what was
-      # published. Master is covered by a ruleset that requires a pull request, and GITHUB_TOKEN cannot be
-      # granted a bypass: that list takes repository roles, teams, GitHub Apps and deploy keys, and Actions is
-      # none of them. Nothing needs the bump committed either, because the version above comes from the feed.
-      # The ruleset's target is branches, so pushing the tag is unaffected.
+      # Publish first: a tag with no package behind it is worse than an untagged release. The tag is this
+      # repository's record of what was published, because the bump is not committed back: master's ruleset
+      # requires a pull request, which GITHUB_TOKEN cannot be granted a bypass from, and the version above
+      # comes from the feed rather than the manifest.
       - name: Tag the release
         env:
           VERSION: ${{ steps.bump.outputs.version }}
