@@ -887,6 +887,25 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     });
   });
 
+  it("should store a twg 1.3.9 auth-profiles.json the pod saves, labelled with its default profile's user", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    const credential = { user: "alice@justice.gov.uk", oauthAccessToken: "", oauthRefreshToken: "refresh-one" };
+    const value = JSON.stringify({
+      version: 1,
+      activeEnvironment: "prod",
+      defaults: { prod: "p1" },
+      profiles: [{ id: "p1", user: "alice@justice.gov.uk", createdAt: "2026-10-01T00:00:00.000Z", bitbucket: false, credentials: { primary: credential } }]
+    });
+
+    const response = await pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/atlassian`, { virtualAgentId: id, kind: "atlassian" }, "PUT", {
+      value
+    });
+
+    expect(response.status).toBe(204);
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "atlassian")).toBe(value);
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ kind: "atlassian", updatedVia: "pod", accountLabel: "alice@justice.gov.uk" });
+  });
+
   it("should refuse a twg auth.conf with no refresh token with 400 and never echo it", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
     const value = "user=alice@justice.gov.uk\ntoken=oauth-managed\noauth-access-token=secret-access";

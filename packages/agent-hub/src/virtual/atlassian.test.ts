@@ -15,6 +15,7 @@ import {
   TWG_LOGIN_OUTPUT,
   TWG_URL,
   twgAuthConf,
+  twgProfiles,
   usePodEnv
 } from "../__fixtures__/pod-shims.ts";
 import { createApi } from "../api.ts";
@@ -26,7 +27,8 @@ import {
   restoreAtlassianAuth,
   syncAtlassianAuth,
   twgDir,
-  twgPromptsForBrowser
+  twgPromptsForBrowser,
+  twgRefreshRejected
 } from "./atlassian.ts";
 
 const VID = "va-atlassian";
@@ -68,6 +70,9 @@ const twgLog = () => fs.readFileSync(path.join(pod.stateDir, "twg.log"), "utf8")
 const storedAtlassian = () => virtual().credentials.get("atlassian") as string;
 const noTwgSecret = (text: string) => !text.includes(TWG_REFRESH) && !text.includes(TWG_ACCESS.slice(0, 40)) && !text.includes(LAUNCH);
 const rotatedTo = (n: number) => new RegExp(`^oauth-refresh-token=${TWG_REFRESH}-${n}$`, "m");
+const v139 = (extra: Record<string, string> = {}) => pod.env({ FAKE_TWG_VERSION: "1.3.9", ...extra });
+type StoredProfiles = { profiles: { createdAt?: string; credentials: { primary: { oauthAccessToken: string; oauthRefreshToken: string } } }[] };
+const storedProfile = () => (JSON.parse(storedAtlassian()) as StoredProfiles).profiles[0];
 
 describe("parseTwgDeviceCode", () => {
   it("should read the code through the colour codes and box drawing twg prints it inside", () => {
@@ -138,6 +143,74 @@ describe("packAtlassianAuth", () => {
     // Act & Assert
     expect(packAtlassianAuth(`oauth-refresh-token=${TWG_REFRESH}\n`).user).toBeNull();
   });
+
+  it("should blank the access token and keep every other field when given an auth-profiles.json", () => {
+    // Act
+    const { value, user } = packAtlassianAuth(twgProfiles());
+
+    // Assert
+    const profile = (JSON.parse(value) as StoredProfiles).profiles[0];
+    expect(profile?.credentials.primary.oauthAccessToken).toBe("");
+    expect(profile?.credentials.primary.oauthRefreshToken).toBe(TWG_REFRESH);
+    expect(profile?.createdAt).toBeDefined();
+    expect(value).not.toContain(TWG_ACCESS.slice(0, 40));
+    expect(user).toBe("olive@hmcts.net");
+  });
+
+  it("should give the same sha for a new access token and a different one for a rotated refresh token when given an auth-profiles.json", () => {
+    // Arrange
+    const { sha } = packAtlassianAuth(twgProfiles());
+
+    // Act & Assert
+    expect(packAtlassianAuth(twgProfiles({ access: "another" })).sha).toBe(sha);
+    expect(packAtlassianAuth(twgProfiles({ refresh: `${TWG_REFRESH}-rotated` })).sha).not.toBe(sha);
+  });
+
+  it("should label it with the active environment's default profile when there are several", () => {
+    // Arrange
+    const parsed = JSON.parse(twgProfiles()) as { defaults: Record<string, string>; profiles: { id: string; user: string }[] };
+    const other = JSON.parse(twgProfiles({ user: "someone.else@example.com" })).profiles[0];
+    parsed.profiles.unshift({ ...other, id: "other" });
+
+    // Act & Assert
+    expect(packAtlassianAuth(JSON.stringify(parsed)).user).toBe("olive@hmcts.net");
+    parsed.defaults.prod = "other";
+    expect(packAtlassianAuth(JSON.stringify(parsed)).user).toBe("someone.else@example.com");
+  });
+
+  it("should refuse an auth-profiles.json with no refresh token, one that is not JSON, and one too large for the hub", () => {
+    // Act & Assert
+    expect(() => packAtlassianAuth(twgProfiles({ refresh: "" }))).toThrow(/no oauthRefreshToken/);
+    expect(() => packAtlassianAuth("{ not json")).toThrow(/not JSON/);
+    expect(() => packAtlassianAuth(twgProfiles({ user: "x".repeat(12000) }))).toThrow(/auth-profiles.json without its access tokens .* over the hub's 24000/);
+  });
+});
+
+describe("twgRefreshRejected", () => {
+  it.each([
+    ["twg 1.3.3's exit 77", { code: 77, stdout: "" }],
+    [
+      "twg 1.3.9's unauthorized_client",
+      { code: 1, stdout: JSON.stringify({ data: { status: "error", profiles: [{ status: "error", errorCode: "unauthorized_client" }] } }) }
+    ],
+    ["an invalid_grant", { code: 1, stdout: JSON.stringify({ data: { status: "error", profiles: [{ errorCode: "invalid_grant" }] } }) }],
+    ["twg finding no OAuth sign-in to refresh", { code: 0, stdout: JSON.stringify({ data: { status: "not_applicable", rotated: false } }) }]
+  ])("should be true when it is %s", (_label, r) => {
+    // Act & Assert
+    expect(twgRefreshRejected(r)).toBe(true);
+  });
+
+  it.each([
+    ["a refresh that worked", { code: 0, stdout: JSON.stringify({ data: { status: "ok", rotated: true } }) }],
+    [
+      "a failure that is not Atlassian refusing the token",
+      { code: 1, stdout: JSON.stringify({ data: { status: "error", profiles: [{ errorCode: "network_error" }] } }) }
+    ],
+    ["a failure with no JSON", { code: 1, stdout: "Error: could not write the credentials file." }]
+  ])("should be false when it is %s", (_label, r) => {
+    // Act & Assert
+    expect(twgRefreshRejected(r)).toBe(false);
+  });
 });
 
 describe("twgDir", () => {
@@ -161,6 +234,34 @@ describe("restoreAtlassianAuth", () => {
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect(fs.statSync(env.TWG_CONFIG_DIR as string).mode & 0o777).toBe(0o700);
     expect(readAtlassianAuth(env)).not.toContain("oauth-access-token");
+  });
+
+  it("should write auth-profiles.json and remove an auth.conf beside it when the sign-in is from twg 1.3.9", () => {
+    // Arrange
+    const env = pod.env();
+    pod.seedTwg(env);
+
+    // Act
+    restoreAtlassianAuth(packAtlassianAuth(twgProfiles()).value, { env });
+
+    // Assert
+    const dir = env.TWG_CONFIG_DIR as string;
+    expect(fs.existsSync(path.join(dir, "auth.conf"))).toBe(false);
+    expect(fs.statSync(path.join(dir, "auth-profiles.json")).mode & 0o777).toBe(0o600);
+    expect(readAtlassianAuth(env)).toBe(`${packAtlassianAuth(twgProfiles()).value}\n`);
+  });
+
+  it("should write auth.conf and remove an auth-profiles.json beside it when the sign-in is from twg 1.3.3", () => {
+    // Arrange
+    const env = v139();
+    pod.seedTwg(env);
+
+    // Act
+    restoreAtlassianAuth(packAtlassianAuth(twgAuthConf()).value, { env });
+
+    // Assert
+    expect(fs.existsSync(path.join(env.TWG_CONFIG_DIR as string, "auth-profiles.json"))).toBe(false);
+    expect(readAtlassianAuth(env)).toMatch(/^oauth-refresh-token=/m);
   });
 });
 
@@ -238,7 +339,7 @@ describe("atlassianLogin", () => {
 
     // Assert
     expect(result).toBe("restored");
-    expect(twgLog()).toMatch(/^auth refresh --force$/m);
+    expect(twgLog()).toMatch(/^auth refresh --force -o json$/m);
     const file = path.join(env.TWG_CONFIG_DIR as string, "auth.conf");
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect(fs.statSync(env.TWG_CONFIG_DIR as string).mode & 0o777).toBe(0o700);
@@ -331,6 +432,58 @@ describe("atlassianLogin", () => {
     expect(virtual().prompts).toHaveLength(1);
     expect(virtual().credentials.has("atlassian")).toBe(false);
     expect(virtual().completes).toEqual([]);
+  });
+
+  it("should restore a stored twg 1.3.9 sign-in, refresh it and store the rotated one without its access token", async () => {
+    // Arrange
+    const env = v139();
+    await api().putCredential(VID, "atlassian", packAtlassianAuth(twgProfiles({ refresh: `${TWG_REFRESH}-0` })).value);
+    fs.writeFileSync(path.join(pod.stateDir, "twg-valid"), `${TWG_REFRESH}-0`);
+
+    // Act
+    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: api(), env }));
+
+    // Assert
+    expect(result).toBe("restored");
+    expect(storedProfile()?.credentials.primary.oauthRefreshToken).toBe(`${TWG_REFRESH}-1`);
+    expect(storedProfile()?.credentials.primary.oauthAccessToken).toBe("");
+    expect(virtual().prompts).toHaveLength(0);
+    expect(noTwgSecret(stderr)).toBe(true);
+  });
+
+  it("should sign in again when twg 1.3.9 reports the stored sign-in refused", async () => {
+    // Arrange
+    await api().putCredential(VID, "atlassian", packAtlassianAuth(twgProfiles({ refresh: `${TWG_REFRESH}-old` })).value);
+    fs.writeFileSync(path.join(pod.stateDir, "twg-valid"), `${TWG_REFRESH}-elsewhere`);
+
+    // Act
+    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: api(), env: v139() }));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(stderr).toMatch(/the stored sign-in no longer works; signing in again/);
+    expect(virtual().prompts).toHaveLength(1);
+    expect(storedProfile()?.credentials.primary.oauthRefreshToken).toBe(`${TWG_REFRESH}-1`);
+  });
+
+  it("should store twg 1.3.9's auth-profiles.json labelled with its account when the owner signs in", async () => {
+    // Act
+    const { result } = await captureStderr(() => atlassianLogin({ api: api(), env: v139({ FAKE_TWG_USER: "olive.owner@justice.gov.uk" }) }));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().completes).toEqual([{ kind: "atlassian", account_label: "olive.owner@justice.gov.uk" }]);
+    expect(storedProfile()?.credentials.primary.oauthAccessToken).toBe("");
+    expect(storedProfile()?.credentials.primary.oauthRefreshToken).toBe(`${TWG_REFRESH}-1`);
+  });
+
+  it("should run twg login without the variables that shorten its device code when the pod has them", async () => {
+    // Act
+    await captureStderr(() => atlassianLogin({ api: api(), env: pod.env({ CLAUDECODE: "1", AI_AGENT: "claude-code" }) }));
+
+    // Assert
+    expect(twgLog()).toMatch(/^login --site hmcts$/m);
+    expect(twgLog()).not.toMatch(/agent marker/);
   });
 
   it("should fail without failing the agent when twg prints no code at all", async () => {

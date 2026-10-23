@@ -12,7 +12,8 @@ export {
   syncAtlassianAuth,
   TWG_DEVICE_CODE_EXPIRES_S,
   twgDir,
-  twgPromptsForBrowser
+  twgPromptsForBrowser,
+  twgRefreshRejected
 } from "./atlassian.ts";
 export type { AzureProfile, MsalCache, PackedAzureCache, SyncAzureCacheOptions, SyncAzureCacheResult } from "./azure-cache.ts";
 export {

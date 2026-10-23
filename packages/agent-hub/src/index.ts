@@ -460,6 +460,7 @@ export {
   TWG_DEVICE_CODE_EXPIRES_S,
   twgDir,
   twgPromptsForBrowser,
+  twgRefreshRejected,
   unpackAzureCache,
   VIRTUAL_USAGE,
   virtualStateDir

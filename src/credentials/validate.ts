@@ -177,15 +177,51 @@ export function checkCredential(kind: CredentialKind, raw: unknown): CheckedCred
 }
 
 /**
- * `twg`'s `auth.conf` as the pod sends it, without its short-lived access token: `#` comments and `key=value` lines,
- * which must include the refresh token `twg` signs in again with. Any site and any account are accepted, because
- * which Atlassian account an agent uses is its owner's choice; the account becomes the label, from `user=`.
+ * `twg`'s sign-in as the pod sends it, without its short-lived access tokens: `auth-profiles.json` (twg 1.3.9 on)
+ * or `auth.conf` (1.3.3). Either must hold the refresh token `twg` signs in again with. Any site and any account
+ * are accepted, because which Atlassian account an agent uses is its owner's choice; the account becomes the label.
  */
 function checkAtlassianAuth(value: string): CheckedCredential {
   const mistake = NOT_ATLASSIAN.find(([shape]) => shape.test(value));
   if (mistake !== undefined) {
     return { ok: false, error: mistake[1] };
   }
+  return value.startsWith("{") ? checkAtlassianProfiles(value) : checkAtlassianAuthConf(value);
+}
+
+type TwgProfile = { id?: unknown; user?: unknown; credentials?: unknown };
+
+const nonEmpty = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+
+/**
+ * A JSON object whose `profiles` array has at least one profile with a credential holding a non-empty
+ * `oauthRefreshToken`. The label is the `user` of the active environment's default profile, else of the first
+ * profile that can refresh.
+ */
+function checkAtlassianProfiles(value: string): CheckedCredential {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return { ok: false, error: "that is not a twg auth-profiles.json: it is not JSON" };
+  }
+  const file = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  const profiles = Array.isArray(file.profiles) ? (file.profiles as TwgProfile[]) : [];
+  const credentials = (p: TwgProfile) =>
+    typeof p?.credentials === "object" && p.credentials !== null ? (Object.values(p.credentials) as { user?: unknown; oauthRefreshToken?: unknown }[]) : [];
+  const signedIn = profiles.filter((p) => credentials(p).some((c) => nonEmpty(c?.oauthRefreshToken)));
+  if (signedIn.length === 0) {
+    return { ok: false, error: "that twg auth-profiles.json has no oauthRefreshToken: sign in to twg with OAuth again" };
+  }
+  const defaults = typeof file.defaults === "object" && file.defaults !== null ? (file.defaults as Record<string, unknown>) : {};
+  const active = typeof file.activeEnvironment === "string" ? defaults[file.activeEnvironment] : undefined;
+  const profile = signedIn.find((p) => p.id === active) ?? (signedIn[0] as TwgProfile);
+  const user = [profile.user, ...credentials(profile).map((c) => c?.user)].find(nonEmpty);
+  return { ok: true, value, accountLabel: user?.trim() || null };
+}
+
+/** `#` comments and `key=value` lines, which must include `oauth-refresh-token`. The label is `user=`. */
+function checkAtlassianAuthConf(value: string): CheckedCredential {
   const settings = new Map<string, string>();
   for (const [index, raw] of value.split(/\r?\n/).entries()) {
     const line = raw.trim();

@@ -170,7 +170,8 @@ tools, and an agent starts without it. Like a GitHub token, only the owner's own
 
 An Atlassian sign-in (`atlassian`) is optional too: it gives an agent the Atlassian Teamwork Graph CLI, `twg`, for Jira
 and Confluence on hmcts.atlassian.net. It is not pasted: the pod relays a device code to its owner, then saves `twg`'s
-`auth.conf` without the access token, and saves it again whenever `twg` replaces its refresh token. Any Atlassian
+sign-in file (`auth-profiles.json` from twg 1.3.9, `auth.conf` before it) without its access tokens, and saves it again
+whenever `twg` replaces its refresh token. Any Atlassian
 account is accepted, and labels the credential; the owner can have the agent sign in again from its page.
 
 Each person also has a CLAUDE.md (`claude_md`), edited in the "Your CLAUDE.md" section of `/hub/virtual`, which every one of
