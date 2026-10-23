@@ -42,3 +42,10 @@ RUN bash -c 'export NVM_DIR="$HOME/.nvm"; \
     && bin="$(command -v agent-hub)" && sudo ln -sf "$bin" /usr/local/bin/agent-hub \
     && boot="$(command -v virtual-agent-boot)" && sudo ln -sf "$boot" /usr/local/bin/virtual-agent-boot \
     && npm ls -g --depth=0 @hmcts-cft/agent-hub'
+
+# Numeric, where the base names the same user: given only a name the kubelet cannot tell whether it
+# is root, and refuses a pod that asks for runAsNonRoot. The orchestrator sets runAsUser: 1000 for
+# that reason (src/orchestrator/manifests.ts), and this makes the image say it too, so it does not
+# depend on the manifest to be startable. It comes after the install, which runs as the base's user
+# so that npm writes to that user's own nvm prefix and sudo covers the two links.
+USER 1000
