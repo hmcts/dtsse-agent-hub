@@ -268,7 +268,7 @@ that repo, and nothing here names it — the orchestrator only takes a digest. W
 | have `node` and `npm`, reachable by sourcing `$NVM_DIR/nvm.sh` | `virtual-agent-boot` sources it to upgrade the client; the entrypoint refuses to start without either |
 | have `tmux`, `git`, `gh` and `curl` | the entrypoint runs each session in tmux; boot clones over HTTPS with `gh`'s token and reports to the hub with `curl`. `twg` is optional — the entrypoint skips the Atlassian sign-in without it |
 | use `/home/hmcts` as `$HOME` | the pod's volume mounts are hardcoded to it: `~/.claude`, `~/.azure` and `~/.config/gh` |
-| run as uid and gid 1000 | the pod sets `runAsNonRoot` with every capability dropped, so an image expecting root cannot start |
+| run as uid and gid 1000 | the pod sets `runAsNonRoot` with every capability dropped, so an image expecting root cannot start. The manifest sets `runAsUser` as well as `runAsNonRoot`, which is what makes the devcontainer image's `USER hmcts` acceptable: given only a user name, the kubelet cannot prove the user is not root and refuses the pod |
 
 Nothing else is the image's business, and the split is worth stating because it is not obvious from either repo: **the
 image owns whatever must be true before the workspace is cloned; the checkout owns whatever can change with it.** So
