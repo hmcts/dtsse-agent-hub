@@ -70,6 +70,22 @@ describe("commandProgram", () => {
   });
 });
 
+/** The name of something runnable in `dir`, to stand in for a launcher installed there, or undefined. */
+function anExecutableIn(dir: string): string | undefined {
+  try {
+    return fs.readdirSync(dir).find((name) => {
+      try {
+        fs.accessSync(path.join(dir, name), fs.constants.X_OK);
+        return fs.statSync(path.join(dir, name)).isFile();
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 // The real check, against files on disk, with the pane's working directory and PATH given explicitly rather than
 // inherited: a bare name is looked up on PATH and a path is resolved against that directory.
 describe("canRunProgram", () => {
@@ -136,6 +152,14 @@ describe("canRunProgram", () => {
     // Act & Assert
     expect(canRunProgram("launcher.sh", { cwd: paneDir, env: {} })).toBe(false);
     expect(canRunProgram("sh", { cwd: paneDir, env: {} })).toBe(true);
+  });
+
+  // `npm install -g` on a default prefix puts a launcher in /usr/local/bin, so a fallback missing that directory
+  // would refuse one the pane's shell would have found. Skipped where the directory holds nothing to look for.
+  const inLocalBin = anExecutableIn("/usr/local/bin");
+  it.skipIf(inLocalBin === undefined)("should search /usr/local/bin when the environment names no PATH", () => {
+    // Act & Assert
+    expect(canRunProgram(inLocalBin as string, { cwd: paneDir, env: {} })).toBe(true);
   });
 });
 

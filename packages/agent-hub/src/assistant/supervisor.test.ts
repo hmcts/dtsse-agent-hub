@@ -7,7 +7,7 @@ import { type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home
 import { conversation, fakeTmux } from "../__fixtures__/fake-tmux.ts";
 import type { SessionsBody } from "../api.ts";
 import { ensureStateDir, hubHome, projectTranscriptPath, statePath } from "../session.ts";
-import { createAssistantSupervisor, EXIT_GRACE_MS, idleMinutes, maxSessions, parseSavedSession, parseWake } from "./supervisor.ts";
+import { createAssistantSupervisor, EXIT_GRACE_MS, idleMinutes, maxSessions, parseSavedSession, parseWake, REFUSAL_EVERY_MS } from "./supervisor.ts";
 import { claudeCommand, commandProgram, PROMPT_FILE, type ProgramCheck, tmuxName } from "./tmux.ts";
 
 const CWD = "/workspace/cft-workspace";
@@ -198,7 +198,7 @@ describe("createAssistantSupervisor wake", () => {
     expect(said.filter((m) => m.includes("making room"))).toEqual([]);
   });
 
-  it("should say a launcher it cannot run once when the hub keeps resending the wake", async () => {
+  it("should say a launcher it cannot run once when the hub resends the wake within the interval", async () => {
     // Arrange
     const { supervisor, said } = setup({ canRun: () => false });
     const c = conversation();
@@ -210,6 +210,21 @@ describe("createAssistantSupervisor wake", () => {
 
     // Assert
     expect(said.filter((m) => m.includes("cannot run hai"))).toHaveLength(1);
+  });
+
+  // Saying it once per process would let the log go cold: a pod that can start nothing would read, an hour later,
+  // as a healthy supervisor that happens to have no sessions.
+  it("should say it again when the launcher still cannot be run an interval later", async () => {
+    // Arrange
+    const { supervisor, said, clock } = setup({ canRun: () => false });
+
+    // Act
+    await supervisor.wake(conversation());
+    clock.t += REFUSAL_EVERY_MS;
+    await supervisor.wake(conversation());
+
+    // Assert
+    expect(said.filter((m) => m.includes("cannot run hai"))).toHaveLength(2);
   });
 
   it("should resume the session when the wake says resume", async () => {

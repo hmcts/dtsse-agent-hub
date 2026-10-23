@@ -40,11 +40,12 @@ export function commandProgram(command: string): string {
 export type ProgramCheck = (program: string, opts: { cwd: string; env: Env }) => boolean;
 
 /**
- * Where a bare name is looked up when the environment names no PATH at all. A shell without one falls back to a
- * system default rather than to the working directory, and so does this: treating no PATH as the working directory
- * would refuse every launcher that is properly installed.
+ * Where a bare name is looked up when the environment names no PATH at all: the list both dash and bash search
+ * with PATH unset. A shell falls back to that rather than to the working directory, and so does this. The whole
+ * list matters, not a shorter stand-in: `npm install -g` on a default prefix puts a launcher in `/usr/local/bin`,
+ * so leaving that out would refuse one the pane's shell would have found.
  */
-const DEFAULT_PATH = "/usr/bin:/bin";
+const DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 function executableFile(file: string): boolean {
   try {

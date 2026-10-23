@@ -15,6 +15,14 @@ export const DEFAULT_IDLE_MINUTES = 20;
 // How long a session has to leave after `/exit` before its tmux session is killed.
 export const EXIT_GRACE_MS = 15000;
 export const REPORT_EVERY_MS = 60000;
+/**
+ * How often a launcher this pod cannot run is said again while that is still true. On an interval, as `report()`
+ * re-sends state that has not changed, rather than once per process: a refused wake is in no report and has no
+ * `SessionReport.state` to carry it, so the log is the only sign, and a pod that said it once an hour ago reads as
+ * a healthy supervisor that simply has no sessions. Not per wake, because the hub replays every pending wake each
+ * time it remakes the sessions stream, which would bury the first.
+ */
+export const REFUSAL_EVERY_MS = 60000;
 // The hub's limits on PUT /api/virtual/{id}/sessions.
 const MAX_REPORTED = 50;
 const DETAIL_MAX = 200;
@@ -87,6 +95,7 @@ export type CreateAssistantSupervisorOptions = {
   idleMs?: number;
   exitGraceMs?: number;
   reportEveryMs?: number;
+  refusalEveryMs?: number;
 };
 
 // The pod's state directory, which `virtual/phases.ts` also writes to. Spelled out rather than taken from
@@ -138,15 +147,18 @@ export function createAssistantSupervisor({
   max = maxSessions(env),
   idleMs = idleMinutes(env) * 60000,
   exitGraceMs = EXIT_GRACE_MS,
-  reportEveryMs = REPORT_EVERY_MS
+  reportEveryMs = REPORT_EVERY_MS,
+  refusalEveryMs = REFUSAL_EVERY_MS
 }: CreateAssistantSupervisorOptions): AssistantSupervisor {
   const sessions = new Map<string, ConversationSession>();
   // Wakes waiting for a free slot, oldest first. A conversation whose session is stopping waits here too.
   const queue: Wake[] = [];
   let reported: string | null = null;
   let reportedAt = 0;
-  // The launcher refusal already said, so replayed wakes do not repeat it. Cleared by a session that starts.
+  // The launcher refusal already said and when, so replayed wakes do not repeat it every time. Cleared by a
+  // session that starts, so a launcher that goes missing again is said at once.
   let refusedLauncher: string | null = null;
+  let refusedLauncherAt = 0;
   let chain: Promise<unknown> = Promise.resolve();
   const serial = <T>(fn: () => Promise<T>): Promise<T> => {
     const next = chain.then(fn);
@@ -277,10 +289,9 @@ export function createAssistantSupervisor({
         // which would promise the person one that cannot start. The hub sends the wake again on its next stream.
         queue.splice(queue.indexOf(next), 1);
         const reason = `cannot run ${unrunnable} from ${cwd}`;
-        // Said on the first refusal, not on every replay: the hub remakes the sessions stream every 25 seconds and
-        // resends each pending wake with it, and the occurrence worth finding in the log is the first.
-        if (refusedLauncher !== reason) {
+        if (refusedLauncher !== reason || now() - refusedLauncherAt >= refusalEveryMs) {
           refusedLauncher = reason;
+          refusedLauncherAt = now();
           say(`conversation ${next.conversation_id}: not starting a session: ${reason}`);
         }
         continue;

@@ -22,6 +22,7 @@ export {
   maxSessions,
   parseSavedSession,
   parseWake,
+  REFUSAL_EVERY_MS,
   REPORT_EVERY_MS
 } from "./supervisor.ts";
 export type { CreateTmuxOptions, ProgramCheck, StartSessionOptions, Tmux, TmuxExec, TmuxResult } from "./tmux.ts";
