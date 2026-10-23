@@ -7,7 +7,7 @@ import { workspaceRoot } from "../agent.ts";
 import type { Api, SessionReport } from "../api.ts";
 import type { Env } from "../env.ts";
 import { hubHome, projectTranscriptPath, statePath, validSessionId } from "../session.ts";
-import { claudeCommand, createTmux, type Tmux, tmuxName } from "./tmux.ts";
+import { canRunProgram, claudeCommand, commandProgram, createTmux, type ProgramCheck, type Tmux, tmuxName } from "./tmux.ts";
 
 export const DEFAULT_MAX_SESSIONS = 2;
 export const MAX_SESSIONS_LIMIT = 20;
@@ -75,11 +75,13 @@ export type CreateAssistantSupervisorOptions = {
   id: string;
   env?: Env;
   tmux?: Tmux;
+  /** Whether a pane's program can be run; a test passes its own rather than putting a launcher on PATH. */
+  canRun?: ProgramCheck;
   fs?: SupervisorFs;
   now?: () => number;
   say?: (message: string) => void;
-  /** Where each conversation's session runs. The workspace checkout root, because `claudeCommand` names the prompt
-   * file through a path relative to it. */
+  /** Where each conversation's session runs, and so what a relative path in its command resolves against: the
+   * workspace checkout root, because `claudeCommand` names the prompt file through a path relative to it. */
   cwd?: string;
   max?: number;
   idleMs?: number;
@@ -128,6 +130,7 @@ export function createAssistantSupervisor({
   id,
   env = process.env,
   tmux = createTmux({ env: env as NodeJS.ProcessEnv }),
+  canRun = canRunProgram,
   fs = nodeFs,
   now = Date.now,
   say = () => {},
@@ -209,8 +212,18 @@ export function createAssistantSupervisor({
   async function start(w: Wake): Promise<void> {
     const resume = w.resume || fs.existsSync(transcript(w.session_id));
     const name = tmuxName(w.conversation_id);
+    const command = claudeCommand(w.session_id, resume);
+    // `new-session` succeeds whatever the command is, because the pane's shell starts and only the command in it
+    // fails, taking its own error message with it when the pane closes. A session recorded for a launcher that is
+    // not there is one the hub believes is running and keeps waking, so it is refused here instead, and the reason
+    // goes to the supervisor's stderr, which is the pod's log and outlives the pane.
+    const program = commandProgram(command);
+    if (!canRun(program, { cwd, env: env as NodeJS.ProcessEnv })) {
+      say(`conversation ${w.conversation_id}: not starting a session: cannot run ${program} from ${cwd}`);
+      return;
+    }
     try {
-      await tmux.start({ name, cwd, vars: { AGENT_HUB_CONVERSATION_ID: w.conversation_id }, command: claudeCommand(w.session_id, resume) });
+      await tmux.start({ name, cwd, vars: { AGENT_HUB_CONVERSATION_ID: w.conversation_id }, command });
     } catch (e) {
       // Nothing registered for it, so the hub sends the wake again on the next connection.
       say(`conversation ${w.conversation_id}: could not start a session: ${(e as Error).message}`);

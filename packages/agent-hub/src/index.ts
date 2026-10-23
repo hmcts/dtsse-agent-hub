@@ -77,6 +77,7 @@ export type {
   ConversationSession,
   CreateAssistantSupervisorOptions,
   CreateTmuxOptions,
+  ProgramCheck,
   ReportOutcome,
   RunAssistantSupervisorOptions,
   SavedSession,
@@ -89,7 +90,9 @@ export type {
   Wake
 } from "./assistant/index.ts";
 export {
+  canRunProgram,
   claudeCommand,
+  commandProgram,
   createAssistantSupervisor,
   createTmux,
   DEFAULT_IDLE_MINUTES,

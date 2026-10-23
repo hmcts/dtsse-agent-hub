@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { claudeCommand, createTmux, PROMPT_FILE, type TmuxExec, type TmuxResult, tmuxName } from "./tmux.ts";
+import { canRunProgram, claudeCommand, commandProgram, createTmux, PROMPT_FILE, type TmuxExec, type TmuxResult, tmuxName } from "./tmux.ts";
 
 let binDir: string;
 
@@ -57,6 +57,77 @@ describe("claudeCommand", () => {
     // Act & Assert
     expect(claudeCommand("sess-1", false)).toBe(`hai --dangerously-skip-permissions --session-id sess-1 --append-system-prompt-file ${PROMPT_FILE}`);
     expect(claudeCommand("sess-1", true)).toBe(`hai --dangerously-skip-permissions --resume sess-1 --append-system-prompt-file ${PROMPT_FILE}`);
+  });
+});
+
+describe("commandProgram", () => {
+  it("should be the first word when given a command of either shape the launcher has had", () => {
+    // Act & Assert
+    expect(commandProgram(claudeCommand("sess-1", false))).toBe("hai");
+    expect(commandProgram(".claude/run.sh --session-id sess-1")).toBe(".claude/run.sh");
+    expect(commandProgram("  hai  --resume sess-1 ")).toBe("hai");
+    expect(commandProgram("")).toBe("");
+  });
+});
+
+// The real check, against files on disk, with the pane's working directory and PATH given explicitly rather than
+// inherited: a bare name is looked up on PATH and a path is resolved against that directory.
+describe("canRunProgram", () => {
+  let paneDir: string;
+  let launcherBin: string;
+
+  beforeAll(() => {
+    paneDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-hub-pane-"));
+    launcherBin = fs.mkdtempSync(path.join(os.tmpdir(), "agent-hub-launcher-"));
+    fs.writeFileSync(path.join(launcherBin, "faux-launcher"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(paneDir, "launcher.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(paneDir, "not-executable.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+    fs.mkdirSync(path.join(paneDir, "a-directory"));
+  });
+
+  afterAll(() => {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+    fs.rmSync(launcherBin, { recursive: true, force: true });
+  });
+
+  it("should be true for a bare name when it is on PATH, and false when it is not", () => {
+    // Act & Assert
+    expect(canRunProgram("faux-launcher", { cwd: paneDir, env: { PATH: `${launcherBin}:/usr/bin:/bin` } })).toBe(true);
+    expect(canRunProgram("faux-launcher", { cwd: paneDir, env: { PATH: "/usr/bin:/bin" } })).toBe(false);
+  });
+
+  it("should be true for a relative path when it resolves in the pane's working directory, and false when it does not", () => {
+    // Act & Assert
+    expect(canRunProgram("./launcher.sh", { cwd: paneDir, env: {} })).toBe(true);
+    expect(canRunProgram("./nothing-here.sh", { cwd: paneDir, env: {} })).toBe(false);
+  });
+
+  it("should be false for a relative path that resolves against another directory", () => {
+    // Act & Assert: the same program, asked of a directory it is not in.
+    expect(canRunProgram("./launcher.sh", { cwd: launcherBin, env: {} })).toBe(false);
+  });
+
+  // A shell's `command -v` disagrees with itself here: bash says no, dash says yes for any path it can spell.
+  it("should be false for a file that exists but is not executable", () => {
+    // Act & Assert
+    expect(fs.existsSync(path.join(paneDir, "not-executable.sh"))).toBe(true);
+    expect(canRunProgram("./not-executable.sh", { cwd: paneDir, env: {} })).toBe(false);
+  });
+
+  it("should be false for a directory, which carries the execute bit but cannot be run", () => {
+    // Act & Assert
+    expect(canRunProgram("./a-directory", { cwd: paneDir, env: {} })).toBe(false);
+    expect(canRunProgram("a-directory", { cwd: paneDir, env: { PATH: paneDir } })).toBe(false);
+  });
+
+  it("should be false for an empty program when the command line is empty", () => {
+    // Act & Assert
+    expect(canRunProgram("", { cwd: paneDir, env: { PATH: launcherBin } })).toBe(false);
+  });
+
+  it("should treat an empty PATH entry as the pane's working directory, as a shell does", () => {
+    // Act & Assert
+    expect(canRunProgram("launcher.sh", { cwd: paneDir, env: { PATH: "/usr/bin:" } })).toBe(true);
   });
 });
 

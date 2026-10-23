@@ -1,6 +1,8 @@
 // How a conversation's Claude is started and stopped: one detached tmux session per conversation, named after
 // it, so a restarted supervisor can find the sessions it left running and a person can attach to one.
 import { execFile } from "node:child_process";
+import nodeFs from "node:fs";
+import path from "node:path";
 
 /** The system prompt the pod appends for a conversation's session. It is a cft-workspace file, not this package's. */
 export const PROMPT_FILE = ".devcontainer/virtual-agent/assistant-prompt.md";
@@ -27,6 +29,46 @@ export function tmuxName(conversationId: string): string {
 export function claudeCommand(sessionId: string, resume: boolean): string {
   return `hai --dangerously-skip-permissions ${resume ? "--resume" : "--session-id"} ${sessionId} --append-system-prompt-file ${PROMPT_FILE}`;
 }
+
+/** The program a command line runs: its first word. The supervisor builds the command, so there is nothing quoted to split. */
+export function commandProgram(command: string): string {
+  return command.trim().split(/\s+/)[0] ?? "";
+}
+
+/** Whether a pane's program can be run, asked of the directory the pane will run in. */
+export type ProgramCheck = (program: string, opts: { cwd: string; env: NodeJS.ProcessEnv }) => boolean;
+
+function executableFile(file: string): boolean {
+  try {
+    nodeFs.accessSync(file, nodeFs.constants.X_OK);
+    return nodeFs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a pane's program resolves, for both shapes this launcher has had: `hai`, found on PATH, and the
+ * `.claude/run.sh` that came before it, a path relative to the checkout. A path is one that holds a separator, as
+ * it is for a shell, and the answer is on executability rather than mere existence.
+ *
+ * Done here rather than with `command -v` in a shell because the two shells a pod might have disagree: bash tests
+ * a slashed path for executability, and dash answers for any path that is merely spelled, so a non-executable
+ * launcher would pass. Resolving in-process has one answer whatever `/bin/sh` is.
+ *
+ * `cwd` is the directory tmux will start the pane in, not this process's, because that is what a relative program
+ * and a relative PATH entry are resolved against; checking from anywhere else would refuse a launcher that works.
+ */
+export const canRunProgram: ProgramCheck = (program, { cwd, env }) => {
+  if (program === "") {
+    return false;
+  }
+  if (program.includes("/")) {
+    return executableFile(path.resolve(cwd, program));
+  }
+  // An empty PATH entry means the working directory, as it does for a shell.
+  return (env.PATH ?? "").split(path.delimiter).some((dir) => executableFile(path.resolve(cwd, dir === "" ? "." : dir, program)));
+};
 
 function runTmux(args: string[], { env }: { env: NodeJS.ProcessEnv }): Promise<TmuxResult> {
   return new Promise((resolve) => {
