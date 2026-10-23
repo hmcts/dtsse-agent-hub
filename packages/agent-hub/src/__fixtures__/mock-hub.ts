@@ -293,7 +293,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     }
     if (req.method === "PUT" && area === "conversations" && kind && sub === "jira") {
       const exportId = typeof body.export_id === "string" ? body.export_id : "";
-      const keyed = typeof body.key === "string" && /^[A-Z][A-Z0-9_]{1,9}-[0-9]{1,9}$/.test(body.key);
+      const keyed = typeof body.key === "string" && /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/.test(body.key);
       const failed = typeof body.error === "string" && body.error.trim() !== "" && body.error.length <= 300;
       if (!exportId || keyed === failed) {
         return send(res, 400, { error: "bad jira report" });

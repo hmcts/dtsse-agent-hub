@@ -94,7 +94,7 @@ export function issueKey(stdout: string, project: string): string | null {
   } catch {
     return null;
   }
-  const wanted = new RegExp(`^${project}-[0-9]{1,9}$`);
+  const wanted = new RegExp(String.raw`^${project}-\d{1,9}$`);
   const pending: unknown[] = [parsed];
   while (pending.length > 0) {
     const next = pending.shift();
@@ -119,7 +119,7 @@ export function twgError(result: RunResult): string {
     try {
       const raw = asRecord(JSON.parse(text));
       const error = asRecord(raw?.error);
-      const message = typeof error?.message === "string" ? error.message : typeof raw?.message === "string" ? raw.message : null;
+      const message = [error?.message, raw?.message].find((candidate): candidate is string => typeof candidate === "string");
       if (message) {
         return `Jira refused the ticket: ${message}`.slice(0, MAX_ERROR);
       }

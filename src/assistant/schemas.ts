@@ -33,7 +33,7 @@ export const sessionsReportBody = z.object({
 export type SessionsReport = z.infer<typeof sessionsReportBody>;
 
 /** A Jira issue key and the longest error a pod may report for an export; the migration checks the same. */
-export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}-[0-9]{1,9}$/;
+export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/;
 export const MAX_JIRA_ERROR = 300;
 
 export const jiraExportReportBody = z.union([

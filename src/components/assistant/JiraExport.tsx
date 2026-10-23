@@ -58,6 +58,94 @@ function SignInPrompt({ login }: { login: LoginView }) {
   );
 }
 
+/** Why the button waits, if it does: there is nothing written yet, or changes Jira would not get. */
+function blockedBy(written: boolean, saved: boolean): string | null {
+  if (!written) {
+    return "Write the document to export it.";
+  }
+  return saved ? null : "Waiting for the document to save.";
+}
+
+/** The line under the footer's controls, if any: why the button waits, or that a sign-in comes first. */
+function footerHint(idle: boolean, blocked: string | null, connected: boolean): string | null {
+  if (!idle) {
+    return null;
+  }
+  return blocked ?? (connected ? null : "You'll be asked to sign in to Atlassian, so the ticket is created as you.");
+}
+
+function BoardPicker({ project, onChange, disabled }: { project: string; onChange: (project: string) => void; disabled: boolean }) {
+  return (
+    <label className="flex min-w-0 flex-[1_1_220px] items-center overflow-hidden rounded-[9px] border border-asst-strong bg-asst-field focus-within:border-asst-accent-line">
+      <span className="shrink-0 whitespace-nowrap border-r border-asst-strong py-[7px] pl-3 pr-2.5 text-xs font-medium text-asst-muted">Target board</span>
+      <select
+        value={project}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        aria-label="Jira board"
+        className="min-w-0 flex-1 cursor-pointer bg-transparent px-2.5 py-[7px] text-[13px] font-medium text-asst-text outline-none disabled:cursor-default"
+      >
+        {JIRA_BOARDS.map((board) => (
+          <option key={board.project} value={board.project} className="bg-asst-field">
+            {board.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/** The ticket once there is one, what is happening while the export runs, or the button that starts it. */
+function JiraAction({
+  exported,
+  pending,
+  signingIn,
+  connected,
+  blocked,
+  describedBy,
+  onExport
+}: {
+  exported: JiraExportView;
+  pending: boolean;
+  signingIn: boolean;
+  connected: boolean;
+  blocked: boolean;
+  describedBy: string | undefined;
+  onExport: () => void;
+}) {
+  if (exported.status === "done") {
+    return (
+      <div role="status" className="flex h-[34px] shrink-0 items-center gap-2.5 text-[13px]">
+        <span className="font-medium text-asst-ok">
+          ✓ Created <span className="font-plex-mono">{exported.key}</span>
+        </span>
+        <a href={exported.url} target="_blank" rel="noreferrer noopener" className="text-asst-accent underline">
+          View in Jira
+        </a>
+      </div>
+    );
+  }
+  if (pending) {
+    return (
+      <span role="status" className="flex h-[34px] shrink-0 items-center text-[13px] text-asst-accent-soft">
+        {signingIn ? "Signing in to Atlassian…" : "Creating ticket…"}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onExport}
+      disabled={blocked}
+      aria-describedby={describedBy}
+      className="flex h-[34px] shrink-0 items-center gap-2 whitespace-nowrap rounded-[9px] bg-asst-accent px-3.5 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-40"
+    >
+      <span aria-hidden="true">↗</span>
+      <span>{connected ? "Export to Jira backlog" : "Connect Jira and export"}</span>
+    </button>
+  );
+}
+
 /**
  * Below the document: the board to send it to and the button that does, then the ticket it became. A document goes
  * to Jira once; after that this shows the ticket instead. `saved` is false while the panel has changes Jira would
@@ -90,57 +178,26 @@ export function JiraFooter({
 
   const pending = clickedAt === shownExport || exported.status === "pending";
   const login = access.login?.kind === "atlassian" && access.login.state === "pending" ? access.login : null;
-  const blocked = !written ? "Write the document to export it." : !saved ? "Waiting for the document to save." : null;
-  const shown = error ?? (exported.status === "failed" && !pending ? exported.error : null);
-  const idle = !pending && exported.status !== "done";
-  const signInNotice = access.connected ? null : "You'll be asked to sign in to Atlassian, so the ticket is created as you.";
-  const hint = idle ? (blocked ?? signInNotice) : null;
+  const blocked = blockedBy(written, saved);
+  const failure = exported.status === "failed" && !pending ? exported.error : null;
+  const shown = error ?? failure;
+  const hint = footerHint(!pending && exported.status !== "done", blocked, access.connected);
+  const hintId = `jira-hint-${conversationId}`;
 
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2.5 border-t border-asst-line bg-asst-panel px-4 py-3">
-      <label className="flex min-w-0 flex-[1_1_220px] items-center overflow-hidden rounded-[9px] border border-asst-strong bg-asst-field focus-within:border-asst-accent-line">
-        <span className="shrink-0 whitespace-nowrap border-r border-asst-strong py-[7px] pl-3 pr-2.5 text-xs font-medium text-asst-muted">Target board</span>
-        <select
-          value={project}
-          onChange={(event) => setProject(event.target.value)}
-          disabled={pending || exported.status === "done"}
-          aria-label="Jira board"
-          className="min-w-0 flex-1 cursor-pointer bg-transparent px-2.5 py-[7px] text-[13px] font-medium text-asst-text outline-none disabled:cursor-default"
-        >
-          {JIRA_BOARDS.map((board) => (
-            <option key={board.project} value={board.project} className="bg-asst-field">
-              {board.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      {exported.status === "done" ? (
-        <div role="status" className="flex h-[34px] shrink-0 items-center gap-2.5 text-[13px]">
-          <span className="font-medium text-asst-ok">
-            ✓ Created <span className="font-plex-mono">{exported.key}</span>
-          </span>
-          <a href={exported.url} target="_blank" rel="noreferrer noopener" className="text-asst-accent underline">
-            View in Jira
-          </a>
-        </div>
-      ) : pending ? (
-        <span role="status" className="flex h-[34px] shrink-0 items-center text-[13px] text-asst-accent-soft">
-          {login === null ? "Creating ticket…" : "Signing in to Atlassian…"}
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => void start()}
-          disabled={blocked !== null}
-          aria-describedby={hint === null ? undefined : `jira-hint-${conversationId}`}
-          className="flex h-[34px] shrink-0 items-center gap-2 whitespace-nowrap rounded-[9px] bg-asst-accent px-3.5 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-40"
-        >
-          <span aria-hidden="true">↗</span>
-          <span>{access.connected ? "Export to Jira backlog" : "Connect Jira and export"}</span>
-        </button>
-      )}
+      <BoardPicker project={project} onChange={setProject} disabled={pending || exported.status === "done"} />
+      <JiraAction
+        exported={exported}
+        pending={pending}
+        signingIn={login !== null}
+        connected={access.connected}
+        blocked={blocked !== null}
+        describedBy={hint === null ? undefined : hintId}
+        onExport={() => void start()}
+      />
       {hint === null ? null : (
-        <p id={`jira-hint-${conversationId}`} className="basis-full text-xs text-asst-faint">
+        <p id={hintId} className="basis-full text-xs text-asst-faint">
           {hint}
         </p>
       )}

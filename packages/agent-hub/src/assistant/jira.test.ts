@@ -144,7 +144,7 @@ describe("twgError", () => {
     const error = twgError({ code: 1, stdout: "", stderr: `\n\u001b[31m${"x".repeat(400)}\u001b[0m\nsecond line` });
 
     expect(error.startsWith("Jira refused the ticket: xxx")).toBe(true);
-    expect(error.length).toBe(300);
+    expect(error).toHaveLength(300);
   });
 });
 
