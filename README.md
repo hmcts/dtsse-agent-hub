@@ -259,6 +259,13 @@ the namespace's `default` ServiceAccount, with no ServiceAccount token mounted a
 capability dropped, the CPU and memory of its size and 2–10Gi of ephemeral storage. `VIRTUAL_AGENT_HOST_ALIASES` become
 the pod's `hostAliases`.
 
+**The client the pod boots on.** `virtual-agent-boot` installs `@hmcts-cft/agent-hub@latest` over the one its image
+carries before handing over to the checkout's entrypoint, so a client release reaches a pod without an image rebuild
+and a digest bump. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
+it ended up on either way. To hold a pod on that copy deliberately, set `VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE=true` on its
+StatefulSet with `kubectl set env` — the pod's environment is a fixed list with no pass-through, and the next apply of
+the StatefulSet drops it again.
+
 **The launch token** is a plain `AGENT_HUB_LAUNCH_TOKEN` value in the pod template, so the orchestrator needs no
 access to Secrets. Anyone who can read StatefulSets in the namespace can read it: the same people who can exec into
 the pod, and it works only for that one agent, and only while the agent is meant to be running. The template carries

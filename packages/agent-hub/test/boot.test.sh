@@ -171,6 +171,10 @@ boot() {
 order_is() { [ "$(tr '\n' ' ' <"$C/order.log")" = "$1" ]; }
 hub() { jq -r "$@" "$HUB_STATE"; }
 
+# The arguments of the install alone. npm.args holds one line per invocation, and the `ls` that follows the
+# install carries -g too, so a flag asserted against the whole file is found whether or not the install has it.
+install_args() { grep '^install ' "$C/npm.args" 2>/dev/null; }
+
 case_no_token() {
     setup no-token
     boot
@@ -265,12 +269,13 @@ case_client_upgrade() {
     boot
     [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
         ok "upgrades the client last, then hands over" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
-    grep -qE '(^| )-g( |$)' "$C/npm.args" && grep -qF -- '@hmcts-cft/agent-hub@latest' "$C/npm.args" &&
+    # Without -g the install goes into the pod's working directory and the upgrade does nothing at all.
+    install_args | grep -qE '(^| )-g( |$)' && install_args | grep -qF -- '@hmcts-cft/agent-hub@latest' &&
         ok "installs the published client globally and unpinned" || no "npm args: $(cat "$C/npm.args" 2>/dev/null)"
-    grep -qF -- '--@hmcts-cft:registry=https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/' "$C/npm.args" &&
+    install_args | grep -qF -- '--@hmcts-cft:registry=https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/' &&
         ok "points the @hmcts-cft scope at the hmcts-lib feed" || no "npm args: $(cat "$C/npm.args" 2>/dev/null)"
     # The feed holds @hmcts-cft packages alone, so a bare --registry 404s on the first public package.
-    grep -qE '(^| )--registry=' "$C/npm.args" && no "sent every package to the hmcts-lib feed" ||
+    install_args | grep -qE '(^| )--registry=' && no "sent every package to the hmcts-lib feed" ||
         ok "leaves every other package on the default registry"
     grep -q 'agent-hub client is @hmcts-cft/agent-hub@9.9.9' "$C/out" &&
         ok "logs the version it ended up with" || no "version not logged: $(grep 'agent-hub client' "$C/out")"

@@ -1,9 +1,9 @@
 # @hmcts-cft/agent-hub
 
 The client side of [agent-hub](https://github.com/hmcts/dtsse-agent-hub): the Claude Code hooks, the bridge that keeps
-a session connected, the topic-board and direct-message CLI, and the runtime a virtual agent's pod boots into. The HTTP
-contract it is built against is [`docs/agent-api.md`](https://github.com/hmcts/dtsse-agent-hub/blob/master/docs/agent-api.md)
-in this repository.
+a session connected, the topic-board and direct-message CLI, and the virtual-agent runtime. The HTTP contract it is
+built against is [`docs/agent-api.md`](https://github.com/hmcts/dtsse-agent-hub/blob/master/docs/agent-api.md) in this
+repository.
 
 Published from `packages/agent-hub/` to the HMCTS Azure Artifacts `hmcts-lib` feed. It has no runtime dependencies: the
 `UserPromptContext` hook runs synchronously on every prompt, so the entrypoint must not pay module-load cost.
@@ -29,16 +29,8 @@ Every command the CLI quotes back — reply hints, `setup inbound`, the usage te
 invoked as, `agent-hub` by default. A wrapper with its own name, such as cft-workspace's `scripts/agent-hub` shim, can
 set `AGENT_HUB_INVOKED_AS` before calling to have that spelling quoted instead.
 
-`bin/virtual-agent-boot` is the other bash bin: stage 0 of a virtual agent's pod, which authenticates to GitHub through
-a device code relayed by the hub, clones or fast-forwards cft-workspace, and hands over to the
-`.devcontainer/virtual-agent/entrypoint.sh` in that checkout. cft-workspace's Dockerfile symlinks it into
-`/usr/local/bin`: the kubelet resolves a pod's `command` with no shell, and npm's global bin directory is not on the
-image's `PATH`.
-
-Immediately before that handover it installs `@hmcts-cft/agent-hub@latest` over the image's copy, so a release reaches
-a pod without an image rebuild, as cft-workspace's `post-start.sh` does for a container. It is never fatal: a pod whose
-feed is unreachable boots on the client the image carries. `VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE=true` pins a pod to that
-copy, to debug a particular version.
+`bin/virtual-agent-boot` is the other bash bin. It is the virtual-agent runtime's own entrypoint rather than anything
+to run by hand, and its header comment documents it.
 
 ## Develop
 

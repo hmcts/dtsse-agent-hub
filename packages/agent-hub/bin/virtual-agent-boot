@@ -165,9 +165,15 @@ load_node() {
 
 # A pod's client is the one the devcontainer image baked in, so without this a client release would reach pods
 # only after an image rebuild and a Flux digest bump; cft-workspace's post-start.sh gives a laptop the same
-# refresh on every container start. Called last, immediately before the handover, because this script is one of
-# the package's own bins: the install replaces the file bash is reading, which is safe only once there is
-# nothing left after the call but the `exec` bash has already parsed.
+# refresh on every container start. Called as late as the handover allows, because this script is one of the
+# package's own bins: the install replaces the file bash is reading, which is safe only once all that is left
+# is the temp-directory removal, the trap clearing and the `exec`, which bash has already parsed.
+#
+# It is called above that trap clearing, not below it, so the TERM handler covers the install: the fetch bound
+# is per request and an install makes several, so this runs for minutes, and an agent stopped from the UI
+# meanwhile should log "terminated during boot" and exit 0 rather than let the kubelet's TERM kill bash at its
+# default disposition — a 143 with no log line and npm orphaned mid-reify. $TMP is therefore still present
+# while npm runs, and nothing here uses it: the output goes to a local, so the call stays free to move.
 #
 # The registry is set for the @hmcts-cft scope alone. The hmcts-lib feed holds nothing else, so a bare
 # --registry would send the first public package there and 404. The feed allows anonymous reads, which is what
@@ -179,7 +185,8 @@ load_node() {
 # resolving to the new copy.
 #
 # Never fatal: whatever happens here the pod carries on and boots on the client the image carries.
-# VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE pins a pod to it, to debug a particular version.
+# VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE pins whatever runs this bin to that copy, to debug a particular version; the hub
+# gives a pod a fixed environment, so pinning one means setting the variable on its StatefulSet.
 upgrade_client() {
     local out version
     case "${VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE:-}" in
@@ -199,8 +206,11 @@ upgrade_client() {
         log "could not upgrade the agent-hub client, keeping the image's: $(printf '%s' "$out" | tr '\n' ' ' | head -c 300)"
         return 0
     fi
-    # The client has no version command, so npm is asked what is now installed: `<path>:<name>@<version>`.
-    version=$(npm ls -g --depth=0 --parseable --long "@hmcts-cft/agent-hub" 2>/dev/null | sed -n 's/^.*://p' || true)
+    # The client has no version command, so npm is asked what is now installed. A `--parseable --long` line is
+    # `<path>:<name>@<version>`, then a realpath when the two differ, then any of EXTRANEOUS, INVALID and
+    # OVERRIDDEN — so the pkgid is taken by position, or a pod npm considers extraneous logs that word as its
+    # version, and this line is the only record of which client the pod booted on.
+    version=$(npm ls -g --depth=0 --parseable --long "@hmcts-cft/agent-hub" 2>/dev/null | cut -d: -s -f2 || true)
     if [[ -n "$version" ]]; then
         log "agent-hub client is $version"
     else
@@ -264,7 +274,7 @@ if [[ ! -x "$entrypoint" ]]; then
     report failed "the cft-workspace checkout has no executable .devcontainer/virtual-agent/entrypoint.sh"
     exit 1
 fi
+upgrade_client
 rm -rf "$TMP"
 trap - EXIT TERM INT
-upgrade_client
 exec "$entrypoint"
