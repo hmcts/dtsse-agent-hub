@@ -123,7 +123,7 @@ describe("createAssistantSupervisor wake", () => {
     expect(start?.name).toMatch(/^c-[0-9a-f]{8}$/);
     expect(start?.cwd).toBe(CWD);
     expect(start?.vars).toEqual({ AGENT_HUB_CONVERSATION_ID: c.conversation_id });
-    expect(start?.command).toBe(`.claude/run.sh --session-id ${c.session_id} --append-system-prompt-file ${PROMPT_FILE}`);
+    expect(start?.command).toBe(`hai --dangerously-skip-permissions --session-id ${c.session_id} --append-system-prompt-file ${PROMPT_FILE}`);
   });
 
   it("should resume the session when the wake says resume", async () => {
@@ -136,7 +136,7 @@ describe("createAssistantSupervisor wake", () => {
 
     // Assert
     expect(tmux.starts()[0]?.command).toBe(claudeCommand(c.session_id, true));
-    expect(tmux.starts()[0]?.command).toMatch(new RegExp(`^\\.claude/run\\.sh --resume ${c.session_id} --append-system-prompt-file `));
+    expect(tmux.starts()[0]?.command).toMatch(new RegExp(`^hai --dangerously-skip-permissions --resume ${c.session_id} --append-system-prompt-file `));
   });
 
   it("should resume the session when its transcript is already on disk, whatever the wake says", async () => {

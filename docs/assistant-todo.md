@@ -18,7 +18,6 @@ Delete this file once everything below is done or has moved to Jira.
   - an assistant-written document opening the panel;
   - an edit conflict;
   - a product change.
-- [ ] Run `scripts/lib/agent-hub/test/run-sh.test.sh` against a clean `.claude/run.sh`; it was skipped because of local uncommitted changes.
 - [ ] Try it in a real pod in preview, with `AGENT_HUB_SESSION_IDLE_MINUTES=1` to see sessions stop. Check that:
   - two chats run two `c-*` sessions;
   - a third queues on `small`;

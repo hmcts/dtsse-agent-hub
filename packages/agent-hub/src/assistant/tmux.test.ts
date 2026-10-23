@@ -55,8 +55,8 @@ describe("tmuxName", () => {
 describe("claudeCommand", () => {
   it("should append the prompt file and choose --resume or --session-id when told whether to resume", () => {
     // Act & Assert
-    expect(claudeCommand("sess-1", false)).toBe(`.claude/run.sh --session-id sess-1 --append-system-prompt-file ${PROMPT_FILE}`);
-    expect(claudeCommand("sess-1", true)).toBe(`.claude/run.sh --resume sess-1 --append-system-prompt-file ${PROMPT_FILE}`);
+    expect(claudeCommand("sess-1", false)).toBe(`hai --dangerously-skip-permissions --session-id sess-1 --append-system-prompt-file ${PROMPT_FILE}`);
+    expect(claudeCommand("sess-1", true)).toBe(`hai --dangerously-skip-permissions --resume sess-1 --append-system-prompt-file ${PROMPT_FILE}`);
   });
 });
 
@@ -66,12 +66,10 @@ describe("createTmux", () => {
     const { args, exec } = recorder();
 
     // Act
-    await createTmux({ exec }).start({ name: "c-0f8a6a1e", cwd: "/w", vars: { AGENT_HUB_CONVERSATION_ID: "c1" }, command: ".claude/run.sh" });
+    await createTmux({ exec }).start({ name: "c-0f8a6a1e", cwd: "/w", vars: { AGENT_HUB_CONVERSATION_ID: "c1" }, command: "hai" });
 
     // Assert
-    expect(args).toEqual([
-      ["new-session", "-d", "-s", "c-0f8a6a1e", "-x", "220", "-y", "50", "-c", "/w", "-e", "AGENT_HUB_CONVERSATION_ID=c1", ".claude/run.sh"]
-    ]);
+    expect(args).toEqual([["new-session", "-d", "-s", "c-0f8a6a1e", "-x", "220", "-y", "50", "-c", "/w", "-e", "AGENT_HUB_CONVERSATION_ID=c1", "hai"]]);
   });
 
   it("should throw with the exit code and stderr when new-session fails", async () => {

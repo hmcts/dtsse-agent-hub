@@ -78,8 +78,8 @@ export type CreateAssistantSupervisorOptions = {
   fs?: SupervisorFs;
   now?: () => number;
   say?: (message: string) => void;
-  /** Where each conversation's session runs. The workspace checkout root, because `claudeCommand` reaches the
-   * launcher through a path relative to it. */
+  /** Where each conversation's session runs. The workspace checkout root, because `claudeCommand` names the prompt
+   * file through a path relative to it. */
   cwd?: string;
   max?: number;
   idleMs?: number;
