@@ -35,6 +35,11 @@ a device code relayed by the hub, clones or fast-forwards cft-workspace, and han
 `/usr/local/bin`: the kubelet resolves a pod's `command` with no shell, and npm's global bin directory is not on the
 image's `PATH`.
 
+Immediately before that handover it installs `@hmcts-cft/agent-hub@latest` over the image's copy, so a release reaches
+a pod without an image rebuild, as cft-workspace's `post-start.sh` does for a container. It is never fatal: a pod whose
+feed is unreachable boots on the client the image carries. `VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE=true` pins a pod to that
+copy, to debug a particular version.
+
 ## Develop
 
 From the repository root:
