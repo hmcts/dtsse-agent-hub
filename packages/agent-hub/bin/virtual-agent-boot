@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stage 0 of an agent-hub virtual agent pod. It only gets the workspace onto the volume: GitHub auth,
-# then a clone or fast-forward of cft-workspace, then hands over to the versioned
-# .devcontainer/virtual-agent/entrypoint.sh in that checkout.
+# then a clone or fast-forward of cft-workspace, then an upgrade of this client to the published one, then
+# it hands over to the versioned .devcontainer/virtual-agent/entrypoint.sh in that checkout.
 #
 # The pod's `command` is this bin's name, resolved by the kubelet with no shell against the image's
 # PATH, and npm's global bin directory is not on it (the devcontainer image reaches node through
@@ -163,6 +163,61 @@ load_node() {
     command -v node >/dev/null
 }
 
+# A pod's client is the one the devcontainer image baked in, so without this a client release would reach pods
+# only after an image rebuild and a Flux digest bump; cft-workspace's post-start.sh gives a laptop the same
+# refresh on every container start. Called as late as the handover allows, because this script is one of the
+# package's own bins: the install replaces the file bash is reading, which is safe only once all that is left
+# is the temp-directory removal, the trap clearing and the `exec`, which bash has already parsed.
+#
+# It is called above that trap clearing, not below it, so the TERM handler covers the install: the fetch bound
+# is per request and an install makes several, so this runs for minutes, and an agent stopped from the UI
+# meanwhile should log "terminated during boot" and exit 0 rather than let the kubelet's TERM kill bash at its
+# default disposition — a 143 with no log line and npm orphaned mid-reify. $TMP is therefore still present
+# while npm runs, and nothing here uses it: the output goes to a local, so the call stays free to move.
+#
+# The registry is set for the @hmcts-cft scope alone. The hmcts-lib feed holds nothing else, so a bare
+# --registry would send the first public package there and 404. The feed allows anonymous reads, which is what
+# makes the install possible with no credential and no .npmrc.
+#
+# No sudo: npm's global prefix is nvm's, under $HOME and owned by the pod user. cft-workspace's Dockerfile
+# symlinks both bins into /usr/local/bin, where the kubelet finds this one having no shell to source nvm, and
+# those links point into nvm's version-specific bin directory — the same path a reinstall writes, so they go on
+# resolving to the new copy.
+#
+# Never fatal: whatever happens here the pod carries on and boots on the client the image carries.
+# VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE pins whatever runs this bin to that copy, to debug a particular version; the hub
+# gives a pod a fixed environment, so pinning one means setting the variable on its StatefulSet.
+upgrade_client() {
+    local out version
+    case "${VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE:-}" in
+        [Tt][Rr][Uu][Ee] | 1 | [Yy][Ee][Ss])
+            log "client upgrade skipped: VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE is set"
+            return 0
+            ;;
+    esac
+    # Only the device-code branch above needs node, so nvm may not have been sourced yet.
+    load_node || { log "client upgrade skipped: node is not on PATH"; return 0; }
+    command -v npm >/dev/null || { log "client upgrade skipped: npm is not on PATH"; return 0; }
+    # Bounded, because npm would otherwise allow five minutes a request and two retries, and a feed that hangs
+    # would hold the agent at "Starting" for as long as that takes.
+    if ! out=$(npm install -g --no-fund --no-audit --fetch-timeout=60000 --fetch-retries=1 \
+        --@hmcts-cft:registry=https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/ \
+        "@hmcts-cft/agent-hub@latest" 2>&1); then
+        log "could not upgrade the agent-hub client, keeping the image's: $(printf '%s' "$out" | tr '\n' ' ' | head -c 300)"
+        return 0
+    fi
+    # The client has no version command, so npm is asked what is now installed. A `--parseable --long` line is
+    # `<path>:<name>@<version>`, then a realpath when the two differ, then any of EXTRANEOUS, INVALID and
+    # OVERRIDDEN — so the pkgid is taken by position, or a pod npm considers extraneous logs that word as its
+    # version, and this line is the only record of which client the pod booted on.
+    version=$(npm ls -g --depth=0 --parseable --long "@hmcts-cft/agent-hub" 2>/dev/null | cut -d: -s -f2 || true)
+    if [[ -n "$version" ]]; then
+        log "agent-hub client is $version"
+    else
+        log "agent-hub client reinstalled; npm said: $(printf '%s' "$out" | tr '\n' ' ' | head -c 200)"
+    fi
+}
+
 log "virtual agent $VID booting"
 report provisioning
 
@@ -219,6 +274,7 @@ if [[ ! -x "$entrypoint" ]]; then
     report failed "the cft-workspace checkout has no executable .devcontainer/virtual-agent/entrypoint.sh"
     exit 1
 fi
+upgrade_client
 rm -rf "$TMP"
 trap - EXIT TERM INT
 exec "$entrypoint"

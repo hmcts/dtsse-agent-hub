@@ -1,5 +1,5 @@
 // `test/boot.test.sh` drives `bin/virtual-agent-boot` — stage 0 of a virtual agent's pod — against fake gh,
-// git and sleep, the package's own client, and a mock hub. Only the hub can be owned from here: the script
+// git, npm and sleep, the package's own client, and a mock hub. Only the hub can be owned from here: the script
 // is bash, so what it asserts stays in bash and this reads its `ok <name>` / `FAIL <name>: …` lines.
 //
 // One hub per case, and one run of the script per case: every case reads a virtual agent whose status,
@@ -24,7 +24,19 @@ const CASE_TIMEOUT = 120_000;
 
 // The cases the script holds, named here so a failure names the case; "should drive every case the script
 // has" keeps the two lists in step.
-const CASES = ["no-token", "refused-token", "stored-token-no-access", "checkout-client", "broken-checkout-client", "no-client", "trailing-slash"];
+const CASES = [
+  "no-token",
+  "refused-token",
+  "stored-token-no-access",
+  "checkout-client",
+  "broken-checkout-client",
+  "no-client",
+  "trailing-slash",
+  "client-upgrade",
+  "client-upgrade-offline",
+  "client-upgrade-no-npm",
+  "client-upgrade-pinned"
+];
 
 let stateDir: string;
 
