@@ -20,7 +20,8 @@ export function tmuxName(conversationId: string): string {
   return `c-${conversationId.slice(0, 8).toLowerCase()}`;
 }
 
-// `hai` is the HMCTS wrapper around `claude`: it forwards these arguments and never adds one of its own, so
+// `hai` is the HMCTS wrapper around `claude`: it passes these arguments through untouched, and the only ones it adds
+// of its own are `--settings` and a `--plugin-dir` per plugin — never a permission flag. So
 // `--dangerously-skip-permissions` has to be here. Nobody can answer a prompt in a pod, and the first one would
 // hang the session. The prompt file is appended on a resume too: Claude Code keeps no system prompt in the transcript.
 export function claudeCommand(sessionId: string, resume: boolean): string {
