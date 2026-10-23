@@ -295,8 +295,20 @@ case_client_upgrade_offline() {
 case_client_upgrade_no_npm() {
     setup client-upgrade-no-npm
     rm "$C/bin/npm"
-    # Only the fake npm may ever run, so a machine carrying one in /usr/bin or /bin fails the case instead of
-    # letting the install reach the real feed.
+    # Only the fake npm may ever run, so the system directories reach this case as a directory of symlinks
+    # with npm left out. A CNP agent has one in /usr/bin, where a laptop reaches npm through nvm, and
+    # without this the install would run against the real feed there and not here.
+    local d f n
+    mkdir -p "$C/sysbin"
+    for d in /usr/bin /bin; do
+        [ -d "$d" ] || continue
+        for f in "$d"/*; do
+            n="${f##*/}"
+            [ -e "$f" ] && [ "$n" != npm ] || continue
+            [ -e "$C/sysbin/$n" ] || ln -s "$f" "$C/sysbin/$n" 2>/dev/null
+        done
+    done
+    BOOT_PATH="$C/bin:$C/sysbin"
     if (PATH="$BOOT_PATH"; command -v npm >/dev/null 2>&1); then
         no "an npm outside the case's bin directory is on $BOOT_PATH"
         return 0
