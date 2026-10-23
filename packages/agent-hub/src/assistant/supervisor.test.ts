@@ -7,8 +7,8 @@ import { type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home
 import { conversation, fakeTmux } from "../__fixtures__/fake-tmux.ts";
 import type { SessionsBody } from "../api.ts";
 import { ensureStateDir, hubHome, projectTranscriptPath, statePath } from "../session.ts";
-import { createAssistantSupervisor, EXIT_GRACE_MS, idleMinutes, maxSessions, parseSavedSession, parseWake } from "./supervisor.ts";
-import { claudeCommand, PROMPT_FILE, tmuxName } from "./tmux.ts";
+import { createAssistantSupervisor, EXIT_GRACE_MS, idleMinutes, maxSessions, parseSavedSession, parseWake, REFUSAL_EVERY_MS } from "./supervisor.ts";
+import { claudeCommand, commandProgram, PROMPT_FILE, type ProgramCheck, tmuxName } from "./tmux.ts";
 
 const CWD = "/workspace/cft-workspace";
 const MINUTE = 60000;
@@ -37,10 +37,13 @@ afterAll(() => {
 });
 
 // A supervisor on a fake clock that starts at the real time, so the hooks' status files written now are "now".
-function setup({ max = 2, idleMs = 20 * MINUTE }: { max?: number; idleMs?: number } = {}) {
+// `canRun` stands in for the launcher check, so these tests never depend on what is installed; `canRunProgram`
+// itself is tested in `tmux.test.ts`.
+function setup({ max = 2, idleMs = 20 * MINUTE, canRun = () => true }: { max?: number; idleMs?: number; canRun?: ProgramCheck } = {}) {
   fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
   const tmux = fakeTmux();
   const reports: SessionsBody[] = [];
+  const said: string[] = [];
   const api = {
     putSessions: async (_id: string, body: SessionsBody) => {
       reports.push(body);
@@ -48,8 +51,18 @@ function setup({ max = 2, idleMs = 20 * MINUTE }: { max?: number; idleMs?: numbe
     }
   };
   const clock = { t: Date.now() };
-  const supervisor = createAssistantSupervisor({ api, id: "va-assist", tmux, now: () => clock.t, cwd: CWD, max, idleMs });
-  return { tmux, reports, clock, supervisor, lastReport: () => reports.at(-1) as SessionsBody };
+  const supervisor = createAssistantSupervisor({
+    api,
+    id: "va-assist",
+    tmux,
+    canRun,
+    now: () => clock.t,
+    cwd: CWD,
+    max,
+    idleMs,
+    say: (message) => said.push(message)
+  });
+  return { tmux, reports, said, clock, supervisor, lastReport: () => reports.at(-1) as SessionsBody };
 }
 
 // What the hooks write for a session that has registered, as busy or idle, last changed `at` (ms).
@@ -124,6 +137,94 @@ describe("createAssistantSupervisor wake", () => {
     expect(start?.cwd).toBe(CWD);
     expect(start?.vars).toEqual({ AGENT_HUB_CONVERSATION_ID: c.conversation_id });
     expect(start?.command).toBe(`hai --dangerously-skip-permissions --session-id ${c.session_id} --append-system-prompt-file ${PROMPT_FILE}`);
+  });
+
+  it("should ask for the command's program against the session's working directory when a conversation is woken", async () => {
+    // Arrange
+    const asked: { program: string; cwd: string }[] = [];
+    const canRun: ProgramCheck = (program, { cwd }) => {
+      asked.push({ program, cwd });
+      return true;
+    };
+    const { tmux, supervisor } = setup({ canRun });
+    const c = conversation();
+
+    // Act
+    await supervisor.wake(c);
+
+    // Assert
+    expect(asked).toEqual([{ program: commandProgram(claudeCommand(c.session_id, false)), cwd: CWD }]);
+    expect(tmux.starts()).toHaveLength(1);
+  });
+
+  // A session started for a launcher that is not there dies with its pane, and the hub keeps waking it.
+  it("should start nothing and say why when the command's program cannot be run", async () => {
+    // Arrange
+    const { tmux, supervisor, said, lastReport } = setup({ canRun: () => false });
+    const c = conversation();
+
+    // Act
+    await supervisor.wake(c);
+
+    // Assert
+    expect(tmux.starts()).toEqual([]);
+    expect(supervisor.sessions.size).toBe(0);
+    expect(supervisor.queue).toEqual([]);
+    expect(lastReport().sessions).toEqual([]);
+    expect(said).toContain(`conversation ${c.conversation_id}: not starting a session: cannot run hai from ${CWD}`);
+  });
+
+  // The refusal costs nothing: at the cap the supervisor would otherwise stop the least recently active session to
+  // make room, and a pod whose launcher has gone would walk through its working sessions a wake at a time.
+  it("should leave a live session running when a wake at the cap is refused", async () => {
+    // Arrange
+    let runnable = true;
+    const { tmux, supervisor, said, lastReport } = setup({ max: 1, canRun: () => runnable });
+    const live = conversation();
+    const refused = conversation();
+    await supervisor.wake(live);
+    hookStatus(live.session_id, "idle");
+
+    // Act
+    runnable = false;
+    await supervisor.wake(refused);
+
+    // Assert
+    expect(tmux.sent(tmuxName(live.conversation_id))).toEqual([]);
+    expect(supervisor.sessions.get(live.conversation_id)?.phase).not.toBe("stopping");
+    expect(tmux.starts()).toHaveLength(1);
+    expect(supervisor.queue).toEqual([]);
+    expect(lastReport().sessions.map((s) => s.conversation_id)).toEqual([live.conversation_id]);
+    expect(said.filter((m) => m.includes("making room"))).toEqual([]);
+  });
+
+  it("should say a launcher it cannot run once when the hub resends the wake within the interval", async () => {
+    // Arrange
+    const { supervisor, said } = setup({ canRun: () => false });
+    const c = conversation();
+
+    // Act
+    await supervisor.wake(c);
+    await supervisor.wake(c);
+    await supervisor.wake(conversation());
+
+    // Assert
+    expect(said.filter((m) => m.includes("cannot run hai"))).toHaveLength(1);
+  });
+
+  // Saying it once per process would let the log go cold: a pod that can start nothing would read, an hour later,
+  // as a healthy supervisor that happens to have no sessions.
+  it("should say it again when the launcher still cannot be run an interval later", async () => {
+    // Arrange
+    const { supervisor, said, clock } = setup({ canRun: () => false });
+
+    // Act
+    await supervisor.wake(conversation());
+    clock.t += REFUSAL_EVERY_MS;
+    await supervisor.wake(conversation());
+
+    // Assert
+    expect(said.filter((m) => m.includes("cannot run hai"))).toHaveLength(2);
   });
 
   it("should resume the session when the wake says resume", async () => {
@@ -403,7 +504,7 @@ describe("createAssistantSupervisor report", () => {
         return null;
       }
     };
-    const supervisor = createAssistantSupervisor({ api, id: "va-assist", tmux: fakeTmux(), cwd: CWD });
+    const supervisor = createAssistantSupervisor({ api, id: "va-assist", tmux: fakeTmux(), canRun: () => true, cwd: CWD });
 
     // Act
     await supervisor.wake(conversation());
@@ -439,6 +540,7 @@ describe("createAssistantSupervisor adopt", () => {
       },
       id: "va-assist",
       tmux,
+      canRun: () => true,
       cwd: CWD
     });
 
@@ -465,7 +567,14 @@ describe("createAssistantSupervisor when tmux or the state file will not play", 
     // Arrange
     const said: string[] = [];
     const tmux = { ...fakeTmux(), start: async () => Promise.reject(new Error("no space left on device")) };
-    const supervisor = createAssistantSupervisor({ api: { putSessions: async () => null }, id: "va-assist", tmux, cwd: CWD, say: (m) => said.push(m) });
+    const supervisor = createAssistantSupervisor({
+      api: { putSessions: async () => null },
+      id: "va-assist",
+      tmux,
+      canRun: () => true,
+      cwd: CWD,
+      say: (m) => said.push(m)
+    });
     const c = conversation();
 
     // Act
@@ -481,7 +590,14 @@ describe("createAssistantSupervisor when tmux or the state file will not play", 
     // Arrange
     const said: string[] = [];
     const tmux = { ...fakeTmux(), sendKeys: async () => Promise.reject(new Error("no such session")) };
-    const supervisor = createAssistantSupervisor({ api: { putSessions: async () => null }, id: "va-assist", tmux, cwd: CWD, say: (m) => said.push(m) });
+    const supervisor = createAssistantSupervisor({
+      api: { putSessions: async () => null },
+      id: "va-assist",
+      tmux,
+      canRun: () => true,
+      cwd: CWD,
+      say: (m) => said.push(m)
+    });
     const c = conversation();
     await supervisor.wake(c);
 
@@ -502,6 +618,7 @@ describe("createAssistantSupervisor when tmux or the state file will not play", 
       api: { putSessions: async () => null },
       id: "va-assist",
       tmux: fakeTmux(),
+      canRun: () => true,
       cwd: CWD,
       say: (m) => said.push(m),
       fs: {

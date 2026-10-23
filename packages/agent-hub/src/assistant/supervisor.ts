@@ -7,7 +7,7 @@ import { workspaceRoot } from "../agent.ts";
 import type { Api, SessionReport } from "../api.ts";
 import type { Env } from "../env.ts";
 import { hubHome, projectTranscriptPath, statePath, validSessionId } from "../session.ts";
-import { claudeCommand, createTmux, type Tmux, tmuxName } from "./tmux.ts";
+import { canRunProgram, claudeCommand, commandProgram, createTmux, type ProgramCheck, type Tmux, tmuxName } from "./tmux.ts";
 
 export const DEFAULT_MAX_SESSIONS = 2;
 export const MAX_SESSIONS_LIMIT = 20;
@@ -15,6 +15,14 @@ export const DEFAULT_IDLE_MINUTES = 20;
 // How long a session has to leave after `/exit` before its tmux session is killed.
 export const EXIT_GRACE_MS = 15000;
 export const REPORT_EVERY_MS = 60000;
+/**
+ * How often a launcher this pod cannot run is said again while that is still true. On an interval, as `report()`
+ * re-sends state that has not changed, rather than once per process: a refused wake is in no report and has no
+ * `SessionReport.state` to carry it, so the log is the only sign, and a pod that said it once an hour ago reads as
+ * a healthy supervisor that simply has no sessions. Not per wake, because the hub replays every pending wake each
+ * time it remakes the sessions stream, which would bury the first.
+ */
+export const REFUSAL_EVERY_MS = 60000;
 // The hub's limits on PUT /api/virtual/{id}/sessions.
 const MAX_REPORTED = 50;
 const DETAIL_MAX = 200;
@@ -75,16 +83,19 @@ export type CreateAssistantSupervisorOptions = {
   id: string;
   env?: Env;
   tmux?: Tmux;
+  /** Whether a pane's program can be run; a test passes its own rather than putting a launcher on PATH. */
+  canRun?: ProgramCheck;
   fs?: SupervisorFs;
   now?: () => number;
   say?: (message: string) => void;
-  /** Where each conversation's session runs. The workspace checkout root, because `claudeCommand` names the prompt
-   * file through a path relative to it. */
+  /** Where each conversation's session runs, and so what a relative path in its command resolves against: the
+   * workspace checkout root, because `claudeCommand` names the prompt file through a path relative to it. */
   cwd?: string;
   max?: number;
   idleMs?: number;
   exitGraceMs?: number;
   reportEveryMs?: number;
+  refusalEveryMs?: number;
 };
 
 // The pod's state directory, which `virtual/phases.ts` also writes to. Spelled out rather than taken from
@@ -128,6 +139,7 @@ export function createAssistantSupervisor({
   id,
   env = process.env,
   tmux = createTmux({ env: env as NodeJS.ProcessEnv }),
+  canRun = canRunProgram,
   fs = nodeFs,
   now = Date.now,
   say = () => {},
@@ -135,13 +147,18 @@ export function createAssistantSupervisor({
   max = maxSessions(env),
   idleMs = idleMinutes(env) * 60000,
   exitGraceMs = EXIT_GRACE_MS,
-  reportEveryMs = REPORT_EVERY_MS
+  reportEveryMs = REPORT_EVERY_MS,
+  refusalEveryMs = REFUSAL_EVERY_MS
 }: CreateAssistantSupervisorOptions): AssistantSupervisor {
   const sessions = new Map<string, ConversationSession>();
   // Wakes waiting for a free slot, oldest first. A conversation whose session is stopping waits here too.
   const queue: Wake[] = [];
   let reported: string | null = null;
   let reportedAt = 0;
+  // The launcher refusal already said and when, so replayed wakes do not repeat it every time. Cleared by a
+  // session that starts, so a launcher that goes missing again is said at once.
+  let refusedLauncher: string | null = null;
+  let refusedLauncherAt = 0;
   let chain: Promise<unknown> = Promise.resolve();
   const serial = <T>(fn: () => Promise<T>): Promise<T> => {
     const next = chain.then(fn);
@@ -206,11 +223,26 @@ export function createAssistantSupervisor({
     say(`conversation ${s.conversation_id}: ${why}`);
   }
 
+  /**
+   * The program a wake's session would be, when it is one this pod cannot run, and null when it can.
+   *
+   * `tmux new-session` succeeds whatever the command is, because the pane's shell starts and only the command in it
+   * fails, taking its own error message with it when the pane closes. A session recorded for a launcher that is not
+   * there is one the hub believes is running and keeps waking, so the wake is refused instead — and refused before
+   * `fill()` acts on it, because the eviction it would do next must not cost a live session its slot for a session
+   * that will never start.
+   */
+  function unrunnableLauncher(w: Wake): string | null {
+    const program = commandProgram(claudeCommand(w.session_id, w.resume));
+    return canRun(program, { cwd, env }) ? null : program;
+  }
+
   async function start(w: Wake): Promise<void> {
     const resume = w.resume || fs.existsSync(transcript(w.session_id));
     const name = tmuxName(w.conversation_id);
+    const command = claudeCommand(w.session_id, resume);
     try {
-      await tmux.start({ name, cwd, vars: { AGENT_HUB_CONVERSATION_ID: w.conversation_id }, command: claudeCommand(w.session_id, resume) });
+      await tmux.start({ name, cwd, vars: { AGENT_HUB_CONVERSATION_ID: w.conversation_id }, command });
     } catch (e) {
       // Nothing registered for it, so the hub sends the wake again on the next connection.
       say(`conversation ${w.conversation_id}: could not start a session: ${(e as Error).message}`);
@@ -219,6 +251,7 @@ export function createAssistantSupervisor({
     const at = now();
     sessions.set(w.conversation_id, { ...w, name, resume, phase: "starting", busy: false, started_at: at, active_at: at });
     save();
+    refusedLauncher = null;
     say(`conversation ${w.conversation_id}: ${resume ? "resumed" : "started"} session ${w.session_id} in tmux session ${name}`);
   }
 
@@ -241,13 +274,27 @@ export function createAssistantSupervisor({
     return idle.sort((a, b) => a.active_at - b.active_at)[0] ?? null;
   }
 
-  // Starts queued wakes while there is room. At the cap, it stops the least recently active idle session for
-  // each wake that no stopping session will make room for; with none idle, the wakes stay queued.
+  // Starts queued wakes while there is room, dropping any whose launcher this pod cannot run. At the cap, it stops
+  // the least recently active idle session for each wake that no stopping session will make room for; with none
+  // idle, the wakes stay queued.
   async function fill(): Promise<void> {
     for (;;) {
       const next = queue.find((w) => !sessions.has(w.conversation_id));
       if (!next) {
         return;
+      }
+      const unrunnable = unrunnableLauncher(next);
+      if (unrunnable !== null) {
+        // Dropped rather than left queued: the hub reports a queued conversation as waiting for a free session,
+        // which would promise the person one that cannot start. The hub sends the wake again on its next stream.
+        queue.splice(queue.indexOf(next), 1);
+        const reason = `cannot run ${unrunnable} from ${cwd}`;
+        if (refusedLauncher !== reason || now() - refusedLauncherAt >= refusalEveryMs) {
+          refusedLauncher = reason;
+          refusedLauncherAt = now();
+          say(`conversation ${next.conversation_id}: not starting a session: ${reason}`);
+        }
+        continue;
       }
       if (sessions.size < max) {
         queue.splice(queue.indexOf(next), 1);
