@@ -88,10 +88,13 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     sessionState: null,
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
+    jira: { status: "none" },
     page: page(),
     ...overrides
   };
 }
+
+const NO_JIRA = { connected: false, login: null };
 
 function ok() {
   return vi.fn(async () => ({ ok: true as const }));
@@ -105,6 +108,7 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
     rename: ok(),
     remove: ok(),
     saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 })),
+    exportToJira: ok(),
     ...overrides
   };
 }
@@ -134,7 +138,7 @@ describe("ChatView thread", () => {
         entry("5", { role: "assistant", content: { text: "Add it to the definition." }, occurred_at: "2026-10-21T09:02:00.000Z" })
       ]
     });
-    render(<ChatView view={conversation({ page: initial })} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView jira={NO_JIRA} view={conversation({ page: initial })} templates={TEMPLATES} actions={actions()} />);
 
     const thread = screen.getByRole("list", { name: "Conversation" });
     expect(within(thread).getByText("How do I add an event?")).toBeTruthy();
@@ -147,14 +151,26 @@ describe("ChatView thread", () => {
 
   it("should mark a product change in the thread when the conversation's product history has one", () => {
     render(
-      <ChatView view={conversation({ productHistory: [{ product: "pcs", at: "2026-10-21T08:00:00.000Z" }] })} templates={TEMPLATES} actions={actions()} />
+      <ChatView
+        jira={NO_JIRA}
+        view={conversation({ productHistory: [{ product: "pcs", at: "2026-10-21T08:00:00.000Z" }] })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
     );
 
     expect(screen.getByText(/Product changed to Civil Possessions/)).toBeTruthy();
   });
 
   it("should say the message was not delivered when it expired", () => {
-    render(<ChatView view={conversation({ page: page({ messages: [message("1", { delivery: "expired" })] }) })} templates={TEMPLATES} actions={actions()} />);
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        view={conversation({ page: page({ messages: [message("1", { delivery: "expired" })] }) })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
 
     expect(screen.getByText("Not delivered. Send it again.")).toBeTruthy();
   });
@@ -164,6 +180,7 @@ describe("ChatView progress", () => {
   it("should say the assistant is starting when the last message is undelivered and the agent is offline", () => {
     render(
       <ChatView
+        jira={NO_JIRA}
         view={conversation({ agentStatus: "offline", page: page({ messages: [message("1", { delivery: "queued" })] }) })}
         templates={TEMPLATES}
         actions={actions()}
@@ -176,6 +193,7 @@ describe("ChatView progress", () => {
   it("should say it is waiting for a free assistant when the session is queued", () => {
     render(
       <ChatView
+        jira={NO_JIRA}
         view={conversation({ agentStatus: "offline", sessionState: "queued", page: page({ messages: [message("1", { delivery: "queued" })] }) })}
         templates={TEMPLATES}
         actions={actions()}
@@ -193,14 +211,14 @@ describe("ChatView progress", () => {
         entry("3", { role: "tool_use", content: { id: "t2", name: "Read", input: {} }, occurred_at: "2026-10-21T09:01:30.000Z" })
       ]
     });
-    render(<ChatView view={conversation({ agentStatus: "busy", page: initial })} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView jira={NO_JIRA} view={conversation({ agentStatus: "busy", page: initial })} templates={TEMPLATES} actions={actions()} />);
 
     expect(screen.getByRole("status").textContent).toContain("Reading");
   });
 
   it("should show nothing in progress when the assistant has answered and is idle", () => {
     const initial = page({ messages: [message("1")], entries: [entry("2")] });
-    render(<ChatView view={conversation({ page: initial })} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView jira={NO_JIRA} view={conversation({ page: initial })} templates={TEMPLATES} actions={actions()} />);
 
     expect(screen.queryByText("Thinking")).toBeNull();
     expect(screen.queryByText(/Starting your assistant/)).toBeNull();
@@ -209,6 +227,7 @@ describe("ChatView progress", () => {
   it("should follow the agent's status from the stream when an agent_status event names this agent", () => {
     render(
       <ChatView
+        jira={NO_JIRA}
         view={conversation({ agentStatus: "offline", page: page({ messages: [message("1", { delivery: "queued" })] }) })}
         templates={TEMPLATES}
         actions={actions()}
@@ -227,7 +246,7 @@ describe("ChatView progress", () => {
 describe("ChatView product", () => {
   it("should change the product only once the person confirms when they pick another product", async () => {
     const setProduct = ok();
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ setProduct })} />);
+    render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} actions={actions({ setProduct })} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     const dialog = screen.getByRole("dialog", { name: "Change product?" });
@@ -246,7 +265,7 @@ describe("ChatView product", () => {
 
   it("should leave the product alone when the person cancels the change", () => {
     const setProduct = ok();
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ setProduct })} />);
+    render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} actions={actions({ setProduct })} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -256,7 +275,7 @@ describe("ChatView product", () => {
   });
 
   it("should close the confirmation when the person presses Escape", () => {
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     fireEvent.keyDown(window, { key: "Escape" });
@@ -267,6 +286,7 @@ describe("ChatView product", () => {
   it("should show the refusal when the product cannot be changed", async () => {
     render(
       <ChatView
+        jira={NO_JIRA}
         view={conversation()}
         templates={TEMPLATES}
         actions={actions({ setProduct: vi.fn(async () => ({ ok: false as const, error: "no such product" })) })}
@@ -285,7 +305,7 @@ describe("ChatView product", () => {
 describe("ChatView sending", () => {
   it("should send the message and show it in the thread when sending succeeds", async () => {
     const send = vi.fn(async () => ({ ok: true as const, message: message("9", { body: "hello assistant" }) }));
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ send })} />);
+    render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} actions={actions({ send })} />);
 
     await type("hello assistant");
 
@@ -297,6 +317,7 @@ describe("ChatView sending", () => {
   it("should show the error and keep the text when sending fails", async () => {
     render(
       <ChatView
+        jira={NO_JIRA}
         view={conversation()}
         templates={TEMPLATES}
         actions={actions({ send: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" })) })}
@@ -311,7 +332,7 @@ describe("ChatView sending", () => {
 
   it("should warm the session once when the person focuses the composer and the agent is offline", () => {
     const warm = ok();
-    render(<ChatView view={conversation({ agentStatus: "offline" })} templates={TEMPLATES} actions={actions({ warm })} />);
+    render(<ChatView jira={NO_JIRA} view={conversation({ agentStatus: "offline" })} templates={TEMPLATES} actions={actions({ warm })} />);
 
     const box = screen.getByRole("textbox", { name: "Message" });
     fireEvent.focus(box);
@@ -324,7 +345,7 @@ describe("ChatView sending", () => {
 
   it("should not warm the session when the agent is already running", () => {
     const warm = ok();
-    render(<ChatView view={conversation({ agentStatus: "idle" })} templates={TEMPLATES} actions={actions({ warm })} />);
+    render(<ChatView jira={NO_JIRA} view={conversation({ agentStatus: "idle" })} templates={TEMPLATES} actions={actions({ warm })} />);
 
     fireEvent.focus(screen.getByRole("textbox", { name: "Message" }));
 
@@ -334,7 +355,7 @@ describe("ChatView sending", () => {
 
 describe("ChatView document", () => {
   it("should open the document panel when the person chooses Add document", () => {
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Add document/ }));
@@ -349,6 +370,7 @@ describe("ChatView document", () => {
   it("should offer to open the document when one has been written", () => {
     render(
       <ChatView
+        jira={NO_JIRA}
         view={conversation({ artefact: { title: "Story", markdown: "x", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } })}
         templates={TEMPLATES}
         actions={actions()}
@@ -359,10 +381,11 @@ describe("ChatView document", () => {
   });
 
   it("should open the panel when the assistant writes a newer version of the document", () => {
-    const { rerender } = render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    const { rerender } = render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     rerender(
       <ChatView
+        jira={NO_JIRA}
         view={conversation({ artefact: { title: "Story", markdown: "# Drafted", version: 1, updatedBy: "agent", updatedAt: "2026-10-21T09:00:00.000Z" } })}
         templates={TEMPLATES}
         actions={actions()}
@@ -373,10 +396,11 @@ describe("ChatView document", () => {
   });
 
   it("should leave the panel closed when the newer version is the person's own", () => {
-    const { rerender } = render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    const { rerender } = render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     rerender(
       <ChatView
+        jira={NO_JIRA}
         view={conversation({ artefact: { title: "Story", markdown: "# Mine", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } })}
         templates={TEMPLATES}
         actions={actions()}
@@ -390,7 +414,7 @@ describe("ChatView document", () => {
 describe("ChatView menu", () => {
   it("should rename the chat when the person saves a new name from the options menu", async () => {
     const rename = ok();
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ rename })} />);
+    render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} actions={actions({ rename })} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
@@ -408,7 +432,7 @@ describe("ChatView menu", () => {
 
   it("should delete the chat and go to a new chat when the person confirms the delete", async () => {
     const remove = ok();
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ remove })} />);
+    render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} actions={actions({ remove })} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete chat" }));
@@ -423,7 +447,12 @@ describe("ChatView menu", () => {
 
   it("should show the refusal and stay when the chat cannot be deleted", async () => {
     render(
-      <ChatView view={conversation()} templates={TEMPLATES} actions={actions({ remove: vi.fn(async () => ({ ok: false as const, error: "gone already" })) })} />
+      <ChatView
+        jira={NO_JIRA}
+        view={conversation()}
+        templates={TEMPLATES}
+        actions={actions({ remove: vi.fn(async () => ({ ok: false as const, error: "gone already" })) })}
+      />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
@@ -437,7 +466,7 @@ describe("ChatView menu", () => {
   });
 
   it("should close the options menu when the person presses Escape", () => {
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
     expect(screen.getByRole("menu", { name: "Chat options" })).toBeTruthy();

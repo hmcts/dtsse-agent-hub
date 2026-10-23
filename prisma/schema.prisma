@@ -469,6 +469,14 @@ model AssistantConversation {
   /// user or agent.
   artefactUpdatedBy String?   @map("artefact_updated_by")
   artefactUpdatedAt DateTime? @map("artefact_updated_at") @db.Timestamptz(6)
+  jiraExportId      String?   @map("jira_export_id") @db.Uuid
+  jiraProject       String?   @map("jira_project")
+  /// pending, done or failed; null before the first export.
+  jiraStatus        String?   @map("jira_status")
+  jiraKey           String?   @map("jira_key")
+  jiraError         String?   @map("jira_error")
+  jiraRequestedAt   DateTime? @map("jira_requested_at") @db.Timestamptz(6)
+  jiraExportedAt    DateTime? @map("jira_exported_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 

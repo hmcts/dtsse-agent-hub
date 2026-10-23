@@ -149,6 +149,9 @@ export type SessionsBody = {
   max: number;
 };
 
+/** A conversation's Jira export result, as its session reports it: the issue key it created, or why it could not. */
+export type JiraExportReport = { export_id: string; key: string } | { export_id: string; error: string };
+
 /** A conversation's one markdown document, which the person and the session both edit. */
 export type Artefact = {
   title: string | null;
@@ -299,6 +302,7 @@ export type Api = {
   putSessions: (id: string, body: SessionsBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
+  putJiraExport: (agentId: string, body: JiraExportReport) => Promise<null>;
   stream: (id: string, opts?: StreamOptions) => Promise<Response>;
 };
 
@@ -435,6 +439,7 @@ export function createApi({
     putSessions: (id, body) => request<null>("PUT", v(id, "sessions"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
+    putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     stream: (id, opts) => openStream(`${a(id)}/stream`, opts)
   };
 }

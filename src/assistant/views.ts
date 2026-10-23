@@ -8,6 +8,8 @@ import { type LoginView, loginViews } from "../virtual-agents/logins.ts";
 import type { VirtualAgentRow } from "../virtual-agents/store.ts";
 import { neededCredentials, OPTIONAL_CREDENTIALS } from "../virtual-agents/views.ts";
 import { type DateGroup, groupByDate } from "./grouping.ts";
+import type { JiraExportView } from "./jira.ts";
+import { readJiraExport } from "./jira-store.ts";
 import { onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { productLabel } from "./products.ts";
 import { type Artefact, type ConversationRow, listConversations, readArtefact, type SessionState } from "./store.ts";
@@ -85,14 +87,16 @@ export interface ConversationView {
   sessionState: SessionState | null;
   sessionDetail: string | null;
   artefact: { title: string | null; markdown: string; version: number; updatedBy: Artefact["updatedBy"]; updatedAt: string | null };
+  jira: JiraExportView;
   page: ConversationPage;
 }
 
 /** One of the viewer's conversations with its first page; `agentId` is the conversation's current agent. */
 export async function conversationView(db: Database, conversation: ConversationRow, agentId: string): Promise<ConversationView> {
-  const [agent, artefact, page] = await Promise.all([
+  const [agent, artefact, jira, page] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true } }),
     readArtefact(db, conversation.id),
+    readJiraExport(db, conversation.id),
     agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true }, [])
   ]);
   return {
@@ -106,6 +110,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,
     artefact: { ...artefact, updatedAt: artefact.updatedAt?.toISOString() ?? null },
+    jira,
     page
   };
 }

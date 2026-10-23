@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ArtefactSnapshot, SaveArtefactResult } from "@/app/_actions/assistant";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
+import { JiraBanner, type JiraExportProps, JiraFooter } from "@/components/assistant/JiraExport";
 import type { ActionResult } from "@/web/action";
 
 export type SaveArtefactAction = (input: {
@@ -52,7 +53,8 @@ export function ArtefactPanel({
   productLabel,
   save,
   onClose,
-  narrow
+  narrow,
+  jira
 }: {
   conversationId: string;
   artefact: ArtefactSnapshot;
@@ -60,6 +62,8 @@ export function ArtefactPanel({
   save: SaveArtefactAction;
   onClose: () => void;
   narrow: boolean;
+  /** The export to Jira, below the document; left out, the panel has none. */
+  jira?: JiraExportProps;
 }) {
   const [title, setTitle] = useState(artefact.title ?? "Untitled document");
   const [markdown, setMarkdown] = useState(artefact.version === 0 ? starterDocument(productLabel) : artefact.markdown);
@@ -311,6 +315,7 @@ export function ArtefactPanel({
           </button>
         </div>
       )}
+      {jira === undefined ? null : <JiraBanner exported={jira.exported} />}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {mode === "edit" ? (
           <textarea
@@ -327,6 +332,16 @@ export function ArtefactPanel({
           </div>
         )}
       </div>
+      {jira === undefined ? null : (
+        <JiraFooter
+          conversationId={conversationId}
+          exported={jira.exported}
+          access={jira.access}
+          exportTo={jira.exportTo}
+          saved={state === "saved" && conflict === null}
+          written={base > 0}
+        />
+      )}
     </section>
   );
 }

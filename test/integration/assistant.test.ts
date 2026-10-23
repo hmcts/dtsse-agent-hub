@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { setGrant } from "../../src/access/load.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
+import * as jiraRoute from "../../src/app/api/agent/[agentId]/jira/route.ts";
 import * as streamRoute from "../../src/app/api/agent/[agentId]/stream/route.ts";
 import * as transcriptRoute from "../../src/app/api/agent/[agentId]/transcript/route.ts";
 import * as agentsRoute from "../../src/app/api/agent/agents/route.ts";
@@ -9,7 +10,8 @@ import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
-import { createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
+import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
+import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { expireDeliveries } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
@@ -490,5 +492,132 @@ describe("the idle sweep", () => {
         linkSession(tx, { conversationId: "00000000-0000-0000-0000-000000000000", virtualAgentId: "x", ownerOid: "o", agentId: "a" })
       )
     ).rejects.toBeDefined();
+  });
+});
+
+describe("jira export", () => {
+  async function written(): Promise<{ token: string; id: string; agentId: string }> {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "other", body: "write a story" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id);
+    await actions.saveArtefact({ conversationId: id, title: "Flags for caseworkers", markdown: "# Problem\n\nFlags are hidden.", baseVersion: 0 });
+    return { token, id, agentId };
+  }
+
+  function report(token: string, agentId: string, body: unknown): Promise<Response> {
+    return pod(jiraRoute.PUT, token, `/api/agent/${agentId}/jira`, { agentId }, "PUT", body);
+  }
+
+  async function currentExport(id: string): Promise<string> {
+    return (await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { jiraExportId: true } })).jiraExportId!;
+  }
+
+  it("should ask the session in the chat, with the export in the message's frame, and show the ticket once it reports the key", async () => {
+    const { token, id, agentId } = await written();
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({ ok: true });
+    const exportId = await currentExport(id);
+    const abort = new AbortController();
+    const stream = frames(await pod(streamRoute.GET, token, `/api/agent/${agentId}/stream`, { agentId }, "GET", undefined, abort.signal));
+    const sent = await stream.named("direct", 2);
+    abort.abort();
+    await stream.cancel();
+    const request = JSON.parse(sent[1]!.data!);
+
+    expect(request).toMatchObject({
+      message: { body: "Please export this document to the VIBE backlog in Jira." },
+      assistant: { conversation_id: id, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] } }
+    });
+    expect((await assistantConversation(VIEWER, id))?.jira).toEqual({ status: "pending", project: "VIBE" });
+
+    expect((await report(token, agentId, { export_id: exportId, key: "VIBE-701" })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.jira).toEqual({
+      status: "done",
+      project: "VIBE",
+      key: "VIBE-701",
+      url: "https://hmcts.atlassian.net/browse/VIBE-701"
+    });
+  });
+
+  it("should leave the export out of the frame once it is reported or has timed out", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" });
+    expect((await assistantFrame(prisma, agentId))?.jira_export?.export_id).toBe(await currentExport(id));
+
+    await prisma.assistantConversation.update({ where: { id }, data: { jiraRequestedAt: new Date(Date.now() - JIRA_EXPORT_TIMEOUT_MS - 1000) } });
+    expect((await assistantFrame(prisma, agentId))?.jira_export).toBeUndefined();
+
+    await prisma.assistantConversation.update({ where: { id }, data: { jiraRequestedAt: new Date() } });
+    await report(token, agentId, { export_id: await currentExport(id), key: "VIBE-702" });
+    expect((await assistantFrame(prisma, agentId))?.jira_export).toBeUndefined();
+  });
+
+  it("should refuse a second export while one is pending, and any once the document is in Jira", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" });
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({
+      ok: false,
+      error: "this document is already being exported"
+    });
+
+    await report(token, agentId, { export_id: await currentExport(id), key: "VIBE-701" });
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({
+      ok: false,
+      error: "this document is already in Jira as VIBE-701"
+    });
+  });
+
+  it("should let the person try again under a new export id, and ignore the old one's late report, when the export failed", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" });
+    const first = await currentExport(id);
+    await report(token, agentId, { export_id: first, error: "Story is not an issue type of VIBE" });
+    expect((await assistantConversation(VIEWER, id))?.jira).toEqual({ status: "failed", project: "VIBE", error: "Story is not an issue type of VIBE" });
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({ ok: true });
+    expect(await currentExport(id)).not.toBe(first);
+
+    expect((await report(token, agentId, { export_id: first, key: "VIBE-1" })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.jira).toEqual({ status: "pending", project: "VIBE" });
+  });
+
+  it("should allow a new export once the session has not answered in time", async () => {
+    const { id } = await written();
+    await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" });
+    await prisma.assistantConversation.update({ where: { id }, data: { jiraRequestedAt: new Date(Date.now() - JIRA_EXPORT_TIMEOUT_MS - 1000) } });
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({ ok: true });
+  });
+
+  it("should refuse an export of a document nobody has written, or to a board not on offer", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "other", body: "hi" })) as { id: string }).id;
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({ ok: false, error: "write the document before exporting it" });
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "CCD" })).toEqual({ ok: false, error: "pick a Jira board from the list" });
+  });
+
+  it("should start a stopped assistant when the person exports", async () => {
+    const { id } = await written();
+    const assistantId = (await findConversation(prisma, ALICE.oid, id))!.virtualAgentId;
+    await prisma.agent.updateMany({ where: { assistantConversationId: id }, data: { status: "offline" } });
+    await setDesired(prisma, ALICE.oid, assistantId, "stopped");
+
+    await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" });
+
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id: assistantId }, select: { desired: true } })).desired).toBe("running");
+  });
+
+  it("should refuse a report from an agent that is not a conversation's, and one that breaks the contract", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" });
+    const exportId = await currentExport(id);
+    const { agent_id: plain } = await jsonOf<{ agent_id: string }>(await register(token, "plain-session"));
+
+    expect((await report(token, plain, { export_id: exportId, key: "VIBE-1" })).status).toBe(404);
+    expect((await report(token, agentId, { export_id: exportId, key: "not a key" })).status).toBe(400);
   });
 });

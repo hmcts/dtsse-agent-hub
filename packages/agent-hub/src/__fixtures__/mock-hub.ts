@@ -155,6 +155,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const sessionStreams = new Map<string, ServerResponse>();
   // agent id → the conversation's document, for conversations' agents
   const artefacts = new Map<string, Artefact>();
+  const jiraReports: Record<string, unknown>[] = [];
   // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
   const virtuals = new Map<string, VirtualRecord>();
   // person oid → Map(kind → value), the /api/agent/credentials routes
@@ -712,6 +713,18 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return send(res, 200, { version: next.version });
       }
     }
+    if (action === "jira" && req.method === "PUT") {
+      if (!agent.conversation_id) {
+        return send(res, 404, { error: "not a conversation" });
+      }
+      const keyed = typeof body.key === "string" && /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/.test(body.key);
+      const failed = typeof body.error === "string" && body.error.trim() !== "" && body.error.length <= 300;
+      if (typeof body.export_id !== "string" || keyed === failed) {
+        return send(res, 400, { error: "bad jira report" });
+      }
+      jiraReports.push({ agent_id: agent.id, ...body });
+      return send(res, 204);
+    }
     if (action === "subscriptions") {
       const subs = subscriptions.get(agent.id) as Set<string>;
       if (req.method === "GET") {
@@ -747,6 +760,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     virtuals,
     personCredentials,
     artefacts,
+    jiraReports,
     sessionStreams,
     // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session
     // registers for it.

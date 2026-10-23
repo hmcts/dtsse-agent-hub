@@ -3,6 +3,7 @@ import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
+import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
 import { DEFAULT_PRODUCT, isProduct, productLabel } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
 
@@ -104,7 +105,7 @@ function toRow(row: {
   };
 }
 
-async function announce(db: Database, conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">): Promise<void> {
+export async function announce(db: Database, conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">): Promise<void> {
   await notify(db, {
     type: "assistant_conversation",
     conversation_id: conversation.id,
@@ -449,24 +450,28 @@ export interface AssistantFrame {
   product_label: string;
   artefact_version: number;
   artefact_updated_by: "user" | "agent" | null;
+  /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
+  jira_export?: JiraExportFrame;
 }
 
 export async function assistantFrame(db: Database, agentId: string): Promise<AssistantFrame | undefined> {
   const row = await db.agent.findUnique({
     where: { id: agentId },
-    select: { assistantConversation: { select: { id: true, product: true, ...ARTEFACT_SELECT } } }
+    select: { assistantConversation: { select: { id: true, product: true, ...ARTEFACT_SELECT, ...JIRA_SELECT } } }
   });
   const conversation = row?.assistantConversation;
   if (conversation === null || conversation === undefined) {
     return undefined;
   }
   const artefact = toArtefact(conversation);
+  const jira = pendingJiraExport(conversation);
   return {
     conversation_id: conversation.id,
     product: conversation.product,
     product_label: productLabel(conversation.product),
     artefact_version: artefact.version,
-    artefact_updated_by: artefact.updatedBy
+    artefact_updated_by: artefact.updatedBy,
+    ...(jira === undefined ? {} : { jira_export: jira })
   };
 }
 
