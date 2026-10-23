@@ -129,6 +129,14 @@ describe("canRunProgram", () => {
     // Act & Assert
     expect(canRunProgram("launcher.sh", { cwd: paneDir, env: { PATH: "/usr/bin:" } })).toBe(true);
   });
+
+  // Not the same as an empty entry in a PATH that was given: a caller passing a curated environment with no PATH
+  // would otherwise have every bare launcher looked for in the checkout root, and so refused.
+  it("should look in the system default rather than the working directory when the environment names no PATH", () => {
+    // Act & Assert
+    expect(canRunProgram("launcher.sh", { cwd: paneDir, env: {} })).toBe(false);
+    expect(canRunProgram("sh", { cwd: paneDir, env: {} })).toBe(true);
+  });
 });
 
 describe("createTmux", () => {

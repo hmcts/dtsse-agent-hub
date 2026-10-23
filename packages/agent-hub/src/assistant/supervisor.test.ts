@@ -174,6 +174,44 @@ describe("createAssistantSupervisor wake", () => {
     expect(said).toContain(`conversation ${c.conversation_id}: not starting a session: cannot run hai from ${CWD}`);
   });
 
+  // The refusal costs nothing: at the cap the supervisor would otherwise stop the least recently active session to
+  // make room, and a pod whose launcher has gone would walk through its working sessions a wake at a time.
+  it("should leave a live session running when a wake at the cap is refused", async () => {
+    // Arrange
+    let runnable = true;
+    const { tmux, supervisor, said, lastReport } = setup({ max: 1, canRun: () => runnable });
+    const live = conversation();
+    const refused = conversation();
+    await supervisor.wake(live);
+    hookStatus(live.session_id, "idle");
+
+    // Act
+    runnable = false;
+    await supervisor.wake(refused);
+
+    // Assert
+    expect(tmux.sent(tmuxName(live.conversation_id))).toEqual([]);
+    expect(supervisor.sessions.get(live.conversation_id)?.phase).not.toBe("stopping");
+    expect(tmux.starts()).toHaveLength(1);
+    expect(supervisor.queue).toEqual([]);
+    expect(lastReport().sessions.map((s) => s.conversation_id)).toEqual([live.conversation_id]);
+    expect(said.filter((m) => m.includes("making room"))).toEqual([]);
+  });
+
+  it("should say a launcher it cannot run once when the hub keeps resending the wake", async () => {
+    // Arrange
+    const { supervisor, said } = setup({ canRun: () => false });
+    const c = conversation();
+
+    // Act
+    await supervisor.wake(c);
+    await supervisor.wake(c);
+    await supervisor.wake(conversation());
+
+    // Assert
+    expect(said.filter((m) => m.includes("cannot run hai"))).toHaveLength(1);
+  });
+
   it("should resume the session when the wake says resume", async () => {
     // Arrange
     const { tmux, supervisor } = setup();

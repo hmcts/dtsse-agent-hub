@@ -145,6 +145,8 @@ export function createAssistantSupervisor({
   const queue: Wake[] = [];
   let reported: string | null = null;
   let reportedAt = 0;
+  // The launcher refusal already said, so replayed wakes do not repeat it. Cleared by a session that starts.
+  let refusedLauncher: string | null = null;
   let chain: Promise<unknown> = Promise.resolve();
   const serial = <T>(fn: () => Promise<T>): Promise<T> => {
     const next = chain.then(fn);
@@ -209,19 +211,24 @@ export function createAssistantSupervisor({
     say(`conversation ${s.conversation_id}: ${why}`);
   }
 
+  /**
+   * The program a wake's session would be, when it is one this pod cannot run, and null when it can.
+   *
+   * `tmux new-session` succeeds whatever the command is, because the pane's shell starts and only the command in it
+   * fails, taking its own error message with it when the pane closes. A session recorded for a launcher that is not
+   * there is one the hub believes is running and keeps waking, so the wake is refused instead — and refused before
+   * `fill()` acts on it, because the eviction it would do next must not cost a live session its slot for a session
+   * that will never start.
+   */
+  function unrunnableLauncher(w: Wake): string | null {
+    const program = commandProgram(claudeCommand(w.session_id, w.resume));
+    return canRun(program, { cwd, env }) ? null : program;
+  }
+
   async function start(w: Wake): Promise<void> {
     const resume = w.resume || fs.existsSync(transcript(w.session_id));
     const name = tmuxName(w.conversation_id);
     const command = claudeCommand(w.session_id, resume);
-    // `new-session` succeeds whatever the command is, because the pane's shell starts and only the command in it
-    // fails, taking its own error message with it when the pane closes. A session recorded for a launcher that is
-    // not there is one the hub believes is running and keeps waking, so it is refused here instead, and the reason
-    // goes to the supervisor's stderr, which is the pod's log and outlives the pane.
-    const program = commandProgram(command);
-    if (!canRun(program, { cwd, env: env as NodeJS.ProcessEnv })) {
-      say(`conversation ${w.conversation_id}: not starting a session: cannot run ${program} from ${cwd}`);
-      return;
-    }
     try {
       await tmux.start({ name, cwd, vars: { AGENT_HUB_CONVERSATION_ID: w.conversation_id }, command });
     } catch (e) {
@@ -232,6 +239,7 @@ export function createAssistantSupervisor({
     const at = now();
     sessions.set(w.conversation_id, { ...w, name, resume, phase: "starting", busy: false, started_at: at, active_at: at });
     save();
+    refusedLauncher = null;
     say(`conversation ${w.conversation_id}: ${resume ? "resumed" : "started"} session ${w.session_id} in tmux session ${name}`);
   }
 
@@ -254,13 +262,28 @@ export function createAssistantSupervisor({
     return idle.sort((a, b) => a.active_at - b.active_at)[0] ?? null;
   }
 
-  // Starts queued wakes while there is room. At the cap, it stops the least recently active idle session for
-  // each wake that no stopping session will make room for; with none idle, the wakes stay queued.
+  // Starts queued wakes while there is room, dropping any whose launcher this pod cannot run. At the cap, it stops
+  // the least recently active idle session for each wake that no stopping session will make room for; with none
+  // idle, the wakes stay queued.
   async function fill(): Promise<void> {
     for (;;) {
       const next = queue.find((w) => !sessions.has(w.conversation_id));
       if (!next) {
         return;
+      }
+      const unrunnable = unrunnableLauncher(next);
+      if (unrunnable !== null) {
+        // Dropped rather than left queued: the hub reports a queued conversation as waiting for a free session,
+        // which would promise the person one that cannot start. The hub sends the wake again on its next stream.
+        queue.splice(queue.indexOf(next), 1);
+        const reason = `cannot run ${unrunnable} from ${cwd}`;
+        // Said on the first refusal, not on every replay: the hub remakes the sessions stream every 25 seconds and
+        // resends each pending wake with it, and the occurrence worth finding in the log is the first.
+        if (refusedLauncher !== reason) {
+          refusedLauncher = reason;
+          say(`conversation ${next.conversation_id}: not starting a session: ${reason}`);
+        }
+        continue;
       }
       if (sessions.size < max) {
         queue.splice(queue.indexOf(next), 1);

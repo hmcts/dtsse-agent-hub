@@ -3,6 +3,7 @@
 import { execFile } from "node:child_process";
 import nodeFs from "node:fs";
 import path from "node:path";
+import type { Env } from "../env.ts";
 
 /** The system prompt the pod appends for a conversation's session. It is a cft-workspace file, not this package's. */
 export const PROMPT_FILE = ".devcontainer/virtual-agent/assistant-prompt.md";
@@ -36,7 +37,14 @@ export function commandProgram(command: string): string {
 }
 
 /** Whether a pane's program can be run, asked of the directory the pane will run in. */
-export type ProgramCheck = (program: string, opts: { cwd: string; env: NodeJS.ProcessEnv }) => boolean;
+export type ProgramCheck = (program: string, opts: { cwd: string; env: Env }) => boolean;
+
+/**
+ * Where a bare name is looked up when the environment names no PATH at all. A shell without one falls back to a
+ * system default rather than to the working directory, and so does this: treating no PATH as the working directory
+ * would refuse every launcher that is properly installed.
+ */
+const DEFAULT_PATH = "/usr/bin:/bin";
 
 function executableFile(file: string): boolean {
   try {
@@ -66,8 +74,10 @@ export const canRunProgram: ProgramCheck = (program, { cwd, env }) => {
   if (program.includes("/")) {
     return executableFile(path.resolve(cwd, program));
   }
-  // An empty PATH entry means the working directory, as it does for a shell.
-  return (env.PATH ?? "").split(path.delimiter).some((dir) => executableFile(path.resolve(cwd, dir === "" ? "." : dir, program)));
+  // An empty entry in a PATH that was given means the working directory, as it does for a shell; no PATH at all
+  // means the system default, which is a different thing.
+  const search = env.PATH ?? DEFAULT_PATH;
+  return search.split(path.delimiter).some((dir) => executableFile(path.resolve(cwd, dir === "" ? "." : dir, program)));
 };
 
 function runTmux(args: string[], { env }: { env: NodeJS.ProcessEnv }): Promise<TmuxResult> {
