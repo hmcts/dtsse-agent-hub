@@ -265,7 +265,12 @@ linked into `/usr/local/bin`, where the kubelet finds `virtual-agent-boot` havin
 changes nothing else — the user, `HOME`, node, tmux, git, gh and curl are all the devcontainer's, and the pod depends
 on them. `.github/workflows/publish-virtual-agent-image.yml` publishes it to `hmctsprod.azurecr.io/dtsse/virtual-agent`
 for linux/amd64 after a client release succeeds on master, uncached so that every build reaches the feed, tagged
-`latest`, `<sha7>` and the time-sortable `prod-<sha7>-<UTC timestamp>`. Which client version a build baked in is in its
+`latest`, `<sha7>` and the time-sortable `prod-<sha7>-<UTC timestamp>`. Every path through that workflow requires
+master, because the repository's federated identity is only trusted for master and for pull requests. A change to the
+image is built on its pull request without being pushed, and both that build and the pushed image must pass
+`.github/scripts/assert-virtual-agent-image.sh`: `virtual-agent-boot` has to run under the kubelet's PATH and fail for
+its own missing `AGENT_HUB_URL` rather than for a missing interpreter, and both bins have to link into nvm's tree.
+Which client version a build baked in is in its
 log, or `npm ls -g --depth=0 @hmcts-cft/agent-hub` inside the image. `VIRTUAL_AGENT_IMAGE` is pinned by digest in
 cnp-flux-config and still points at the devcontainer image, which carries the same two things; moving it is its own
 change.

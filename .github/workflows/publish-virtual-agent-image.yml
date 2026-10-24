@@ -16,18 +16,20 @@ on:
     branches: [master]
     paths:
       - 'docker/virtual-agent/**'
+      - '.github/scripts/assert-virtual-agent-image.sh'
+      - '.github/workflows/publish-virtual-agent-image.yml'
+  # The same paths on a pull request, built and asserted but never pushed, so that a change to the
+  # image is not first exercised by the master run that moves `latest`.
+  pull_request:
+    paths:
+      - 'docker/virtual-agent/**'
+      - '.github/scripts/assert-virtual-agent-image.sh'
       - '.github/workflows/publish-virtual-agent-image.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
-
-# Never two publishes at once: both push `latest`, and the one that finishes second would win
-# whichever client it happens to carry.
-concurrency:
-  group: publish-virtual-agent-image
-  cancel-in-progress: false
 
 env:
   REGISTRY: hmctsprod
@@ -37,13 +39,62 @@ env:
   IMAGE_NAME: dtsse/virtual-agent
 
 jobs:
+  # The pull-request build: the same image, asserted the same way, never pushed. The `pull_request`
+  # federated subject is already trusted and the base image comes from ACR either way, so this needs
+  # the same login a publish does. container-build-push-openid cannot stand in for it: with
+  # `push: false` buildx leaves the image in the build cache, the action does not expose
+  # docker/build-push-action's `load`, and `docker run` would have nothing to run.
+  verify:
+    if: github.event_name == 'pull_request'
+    # Superseded by the next push to the branch, unlike a publish.
+    concurrency:
+      group: verify-virtual-agent-image-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: virtual-agent:${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Az CLI login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: ACR login
+        run: az acr login --name "$REGISTRY"
+
+      # Plain `docker build`, so the default builder loads the result into the daemon where the
+      # assertion can run it. No cache, for the reason the publish step gives below.
+      - name: Build
+        run: docker build --no-cache --tag "$IMAGE" --file docker/virtual-agent/Dockerfile docker/virtual-agent
+
+      - name: Assert a pod could start this image
+        run: .github/scripts/assert-virtual-agent-image.sh "$IMAGE"
+
   publish:
-    # A release that failed, or one on a branch, must not publish an image. The push trigger is
-    # master-only already; a manual run is deliberately not restricted, since rebuilding to pick up
-    # a newer client is the one thing someone would want to do by hand.
+    # Master, on every path. The federated identity in azure-github-federation-config trusts two
+    # subjects for this repository, `ref:refs/heads/master` and `pull_request`, so a run on any other
+    # branch dies inside the composite action's azure/login with AADSTS70021 and no hint that the
+    # branch is the cause. Adding a branch subject is not enough to loosen this: `latest` is the tag
+    # pods and engineers pull, and it must not come from unreviewed code.
+    #
+    # A workflow_run is master-only by its own head_branch rather than by github.ref, which for that
+    # event describes the default branch the workflow file was read from and not where the release
+    # ran. A release that failed must not publish either.
     if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master')
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'master') ||
+      (github.event_name != 'workflow_run' && github.ref == 'refs/heads/master')
+    # Never two publishes at once: both push `latest`, and the one that finishes second would win
+    # whichever client it happens to carry.
+    concurrency:
+      group: publish-virtual-agent-image
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -93,3 +144,14 @@ jobs:
           platforms: linux/amd64
           cache-from: ''
           cache-to: ''
+
+      # The pull-request build asserted the same thing, but a workflow_run publishes a client this
+      # commit was never built against, so the image that was actually pushed is checked again. The
+      # timestamped tag rather than `latest`, because it names this build and only this build. The
+      # runner is already logged in to the registry, from the step above.
+      - name: Assert a pod could start the pushed image
+        env:
+          IMAGE: ${{ env.REGISTRY }}.azurecr.io/${{ env.IMAGE_NAME }}:prod-${{ steps.tags.outputs.sha }}-${{ steps.tags.outputs.stamp }}
+        run: |
+          docker pull "$IMAGE"
+          .github/scripts/assert-virtual-agent-image.sh "$IMAGE"
