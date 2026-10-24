@@ -265,7 +265,8 @@ linked into `/usr/local/bin`, where the kubelet finds `virtual-agent-boot` havin
 changes nothing else — the user, `HOME`, node, tmux, git, gh and curl are all the devcontainer's, and the pod depends
 on them. `.github/workflows/publish-virtual-agent-image.yml` publishes it to `hmctsprod.azurecr.io/dtsse/virtual-agent`
 for linux/amd64 after a client release succeeds on master, uncached so that every build reaches the feed, tagged
-`latest`, `<sha7>` and the time-sortable `prod-<sha7>-<UTC timestamp>`. Every path through that workflow requires
+`latest`, `<sha7>` and `prod-<sha7>-<UTC timestamp>`, the last being the one Flux selects on, by the timestamp the
+automation overlay's pattern extracts from it. Every path through that workflow requires
 master, because the repository's federated identity is only trusted for master and for pull requests. A change to the
 image is built on its pull request without being pushed, and both that build and the pushed image must pass
 `.github/scripts/assert-virtual-agent-image.sh`: `virtual-agent-boot` has to run under the kubelet's PATH and fail for

@@ -118,8 +118,12 @@ jobs:
       #
       # `image-tags` goes to docker/metadata-action, which splits on newlines and not on commas
       # (a tag pattern's own attributes are comma-separated), despite the input's description.
-      # `prod-<sha7>-<UTC timestamp>` is the time-sortable one: Flux image automation follows the
-      # pod image and its ImagePolicy sets no filterTags, so it orders on the tag string itself.
+      # `prod-<sha7>-<UTC timestamp>` is the one Flux image automation follows, and the format is not
+      # free: cnp-flux-config's ImagePolicy for this image declares no ordering of its own, and gets
+      # `^prod-[a-f0-9]+-(?P<ts>[0-9]+)` with `alphabetical: asc` from the automation overlay's
+      # patch. So the timestamp is extracted and compared on its own — as a whole string the tag
+      # would sort by sha first and pick an arbitrary build. A tag that stops matching that pattern,
+      # or a sha7 that is not lowercase hex, silently stops being selected.
       # The sha7 is this repository's commit; which client version an image carries is in its build
       # log, from the `npm ls` at the end of the Dockerfile's RUN, or read back out of the image
       # with `docker run --rm <image> bash -lc 'npm ls -g --depth=0 @hmcts-cft/agent-hub'`.
