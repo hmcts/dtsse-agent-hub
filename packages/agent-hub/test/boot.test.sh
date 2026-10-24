@@ -9,9 +9,10 @@
 #   bash test/boot.test.sh --list          # the case names, which is what the wrapper iterates
 #
 # HUB_URL and HUB_STATE are required: the hub answers on the first and rewrites the second
-# ({status, prompts, completes, github}) after every request it serves. VID and LAUNCH name the
-# virtual agent it minted the launch token for. BOOT is the script under test and AGENT_HUB_CLI_JS
-# the client's CLI, so both can be pointed elsewhere.
+# ({status, prompts, completes, github}) as each response it sends goes out, so a read taken the moment a
+# boot returns holds everything the boot was told. VID and LAUNCH name the virtual agent it minted the
+# launch token for. BOOT is the script under test and AGENT_HUB_CLI_JS the client's CLI, so both can be
+# pointed elsewhere.
 
 # ok and no always succeed, so `test && ok || no` never runs both; the fakes expand $FAKE_DIR when they run.
 # shellcheck disable=SC2015,SC2016
