@@ -259,6 +259,25 @@ the namespace's `default` ServiceAccount, with no ServiceAccount token mounted a
 capability dropped, the CPU and memory of its size and 2–10Gi of ephemeral storage. `VIRTUAL_AGENT_HOST_ALIASES` become
 the pod's `hostAliases`.
 
+**What `VIRTUAL_AGENT_IMAGE` has to provide.** Today that image is `cft-workspace`'s devcontainer image, built in
+that repo, and nothing here names it — the orchestrator only takes a digest. What it depends on is this:
+
+| The image must | Because |
+| --- | --- |
+| have `virtual-agent-boot` on the image's `PATH`, as a `/usr/local/bin` symlink | it is the container's `command`, and the kubelet resolves that with no shell, against the image's own `PATH`. npm installs it into nvm's version-specific bin directory, which only a shell that has sourced `nvm.sh` can see. `agent-hub` is linked beside it for convenience, not necessity: boot looks that one up after `load_node`, and the entrypoint runs the checkout's `scripts/agent-hub` shim |
+| have `node` and `npm`, reachable by sourcing `$NVM_DIR/nvm.sh` | `virtual-agent-boot` sources it to upgrade the client; the entrypoint refuses to start without either |
+| have `jq`, `tmux`, `git`, `gh` and `curl` | boot builds every status body with `jq -cn` under `set -euo pipefail`, so without it a pod aborts at its first report and crash-loops having told the hub nothing; it clones over HTTPS with `gh`'s token and reports with `curl`, and the entrypoint runs each session in tmux |
+| have the Azure CLI | the client shells out to `az` for the device-code sign-in and the token it caches (`src/virtual/sign-in.ts`), and the entrypoint retries that sign-in indefinitely — so without `az` the agent sits at "Starting" with no failure its owner can act on |
+| have Claude Code | `hai` execs `claude` by bare name, so every session dies at launch and the entrypoint restart-loops. `twg` is the only optional one: the entrypoint skips the Atlassian sign-in without it |
+| use `/home/hmcts` as `$HOME` | the pod's volume mounts are hardcoded to it: `~/.claude`, `~/.azure` and `~/.config/gh` |
+| own `$HOME`, `$NVM_DIR` and npm's global prefix as uid and gid 1000 | the pod sets `runAsUser`, `runAsGroup` and `fsGroup` to 1000, which override whatever the image's `USER` says — so an image expecting root still starts, and the failure is `EACCES` when boot's `npm install -g` writes to a prefix it does not own. `runAsUser` is also what makes a named `USER` acceptable: given only a name, the kubelet cannot prove the user is not root and refuses a pod asking for `runAsNonRoot` |
+
+Nothing else is the image's business, and the split is worth stating because it is not obvious from either repo: **the
+image owns whatever must be true before the workspace is cloned; the checkout owns whatever can change with it.** So
+the two `HAI_*` markers in the pod's environment are set here, while installing `hai`, choosing `HAI_ROUTE` and
+building the launch command belong to `.devcontainer/virtual-agent/entrypoint.sh`, which boot `exec`s out of the clone
+and which therefore changes without an image build.
+
 **The client the pod boots on.** `virtual-agent-boot` installs `@hmcts-cft/agent-hub@latest` over the one its image
 carries before handing over to the checkout's entrypoint, so a client release reaches a pod without an image rebuild
 and a digest bump. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
