@@ -98,6 +98,12 @@ Every virtual agent can hold **conversations**: the chats of the HMCTS Assistant
 
 **Conversations.** The hub creates each conversation's agent with the conversation, before any session exists: a fresh UUID as its `session_id`, the virtual agent as its virtual agent, status `offline`, and the virtual agent's name. The person's messages are ordinary direct messages to that agent, so they queue as deliveries while no session runs. A conversation's agent is visible to and messageable by its owner only, whatever grants they have given, and is left out of `GET /api/agent/agents`.
 
+**Sharing a conversation.** An owner can share one conversation, read only, with people they name one at a time in the web UI (`/assistant/{id}?share=1`, listed at `/assistant/shared`). A share is a row naming one person who has used the hub, and the rows are the whole of the access: the link the owner copies, `/assistant/shared/{conversation_id}`, resolves for the people named and gives everyone else the same `404` a conversation that does not exist gives. Removing someone from the list revokes it at their next read.
+
+A share exposes the words of the thread and the conversation's artefact, and nothing else: a recipient cannot send, rename, delete, change the artefact, re-share, or read any file attached to a message — a message that carried files says only how many. It is a snapshot rather than a live view.
+
+**Nothing in this contract changes with it.** A conversation's agent stays its owner's alone, so a recipient is refused every `/api/agent/{agent_id}/…` route of it, is not sent it in `GET /api/agent/agents`, cannot read its directs through `GET /api/agent/messages/{id}`, and gets `404` from `/api/ui/stream?agent=…` for it. The dialog's people search is `GET /api/ui/people?q=`, same-origin and cookie-authenticated like the `/api/ui/uploads` routes: it answers `200 {people: [{oid, name, email}]}` with at most 8 of the people the hub knows whose name starts a word with `q` or whose address starts with it, never the caller, and an empty list for a `q` of under two characters, so it is a search rather than a way to list the hub's users.
+
 **Waking a session.** A message to a conversation whose agent is not live sets a wake on the conversation, and starts the virtual agent if it is stopped. The pod hears of wakes on its sessions stream:
 
 | Method and path | Body | Response |

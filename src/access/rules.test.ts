@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   type AgentRef,
   agentAccess,
+  type ConversationRef,
+  type ConversationShare,
   canActAsVirtualAgent,
   canAgentMessageAgent,
   canAttachUpload,
   canGrant,
   canLaunchTokenActForAgent,
   canLaunchTokenReadMessage,
+  canManageConversationShares,
   canManageCredential,
   canManageGrants,
   canManageVirtualAgent,
@@ -16,15 +19,22 @@ import {
   canReadMessage,
   canSeeAgentSkills,
   canSessionUseAttachment,
+  canShareConversationWith,
+  canSuggestPerson,
   canUseCredentialRoutes,
   canViewAgent,
+  canViewSharedConversation,
   canViewTranscript,
   canViewVirtualAgent,
   canVirtualAgentStoreCredential,
   canWriteUpload,
+  conversationAccess,
   type Grant,
   grantLevel,
+  MAX_PEOPLE_SUGGESTIONS,
   type MessageRef,
+  MIN_PEOPLE_QUERY,
+  peopleLookup,
   replyRoute,
   type UploadRef
 } from "./rules.ts";
@@ -526,6 +536,157 @@ describe("the upload rules", () => {
 
     it.each([["pending"], ["expired"]] as const)("should refuse a fetched report when the upload is %s", (state) => {
       expect(canSessionUseAttachment(CONVERSATION, upload({ state, messageId: "41" }), "fetched")).toBe(false);
+    });
+  });
+});
+
+describe("the conversation share rules", () => {
+  const CONVERSATION: ConversationRef = { id: "conv-1", ownerOid: OWNER };
+  const RECIPIENT = "oid-recipient";
+  const SHARES: ConversationShare[] = [
+    { conversationId: CONVERSATION.id, recipientOid: RECIPIENT },
+    // A share of another conversation of the same owner, which must not carry over to this one.
+    { conversationId: "conv-2", recipientOid: STRANGER }
+  ];
+
+  describe("conversationAccess", () => {
+    it("should answer owner when the viewer owns the conversation", () => {
+      expect(conversationAccess(OWNER, CONVERSATION, SHARES)).toBe("owner");
+    });
+
+    it("should answer reader when the viewer is named in a share of that conversation", () => {
+      expect(conversationAccess(RECIPIENT, CONVERSATION, SHARES)).toBe("reader");
+    });
+
+    it("should answer none when the viewer is named only in a share of another conversation", () => {
+      expect(conversationAccess(STRANGER, CONVERSATION, SHARES)).toBe("none");
+    });
+
+    it("should answer none when the conversation is shared with nobody", () => {
+      expect(conversationAccess(RECIPIENT, CONVERSATION, [])).toBe("none");
+    });
+
+    it.each([
+      ["a read grantee of the owner's agents", READER],
+      ["a write grantee of the owner's agents", WRITER]
+    ])("should answer none for %s, since no agent grant reaches a conversation", (_label, viewerOid) => {
+      expect(conversationAccess(viewerOid, CONVERSATION, SHARES)).toBe("none");
+    });
+  });
+
+  describe("canViewSharedConversation", () => {
+    it.each([
+      ["its owner", OWNER],
+      ["someone named in a share of it", RECIPIENT]
+    ])("should allow %s", (_label, viewerOid) => {
+      expect(canViewSharedConversation(viewerOid, CONVERSATION, SHARES)).toBe(true);
+    });
+
+    // The one that matters: holding the link is not being on the list, so a stranger handed it reads nothing. The
+    // rule takes no link, token or secret at all, which is why there is nothing a link alone could satisfy.
+    it.each([
+      ["a stranger", STRANGER],
+      ["a read grantee of the owner's agents", READER],
+      ["a write grantee of the owner's agents", WRITER]
+    ])("should refuse %s, however they came by the address", (_label, viewerOid) => {
+      expect(canViewSharedConversation(viewerOid, CONVERSATION, SHARES)).toBe(false);
+    });
+
+    it("should refuse everyone but the owner while the conversation is shared with nobody", () => {
+      expect(canViewSharedConversation(OWNER, CONVERSATION, [])).toBe(true);
+      for (const viewerOid of [RECIPIENT, READER, WRITER, STRANGER]) {
+        expect(canViewSharedConversation(viewerOid, CONVERSATION, [])).toBe(false);
+      }
+    });
+  });
+
+  // A share is of the conversation, never of its agent, so everything decided about the agent still answers for a
+  // recipient exactly as it does for a stranger: the UI stream's watch, the agent API's routes and the rosters.
+  describe("what a share does not widen", () => {
+    const agent: AgentRef = { id: "conversation-agent", ownerOid: OWNER, ownerOnly: true };
+    const asGrants: Grant[] = [...GRANTS, { ownerOid: OWNER, granteeOid: RECIPIENT, level: "write" }];
+
+    it.each([
+      ["see the conversation's agent", canViewAgent],
+      ["read its transcript", canViewTranscript],
+      ["message it", canPersonMessageAgent],
+      ["see the skills it offers", canSeeAgentSkills]
+    ])("should not let a share recipient %s", (_label, rule) => {
+      expect(rule(RECIPIENT, agent, [])).toBe(false);
+      // Not even with a grant over the owner's agents on top, which is what `ownerOnly` is for.
+      expect(rule(RECIPIENT, agent, asGrants)).toBe(false);
+    });
+
+    it("should still let the owner do all of it", () => {
+      for (const rule of [canViewAgent, canViewTranscript, canPersonMessageAgent, canSeeAgentSkills]) {
+        expect(rule(OWNER, agent, [])).toBe(true);
+      }
+    });
+  });
+
+  describe("canManageConversationShares", () => {
+    it("should allow the owner", () => {
+      expect(canManageConversationShares(OWNER, CONVERSATION)).toBe(true);
+    });
+
+    it.each([
+      ["a recipient of it", RECIPIENT],
+      ["a write grantee of the owner's agents", WRITER],
+      ["a stranger", STRANGER]
+    ])("should refuse %s", (_label, actorOid) => {
+      expect(canManageConversationShares(actorOid, CONVERSATION)).toBe(false);
+    });
+  });
+
+  describe("canShareConversationWith", () => {
+    it("should let the owner share with someone the hub knows", () => {
+      expect(canShareConversationWith(OWNER, CONVERSATION, RECIPIENT, true)).toBe(true);
+    });
+
+    it("should refuse someone who has never used the hub", () => {
+      expect(canShareConversationWith(OWNER, CONVERSATION, RECIPIENT, false)).toBe(false);
+    });
+
+    it("should refuse sharing a conversation with its own owner", () => {
+      expect(canShareConversationWith(OWNER, CONVERSATION, OWNER, true)).toBe(false);
+    });
+
+    it.each([
+      ["a recipient", RECIPIENT],
+      ["a write grantee of the owner's agents", WRITER],
+      ["a stranger", STRANGER]
+    ])("should refuse %s sharing someone else's conversation", (_label, actorOid) => {
+      expect(canShareConversationWith(actorOid, CONVERSATION, STRANGER, true)).toBe(false);
+    });
+  });
+});
+
+describe("the people lookup rules", () => {
+  describe("peopleLookup", () => {
+    it("should answer a query of the shortest length it accepts", () => {
+      expect(peopleLookup("no")).toEqual({ ok: true, query: "no", limit: MAX_PEOPLE_SUGGESTIONS });
+    });
+
+    it("should trim the query, so the spaces around a name do not count towards its length", () => {
+      expect(peopleLookup("  norton  ")).toEqual({ ok: true, query: "norton", limit: MAX_PEOPLE_SUGGESTIONS });
+    });
+
+    it.each([[""], [" "], ["n"], ["  n "]])("should refuse %p, which is too little to match anyone against", (raw) => {
+      expect(peopleLookup(raw)).toEqual({ ok: false });
+    });
+
+    it("should hold the shortest query to two characters, so the hub cannot be listed a letter at a time", () => {
+      expect(MIN_PEOPLE_QUERY).toBe(2);
+    });
+  });
+
+  describe("canSuggestPerson", () => {
+    it("should offer anyone else the hub knows", () => {
+      expect(canSuggestPerson(OWNER, { oid: STRANGER })).toBe(true);
+    });
+
+    it("should not offer the viewer themselves", () => {
+      expect(canSuggestPerson(OWNER, { oid: OWNER })).toBe(false);
     });
   });
 });

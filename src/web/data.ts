@@ -1,10 +1,20 @@
 import "server-only";
 import { grantsHeldBy } from "../access/load.ts";
-import { canOwnerReadCredential, canReadMessage } from "../access/rules.ts";
+import { canManageConversationShares, canOwnerReadCredential, canReadMessage } from "../access/rules.ts";
 import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
+import {
+  accessToConversation,
+  conversationRef,
+  conversationsSharedBy,
+  conversationsSharedWith,
+  type SharedChatLink,
+  type SharePerson,
+  shareRecipients
+} from "../assistant/shares.ts";
+import { type SharedConversationView, sharedConversation } from "../assistant/sharing.ts";
 import { conversationAgent, ensureAssistant, findAssistant, findConversation } from "../assistant/store.ts";
 import {
   type AssistantSummary,
@@ -343,4 +353,32 @@ export async function assistantConversation(viewer: Viewer, id: string): Promise
     return undefined;
   }
   return await conversationView(prisma, conversation, await conversationAgent(prisma, conversation));
+}
+
+/**
+ * The read-only share of a conversation, for its owner or for someone they named, and `undefined` for everyone else
+ * — including someone who was handed the link, since the link is how a recipient reaches a share and never what
+ * grants one. `accessToConversation` applies `canViewSharedConversation`.
+ */
+export async function sharedChat(viewer: Identity, id: string): Promise<SharedConversationView | undefined> {
+  const allowed = await accessToConversation(prisma, viewer.oid, id);
+  if (allowed === undefined) {
+    return undefined;
+  }
+  return await sharedConversation(prisma, allowed.conversation, allowed.access);
+}
+
+/** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */
+export async function chatShares(viewer: Identity, id: string): Promise<SharePerson[] | undefined> {
+  const conversation = await conversationRef(prisma, id);
+  if (conversation === undefined || !canManageConversationShares(viewer.oid, conversation)) {
+    return undefined;
+  }
+  return await shareRecipients(prisma, id);
+}
+
+/** Both sides of the viewer's shares: their own chats they have shared, and the chats shared with them. */
+export async function sharedChats(viewer: Identity): Promise<{ given: SharedChatLink[]; received: SharedChatLink[] }> {
+  const [given, received] = await Promise.all([conversationsSharedBy(prisma, viewer.oid), conversationsSharedWith(prisma, viewer.oid)]);
+  return { given, received };
 }

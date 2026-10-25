@@ -164,6 +164,8 @@ model User {
   virtualAgents VirtualAgent[]
   assistantConversations AssistantConversation[]
   assistantUploads       AssistantUpload[]
+  conversationsSharedWithThem AssistantConversationShare[] @relation("shareRecipient")
+  conversationsTheyShared     AssistantConversationShare[] @relation("shareOwner")
 
   @@map("user")
 }
@@ -482,9 +484,28 @@ model AssistantConversation {
   agent        Agent?           @relation("assistantConversationCurrent", fields: [agentId], references: [id], onDelete: SetNull)
   sessions     Agent[]          @relation("assistantConversationSessions")
   uploads      AssistantUpload[]
+  shares       AssistantConversationShare[]
 
   @@index([ownerOid, lastActiveAt(sort: Desc)], map: "assistant_conversation_owner_active_idx")
   @@map("assistant_conversation")
+}
+
+/// A read-only share of one conversation with one named person. The list of rows is the whole of the access: a link
+/// to a shared conversation resolves for the people named here and for nobody else. See src/access/rules.ts.
+model AssistantConversationShare {
+  conversationId String   @map("conversation_id") @db.Uuid
+  recipientOid   String   @map("recipient_oid")
+  /// The conversation's owner, who is the only person who can share it.
+  sharedByOid    String   @map("shared_by_oid")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  recipient    User                  @relation("shareRecipient", fields: [recipientOid], references: [oid], onDelete: Cascade)
+  sharedBy     User                  @relation("shareOwner", fields: [sharedByOid], references: [oid], onDelete: Cascade)
+
+  @@id([conversationId, recipientOid])
+  @@index([recipientOid, createdAt], map: "assistant_conversation_share_recipient_idx")
+  @@map("assistant_conversation_share")
 }
 
 /// A file attached to an Assistant message: the metadata, which outlives the bytes in `AssistantUploadPart`.

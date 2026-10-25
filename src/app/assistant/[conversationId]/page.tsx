@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { deleteConversation, renameConversation, saveArtefact, sendAssistantMessage, setConversationProduct, warmConversation } from "@/app/_actions/assistant";
 import { saveCredential } from "@/app/_actions/credentials";
+import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
@@ -11,8 +12,9 @@ import { WAITING_COOKIE, waitingDismissed } from "@/assistant/waiting";
 import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
+import { ShareGate } from "@/components/assistant/ShareGate";
 import { requireViewer } from "@/viewer/current";
-import { assistantConversation, openAssistant } from "@/web/data";
+import { assistantConversation, chatShares, openAssistant } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -26,15 +28,23 @@ const ACTIONS: ChatActions = {
 };
 
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */
-export default async function ConversationPage({ params }: { params: Promise<{ conversationId: string }> }) {
+export default async function ConversationPage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ conversationId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const viewer = await requireViewer();
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const { conversationId } = await params;
-  const [home, view] = await Promise.all([openAssistant(viewer), assistantConversation(viewer, conversationId)]);
+  const [home, view, query] = await Promise.all([openAssistant(viewer), assistantConversation(viewer, conversationId), searchParams]);
   if (view === undefined) {
     notFound();
   }
+  // Who the chat is already shared with, so the dialog opens with its list rather than filling it in afterwards.
+  const shares = (await chatShares(viewer, conversationId)) ?? [];
   const plugins = assistantPluginsData(home.assistant, home.plugins);
   const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
   return (
@@ -59,6 +69,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
         dismissed={waitingDismissed(jar.get(WAITING_COOKIE)?.value, home.assistant.id, home.assistant.startedAt)}
         theme={theme}
       />
+      <ShareGate conversationId={view.id} open={query.share === "1"} people={shares} share={shareChat} unshare={unshareChat} />
     </AssistantShell>
   );
 }

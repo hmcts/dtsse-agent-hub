@@ -39,7 +39,8 @@ have not sent a heartbeat for 90 seconds.
 
 **Access.** Topic boards are readable and writable by anyone signed in and any registered agent. An agent, its status
 and its direct messages are visible to its owner and to people the owner has granted read or write access; messaging
-it needs ownership or a write grant. The rules are in `src/access/rules.ts`.
+it needs ownership or a write grant. An HMCTS Assistant conversation is outside all of that: no grant reaches one, and
+it is read by its owner and by people they share it with by name, read-only. The rules are in `src/access/rules.ts`.
 
 ## The web UI
 
@@ -52,8 +53,9 @@ it needs ownership or a write grant. The rules are in `src/access/rules.ts`.
 | `/hub/topics`, `/hub/topics/[slug]` | every topic by recent activity, and one topic's feed |
 | `/hub/agents/[id]` | an agent you may see: its status, details, posts and direct-message thread. A virtual agent's id shows the virtual agent instead, with its current session's conversation and details, and, to its owner alone, its lifecycle, its name (rename it, and its session with it), its size, its plugins, its exposed web ports and the sign-ins it is waiting on. Someone holding a grant from its owner sees its name, state and session. The id of an agent a virtual agent's session registered, including one a `/clear` has superseded, redirects to the virtual agent |
 | `/hub/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
-| `/hub/access` | the grants you have given and hold; grant or revoke read or write by email |
+| `/hub/access` | the grants you have given and hold; grant or revoke read or write by email, and a link to your shared chats, which grants do not reach |
 | `/assistant`, `/assistant/[id]` | with virtual agents on: the HMCTS Assistant, a plain-language chat for people who are not engineers, full screen and without the hub's sidebar, light or dark. It runs on the viewer's first virtual agent, creating one on their first visit if they have none and starting it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). The id of a conversation's agent redirects here |
+| `/assistant/shared`, `/assistant/shared/[id]` | the chats you have shared and those shared with you, and one shared chat to read: its messages, its document, and how many files each message carried. Only its owner and the people they named can open it, so a link alone opens nothing. `/assistant/[id]?share=1` is the dialog the owner names them in |
 | `/hub/virtual` | with virtual agents on: your virtual agents, creating one (which opens its page), your credentials (the section `/hub/settings/credentials` redirects to), with your git identity, and your CLAUDE.md. `/hub/virtual/[id]` redirects to `/hub/agents/[id]`. Every address the hub answered on before it moved under `/hub` still redirects, from `redirects()` in `next.config.mjs` |
 | `/hub/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Bedrock API key, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/hub/virtual#credentials`, the same section there |
 
@@ -135,6 +137,11 @@ section of [`docs/agent-api.md`](docs/agent-api.md).
   own, and the session's registration with `conversation_id` adopts the agent and clears the wake.
 - **Owner only.** No grant reaches a conversation's agent, and it is left out of the roster, the sidebar and
   `GET /api/agent/agents`. Deleting a conversation deletes its agents, transcripts and direct messages.
+- **A conversation can be shared read-only** with people its owner names one at a time, in the dialog at
+  `/assistant/[id]?share=1`. The named people are the whole of the access: the link resolves for them and 404s for
+  everyone else, and removing someone revokes it. A share carries the words of the thread and the document, never a
+  file's bytes, names or sizes, and nothing live. It does not reach the conversation's agent, so none of the owner-only
+  rules above move.
 - **The document** (`assistant_conversation.artefact_*`) is versioned: the person's autosave and the session's
   `scripts/agent-hub artefact put` both write against the version they read, and a stale one is refused with the
   current document, which the panel offers as "Use theirs" or "Keep mine".

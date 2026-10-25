@@ -35,3 +35,27 @@ export async function usersByEmail(db: Database, email: string): Promise<KnownUs
     SELECT oid, name, email, tid FROM "user" WHERE lower(email) = lower(${email.trim()}) ORDER BY oid
   `;
 }
+
+/** The characters `LIKE` reads as pattern rather than text, so a typed `%` matches a literal one. */
+function literal(value: string): string {
+  return value.toLowerCase().replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+/**
+ * People the hub knows whose name starts a word with `query`, or whose address starts with it, nearest the start of
+ * the name first. A search, never a list: `peopleLookup` in `src/access/rules.ts` is what decides that a query is
+ * specific enough to answer at all and how many people one answer may carry.
+ *
+ * A word prefix rather than a substring, so "nor" finds Linus Norton without "or" finding everyone.
+ */
+export async function searchUsers(db: Database, query: string, limit: number): Promise<KnownUser[]> {
+  const starts = `${literal(query)}%`;
+  const word = `% ${literal(query)}%`;
+  return await db.$queryRaw<KnownUser[]>`
+    SELECT oid, name, email, tid
+      FROM "user"
+     WHERE lower(name) LIKE ${starts} OR lower(name) LIKE ${word} OR lower(coalesce(email, '')) LIKE ${starts}
+     ORDER BY lower(name), oid
+     LIMIT ${limit}
+  `;
+}
