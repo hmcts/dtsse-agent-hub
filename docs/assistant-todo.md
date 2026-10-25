@@ -40,7 +40,7 @@ Delete this file once everything below is done or has moved to Jira.
 - [ ] **Markdown.** `src/messages/markup.ts` has no tables, blockquotes or horizontal rules, so they show as raw text in answers and documents.
 - [ ] **File upload** (the prototype's "Upload file") was out of scope. It needs storage the pod can read.
 - [ ] **Fonts.** IBM Plex is used only where it's installed; nothing loads it. Bundle the font files under `public/` if the design needs them everywhere.
-- [ ] **Product chip.** The header's product `<select>` takes the width of its longest option. A custom listbox would fit the prototype better.
+- [ ] **Product chip.** The header's product `<select>` is capped and ellipsised, because a native one takes the width of its longest option. A custom listbox would show the whole label and fit the prototype better.
 - [ ] **`/clear` in a session.** A `/clear` moves the conversation to the new session id, but the supervisor still tracks idleness by the id it started. A person can't send `/clear` from the Assistant, so this only matters if that changes.
 - [ ] **Templates and starters** are static (`src/assistant/starters.ts`). Should teams have their own?
 - [ ] **Agent status leak.** `agent_status` events for a conversation's agent reach the owner's grantees' streams (id and status only, nothing else). Filter them out if that matters.

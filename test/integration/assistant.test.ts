@@ -9,7 +9,7 @@ import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
-import { createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
+import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { expireDeliveries } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
@@ -306,6 +306,20 @@ describe("conversations", () => {
     const conversation = (await findConversation(prisma, ALICE.oid, id))!;
     expect(conversation.product).toBe("ccd");
     expect(conversation.productHistory.map((change) => change.product)).toEqual(["ccd"]);
+  });
+
+  it("should read as the default everywhere when a conversation is on a product no longer offered", async () => {
+    const { id: assistantId } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "ccd", body: "hi" })) as { id: string }).id;
+    // What a replica still on the previous bundle writes during a rolling deploy, and what a retirement leaves.
+    await prisma.$executeRaw`UPDATE assistant_conversation SET product = 'other' WHERE id = ${id}::uuid`;
+
+    const view = (await assistantConversation(VIEWER, id))!;
+
+    expect(view).toMatchObject({ product: "general", productLabel: "General" });
+    expect((await findConversation(prisma, ALICE.oid, id))!.product).toBe("general");
+    expect(await assistantFrame(prisma, view.agentId)).toMatchObject({ product: "general", product_label: "General" });
+    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.product)).toEqual(["general"]);
   });
 
   it("should rename and delete a conversation with everything it holds", async () => {

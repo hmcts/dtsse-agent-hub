@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PRODUCT, isProduct, PRODUCTS, productLabel } from "./products.ts";
-
-function byCodePoint(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
+import { byCodePoint } from "../topics/slug.ts";
+import { DEFAULT_PRODUCT, isProduct, PRODUCTS, productLabel, storedProduct } from "./products.ts";
 
 describe("products", () => {
   it("should offer General first, as the default, with the rest alphabetical", () => {
@@ -41,5 +38,13 @@ describe("products", () => {
 
   it("should label an offered slug with its display name", () => {
     expect(productLabel("pcs")).toBe("Possession Claims Service (PCS)");
+  });
+
+  it.each([["ccd"], ["general"], ["send-letter"]])("should stand for itself when %s is offered", (slug) => {
+    expect(storedProduct(slug)).toBe(slug);
+  });
+
+  it.each([["other"], ["retired"], ["CCD"], [""]])("should stand for the default when %j is not offered", (slug) => {
+    expect(storedProduct(slug)).toBe(DEFAULT_PRODUCT);
   });
 });

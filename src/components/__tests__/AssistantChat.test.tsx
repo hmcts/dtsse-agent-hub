@@ -280,6 +280,19 @@ describe("ChatView product", () => {
 
     expect(screen.getByRole("alert").textContent).toBe("no such product");
   });
+
+  it("should show the default and change from it when the conversation is on a product no longer offered", () => {
+    const setProduct = ok();
+    render(<ChatView view={conversation({ product: "other", productLabel: "other" })} templates={TEMPLATES} actions={actions({ setProduct })} />);
+
+    const select = screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement;
+    expect(select.value).toBe("general");
+    expect(within(select).queryByRole("option", { name: "other" })).toBeNull();
+
+    fireEvent.change(select, { target: { value: "pcs" } });
+
+    expect(screen.getByRole("dialog", { name: "Change product?" }).textContent).toContain("from General to Possession Claims Service (PCS)");
+  });
 });
 
 describe("ChatView sending", () => {

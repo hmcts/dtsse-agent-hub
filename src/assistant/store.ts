@@ -3,7 +3,7 @@ import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
-import { DEFAULT_PRODUCT, isProduct, productLabel } from "./products.ts";
+import { DEFAULT_PRODUCT, isProduct, productLabel, storedProduct } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
 
 /**
@@ -99,6 +99,8 @@ function toRow(row: {
   const state = row.sessionState;
   return {
     ...row,
+    // Nothing leaves the store carrying a product the list no longer offers, so every page agrees with the picker.
+    product: storedProduct(row.product),
     productHistory: storedHistory(row.productHistory),
     sessionState: state === "starting" || state === "live" || state === "queued" ? state : null
   };
@@ -461,10 +463,11 @@ export async function assistantFrame(db: Database, agentId: string): Promise<Ass
     return undefined;
   }
   const artefact = toArtefact(conversation);
+  const product = storedProduct(conversation.product);
   return {
     conversation_id: conversation.id,
-    product: conversation.product,
-    product_label: productLabel(conversation.product),
+    product,
+    product_label: productLabel(product),
     artefact_version: artefact.version,
     artefact_updated_by: artefact.updatedBy
   };
@@ -480,13 +483,14 @@ export interface Wake {
 
 /** Every pending wake of the assistant, oldest first. `resume` once the session has sent a transcript entry. */
 export async function pendingWakes(db: Database, virtualAgentId: string): Promise<Wake[]> {
-  return await db.$queryRaw<Wake[]>`
+  const wakes = await db.$queryRaw<Wake[]>`
     SELECT c.id::text AS conversation_id, a.session_id, EXISTS (SELECT 1 FROM transcript_entry t WHERE t.agent_id = a.id) AS resume, c.product
       FROM assistant_conversation c
       JOIN agent a ON a.id = c.agent_id
      WHERE c.virtual_agent_id = ${virtualAgentId}::uuid AND c.wake_requested_at IS NOT NULL
      ORDER BY c.wake_requested_at, c.id
   `;
+  return wakes.map((wake) => ({ ...wake, product: storedProduct(wake.product) }));
 }
 
 /** The wake for one conversation, if it has one pending; `null` when the conversation is gone. */

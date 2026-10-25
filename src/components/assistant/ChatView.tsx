@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
-import { PRODUCTS, productLabel } from "@/assistant/products";
+import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
 import { type Progress, progress, type ThreadItem, threadItems } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
@@ -259,6 +259,8 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
     seenVersion.current = Math.max(seenVersion.current, view.artefact.version);
   }, [view.artefact.version, view.artefact.updatedBy, arrivals]);
 
+  // The picker can only show a product it offers, so it and the dialog it opens read the stored one through this.
+  const product = storedProduct(view.product);
   const thread = threadItems(live.items, view.productHistory);
   const doing: Progress = progress(live.items, thread, status, view.sessionState);
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
@@ -294,15 +296,20 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
           <label className="sr-only" htmlFor="chat-product">
             Product
           </label>
+          {/*
+            A native select is as wide as its widest option, and the longest label runs to 40 characters, so the
+            control is capped and may shrink: the title, "Open document" and the chat menu keep their place at the
+            360px the document panel leaves, and the closed control ellipsises what does not fit.
+          */}
           <select
             id="chat-product"
-            value={view.product}
+            value={product}
             onChange={(event) => setPendingProduct(event.target.value)}
-            className="shrink-0 cursor-pointer appearance-none rounded-md border border-asst-accent-line bg-transparent px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft outline-none focus:border-asst-accent"
+            className="min-w-0 max-w-[9.5rem] shrink cursor-pointer truncate appearance-none rounded-md border border-asst-accent-line bg-transparent px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft outline-none focus:border-asst-accent"
           >
-            {PRODUCTS.map((product) => (
-              <option key={product.slug} value={product.slug} className="bg-asst-raised normal-case">
-                {product.label}
+            {PRODUCTS.map((offered) => (
+              <option key={offered.slug} value={offered.slug} className="bg-asst-raised normal-case">
+                {offered.label}
               </option>
             ))}
           </select>
@@ -393,8 +400,8 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
           narrow={narrow}
         />
       ) : null}
-      {pendingProduct !== null && pendingProduct !== view.product ? (
-        <ConfirmProduct from={view.product} to={pendingProduct} onCancel={() => setPendingProduct(null)} onConfirm={() => void changeProduct(pendingProduct)} />
+      {pendingProduct !== null && pendingProduct !== product ? (
+        <ConfirmProduct from={product} to={pendingProduct} onCancel={() => setPendingProduct(null)} onConfirm={() => void changeProduct(pendingProduct)} />
       ) : null}
     </div>
   );
