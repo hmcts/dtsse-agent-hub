@@ -139,6 +139,11 @@ export function AssistantShell({
     }
   }, [activeId]);
 
+  // A refusal is about one attempt on one chat. The shell outlives moving between conversations, so it is dropped on
+  // the way rather than left pinned under a row.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dropping it on navigation is the point, so the effect keys on the active id it does not read
+  useEffect(() => setFailed(null), [activeId]);
+
   return (
     <ShellContext.Provider value={{ sidebarOpen: open, openSidebar: () => setOpen(true) }}>
       <div className="relative flex min-h-0 flex-1 overflow-hidden bg-asst-bg font-plex text-[15px] leading-normal text-asst-text">
@@ -207,6 +212,7 @@ export function AssistantShell({
                             triggerClassName={`flex h-7 w-7 items-center justify-center rounded-md text-base leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${
                               item.id === activeId ? "" : "opacity-0"
                             }`}
+                            onOpen={() => setFailed(null)}
                             onRename={async (title) => {
                               const result = await actions.rename({ conversationId: item.id, title });
                               setFailed(result.ok ? null : { id: item.id, error: result.error });

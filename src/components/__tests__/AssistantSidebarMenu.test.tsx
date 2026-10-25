@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationLink } from "@/assistant/views";
-import { AssistantShell, type ConversationActions } from "@/components/assistant/AssistantShell";
+import { AssistantShell, type ConversationActions, SidebarToggle } from "@/components/assistant/AssistantShell";
 
 const refresh = vi.fn();
 const push = vi.fn();
@@ -15,11 +15,14 @@ vi.mock("@/components/live/HubStream", () => ({
   useEndSession: () => () => undefined
 }));
 
+let narrow = false;
+
 beforeEach(() => {
+  narrow = false;
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     writable: true,
-    value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })
+    value: () => ({ matches: narrow, addEventListener: () => undefined, removeEventListener: () => undefined })
   });
 });
 
@@ -42,7 +45,7 @@ function actions(overrides: Partial<ConversationActions> = {}): ConversationActi
 }
 
 /** The sidebar with two chats, the second of which, "Story draft", is the one open. */
-function shell(props: { actions?: ConversationActions } = {}) {
+function shell(props: { actions?: ConversationActions; activeId?: string | null } = {}) {
   return (
     <AssistantShell
       viewerName="Alice Smith"
@@ -51,6 +54,7 @@ function shell(props: { actions?: ConversationActions } = {}) {
       hubLink={false}
       {...props}
     >
+      <SidebarToggle />
       <p>page</p>
     </AssistantShell>
   );
@@ -60,8 +64,27 @@ function row(title: string): HTMLElement {
   return within(screen.getByRole("navigation", { name: "Chats" })).getByRole("link", { name: title }).parentElement!;
 }
 
+function trigger(title: string): HTMLElement {
+  return within(row(title)).getByRole("button", { name: `Options for ${title}` });
+}
+
 function openMenu(title: string): void {
-  fireEvent.click(within(row(title)).getByRole("button", { name: `Options for ${title}` }));
+  fireEvent.click(trigger(title));
+}
+
+const CONFIRMATION = "Delete this chat and its document? This cannot be undone.";
+
+/** The sidebar is taken out of the tab order when it is shut, which is how a drawer's state is visible. */
+function drawerOpen(): boolean {
+  return !screen.getByRole("complementary", { name: "Conversations", hidden: true }).hasAttribute("inert");
+}
+
+async function deleteFrom(title: string): Promise<void> {
+  openMenu(title);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Delete chat" }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+  });
 }
 
 describe("AssistantShell conversation menu", () => {
@@ -179,14 +202,111 @@ describe("AssistantShell conversation menu", () => {
   it("should show the refusal and stay when a chat cannot be deleted", async () => {
     render(shell({ actions: actions({ remove: vi.fn(async () => ({ ok: false as const, error: "gone already" })) }) }));
 
-    openMenu("Story draft");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete chat" }));
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    });
+    await deleteFrom("Story draft");
 
     expect(push).not.toHaveBeenCalled();
     expect(within(row("Story draft")).getByRole("alert").textContent).toBe("gone already");
+  });
+
+  // The confirmation panel is opaque and sits directly over the row, so a refusal left underneath it is a refusal
+  // nobody reads. jsdom finds a covered element as readily as a visible one, so the panel going is what is asserted
+  // here; that it uncovers the refusal is measured in a browser.
+  it("should take the confirmation away so the refusal is not left underneath it when a delete is refused", async () => {
+    render(shell({ actions: actions({ remove: vi.fn(async () => ({ ok: false as const, error: "gone already" })) }) }));
+
+    await deleteFrom("Story draft");
+
+    expect(screen.queryByText(CONFIRMATION)).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(within(row("Story draft")).getByRole("alert").textContent).toBe("gone already");
+  });
+
+  it("should drop the refusal when the person opens the menu again", async () => {
+    render(shell({ actions: actions({ remove: vi.fn(async () => ({ ok: false as const, error: "gone already" })) }) }));
+    await deleteFrom("Story draft");
+    expect(within(row("Story draft")).queryByRole("alert")).toBeTruthy();
+
+    openMenu("Story draft");
+
+    expect(within(row("Story draft")).queryByRole("alert")).toBeNull();
+  });
+
+  it("should drop the refusal when the person moves to another conversation", async () => {
+    const remove = vi.fn(async () => ({ ok: false as const, error: "gone already" }));
+    const { rerender } = render(shell({ actions: actions({ remove }) }));
+    await deleteFrom("Story draft");
+    expect(screen.queryByRole("alert")).toBeTruthy();
+
+    rerender(shell({ actions: actions({ remove }), activeId: "a" }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("should keep the typed name and say so when a rename cannot be sent at all", async () => {
+    render(shell({ actions: actions({ rename: vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))) }) }));
+
+    openMenu("Event help");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat name" }), { target: { value: "Half typed" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+
+    expect((screen.getByRole("textbox", { name: "Chat name" }) as HTMLInputElement).value).toBe("Half typed");
+    expect(screen.getByRole("alert").textContent).toBe("the new name could not be sent; check your connection and try again");
+  });
+
+  it("should keep the confirmation and say so when a delete cannot be sent at all", async () => {
+    render(shell({ actions: actions({ remove: vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))) }) }));
+
+    await deleteFrom("Story draft");
+
+    expect(screen.getByText(CONFIRMATION)).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toBe("the delete could not be sent; check your connection and try again");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("should put the focus back on the trigger when the menu is closed from the keyboard", () => {
+    render(shell({ actions: actions() }));
+
+    openMenu("Event help");
+    screen.getByRole("menuitem", { name: "Rename" }).focus();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(document.activeElement).toBe(trigger("Event help"));
+  });
+
+  it("should leave the focus where a click put it when the menu is dismissed by clicking outside", () => {
+    render(shell({ actions: actions() }));
+
+    openMenu("Event help");
+    fireEvent.mouseDown(screen.getByText("page"));
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).not.toBe(trigger("Event help"));
+  });
+
+  it("should close only the menu, and not the whole drawer, when Escape is pressed on a narrow screen", () => {
+    narrow = true;
+    render(shell({ actions: actions() }));
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+    expect(drawerOpen()).toBe(true);
+
+    openMenu("Event help");
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(drawerOpen()).toBe(true);
+  });
+
+  it("should close the drawer when Escape is pressed with no menu open on a narrow screen", () => {
+    narrow = true;
+    render(shell({ actions: actions() }));
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(drawerOpen()).toBe(false);
   });
 
   it("should close the menu when the person presses Escape", () => {

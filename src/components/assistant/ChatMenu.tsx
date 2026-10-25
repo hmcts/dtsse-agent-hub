@@ -1,70 +1,142 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const TRIGGER = "flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-lg text-asst-muted hover:bg-asst-field hover:text-asst-text";
 
-/** Roughly the tallest the panel gets, which is its delete confirmation, used to decide which way it opens. */
+/**
+ * A generous allowance for the panel's height, used to decide which way it opens before it is rendered and can be
+ * measured. Its tallest pane, the delete confirmation carrying a refusal, comes to about 130px.
+ */
 const PANEL_HEIGHT = 170;
+
+/** What an action that rejects gets instead of its own refusal, having never reached the server to be refused. */
+const UNREACHABLE = (what: string) => `the ${what} could not be sent; check your connection and try again`;
+
+/**
+ * The room above and below `element` before the nearest edge that would clip the panel: whichever is closer, the
+ * window or a scrolling ancestor. The sidebar's list of chats scrolls and ends well above the bottom of the window,
+ * so the window alone is not the bound.
+ */
+function room(element: HTMLElement): { above: number; below: number } {
+  const rect = element.getBoundingClientRect();
+  let top = 0;
+  let bottom = window.innerHeight;
+  for (let node = element.parentElement; node !== null; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === "auto" || overflow === "scroll" || overflow === "hidden") {
+      const box = node.getBoundingClientRect();
+      top = Math.max(top, box.top);
+      bottom = Math.min(bottom, box.bottom);
+    }
+  }
+  return { above: rect.top - top, below: bottom - rect.bottom };
+}
 
 /**
  * A conversation's options: rename it, or delete it and its document. Shown from the chat's header for the open
  * conversation and from every row of the sidebar, so the destructive confirmation is written once.
  *
- * The panel opens upward when there is no room for it below, because the sidebar's list scrolls and clips it.
+ * Dismissed by Escape or a click outside, in the same shape as the hub's other menus: closing from the keyboard puts
+ * focus back on the trigger, while a click elsewhere leaves focus where the click put it. The panel opens upward when
+ * there is no room for it below.
  */
 export function ChatMenu({
   title,
   onRename,
   onDelete,
+  onOpen,
   label = "Chat options",
   triggerClassName = TRIGGER
 }: {
   title: string;
   onRename: (title: string) => Promise<void>;
   onDelete: () => Promise<void>;
+  /** Called as the menu opens, so whatever is shown about the last attempt can be dropped. */
+  onOpen?: () => void;
   /** The accessible name of the trigger and of the menu. Name the chat wherever more than one menu is on the page. */
   label?: string;
   triggerClassName?: string;
 }) {
   const [open, setOpen] = useState<"closed" | "menu" | "rename" | "delete">("closed");
   const [draft, setDraft] = useState(title);
+  const [problem, setProblem] = useState<string | null>(null);
   const [above, setAbove] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const titleBox = useRef<HTMLInputElement>(null);
+
+  const close = useCallback(() => {
+    if (ref.current?.contains(document.activeElement)) {
+      trigger.current?.focus();
+    }
+    setOpen("closed");
+  }, []);
+
   useEffect(() => {
     if (open === "rename") {
       titleBox.current?.focus();
     }
   }, [open]);
+
   useEffect(() => {
     if (open === "closed") {
       return;
     }
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent ? event.key === "Escape" : !ref.current?.contains(event.target as Node)) {
-        setOpen("closed");
+    const dismiss = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") {
+          // Escape dismisses the innermost thing only. The shell closes its drawer on Escape from `window`, which is
+          // the next stop after `document`, so a row's menu would otherwise take the whole sidebar with it.
+          event.stopPropagation();
+          close();
+        }
+        return;
+      }
+      if (!ref.current?.contains(event.target as Node)) {
+        close();
       }
     };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
+    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", dismiss);
     return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
+      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("keydown", dismiss);
     };
-  }, [open]);
+  }, [open, close]);
 
-  function toggle() {
+  /** Opens a pane, forgetting whatever the last attempt reported. */
+  function show(next: "menu" | "rename" | "delete"): void {
+    setProblem(null);
+    setOpen(next);
+  }
+
+  function toggle(): void {
     if (open !== "closed") {
-      setOpen("closed");
+      close();
       return;
     }
-    const rect = trigger.current?.getBoundingClientRect();
+    const space = trigger.current === null ? null : room(trigger.current);
     // An environment without layout, such as jsdom, measures zeros, so the panel opens downward as it does whenever
     // there is room below.
-    setAbove(rect !== undefined && rect.bottom + PANEL_HEIGHT > window.innerHeight && rect.top > PANEL_HEIGHT);
-    setOpen("menu");
+    setAbove(space !== null && space.below < PANEL_HEIGHT && space.above >= PANEL_HEIGHT);
+    onOpen?.();
+    show("menu");
+  }
+
+  /**
+   * Runs one of the two actions. An action answers its own refusal, which belongs beside the chat rather than in a
+   * panel over it, so the panel closes on any answer at all and stays open only when none arrived.
+   */
+  async function run(what: string, work: () => Promise<void>): Promise<void> {
+    setProblem(null);
+    try {
+      await work();
+    } catch {
+      setProblem(UNREACHABLE(what));
+      return;
+    }
+    close();
   }
 
   const item = "rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active";
@@ -95,12 +167,12 @@ export function ChatMenu({
                 className={item}
                 onClick={() => {
                   setDraft(title);
-                  setOpen("rename");
+                  show("rename");
                 }}
               >
                 Rename
               </button>
-              <button type="button" role="menuitem" className={`${item} text-asst-error`} onClick={() => setOpen("delete")}>
+              <button type="button" role="menuitem" className={`${item} text-asst-error`} onClick={() => show("delete")}>
                 Delete chat
               </button>
             </div>
@@ -110,7 +182,7 @@ export function ChatMenu({
               className="flex flex-col gap-2 p-1"
               onSubmit={(event) => {
                 event.preventDefault();
-                void onRename(draft).then(() => setOpen("closed"));
+                void run("new name", () => onRename(draft));
               }}
             >
               {/* The box is inside its label, so nothing has to be unique to the one menu that is open. */}
@@ -132,14 +204,23 @@ export function ChatMenu({
             <div className="flex flex-col gap-2 p-1">
               <p className="text-sm">Delete this chat and its document? This cannot be undone.</p>
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setOpen("closed")} className="rounded-lg border border-asst-strong px-3 py-1.5 text-sm">
+                <button type="button" onClick={close} className="rounded-lg border border-asst-strong px-3 py-1.5 text-sm">
                   Cancel
                 </button>
-                <button type="button" onClick={() => void onDelete()} className="rounded-lg bg-asst-error px-3 py-1.5 text-sm font-semibold text-asst-ink">
+                <button
+                  type="button"
+                  onClick={() => void run("delete", onDelete)}
+                  className="rounded-lg bg-asst-error px-3 py-1.5 text-sm font-semibold text-asst-ink"
+                >
                   Delete
                 </button>
               </div>
             </div>
+          )}
+          {problem === null ? null : (
+            <p role="alert" className="px-1.5 pb-1 text-xs text-asst-error">
+              {problem}
+            </p>
           )}
         </div>
       )}
