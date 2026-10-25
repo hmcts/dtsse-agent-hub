@@ -3,7 +3,7 @@ import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
-import { DEFAULT_PRODUCT, isProduct, productLabel } from "./products.ts";
+import { DEFAULT_PRODUCT, isProduct, productLabel, storedProduct } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
 
 /**
@@ -99,6 +99,9 @@ function toRow(row: {
   const state = row.sessionState;
   return {
     ...row,
+    // A row reads as a product the list offers, so every page agrees with the picker. What a session is told does
+    // not go through here: `assistantFrame` and `pendingWakes` carry the slug as stored.
+    product: storedProduct(row.product),
     productHistory: storedHistory(row.productHistory),
     sessionState: state === "starting" || state === "live" || state === "queued" ? state : null
   };
@@ -334,16 +337,18 @@ export async function setProduct(prisma: PrismaClient, ownerOid: string, id: str
   if (conversation === undefined) {
     throw new ConversationNotFound();
   }
-  if (conversation.product === product) {
-    return;
-  }
   const history = [...conversation.productHistory, { product, at: now.toISOString() }].slice(-MAX_PRODUCT_HISTORY);
   await prisma.$transaction(async (tx) => {
-    await tx.assistantConversation.update({
-      where: { id },
-      data: { product, productHistory: history.map((change) => ({ product: change.product, at: change.at })), updatedAt: now }
-    });
-    await announce(tx, conversation);
+    // The row decides whether this is a change, because a conversation left on a slug the list no longer offers
+    // reads as the default: picking that default is a real change, which this stores and records in the history.
+    const changed = await tx.$executeRaw`
+      UPDATE assistant_conversation
+         SET product = ${product}, product_history = ${JSON.stringify(history)}::jsonb, updated_at = ${now}
+       WHERE id = ${id}::uuid AND product <> ${product}
+    `;
+    if (changed > 0) {
+      await announce(tx, conversation);
+    }
   });
 }
 
@@ -463,6 +468,8 @@ export async function assistantFrame(db: Database, agentId: string): Promise<Ass
   const artefact = toArtefact(conversation);
   return {
     conversation_id: conversation.id,
+    // What the conversation is stored as, not what the picker can show: this is the subject the session has been
+    // working in, and a product dropped from the list still names it. `productLabel` falls back to the slug.
     product: conversation.product,
     product_label: productLabel(conversation.product),
     artefact_version: artefact.version,
@@ -478,7 +485,10 @@ export interface Wake {
   product: string;
 }
 
-/** Every pending wake of the assistant, oldest first. `resume` once the session has sent a transcript entry. */
+/**
+ * Every pending wake of the assistant, oldest first. `resume` once the session has sent a transcript entry. The
+ * product is the stored one, as the frame's is: what the pod is told is what the conversation holds.
+ */
 export async function pendingWakes(db: Database, virtualAgentId: string): Promise<Wake[]> {
   return await db.$queryRaw<Wake[]>`
     SELECT c.id::text AS conversation_id, a.session_id, EXISTS (SELECT 1 FROM transcript_entry t WHERE t.agent_id = a.id) AS resume, c.product

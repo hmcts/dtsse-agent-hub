@@ -161,7 +161,7 @@ describe("ChatView thread", () => {
       />
     );
 
-    expect(screen.getByText(/Product changed to Civil Possessions/)).toBeTruthy();
+    expect(screen.getByText(/Product changed to Possession Claims Service \(PCS\)/)).toBeTruthy();
   });
 
   it("should say the message was not delivered when it expired", () => {
@@ -246,6 +246,22 @@ describe("ChatView progress", () => {
 });
 
 describe("ChatView product", () => {
+  it("should draw the chosen product's label itself when the header shows the picker", () => {
+    render(
+      <ChatView
+        viewerOid={VIEWER}
+        view={conversation({ product: "sscs", productLabel: "SSCS (Social Security and Child Support)" })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    const drawn = screen.getAllByText("SSCS (Social Security and Child Support)").filter((node) => node.tagName !== "OPTION");
+
+    expect(drawn).toHaveLength(1);
+    expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("sscs");
+  });
+
   it("should change the product only once the person confirms when they pick another product", async () => {
     const setProduct = ok();
     render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ setProduct })} />);
@@ -253,7 +269,7 @@ describe("ChatView product", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     const dialog = screen.getByRole("dialog", { name: "Change product?" });
     expect(dialog.textContent).toContain("CCD");
-    expect(dialog.textContent).toContain("Civil Possessions");
+    expect(dialog.textContent).toContain("Possession Claims Service (PCS)");
     expect(setProduct).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -301,6 +317,21 @@ describe("ChatView product", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toBe("no such product");
+  });
+
+  it("should show the default and change from it when the conversation is on a product no longer offered", () => {
+    const setProduct = ok();
+    render(
+      <ChatView viewerOid={VIEWER} view={conversation({ product: "other", productLabel: "other" })} templates={TEMPLATES} actions={actions({ setProduct })} />
+    );
+
+    const select = screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement;
+    expect(select.value).toBe("general");
+    expect(within(select).queryByRole("option", { name: "other" })).toBeNull();
+
+    fireEvent.change(select, { target: { value: "pcs" } });
+
+    expect(screen.getByRole("dialog", { name: "Change product?" }).textContent).toContain("from General to Possession Claims Service (PCS)");
   });
 });
 
@@ -813,10 +844,10 @@ describe("EmptyChat", () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={start} />);
 
-    expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("other");
+    expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("general");
     await type("my own words");
 
-    expect(start).toHaveBeenCalledWith({ product: "other", body: "my own words" });
+    expect(start).toHaveBeenCalledWith({ product: "general", body: "my own words" });
     expect(push).toHaveBeenCalledWith("/assistant/abc");
   });
 
@@ -869,7 +900,7 @@ describe("EmptyChat", () => {
       fireEvent.click(screen.getByRole("button", { name: new RegExp(STARTERS[0]?.title ?? "") }));
     });
 
-    expect(start).toHaveBeenCalledWith({ product: "other", body: STARTERS[0]?.prompt });
+    expect(start).toHaveBeenCalledWith({ product: "general", body: STARTERS[0]?.prompt });
     expect(box().value).toBe("a thought I have not finished");
     cleanup();
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={start} />);
