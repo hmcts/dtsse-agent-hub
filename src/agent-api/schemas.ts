@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MAX_SKILL_DESCRIPTION, MAX_SKILL_NAME, MAX_SKILLS, normaliseSkills, SKILL_NAME } from "../agents/skills.ts";
 import { MAX_BODY, MAX_TITLE, messageIdOf } from "../messages/limits.ts";
+import { boundedArray } from "./bounded-array.ts";
 
 /** Request bodies of `docs/agent-api.md`. Topic lists are validated by `topics/slug.ts`, not here. */
 
@@ -19,17 +20,17 @@ const optionalText = (max: number) =>
     .transform((value) => (value === undefined || value === null || value.trim() === "" ? null : value));
 
 /** A description over the limit is cut rather than refused, so one long description does not lose the whole list. */
-const skills = z
-  .array(
-    z.object({
-      name: z.string().max(MAX_SKILL_NAME).regex(SKILL_NAME, "must match ^[a-z0-9][a-z0-9:_-]*$"),
-      description: z
-        .string()
-        .nullish()
-        .transform((value) => (value ?? "").trim().slice(0, MAX_SKILL_DESCRIPTION))
-    })
-  )
-  .max(MAX_SKILLS, `at most ${MAX_SKILLS} skills`)
+const skills = boundedArray(
+  z.object({
+    name: z.string().max(MAX_SKILL_NAME).regex(SKILL_NAME, "must match ^[a-z0-9][a-z0-9:_-]*$"),
+    description: z
+      .string()
+      .nullish()
+      .transform((value) => (value ?? "").trim().slice(0, MAX_SKILL_DESCRIPTION))
+  }),
+  MAX_SKILLS,
+  { message: `at most ${MAX_SKILLS} skills` }
+)
   .transform(normaliseSkills)
   .optional();
 
