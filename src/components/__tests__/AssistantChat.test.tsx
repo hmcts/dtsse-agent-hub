@@ -696,6 +696,26 @@ describe("Composer draft", () => {
     expect(composer().value).toBe("and the next thought");
   });
 
+  it("should keep only what was typed past the sent message when the person carried on typing in the same box", async () => {
+    // The box still shows the sent text while the send is in flight, so what is typed next lands on the end of it.
+    // Keeping all of it would leave "all finished" in the box for Enter to deliver a second time.
+    const onSend = vi.fn(async () => {
+      write(screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement, "all finished, and one more thing");
+      return null;
+    });
+    const box = composer({ onSend });
+    write(box, "all finished");
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(box.value).toBe(", and one more thing");
+    expect(stored(CONVERSATION)).toBe(", and one more thing");
+    cleanup();
+    expect(composer().value).toBe(", and one more thing");
+  });
+
   it("should leave no draft behind when the box is emptied by hand", () => {
     const box = composer();
     write(box, "second thoughts");
@@ -870,6 +890,23 @@ describe("EmptyChat", () => {
 
     expect(push).toHaveBeenCalledWith("/assistant/abc");
     expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBeNull();
+  });
+
+  it("should leave no sent words in the new chat's draft when the person typed on while the first send was in flight", async () => {
+    // The new chat's draft is not keyed on any conversation, so anything left in it is what the *next* new chat
+    // opens with. Words that have already been delivered must not be among them, or Enter sends them again.
+    const start = vi.fn(async () => {
+      fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "my own words and a second thought" } });
+      return { ok: true as const, id: "abc" };
+    });
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+
+    await type("my own words");
+
+    expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBe(" and a second thought");
+    cleanup();
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe(" and a second thought");
   });
 
   it("should keep what is in the box when a starter card starts a conversation instead", async () => {
