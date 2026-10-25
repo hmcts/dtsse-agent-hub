@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { browserConnectivity, type ConnectivityDependencies, whenOnline } from "@/components/live/connectivity";
+import { boundaryRetryBudget, browserConnectivity, type ConnectivityDependencies, type RetryBudget, recoveryMessage } from "@/components/error-recovery";
 import { PANE_ACTION, PaneBody, PaneHeader } from "@/components/Pane";
 
 /** The hash Next gives a server-side error, which matches the line it logs; a client-side error has none. */
@@ -13,60 +13,73 @@ export function errorDigest(error: unknown): string | undefined {
 }
 
 /**
- * Whether the browser had no network when the boundary rendered, which is the usual reason a page fails during a
- * network flap. While it had none, the person is told so and `retry` is called for them as soon as the network
- * returns; from then on the panel offers the button again, so a retry that fails anyway is not a dead end.
+ * Retries for the person while the budget allows: once the delay passes, or as soon as the network comes back,
+ * whichever happens first. Returns whether an attempt is still coming, which is all the message needs to know.
+ *
+ * `retry` refetches rather than re-rendering what already threw, and the component is remounted before any second
+ * attempt, so one call per mount is all there is to make here.
  */
-function useRetryWhenOnline(retry: () => void, connectivity: ConnectivityDependencies | undefined): boolean {
-  const [dependencies] = useState(() => connectivity ?? browserConnectivity());
-  const [offline, setOffline] = useState(() => !dependencies.online());
+function useAutomaticRetry(retry: () => void, connectivity: ConnectivityDependencies, budget: RetryBudget): boolean {
+  const [delay] = useState(() => budget.delay());
   const latest = useRef(retry);
   latest.current = retry;
   useEffect(() => {
-    if (!offline) {
+    if (delay === null) {
       return;
     }
-    return (
-      whenOnline(() => {
-        setOffline(false);
-        latest.current();
-      }, dependencies) ?? undefined
-    );
-  }, [dependencies, offline]);
-  return offline;
+    const attempt = (): void => {
+      budget.spend();
+      latest.current();
+    };
+    const timer = setTimeout(attempt, delay);
+    const unwatch = connectivity.watch(() => {
+      clearTimeout(timer);
+      attempt();
+    });
+    return () => {
+      clearTimeout(timer);
+      unwatch();
+    };
+  }, [budget, connectivity, delay]);
+  return delay !== null;
 }
 
 /**
  * What `error.tsx` and `global-error.tsx` show. It never renders the error's message, which can carry SQL or a
  * hostname: the digest is enough to find the server log line. Home is a plain link so that leaving reloads the
- * whole document, layout included, rather than reusing whatever state threw.
+ * whole document, layout included, rather than reusing whatever state threw. The button stays whatever else is
+ * happening, so an exhausted budget is never a dead end.
  */
-export function ErrorPanel({ error, retry, connectivity }: { error: unknown; retry: () => void; connectivity?: ConnectivityDependencies }) {
+export function ErrorPanel({
+  error,
+  retry,
+  connectivity,
+  budget
+}: {
+  error: unknown;
+  retry: () => void;
+  connectivity?: ConnectivityDependencies;
+  budget?: RetryBudget;
+}) {
   const digest = errorDigest(error);
-  const offline = useRetryWhenOnline(retry, connectivity);
+  const [dependencies] = useState(() => connectivity ?? browserConnectivity());
+  const [attempts] = useState(() => budget ?? boundaryRetryBudget);
+  const retrying = useAutomaticRetry(retry, dependencies, attempts);
   return (
     <>
-      <PaneHeader title={offline ? "No internet connection" : "Something went wrong"} />
+      <PaneHeader title="Something went wrong" />
       <PaneBody>
         <div role="alert" className="rounded-lg border border-dashed border-hub-line px-5 py-6 text-center">
-          {offline ? (
-            <p className="text-[15px] text-hub-text">
-              This page could not be loaded because you are not connected to the internet. It will load again on its own as soon as you are.
-            </p>
-          ) : (
-            <p className="text-[15px] text-hub-text">This page could not be loaded. It is often a passing problem, so try again.</p>
-          )}
-          {digest && !offline ? (
+          <p className="text-[15px] text-hub-text">{recoveryMessage(!dependencies.online(), retrying)}</p>
+          {digest ? (
             <p className="mt-1 text-[13px] text-hub-muted">
               If it keeps happening, quote reference <code className="font-mono text-hub-text">{digest}</code>
             </p>
           ) : null}
           <div className="mt-4 flex justify-center gap-2 text-[13px]">
-            {offline ? null : (
-              <button type="button" onClick={retry} className={PANE_ACTION}>
-                Try again
-              </button>
-            )}
+            <button type="button" onClick={retry} className={PANE_ACTION}>
+              Try again
+            </button>
             <a href="/" className={PANE_ACTION}>
               Back to home
             </a>
