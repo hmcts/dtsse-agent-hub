@@ -25,7 +25,7 @@ change it first when the contract changes.
 | `src/auth/`, `src/app/auth/` | Web SSO: openid-client code flow with PKCE, sealed `ah_session` cookie keyed by `oid`/`tid` |
 | `src/viewer/` | Who is using the web UI: the session's person, or the development identity when sign-in is disabled, and their model route (Amazon Bedrock, with their own Bedrock API key, for holders of the `AIGateway.User` app role, otherwise their own Claude licence) |
 | `src/app/_actions/`, `src/web/` | Server actions (each re-reads the viewer), the `server-only` read seam `web/data.ts`, action results, and `web/home.ts`, where `/` goes |
-| `src/app/api/ui/**`, `src/components/` | The UI's stream, feed, transcript, topic-suggestion and session-check routes, and its components; `components/live/` is the one `EventSource` per tab |
+| `src/app/api/ui/**`, `src/components/` | The UI's stream, feed, transcript, topic-suggestion and session-check routes, and its components; `components/live/` is the one `EventSource` per tab, and `components/SkillMenu.tsx` the one "/" skill autocomplete both composers theme |
 | `src/channels/` | Saved channels and the 1–10 topic rules the builder and the save action share |
 | `src/access/` | Who may see and message which agent. `rules.ts` is pure and is the single source of the rules; `load.ts` loads the rows they apply to |
 | `src/agents/`, `src/topics/`, `src/messages/`, `src/users/` | Feature stores |

@@ -1,4 +1,5 @@
 import { storedClientFeatures } from "../agents/client-features.ts";
+import { type Skill, storedSkills } from "../agents/skills.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import type { Database } from "../store/prisma.ts";
@@ -119,6 +120,12 @@ export interface ConversationView {
   agentId: string;
   agentStatus: AgentStatus;
   /**
+   * What the composer's "/" autocomplete offers: the skills the conversation's session reported. Empty until one has
+   * registered, so a chat whose assistant is not running yet gets no list. No access check guards it, unlike the
+   * hub's agent page: a conversation is only ever read by its owner, who is the only person who can message it.
+   */
+  skills: Skill[];
+  /**
    * What the client running this conversation's session claimed it understands, so the composer can offer — or
    * refuse, and say why — anything the session could not act on. `null` from a client that reported nothing, which
    * claims nothing; ask with `clientSupports` rather than reading the list, so old and current clients answer the
@@ -134,7 +141,7 @@ export interface ConversationView {
 /** One of the viewer's conversations with its first page; `agentId` is the conversation's current agent. */
 export async function conversationView(db: Database, conversation: ConversationRow, agentId: string): Promise<ConversationView> {
   const [agent, artefact, page] = await Promise.all([
-    db.agent.findUnique({ where: { id: agentId }, select: { status: true, clientFeatures: true } }),
+    db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true } }),
     readArtefact(db, conversation.id),
     agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true }, [])
   ]);
@@ -146,6 +153,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     productHistory: conversation.productHistory,
     agentId,
     agentStatus: agent?.status ?? "offline",
+    skills: storedSkills(agent?.skills),
     clientFeatures: storedClientFeatures(agent?.clientFeatures),
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,

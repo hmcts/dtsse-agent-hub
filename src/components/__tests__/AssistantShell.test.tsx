@@ -594,7 +594,7 @@ describe("AssistantMarkdown", () => {
 });
 
 describe("AssistantRefresh", () => {
-  it.each(["assistant_conversation", "virtual_agent"])("should refresh the page once for a burst of %s events", async (type) => {
+  it.each(["assistant_conversation", "virtual_agent", "agent_skills"])("should refresh the page once for a burst of %s events", async (type) => {
     vi.useFakeTimers();
     render(<AssistantRefresh />);
 
@@ -606,6 +606,19 @@ describe("AssistantRefresh", () => {
     expect(refresh).not.toHaveBeenCalled();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("should refresh once when a cold chat reports its skills and its conversation together", async () => {
+    vi.useFakeTimers();
+    render(<AssistantRefresh />);
+
+    hubHandlers.get("agent_skills")?.({});
+    hubHandlers.get("assistant_conversation")?.({});
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
     });
 
     expect(refresh).toHaveBeenCalledTimes(1);

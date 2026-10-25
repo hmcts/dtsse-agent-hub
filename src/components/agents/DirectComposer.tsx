@@ -1,15 +1,16 @@
 "use client";
 
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { AgentAccess } from "@/access/rules";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
-import { matchSkills, pickSkill, type Skill, skillQuery } from "@/agents/skills";
+import type { Skill } from "@/agents/skills";
 import { useLiveStatus } from "@/components/agents/LiveStatus";
 import { useDirectDraft } from "@/components/agents/useDirectDraft";
 import { SEND_BUTTON, submitOnEnter } from "@/components/feed/Composer";
 import { useEndSession } from "@/components/live/HubStream";
 import { SessionEndedMessage } from "@/components/live/SessionEnded";
 import { sessionEnded } from "@/components/live/session";
+import { type SkillMenuTheme, useSkillMenu } from "@/components/SkillMenu";
 import { SendIcon } from "@/components/sidebar/icons";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import type { AgentStatus } from "@/realtime/events";
@@ -29,127 +30,15 @@ export function offlineNote(agentName: string | undefined): string {
   return `${who} is offline; your message is queued and delivered when it reconnects. Queued messages expire after ${duration(EXPIRE_AFTER_SECONDS)} offline.`;
 }
 
-/**
- * The "/" autocomplete over the agent's skills, as a WAI-ARIA combobox on the textarea. It opens while the caret is in
- * a "/" token that starts the message, and Escape keeps it shut until the message changes.
- */
-function useSkillMenu(skills: readonly Skill[], body: string, setBody: (body: string) => void) {
-  const listId = useId();
-  const field = useRef<HTMLTextAreaElement>(null);
-  const [caret, setCaret] = useState(0);
-  const [active, setActive] = useState(0);
-  const [dismissed, setDismissed] = useState(false);
-  const [lastQuery, setLastQuery] = useState<string | null>(null);
-  const placeCaret = useRef<number | null>(null);
-
-  const query = skills.length === 0 ? null : skillQuery(body, caret);
-  if (query !== lastQuery) {
-    setLastQuery(query);
-    setActive(0);
-  }
-  const matches = query === null ? [] : matchSkills(skills, query);
-  const open = !dismissed && matches.length > 0;
-  const current = open ? Math.min(active, matches.length - 1) : -1;
-  const optionId = (index: number) => `${listId}-${index}`;
-
-  useLayoutEffect(() => {
-    if (placeCaret.current !== null && field.current !== null) {
-      field.current.setSelectionRange(placeCaret.current, placeCaret.current);
-      placeCaret.current = null;
-    }
-  });
-
-  function pick(skill: Skill): void {
-    const picked = pickSkill(body, skill.name);
-    placeCaret.current = picked.caret;
-    setCaret(picked.caret);
-    setBody(picked.body);
-    field.current?.focus();
-  }
-
-  /** Whether the key was the menu's, so the composer must not also act on it. */
-  function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>): boolean {
-    if (!open) {
-      return false;
-    }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const step = event.key === "ArrowDown" ? 1 : matches.length - 1;
-      setActive((current + step) % matches.length);
-      return true;
-    }
-    if ((event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) || event.key === "Tab") {
-      event.preventDefault();
-      const chosen = matches[current];
-      if (chosen !== undefined) {
-        pick(chosen);
-      }
-      return true;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setDismissed(true);
-      return true;
-    }
-    return false;
-  }
-
-  function track(event: React.SyntheticEvent<HTMLTextAreaElement>): void {
-    setCaret(event.currentTarget.selectionStart);
-  }
-
-  function onChange(value: string): void {
-    setDismissed(false);
-    setBody(value);
-  }
-
-  const fieldProps =
-    skills.length === 0
-      ? {}
-      : {
-          role: "combobox",
-          "aria-autocomplete": "list" as const,
-          "aria-expanded": open,
-          "aria-controls": listId,
-          "aria-activedescendant": open ? optionId(current) : undefined
-        };
-
-  const list = (
-    <div
-      id={listId}
-      role="listbox"
-      aria-label="Skills"
-      hidden={!open}
-      className="mx-2 mt-2 max-h-60 overflow-y-auto rounded border border-hub-line bg-hub-raised py-1 text-[13px]"
-    >
-      {open
-        ? matches.map((skill, index) => (
-            <div
-              key={skill.name}
-              id={optionId(index)}
-              role="option"
-              tabIndex={-1}
-              aria-selected={index === current}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => pick(skill)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  pick(skill);
-                }
-              }}
-              className={`cursor-pointer px-3 py-1 ${index === current ? "bg-hub-active text-white" : "text-hub-text hover:bg-hub-hover"}`}
-            >
-              <span className="font-mono font-bold">/{skill.name}</span>
-              {skill.description ? <span className={`block truncate ${index === current ? "text-white" : "text-hub-muted"}`}>{skill.description}</span> : null}
-            </div>
-          ))
-        : null}
-    </div>
-  );
-
-  return { field, fieldProps, list: skills.length === 0 ? null : list, onKeyDown, onChange, track };
-}
+/** The list sits in the flow above the box, which is what pushes the box down to make room for it. */
+const SKILL_MENU: SkillMenuTheme = {
+  list: "mx-2 mt-2 max-h-60 overflow-y-auto rounded border border-hub-line bg-hub-raised py-1 text-[13px]",
+  option: "cursor-pointer px-3 py-1",
+  active: "bg-hub-active text-white",
+  idle: "text-hub-text hover:bg-hub-hover",
+  name: "font-mono font-bold",
+  description: (active) => `block truncate ${active ? "text-white" : "text-hub-muted"}`
+};
 
 /**
  * The box for a direct message to an agent, which appears only with write access; a person with read access sees why
@@ -189,7 +78,8 @@ export function DirectComposer({
   const [signedOut, setSignedOut] = useState(false);
   const status = useLiveStatus(agentId, initialStatus);
   const noteId = useId();
-  const menu = useSkillMenu(skills, body, setBody);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const menu = useSkillMenu({ skills, body, setBody, field, theme: SKILL_MENU });
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -244,7 +134,7 @@ export function DirectComposer({
       <label className="block">
         <span className="sr-only">Message this agent</span>
         <textarea
-          ref={menu.field}
+          ref={field}
           {...menu.fieldProps}
           value={body}
           onChange={(event) => {

@@ -77,13 +77,19 @@ async function startedAssistant(): Promise<{ id: string; token: string; claimed:
   return { id: assistant.id, token: claimed.launch_token!, claimed };
 }
 
-function register(token: string, sessionId: string, conversationId?: string, clientFeatures?: string[]): Promise<Response> {
+function register(
+  token: string,
+  sessionId: string,
+  conversationId?: string,
+  reported: { skills?: { name: string; description: string }[]; clientFeatures?: string[] } = {}
+): Promise<Response> {
   return pod(registerRoute.POST, token, "/api/agent/register", {}, "POST", {
     session_id: sessionId,
     name: "session",
     ...(conversationId === undefined ? {} : { conversation_id: conversationId }),
+    ...(reported.skills === undefined ? {} : { skills: reported.skills }),
     // Left out unless a test is a newer client: a pod runs whatever client version its image booted with.
-    ...(clientFeatures === undefined ? {} : { client_features: clientFeatures })
+    ...(reported.clientFeatures === undefined ? {} : { client_features: reported.clientFeatures })
   });
 }
 
@@ -346,6 +352,25 @@ describe("conversations", () => {
     expect(await actions.sendAssistantMessage({ conversationId: id, body: "hi" })).toEqual({ ok: false, error: "that conversation no longer exists" });
   });
 
+  it("should carry the session's skills to the conversation page, and none before a session registers", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+
+    expect((await assistantConversation(VIEWER, id))?.skills).toEqual([]);
+    await register(token, sessionId, id, {
+      skills: [
+        { name: "cft-how-to", description: "Find a how-to recipe" },
+        { name: "cft-explain", description: "Answer a what is X question" }
+      ]
+    });
+
+    expect((await assistantConversation(VIEWER, id))?.skills).toEqual([
+      { name: "cft-explain", description: "Answer a what is X question" },
+      { name: "cft-how-to", description: "Find a how-to recipe" }
+    ]);
+  });
+
   it("should record each change of product, and leave it alone when it is the same", async () => {
     await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
@@ -424,7 +449,7 @@ describe("conversations", () => {
     expect((await assistantConversation(VIEWER, id))!.clientFeatures).toBeNull();
 
     // The pod is restarted on a newer client, which re-registers the same session.
-    await register(token, sessionId, id, ["attachments"]);
+    await register(token, sessionId, id, { clientFeatures: ["attachments"] });
 
     expect((await assistantConversation(VIEWER, id))!.clientFeatures).toEqual(["attachments"]);
   });
