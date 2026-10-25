@@ -332,16 +332,6 @@ export async function unsentAttachments(db: Database, conversationId: string): P
   return rows.map(attachmentView);
 }
 
-/** The attachments of a message, oldest first, for the thread. Empty for a message with none. */
-export async function messageAttachments(db: Database, messageId: bigint): Promise<MessageAttachment[]> {
-  const rows = await db.assistantUpload.findMany({
-    where: { messageId },
-    select: ATTACHMENT_SELECT,
-    orderBy: { createdAt: "asc" }
-  });
-  return rows.map(attachmentView);
-}
-
 /**
  * The attachments a `direct` frame names, so the pod can fetch each one part by part before the message is delivered.
  *

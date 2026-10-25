@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentView } from "@/agents/views";
 import { AgentLayout } from "@/components/agents/AgentLayout";
 import { type VirtualAgentActions, VirtualAgentPanel, VirtualAgentPending } from "@/components/virtual-agents/VirtualAgentPanel";
+import { NO_PLUGINS } from "@/virtual-agents/plugins";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 import type { VirtualAgentPageView } from "@/web/data";
 
@@ -64,7 +65,7 @@ function page(overrides: Partial<VirtualAgentPageView> = {}): VirtualAgentPageVi
     summary: { id: VIRTUAL_ID, name: "pcs-api", desired: "running", status: "running", agentId: null, owner: { oid: "alice", name: "Alice", tid: "a-tenant" } },
     manage: {
       detail: { card: CARD, logins: [], needed: ["github", "azure", "bedrock"], optional: ["jenkins"] },
-      credentials: { available: true, modelRoute: "bedrock", statuses: [] },
+      credentials: { available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: [] },
       chats: []
     },
     linked: null,
@@ -118,7 +119,7 @@ describe("AgentLayout", () => {
 
 describe("VirtualAgentPanel", () => {
   it("should give the owner the lifecycle, settings and sign-ins, and no session details, when no session has registered", () => {
-    render(<VirtualAgentPanel page={page()} actions={ACTIONS} now={NOW} session={null} />);
+    render(<VirtualAgentPanel page={page()} actions={ACTIONS} now={NOW} session={null} plugins={NO_PLUGINS} />);
 
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
     expect(screen.getByRole("form", { name: "Rename pcs-api" })).toBeTruthy();
@@ -127,14 +128,22 @@ describe("VirtualAgentPanel", () => {
   });
 
   it("should show the current session's details after the owner's panels when a session has registered", () => {
-    render(<VirtualAgentPanel page={page({ linked: { ...LINKED, access: "owner" } })} actions={ACTIONS} now={NOW} session={<p>the session</p>} />);
+    render(
+      <VirtualAgentPanel
+        page={page({ linked: { ...LINKED, access: "owner" } })}
+        actions={ACTIONS}
+        now={NOW}
+        session={<p>the session</p>}
+        plugins={NO_PLUGINS}
+      />
+    );
 
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
     expect(screen.getByText("the session")).toBeTruthy();
   });
 
   it("should tell a grantee whose it is and offer none of the owner's controls when the viewer does not own it", () => {
-    render(<VirtualAgentPanel page={page({ manage: null, linked: LINKED })} actions={ACTIONS} now={NOW} session={<p>the session</p>} />);
+    render(<VirtualAgentPanel page={page({ manage: null, linked: LINKED })} actions={ACTIONS} now={NOW} session={<p>the session</p>} plugins={NO_PLUGINS} />);
 
     expect(screen.getByText(/A virtual agent the hub runs for Alice/)).toBeTruthy();
     expect(screen.getByText("the session")).toBeTruthy();

@@ -533,9 +533,8 @@ function message(overrides: Partial<ThreadMessage> = {}): ThreadMessage {
 const HELD_UNTIL = "2099-01-01T00:00:00.000Z";
 
 /**
- * A message carrying files, as `messageAttachments` loads them: the person's own name, the size, and when the hub
- * stops holding the bytes. Held by default, since that is a message just sent; `available_until: null` is a file the
- * sweep has taken.
+ * A message carrying files, as the thread loads them: the person's own name, the size, and when the hub stops holding
+ * the bytes. Held by default, since that is a message just sent; `available_until: null` is a file the sweep has taken.
  */
 function withAttachments(
   attachments: { name: string; bytes: number; available_until?: string | null }[],

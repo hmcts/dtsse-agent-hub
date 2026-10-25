@@ -26,6 +26,7 @@ import { sweepUploads } from "../../src/assistant/upload-sweep.ts";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_BYTES, MAX_UPLOAD_BYTES, PART_BYTES } from "../../src/assistant/uploads.ts";
 import { unsentChat } from "../../src/assistant/views.ts";
 import { realtime } from "../../src/realtime/process.ts";
+import { byCodePoint } from "../../src/topics/slug.ts";
 import { DEV_PERSONA_COOKIE } from "../../src/viewer/identity.ts";
 import { type ClaimResult, createVirtualAgent } from "../../src/virtual-agents/store.ts";
 import { insertUser, type Person, prisma, resetDatabase } from "./database.ts";
@@ -700,7 +701,7 @@ describe("the pod fetching an attachment", () => {
 
     // Assert
     const { conversations } = await jsonOf<{ conversations: { id: string }[] }>(response);
-    expect(conversations.map((conversation) => conversation.id).sort()).toEqual([one.id, two.id].sort());
+    expect(conversations.map((conversation) => conversation.id).sort(byCodePoint)).toEqual([one.id, two.id].sort(byCodePoint));
   });
 });
 

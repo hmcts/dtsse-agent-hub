@@ -88,7 +88,6 @@ export function AssistantShell({
   viewerName,
   groups,
   activeId,
-  hubLink,
   theme = "system",
   connections,
   plugins,
@@ -98,8 +97,6 @@ export function AssistantShell({
   viewerName: string;
   groups: { label: DateGroup; items: ConversationLink[] }[];
   activeId: string | null;
-  /** Shown to people who also use the hub's own pages. */
-  hubLink: boolean;
   /** The appearance the person chose, which the switch in the footer's settings starts from. */
   theme?: Theme;
   /** The person's sign-ins, which the footer's settings lists and warns about. */
@@ -278,23 +275,14 @@ export function AssistantShell({
               </div>
             ))}
           </nav>
-          <div className="flex flex-col gap-2.5 border-t border-asst-active px-4 py-3">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-asst-line text-xs font-semibold">
-                {initials(viewerName)}
-              </span>
-              {/* The name takes the room between the two: the cog belongs at the end of the row, in line with the
-                  Agent Hub link under it, wherever a name happens to end. */}
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">{viewerName}</span>
-              <AssistantSettings theme={theme} connections={connections} plugins={plugins} />
-            </div>
-            {hubLink ? (
-              <div className="flex items-center gap-2">
-                <Link href="/hub" className="ml-auto shrink-0 rounded px-2 py-1 text-xs text-asst-muted hover:bg-asst-hover hover:text-asst-text">
-                  Agent Hub
-                </Link>
-              </div>
-            ) : null}
+          <div className="flex min-w-0 items-center gap-2.5 border-t border-asst-active px-4 py-3">
+            <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-asst-line text-xs font-semibold">
+              {initials(viewerName)}
+            </span>
+            {/* The name takes whatever room is left between the two, so the cog sits at the end of the row rather
+                than against a short name. */}
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{viewerName}</span>
+            <AssistantSettings theme={theme} connections={connections} plugins={plugins} />
           </div>
           {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,
               and the width dragged here is the one it comes back to. */}

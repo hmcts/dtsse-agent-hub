@@ -5,7 +5,6 @@ import { boundedArray } from "../agent-api/bounded-array.ts";
 
 export const MAX_ARTEFACT_MARKDOWN = 100_000;
 export const MAX_ARTEFACT_TITLE = 200;
-export const MAX_CONVERSATION_TITLE = 200;
 export const MAX_SESSION_DETAIL = 200;
 export const MAX_SESSIONS_REPORTED = 50;
 export const MAX_SESSIONS_AT_ONCE = 20;

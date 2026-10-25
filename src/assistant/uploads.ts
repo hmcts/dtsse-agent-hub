@@ -133,12 +133,6 @@ export type UploadRefusal =
   | "part_too_big"
   | "part_wrong_length";
 
-/** The body of a refused upload request: the contract's `error`, and the reason the composer words. */
-export interface UploadRefusalBody {
-  error: string;
-  reason?: UploadRefusal;
-}
-
 /**
  * The message a person sends by attaching files and typing nothing at all.
  *

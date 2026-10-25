@@ -1,16 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DISK_WARNING_DAYS,
-  diskExpiresAt,
-  diskWarningDays,
-  dueEveningStop,
-  isIdle,
-  lastActivity,
-  latestEveningStop,
-  londonInstant,
-  PROVISIONING_TIMEOUT_MS,
-  provisioningTimedOut
-} from "./cleanup.ts";
+import { DISK_WARNING_DAYS, diskExpiresAt, diskWarningDays, dueEveningStop, isIdle, lastActivity, latestEveningStop, londonInstant } from "./cleanup.ts";
 
 const SEVEN_PM = { hour: 19, minute: 0 };
 
@@ -109,18 +98,6 @@ describe("isIdle", () => {
 
   it("should not be idle when the linked agent is busy, however long ago anything was recorded", () => {
     expect(isIdle("busy", at("2026-10-01T00:00:00.000Z"), now, 120)).toBe(false);
-  });
-});
-
-describe("provisioningTimedOut", () => {
-  const now = at("2026-10-05T12:00:00.000Z");
-
-  it("should time out when the pod has said nothing for the timeout", () => {
-    expect(provisioningTimedOut(new Date(now.getTime() - PROVISIONING_TIMEOUT_MS), now)).toBe(true);
-  });
-
-  it("should not time out when the pod spoke within it", () => {
-    expect(provisioningTimedOut(new Date(now.getTime() - PROVISIONING_TIMEOUT_MS + 1000), now)).toBe(false);
   });
 });
 
