@@ -76,9 +76,8 @@ export function ArtefactPanel({
     initial: ARTEFACT_WIDTH,
     min: ARTEFACT_MIN_WIDTH,
     // The chat keeps its room between this panel and the sidebar, however wide the sidebar has been dragged.
-    reserve: CHAT_MIN_WIDTH + sidebarWidth,
-    edge: "right",
-    active: !narrow
+    reserve: () => CHAT_MIN_WIDTH + sidebarWidth,
+    edge: "right"
   });
   const box = useRef<HTMLTextAreaElement>(null);
   // A save in flight counts: an update arriving before its reply would otherwise replace what is being saved.

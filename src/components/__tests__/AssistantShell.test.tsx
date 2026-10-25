@@ -195,6 +195,84 @@ describe("AssistantShell sidebar width", () => {
     expect(window.localStorage.getItem(SIDEBAR_KEY)).toBe("360");
   });
 
+  it("should give the dragged width back when the window is made small and then large again", () => {
+    viewport(1600);
+    render(shell());
+    drag(460);
+
+    // The window `resize` event is dispatched before the media queries are re-evaluated, so a handler that waits for
+    // the screen to count as narrow has already missed it.
+    viewport(700);
+    fireEvent(window, new Event("resize"));
+    viewport(1600);
+    fireEvent(window, new Event("resize"));
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("460");
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBe("460");
+  });
+
+  it("should fit a window too small for the dragged width without forgetting it", () => {
+    viewport(1600);
+    render(shell());
+    drag(460);
+
+    viewport(1000);
+    fireEvent(window, new Event("resize"));
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("320");
+    expect(handle().getAttribute("aria-valuemax")).toBe("320");
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBe("460");
+  });
+
+  it("should follow the window's new size when it changes during a drag", () => {
+    viewport(1600);
+    render(shell());
+
+    fireEvent.pointerDown(handle());
+    fireEvent.pointerMove(window, { clientX: 460 });
+    viewport(800);
+    fireEvent(window, new Event("resize"));
+    fireEvent.pointerMove(window, { clientX: 500 });
+    fireEvent.pointerUp(window);
+
+    // 800 less the chat's 360, the document panel covering the page at this width rather than taking a column.
+    expect(handle().getAttribute("aria-valuemax")).toBe("440");
+    expect(handle().getAttribute("aria-valuenow")).toBe("440");
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBe("440");
+  });
+
+  it("should remember no width at all when the handle is pressed without being moved", () => {
+    viewport(1600);
+    render(shell());
+
+    fireEvent.pointerDown(handle());
+    fireEvent.pointerUp(window);
+
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBeNull();
+  });
+
+  it("should leave the remembered width alone when the handle is pressed without being moved", () => {
+    window.localStorage.setItem(SIDEBAR_KEY, "460");
+    viewport(1000);
+    render(shell());
+
+    fireEvent.pointerDown(handle());
+    fireEvent.pointerUp(window);
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("320");
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBe("460");
+  });
+
+  it("should keep back only the chat's room while the document panel covers the page instead of taking a column", () => {
+    viewport(880);
+    render(shell());
+
+    expect(handle().getAttribute("aria-valuemax")).toBe("480");
+    fireEvent.keyDown(handle(), { key: "End" });
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("480");
+  });
+
   it("should stop following the pointer once the drag has ended", () => {
     viewport(1600);
     render(shell());
@@ -303,17 +381,6 @@ describe("AssistantShell sidebar width", () => {
     render(shell());
 
     expect(handle().getAttribute("aria-valuenow")).toBe("320");
-  });
-
-  it("should narrow the sidebar when the window is made smaller", () => {
-    viewport(1600);
-    render(shell());
-    drag(480);
-
-    viewport(900);
-    fireEvent(window, new Event("resize"));
-
-    expect(handle().getAttribute("aria-valuenow")).toBe("240");
   });
 
   it("should come back to the dragged width when the sidebar is expanded again", () => {

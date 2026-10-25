@@ -5,7 +5,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
-import { ARTEFACT_MIN_WIDTH, CHAT_MIN_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
+import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 
@@ -100,10 +100,10 @@ export function AssistantShell({
     initial: SIDEBAR_WIDTH,
     min: SIDEBAR_MIN_WIDTH,
     ceiling: SIDEBAR_MAX_WIDTH,
-    // The sidebar cannot see whether the document panel is open, so it always leaves room for one.
-    reserve: CHAT_MIN_WIDTH + ARTEFACT_MIN_WIDTH,
-    edge: "left",
-    active: !narrow
+    // The sidebar cannot see whether the document panel is open, so it leaves room for one wherever one would take a
+    // column of the row.
+    reserve: besideSidebar,
+    edge: "left"
   });
   // The drawer is its own width over the page, so a width dragged on a wide screen never reaches it.
   const width = narrow ? SIDEBAR_WIDTH : resize.width;
@@ -115,7 +115,7 @@ export function AssistantShell({
   }, [open]);
 
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 767px)");
+    const query = window.matchMedia(`(max-width: ${SIDEBAR_DRAWER_MAX_WIDTH}px)`);
     const update = () => {
       setNarrow(query.matches);
       if (query.matches) {
