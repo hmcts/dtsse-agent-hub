@@ -123,6 +123,31 @@ export function ReconnectIcon() {
   );
 }
 
+export function CopyIcon() {
+  return (
+    <Icon>
+      <rect x="7.5" y="7.5" width="9" height="9" rx="1.5" />
+      <path d="M13 7.5V5A1.5 1.5 0 0 0 11.5 3.5H5A1.5 1.5 0 0 0 3.5 5v6.5A1.5 1.5 0 0 0 5 13h2.5" />
+    </Icon>
+  );
+}
+
+export function TickIcon() {
+  return (
+    <Icon>
+      <path d="m4 10.5 4 4 8-9" />
+    </Icon>
+  );
+}
+
+export function DownloadIcon() {
+  return (
+    <Icon>
+      <path d="M10 3.5v9M6 8.5l4 4 4-4M4 16.5h12" />
+    </Icon>
+  );
+}
+
 export function ChatIcon() {
   return (
     <Icon>
