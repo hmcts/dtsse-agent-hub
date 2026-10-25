@@ -412,7 +412,7 @@ describe("ArtefactPanel tools", () => {
   it("should make the preview a named tab stop so a keyboard user can scroll a long document", () => {
     render(panel(snapshot({ markdown: "# Original" })));
 
-    const preview = screen.getByRole("group", { name: "Document preview" });
+    const preview = screen.getByRole("region", { name: "Document preview" });
     expect(preview.tabIndex).toBe(0);
     expect(preview.className).toContain("overflow-y-auto");
     expect(preview.textContent).toContain("Original");
@@ -423,7 +423,7 @@ describe("ArtefactPanel tools", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
-    expect(screen.queryByRole("group", { name: "Document preview" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Document preview" })).toBeNull();
     expect(box().closest("div")?.className).toContain("overflow-y-auto");
   });
 

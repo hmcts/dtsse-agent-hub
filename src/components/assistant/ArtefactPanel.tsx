@@ -7,6 +7,7 @@ import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
+import { ScrollPane } from "@/components/Markup";
 import { CopyIcon, DownloadIcon, TickIcon } from "@/components/sidebar/icons";
 import type { ActionResult } from "@/web/action";
 
@@ -492,12 +493,12 @@ export function ArtefactPanel({
           />
         </div>
       ) : (
-        // `group` rather than a second landmark inside the panel's own, because an element that takes focus needs a
-        // role that permits the name telling a screen-reader user what they have landed on.
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: the preview holds no control of its own, so a keyboard user needs focus on it to scroll the rest of a long document into view, which axe checks as scrollable-region-focusable
-        <div tabIndex={0} role="group" aria-label="Document preview" className="min-h-0 flex-1 overflow-y-auto px-[26px] pb-10 pt-5 text-asst-body">
+        // The same focusable scroller a wide table and a long code line use, because the preview holds no control of
+        // its own and a keyboard user needs focus on it to scroll the rest of a long document into view. It is a
+        // named region, nested in the panel's own, so the focus says what it has landed on.
+        <ScrollPane as="section" label="Document preview" className="min-h-0 flex-1 overflow-y-auto px-[26px] pb-10 pt-5 text-asst-body">
           {markdown.trim() === "" ? <p className="text-asst-faint">This document is empty.</p> : <AssistantMarkdown source={markdown} document />}
-        </div>
+        </ScrollPane>
       )}
       {printing ? <PrintSheet title={title} markdown={markdown} /> : null}
     </section>

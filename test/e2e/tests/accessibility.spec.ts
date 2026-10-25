@@ -114,6 +114,9 @@ test.describe("accessibility @nightly", () => {
    */
   test("should raise no WCAG A or AA violations on the Assistant's new chat and getting-ready screen @nightly @a11y", async ({ page }) => {
     const response = await page.goto("/assistant");
+    // Conditional on the deployment rather than a test put aside: `VIRTUAL_AGENTS_ENABLED` is `"false"` in every
+    // environment `Jenkinsfile_nightly` targets, so the layout answers 404 there. Turning the flag on in one is all
+    // this needs to run, and the audit below then runs unchanged.
     test.skip(response?.status() === 404, "the Assistant is off on this deployment");
     expect(response?.status()).toBe(200);
 
