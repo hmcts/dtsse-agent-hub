@@ -6,6 +6,7 @@ import { type Connection, type ConnectionsData, connections, connectionsWarning 
 import type { AssistantPluginsData } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import { pluginChoices } from "@/components/virtual-agents/PluginsField";
@@ -19,9 +20,16 @@ interface SettingsView {
   unavailable: string | null;
   warning: string | null;
   plugins: AssistantPlugins | undefined;
+  templates: AssistantTemplates | undefined;
 }
 
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+/**
+ * Everything in the dialog a Tab can reach, and so everything its focus trap has to account for. Exported so a test
+ * asks the dialog which its own tab stops are rather than keeping a second copy of this list, which would pass while
+ * a control the trap has been left out of still takes focus off the end of it.
+ */
+export const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const STATE_CLASS: Record<Connection["state"], string> = {
   connected: "text-asst-ok",
@@ -109,7 +117,7 @@ function Plugins({ plugins }: { plugins: AssistantPlugins }) {
   );
 }
 
-function Sections({ theme, list, unavailable, warning, plugins }: SettingsView) {
+function Sections({ theme, list, unavailable, warning, plugins, templates }: SettingsView) {
   return (
     <>
       <section aria-labelledby="assistant-settings-appearance" className="flex flex-col gap-2.5">
@@ -143,14 +151,15 @@ function Sections({ theme, list, unavailable, warning, plugins }: SettingsView) 
         )}
       </section>
       {plugins === undefined ? null : <Plugins plugins={plugins} />}
+      {templates === undefined ? null : <Templates templates={templates} />}
     </>
   );
 }
 
 /**
- * The settings themselves, over the page: the appearance, the person's sign-ins and their team tools. Focus moves
- * into it as it opens and stays in it while it is open; closing it, by Escape, the close button or the page behind
- * it, puts focus back on the cog, which is what `onClose` is for.
+ * The settings themselves, over the page: the appearance, the person's sign-ins, their team tools and their own saved
+ * templates. Focus moves into it as it opens and stays in it while it is open; closing it, by Escape, the close
+ * button or the page behind it, puts focus back on the cog, which is what `onClose` is for.
  */
 function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -223,11 +232,13 @@ function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) 
 export function AssistantSettings({
   theme = "system",
   connections: data,
-  plugins
+  plugins,
+  templates
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
   plugins?: AssistantPlugins;
+  templates?: AssistantTemplates;
 }) {
   const cog = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -290,7 +301,10 @@ export function AssistantSettings({
         )}
       </button>
       {open
-        ? createPortal(<Dialog view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins }} onClose={close} />, themeRoot())
+        ? createPortal(
+            <Dialog view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, templates }} onClose={close} />,
+            themeRoot()
+          )
         : null}
     </>
   );

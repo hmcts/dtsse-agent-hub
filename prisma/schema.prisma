@@ -164,6 +164,7 @@ model User {
   virtualAgents VirtualAgent[]
   assistantConversations AssistantConversation[]
   assistantUploads       AssistantUpload[]
+  assistantTemplates     AssistantTemplate[]
 
   @@map("user")
 }
@@ -511,6 +512,22 @@ model AssistantUpload {
 
   @@index([conversationId, createdAt], map: "assistant_upload_conversation_idx")
   @@map("assistant_upload")
+}
+
+/// One of a person's own saved prompts, offered wherever the built-in templates in src/assistant/starters.ts are.
+model AssistantTemplate {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerOid  String   @map("owner_oid")
+  name      String
+  body      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  owner User @relation(fields: [ownerOid], references: [oid])
+
+  @@unique([ownerOid, name], map: "assistant_template_owner_name_key")
+  @@index([ownerOid, name], map: "assistant_template_owner_idx")
+  @@map("assistant_template")
 }
 
 /// One 4 MiB slice of an upload. Deleted as soon as the pod says it has the file, or by the sweep if it never does.

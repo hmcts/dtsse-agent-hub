@@ -4,7 +4,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionsData } from "@/assistant/connections";
-import { type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
+import { MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } from "@/assistant/templates";
+import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
+import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { LoginState, LoginView } from "@/virtual-agents/logins";
@@ -60,9 +62,13 @@ function themed(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, th
   return root;
 }
 
-/** The dialog's own focusable controls, in tab order: its close button, the appearance choices, then any others. */
+/**
+ * The dialog's own focusable controls, in tab order: its close button, the appearance choices, then any others. Asked
+ * for with the dialog's own `FOCUSABLE`, so a section adding a kind of control the focus trap does not know about
+ * fails here rather than passing against a second copy of the list.
+ */
 function stops(): HTMLElement[] {
-  return [...screen.getByRole("dialog").querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled])")];
+  return [...screen.getByRole("dialog").querySelectorAll<HTMLElement>(FOCUSABLE)];
 }
 
 describe("the Assistant's settings cog", () => {
@@ -469,5 +475,180 @@ describe("the Assistant's team tools", () => {
     const items = stops();
 
     expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Save team tools" }));
+  });
+});
+
+function saved(name: string, text = `${name} prompt`): SavedTemplate {
+  return { id: `t-${name.toLowerCase()}`, name, text };
+}
+
+function saveOk() {
+  return vi.fn(async () => ({ ok: true as const, id: "t-new", confirmation: `"Stand-up" is saved, and is in the + menu of every chat` }));
+}
+
+function templates(overrides: Partial<AssistantTemplates> = {}): AssistantTemplates {
+  return { mine: [], save: saveOk(), remove: vi.fn(async () => ({ ok: true as const, confirmation: "Your template is deleted" })), ...overrides };
+}
+
+const ADD = "Save a new template";
+
+function submit(form: string): Promise<void> {
+  return act(async () => {
+    fireEvent.submit(screen.getByRole("form", { name: form }));
+  });
+}
+
+describe("the Assistant's own templates", () => {
+  it("should show nothing at all when the page passes no templates", () => {
+    open({ templates: undefined });
+
+    expect(screen.queryByRole("heading", { name: "Your templates" })).toBeNull();
+    expect(screen.queryByRole("form", { name: ADD })).toBeNull();
+  });
+
+  it("should still offer the appearance and the connections when the templates section is not shown", () => {
+    open({ templates: undefined });
+
+    expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+  });
+
+  it("should say the person has saved none, and still offer the form, when their list is empty", () => {
+    open({ templates: templates() });
+
+    expect(screen.getByText("You have not saved any yet.")).toBeTruthy();
+    expect(screen.getByRole("form", { name: ADD })).toBeTruthy();
+  });
+
+  it("should list each saved template with its prompt when it opens", () => {
+    open({ templates: templates({ mine: [saved("Stand-up"), saved("Retro")] }) });
+    const rows = within(screen.getByRole("list", { name: "Your templates" })).getAllByRole("listitem");
+
+    expect(rows.map((row) => row.textContent)).toEqual(["Stand-upStand-up promptEditDelete", "RetroRetro promptEditDelete"]);
+  });
+
+  it("should send the name and the prompt, and no id, to the save action when the person adds one", async () => {
+    const save = saveOk();
+    open({ templates: templates({ save }) });
+
+    fireEvent.change(screen.getByLabelText("Template name"), { target: { value: " Stand-up " } });
+    fireEvent.change(screen.getByLabelText("What it fills the message box with"), { target: { value: "What I did yesterday:" } });
+    await submit(ADD);
+
+    const sent = (save.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("name"), sent.get("body")]).toEqual([null, " Stand-up ", "What I did yesterday:"]);
+    expect(screen.getByRole("status").textContent).toContain("is in the + menu of every chat");
+  });
+
+  it("should open the form on a template, and send its id, when the person edits one", async () => {
+    const save = saveOk();
+    open({ templates: templates({ mine: [saved("Stand-up")], save }) });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Stand-up" }));
+    expect((screen.getByLabelText("Template name") as HTMLInputElement).value).toBe("Stand-up");
+    expect((screen.getByLabelText("What it fills the message box with") as HTMLTextAreaElement).value).toBe("Stand-up prompt");
+    fireEvent.change(screen.getByLabelText("What it fills the message box with"), { target: { value: "Changed" } });
+    await submit("Save your changes to Stand-up");
+
+    const sent = (save.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("name"), sent.get("body")]).toEqual(["t-stand-up", "Stand-up", "Changed"]);
+  });
+
+  it("should go back to adding, with the fields empty, when the person cancels an edit", () => {
+    open({ templates: templates({ mine: [saved("Stand-up")] }) });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Stand-up" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("form", { name: ADD })).toBeTruthy();
+    expect((screen.getByLabelText("Template name") as HTMLInputElement).value).toBe("");
+  });
+
+  it("should empty the fields after a save, so the next template is not written over the last one", async () => {
+    open({ templates: templates() });
+
+    fireEvent.change(screen.getByLabelText("Template name"), { target: { value: "Stand-up" } });
+    await submit(ADD);
+
+    expect((screen.getByLabelText("Template name") as HTMLInputElement).value).toBe("");
+  });
+
+  it("should send the template's id to the delete action when the person deletes one", async () => {
+    const remove = vi.fn(async () => ({ ok: true as const, confirmation: "Your template is deleted" }));
+    open({ templates: templates({ mine: [saved("Stand-up"), saved("Retro")], remove }) });
+
+    await submit("Delete Retro");
+
+    expect((remove.mock.calls[0] as unknown as [FormData])[0].get("id")).toBe("t-retro");
+  });
+
+  it("should show the save action's own refusal, rather than deciding for itself, when it refuses", async () => {
+    const save = vi.fn(async () => ({ ok: false as const, error: `you already have a template called "Stand-up"` }));
+    open({ templates: templates({ save }) });
+
+    fireEvent.change(screen.getByLabelText("Template name"), { target: { value: "Stand-up" } });
+    await submit(ADD);
+
+    expect(screen.getByRole("alert").textContent).toBe(`you already have a template called "Stand-up"`);
+  });
+
+  it("should count what the person has against the cap when it opens", () => {
+    open({ templates: templates({ mine: [saved("Stand-up")] }) });
+
+    expect(screen.getByText(`1 of ${MAX_TEMPLATES} templates`)).toBeTruthy();
+  });
+
+  // The cap is refused in the store's own sentence, so what is read here is what a POST skipping this screen is told.
+  it("should refuse another in the store's own words, and offer no form, when the person is at the cap", () => {
+    const mine = Array.from({ length: MAX_TEMPLATES }, (_, index) => saved(`Template ${index}`));
+    open({ templates: templates({ mine }) });
+
+    expect(screen.getByText(TEMPLATES_FULL)).toBeTruthy();
+    expect(screen.queryByRole("form", { name: ADD })).toBeNull();
+  });
+
+  it("should still let the person change one of the ones they have when they are at the cap", () => {
+    const mine = Array.from({ length: MAX_TEMPLATES }, (_, index) => saved(`Template ${index}`));
+    open({ templates: templates({ mine }) });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Template 3" }));
+
+    expect(screen.getByRole("form", { name: "Save your changes to Template 3" })).toBeTruthy();
+    expect(screen.queryByText(TEMPLATES_FULL)).toBeNull();
+  });
+
+  it("should say how far over the cap a prompt is, in the same count the store checks, while the person types", () => {
+    open({ templates: templates() });
+
+    fireEvent.change(screen.getByLabelText("What it fills the message box with"), { target: { value: "x".repeat(MAX_TEMPLATE_BODY + 5) } });
+
+    expect(screen.getByText(/4,005 of 4,000 characters: 5 too many/)).toBeTruthy();
+    expect(screen.getByLabelText("What it fills the message box with").getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("should say the templates sit above the built-in ones, which the + menu cannot show, when it opens", () => {
+    open({ templates: templates() });
+
+    expect(screen.getByText(/above the built-in templates/)).toBeTruthy();
+  });
+
+  it("should keep its own fields in the dialog's focus trap when it is open", () => {
+    open({ templates: templates({ mine: [saved("Stand-up")] }) });
+    const items = stops();
+
+    expect(items).toContain(screen.getByLabelText("What it fills the message box with"));
+    expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Save template" }));
+  });
+
+  // Two rows of Edit and Delete say which template they belong to, so a screen reader is not read four of one name.
+  it("should name the Edit and Delete of each row after its own template when it opens", () => {
+    open({ templates: templates({ mine: [saved("Stand-up"), saved("Retro")] }) });
+    const section = screen.getByRole("list", { name: "Your templates" });
+
+    expect(
+      within(section)
+        .getAllByRole("button")
+        .map((control) => control.getAttribute("aria-label"))
+    ).toEqual(["Edit Stand-up", "Delete Stand-up", "Edit Retro", "Delete Retro"]);
   });
 });

@@ -10,6 +10,7 @@ import {
   canLaunchTokenReadMessage,
   canManageCredential,
   canManageGrants,
+  canManageTemplate,
   canManageVirtualAgent,
   canOwnerReadCredential,
   canPersonMessageAgent,
@@ -300,6 +301,18 @@ describe("canManageCredential", () => {
     [false, "stranger"]
   ])("should answer %s when the %s manages the owner's credentials", (expected, role) => {
     expect(canManageCredential(ROLES[role], OWNER)).toBe(expected);
+  });
+});
+
+describe("canManageTemplate", () => {
+  // Reading is the same decision as writing, and no grant reaches a prompt somebody wrote for themselves.
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s reads or changes the owner's templates", (expected, role) => {
+    expect(canManageTemplate(ROLES[role], OWNER)).toBe(expected);
   });
 });
 
