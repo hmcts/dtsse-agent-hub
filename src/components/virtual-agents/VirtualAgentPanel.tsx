@@ -10,7 +10,7 @@ import { RenameVirtualAgent } from "@/components/virtual-agents/RenameVirtualAge
 import { SizePanel } from "@/components/virtual-agents/SizePanel";
 import { DiskNotice, ModelRouteLine } from "@/components/virtual-agents/VirtualAgentsView";
 import type { VirtualAgentDesired } from "@/virtual-agents/lifecycle";
-import { NO_PLUGINS, type PluginOffer } from "@/virtual-agents/plugins";
+import type { PluginOffer } from "@/virtual-agents/plugins";
 import type { VirtualAgentPageView } from "@/web/data";
 
 export interface VirtualAgentActions {
@@ -73,13 +73,13 @@ export function VirtualAgentPanel({
   actions,
   now,
   session,
-  plugins = NO_PLUGINS
+  plugins
 }: {
   page: VirtualAgentPageView;
   actions: VirtualAgentActions;
   now: number;
   session: React.ReactNode;
-  plugins?: PluginOffer;
+  plugins: PluginOffer;
 }) {
   const { summary, manage } = page;
   return (
