@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { Template } from "@/assistant/starters";
+import { useDraft } from "@/components/useDraft";
 
 /** Above this the box scrolls rather than grows. */
 const MAX_HEIGHT = 200;
@@ -9,22 +10,31 @@ const MAX_HEIGHT = 200;
 /**
  * The message box: Enter sends and Shift+Enter starts a new line, as in any chat. The + menu fills the box from a
  * saved template for the person to complete. `onFocus` lets the page warm a session up before they have finished.
+ *
+ * What is in the box is kept as a draft per `draftId`, because each conversation is its own page: going to another one
+ * and back unmounts and remounts the box, and a half-written message has to outlive that. A template the person
+ * picked and then left is kept the same way — it is the same "I was part-way through" — and emptying the box by hand
+ * is what drops it.
  */
 export function Composer({
   templates,
   onSend,
   onFocus,
   disabled = false,
-  initialText = ""
+  viewerOid,
+  draftId
 }: {
   templates: readonly Template[];
   /** Resolves to an error to show, or `null` once sent, which clears the box. */
   onSend: (text: string) => Promise<string | null>;
   onFocus?: () => void;
   disabled?: boolean;
-  initialText?: string;
+  /** Who is reading, so the box never shows the draft of whoever signed in on this tab before them. */
+  viewerOid: string;
+  /** What the draft is kept under: the conversation, or the new chat that has not created one yet. */
+  draftId: string;
 }) {
-  const [text, setText] = useState(initialText);
+  const { body: text, setBody: setText, discard } = useDraft({ kind: "assistant-draft", viewerOid, draftId });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<"closed" | "open" | "templates">("closed");
@@ -70,7 +80,9 @@ export function Composer({
     const failure = await onSend(text);
     setSending(false);
     if (failure === null) {
-      setText("");
+      // Forgets the draft of the message that was sent, which empties the box; anything typed while the send was in
+      // flight is the draft now and stays. A refused send keeps its draft, which is when it is worth the most.
+      discard(text);
       box.current?.focus();
     } else {
       setError(failure);

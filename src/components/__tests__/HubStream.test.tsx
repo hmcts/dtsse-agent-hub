@@ -62,6 +62,8 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  // Puts back the real `navigator.onLine` getter for the tests that move the network.
+  vi.restoreAllMocks();
 });
 
 describe("HubStreamProvider", () => {
@@ -101,6 +103,61 @@ describe("HubStreamProvider", () => {
     });
 
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("should hold the refresh until the network returns when a resync arrives with no network", async () => {
+    const onLine = vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    render(<HubStreamProvider>{null}</HubStreamProvider>);
+
+    await act(async () => {
+      current().emit("resync");
+    });
+    expect(refresh).not.toHaveBeenCalled();
+
+    onLine.mockReturnValue(true);
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("should refresh once however many resyncs arrived while the network was down", async () => {
+    const onLine = vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    render(<HubStreamProvider>{null}</HubStreamProvider>);
+
+    await act(async () => {
+      current().emit("resync");
+      current().emit("resync");
+      current().emit("resync");
+    });
+
+    onLine.mockReturnValue(true);
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      current().emit("resync");
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("should drop a held refresh when the page is left before the network returns", async () => {
+    vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    const { unmount } = render(<HubStreamProvider>{null}</HubStreamProvider>);
+    await act(async () => {
+      current().emit("resync");
+    });
+
+    unmount();
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("should refresh once when an agent it does not list changes status", async () => {
