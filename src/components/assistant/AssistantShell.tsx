@@ -8,6 +8,7 @@ import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
+import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
@@ -214,7 +215,7 @@ export function AssistantShell({
               New chat
             </Link>
           </div>
-          <nav aria-label="Chats" className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-2 pb-4 pt-1">
+          <ConversationSearch>
             {groups.length === 0 ? <p className="px-2.5 text-[13px] text-asst-faint">Your chats appear here.</p> : null}
             {groups.map((group) => (
               <div key={group.label} className="flex flex-col gap-0.5">
@@ -277,7 +278,7 @@ export function AssistantShell({
                 </ul>
               </div>
             ))}
-          </nav>
+          </ConversationSearch>
           <div className="flex flex-col gap-2.5 border-t border-asst-active px-4 py-3">
             <div className="flex min-w-0 items-center gap-2.5">
               <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-asst-line text-xs font-semibold">

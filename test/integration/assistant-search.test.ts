@@ -1,0 +1,253 @@
+import { NextRequest } from "next/server";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { GET as searchRoute } from "../../src/app/api/ui/assistant/search/route.ts";
+import {
+  type ConversationRow,
+  conversationAgent,
+  createConversation,
+  ensureAssistant,
+  renameConversation,
+  searchConversations,
+  touchConversation
+} from "../../src/assistant/store.ts";
+import { type ConversationMatch, conversationMatches } from "../../src/assistant/views.ts";
+import { directAsPerson } from "../../src/messages/send.ts";
+import { byCodePoint } from "../../src/topics/slug.ts";
+import { setDesired } from "../../src/virtual-agents/store.ts";
+import { insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
+import { jsonOf } from "./routes.ts";
+
+/**
+ * Searching the viewer's own Assistant conversations, over the real query: what it matches in a title and in what was
+ * said in a chat, and that it never reaches another person's chats, which are owner-only and on no roster.
+ */
+
+const ALICE = person("alice");
+const BOB = person("bob");
+
+/** A chat of `who`'s, with the messages they sent in it; its title comes from the first, as the real send does. */
+async function chat(who: Person, said: readonly string[]): Promise<ConversationRow> {
+  const conversation = await createConversation(prisma, who.oid, { product: "pcs" });
+  const agentId = await conversationAgent(prisma, conversation);
+  for (const [index, body] of said.entries()) {
+    await directAsPerson(prisma, who.oid, agentId, body);
+    if (index === 0) {
+      await touchConversation(prisma, conversation, body);
+    }
+  }
+  return conversation;
+}
+
+/** What the assistant answered: a direct message from the chat's agent into the person's own thread. */
+async function answered(conversation: ConversationRow, who: Person, body: string): Promise<void> {
+  const agentId = await conversationAgent(prisma, conversation);
+  await prisma.message.create({ data: { kind: "direct", authorAgentId: agentId, authorOid: who.oid, targetAgentId: null, body } });
+}
+
+async function found(who: Person, query: string): Promise<string[]> {
+  return (await conversationMatches(prisma, who.oid, query)).map((chat) => chat.title);
+}
+
+/** The search as the sidebar asks for it: the signed-in person is the development persona in the cookie. */
+async function asked(persona: string, query: string): Promise<ConversationMatch[]> {
+  const request = new NextRequest(`http://localhost:3000/api/ui/assistant/search?q=${encodeURIComponent(query)}`, {
+    headers: { cookie: `ah_dev_persona=${persona}` }
+  });
+  const response = await searchRoute(request);
+  expect(response.status).toBe(200);
+  return (await jsonOf<{ chats: ConversationMatch[] }>(response)).chats;
+}
+
+beforeEach(async () => {
+  await resetDatabase();
+  await insertUser(ALICE);
+  await insertUser(BOB);
+  await ensureAssistant(prisma, { oid: ALICE.oid, modelRoute: "own-licence" });
+  await ensureAssistant(prisma, { oid: BOB.oid, modelRoute: "own-licence" });
+});
+
+afterAll(async () => {
+  await prisma.$disconnect();
+});
+
+describe("searching conversations", () => {
+  it("should find a chat by a word in its title", async () => {
+    const conversation = await chat(ALICE, ["Something else entirely"]);
+    await renameConversation(prisma, ALICE.oid, conversation.id, "Possession claim notes");
+
+    expect(await found(ALICE, "possession")).toEqual(["Possession claim notes"]);
+  });
+
+  it("should find a chat by a word in the title however it was typed", async () => {
+    const conversation = await chat(ALICE, ["Something else entirely"]);
+    await renameConversation(prisma, ALICE.oid, conversation.id, "Possession claim notes");
+
+    expect(await found(ALICE, "POSSESSION")).toEqual(["Possession claim notes"]);
+  });
+
+  // The point of searching in English rather than for the letters typed: "claims" and "claim" are the same word.
+  it("should find a chat by a word the person remembers in another form", async () => {
+    await chat(ALICE, ["The landlord served a possession claim"]);
+
+    expect(await found(ALICE, "claims")).toEqual(["The landlord served a possession claim"]);
+    expect(await found(ALICE, "serve")).toEqual(["The landlord served a possession claim"]);
+  });
+
+  // Results have to arrive while a word is still being typed, or the box answers nothing until it is finished.
+  it("should find a chat by the start of a word", async () => {
+    await chat(ALICE, ["The landlord served a possession claim"]);
+
+    expect(await found(ALICE, "posse")).toEqual(["The landlord served a possession claim"]);
+  });
+
+  it("should find nothing from the middle of a word, which is not how the words are matched", async () => {
+    await chat(ALICE, ["The landlord served a possession claim"]);
+
+    expect(await found(ALICE, "ssession")).toEqual([]);
+  });
+
+  it("should find a chat by a word in a message, and show where it matched, when the title does not carry it", async () => {
+    const conversation = await chat(ALICE, ["Help me with a tenancy question", "The landlord served a possession claim last week"]);
+    await renameConversation(prisma, ALICE.oid, conversation.id, "Tenancy question");
+
+    const matches = await conversationMatches(prisma, ALICE.oid, "possession");
+
+    expect(matches.map((match) => match.title)).toEqual(["Tenancy question"]);
+    // The words around the match, which start at the first one the English dictionary has anything to say about.
+    expect(matches[0]?.snippet).toBe("landlord served a possession claim last week");
+    expect(matches[0]?.id).toBe(conversation.id);
+  });
+
+  it("should find a chat by a word in what the assistant answered", async () => {
+    const conversation = await chat(ALICE, ["Help me with a tenancy question"]);
+    await answered(conversation, ALICE, "A possession order follows if the claim succeeds");
+
+    expect(await found(ALICE, "possession order")).toEqual(["Help me with a tenancy question"]);
+  });
+
+  it("should show nothing of the message when the title is already why the chat matched", async () => {
+    const conversation = await chat(ALICE, ["Nothing in here about that"]);
+    await renameConversation(prisma, ALICE.oid, conversation.id, "Possession claim notes");
+
+    expect((await conversationMatches(prisma, ALICE.oid, "possession"))[0]?.snippet).toBeNull();
+  });
+
+  it("should need every word of the query, wherever each of them is", async () => {
+    const both = await chat(ALICE, ["The landlord served a possession claim"]);
+    await renameConversation(prisma, ALICE.oid, both.id, "Rent arrears");
+    await chat(ALICE, ["A possession claim came through"]);
+
+    // "arrears" is only in one chat's title and "possession" only in its message: both have to match, and do.
+    expect(await found(ALICE, "arrears possession")).toEqual(["Rent arrears"]);
+  });
+
+  it("should find nothing when only some of the words match", async () => {
+    await chat(ALICE, ["The landlord served a possession claim"]);
+
+    expect(await found(ALICE, "possession adjournment")).toEqual([]);
+  });
+
+  it("should find nothing when no chat matches at all", async () => {
+    await chat(ALICE, ["The landlord served a possession claim"]);
+
+    expect(await found(ALICE, "mediation")).toEqual([]);
+  });
+
+  it("should find nothing, and ask the database nothing, when the query has no word worth searching for", async () => {
+    await chat(ALICE, ["The landlord served a possession claim"]);
+
+    expect(await found(ALICE, " ")).toEqual([]);
+    expect(await found(ALICE, "a")).toEqual([]);
+  });
+
+  // Each term goes into a tsquery, whose own language has operators; a term carrying them must be matched, not run.
+  it("should match punctuation the person typed rather than reading it as a query of its own", async () => {
+    await chat(ALICE, ["The hearing is 100% going ahead"]);
+    await chat(ALICE, ["Nothing to do with that"]);
+
+    expect(await found(ALICE, "100%")).toEqual(["The hearing is 100% going ahead"]);
+    for (const nonsense of ["&", "!(", "'", ":*", "a&!b", "\\"]) {
+      expect(await found(ALICE, `${nonsense}xyzzy`)).toEqual([]);
+    }
+  });
+
+  // "the" has nothing of its own to match on, so it is dropped rather than left to refuse every chat beside a word
+  // that does.
+  it("should ignore a word of the query that carries no meaning of its own", async () => {
+    await chat(ALICE, ["The landlord served a possession claim"]);
+
+    expect(await found(ALICE, "the possession")).toEqual(["The landlord served a possession claim"]);
+  });
+
+  it("should find nothing when the query is nothing but words that carry no meaning", async () => {
+    await chat(ALICE, ["The landlord served a possession claim"]);
+
+    expect(await found(ALICE, "the and of")).toEqual([]);
+  });
+
+  it("should answer most recently active first, as the sidebar's own list does", async () => {
+    const older = await chat(ALICE, ["A possession claim came through"]);
+    const newer = await chat(ALICE, ["Another possession claim"]);
+    await touchConversation(prisma, older, "A possession claim came through", new Date(Date.now() - 60_000));
+    await touchConversation(prisma, newer, "Another possession claim", new Date());
+
+    expect(await found(ALICE, "possession")).toEqual(["Another possession claim", "A possession claim came through"]);
+  });
+
+  it("should leave out a chat whose assistant is being deleted, as the sidebar's own list does", async () => {
+    const conversation = await chat(ALICE, ["A possession claim came through"]);
+
+    await setDesired(prisma, ALICE.oid, conversation.virtualAgentId, "deleted");
+
+    expect(await found(ALICE, "possession")).toEqual([]);
+  });
+
+  it("should answer with no more chats than its limit", async () => {
+    for (let n = 0; n < 4; n += 1) {
+      await chat(ALICE, [`A possession claim, number ${n}`]);
+    }
+
+    expect(await searchConversations(prisma, ALICE.oid, "possession", 2)).toHaveLength(2);
+  });
+});
+
+/**
+ * The half that matters. Conversations are owner-only: no grant reaches one and none is on any roster, so search is
+ * the one surface that could have widened. Each of these asserts that the *same words* that find a person's own chat
+ * find nothing at all for anybody else — by title, by what they wrote, and by what the assistant answered them — so
+ * the test fails both if the query stopped filtering by owner and if it filtered by something weaker, such as the
+ * virtual agent or a grant.
+ */
+describe("searching someone else's conversations", () => {
+  let bobsTitle: string;
+
+  beforeEach(async () => {
+    const titled = await chat(BOB, ["Nothing about that in here"]);
+    await renameConversation(prisma, BOB.oid, titled.id, "Possession claim notes");
+    const said = await chat(BOB, ["Bob asked about a possession claim"]);
+    await answered(said, BOB, "An adjournment is possible");
+    bobsTitle = "Possession claim notes";
+  });
+
+  it("should find nothing of another person's chats, by title or by anything said in them", async () => {
+    expect(await found(ALICE, "possession")).toEqual([]);
+    expect(await found(ALICE, "adjournment")).toEqual([]);
+    expect(await found(ALICE, "bob")).toEqual([]);
+  });
+
+  it("should still find them for the person they belong to", async () => {
+    expect(await found(BOB, "possession")).toEqual(expect.arrayContaining([bobsTitle]));
+    expect(await found(BOB, "adjournment")).toEqual(["Bob asked about a possession claim"]);
+  });
+
+  it("should find only the signed-in person's own chats when the sidebar asks", async () => {
+    await chat(ALICE, ["Alice asked about a possession claim"]);
+
+    expect((await asked("alice", "possession")).map((chat) => chat.title)).toEqual(["Alice asked about a possession claim"]);
+    expect((await asked("bob", "possession")).map((chat) => chat.title).sort(byCodePoint)).toEqual(["Bob asked about a possession claim", bobsTitle]);
+  });
+
+  it("should find nothing for a person who has no chats of their own", async () => {
+    expect(await asked("carol", "possession")).toEqual([]);
+  });
+});
