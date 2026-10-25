@@ -13,8 +13,9 @@ export const dynamic = "force-dynamic";
  * The person's own attached file, back. Their only route to the bytes once the browser that picked it has moved on.
  *
  * Streamed part row by part row by `uploadBytes`, which holds one at a time; a `Buffer.concat` of the parts, or a
- * single query for all of them, would put 25 MB on a heap capped at 768 MB across two replicas and undo the reason
- * the file is in parts at all.
+ * single query for all of them, would cost 25 MB of external memory per download. That is not heap V8 would complain
+ * about — a Prisma `Bytes` sits outside the old space `--max-old-space-size=768` bounds — so what it reaches is the
+ * 1 GiB `memoryLimits` in `charts/dtsse-agent-hub/values.yaml`, as an OOM-kill of the pod with nothing logged.
  *
  * Who may do this, and until when, is `attachmentDownload` in `src/access/rules.ts`. The window is short on purpose —
  * see `uploadHeldUntil` — and `MessageAttachments.tsx` offers no download outside it, so a 410 from here is a race
@@ -36,6 +37,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ upl
         // The media type the browser claimed on the way up, never re-derived from the bytes, so it is paired with
         // `nosniff` and an `attachment` disposition: the response is same-origin, and a file someone claimed was
         // `text/html` must be saved rather than rendered as a page of this site.
+        //
+        // **Echoing a claimed type back from this origin is safe only because this route is owner-only.** A person
+        // uploading HTML and then opening it as themselves is no escalation. If a conversation is ever shared and the
+        // shared view grows a download — the read-only share shows a count and no link today — the same file becomes
+        // stored XSS against the reader, and this header must then be forced to `application/octet-stream` for
+        // anything outside an allowlist rather than relying on the disposition alone.
         "content-type": upload.mediaType,
         "content-length": String(upload.bytes),
         "x-content-type-options": "nosniff",

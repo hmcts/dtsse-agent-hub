@@ -27,8 +27,11 @@ import {
  * marks the upload but no longer takes the bytes, so within that window the owner can download their own file back
  * — see `uploadHeldUntil` for why the window did not have to grow to pay for it.
  *
- * Nothing here ever holds more than one part in memory, in either direction, which is what keeps a 25 MB file off a
- * 768 MB heap.
+ * Nothing here ever holds more than one part in memory, in either direction. **The limit that bounds is the
+ * container's, not V8's**: a part arrives from Prisma as a `Bytes` whose backing store is external memory, which
+ * `--max-old-space-size=768` does not count and V8 will not collect under pressure from. What a buffered 25 MB file
+ * runs into is the 1 GiB `memoryLimits` in `charts/dtsse-agent-hub/values.yaml`, and the failure is the kernel
+ * OOM-killing the pod rather than a heap error anything could log.
  */
 
 /** What Prisma's `Bytes` resolves to: a view onto its own buffer, never a shared one. */
@@ -417,12 +420,14 @@ export async function downloadableUpload(prisma: PrismaClient, viewerOid: string
  * The outbound half of the rule the upload routes keep: `pull` is called again only once the part it enqueued has
  * been taken, so the most this ever holds is the part being read plus the one queued behind it — the same two parts
  * the inbound measurement in `test/integration/assistant-uploads.test.ts` allows per upload in flight. **Reading the
- * rows into one buffer and answering that** would put 25 MB on a heap capped at 768 MB across two replicas, which is
- * the whole reason the file is in parts to begin with.
+ * rows into one buffer and answering that** would cost 25 MB of external memory per download, against the container
+ * limit this module's own comment names, and is the whole reason the file is in parts to begin with.
  *
  * A missing part errors the stream rather than closing it short, so the browser sees a broken download instead of a
- * truncated file it would keep. It should not happen — the window is what takes parts, and it takes all of an
- * upload's at once — but a short file that looked complete is the one outcome worth refusing to produce.
+ * truncated file it would keep. The reachable way in is not a race with the sweep but a `DELETE /api/ui/uploads/{id}`
+ * on an unsent composer upload while this is streaming it: the part rows cascade from the upload row, so the next
+ * `pull` finds nothing. The browser gets a failed download and the pod's log a broken pipe, which is the right
+ * outcome — a short file that looked complete is the one thing worth refusing to produce.
  */
 export function uploadBytes(db: Database, upload: UploadRow): ReadableStream<UploadBytes> {
   const parts = partCount(upload.bytes);

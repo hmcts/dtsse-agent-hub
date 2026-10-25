@@ -13,7 +13,7 @@ import type { Database, PrismaClient } from "../store/prisma.ts";
  * Only the parts go. The metadata row stays, marked `expired`, so the thread can still say a file was attached.
  */
 
-/** Uploads are swept at about the rate the transcripts are, for the same reason: they grow slowly. */
+/** How often the sweep runs. With `UPLOAD_SWEEP_BATCH` this is the drain rate for every upload; see that constant. */
 export const UPLOAD_SWEEP_INTERVAL_MS = 10 * 60_000;
 
 /**
@@ -25,7 +25,17 @@ export const UPLOAD_SWEEP_INTERVAL_MS = 10 * 60_000;
  */
 export const UPLOAD_RETENTION_HOURS = 3;
 
-/** Uploads expired per sweep. Small, because each one is up to 25 MB of part rows in one transaction. */
+/**
+ * Uploads expired per sweep. Kept small because each one is up to 25 MB of part rows deleted in one transaction, and
+ * all of a batch's are deleted in the same one.
+ *
+ * **With the interval this is the drain rate for every upload, not just for the ones nobody fetched**, since nothing
+ * else deletes a part row any more. 20 every 10 minutes is 120 uploads an hour: at 25 MB each the resident part bytes
+ * settle around 9 GB of the 32 GB in `infrastructure/postgres.tf`, with up to 500 MB of dead tuples per tick for
+ * autovacuum to catch up on. Sustained above 120 uploads an hour the backlog grows without bound and bytes outlive
+ * their window, so this and the interval are what to raise first — before the per-file or per-conversation caps, which
+ * bound one person's share and say nothing about the whole database's.
+ */
 export const UPLOAD_SWEEP_BATCH = 20;
 
 /** "upldswep". Distinct from the migration, offline-sweep and transcript-sweep locks. */
