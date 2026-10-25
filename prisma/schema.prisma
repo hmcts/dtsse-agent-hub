@@ -457,7 +457,7 @@ model AssistantConversation {
   agentId           String?   @map("agent_id") @db.Uuid
   title             String?
   /// One of src/assistant/products.ts.
-  product           String    @default("other")
+  product           String    @default("general")
   /// Every change of product, as [{product, at}].
   productHistory    Json      @default("[]") @map("product_history")
   wakeRequestedAt   DateTime? @map("wake_requested_at") @db.Timestamptz(6)

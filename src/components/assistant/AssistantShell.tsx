@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import type { ConnectionsData } from "@/assistant/connections";
 import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
-import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
+import { type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import type { ActionResult } from "@/web/action";
 
@@ -89,6 +90,8 @@ export function AssistantShell({
   activeId,
   hubLink,
   theme = "system",
+  connections,
+  plugins,
   actions,
   children
 }: {
@@ -97,8 +100,12 @@ export function AssistantShell({
   activeId: string | null;
   /** Shown to people who also use the hub's own pages. */
   hubLink: boolean;
-  /** The appearance the person chose, which the switch in the footer starts from. */
+  /** The appearance the person chose, which the switch in the footer's settings starts from. */
   theme?: Theme;
+  /** The person's sign-ins, which the footer's settings lists and warns about. */
+  connections?: ConnectionsData;
+  /** The workspace plugins the footer's settings lets the person tick. */
+  plugins?: AssistantPlugins;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
   actions?: ConversationActions;
   children: React.ReactNode;
@@ -277,15 +284,15 @@ export function AssistantShell({
                 {initials(viewerName)}
               </span>
               <span className="min-w-0 truncate text-sm font-medium">{viewerName}</span>
+              <AssistantSettings theme={theme} connections={connections} plugins={plugins} />
             </div>
-            <div className="flex items-center gap-2">
-              <ThemeSwitch initial={theme} />
-              {hubLink ? (
+            {hubLink ? (
+              <div className="flex items-center gap-2">
                 <Link href="/hub" className="ml-auto shrink-0 rounded px-2 py-1 text-xs text-asst-muted hover:bg-asst-hover hover:text-asst-text">
                   Agent Hub
                 </Link>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
           </div>
           {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,
               and the width dragged here is the one it comes back to. */}

@@ -277,3 +277,61 @@ describe("the bedrock migration", () => {
     ]);
   });
 });
+
+describe("the assistant product list migration", () => {
+  const REMAP = "agent_hub_migrate_product_test";
+  const MIGRATION = "20261025120000_assistant_product_list";
+  const original = process.env.DATABASE_URL;
+  let before: string;
+
+  beforeAll(async () => {
+    await query("postgres", `DROP DATABASE IF EXISTS "${REMAP}"`);
+    await query("postgres", `CREATE DATABASE "${REMAP}"`);
+    process.env.DATABASE_URL = urlFor(REMAP);
+    before = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
+    await cp(migrationsDirectory(), before, { recursive: true });
+    // The database as it was before this migration: it and every one after it are applied by the test.
+    for (const name of await readdir(before)) {
+      if (/^\d/.test(name) && name >= MIGRATION) {
+        await rm(path.join(before, name), { recursive: true });
+      }
+    }
+  });
+
+  afterAll(async () => {
+    if (original === undefined) {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = original;
+    }
+    await rm(before, { recursive: true, force: true });
+    await query("postgres", `DROP DATABASE IF EXISTS "${REMAP}"`);
+  });
+
+  it("should move conversations off the retired product and default new ones to general when it is applied", async () => {
+    await migrate(before);
+    await query(REMAP, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(REMAP, `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'assistant', 'bedrock')`);
+    await query(
+      REMAP,
+      `INSERT INTO "assistant_conversation" (owner_oid, virtual_agent_id, title, product, product_history)
+        SELECT 'dev-alice', id, t.title, t.product, t.history::jsonb FROM "virtual_agent",
+          (VALUES ('left on other', 'other', '[{"product": "other", "at": "2026-10-21T09:00:00.000Z"}]'), ('on a product', 'ccd', '[]'))
+            AS t (title, product, history)`
+    );
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    await query(REMAP, `INSERT INTO "assistant_conversation" (owner_oid, virtual_agent_id, title) SELECT 'dev-alice', id, 'new' FROM "virtual_agent"`);
+    const conversations = await query<{ title: string; product: string; product_history: unknown }>(
+      REMAP,
+      `SELECT title, product, product_history FROM "assistant_conversation" ORDER BY title`
+    );
+    expect(conversations).toEqual([
+      // The history is an audit trail of what was picked, so the retired slug stays in it.
+      { title: "left on other", product: "general", product_history: [{ product: "other", at: "2026-10-21T09:00:00.000Z" }] },
+      { title: "new", product: "general", product_history: [] },
+      { title: "on a product", product: "ccd", product_history: [] }
+    ]);
+  });
+});

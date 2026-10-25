@@ -33,6 +33,7 @@ import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
+import { availablePlugins, PluginConfigurationError, type PluginOption } from "../virtual-agents/plugins.ts";
 import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
 import {
   type VirtualAgentCard,
@@ -254,10 +255,38 @@ export interface AssistantHome {
   assistant: AssistantSummary;
   credentials: CredentialSettings;
   conversations: { label: DateGroup; items: ConversationLink[] }[];
+  /**
+   * The workspace plugins this hub offers, and the ones the viewer's assistant loads; `null` when the configuration
+   * cannot be read, which is not the same as its offering nothing.
+   */
+  plugins: { available: PluginOption[]; checked: string[] } | null;
 }
 
 function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
   return new Set(credentials.available ? credentials.statuses.filter((status) => status.stored).map((status) => status.kind) : []);
+}
+
+/**
+ * What the Assistant may offer: an empty list when `VIRTUAL_AGENT_PLUGINS` is unset, and `null` when it is malformed.
+ * A malformed list does not fail the page, because the Assistant is someone's whole chat and the hub's own
+ * virtual-agent pages still report the error to whoever has to fix it. It cannot read as an empty list either: the
+ * person's own plugins would then each read as one the hub no longer offers, and the write path's own unguarded
+ * `availablePlugins` would refuse every save. `null` is what hides the section instead.
+ */
+function offeredPlugins(): PluginOption[] | null {
+  try {
+    return availablePlugins();
+  } catch (error) {
+    if (error instanceof PluginConfigurationError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugins"] {
+  const available = offeredPlugins();
+  return available === null ? null : { available, checked: assistant.plugins };
 }
 
 /**
@@ -267,7 +296,12 @@ function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const assistant = await ensureAssistant(prisma, viewer);
   const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
-  return { assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)), credentials, conversations };
+  return {
+    assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)),
+    credentials,
+    conversations,
+    plugins: pluginSettings(assistant)
+  };
 }
 
 /**
@@ -286,7 +320,12 @@ export async function assistantSidebar(viewer: Viewer): Promise<AssistantHome | 
     return undefined;
   }
   const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
-  return { assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)), credentials, conversations };
+  return {
+    assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)),
+    credentials,
+    conversations,
+    plugins: pluginSettings(assistant)
+  };
 }
 
 /** One of the viewer's conversations, or `undefined` for the not-found the page answers. */

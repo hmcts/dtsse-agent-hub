@@ -16,11 +16,14 @@ export function AssistantChatsPanel({ chats }: { chats: readonly ConversationLin
       ) : (
         <ul aria-label="HMCTS Assistant chats" className="space-y-1">
           {chats.map((chat) => (
+            // The title is what tells one chat from another, so the product label is what gives way: labels run to
+            // 40 characters, and the label keeps at most two fifths of the row. Neither grows, so the label stays
+            // beside the name it belongs to.
             <li key={chat.id} className="flex min-w-0 items-baseline gap-2 text-[13px]">
               <a href={`/assistant/${chat.id}`} className="min-w-0 truncate text-hub-link underline hover:no-underline">
                 {chat.title}
               </a>
-              <span className="shrink-0 text-xs text-hub-muted">{chat.productLabel}</span>
+              <span className="min-w-0 max-w-[40%] truncate text-xs text-hub-muted">{chat.productLabel}</span>
             </li>
           ))}
         </ul>

@@ -711,7 +711,7 @@ describe("EmptyChat attaching before the chat exists", () => {
     });
 
     expect(acts.open).not.toHaveBeenCalled();
-    expect(acts.start).toHaveBeenCalledWith({ product: "other", body: "just words" });
+    expect(acts.start).toHaveBeenCalledWith({ product: "general", body: "just words" });
     expect(push).toHaveBeenCalledWith("/assistant/started");
   });
 
@@ -949,7 +949,7 @@ describe("EmptyChat remounted after a file was attached", () => {
     });
 
     expect(chips()).toHaveLength(0);
-    expect(acts.start).toHaveBeenCalledWith({ product: "other", body: "just words" });
+    expect(acts.start).toHaveBeenCalledWith({ product: "general", body: "just words" });
   });
 });
 
@@ -989,7 +989,7 @@ describe("EmptyChat remembering the product with no conversation yet", () => {
   it("should fall back to the default when what was remembered is not a product any more", () => {
     sessionStorage.setItem(`agent-hub:assistant-product:${VIEWER}`, "a-product-that-was-retired");
 
-    expect(newChat().value).toBe("other");
+    expect(newChat().value).toBe("general");
   });
 });
 
@@ -1015,7 +1015,7 @@ describe("EmptyChat when the tab will not keep anything", () => {
       />
     );
 
-    expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("other");
+    expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("general");
     storage.mockRestore();
   });
 });
