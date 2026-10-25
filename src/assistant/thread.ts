@@ -11,8 +11,17 @@ import { productLabel } from "./products.ts";
  * updates agree.
  */
 
+/**
+ * A file sent with a message. Only the name and size survive: the hub drops the bytes once the assistant's machine
+ * has them, so there is nothing to hand back.
+ */
+export interface ThreadAttachment {
+  name: string;
+  bytes: number;
+}
+
 export type ThreadItem =
-  | { type: "user"; key: string; at: string; text: string; delivery: DeliveryView | null }
+  | { type: "user"; key: string; at: string; text: string; delivery: DeliveryView | null; attachments: readonly ThreadAttachment[] }
   | { type: "assistant"; key: string; at: string; text: string }
   | { type: "product"; key: string; at: string; label: string };
 
@@ -29,6 +38,11 @@ function textOf(content: unknown): string | undefined {
   return undefined;
 }
 
+/** A message's attachments. `ThreadMessage` carries them from the upload store, which does not declare them yet. */
+function attachmentsOf(message: object): readonly ThreadAttachment[] {
+  return (message as { attachments?: readonly ThreadAttachment[] }).attachments ?? [];
+}
+
 /** By time, then by kind so a product change at the same instant as a message sits before it. */
 function byTime(left: ThreadItem, right: ThreadItem): number {
   const rank = (item: ThreadItem) => (item.type === "product" ? 0 : 1);
@@ -42,7 +56,7 @@ export function threadItems(items: readonly ConversationItem[], products: readon
       const message = item.message;
       thread.push(
         message.author.type === "user"
-          ? { type: "user", key: item.key, at: item.at, text: message.body, delivery: message.delivery }
+          ? { type: "user", key: item.key, at: item.at, text: message.body, delivery: message.delivery, attachments: attachmentsOf(message) }
           : { type: "assistant", key: item.key, at: item.at, text: message.body }
       );
     } else if (item.entry.role === "assistant") {

@@ -64,6 +64,16 @@ describe("threadItems", () => {
     expect(threadItems(items)).toEqual([expect.objectContaining({ type: "assistant", text: "Here you are" })]);
   });
 
+  it("should carry a message's attachments onto its thread item when it was sent with files", () => {
+    const sent = { ...person("have a look", T(1)), attachments: [{ name: "letter.pdf", bytes: 2048 }] } as ThreadMessage;
+
+    expect(threadItems(conversationItems([sent], []))[0]).toMatchObject({ type: "user", attachments: [{ name: "letter.pdf", bytes: 2048 }] });
+  });
+
+  it("should give a message no attachments when it was sent with none", () => {
+    expect(threadItems(conversationItems([person("just words", T(1))], []))[0]).toMatchObject({ type: "user", attachments: [] });
+  });
+
   it("should place each change of product in time, before a message at the same instant", () => {
     const items = conversationItems([person("first", T(1)), person("second", T(5))], []);
 

@@ -289,7 +289,7 @@ describe("ChatView sending", () => {
 
     await type("hello assistant");
 
-    expect(send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "hello assistant" });
+    expect(send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "hello assistant", uploadIds: [] });
     expect(within(screen.getByRole("list", { name: "Conversation" })).getByText("hello assistant")).toBeTruthy();
     expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe("");
   });
@@ -462,7 +462,7 @@ describe("Composer", () => {
       fireEvent.keyDown(box, { key: "Enter" });
     });
 
-    expect(onSend).toHaveBeenCalledWith("hello");
+    expect(onSend).toHaveBeenCalledWith("hello", []);
     expect(box.value).toBe("");
   });
 
@@ -502,7 +502,7 @@ describe("Composer", () => {
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
     });
 
-    expect(onSend).toHaveBeenCalledWith("hi");
+    expect(onSend).toHaveBeenCalledWith("hi", []);
   });
 
   it("should not send when the composer is disabled", async () => {
