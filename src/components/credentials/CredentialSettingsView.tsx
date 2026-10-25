@@ -34,39 +34,63 @@ const VIA: Record<CredentialVia, string> = {
 const INPUT = "mt-1 w-96 max-w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 font-mono text-sm text-hub-text";
 const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
 
-export function ModelRouteNotice({ route }: { route: ModelRoute }) {
+/**
+ * `route` is the viewer's own, so it describes what a new agent of theirs would run on; `claudeTokenUsable` describes
+ * the agents they already have, whose route was fixed when each was created. Someone given the `AIGateway.User` app
+ * role since then is on both at once, and is told so — rather than being told that the Claude token an agent of
+ * theirs is still waiting for is not needed.
+ */
+function modelRouteWords(route: ModelRoute, claudeTokenUsable: boolean): { detail: string; body: React.ReactNode } {
+  const setupToken = <code className="font-mono">claude setup-token</code>;
+  if (route === "own-licence") {
+    return {
+      detail: "Your own Claude licence",
+      body: <>Your virtual agents use your own Claude licence, so they need the Claude token {setupToken} prints.</>
+    };
+  }
+  if (claudeTokenUsable) {
+    return {
+      detail: "Amazon Bedrock and your own Claude licence",
+      body: (
+        <>
+          A new virtual agent of yours uses Amazon Bedrock, with your Bedrock API key. One you created earlier is on your own Claude licence, and still needs
+          the Claude token {setupToken} prints.
+        </>
+      )
+    };
+  }
+  return {
+    detail: "Amazon Bedrock",
+    body: "Your virtual agents use Amazon Bedrock, with your Bedrock API key, so they need that key and no Claude token of yours."
+  };
+}
+
+export function ModelRouteNotice({ route, claudeTokenUsable }: { route: ModelRoute; claudeTokenUsable: boolean }) {
+  const words = modelRouteWords(route, claudeTokenUsable);
   return (
-    <Section heading="Model" detail={route === "bedrock" ? "Amazon Bedrock" : "Your own Claude licence"}>
-      <p className="text-sm text-hub-text">
-        {route === "bedrock" ? (
-          "Your virtual agents use Amazon Bedrock, with your Bedrock API key, so they need that key and no Claude token of yours."
-        ) : (
-          <>
-            Your virtual agents use your own Claude licence, so they need the Claude token <code className="font-mono">claude setup-token</code> prints.
-          </>
-        )}
-      </p>
+    <Section heading="Model" detail={words.detail}>
+      <p className="text-sm text-hub-text">{words.body}</p>
     </Section>
   );
 }
 
 /** Why a kind cannot be pasted here, or `undefined` when it can. */
-function notPasteable(kind: CredentialKind, route: ModelRoute): string | undefined {
+function notPasteable(kind: CredentialKind, claudeTokenUsable: boolean): string | undefined {
   if (kind === "azure") {
     return "This comes from your virtual agent's own Azure device-code sign-in, and cannot be pasted here.";
   }
   if (kind === "atlassian") {
     return "This comes from your virtual agent's own Atlassian device-code sign-in, and cannot be pasted here.";
   }
-  if (kind === "claude" && route === "bedrock") {
+  if (kind === "claude" && !claudeTokenUsable) {
     return "Not needed: your virtual agents use Amazon Bedrock, with your Bedrock API key.";
   }
   return undefined;
 }
 
-export function CredentialCard({ status, route, actions }: { status: CredentialStatus; route: ModelRoute; actions: CredentialActions }) {
+export function CredentialCard({ status, claudeTokenUsable, actions }: { status: CredentialStatus; claudeTokenUsable: boolean; actions: CredentialActions }) {
   const title = TITLES[status.kind];
-  const unpasteable = notPasteable(status.kind, route);
+  const unpasteable = notPasteable(status.kind, claudeTokenUsable);
   return (
     <Section heading={title} detail={status.stored ? "Stored" : "Not stored"}>
       <div className="space-y-3 text-sm">
@@ -114,7 +138,7 @@ export function CredentialCard({ status, route, actions }: { status: CredentialS
 export function CredentialSettingsView({ settings, actions }: { settings: CredentialSettings; actions: CredentialActions }) {
   return (
     <>
-      <ModelRouteNotice route={settings.modelRoute} />
+      <ModelRouteNotice route={settings.modelRoute} claudeTokenUsable={settings.claudeTokenUsable} />
       {settings.available ? (
         <>
           <p className="max-w-3xl text-[15px] text-hub-muted">
@@ -123,7 +147,7 @@ export function CredentialSettingsView({ settings, actions }: { settings: Creden
             your laptop can use it; nothing reads back the others.
           </p>
           {settings.statuses.map((status) => (
-            <CredentialCard key={status.kind} status={status} route={settings.modelRoute} actions={actions} />
+            <CredentialCard key={status.kind} status={status} claudeTokenUsable={settings.claudeTokenUsable} actions={actions} />
           ))}
         </>
       ) : (

@@ -35,7 +35,9 @@ import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
 import { availablePlugins, PluginConfigurationError, type PluginOption } from "../virtual-agents/plugins.ts";
 import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
+import { liveModelRoutes } from "../virtual-agents/store.ts";
 import {
+  claudeTokenUsable,
   type VirtualAgentCard,
   type VirtualAgentDetail,
   type VirtualAgentSummary,
@@ -94,27 +96,33 @@ export async function access(viewer: Identity) {
   return { given, received };
 }
 
-export type CredentialSettings =
-  | { available: true; modelRoute: ModelRoute; statuses: CredentialStatus[] }
-  | { available: false; modelRoute: ModelRoute; reason: string };
+export type CredentialSettings = { modelRoute: ModelRoute; claudeTokenUsable: boolean } & (
+  | { available: true; statuses: CredentialStatus[] }
+  | { available: false; reason: string }
+);
 
 /**
  * What the viewer has stored, as metadata: nothing here carries a credential's value. Their CLAUDE.md and git identity
  * are not among them; `claudeMdSettings` and `gitIdentitySettings` read those for their own forms.
+ *
+ * `modelRoute` is the viewer's own, which is what a new agent of theirs would be created on; `claudeTokenUsable`
+ * answers the one question that route is not enough for, because it is the agents' routes that decide whether a
+ * Claude token is any use.
  */
 export async function credentialSettings(viewer: Viewer): Promise<CredentialSettings> {
+  const route = { modelRoute: viewer.modelRoute, claudeTokenUsable: claudeTokenUsable(viewer.modelRoute, await liveModelRoutes(prisma, viewer.oid)) };
   const backend = credentialBackend(prisma);
   if (!backend.available) {
-    return { available: false, modelRoute: viewer.modelRoute, reason: backend.reason };
+    return { ...route, available: false, reason: backend.reason };
   }
   const refusal = ownerRefusal(backend.store, viewer.oid);
   if (refusal !== undefined) {
-    return { available: false, modelRoute: viewer.modelRoute, reason: refusal.message };
+    return { ...route, available: false, reason: refusal.message };
   }
   const statuses = await credentialStatus(prisma, viewer.oid);
   return {
+    ...route,
     available: true,
-    modelRoute: viewer.modelRoute,
     statuses: statuses.filter((status) => status.kind !== "claude_md" && status.kind !== "git_identity")
   };
 }

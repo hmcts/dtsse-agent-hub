@@ -35,8 +35,8 @@ function card(heading: string): HTMLElement {
 }
 
 describe("CredentialSettingsView", () => {
-  it("should say the viewer is on Amazon Bedrock and offer no Claude token field when their route is Bedrock", () => {
-    show({ available: true, modelRoute: "bedrock", statuses: NOTHING_STORED });
+  it("should say the viewer is on Amazon Bedrock and offer no Claude token field when no agent of theirs wants one", () => {
+    show({ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: NOTHING_STORED });
 
     expect(card("Model").textContent).toContain("Amazon Bedrock, with your Bedrock API key");
     expect(within(card("Claude token")).queryByRole("form")).toBeNull();
@@ -45,21 +45,34 @@ describe("CredentialSettingsView", () => {
   });
 
   it("should offer a Claude token field when the viewer is on their own licence", () => {
-    show({ available: true, modelRoute: "own-licence", statuses: NOTHING_STORED });
+    show({ available: true, modelRoute: "own-licence", claudeTokenUsable: true, statuses: NOTHING_STORED });
 
     expect(card("Model").textContent).toContain("Your own Claude licence");
     expect(screen.getByRole("form", { name: "Save Claude token" })).toBeTruthy();
   });
 
+  // A person given the `AIGateway.User` app role after an agent of theirs was created is on Bedrock while that agent
+  // is still on their own licence and still waiting for a Claude token. Keyed off the route alone, this page told
+  // them the token was not needed and gave them no box to paste it into.
+  it("should offer a Claude token field and name both routes when the viewer is on Bedrock and an agent of theirs is not", () => {
+    show({ available: true, modelRoute: "bedrock", claudeTokenUsable: true, statuses: NOTHING_STORED });
+
+    expect(card("Model").textContent).toContain("Amazon Bedrock");
+    expect(card("Model").textContent).toContain("own Claude licence");
+    expect(card("Claude token").textContent).not.toContain("Not needed");
+    expect(screen.getByRole("form", { name: "Save Claude token" })).toBeTruthy();
+    expect(within(card("Bedrock API key")).getByLabelText("Paste a Bedrock API key")).toBeTruthy();
+  });
+
   it("should never offer to paste the Azure sign-in when it comes from the virtual agent", () => {
-    show({ available: true, modelRoute: "own-licence", statuses: NOTHING_STORED });
+    show({ available: true, modelRoute: "own-licence", claudeTokenUsable: true, statuses: NOTHING_STORED });
 
     expect(within(card("Azure sign-in")).queryByRole("form")).toBeNull();
     expect(card("Azure sign-in").textContent).toContain("device-code");
   });
 
   it("should say each credential is not stored and offer no delete when nothing is stored", () => {
-    show({ available: true, modelRoute: "bedrock", statuses: NOTHING_STORED });
+    show({ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: NOTHING_STORED });
 
     for (const heading of ["GitHub token", "Azure sign-in", "Claude token", "Bedrock API key"]) {
       expect(card(heading).textContent).toContain("Not stored");
@@ -71,6 +84,7 @@ describe("CredentialSettingsView", () => {
     show({
       available: true,
       modelRoute: "bedrock",
+      claudeTokenUsable: false,
       statuses: [
         status("github", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "cli" }),
         status("azure", { stored: true, accountLabel: "a.person@justice.gov.uk", updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "pod" }),
@@ -90,13 +104,18 @@ describe("CredentialSettingsView", () => {
   });
 
   it.each(["bedrock", "own-licence"] as const)("should offer a password field for the Bedrock API key when the route is %s", (modelRoute) => {
-    show({ available: true, modelRoute, statuses: NOTHING_STORED });
+    show({ available: true, modelRoute, claudeTokenUsable: modelRoute === "own-licence", statuses: NOTHING_STORED });
 
     expect(within(card("Bedrock API key")).getByLabelText("Paste a Bedrock API key")).toHaveProperty("type", "password");
   });
 
   it("should show a stored Bedrock API key as stored with a delete and no value when one is stored", () => {
-    show({ available: true, modelRoute: "bedrock", statuses: [status("bedrock", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "cli" })] });
+    show({
+      available: true,
+      modelRoute: "bedrock",
+      claudeTokenUsable: false,
+      statuses: [status("bedrock", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "cli" })]
+    });
 
     const bedrock = card("Bedrock API key");
     expect(bedrock.textContent).toContain("Stored");
@@ -106,13 +125,18 @@ describe("CredentialSettingsView", () => {
   });
 
   it("should say a stored credential was saved on this page when it came from the web", () => {
-    show({ available: true, modelRoute: "bedrock", statuses: [status("github", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "web" })] });
+    show({
+      available: true,
+      modelRoute: "bedrock",
+      claudeTokenUsable: false,
+      statuses: [status("github", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "web" })]
+    });
 
     expect(card("GitHub token").textContent).toContain("on this page");
   });
 
   it("should send the kind and the pasted value to the save action and confirm when a token is saved", async () => {
-    const given = show({ available: true, modelRoute: "bedrock", statuses: NOTHING_STORED });
+    const given = show({ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: NOTHING_STORED });
 
     fireEvent.change(screen.getByLabelText("Paste a GitHub token"), { target: { value: "ghp_pasted" } });
     await act(async () => {
@@ -126,7 +150,12 @@ describe("CredentialSettingsView", () => {
   });
 
   it("should send the kind to the delete action when a stored credential is deleted", async () => {
-    const given = show({ available: true, modelRoute: "bedrock", statuses: [status("azure", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z" })] });
+    const given = show({
+      available: true,
+      modelRoute: "bedrock",
+      claudeTokenUsable: false,
+      statuses: [status("azure", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z" })]
+    });
 
     await act(async () => {
       fireEvent.submit(screen.getByRole("form", { name: "Delete Azure sign-in" }));
@@ -136,7 +165,7 @@ describe("CredentialSettingsView", () => {
   });
 
   it("should say credentials are unavailable, and why, with no forms when the deployment cannot store them", () => {
-    show({ available: false, modelRoute: "bedrock", reason: "this deployment has no credentials vault" });
+    show({ available: false, modelRoute: "bedrock", claudeTokenUsable: false, reason: "this deployment has no credentials vault" });
 
     expect(screen.getByText("Credentials unavailable")).toBeTruthy();
     expect(screen.getByText("this deployment has no credentials vault")).toBeTruthy();
@@ -147,7 +176,9 @@ describe("CredentialSettingsView", () => {
 
 describe("CredentialsSection", () => {
   it("should head the credentials as a section the virtual agents page links to when it is part of that page", () => {
-    render(<CredentialsSection settings={{ available: true, modelRoute: "bedrock", statuses: NOTHING_STORED }} actions={actions()} />);
+    render(
+      <CredentialsSection settings={{ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: NOTHING_STORED }} actions={actions()} />
+    );
 
     const section = screen.getByRole("region", { name: "Credentials" });
     expect(section.id).toBe("credentials");
@@ -158,7 +189,7 @@ describe("CredentialsSection", () => {
 
 describe("the Jenkins API token card", () => {
   it("should say it is optional and link to where the token is made when the viewer's credentials are listed", () => {
-    show({ available: true, modelRoute: "bedrock", statuses: [...NOTHING_STORED, status("jenkins")] });
+    show({ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: [...NOTHING_STORED, status("jenkins")] });
 
     const jenkins = card("Jenkins API token");
     expect(jenkins.textContent).toContain("Optional");
@@ -169,7 +200,7 @@ describe("the Jenkins API token card", () => {
 
 describe("the Atlassian sign-in card", () => {
   it("should say it is optional and never offer to paste it when it comes from the virtual agent", () => {
-    show({ available: true, modelRoute: "bedrock", statuses: [...NOTHING_STORED, status("atlassian")] });
+    show({ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: [...NOTHING_STORED, status("atlassian")] });
 
     const atlassian = card("Atlassian sign-in (Jira & Confluence)");
     expect(atlassian.textContent).toContain("Optional");
@@ -182,6 +213,7 @@ describe("the Atlassian sign-in card", () => {
     show({
       available: true,
       modelRoute: "bedrock",
+      claudeTokenUsable: false,
       statuses: [
         ...NOTHING_STORED,
         status("atlassian", { stored: true, accountLabel: "alice@justice.gov.uk", updatedAt: "2026-10-05T11:00:00.000Z", updatedVia: "pod" })
