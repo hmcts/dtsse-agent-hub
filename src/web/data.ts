@@ -31,7 +31,7 @@ import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
-import { availablePlugins, type PluginOption } from "../virtual-agents/plugins.ts";
+import { availablePlugins, PluginConfigurationError, type PluginOption } from "../virtual-agents/plugins.ts";
 import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
 import {
   type VirtualAgentCard,
@@ -253,8 +253,11 @@ export interface AssistantHome {
   assistant: AssistantSummary;
   credentials: CredentialSettings;
   conversations: { label: DateGroup; items: ConversationLink[] }[];
-  /** The workspace plugins this hub offers, and the ones the viewer's assistant loads. */
-  plugins: { available: PluginOption[]; checked: string[] };
+  /**
+   * The workspace plugins this hub offers, and the ones the viewer's assistant loads; `null` when the configuration
+   * cannot be read, which is not the same as its offering nothing.
+   */
+  plugins: { available: PluginOption[]; checked: string[] } | null;
 }
 
 function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
@@ -262,13 +265,34 @@ function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
 }
 
 /**
- * What the Assistant may offer, which is an empty list when `VIRTUAL_AGENT_PLUGINS` is unset. A malformed list throws,
- * as it does everywhere else the configuration is read: `createVirtualAgent` validates it on the way to creating the
- * assistant itself, so catching it here would only turn a first visit's failure into a return visit's hidden section.
- * A misconfiguration is a deployment fault, and the hub's own virtual-agent pages report it to whoever fixes it.
+ * What the Assistant may offer: an empty list when `VIRTUAL_AGENT_PLUGINS` is unset, and `null` when it is malformed.
+ * An empty list is not available for the malformed case: the person's own plugins would each read as one the hub no
+ * longer offers. `null` hides the section instead.
+ *
+ * This is the only place a malformed configuration is tolerated, and the asymmetry is deliberate. The Assistant is
+ * someone's whole chat surface, and a configuration they cannot see, let alone fix, must not take it away from them;
+ * `createVirtualAgent` reads the offer list only when plugins are actually ticked, so the Assistant no longer fails
+ * on a first visit either, and hiding the section is now the whole of the behaviour rather than half of it.
+ *
+ * `/hub/virtual` and `/hub/agents/{id}` call `availablePlugins` directly and still fail loudly, which is right: the
+ * person looking at the hub's own plugin pages is the person who can fix the configuration. Do not "make this
+ * consistent" by catching there too, and do not remove the catch here — one of those breaks every Assistant, the
+ * other hides the fault from the only people who can act on it.
  */
+function offeredPlugins(): PluginOption[] | null {
+  try {
+    return availablePlugins();
+  } catch (error) {
+    if (error instanceof PluginConfigurationError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugins"] {
-  return { available: availablePlugins(), checked: assistant.plugins };
+  const available = offeredPlugins();
+  return available === null ? null : { available, checked: assistant.plugins };
 }
 
 /**

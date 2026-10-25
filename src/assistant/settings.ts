@@ -16,16 +16,21 @@ export interface AssistantPluginsData {
 }
 
 /**
- * The plugins half of settings. `podRunning` is the rule the hub's own plugins panel uses: a pod exists from the
- * moment the orchestrator has acted on a `running` agent, which is every status but `requested`.
+ * The plugins half of settings, or `undefined` when there is none to show. `podRunning` is the rule the hub's own
+ * plugins panel uses: a pod exists from the moment the orchestrator has acted on a `running` agent, which is every
+ * status but `requested`.
  *
- * A hub that offers none gives an empty `available`, which the dialog shows nothing for. That is the only quiet case:
- * a configuration that cannot be read throws where it is read, rather than reaching here.
+ * `null` plugins are a configuration the hub could not read, and hide the section rather than showing an empty one:
+ * the hub cannot then tell which of the person's own plugins it still offers, so a section would mislabel every one
+ * of them. A hub that simply offers none gives an empty `available`, which is a different state and still shown.
  */
 export function assistantPluginsData(
   assistant: { id: string; desired: VirtualAgentDesired; status: VirtualAgentStatus },
-  plugins: { available: PluginOption[]; checked: string[] }
-): AssistantPluginsData {
+  plugins: { available: PluginOption[]; checked: string[] } | null
+): AssistantPluginsData | undefined {
+  if (plugins === null) {
+    return undefined;
+  }
   return {
     assistantId: assistant.id,
     available: plugins.available,

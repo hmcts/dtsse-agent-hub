@@ -23,6 +23,9 @@ function urlFor(database: string): string {
  */
 const RUN = `${process.pid.toString(36)}_${randomBytes(4).toString("hex")}`;
 
+/** The namespace every scratch database this file creates sits in, shared with `SCRATCH_PATTERN` so the two cannot drift. */
+const SCRATCH_PREFIX = "agent_hub_scratch";
+
 /**
  * Every database this file creates is named through here. A fixed name looks harmless because the suite drops it
  * first, but a sibling run drops and recreates the same one mid-test: the symptoms are a `CREATE DATABASE` that
@@ -30,7 +33,7 @@ const RUN = `${process.pid.toString(36)}_${randomBytes(4).toString("hex")}`;
  * the database out from under it.
  */
 function scratchDatabase(suffix: string): string {
-  return `agent_hub_${suffix}_${RUN}`;
+  return `${SCRATCH_PREFIX}_${suffix}_${RUN}`;
 }
 
 const SCRATCH = scratchDatabase("migrate");
@@ -38,8 +41,13 @@ const SCRATCH = scratchDatabase("migrate");
 /** How long ago a scratch database must have been created before a later run treats it as abandoned and reclaims it. */
 const ORPHAN_HOURS = 2;
 
-/** `agent_hub_migrate`, an optional suffix, and a `RUN`: only the names `scratchDatabase` generates, never a hand-made one. */
-const SCRATCH_PATTERN = "^agent_hub_migrate(_[a-z_]+)?_[0-9a-z]+_[0-9a-f]{8}$";
+/**
+ * Every name `scratchDatabase` can produce: the namespace, any suffix at all, and a `RUN`. The suffix is deliberately
+ * unconstrained, because a pattern that spelled out the suffixes this file happens to use today would silently stop
+ * matching the day someone added another one — and a sweep that matches nothing looks exactly like a sweep with
+ * nothing to do. The trailing `RUN` is what keeps a hand-made database out of it.
+ */
+const SCRATCH_PATTERN = `^${SCRATCH_PREFIX}_.+_[0-9a-z]+_[0-9a-f]{8}$`;
 
 async function query<T extends pg.QueryResultRow>(database: string, statement: string): Promise<T[]> {
   const client = new pg.Client({ connectionString: urlFor(database) });
@@ -261,7 +269,7 @@ describe("the bedrock migration", () => {
   const RENAME = scratchDatabase("migrate_bedrock");
   const MIGRATION = "20261009090000_bedrock";
   const original = process.env.DATABASE_URL;
-  let before: string;
+  let before: string | undefined;
 
   beforeAll(async () => {
     await query("postgres", `DROP DATABASE IF EXISTS "${RENAME}"`);
@@ -283,7 +291,12 @@ describe("the bedrock migration", () => {
     } else {
       process.env.DATABASE_URL = original;
     }
-    await rm(before, { recursive: true, force: true });
+    // Guarded because `beforeAll` may have thrown before assigning it: an `rm(undefined)` here would replace that
+    // failure with a confusing `TypeError` and, worse, skip the `DROP DATABASE` below, leaking the scratch database
+    // until the sweep's `ORPHAN_HOURS` are up.
+    if (before !== undefined) {
+      await rm(before, { recursive: true, force: true });
+    }
     await query("postgres", `DROP DATABASE IF EXISTS "${RENAME}"`);
   });
 
@@ -326,7 +339,7 @@ describe("the assistant product list migration", () => {
   const REMAP = scratchDatabase("migrate_product");
   const MIGRATION = "20261025120000_assistant_product_list";
   const original = process.env.DATABASE_URL;
-  let before: string;
+  let before: string | undefined;
 
   beforeAll(async () => {
     await query("postgres", `DROP DATABASE IF EXISTS "${REMAP}"`);
@@ -348,7 +361,12 @@ describe("the assistant product list migration", () => {
     } else {
       process.env.DATABASE_URL = original;
     }
-    await rm(before, { recursive: true, force: true });
+    // Guarded because `beforeAll` may have thrown before assigning it: an `rm(undefined)` here would replace that
+    // failure with a confusing `TypeError` and, worse, skip the `DROP DATABASE` below, leaking the scratch database
+    // until the sweep's `ORPHAN_HOURS` are up.
+    if (before !== undefined) {
+      await rm(before, { recursive: true, force: true });
+    }
     await query("postgres", `DROP DATABASE IF EXISTS "${REMAP}"`);
   });
 
@@ -377,5 +395,34 @@ describe("the assistant product list migration", () => {
       { title: "new", product: "general", product_history: [] },
       { title: "on a product", product: "ccd", product_history: [] }
     ]);
+  });
+});
+
+/**
+ * The sweep's pattern and the name generator have to agree, and nothing else in the suite would notice if they
+ * stopped: an unswept name leaks silently, and `dropAbandonedScratchDatabases` swallows its own errors by design.
+ */
+describe("the scratch database sweep's pattern", () => {
+  const pattern = new RegExp(SCRATCH_PATTERN);
+
+  it.each([
+    "migrate",
+    "migrate_bedrock",
+    "migrate_product",
+    "assistant2",
+    "x",
+    "a_much_longer_suffix_9"
+  ])("should match the name the generator produces for the %s suffix", (suffix) => {
+    expect(scratchDatabase(suffix)).toMatch(pattern);
+  });
+
+  it.each([
+    "agent_hub",
+    "agent_hub_test",
+    "agent_hub_migrate_probe",
+    "agent_hub_scratch_probe",
+    `${SCRATCH_PREFIX}_migrate`
+  ])("should leave %s alone, because nothing generated it", (name) => {
+    expect(name).not.toMatch(pattern);
   });
 });
