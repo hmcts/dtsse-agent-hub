@@ -186,6 +186,9 @@ model Agent {
   virtualAgentId  String?     @map("virtual_agent_id") @db.Uuid
   /// The skills its session reported, as [{name, description}]. See src/agents/skills.ts.
   skills          Json        @default("[]")
+  /// What its client claimed it understands of the hub's optional wire fields, as ["name"], or null from a client
+  /// that reported nothing, which claims nothing. See src/agents/client-features.ts.
+  clientFeatures  Json?       @map("client_features")
   /// The assistant conversation this agent is a session of, if any. Visible to and messageable by its owner only.
   assistantConversationId String? @map("assistant_conversation_id") @db.Uuid
 

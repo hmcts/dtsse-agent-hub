@@ -91,6 +91,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     productHistory: [],
     agentId: AGENT,
     agentStatus: "idle",
+    clientFeatures: null,
     sessionState: null,
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
