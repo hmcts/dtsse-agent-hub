@@ -32,6 +32,10 @@ export interface SkillMenu {
   fieldProps: Record<string, unknown>;
   /** The listbox, or `null` when there are no skills to offer. */
   list: React.ReactNode;
+  /** Whether the listbox is showing, so a composer with popovers of its own can keep only one of them open. */
+  open: boolean;
+  /** Shuts the list until the message changes, as Escape does: what a composer opening a popover of its own calls. */
+  dismiss: () => void;
   /** Whether the key was the menu's, so the composer must not also act on it. */
   onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
   /** Replaces the composer's own change handler, so a reopened list follows what is now typed. */
@@ -164,5 +168,5 @@ export function useSkillMenu({
     </div>
   );
 
-  return { fieldProps, list: skills.length === 0 ? null : list, onKeyDown, onChange, track };
+  return { fieldProps, list: skills.length === 0 ? null : list, open, dismiss: () => setDismissed(true), onKeyDown, onChange, track };
 }

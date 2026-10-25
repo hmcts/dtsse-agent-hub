@@ -399,18 +399,12 @@ describe("ChatView skills", () => {
     expect(screen.getByRole("option", { name: /cft-explain/ })).toBeTruthy();
   });
 
-  it("should re-read the page when the conversation's agent reports a changed skill list", () => {
+  // A reported skill list re-reads the page through `AssistantRefresh`, which debounces it against the rest of a
+  // cold chat coming up; that is covered in `AssistantShell.test.tsx`.
+  it("should not re-read the page itself when the conversation's agent reports a changed skill list", () => {
     render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     emit("agent_skills", { agent_id: AGENT });
-
-    expect(refresh).toHaveBeenCalledTimes(1);
-  });
-
-  it("should ignore a skill list reported by another agent", () => {
-    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
-
-    emit("agent_skills", { agent_id: "44444444-4444-4444-4444-444444444444" });
 
     expect(refresh).not.toHaveBeenCalled();
   });
@@ -761,6 +755,44 @@ describe("Composer skills", () => {
     });
 
     expect(onSend).toHaveBeenCalledWith("/cft-explain what is CDAM?", []);
+  });
+
+  // Both popovers are drawn above the box, in the same place, so either one open with the other would be painted
+  // over by it.
+  it("should close the skill list when the + menu is opened", () => {
+    composer();
+    write("/cft");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
+
+    expect(field().getAttribute("aria-expanded")).toBe("false");
+    expect(options()).toEqual([]);
+    expect(screen.getByRole("menu", { name: "Add" })).toBeTruthy();
+  });
+
+  it("should close the + menu when the skill list opens", () => {
+    composer();
+    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
+
+    write("/cft");
+
+    expect(screen.queryByRole("menu", { name: "Add" })).toBeNull();
+    expect(field().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("should offer the list again when a template starting with a slash is picked after an Escape", () => {
+    const templates = [{ name: "Skill template", text: "/cft-explain what is CDAM?" }];
+    render(<Composer templates={templates} viewerOid={VIEWER} draftId={CONVERSATION} onSend={vi.fn(async () => null)} skills={SKILLS} />);
+    write("/cft");
+    fireEvent.keyDown(field(), { key: "Escape" });
+    expect(field().getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Templates" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Skill template" }));
+
+    expect(field().value).toBe("/cft-explain what is CDAM?");
+    expect(field().getAttribute("aria-expanded")).toBe("true");
   });
 
   it("should be a plain box with no list when the session reported no skills", () => {

@@ -188,14 +188,6 @@ export function ChatView({
     }
   });
 
-  // The event carries only the id, so the page is re-read for the list itself. A chat is usually opened before its
-  // session exists, which is the registration that reports the skills, so this is the ordinary path to a "/" list.
-  useHubEvent<{ agent_id: string }>("agent_skills", ({ agent_id }) => {
-    if (agent_id === view.agentId) {
-      router.refresh();
-    }
-  });
-
   // The assistant writing the document opens it, so the person sees what it was asked to draft.
   useEffect(() => {
     if (view.artefact.version > seenVersion.current && view.artefact.updatedBy === "agent") {

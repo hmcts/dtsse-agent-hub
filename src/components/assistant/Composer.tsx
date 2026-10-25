@@ -14,8 +14,8 @@ const MAX_HEIGHT = 200;
 
 /**
  * The "/" list, as a popover above the box rather than in the flow: the box here grows with what is typed, and a list
- * taking space inside it would move the line the person is on while they are still typing the skill's name. It stacks
- * with the + menu, which sits in the same place.
+ * taking space inside it would move the line the person is on while they are still typing the skill's name. It is
+ * drawn where the + menu is, so the two are never open together: opening either dismisses the other.
  */
 const SKILL_MENU: SkillMenuTheme = {
   list: "absolute bottom-[calc(100%+10px)] left-0 z-30 max-h-60 w-full overflow-y-auto rounded-xl border border-asst-strong bg-asst-hover p-1.5 text-[13px] shadow-2xl",
@@ -162,6 +162,15 @@ export function Composer({
       document.removeEventListener("keydown", close);
     };
   }, [menu]);
+
+  // The "/" list is drawn in the same place as this menu, and over it, so the list opening closes the menu. Typing
+  // into the box is the only way to open the list, which a pointer does by itself: it is the keyboard, tabbing from
+  // the + button to the box, that can reach both.
+  useEffect(() => {
+    if (skillMenu.open) {
+      setMenu("closed");
+    }
+  }, [skillMenu.open]);
 
   const attachable = (conversationId !== undefined || openConversation !== undefined) && !disabled;
 
@@ -355,7 +364,9 @@ export function Composer({
   }
 
   function applyTemplate(template: Template): void {
-    setText(template.text);
+    // Through the menu's own change, not `setText`: a template is a new message, so an earlier Escape stops holding
+    // the "/" list shut.
+    skillMenu.onChange(template.text);
     setMenu("closed");
     box.current?.focus();
   }
@@ -415,7 +426,11 @@ export function Composer({
           <div ref={menuRef} className="relative shrink-0">
             <button
               type="button"
-              onClick={() => setMenu(menu === "closed" ? "open" : "closed")}
+              onClick={() => {
+                // This menu would paint over the "/" list, so opening it dismisses the list the way Escape does.
+                skillMenu.dismiss();
+                setMenu(menu === "closed" ? "open" : "closed");
+              }}
               aria-label={attachable ? "Attach a file or add a template" : "Add a template"}
               aria-haspopup="menu"
               aria-expanded={menu !== "closed"}
