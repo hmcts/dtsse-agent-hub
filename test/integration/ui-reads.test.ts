@@ -13,7 +13,7 @@ const CAROL = { oid: "oid-carol", name: "Carol", email: "carol@example.com" };
 
 const viewer = (who: Person): Identity => ({ ...who, tid: "dev" });
 
-/** The agent `who` sees on `/agents/{id}`, when it is an agent shown as itself. */
+/** The agent `who` sees on `/hub/agents/{id}`, when it is an agent shown as itself. */
 async function agentPage(who: Person, id: string): Promise<AgentView | undefined> {
   const route = await agentRoute({ ...viewer(who), modelRoute: "bedrock" }, id);
   return route?.variant === "local" ? route.view : undefined;

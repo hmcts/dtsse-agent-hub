@@ -8,7 +8,7 @@ import { requireViewer } from "@/viewer/current";
 
 export const dynamic = "force-dynamic";
 
-/** The channel builder, optionally started from a view: `/channels/new?topics=a,b&mode=all`. */
+/** The channel builder, optionally started from a view: `/hub/channels/new?topics=a,b&mode=all`. */
 export default async function NewChannel({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireViewer();
   const query = await searchParams;

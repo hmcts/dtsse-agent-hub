@@ -224,7 +224,7 @@ export async function virtualAgentPage(viewer: Viewer, id: string): Promise<Virt
 export type AgentRoute = { variant: "virtual"; page: VirtualAgentPageView } | { variant: "local"; view: AgentView } | { variant: "moved"; to: string };
 
 /**
- * What `/agents/{id}` shows. A virtual agent's id is its page. An agent one of its sessions registered moves there,
+ * What `/hub/agents/{id}` shows. A virtual agent's id is its page. An agent one of its sessions registered moves there,
  * since a virtual agent registers a new agent on every `/clear` and its page always shows the current one. Any other
  * agent is shown as itself. `undefined` is the not-found for an id that is none of these, or that the viewer may not
  * see.

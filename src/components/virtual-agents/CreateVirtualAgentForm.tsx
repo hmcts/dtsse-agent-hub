@@ -19,7 +19,7 @@ const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white ho
  */
 export function CreateVirtualAgentForm({ create, plugins = [] }: { create: CreateAction; plugins?: readonly PluginOption[] }) {
   return (
-    <ActionForm action={create} navigate={(created) => `/agents/${created.id}`} label="Create a virtual agent" className="flex flex-wrap items-end gap-3">
+    <ActionForm action={create} navigate={(created) => `/hub/agents/${created.id}`} label="Create a virtual agent" className="flex flex-wrap items-end gap-3">
       <label className="block">
         <span className="block text-hub-text">Name</span>
         <input name="name" required maxLength={MAX_NAME_LENGTH} autoComplete="off" spellCheck={false} className={INPUT} />
