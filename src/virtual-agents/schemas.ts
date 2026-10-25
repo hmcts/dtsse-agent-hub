@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { boundedArray } from "../agent-api/bounded-array.ts";
 import { POD_PHASES } from "./lifecycle.ts";
 import { MAX_EXPOSED_PORT, MAX_REPORTED_PORTS, MIN_EXPOSED_PORT } from "./ports.ts";
 
@@ -67,10 +68,10 @@ export const observedBody = z.object({
   disk_deleted: z.boolean().optional()
 });
 
-const reportedPorts = z
-  .array(z.number().int().min(MIN_EXPOSED_PORT).max(MAX_EXPOSED_PORT))
-  .max(MAX_REPORTED_PORTS)
-  .refine((ports) => new Set(ports).size === ports.length, "must not list a port twice");
+const reportedPorts = boundedArray(z.number().int().min(MIN_EXPOSED_PORT).max(MAX_EXPOSED_PORT), MAX_REPORTED_PORTS).refine(
+  (ports) => new Set(ports).size === ports.length,
+  "must not list a port twice"
+);
 
 export const portsBody = z.object({
   ports: reportedPorts,

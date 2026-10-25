@@ -7,7 +7,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
 import { migrate, migrationsDirectory } from "../../src/store/migrate.ts";
 
-const SCRATCH = "agent_hub_migrate_test";
 const BASE = resolveDatabaseUrl();
 
 function urlFor(database: string): string {
@@ -15,6 +14,17 @@ function urlFor(database: string): string {
   url.pathname = `/${database}`;
   return url.toString();
 }
+
+/**
+ * Names a database this suite creates and drops after the one the run is using, read out of the URL the way
+ * `setup.ts` reads it. Concurrent runs each have their own `DATABASE_URL`, so a fixed name would have them creating
+ * and dropping one another's scratch databases mid-suite.
+ */
+function scratchDatabase(suffix: string): string {
+  return `${decodeURIComponent(new URL(BASE).pathname.slice(1))}_${suffix}`;
+}
+
+const SCRATCH = scratchDatabase("migrate");
 
 async function query<T extends pg.QueryResultRow>(database: string, statement: string): Promise<T[]> {
   const client = new pg.Client({ connectionString: urlFor(database) });
@@ -199,7 +209,7 @@ describe("migrate waiting for the database", () => {
 });
 
 describe("the bedrock migration", () => {
-  const RENAME = "agent_hub_migrate_bedrock_test";
+  const RENAME = scratchDatabase("migrate_bedrock");
   const MIGRATION = "20261009090000_bedrock";
   const original = process.env.DATABASE_URL;
   let before: string;
