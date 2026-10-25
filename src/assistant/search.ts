@@ -12,7 +12,7 @@ import { collapse, oneLine } from "../transcripts/conversation.ts";
  *
  * - `ILIKE` cannot use an index with a wildcard at the front, so every search read every direct message in the hub:
  *   62ms for one term and 117ms for two over one person's 12,000 messages, growing with everybody's traffic. The
- *   same searches answer in 8–9ms through the `GIN` index of `20261027090000_assistant_search`, and now grow with
+ *   same searches answer in 5–7ms through the `GIN` index of `20261027120000_assistant_search`, and now grow with
  *   how much matches rather than with how much there is.
  * - These are short English strings, so stemming is what a person expects: "claims" finds "claim", "hearings" finds
  *   "hearing". The `:*` keeps a part-typed word matching, so "poss" still finds "possession" as it is typed. What is
