@@ -56,9 +56,14 @@ export function ShareDialog({
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const box = useRef<HTMLInputElement>(null);
-  const link = typeof window === "undefined" ? `/assistant/shared/${conversationId}` : `${window.location.origin}/assistant/shared/${conversationId}`;
+  const path = `/assistant/shared/${conversationId}`;
+  // The whole address, once there is a browser to ask for the origin: the server has no origin to render, and a first
+  // render that disagreed with the server's would be a hydration mismatch on the box's value.
+  const [link, setLink] = useState(path);
 
   useEffect(() => box.current?.focus(), []);
+
+  useEffect(() => setLink(`${window.location.origin}${path}`), [path]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

@@ -8,6 +8,7 @@ import {
   conversationAccess
 } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
+import { isUuid } from "../agents/store.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { productLabel } from "./products.ts";
@@ -28,7 +29,7 @@ export interface SharedConversationRow extends ConversationRef {
 
 /** The conversation, if it exists, without regard to who is asking: `conversationAccess` decides that next. */
 export async function conversationRef(db: Database, id: string): Promise<SharedConversationRow | undefined> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+  if (!isUuid(id)) {
     return undefined;
   }
   const row = await db.assistantConversation.findUnique({ where: { id }, select: { id: true, ownerOid: true, virtualAgentId: true } });
