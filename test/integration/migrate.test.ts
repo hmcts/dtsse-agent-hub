@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { appendFile, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,7 +7,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
 import { migrate, migrationsDirectory } from "../../src/store/migrate.ts";
 
-const SCRATCH = "agent_hub_migrate_test";
 const BASE = resolveDatabaseUrl();
 
 function urlFor(database: string): string {
@@ -15,6 +14,20 @@ function urlFor(database: string): string {
   url.pathname = `/${database}`;
   return url.toString();
 }
+
+/**
+ * Unique per process, so two concurrent runs never create and drop one another's scratch databases mid-suite. It is
+ * not derived from `DATABASE_URL`, because the two ways this suite is normally run both leave that at a fixed name —
+ * `vitest.integration.config.mts` falls back to `agent_hub_test`, and `Jenkinsfile_CNP` sets `agent_hub` — so a name
+ * derived from it would collide for exactly the people who have not overridden it.
+ */
+const RUN = `${process.pid.toString(36)}_${randomBytes(4).toString("hex")}`;
+
+function scratchDatabase(suffix: string): string {
+  return `agent_hub_${suffix}_${RUN}`;
+}
+
+const SCRATCH = scratchDatabase("migrate");
 
 async function query<T extends pg.QueryResultRow>(database: string, statement: string): Promise<T[]> {
   const client = new pg.Client({ connectionString: urlFor(database) });
@@ -201,7 +214,7 @@ describe("migrate waiting for the database", () => {
 });
 
 describe("the bedrock migration", () => {
-  const RENAME = "agent_hub_migrate_bedrock_test";
+  const RENAME = scratchDatabase("migrate_bedrock");
   const MIGRATION = "20261009090000_bedrock";
   const original = process.env.DATABASE_URL;
   let before: string;
