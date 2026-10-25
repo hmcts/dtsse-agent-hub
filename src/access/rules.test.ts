@@ -19,6 +19,7 @@ import {
   canStopAssistantAnswer,
   canUseCredentialRoutes,
   canViewAgent,
+  canViewConversation,
   canViewTranscript,
   canViewVirtualAgent,
   canVirtualAgentStoreCredential,
@@ -540,6 +541,25 @@ describe("the upload rules", () => {
 
     it.each([["pending"], ["expired"]] as const)("should refuse a fetched report when the upload is %s", (state) => {
       expect(canSessionUseAttachment(CONVERSATION, upload({ state, messageId: "41" }), "fetched")).toBe(false);
+    });
+  });
+
+  describe("conversations", () => {
+    it("should let a person see their own chat", () => {
+      expect(canViewConversation("alice", { ownerOid: "alice" })).toBe(true);
+    });
+
+    it("should refuse someone else's chat", () => {
+      expect(canViewConversation("bob", { ownerOid: "alice" })).toBe(false);
+    });
+
+    // A grant covers every agent its owner has, and a chat's session agent is one of them. The chat is still nobody
+    // else's, which is why this rule takes no grants at all rather than being handed some it would ignore.
+    it("should refuse someone else's chat however much access they hold over that person's agents", () => {
+      const write: Grant[] = [{ ownerOid: "alice", granteeOid: "bob", level: "write" }];
+
+      expect(canViewAgent("bob", { id: "a1", ownerOid: "alice" }, write)).toBe(true);
+      expect(canViewConversation("bob", { ownerOid: "alice" })).toBe(false);
     });
   });
 });

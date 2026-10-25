@@ -12,7 +12,8 @@ import { neededCredentials, OPTIONAL_CREDENTIALS } from "../virtual-agents/views
 import { type DateGroup, groupByDate } from "./grouping.ts";
 import { onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { productLabel } from "./products.ts";
-import { type Artefact, type ConversationRow, listConversations, readArtefact, type SessionState, unsentConversation } from "./store.ts";
+import { snippetOf } from "./search.ts";
+import { type Artefact, type ConversationRow, listConversations, readArtefact, type SessionState, searchConversations, unsentConversation } from "./store.ts";
 import { type MessageAttachment, unsentAttachments } from "./upload-store.ts";
 
 /** The HMCTS Assistant as its pages show it. Only ever the viewer's own: nobody sees anyone else's assistant. */
@@ -63,7 +64,7 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
   };
 }
 
-function toLink(row: ConversationRow): ConversationLink {
+function toLink(row: Pick<ConversationRow, "id" | "title" | "product" | "lastActiveAt">): ConversationLink {
   return {
     id: row.id,
     title: row.title ?? UNTITLED,
@@ -81,6 +82,17 @@ export async function conversationLinks(db: Database, ownerOid: string, virtualA
 export async function conversationGroups(db: Database, ownerOid: string, now: Date = new Date()): Promise<{ label: DateGroup; items: ConversationLink[] }[]> {
   const rows = await listConversations(db, ownerOid);
   return groupByDate(rows.map(toLink), (link) => new Date(link.lastActiveAt), now);
+}
+
+export interface ConversationMatch extends ConversationLink {
+  /** Why the chat matched, when its title does not already show it: the words around the match in one message. */
+  snippet: string | null;
+}
+
+/** The viewer's own chats matching every word of `query`, for the sidebar's search. */
+export async function conversationMatches(db: Database, ownerOid: string, query: string): Promise<ConversationMatch[]> {
+  const rows = await searchConversations(db, ownerOid, query);
+  return rows.map((row) => ({ ...toLink(row), snippet: snippetOf(row.excerpt) }));
 }
 
 /**
