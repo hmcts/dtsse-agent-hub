@@ -483,7 +483,8 @@ export async function runBridge({
       // leave the person believing the agent had read it.
       const attachments = await fetchForDelivery(message.id, assistant);
       try {
-        const content = assistant ? assistantEnvelope(message, assistant, previousProduct, attachments) : envelope(message, { skills: skillNames() });
+        const skills = skillNames();
+        const content = assistant ? assistantEnvelope(message, assistant, previousProduct, { skills, attachments }) : envelope(message, { skills });
         await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, content);
         remember(message.id);
         if (assistant) {

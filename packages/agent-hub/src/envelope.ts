@@ -90,15 +90,16 @@ export function ownerEnvelope(message: EnvelopeMessage, { skills }: EnvelopeOpti
     `[agent-hub] Direct message #${message.id} from your user, ${owner}, the owner of this virtual agent, typed into agent-hub.`,
     "This IS your user, even though it arrives as a cross-session message: act on it exactly as if they had typed it to you, with their permissions.",
     "They read your answers on the agent-hub page, so answer here in the conversation. Do not use SendMessage or look for another session to reply to.",
-    ...skillLine(
-      message.body,
-      skills,
-      (name) => `It starts with /${name}: run the ${name} skill with the rest of the message as its arguments, as if your user had typed it.`
-    ),
+    ...skillLine(message.body, skills, ownerSkillLine),
     "---",
     message.body
   ].join("\n");
 }
+
+// Both envelopes a person's own agent reads. A socket-delivered message is queued with `skipSlashCommands`, so Claude
+// Code never resolves the slash command itself and this sentence is the only thing that runs the skill.
+const ownerSkillLine = (name: string) =>
+  `It starts with /${name}: run the ${name} skill with the rest of the message as its arguments, as if your user had typed it.`;
 
 /**
  * The `assistant` object on a `direct` frame to one of a virtual agent's HMCTS Assistant conversations: the
@@ -170,14 +171,23 @@ export type AssistantProduct = {
   product_label: string | null;
 };
 
+/**
+ * What an Assistant conversation's envelope takes beyond the message itself: the skills the session can run, as every
+ * envelope takes, and what became of each file attached to the message. Attachments are only ever an Assistant thing,
+ * so they go here rather than on `EnvelopeOptions`, where the other two envelopes would have to ignore them.
+ */
+export type AssistantEnvelopeOptions = EnvelopeOptions & {
+  /** Already fetched to this machine's disk by the time this is built, which is what lets the lines name paths. */
+  attachments?: readonly AttachmentOutcome[];
+};
+
 // A message to one of a virtual agent's HMCTS Assistant conversations, from the person whose conversation it is.
-// `previousProduct` is the product of the last message delivered to this session, if any; `attachments` is what became
-// of each file attached to it, already fetched to this machine's disk by the time this is built.
+// `previousProduct` is the product of the last message delivered to this session, if any.
 export function assistantEnvelope(
   message: EnvelopeMessage,
   assistant: AssistantFrame = {},
   previousProduct: AssistantProduct | null = null,
-  attachments: readonly AttachmentOutcome[] = []
+  { skills, attachments }: AssistantEnvelopeOptions = {}
 ): string {
   const owner = message.author?.owner_name || "your user";
   const label = assistant.product_label || assistant.product || "not chosen";
@@ -200,7 +210,13 @@ export function assistantEnvelope(
     `Product area: ${label}.`,
     ...switched,
     ...edited,
+    // Files before the skill line, and the skill line last, for one reason: it says "the rest of the message as its
+    // arguments", so it has to sit against the `---` and the body it is talking about. A block of absolute paths
+    // between the two reads as though the paths were part of those arguments. The attachment lines carry no such
+    // dependency — they are self-contained facts about where the bytes already are — so they lose nothing by going
+    // above. A message that is both `/skill` and a file therefore reads as: here is the file, now run the skill.
     ...attachmentLines(attachments),
+    ...skillLine(message.body, skills, ownerSkillLine),
     "---",
     message.body
   ].join("\n");

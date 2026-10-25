@@ -173,9 +173,9 @@ describe("assistantEnvelope", () => {
 
   it("should name the absolute path of a file already on disk, before the separator, when one was attached", () => {
     // Act
-    const text = assistantEnvelope(personMessage, pcs, null, [
-      { name: "letter.pdf", path: "/workspace/uploads/c1/u1-letter.pdf", media_type: "application/pdf", bytes: 1_500_000 }
-    ]);
+    const text = assistantEnvelope(personMessage, pcs, null, {
+      attachments: [{ name: "letter.pdf", path: "/workspace/uploads/c1/u1-letter.pdf", media_type: "application/pdf", bytes: 1_500_000 }]
+    });
 
     // Assert
     const lines = text.split("\n");
@@ -188,7 +188,9 @@ describe("assistantEnvelope", () => {
 
   it("should say so, and ask for it again, when a file could not be retrieved", () => {
     // Act
-    const text = assistantEnvelope(personMessage, pcs, null, [{ name: "scan.png", media_type: "image/png", bytes: 2048, error: "503 from the hub" }]);
+    const text = assistantEnvelope(personMessage, pcs, null, {
+      attachments: [{ name: "scan.png", media_type: "image/png", bytes: 2048, error: "503 from the hub" }]
+    });
 
     // Assert
     expect(text.split("\n")).toContain(
@@ -199,12 +201,14 @@ describe("assistantEnvelope", () => {
 
   it("should count both when some files arrived and others did not", () => {
     // Act
-    const text = assistantEnvelope(personMessage, pcs, null, [
-      { name: "a.pdf", path: "/workspace/uploads/c1/u1-a.pdf", media_type: "application/pdf", bytes: 2 * 1024 * 1024 },
-      { name: "b.pdf", path: "/workspace/uploads/c1/u2-b.pdf", media_type: "application/pdf", bytes: 1024 },
-      { name: "c.png", media_type: "image/png", error: "timed out" },
-      { name: "d.png", path: "", media_type: "image/png", error: "timed out" }
-    ]);
+    const text = assistantEnvelope(personMessage, pcs, null, {
+      attachments: [
+        { name: "a.pdf", path: "/workspace/uploads/c1/u1-a.pdf", media_type: "application/pdf", bytes: 2 * 1024 * 1024 },
+        { name: "b.pdf", path: "/workspace/uploads/c1/u2-b.pdf", media_type: "application/pdf", bytes: 1024 },
+        { name: "c.png", media_type: "image/png", error: "timed out" },
+        { name: "d.png", path: "", media_type: "image/png", error: "timed out" }
+      ]
+    });
 
     // Assert
     expect(text).toMatch(/The user attached 2 files to this message\. They are already saved/);
@@ -213,7 +217,65 @@ describe("assistantEnvelope", () => {
   });
 
   it("should say nothing about attachments when the message carried none", () => {
-    expect(assistantEnvelope(personMessage, pcs, null, [])).not.toMatch(/attached/);
+    expect(assistantEnvelope(personMessage, pcs, null, { attachments: [] })).not.toMatch(/attached/);
+  });
+  it("should ask for the skill to be run as the user typed it when the body starts with one the session has", () => {
+    // Arrange
+    const skills = new Set(["cft-explain"]);
+
+    // Act
+    const text = assistantEnvelope({ ...personMessage, body: "/cft-explain what is CDAM?" }, pcs, null, { skills });
+
+    // Assert
+    const lines = text.split("\n");
+    const sep = lines.indexOf("---");
+    expect(lines[sep - 1]).toBe(
+      "It starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments, as if your user had typed it."
+    );
+    expect(text.endsWith("\n---\n/cft-explain what is CDAM?")).toBe(true);
+  });
+
+  it("should say nothing about a skill when the body names one the session does not have", () => {
+    // Act
+    const text = assistantEnvelope({ ...personMessage, body: "/cft-explain what is CDAM?" }, pcs, null, { skills: new Set(["pcs:start-env"]) });
+
+    // Assert
+    expect(text).not.toMatch(/skill/);
+    expect(text.endsWith("\n---\n/cft-explain what is CDAM?")).toBe(true);
+  });
+
+  it("should name the file above the skill line when a message is both a slash command and an attachment", () => {
+    // The order is load-bearing, not incidental. The skill line says "the rest of the message as its arguments", so
+    // it has to sit against the separator and the body; absolute paths between the two would read as arguments.
+    // Arrange
+    const skills = new Set(["cft-explain"]);
+
+    // Act
+    const text = assistantEnvelope({ ...personMessage, body: "/cft-explain what does this say?" }, pcs, null, {
+      skills,
+      attachments: [{ name: "letter.pdf", path: "/workspace/uploads/c1/u1-letter.pdf", media_type: "application/pdf", bytes: 1024 }]
+    });
+
+    // Assert: both instructions are there, the skill line last, and the paths above it.
+    const lines = text.split("\n");
+    const sep = lines.indexOf("---");
+    expect(lines[sep - 1]).toBe(
+      "It starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments, as if your user had typed it."
+    );
+    expect(lines.indexOf("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1 KB)")).toBeLessThan(sep - 1);
+    expect(text.endsWith("\n---\n/cft-explain what does this say?")).toBe(true);
+  });
+
+  it("should say nothing about a skill when the body has no leading slash command", () => {
+    // Arrange
+    const skills = new Set(["cft-explain"]);
+
+    // Act
+    const text = assistantEnvelope(personMessage, pcs, null, { skills });
+
+    // Assert
+    expect(text).not.toMatch(/skill/);
+    expect(text).toBe(assistantEnvelope(personMessage, pcs, null));
   });
 });
 

@@ -765,6 +765,31 @@ describe("runBridge", () => {
     }
   });
 
+  it("should ask the assistant conversation to run the skill when the user's message starts with one the session has", async () => {
+    // Arrange
+    const bridge = await startBridge(
+      { pingMs: 5000 },
+      { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: "c1" }, skills: () => [{ name: "cft-explain", description: "Explain" }] }
+    );
+    const assistant = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Act
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "/cft-explain what is CDAM?", { assistant });
+      await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "/pcs:start-env aat", { assistant });
+      await waitUntil(() => bridge.socketWrites.length >= 2, "the second message");
+
+      // Assert
+      expect(bridge.socketWrites[0]).toMatch(/\nIt starts with \/cft-explain: run the cft-explain skill with the rest of the message as its arguments/);
+      expect(bridge.socketWrites[1]).not.toMatch(/skill/);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
   it("should keep the peer framing when an assistant frame comes from someone other than the owner", async () => {
     // Arrange
     const bridge = await startBridge({ pingMs: 5000 }, { env: VIRTUAL });

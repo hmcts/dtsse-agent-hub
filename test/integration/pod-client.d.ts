@@ -64,6 +64,6 @@ declare module "pod-client" {
     message: EnvelopeMessage,
     assistant?: AssistantFrame,
     previousProduct?: { product: string | null; label: string | null } | null,
-    attachments?: readonly AttachmentOutcome[]
+    options?: { skills?: ReadonlySet<string>; attachments?: readonly AttachmentOutcome[] }
   ): string;
 }

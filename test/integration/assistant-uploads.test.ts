@@ -1034,7 +1034,7 @@ describe("a file from the browser to the session's envelope", () => {
     const assistant = parseAssistantFrame(frame.assistant);
     const attachments = parseAttachments(assistant?.attachments);
     const outcomes = await fetchAttachments({ api: podApi(token), agentId, conversationId: conversation.id, attachments, root });
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, outcomes);
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: outcomes });
 
     // Assert: the client was willing to act on the frame the route really produced.
     expect(attachments).toEqual([{ uploadId, name: "my_scanned_letter.pdf", bytes: bytes.byteLength, mediaType: "application/pdf", parts: 2 }]);
@@ -1080,7 +1080,7 @@ describe("a file from the browser to the session's envelope", () => {
       attachments: parseAttachments(assistant?.attachments),
       root
     });
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, outcomes);
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: outcomes });
 
     // Assert: said so rather than dropped, because a silent omission leaves the person believing their file was read.
     expect(outcomes[0]).toMatchObject({ name: "letter.pdf", error: expect.stringContaining("404") });
@@ -1112,7 +1112,7 @@ describe("a file from the browser to the session's envelope", () => {
       attachments: parseAttachments(assistant?.attachments),
       root
     });
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, outcomes);
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: outcomes });
 
     // Assert
     expect(outcomes.map((outcome) => outcome.name)).toEqual(names);
@@ -1145,7 +1145,7 @@ describe("a file from the browser to the session's envelope", () => {
       attachments: parseAttachments(assistant?.attachments),
       root
     });
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, outcomes);
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: outcomes });
 
     // Assert: the session gets the paths and a body saying what to do with them, rather than paths and silence.
     expect(sent).toMatchObject({ ok: true });
@@ -1173,7 +1173,7 @@ describe("a file from the browser to the session's envelope", () => {
     const frame = await frameFor(token, agentId);
     const assistant = parseAssistantFrame(frame.assistant);
     const unreadable = parseAttachments(undefined);
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, unreadable);
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: unreadable });
 
     // Assert: the hub did send them, and an old client still says not a word about a file it never fetched.
     expect(parseAttachments(assistant?.attachments)).toHaveLength(1);
