@@ -114,6 +114,7 @@ describe("runAssistantSupervisor", () => {
     const stop = new AbortController();
     const api = {
       putSessions: async () => null,
+      conversations: async () => ({ conversations: [] }),
       sessionsStream: async (): Promise<Response> => {
         opens.push(Date.now());
         throw new ApiError(403, { error: "forbidden" }, "GET", `/api/virtual/${VID}/sessions`);
@@ -147,12 +148,54 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
+  it("should reconcile the uploads on disk against the hub's conversations on its own interval", async () => {
+    // Arrange: a directory for a conversation the hub no longer has, as a conversation deleted while this pod was
+    // stopped would leave behind — it sends no close anybody was there to hear.
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const uploads = fs.mkdtempSync(path.join(home.root, "run-uploads-"));
+    const gone = "99999999-8888-7777-6666-555555555555";
+    fs.mkdirSync(path.join(uploads, gone), { recursive: true });
+    const said: string[] = [];
+    const stop = new AbortController();
+    const running = runAssistantSupervisor({
+      api: {
+        putSessions: async () => null,
+        conversations: async () => ({ conversations: [] }),
+        sessionsStream: async () => new Response("", { status: 200 })
+      },
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      uploadsDir: uploads,
+      signal: stop.signal,
+      tickMs: 1000,
+      reconcileMs: 20,
+      say: (m) => said.push(m)
+    });
+
+    try {
+      // Act & Assert
+      await waitUntil(() => !fs.existsSync(path.join(uploads, gone)), "the stale uploads to be removed");
+      expect(said).toContain(`removed the uploads of conversation ${gone}, which the hub no longer has`);
+    } finally {
+      stop.abort();
+      await running;
+      fs.rmSync(uploads, { recursive: true, force: true });
+    }
+  });
+
   it("should say so and fall back to a backoff when sessions streams keep ending as they open, without a reconnect event", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
     const said: string[] = [];
     const stop = new AbortController();
-    const api = { putSessions: async () => null, sessionsStream: async () => new Response("", { status: 200 }) };
+    const api = {
+      putSessions: async () => null,
+      conversations: async () => ({ conversations: [] }),
+      sessionsStream: async () => new Response("", { status: 200 })
+    };
     const running = runAssistantSupervisor({
       api,
       id: VID,
@@ -190,6 +233,7 @@ describe("runAssistantSupervisor", () => {
     let opens = 0;
     const api = {
       putSessions: async () => null,
+      conversations: async () => ({ conversations: [] }),
       sessionsStream: async (_id: string, opts: { signal?: AbortSignal } = {}): Promise<Response> => {
         opens += 1;
         const body = new ReadableStream<Uint8Array>({
@@ -232,6 +276,7 @@ describe("runAssistantSupervisor", () => {
     const stop = new AbortController();
     const api = {
       putSessions: async () => null,
+      conversations: async () => ({ conversations: [] }),
       sessionsStream: async () => new Response("event: wake\ndata: {oops\n\nevent: close\ndata: nope\n\nevent: reconnect\ndata: {}\n\n", { status: 200 })
     };
     const running = runAssistantSupervisor({

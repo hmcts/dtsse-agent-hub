@@ -4,6 +4,7 @@ import {
   agentAccess,
   canActAsVirtualAgent,
   canAgentMessageAgent,
+  canAttachUpload,
   canGrant,
   canLaunchTokenActForAgent,
   canLaunchTokenReadMessage,
@@ -14,15 +15,18 @@ import {
   canPersonMessageAgent,
   canReadMessage,
   canSeeAgentSkills,
+  canSessionUseAttachment,
   canUseCredentialRoutes,
   canViewAgent,
   canViewTranscript,
   canViewVirtualAgent,
   canVirtualAgentStoreCredential,
+  canWriteUpload,
   type Grant,
   grantLevel,
   type MessageRef,
-  replyRoute
+  replyRoute,
+  type UploadRef
 } from "./rules.ts";
 
 const OWNER = "oid-owner";
@@ -442,5 +446,86 @@ describe("canLaunchTokenReadMessage", () => {
 
   it("should refuse every direct when the virtual agent has no sessions yet", () => {
     expect(canLaunchTokenReadMessage([], direct(null, session))).toBe(false);
+  });
+});
+
+describe("the upload rules", () => {
+  const CONVERSATION = "conv-1";
+
+  function upload(overrides: Partial<UploadRef> = {}): UploadRef {
+    return { conversationId: CONVERSATION, ownerOid: OWNER, messageId: null, state: "pending", ...overrides };
+  }
+
+  describe("canWriteUpload", () => {
+    it.each([["pending"], ["stored"]] as const)("should allow the owner to write an upload that is %s", (state) => {
+      expect(canWriteUpload(OWNER, upload({ state }))).toBe(true);
+    });
+
+    it("should refuse anyone but the person who started it, grant or no grant", () => {
+      expect(canWriteUpload(WRITER, upload())).toBe(false);
+      expect(canWriteUpload(STRANGER, upload())).toBe(false);
+    });
+
+    it("should refuse an upload already attached to a message, since there is nothing left to write", () => {
+      expect(canWriteUpload(OWNER, upload({ state: "stored", messageId: "41" }))).toBe(false);
+    });
+
+    it.each([["fetched"], ["expired"]] as const)("should refuse an upload that is %s", (state) => {
+      expect(canWriteUpload(OWNER, upload({ state }))).toBe(false);
+    });
+  });
+
+  describe("canAttachUpload", () => {
+    it("should allow the owner to attach their own finished upload to its own conversation", () => {
+      expect(canAttachUpload(OWNER, CONVERSATION, upload({ state: "stored" }))).toBe(true);
+    });
+
+    it("should refuse an upload of another conversation", () => {
+      expect(canAttachUpload(OWNER, "conv-2", upload({ state: "stored" }))).toBe(false);
+    });
+
+    it("should refuse someone else's upload", () => {
+      expect(canAttachUpload(STRANGER, CONVERSATION, upload({ state: "stored" }))).toBe(false);
+    });
+
+    it("should refuse an upload that is still arriving", () => {
+      expect(canAttachUpload(OWNER, CONVERSATION, upload({ state: "pending" }))).toBe(false);
+    });
+
+    it("should refuse an upload already on a message, so it is attached once", () => {
+      expect(canAttachUpload(OWNER, CONVERSATION, upload({ state: "stored", messageId: "41" }))).toBe(false);
+    });
+  });
+
+  describe("canSessionUseAttachment", () => {
+    const attached = upload({ state: "stored", messageId: "41" });
+
+    it("should let a conversation's session read a part of its own attachment", () => {
+      expect(canSessionUseAttachment(CONVERSATION, attached, "part")).toBe(true);
+    });
+
+    it("should refuse an attachment of another conversation", () => {
+      expect(canSessionUseAttachment("conv-2", attached, "part")).toBe(false);
+    });
+
+    it("should refuse an agent that is not a conversation's at all", () => {
+      expect(canSessionUseAttachment(null, attached, "part")).toBe(false);
+    });
+
+    it("should refuse an upload that never reached a message", () => {
+      expect(canSessionUseAttachment(CONVERSATION, upload({ state: "stored" }), "part")).toBe(false);
+    });
+
+    it.each([["pending"], ["fetched"], ["expired"]] as const)("should refuse reading a part when the upload is %s", (state) => {
+      expect(canSessionUseAttachment(CONVERSATION, upload({ state, messageId: "41" }), "part")).toBe(false);
+    });
+
+    it.each([["stored"], ["fetched"]] as const)("should accept a fetched report when the upload is %s", (state) => {
+      expect(canSessionUseAttachment(CONVERSATION, upload({ state, messageId: "41" }), "fetched")).toBe(true);
+    });
+
+    it.each([["pending"], ["expired"]] as const)("should refuse a fetched report when the upload is %s", (state) => {
+      expect(canSessionUseAttachment(CONVERSATION, upload({ state, messageId: "41" }), "fetched")).toBe(false);
+    });
   });
 });

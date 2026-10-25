@@ -18,6 +18,7 @@ export const POST = agentRoute(async ({ caller, request }) => {
       branch: body.branch,
       host: body.host,
       skills: body.skills,
+      clientFeatures: body.client_features,
       conversationId: body.conversation_id ?? null
     });
     return json({ agent_id: agent.id, name: agent.name });

@@ -13,7 +13,9 @@ import {
   type ConversationView,
   conversationGroups,
   conversationLinks,
-  conversationView
+  conversationView,
+  type UnsentChat,
+  unsentChat
 } from "../assistant/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
@@ -308,6 +310,15 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
     conversations,
     plugins: pluginSettings(assistant)
   };
+}
+
+/**
+ * The new chat the viewer already opened for a file and never sent, for `/assistant` to hand back to that screen.
+ * Its own read rather than part of `openAssistant`, because every other page that renders the sidebar has no use for
+ * it and should not pay for the query.
+ */
+export async function unsentNewChat(viewer: Viewer): Promise<UnsentChat | undefined> {
+  return await unsentChat(prisma, viewer.oid);
 }
 
 /** The sidebar and the assistant's state alone, for pages that must not start or create it. */

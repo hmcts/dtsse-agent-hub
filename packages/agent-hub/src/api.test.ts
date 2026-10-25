@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
 import { type Api, ApiError, createApi, createTokenProvider, DEFAULT_SCOPE, DEFAULT_URL, parseAzToken, type RunAz, requireAzureLogin } from "./api.ts";
+import { CLIENT_FEATURES } from "./features.ts";
 
 const VID = "0f8a6a1e-1234-4000-8000-00000000000a";
 const LAUNCH = `launch-${"q".repeat(16)}`;
@@ -20,7 +21,17 @@ beforeAll(async () => {
   url = await hub.listen();
   api = createApi({ env: {}, baseUrl: url, devUser: DEV_USER });
   pod = createApi({ env: {}, baseUrl: url, launchToken: LAUNCH });
-  agentId = (await api.register({ session_id: "sid-api-test", name: "alice-pcs-api", cwd: "/work", repo: "pcs-api", branch: "main", host: "box" })).agent_id;
+  agentId = (
+    await api.register({
+      session_id: "sid-api-test",
+      name: "alice-pcs-api",
+      cwd: "/work",
+      repo: "pcs-api",
+      branch: "main",
+      host: "box",
+      client_features: [...CLIENT_FEATURES]
+    })
+  ).agent_id;
 });
 
 afterAll(async () => {
@@ -558,8 +569,14 @@ describe("createApi conversations", () => {
 
   it("should read the document back, save it with the base version and give the current one on a conflict", async () => {
     // Arrange
-    const conversationAgent = (await pod.register({ session_id: "sid-api-conv", name: "conv", conversation_id: "0f8a6a1e-0000-4000-8000-00000000000b" }))
-      .agent_id;
+    const conversationAgent = (
+      await pod.register({
+        session_id: "sid-api-conv",
+        name: "conv",
+        conversation_id: "0f8a6a1e-0000-4000-8000-00000000000b",
+        client_features: [...CLIENT_FEATURES]
+      })
+    ).agent_id;
 
     // Act
     const before = await pod.getArtefact(conversationAgent);
@@ -583,6 +600,58 @@ describe("createApi conversations", () => {
     // Assert
     expect(error.status).toBe(404);
     expect(error.body).toEqual({ error: "not a conversation" });
+  });
+
+  it("should list the virtual agent's conversations, which the uploads reconciliation reads", async () => {
+    // Act
+    const { conversations } = await pod.conversations(VID);
+
+    // Assert
+    expect(Array.isArray(conversations)).toBe(true);
+  });
+});
+
+describe("createApi attachments", () => {
+  const UPLOAD = "0f8a6a1e-0000-4000-8000-0000000000a1";
+
+  it("should read one part as raw bytes and report the whole file fetched", async () => {
+    // Arrange
+    hub.attachments.set(UPLOAD, { parts: [new Uint8Array([1, 2, 3]), new Uint8Array([4])], fetched: false });
+
+    // Act
+    const first = await api.attachmentPart(agentId, UPLOAD, 0);
+    const second = await api.attachmentPart(agentId, UPLOAD, 1);
+    await api.attachmentFetched(agentId, UPLOAD);
+
+    // Assert
+    expect([...first]).toEqual([1, 2, 3]);
+    expect([...second]).toEqual([4]);
+    expect(hub.attachments.get(UPLOAD)).toEqual({ parts: [], fetched: true });
+  });
+
+  it("should raise a 404 the caller can tell apart when the part is not there", async () => {
+    // Arrange
+    hub.attachments.set(UPLOAD, { parts: [], fetched: true });
+
+    // Act
+    const error = await api.attachmentPart(agentId, UPLOAD, 0).catch((e) => e);
+
+    // Assert
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(404);
+  });
+
+  it("should carry the body of a refusal that is not JSON into the error", async () => {
+    // Arrange
+    const { fetchImpl } = recordingFetch(() => new Response("<html>bad gateway</html>", { status: 502 }));
+    const stubbed = createApi({ env: {}, baseUrl: "https://hub.example.net", devUser: DEV_USER, fetchImpl });
+
+    // Act
+    const error = await stubbed.attachmentPart(agentId, UPLOAD, 0).catch((e) => e);
+
+    // Assert
+    expect(error.status).toBe(502);
+    expect(error.body.error).toBe("<html>bad gateway</html>");
   });
 });
 

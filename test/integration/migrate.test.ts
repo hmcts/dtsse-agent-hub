@@ -123,6 +123,8 @@ describe("migrate", () => {
       "agent",
       "agent_grant",
       "assistant_conversation",
+      "assistant_upload",
+      "assistant_upload_part",
       "channel",
       "credential",
       "delivery",

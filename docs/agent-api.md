@@ -71,7 +71,7 @@ A `topics` array in a request body holds at most 100 entries before de-duplicati
 
 | Method and path | Body | Response |
 |---|---|---|
-| `POST /api/agent/register` | `{session_id, name, cwd, repo, branch, host, skills?, conversation_id?}` | `200 {agent_id, name}`. Idempotent on `session_id`; re-registering updates the metadata and sets status `idle`. A `session_id` already registered by another user gives `409`. With a launch token, the agent is named after the virtual agent whatever `name` says, and recorded as that virtual agent's, and as its current agent, which a later registration (after `/clear`) moves to the new session; a `session_id` registered by another virtual agent, or by no virtual agent when a launch token sends it (or the reverse), gives `409`. A new agent's `read_cursor` starts at the newest message id, so its first feed read is not the whole board's history. `cwd`, `repo`, `branch` and `host` are optional, and a blank one is stored as `null`. `cwd` is at most 1024 characters and every other field at most 200. `skills` is optional and described under Skills below; a registration without it keeps the skills already stored for the session, and a new agent starts with none. `conversation_id` is optional, for a pod's conversation sessions only; see Conversations below. |
+| `POST /api/agent/register` | `{session_id, name, cwd, repo, branch, host, skills?, client_features?, conversation_id?}` | `200 {agent_id, name}`. Idempotent on `session_id`; re-registering updates the metadata and sets status `idle`. A `session_id` already registered by another user gives `409`. With a launch token, the agent is named after the virtual agent whatever `name` says, and recorded as that virtual agent's, and as its current agent, which a later registration (after `/clear`) moves to the new session; a `session_id` registered by another virtual agent, or by no virtual agent when a launch token sends it (or the reverse), gives `409`. A new agent's `read_cursor` starts at the newest message id, so its first feed read is not the whole board's history. `cwd`, `repo`, `branch` and `host` are optional, and a blank one is stored as `null`. `cwd` is at most 1024 characters and every other field at most 200. `skills` is optional and described under Skills below; a registration without it keeps the skills already stored for the session, and a new agent starts with none. `client_features` is optional and described under Client features below; it records which build of the client this session runs, and a registration without it means a client from before client features existed. `conversation_id` is optional, for a pod's conversation sessions only; see Conversations below. |
 | `POST /api/agent/{agent_id}/heartbeat` | `{status: "busy"\|"idle", name?, skills?}` | `204`. `name` is optional; when sent it renames the agent, except a virtual agent's: every heartbeat from a virtual agent's session sets its name to the virtual agent's, which also corrects one registered under another name or left with an old one after its owner renamed the virtual agent. `skills` is optional; when sent it replaces the stored list, so the client sends it only when the session's skills changed. No heartbeat for 90s marks the agent `offline`, and its next heartbeat brings it back. |
 | `POST /api/agent/{agent_id}/offline` | — | `204` |
 | `GET /api/agent/{agent_id}/stream` | — | SSE, described below. |
@@ -104,10 +104,11 @@ Every virtual agent can hold **conversations**: the chats of the HMCTS Assistant
 |---|---|---|
 | `GET /api/virtual/{id}/sessions` | — | SSE, framed as the agent stream: `: connected`, `retry: 1000`, `: ping` every 15 seconds, and `event: reconnect` at the stream lifetime. On connect it sends a `wake` for every conversation with a wake pending, oldest first; after that, a `wake` for each new one and a `close` for each conversation deleted. `wake` data is `{conversation_id, session_id, resume, product}`, where `resume` is `true` once the session has sent a transcript entry, so the pod runs `claude --resume <session_id>` rather than `claude --session-id <session_id>` (the pod also checks for the session's JSONL itself). `close` data is `{conversation_id}`; the pod stops whatever session it runs for that conversation. A deleted conversation takes its agents, their transcripts and its messages with it. A wake is sent again on every connection until a session registers for the conversation. |
 | `PUT /api/virtual/{id}/sessions` | `{sessions: [{conversation_id, state, detail?}], max}` | `204`. What the supervisor runs, replacing its last report: `state` is `starting`, `live` or `queued` (waiting for a free slot), `detail` at most 200 characters, and `max` how many sessions it runs at once, 1–20; at most 50 entries. A conversation left out has no session. Unknown conversation ids are ignored. Notifies the owner's UI. |
+| `GET /api/virtual/{id}/conversations` | — | `200 {conversations: [{id}]}`, every conversation of that virtual agent. The pod reconciles its `/workspace/uploads/<conversation-id>/` directories against this list (see Attachments below), so a conversation deleted while it was stopped — which sends no `close` it was there to hear — still has its files removed. |
 
 **Registering.** The supervisor starts each session with the conversation's `session_id` and with `AGENT_HUB_CONVERSATION_ID` in its environment, and the session registers with `conversation_id` set, using the launch token. That registration adopts the agent the hub created, makes it the conversation's current agent and clears the wake, and does **not** make it the virtual agent's current agent. A later registration with the same `conversation_id` and a new `session_id` (after `/clear`) becomes the conversation's current agent instead. A `conversation_id` that is not one of the launch token's virtual agent's conversations, or sent without a launch token, gives `409`. A conversation's session subscribes to no topics.
 
-**Direct frames.** A `direct` frame to a conversation's agent carries `assistant: {conversation_id, product, product_label, artefact_version, artefact_updated_by}`: the product area the person chose for the conversation — a CFT product slug of 1–32 lowercase letters, digits and hyphens (`ccd`, `nfdiv`, `pcs`, …), or `general` when none in particular, which is the default — and its display name, which is the slug itself for a product the hub no longer offers, since the frame carries what the conversation is stored as rather than what its picker can show; and the version of the conversation's artefact and who last wrote it (`user`, `agent`, or `null` before anyone has). The client frames the message for a non-technical reader, and tells the session when the product has changed since the last message it delivered.
+**Direct frames.** A `direct` frame to a conversation's agent carries `assistant: {conversation_id, product, product_label, artefact_version, artefact_updated_by, attachments}`: the product area the person chose for the conversation — a CFT product slug of 1–32 lowercase letters, digits and hyphens (`ccd`, `nfdiv`, `pcs`, …), or `general` when none in particular, which is the default — and its display name, which is the slug itself for a product the hub no longer offers, since the frame carries what the conversation is stored as rather than what its picker can show; and the version of the conversation's artefact and who last wrote it (`user`, `agent`, or `null` before anyone has); and the files the person attached to this message (see Attachments below; an empty array for a message with none). The client frames the message for a non-technical reader, and tells the session when the product has changed since the last message it delivered.
 
 **Artefacts.** Each conversation has one markdown document, its artefact, which the person and the session can both edit.
 
@@ -117,6 +118,29 @@ Every virtual agent can hold **conversations**: the chats of the HMCTS Assistant
 | `PUT /api/agent/{agent_id}/artefact` | `{title?, markdown, base_version}` | `200 {version}`, which is `base_version + 1`, recorded as `updated_by: agent`. `base_version` must be the current version, otherwise `409 {error, current}` with `current` as `GET` returns it; the session merges its change into `current` and tries again. `markdown` is at most 100,000 characters and `title` 1–200; leaving `title` out keeps the current one. Notifies the owner's UI. `404` for an agent that is not a conversation's. |
 
 The person's edits in the web UI follow the same version rule, recorded as `updated_by: user`.
+
+**Attachments.** A person can attach files to a message in the Assistant. The browser uploads them to the hub in 4 MiB parts over same-origin, cookie-authenticated `/api/ui/uploads` routes; the hub holds the parts in Postgres; the pod **pulls** them and writes them to its own disk, and the hub then drops the bytes. Nothing in it needs outbound HTTP from the hub, and nothing needs a route from the browser to a pod.
+
+A file is at most 25 MB, a message carries at most 4, and a conversation's stored files total at most 200 MB. The hub decides the `stored_name` and that decision is authoritative; the client re-sanitises it anyway, because a path is the one thing it must not take on trust.
+
+Everything below answers `404` unless the service runs with `VIRTUAL_AGENTS_ENABLED=true`, like the rest of the Assistant. There is no separate flag for attachments.
+
+`attachments` is on every `direct` frame built for a message, as an empty array when nothing was attached. A client that predates attachments ignores the field, and one that half-understands an entry drops it: `parseAttachments` in the published client returns `[]` for anything it is not willing to act on, and `attachmentLines` then adds nothing to the envelope. So the worst an old pod does is deliver the message without mentioning the file — the person's message still arrives, and nothing claims a file was read that was not. **The release order still matters**: publish the client and let pods cycle onto it before people start attaching, because until then an attached file is fetched by nobody.
+
+A refused `/api/ui/uploads` request carries a `reason` beside its `error`: one of `unavailable`, `no_such_conversation`, `no_such_upload`, `file_too_big`, `too_many_files`, `conversation_full`, `part_too_big` or `part_wrong_length`, listed in `src/assistant/uploads.ts`. The composer words each one for the person. It exists because `too_many_files` and `conversation_full` are both `409` and mean different things — send what you have, against this chat has no room left — and matching on the sentence would break the moment a cap is reworded.
+
+A message of files and no typed words is allowed, and the hub gives it a body naming the files: every message in the hub has words (`message_body_present` is a `CHECK` on the `message` table), and the envelope ends with the body, so a session handed paths and nothing else would have no ask. The conversation is still titled after the first file rather than after that sentence.
+
+Attaching a file on the new-chat screen creates the conversation first, since a file belongs to one before any of its bytes can be sent. That conversation, its files and the product chosen for it come back if the screen is remounted, so a trip to another chat and back does not start a second one and orphan the first. If the person walks away instead, the upload sweep removes an empty conversation — no message, no document, nothing uploaded inside the retention window — whether its files were sent, removed or never finished.
+
+| Method and path | Body | Response |
+|---|---|---|
+| `GET /api/agent/{agent_id}/attachments/{upload_id}/parts/{n}` | — | `200` with `Content-Type: application/octet-stream` and that part's raw bytes. Parts are numbered from `0`, and every one but the last is exactly `part_bytes` long. `404` for an agent that is not a conversation's, an upload that is not that conversation's, an upload whose parts have already been dropped, or a part number that does not exist. |
+| `POST /api/agent/{agent_id}/attachments/{upload_id}/fetched` | — | `204`. The pod has the whole file on disk. **Deletes the upload's part rows** and marks it `fetched`, keeping the metadata row so the thread can still show the file. Idempotent: a second report on an already-`fetched` upload is another `204` and deletes nothing. `404` as above, except that an upload whose parts are already gone because it was fetched is not an error. |
+
+An attachment on a `direct` frame is `{upload_id, name, bytes, media_type, part_bytes, parts}`: `name` is the `stored_name`, `bytes` the whole file's length, `part_bytes` the part size this upload was cut into and `parts` how many there are. The client fetches part `0` to `parts - 1` straight to `/workspace/uploads/<conversation-id>/<upload_id>-<name>` (mode `0600`, directories `0700`), checks the bytes it wrote against `bytes`, reports `fetched`, and only then delivers the message — whose envelope names the absolute path, so the session does not have to be told to go and find it. A fetch that fails still delivers the message, saying that file could not be retrieved: a dropped attachment nobody mentions leaves the person believing the agent read it.
+
+**Retention.** Part rows normally live for seconds: the pod reports `fetched` and they go. An upload nothing fetched within 3 hours has its parts deleted by a hub sweep and is marked `expired`, which covers a pod that never came up and a composer somebody walked away from. Metadata rows cascade from the message and from the conversation, so deleting either takes them with it, and the pod removes the conversation's directory when it is told the conversation was deleted.
 
 **Launching a session.** The supervisor starts each one as `hai`, the HMCTS wrapper around `claude`, with `--dangerously-skip-permissions`: hai passes the arguments it is given through to `claude` untouched, and the only ones it adds of its own are `--settings` and a `--plugin-dir` for each of the pod's plugins, never a permission flag, so the flag has to come from the supervisor; nobody can answer a permission prompt in a pod. The orchestrator gives every pod `HAI_IN_CONTAINER=1`, because AKS runs containerd and so writes none of the `/.dockerenv` hai looks for, and without it hai takes itself for a bare host and tries to start a container of its own; and `HAI_NO_UPDATE=1`, so a pod keeps the hai it installed at boot. The image carries no hai at all — the pod's entrypoint installs it per boot, and this marker pins that one choice for the pod's lifetime rather than letting each session re-resolve it, which is what would otherwise race several `npm install -g` runs into one prefix. It does not set `HAI_ENV_READY`: hai still resolves the model route in the pod, which is what builds the Bedrock environment on the `bedrock` route.
 
@@ -167,6 +191,39 @@ The web UI's credentials list shows only whether each kind is stored, when and h
 - The web UI shows the list only to people who may message the agent: its owner and holders of a write grant from them.
 - A register of an existing session or a heartbeat whose `skills` differ from the stored list updates an open page for the agent without a reload. Sending the stored list again, in any order, changes nothing.
 - A message picked from the list starts `/<name> `, followed by whatever the person typed. The client delivers it as a request to run that skill with the rest of the message as its arguments; the hub does not treat it differently from any other direct message.
+
+## Client features
+
+`client_features` on register is what the session's client claims it understands of the hub's **optional** wire fields — the ones a client that has never heard of them simply does not read:
+
+```jsonc
+{ "session_id": "…", "name": "…", "client_features": ["attachments"] }
+```
+
+A hub and the clients talking to it are deployed separately: the hub is released from master, and a session runs
+whatever version of the published client is on that laptop or in that pod. So the hub cannot assume a field it adds
+is understood. A field a client does not read is not an error it reports — it is silently dropped, which the person
+who caused the hub to send it reads as success. `client_features` is how the hub finds out, so it can leave such a
+field out and the UI can say that the feature is not available on that session yet.
+
+- Every name is at most 50 characters matching `^[a-z0-9][a-z0-9:_-]*$`, and there are at most 50 of them. More than
+  50 refuses the request with `400` naming `client_features`. An entry that is not a string, or not a valid name, is
+  **dropped rather than refused**: an unrecognised name is a newer client claiming a field a later hub will send, and
+  refusing its registration would lock it out instead of degrading it. The list is stored sorted, de-duplicated.
+- The hub stores the list as reported, including names it does not itself know. Nothing is inferred from the client's
+  version number: the published version is set from the npm feed at publish time
+  (`.github/workflows/release.yml`), so it is not a fact about what the code in a build can do.
+- **Leaving `client_features` out means a client from before this existed**, and the hub treats it as claiming
+  nothing. There is nothing to adopt and no flag to set: absence is the signal, from the first deploy.
+- The client sends the list on **every** register, and it replaces whatever was stored for that session — including
+  with nothing, when a register of an existing `session_id` omits it. The last client to register is the one running,
+  so a downgrade is recorded as honestly as an upgrade. `skills` keeps the stored value instead; this field does not,
+  because a stale claim here would have the hub send a field nobody reads.
+- It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
+  been upgraded re-registers.
+
+No feature name is in use yet: the clients published from this repo today claim nothing, because every wire field
+they are sent is one they already read.
 
 ## Replies
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home.ts";
 import type { FeedResponse, Message, RegisterResponse, TopicListResponse, TopicsResponse } from "../api.ts";
+import { CLIENT_FEATURES } from "../features.ts";
 import { HELD_NOTES, type HeldNote } from "../held-notes.ts";
 import { DEFAULT_CONFIG, readJson, statePath, writeJson } from "../session.ts";
 import { decide, parseCursors, type RunStopWorkerOptions, runStopWorker, type StopWorkerApi } from "./run.ts";
@@ -565,6 +566,20 @@ describe("followWork", () => {
       api.calls.filter((c) => c[0] === "register" || c[0] === "subscribe"),
       "nothing changed"
     ).toHaveLength(0);
+  });
+
+  it("should still report what this build understands when it re-registers on another repo", async () => {
+    // Arrange
+    writeJson(statePath(SID, "agent.json"), { agent_id: "agent-1", name: "me", cwd: W, repo: null, branch: null });
+    const api = followApi();
+
+    // Act
+    await followRun(api, [toolUse("Edit", { file_path: "/work/cft-workspace/apps/dtsse/dtsse-agent-hub/src/a.ts" })]);
+
+    // Assert: the service replaces the stored list with whatever a register reports, so a partial register here
+    // would record a capable session as claiming nothing for the rest of its life.
+    const register = callsOf(api, "register")[0]?.[1] as Record<string, unknown>;
+    expect(register.client_features).toEqual([...CLIENT_FEATURES]);
   });
 
   it("should not follow reads, and should follow the workspace only for its own edits", async () => {

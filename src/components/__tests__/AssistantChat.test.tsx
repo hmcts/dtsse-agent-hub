@@ -7,7 +7,7 @@ import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import type { ConversationView } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { Composer } from "@/components/assistant/Composer";
-import { EmptyChat, NEW_CHAT_DRAFT } from "@/components/assistant/EmptyChat";
+import { EmptyChat, type EmptyChatActions, NEW_CHAT_DRAFT } from "@/components/assistant/EmptyChat";
 import { draftKey } from "@/components/useDraft";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import type { ConversationPage, TranscriptEntryView } from "@/transcripts/conversation";
@@ -91,6 +91,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     productHistory: [],
     agentId: AGENT,
     agentStatus: "idle",
+    clientFeatures: null,
     sessionState: null,
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
@@ -342,7 +343,7 @@ describe("ChatView sending", () => {
 
     await type("hello assistant");
 
-    expect(send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "hello assistant" });
+    expect(send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "hello assistant", uploadIds: [] });
     expect(within(screen.getByRole("list", { name: "Conversation" })).getByText("hello assistant")).toBeTruthy();
     expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe("");
   });
@@ -524,7 +525,7 @@ describe("Composer", () => {
       fireEvent.keyDown(box, { key: "Enter" });
     });
 
-    expect(onSend).toHaveBeenCalledWith("hello");
+    expect(onSend).toHaveBeenCalledWith("hello", []);
     expect(box.value).toBe("");
   });
 
@@ -564,7 +565,7 @@ describe("Composer", () => {
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
     });
 
-    expect(onSend).toHaveBeenCalledWith("hi");
+    expect(onSend).toHaveBeenCalledWith("hi", []);
   });
 
   it("should not send when the composer is disabled", async () => {
@@ -624,6 +625,15 @@ describe("Composer", () => {
     expect(box.value).toBe("too long a message");
   });
 });
+
+function emptyActions(start: EmptyChatActions["start"]): EmptyChatActions {
+  return {
+    start,
+    open: vi.fn(async () => ({ ok: true as const, id: "opened" })),
+    send: vi.fn(async () => ({ ok: true as const })),
+    setProduct: vi.fn(async () => ({ ok: true as const }))
+  };
+}
 
 /** Unmounting flushes whatever the throttle still owes, so none of these has to wait on its timer. */
 describe("Composer draft", () => {
@@ -712,10 +722,30 @@ describe("Composer draft", () => {
       fireEvent.keyDown(box, { key: "Enter" });
     });
 
-    expect(onSend).toHaveBeenCalledWith("all finished");
+    expect(onSend).toHaveBeenCalledWith("all finished", []);
     expect(box.value).toBe("and the next thought");
     cleanup();
     expect(composer().value).toBe("and the next thought");
+  });
+
+  it("should keep only what was typed past the sent message when the person carried on typing in the same box", async () => {
+    // The box still shows the sent text while the send is in flight, so what is typed next lands on the end of it.
+    // Keeping all of it would leave "all finished" in the box for Enter to deliver a second time.
+    const onSend = vi.fn(async () => {
+      write(screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement, "all finished, and one more thing");
+      return null;
+    });
+    const box = composer({ onSend });
+    write(box, "all finished");
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(box.value).toBe(", and one more thing");
+    expect(stored(CONVERSATION)).toBe(", and one more thing");
+    cleanup();
+    expect(composer().value).toBe(", and one more thing");
   });
 
   it("should leave no draft behind when the box is emptied by hand", () => {
@@ -828,7 +858,7 @@ describe("Composer draft", () => {
 describe("EmptyChat", () => {
   it("should start a conversation with the starter's prompt and the chosen product and go to it when the person picks a starter card", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={start} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     const starter = STARTERS[0];
@@ -842,7 +872,7 @@ describe("EmptyChat", () => {
 
   it("should start with the default product when the person has not chosen one", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={start} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
 
     expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("general");
     await type("my own words");
@@ -853,7 +883,12 @@ describe("EmptyChat", () => {
 
   it("should show the error and let the person try again when a starter cannot start", async () => {
     render(
-      <EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={vi.fn(async () => ({ ok: false as const, error: "not available" }))} />
+      <EmptyChat
+        viewerOid={VIEWER}
+        starters={STARTERS}
+        templates={TEMPLATES}
+        actions={emptyActions(vi.fn(async () => ({ ok: false as const, error: "not available" })))}
+      />
     );
 
     const card = screen.getByRole("button", { name: /Research/ }) as HTMLButtonElement;
@@ -869,11 +904,11 @@ describe("EmptyChat", () => {
   it("should keep what was typed in the new chat when the person goes away and comes back", () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
     const box = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={start} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
     fireEvent.change(box(), { target: { value: "a thought I have not finished" } });
 
     cleanup();
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={start} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
 
     expect(box().value).toBe("a thought I have not finished");
     expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBe("a thought I have not finished");
@@ -881,7 +916,7 @@ describe("EmptyChat", () => {
 
   it("should forget the new chat's draft once the first message has created the conversation", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={start} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
 
     await type("my own words");
 
@@ -889,11 +924,28 @@ describe("EmptyChat", () => {
     expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBeNull();
   });
 
+  it("should leave no sent words in the new chat's draft when the person typed on while the first send was in flight", async () => {
+    // The new chat's draft is not keyed on any conversation, so anything left in it is what the *next* new chat
+    // opens with. Words that have already been delivered must not be among them, or Enter sends them again.
+    const start = vi.fn(async () => {
+      fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "my own words and a second thought" } });
+      return { ok: true as const, id: "abc" };
+    });
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+
+    await type("my own words");
+
+    expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBe(" and a second thought");
+    cleanup();
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe(" and a second thought");
+  });
+
   it("should keep what is in the box when a starter card starts a conversation instead", async () => {
     // The card sends its own words, so what the person typed is still unsent and is still theirs to come back to.
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
     const box = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={start} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
     fireEvent.change(box(), { target: { value: "a thought I have not finished" } });
 
     await act(async () => {
@@ -903,7 +955,7 @@ describe("EmptyChat", () => {
     expect(start).toHaveBeenCalledWith({ product: "general", body: STARTERS[0]?.prompt });
     expect(box().value).toBe("a thought I have not finished");
     cleanup();
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={start} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
     expect(box().value).toBe("a thought I have not finished");
   });
 });

@@ -77,11 +77,13 @@ async function startedAssistant(): Promise<{ id: string; token: string; claimed:
   return { id: assistant.id, token: claimed.launch_token!, claimed };
 }
 
-function register(token: string, sessionId: string, conversationId?: string): Promise<Response> {
+function register(token: string, sessionId: string, conversationId?: string, clientFeatures?: string[]): Promise<Response> {
   return pod(registerRoute.POST, token, "/api/agent/register", {}, "POST", {
     session_id: sessionId,
     name: "session",
-    ...(conversationId === undefined ? {} : { conversation_id: conversationId })
+    ...(conversationId === undefined ? {} : { conversation_id: conversationId }),
+    // Left out unless a test is a newer client: a pod runs whatever client version its image booted with.
+    ...(clientFeatures === undefined ? {} : { client_features: clientFeatures })
   });
 }
 
@@ -391,6 +393,42 @@ describe("conversations", () => {
     // The session keeps the subject it was started in; its label is the slug, since the list has no name for it.
     expect(await assistantFrame(prisma, agentId)).toMatchObject({ product: "other", product_label: "other" });
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.product)).toEqual(["other"]);
+  });
+
+  it("should send a session that claimed no features only the frame fields every client reads", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+    // A client from before client features existed: it reports none, so it claims none. Anything the hub adds to
+    // the frame for a claimed feature would be dropped here without the session, or the person, ever hearing of it.
+    await register(token, sessionId, id);
+
+    const { agentId } = await sessionOf(id);
+
+    expect(await assistantFrame(prisma, agentId)).toEqual({
+      conversation_id: id,
+      product: "general",
+      product_label: "General",
+      artefact_version: 0,
+      artefact_updated_by: null
+    });
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).clientFeatures).toBeNull();
+  });
+
+  it("should offer the conversation what its session's client claimed, so the composer can act on it", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+
+    // Before any session has registered, and after an old client's, the conversation claims nothing.
+    expect((await assistantConversation(VIEWER, id))!.clientFeatures).toBeNull();
+    await register(token, sessionId, id);
+    expect((await assistantConversation(VIEWER, id))!.clientFeatures).toBeNull();
+
+    // The pod is restarted on a newer client, which re-registers the same session.
+    await register(token, sessionId, id, ["attachments"]);
+
+    expect((await assistantConversation(VIEWER, id))!.clientFeatures).toEqual(["attachments"]);
   });
 
   it("should rename and delete a conversation with everything it holds", async () => {

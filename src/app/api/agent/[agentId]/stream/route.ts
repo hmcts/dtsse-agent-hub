@@ -24,12 +24,13 @@ export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
     throw new HttpError(429, "too many open streams for this person");
   }
   // A conversation's session is told the conversation's product and document version with every message, read as
-  // each is sent, so a change of product reaches the next message whether it was queued before or after it.
+  // each is sent, so a change of product reaches the next message whether it was queued before or after it. The
+  // message id goes in too, because the frame also names that message's attachments.
   const withAssistant = async (direct: StreamedDirect): Promise<StreamedDirect> => {
     if (!agent.ownerOnly) {
       return direct;
     }
-    const assistant = await assistantFrame(prisma, agent.id);
+    const assistant = await assistantFrame(prisma, agent.id, BigInt(direct.message.id));
     return assistant === undefined ? direct : { ...direct, assistant: { ...assistant } };
   };
   const body = openSseStream({

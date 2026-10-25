@@ -5,11 +5,13 @@
 import fs from "node:fs";
 import { loadAgent, registerAgent, type StoredAgent } from "./agent.ts";
 import { type Api, ApiError, createApi } from "./api.ts";
+import { fetchAttachments, parseAttachments } from "./assistant/attachments.ts";
 import { peerOf, recordDirect } from "./directs.ts";
 import type { Env } from "./env.ts";
 import {
   type AssistantFrame,
   type AssistantProduct,
+  type AttachmentOutcome,
   assistantEnvelope,
   directEnvelope,
   type EnvelopeOptions,
@@ -162,7 +164,9 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     product: asNullableString(raw.product),
     product_label: asNullableString(raw.product_label),
     artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
-    artefact_updated_by: asNullableString(raw.artefact_updated_by)
+    artefact_updated_by: asNullableString(raw.artefact_updated_by),
+    // Left as it came: `parseAttachments` is what decides which entries this client is willing to act on.
+    attachments: raw.attachments
   };
 }
 
@@ -419,6 +423,24 @@ export async function runBridge({
     }
   }
 
+  /** The files on an assistant frame, written to this pod's disk. Empty for any frame that names none. */
+  async function fetchForDelivery(messageId: string, assistant: AssistantFrame | null): Promise<AttachmentOutcome[]> {
+    const conversationId = assistant?.conversation_id;
+    const agentId = agent?.agent_id;
+    const attachments = parseAttachments(assistant?.attachments);
+    if (attachments.length === 0 || conversationId === undefined || agentId === undefined) {
+      return [];
+    }
+    return await fetchAttachments({
+      api,
+      agentId,
+      conversationId,
+      attachments,
+      env,
+      say: (m) => log(sid, `#${messageId}: ${m}`)
+    });
+  }
+
   async function handleDirect(event: SseEvent): Promise<void> {
     let parsed: unknown;
     try {
@@ -455,9 +477,14 @@ export async function runBridge({
         : ownerReads
           ? ownerDirectEnvelope
           : directEnvelope;
+      // Fetched before the message is delivered, so the envelope can name the absolute path and the session has the
+      // file the moment it reads about it. Nothing here throws: a file that could not be fetched comes back as an
+      // outcome the envelope says so about, because a message delivered with the attachment silently missing would
+      // leave the person believing the agent had read it.
+      const attachments = await fetchForDelivery(message.id, assistant);
       try {
         const skills = skillNames();
-        const content = assistant ? assistantEnvelope(message, assistant, previousProduct, { skills }) : envelope(message, { skills });
+        const content = assistant ? assistantEnvelope(message, assistant, previousProduct, { skills, attachments }) : envelope(message, { skills });
         await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, content);
         remember(message.id);
         if (assistant) {

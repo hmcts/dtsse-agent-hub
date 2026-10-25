@@ -5,6 +5,7 @@ import type { ModelRoute } from "../viewer/identity.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
 import { DEFAULT_PRODUCT, isProduct, productLabel, storedProduct } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
+import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
 
 /**
  * The HMCTS Assistant: each person's one assistant virtual agent, and its conversations.
@@ -184,6 +185,50 @@ export async function listConversations(db: Database, ownerOid: string, limit = 
     take: limit
   });
   return rows.map(toRow);
+}
+
+/**
+ * The owner's newest conversation that exists only because the new-chat screen opened it for a file and nobody has
+ * sent it yet: no message to or from any of its agents, no document, and at least one file finished uploading and
+ * still unclaimed.
+ *
+ * This is what lets that screen survive being remounted. Without it the screen comes back with the draft text and no
+ * conversation, sends, and starts a *second* conversation — leaving the first with the person's file in it for
+ * `sweepUploads` to delete hours later, which is silent data loss.
+ *
+ * The conditions are the same ones `dropAbandoned` sweeps on, minus the retention window, which is deliberate: a
+ * conversation is resumable for exactly as long as it is not yet rubbish. `state = 'stored'` rather than any
+ * unclaimed upload, because a half-uploaded file cannot be sent and there is nothing to hand back.
+ */
+export async function unsentConversation(db: Database, ownerOid: string): Promise<ConversationRow | undefined> {
+  const [row] = await db.$queryRaw<{ id: string }[]>`
+    SELECT c.id::text AS id
+      FROM assistant_conversation c
+     WHERE c.owner_oid = ${ownerOid}
+       AND c.artefact_version = 0
+       AND EXISTS (
+             SELECT 1 FROM assistant_upload u
+              WHERE u.conversation_id = c.id AND u.message_id IS NULL AND u.state = 'stored'
+           )
+       AND NOT EXISTS (
+             SELECT 1 FROM message m
+              WHERE m.target_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = c.id)
+                 OR m.author_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = c.id)
+           )
+     ORDER BY c.created_at DESC
+     LIMIT 1
+  `;
+  return row === undefined ? undefined : await findConversation(db, ownerOid, row.id);
+}
+
+/**
+ * Every conversation id of the virtual agent, so its pod can reconcile its `/workspace/uploads/<id>/` directories
+ * against them. A conversation deleted while the pod was stopped sends no `close`, so without this read its
+ * attachments would stay on the disk until the volume went.
+ */
+export async function conversationIdsOf(db: Database, virtualAgentId: string): Promise<string[]> {
+  const rows = await db.assistantConversation.findMany({ where: { virtualAgentId }, select: { id: true }, orderBy: { id: "asc" } });
+  return rows.map((row) => row.id);
 }
 
 /** Creates the conversation's agent: offline, the assistant's, under a session id the pod will start a session as. */
@@ -447,16 +492,38 @@ export async function writeArtefact(
   });
 }
 
-/** What a direct frame to a conversation's agent carries, or `undefined` for any other agent. */
+/**
+ * What a direct frame to a conversation's agent carries, or `undefined` for any other agent.
+ *
+ * Every field here is one that every published client reads, so the frame is safe to send to any of them. A field
+ * that is not — one only a client claiming a feature reads — must be left out for a client that did not claim it,
+ * or the pod ignores it and the person who asked for it is told nothing. `client_features` on register
+ * (`src/agents/client-features.ts`) is what says which.
+ *
+ * For the first such field, the Assistant's file attachments, that is three lines:
+ *   1. `clientFeatures: true` in the `select` below. It is free: a column of the `agent` row this read already
+ *      fetches, so it widens the projection and adds no statement;
+ *   2. `...(clientSupports(row.clientFeatures, "attachments") ? { attachments } : {})` in the returned frame;
+ *   3. `"attachments"` in `CLIENT_FEATURES` (`packages/agent-hub/src/features.ts`), in the change that teaches
+ *      `parseAssistantFrame` to carry `raw.attachments`.
+ */
 export interface AssistantFrame {
   conversation_id: string;
   product: string;
   product_label: string;
   artefact_version: number;
   artefact_updated_by: "user" | "agent" | null;
+  /**
+   * The files the person attached to this message, for the pod to fetch to its disk before it delivers the message.
+   * Absent from a frame built without a message — a wake rather than a delivery — and an empty array for a message
+   * nothing was attached to. A client that predates attachments ignores the field, which is what makes it safe to
+   * send to every pod: see `parseAttachments` in the published client.
+   */
+  attachments?: FrameAttachment[];
 }
 
-export async function assistantFrame(db: Database, agentId: string): Promise<AssistantFrame | undefined> {
+/** `messageId` is the direct being framed, which is what the attachments hang off. */
+export async function assistantFrame(db: Database, agentId: string, messageId?: bigint): Promise<AssistantFrame | undefined> {
   const row = await db.agent.findUnique({
     where: { id: agentId },
     select: { assistantConversation: { select: { id: true, product: true, ...ARTEFACT_SELECT } } }
@@ -473,7 +540,8 @@ export async function assistantFrame(db: Database, agentId: string): Promise<Ass
     product: conversation.product,
     product_label: productLabel(conversation.product),
     artefact_version: artefact.version,
-    artefact_updated_by: artefact.updatedBy
+    artefact_updated_by: artefact.updatedBy,
+    ...(messageId === undefined ? {} : { attachments: await frameAttachments(db, messageId) })
   };
 }
 
