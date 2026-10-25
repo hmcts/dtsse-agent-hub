@@ -23,6 +23,25 @@ const SAVE_AFTER_MS = 1000;
 /** `draft`: the starting outline of a document nobody has written yet, which an update from the assistant replaces. */
 type SaveState = "draft" | "saved" | "saving" | "unsaved" | "failed";
 
+/** What the toolbar has to say about the last copy or print. A failure is on screen; success only needs announcing. */
+type Notice = "copied" | "copyFailed" | "printFailed";
+
+const NOTICES: Record<Notice, string> = {
+  copied: "Document copied",
+  copyFailed: "Could not copy. Select the text in the document and copy it yourself.",
+  printFailed: "Could not open the print dialogue. Download the markdown instead."
+};
+
+/** How long the tick and its announcement stay after a copy. A failure stays until the next attempt. */
+const COPIED_FOR_MS = 1400;
+
+/**
+ * How long to wait for `afterprint` before taking the sheet out anyway. Browsers that open a dialogue all send the
+ * event; one that silently never does — a WebView, or a blocked dialogue — would otherwise leave the panel believing
+ * a print is still in flight and refusing every later one.
+ */
+const PRINT_GIVE_UP_MS = 60_000;
+
 /** Wraps the selection in `before` and `after`, or puts a list marker at the start of each selected line. */
 export function format(
   text: string,
@@ -40,7 +59,10 @@ export function format(
   return { text: `${text.slice(0, lineStart)}${marked}${text.slice(end)}`, start: lineStart, end: lineStart + marked.length };
 }
 
-/** Windows refuses these names whatever the extension, so a document called one of them downloads under the fallback. */
+/**
+ * Windows refuses these as the part before the first dot, whatever follows it, so `NUL.txt` is as unusable as `NUL`
+ * and both download under the fallback name.
+ */
 const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 /** Long enough for any title worth reading in a downloads list, short enough to leave room in a path. */
 const NAME_LIMIT = 80;
@@ -57,7 +79,8 @@ export function fileName(title: string, extension: string): string {
     .slice(0, NAME_LIMIT)
     // Leading and trailing dots and spaces are stripped by Windows and hide a file on Unix, so they go here instead.
     .replace(/^[\s.]+|[\s.]+$/g, "");
-  return `${cleaned === "" || RESERVED_NAMES.test(cleaned) ? "document" : cleaned}.${extension}`;
+  const stem = cleaned.split(".")[0] ?? "";
+  return `${cleaned === "" || RESERVED_NAMES.test(stem) ? "document" : cleaned}.${extension}`;
 }
 
 /** Downloads `text` as `name`, through the one mechanism a browser gives a page: a blob URL on a clicked anchor. */
@@ -191,7 +214,7 @@ export function ArtefactPanel({
   const [state, setState] = useState<SaveState>(artefact.version === 0 ? "draft" : "saved");
   const [mode, setMode] = useState<"edit" | "preview">(artefact.version === 0 ? "edit" : "preview");
   const [conflict, setConflict] = useState<ArtefactSnapshot | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [printing, setPrinting] = useState(false);
   const sidebarWidth = useSidebarWidth();
   const resize = useResizableWidth({
@@ -207,11 +230,13 @@ export function ArtefactPanel({
   // A save in flight counts: an update arriving before its reply would otherwise replace what is being saved.
   const dirty = state === "unsaved" || state === "failed" || state === "saving";
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /**
    * Printing is what makes a PDF here: the sheet is mounted on the body, where `@media print` in `globals.css` hides
    * the app around it, and the dialogue only opens once that render has committed. `afterprint` takes the sheet back
-   * out, whether the person saved the PDF or cancelled.
+   * out, whether the person saved the PDF or cancelled; the timer and the `catch` are so that a browser which opens
+   * no dialogue cannot strand the panel with a sheet it will never take out.
    */
   useEffect(() => {
     if (!printing) {
@@ -219,8 +244,17 @@ export function ArtefactPanel({
     }
     const done = () => setPrinting(false);
     window.addEventListener("afterprint", done);
-    window.print();
-    return () => window.removeEventListener("afterprint", done);
+    const giveUp = setTimeout(done, PRINT_GIVE_UP_MS);
+    try {
+      window.print();
+    } catch {
+      setNotice("printFailed");
+      done();
+    }
+    return () => {
+      clearTimeout(giveUp);
+      window.removeEventListener("afterprint", done);
+    };
   }, [printing]);
 
   // The assistant, or this person in another tab, saved a newer version.
@@ -276,9 +310,28 @@ export function ArtefactPanel({
       if (timer.current !== null) {
         clearTimeout(timer.current);
       }
+      if (noticeTimer.current !== null) {
+        clearTimeout(noticeTimer.current);
+      }
     },
     []
   );
+
+  /** Says what happened only once it has: a tick and an announcement are the whole acknowledgement, so they must be true. */
+  async function copy(): Promise<void> {
+    if (noticeTimer.current !== null) {
+      clearTimeout(noticeTimer.current);
+      noticeTimer.current = null;
+    }
+    try {
+      await navigator.clipboard.writeText(markdown);
+    } catch {
+      setNotice("copyFailed");
+      return;
+    }
+    setNotice("copied");
+    noticeTimer.current = setTimeout(() => setNotice(null), COPIED_FOR_MS);
+  }
 
   function takeTheirs(current: ArtefactSnapshot): void {
     setTitle(current.title ?? "Untitled document");
@@ -394,20 +447,17 @@ export function ArtefactPanel({
           </div>
           <button
             type="button"
-            onClick={() => {
-              void navigator.clipboard?.writeText(markdown);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1400);
-            }}
+            onClick={() => void copy()}
             aria-label="Copy document"
             className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-field hover:text-asst-text"
           >
             {/* A tick in place of the copy icon says it worked, by shape rather than by colour; the status says it aloud. */}
-            {copied ? <TickIcon /> : <CopyIcon />}
+            {notice === "copied" ? <TickIcon /> : <CopyIcon />}
           </button>
           <DownloadMenu onMarkdown={() => download(markdown, fileName(title, "md"), "text/markdown;charset=utf-8")} onPdf={() => setPrinting(true)} />
-          <span role="status" className="sr-only">
-            {copied ? "Document copied" : ""}
+          {/* A failure has to be read, so it is on screen; the tick already shows a copy worked. */}
+          <span role="status" className={notice === null || notice === "copied" ? "sr-only" : "max-w-[220px] text-[13px] text-asst-error"}>
+            {notice === null ? "" : NOTICES[notice]}
           </span>
         </div>
       </div>

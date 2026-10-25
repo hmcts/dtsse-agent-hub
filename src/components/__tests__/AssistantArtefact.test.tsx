@@ -50,6 +50,13 @@ async function pause(ms = 1000): Promise<void> {
   });
 }
 
+/** The copy only says what happened once the write has settled, so the click has to be flushed. */
+async function copyIt(): Promise<void> {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Copy document" }));
+  });
+}
+
 function saveState(): string {
   return screen
     .getAllByRole("status")
@@ -282,13 +289,13 @@ describe("ArtefactPanel conflicts", () => {
 });
 
 describe("ArtefactPanel tools", () => {
-  it("should copy the markdown and say so when the person copies the document", () => {
+  it("should copy the markdown and say so when the person copies the document", async () => {
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
     render(panel(snapshot()));
 
     expect(screen.queryByText("Document copied")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Copy document" }));
+    await copyIt();
 
     expect(writeText).toHaveBeenCalledWith("# Original");
     expect(screen.getByText("Document copied").getAttribute("role")).toBe("status");
@@ -299,10 +306,75 @@ describe("ArtefactPanel tools", () => {
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn(async () => undefined) } });
     render(panel(snapshot()));
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy document" }));
+    await copyIt();
     await pause(1400);
 
     expect(screen.queryByText("Document copied")).toBeNull();
+  });
+
+  it("should say it could not copy, and not that it did, when the clipboard refuses", async () => {
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn(async () => Promise.reject(new Error("Write permission denied."))) } });
+    render(panel(snapshot()));
+
+    await copyIt();
+
+    expect(screen.queryByText("Document copied")).toBeNull();
+    expect(screen.getByText(/Could not copy/).getAttribute("role")).toBe("status");
+  });
+
+  it("should say it could not copy when the browser offers no clipboard", async () => {
+    vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+    render(panel(snapshot()));
+
+    await copyIt();
+
+    expect(screen.queryByText("Document copied")).toBeNull();
+    expect(screen.getByText(/Could not copy/)).toBeTruthy();
+  });
+
+  it("should take the failure back when a later copy works", async () => {
+    let refuse = true;
+    const writeText = vi.fn(async () => {
+      if (refuse) {
+        throw new Error("Document is not focused.");
+      }
+    });
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    render(panel(snapshot()));
+
+    await copyIt();
+    expect(screen.getByText(/Could not copy/)).toBeTruthy();
+
+    refuse = false;
+    await copyIt();
+
+    expect(screen.queryByText(/Could not copy/)).toBeNull();
+    expect(screen.getByText("Document copied")).toBeTruthy();
+  });
+
+  it("should keep saying it could not copy when the last copy's acknowledgement was still running out", async () => {
+    vi.useFakeTimers();
+    let refuse = false;
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: {
+        writeText: vi.fn(async () => {
+          if (refuse) {
+            throw new Error("Write permission denied.");
+          }
+        })
+      }
+    });
+    render(panel(snapshot()));
+
+    await copyIt();
+    await pause(1000);
+    refuse = true;
+    await copyIt();
+    // When the first copy's 1400ms would have run out, which must not clear what the second one said.
+    await pause(400);
+
+    expect(screen.getByText(/Could not copy/)).toBeTruthy();
   });
 
   it("should name the icon-only buttons for what they do when the toolbar has no labels", () => {
@@ -440,6 +512,16 @@ describe("fileName", () => {
     expect(fileName("com1", "md")).toBe("document.md");
   });
 
+  it("should fall back to document when a reserved name has something after it", () => {
+    expect(fileName("NUL.txt", "md")).toBe("document.md");
+    expect(fileName("COM1.v2", "md")).toBe("document.md");
+  });
+
+  it("should keep a title whose first dotted part is not a reserved name", () => {
+    expect(fileName("Order v2.1", "md")).toBe("Order v2.1.md");
+    expect(fileName("Consultation.NUL", "md")).toBe("Consultation.NUL.md");
+  });
+
   it("should shorten a very long title when it would make an unwieldy filename", () => {
     expect(fileName("w".repeat(200), "md")).toBe(`${"w".repeat(80)}.md`);
   });
@@ -468,6 +550,11 @@ describe("ArtefactPanel download", () => {
     const trigger = screen.getByRole("button", { name: "Download document" });
     fireEvent.click(trigger);
     return trigger;
+  }
+
+  function printIt(): void {
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "PDF (opens your print dialogue)" }));
   }
 
   it("should offer Markdown and PDF when the person opens the download menu", () => {
@@ -604,5 +691,38 @@ describe("ArtefactPanel download", () => {
     fireEvent(window, new Event("afterprint"));
 
     expect(screen.queryByRole("heading", { level: 1, name: "Story" })).toBeNull();
+  });
+
+  it("should let the person print again when the browser never says the dialogue closed", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("print", vi.fn());
+    render(panel(snapshot()));
+
+    printIt();
+    expect(window.print).toHaveBeenCalledTimes(1);
+    await pause(59_999);
+    expect(screen.getByRole("heading", { level: 1, name: "Story" })).toBeTruthy();
+    await pause(1);
+
+    expect(screen.queryByRole("heading", { level: 1, name: "Story" })).toBeNull();
+    printIt();
+    expect(window.print).toHaveBeenCalledTimes(2);
+  });
+
+  it("should say so, and stay usable, when the browser opens no print dialogue", () => {
+    vi.stubGlobal(
+      "print",
+      vi.fn(() => {
+        throw new Error("Printing is not available.");
+      })
+    );
+    render(panel(snapshot()));
+
+    printIt();
+
+    expect(screen.getByText(/Could not open the print dialogue/).getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("heading", { level: 1, name: "Story" })).toBeNull();
+    printIt();
+    expect(window.print).toHaveBeenCalledTimes(2);
   });
 });

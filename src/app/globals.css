@@ -28,32 +28,32 @@ body {
  * the browser's own "Save as PDF" writes the file. These rules make the printed page the document alone: the app's
  * chrome is every other child of the body, and the sheet is outside the theme, so it carries no screen colours.
  *
- * Every selector here is at least as specific as the Tailwind utility it has to beat — `:root` for the `h-full` and
- * `overflow-hidden` on `html` and `body`, and a descendant or child combinator elsewhere — so none of it needs
- * `!important`, which the lint forbids.
+ * Every rule that reaches outside the sheet is scoped with `:has(.asst-print-sheet)`, so pressing Ctrl+P anywhere
+ * else in the app prints what the browser would have printed before any of this existed. Nothing sets a page margin,
+ * for the same reason: the margins are the ones in the person's print dialogue.
+ *
+ * None of it needs `!important`, which the lint forbids: each selector either beats the Tailwind utility it has to
+ * override on specificity, or ties with it and wins on order, because this block sits after `@tailwind utilities`.
  */
 .asst-print-sheet {
   display: none;
 }
 
 @media print {
-  @page {
-    margin: 16mm;
-  }
-
-  :root,
-  :root > body {
+  html:has(.asst-print-sheet),
+  html:has(.asst-print-sheet) > body {
     height: auto;
     overflow: visible;
     background: #fff;
   }
 
-  body > *:not(.asst-print-sheet) {
+  body:has(.asst-print-sheet) > *:not(.asst-print-sheet) {
     display: none;
   }
 
   body > .asst-print-sheet {
     display: block;
+    max-width: 170mm;
     color: #000;
     font-size: 11pt;
     line-height: 1.5;
