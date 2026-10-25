@@ -1,11 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
+import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
+import type { ActionResult } from "@/web/action";
+
+/** What a sidebar row's options menu does. The pages pass the same server actions the chat's own header uses. */
+export interface ConversationActions {
+  rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
+  remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
+}
 
 interface ShellContextValue {
   sidebarOpen: boolean;
@@ -70,6 +79,7 @@ export function AssistantShell({
   activeId,
   hubLink,
   theme = "system",
+  actions,
   children
 }: {
   viewerName: string;
@@ -79,10 +89,14 @@ export function AssistantShell({
   hubLink: boolean;
   /** The appearance the person chose, which the switch in the footer starts from. */
   theme?: Theme;
+  /** Given, every row offers an options menu; left out, the rows are links alone. */
+  actions?: ConversationActions;
   children: React.ReactNode;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(true);
   const [narrow, setNarrow] = useState(false);
+  const [failed, setFailed] = useState<{ id: string; error: string } | null>(null);
   const sidebar = useRef<HTMLElement>(null);
 
   // A collapsed sidebar is out of the tab order. Set on the element itself, since React 18 and the React 19 the app
@@ -171,16 +185,56 @@ export function AssistantShell({
                 <h2 className="px-2.5 pb-1.5 pt-1 text-xs font-medium text-asst-faint">{group.label}</h2>
                 <ul className="flex flex-col gap-0.5">
                   {group.items.map((item) => (
-                    <li key={item.id}>
+                    <li key={item.id} className="group relative">
                       <Link
                         href={`/assistant/${item.id}`}
                         aria-current={item.id === activeId ? "page" : undefined}
-                        className={`block truncate rounded-lg px-2.5 py-2 text-sm ${
+                        className={`block truncate rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
                           item.id === activeId ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
                         }`}
                       >
                         {item.title}
                       </Link>
+                      {actions === undefined ? null : (
+                        // A sibling of the link, not a child: an anchor may not hold a button.
+                        <div className="absolute right-1 top-1 flex">
+                          <ChatMenu
+                            title={item.title}
+                            label={`Options for ${item.title}`}
+                            // The trigger appears when the row is hovered, but a keyboard or touch user never
+                            // hovers, so it is shown as well while the focus is anywhere inside the row, at every
+                            // drawer-width screen, and always on the chat that is open.
+                            triggerClassName={`flex h-7 w-7 items-center justify-center rounded-md text-base leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${
+                              item.id === activeId ? "" : "opacity-0"
+                            }`}
+                            onRename={async (title) => {
+                              const result = await actions.rename({ conversationId: item.id, title });
+                              setFailed(result.ok ? null : { id: item.id, error: result.error });
+                              router.refresh();
+                            }}
+                            onDelete={async () => {
+                              const result = await actions.remove({ conversationId: item.id });
+                              if (!result.ok) {
+                                setFailed({ id: item.id, error: result.error });
+                                return;
+                              }
+                              setFailed(null);
+                              // The open chat's page now has nothing to show, so it has to be left; deleting any
+                              // other only takes a row out of the list.
+                              if (item.id === activeId) {
+                                router.push("/assistant");
+                              } else {
+                                router.refresh();
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
+                      {failed?.id === item.id ? (
+                        <p role="alert" className="px-2.5 pb-1 text-xs text-asst-error">
+                          {failed.error}
+                        </p>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

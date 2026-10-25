@@ -11,6 +11,7 @@ import { useLiveConversation } from "@/components/agents/useLiveConversation";
 import { ArtefactPanel, type SaveArtefactAction } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
+import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
@@ -116,99 +117,6 @@ function ConfirmProduct({ from, to, onCancel, onConfirm }: { from: string; to: s
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ChatMenu({ title, onRename, onDelete }: { title: string; onRename: (title: string) => Promise<void>; onDelete: () => Promise<void> }) {
-  const [open, setOpen] = useState<"closed" | "menu" | "rename" | "delete">("closed");
-  const [draft, setDraft] = useState(title);
-  const ref = useRef<HTMLDivElement>(null);
-  const titleBox = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (open === "rename") {
-      titleBox.current?.focus();
-    }
-  }, [open]);
-  useEffect(() => {
-    if (open === "closed") {
-      return;
-    }
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent ? event.key === "Escape" : !ref.current?.contains(event.target as Node)) {
-        setOpen("closed");
-      }
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [open]);
-  const item = "rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active";
-  return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        type="button"
-        aria-label="Chat options"
-        aria-haspopup="menu"
-        aria-expanded={open !== "closed"}
-        onClick={() => setOpen(open === "closed" ? "menu" : "closed")}
-        className="flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-lg text-asst-muted hover:bg-asst-field hover:text-asst-text"
-      >
-        ⋯
-      </button>
-      {open === "closed" ? null : (
-        <div className="absolute right-0 top-[calc(100%+6px)] z-30 flex w-[260px] flex-col gap-0.5 rounded-xl border border-asst-strong bg-asst-hover p-1.5 shadow-2xl">
-          {open === "menu" ? (
-            <div role="menu" aria-label="Chat options" className="flex flex-col gap-0.5">
-              <button type="button" role="menuitem" className={item} onClick={() => setOpen("rename")}>
-                Rename
-              </button>
-              <button type="button" role="menuitem" className={`${item} text-asst-error`} onClick={() => setOpen("delete")}>
-                Delete chat
-              </button>
-            </div>
-          ) : open === "rename" ? (
-            <form
-              method="post"
-              className="flex flex-col gap-2 p-1"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void onRename(draft).then(() => setOpen("closed"));
-              }}
-            >
-              <label className="text-xs text-asst-faint" htmlFor="chat-title">
-                Chat name
-              </label>
-              <input
-                ref={titleBox}
-                id="chat-title"
-                value={draft}
-                maxLength={200}
-                onChange={(event) => setDraft(event.target.value)}
-                className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-none focus:border-asst-accent-line"
-              />
-              <button type="submit" className="self-end rounded-lg bg-asst-accent px-3 py-1.5 text-sm font-semibold text-asst-ink">
-                Save
-              </button>
-            </form>
-          ) : (
-            <div className="flex flex-col gap-2 p-1">
-              <p className="text-sm">Delete this chat and its document? This cannot be undone.</p>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setOpen("closed")} className="rounded-lg border border-asst-strong px-3 py-1.5 text-sm">
-                  Cancel
-                </button>
-                <button type="button" onClick={() => void onDelete()} className="rounded-lg bg-asst-error px-3 py-1.5 text-sm font-semibold text-asst-ink">
-                  Delete
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
