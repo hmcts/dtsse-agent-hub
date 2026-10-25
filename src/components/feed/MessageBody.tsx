@@ -112,7 +112,18 @@ function renderBlock(block: Block, index: number): ReactNode {
       return <List key={index} list={block} />;
     case "table":
       return <Table key={index} table={block} />;
+    default:
+      return noCaseFor(block);
   }
+}
+
+/**
+ * Every block `parseMarkup` yields must have a case above. `block` is `never` only while the switch is total, so a
+ * block type added to the parser fails the typecheck here rather than rendering as nothing and dropping a message's
+ * content without a trace.
+ */
+function noCaseFor(block: never): never {
+  throw new Error(`MessageBody has no case for the ${(block as Block).type} block`);
 }
 
 /**
