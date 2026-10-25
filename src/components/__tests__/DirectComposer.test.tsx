@@ -225,6 +225,28 @@ describe("DirectComposer skill autocomplete", () => {
     expect(document.activeElement).toBe(field());
   });
 
+  it("should keep the list open and pick nothing when a key the menu does not own is pressed", () => {
+    composer();
+    type("/cft");
+
+    fireEvent.keyDown(field(), { key: "Home" });
+
+    expect(field().getAttribute("aria-expanded")).toBe("true");
+    expect(field().value).toBe("/cft");
+  });
+
+  it("should pick the skill and leave the box focused when an option is reached by keyboard and entered", () => {
+    composer();
+    type("/");
+    const option = screen.getByRole("option", { name: /cft-how-to/ });
+
+    fireEvent.mouseDown(option);
+    fireEvent.keyDown(option, { key: "Enter" });
+
+    expect(field().value).toBe("/cft-how-to ");
+    expect(document.activeElement).toBe(field());
+  });
+
   it("should close the list on Escape and keep it closed until the message changes", () => {
     composer();
     type("/cft");
