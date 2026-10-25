@@ -3,10 +3,11 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TEMPLATES } from "@/assistant/starters";
+import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import type { ConversationView } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { Composer } from "@/components/assistant/Composer";
+import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
 import type { UploadRequest } from "@/components/assistant/uploadClient";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import type { ConversationPage } from "@/transcripts/conversation";
@@ -88,7 +89,7 @@ async function finished(index = 0, uploadId = "u1"): Promise<void> {
 }
 
 function composer(onSend: (text: string, uploadIds: string[]) => Promise<string | null> = vi.fn(async () => null), props: object = {}) {
-  render(<Composer templates={TEMPLATES} onSend={onSend} conversationId="c1" {...props} />);
+  render(<Composer templates={TEMPLATES} onSend={onSend} uploads conversationId="c1" {...props} />);
   return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
 }
 
@@ -157,7 +158,7 @@ describe("Composer attaching", () => {
   });
 
   it("should attach a file dropped on the message pane when the pane is the drop zone", async () => {
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} uploads />);
 
     await act(async () => {
       fireEvent.drop(screen.getByRole("list", { name: "Conversation" }), { dataTransfer: { files: [file("notes.pdf", 100)], types: ["Files"] } });
@@ -241,13 +242,79 @@ describe("Composer attaching", () => {
     expect(uploads.pending).toHaveLength(4);
   });
 
-  it("should offer no file controls when there is no conversation to attach to yet", () => {
-    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} />);
+  it("should offer no file controls when there is no conversation to attach to and none can be opened", () => {
+    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} uploads />);
 
     expect(screen.getByRole("button", { name: "Add a template" })).toBeTruthy();
     expect(screen.queryByLabelText("Files to attach")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
     expect(screen.queryByRole("menuitem", { name: "Attach files" })).toBeNull();
+  });
+});
+
+/**
+ * `ASSISTANT_UPLOADS_ENABLED` is off by default and the routes answer 404 while it is, so the composer must not offer
+ * a control that cannot work. The flag is read on the server and reaches the component as `uploads`, which is why
+ * every one of these renders without it rather than stubbing an environment.
+ */
+describe("Composer with uploads switched off", () => {
+  it("should offer no Attach item in the add menu, even with a conversation to attach to", () => {
+    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} conversationId="c1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
+
+    expect(screen.queryByRole("menuitem", { name: "Attach files" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: /Templates/ })).toBeTruthy();
+  });
+
+  it("should offer no file picker at all", () => {
+    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} conversationId="c1" />);
+
+    expect(screen.queryByLabelText("Files to attach")).toBeNull();
+  });
+
+  it("should leave a pasted screenshot to the box rather than attaching it", () => {
+    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} conversationId="c1" />);
+    const box = screen.getByRole("textbox", { name: "Message" });
+
+    const delivered = fireEvent.paste(box, { clipboardData: { files: [file("", 512, "image/png")] } });
+
+    expect(delivered).toBe(true);
+    expect(uploads.pending).toHaveLength(0);
+  });
+
+  it("should upload nothing when a file is dropped on it", async () => {
+    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} conversationId="c1" />);
+    const box = screen.getByRole("textbox", { name: "Message" });
+
+    await act(async () => {
+      fireEvent.drop(box, { dataTransfer: { files: [file("notes.pdf", 100)], types: ["Files"] } });
+    });
+
+    expect(uploads.pending).toHaveLength(0);
+    expect(chips()).toHaveLength(0);
+  });
+
+  it("should not say files can be dropped while one is dragged over it", () => {
+    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} conversationId="c1" />);
+
+    act(() => {
+      fireEvent.dragOver(screen.getByRole("textbox", { name: "Message" }), { dataTransfer: { files: [], types: ["Files"] } });
+    });
+
+    expect(screen.queryByText("Drop your files here to attach them")).toBeNull();
+  });
+
+  it("should still show the chips of a message that was sent while it was on, since the file did reach the assistant", () => {
+    render(
+      <ChatView
+        view={conversation({ page: page({ messages: [withAttachments([{ name: "letter.pdf", bytes: 2048 }])] }) })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    expect(screen.getByRole("list", { name: "Files sent with this message" })).toBeTruthy();
   });
 });
 
@@ -534,5 +601,244 @@ describe("ChatView attachments in the thread", () => {
     render(<ChatView view={conversation({ page: page({ messages: [message()] }) })} templates={TEMPLATES} actions={actions()} />);
 
     expect(screen.queryByRole("list", { name: "Files sent with this message" })).toBeNull();
+  });
+});
+
+/**
+ * Attaching on the new-chat screen, where there is no conversation yet. A file has to belong to one before any of its
+ * bytes can be sent, so the first attachment opens one and the first message then goes into it.
+ */
+describe("EmptyChat attaching before the chat exists", () => {
+  function emptyActions(overrides: Partial<EmptyChatActions> = {}): EmptyChatActions {
+    return {
+      start: vi.fn(async () => ({ ok: true as const, id: "started" })),
+      open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
+      send: vi.fn(async () => ({ ok: true as const })),
+      setProduct: vi.fn(async () => ({ ok: true as const })),
+      ...overrides
+    };
+  }
+
+  function newChat(acts: EmptyChatActions, uploadsOn = true) {
+    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={acts} uploads={uploadsOn} />);
+    return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+  }
+
+  it("should offer Attach files here too, since handing the assistant a document is a way to open a chat", () => {
+    newChat(emptyActions());
+
+    fireEvent.click(screen.getByRole("button", { name: "Attach a file or add a template" }));
+
+    expect(screen.getByRole("menuitem", { name: "Attach files" })).toBeTruthy();
+  });
+
+  it("should open a conversation with the chosen product and upload into it when the first file is attached", async () => {
+    const acts = emptyActions();
+    newChat(acts);
+    fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
+
+    await choose(file("letter.pdf", 2048));
+
+    expect(acts.open).toHaveBeenCalledWith({ product: "pcs" });
+    expect(request().conversationId).toBe(CONVERSATION);
+    expect(chips()[0]?.textContent).toContain("letter.pdf");
+  });
+
+  it("should stay on the new-chat screen while the file uploads, so nothing typed or in flight is lost", async () => {
+    const box = newChat(emptyActions());
+    fireEvent.change(box, { target: { value: "what does this say?" } });
+
+    await choose(file("letter.pdf", 2048));
+    await finished();
+
+    expect(push).not.toHaveBeenCalled();
+    expect(box.value).toBe("what does this say?");
+  });
+
+  it("should open one conversation for a batch of files rather than one each", async () => {
+    const acts = emptyActions();
+    newChat(acts);
+
+    await choose(file("a.pdf", 10), file("b.pdf", 10), file("c.pdf", 10));
+
+    expect(acts.open).toHaveBeenCalledTimes(1);
+    expect(uploads.pending.map((upload) => upload.request.conversationId)).toEqual([CONVERSATION, CONVERSATION, CONVERSATION]);
+  });
+
+  it("should send the first message into the conversation attaching opened, rather than starting another", async () => {
+    const acts = emptyActions();
+    const box = newChat(acts);
+    fireEvent.change(box, { target: { value: "what does this say?" } });
+    await choose(file("letter.pdf", 2048));
+    await finished();
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(acts.start).not.toHaveBeenCalled();
+    expect(acts.send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "what does this say?", uploadIds: ["u1"] });
+    expect(push).toHaveBeenCalledWith(`/assistant/${CONVERSATION}`);
+  });
+
+  it("should send a message of files and no words, since that is the whole ask", async () => {
+    const acts = emptyActions();
+    newChat(acts);
+    await choose(file("letter.pdf", 2048));
+    await finished();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+
+    expect(acts.send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "", uploadIds: ["u1"] });
+  });
+
+  it("should start a conversation the ordinary way when nothing was attached", async () => {
+    const acts = emptyActions();
+    const box = newChat(acts);
+    fireEvent.change(box, { target: { value: "just words" } });
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(acts.open).not.toHaveBeenCalled();
+    expect(acts.start).toHaveBeenCalledWith({ product: "other", body: "just words" });
+    expect(push).toHaveBeenCalledWith("/assistant/started");
+  });
+
+  it("should carry a later change of product through to the conversation attaching already opened", async () => {
+    const acts = emptyActions();
+    newChat(acts);
+    await choose(file("letter.pdf", 2048));
+    await finished();
+
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "ccd" } });
+    });
+
+    expect(acts.setProduct).toHaveBeenCalledWith({ conversationId: CONVERSATION, product: "ccd" });
+  });
+
+  it("should change the product without a call when nothing has been attached, since there is no conversation yet", async () => {
+    const acts = emptyActions();
+    newChat(acts);
+
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "ccd" } });
+    });
+
+    expect(acts.setProduct).not.toHaveBeenCalled();
+  });
+
+  it("should show the refusal on the chip and offer Try again when the conversation cannot be opened", async () => {
+    const acts = emptyActions({ open: vi.fn(async () => ({ ok: false as const, error: "the HMCTS Assistant is not available on this deployment" })) });
+    newChat(acts);
+
+    await choose(file("letter.pdf", 2048));
+
+    expect(chips()[0]?.textContent).toContain("the HMCTS Assistant is not available on this deployment");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("should try to open the conversation again rather than replay the failure when the person tries again", async () => {
+    const open = vi
+      .fn<EmptyChatActions["open"]>()
+      .mockResolvedValueOnce({ ok: false as const, error: "it did not work" })
+      .mockResolvedValue({ ok: true as const, id: CONVERSATION });
+    newChat(emptyActions({ open }));
+    await choose(file("letter.pdf", 2048));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    });
+
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(request(0).conversationId).toBe(CONVERSATION);
+  });
+
+  it("should offer no Attach item here either when uploads are switched off", () => {
+    newChat(emptyActions(), false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
+
+    expect(screen.queryByRole("menuitem", { name: "Attach files" })).toBeNull();
+  });
+});
+
+describe("EmptyChat when the first message into an opened conversation is refused", () => {
+  it("should keep the person on the new-chat screen with their files and the reason", async () => {
+    const acts: EmptyChatActions = {
+      start: vi.fn(async () => ({ ok: true as const, id: "started" })),
+      open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
+      send: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" })),
+      setProduct: vi.fn(async () => ({ ok: true as const }))
+    };
+    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
+    const box = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "have a look" } });
+    await choose(file("letter.pdf", 2048));
+    await finished();
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("that conversation no longer exists");
+    expect(chips()).toHaveLength(1);
+    expect(box.value).toBe("have a look");
+    expect(push).not.toHaveBeenCalled();
+  });
+});
+
+describe("EmptyChat when the person changes their mind while the chat is being opened", () => {
+  it("should upload nothing once the attachment has been removed, even though the conversation was created", async () => {
+    let settle: (result: { ok: true; id: string }) => void = () => undefined;
+    const acts: EmptyChatActions = {
+      start: vi.fn(async () => ({ ok: true as const, id: "started" })),
+      open: vi.fn(
+        () =>
+          new Promise<{ ok: true; id: string }>((resolve) => {
+            settle = resolve;
+          })
+      ),
+      send: vi.fn(async () => ({ ok: true as const })),
+      setProduct: vi.fn(async () => ({ ok: true as const }))
+    };
+    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
+    await choose(file("letter.pdf", 2048));
+
+    // Removed while the conversation is still being created, so there is no upload id to discard yet.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove letter.pdf" }));
+    });
+    await act(async () => {
+      settle({ ok: true, id: CONVERSATION });
+    });
+
+    expect(uploads.pending).toHaveLength(0);
+    expect(uploads.discarded).toEqual([]);
+    expect(chips()).toHaveLength(0);
+  });
+});
+
+describe("EmptyChat when a later change of product cannot be saved", () => {
+  it("should say so rather than show a product the conversation does not have", async () => {
+    const acts: EmptyChatActions = {
+      start: vi.fn(async () => ({ ok: true as const, id: "started" })),
+      open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
+      send: vi.fn(async () => ({ ok: true as const })),
+      setProduct: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" }))
+    };
+    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
+    await choose(file("letter.pdf", 2048));
+    await finished();
+
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "ccd" } });
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("that conversation no longer exists");
   });
 });

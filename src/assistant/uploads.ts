@@ -121,6 +121,52 @@ export function partIndexOf(value: string, bytes: number): number | undefined {
   return index < partCount(bytes) ? index : undefined;
 }
 
+/**
+ * Why an upload was refused, carried beside the `error` sentence as `reason`.
+ *
+ * The composer words each of these for the person itself, which is what the discriminator is for: two of them are
+ * `409`, and "you have attached four files already" and "this chat has no room left" are different things to be told
+ * and must not be told in the same words. Matching on the sentence instead would break the moment a cap is reworded.
+ */
+export type UploadRefusal =
+  /** The deployment has `ASSISTANT_UPLOADS_ENABLED` off, so there is nothing to attach to. */
+  | "unavailable"
+  | "no_such_conversation"
+  /** No such upload, or someone else's: the two are deliberately indistinguishable. */
+  | "no_such_upload"
+  | "file_too_big"
+  /** `MAX_ATTACHMENTS_PER_MESSAGE` files are already waiting on this conversation's next message. */
+  | "too_many_files"
+  /** The conversation's files would pass `MAX_CONVERSATION_BYTES`, which the browser cannot know in advance. */
+  | "conversation_full"
+  | "part_too_big"
+  | "part_wrong_length";
+
+/** The body of a refused upload request: the contract's `error`, and the reason the composer words. */
+export interface UploadRefusalBody {
+  error: string;
+  reason?: UploadRefusal;
+}
+
+/**
+ * The message a person sends by attaching files and typing nothing at all.
+ *
+ * Every message in the hub has words, and not only by convention: `message_body_present` is a `CHECK (length(body) >
+ * 0)` on the `message` table, which protects every topic post and every agent's direct as well, and is not worth
+ * loosening for this one case. A body of nothing would be no use to the session either — `assistantEnvelope` ends
+ * with it, so the session would be handed paths and no ask.
+ *
+ * So the hub writes the obvious sentence instead. It is true, it is what attaching a file means, and it is what the
+ * thread then shows above the chips.
+ */
+export function attachedBody(names: readonly string[]): string {
+  if (names.length === 0) {
+    return "";
+  }
+  const listed = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `I have attached ${listed}. Please take a look.`;
+}
+
 /** `25 MB`, `4 MiB`: for a refusal a person reads, not a log line. */
 export function describeBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);

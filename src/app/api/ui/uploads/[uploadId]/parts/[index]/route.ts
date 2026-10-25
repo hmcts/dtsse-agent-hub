@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { errorResponse, HttpError, json } from "@/agent-api/http";
 import { readBytes } from "@/assistant/upload-body";
 import { putUploadPart, writableUpload } from "@/assistant/upload-store";
-import { partIndexOf, partLength, uploadsEnabled } from "@/assistant/uploads";
+import { partIndexOf, partLength, type UploadRefusal, uploadsEnabled } from "@/assistant/uploads";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { uiRefusals, uiViewer } from "../../../../request";
@@ -24,14 +24,14 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ upl
     return viewer;
   }
   if (!virtualAgentsEnabled() || !uploadsEnabled()) {
-    return errorResponse(404, "attaching files is not available on this deployment");
+    return errorResponse(404, "attaching files is not available on this deployment", { reason: "unavailable" satisfies UploadRefusal });
   }
   return await uiRefusals("upload part", async () => {
     const params = await context.params;
     const upload = await writableUpload(prisma, viewer.oid, params.uploadId);
     const index = partIndexOf(params.index, upload.bytes);
     if (index === undefined) {
-      throw new HttpError(404, "no such part of this file");
+      throw new HttpError(404, "no such part of this file", { reason: "no_such_upload" satisfies UploadRefusal });
     }
     const data = await readBytes(request, partLength(upload.bytes, index));
     return json(await putUploadPart(prisma, upload, index, data));

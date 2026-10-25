@@ -7,25 +7,19 @@
  *
  * Parts go through `XMLHttpRequest` rather than `fetch`, because `fetch` reports no progress while a request body is
  * being sent in any shipping browser, and a 4 MiB part over VPN takes long enough that a person needs to see it move.
+ *
+ * Every cap here is imported from `src/assistant/uploads.ts`, which is the same module the routes enforce them from.
+ * A second copy of 25 MB would be a client that refuses what the hub accepts, or accepts what the hub refuses, the
+ * first time one of them moved.
  */
 
-/**
- * 4 MiB. Traefik gives one request 30 seconds to arrive, body included
- * (`platops/cnp-flux-config/apps/admin/traefik2/`), and a whole 25 MB file does not reliably arrive in that over VPN.
- * The hub answers `createUpload` with the size it actually wants; this is the fallback and the figure the UI plans
- * progress against.
- */
-export const PART_BYTES = 4 * 1024 * 1024;
-
-/** The largest file the hub accepts. It checks this too; here it buys a decent sentence instead of a failed request. */
-export const MAX_FILE_BYTES = 25 * 1024 * 1024;
-
-/** How many files one message may carry. */
-export const MAX_FILES = 4;
+import { describeBytes, MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_BYTES, MAX_UPLOAD_BYTES, type UploadRefusal } from "@/assistant/uploads";
 
 export interface CreatedUpload {
   uploadId: string;
   partBytes: number;
+  /** How many parts the hub expects, so the browser's own arithmetic can be checked against it before any are sent. */
+  parts: number;
 }
 
 /** One part's place in the file: `[start, end)` of the whole, sent as part `index`. */
@@ -74,20 +68,22 @@ export interface Candidate {
  * over-size or empty file is refused on its own and the others still go.
  */
 export function admitFiles<T extends Candidate>(attached: number, chosen: readonly T[]): { accepted: T[]; refusal: string | null } {
-  if (attached + chosen.length > MAX_FILES) {
-    return { accepted: [], refusal: `You can attach up to ${MAX_FILES} files to a message.` };
+  if (attached + chosen.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+    return { accepted: [], refusal: `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files to a message.` };
   }
-  const tooBig = chosen.filter((file) => file.size > MAX_FILE_BYTES);
+  const tooBig = chosen.filter((file) => file.size > MAX_UPLOAD_BYTES);
   const empty = chosen.filter((file) => file.size === 0);
   const refusals: string[] = [];
   if (tooBig.length > 0) {
-    refusals.push(`${listNames(tooBig.map((file) => file.name))} ${tooBig.length === 1 ? "is" : "are"} too big. Each file must be 25 MB or less.`);
+    refusals.push(
+      `${listNames(tooBig.map((file) => file.name))} ${tooBig.length === 1 ? "is" : "are"} too big. Each file must be ${describeBytes(MAX_UPLOAD_BYTES)} or less.`
+    );
   }
   if (empty.length > 0) {
     refusals.push(`${listNames(empty.map((file) => file.name))} ${empty.length === 1 ? "is" : "are"} empty, so there is nothing to attach.`);
   }
   return {
-    accepted: chosen.filter((file) => file.size > 0 && file.size <= MAX_FILE_BYTES),
+    accepted: chosen.filter((file) => file.size > 0 && file.size <= MAX_UPLOAD_BYTES),
     refusal: refusals.length === 0 ? null : refusals.join(" ")
   };
 }
@@ -114,17 +110,51 @@ export function pastedName(name: string, mediaType: string, at: Date): string {
   return `screenshot-${stamp}.${extension}`;
 }
 
-/** What the hub sends when it refuses, or a sentence built from the status when the body is not its usual shape. */
-function refusalIn(body: string, fallback: string): string {
+/**
+ * What to tell the person for each refusal the routes can give. The hub's own `error` is written for the API contract
+ * and reads as a rule rather than as something that just happened to them; these are the same facts in the second
+ * person, and they say what to do next.
+ *
+ * The two `409`s matter most. They are the same status and the same shape, but "you have four files on this message
+ * already" is a nudge to send and carry on, and "this chat is full" means no further file will ever fit in it — so
+ * they must not be told in the same words.
+ */
+const REFUSALS: Readonly<Record<UploadRefusal, string>> = {
+  unavailable: "Attaching files is not switched on here yet.",
+  no_such_conversation: "This chat no longer exists, so the file could not be attached.",
+  no_such_upload: "This file is no longer being uploaded. Remove it and attach it again.",
+  file_too_big: `This file is too big. Each file must be ${describeBytes(MAX_UPLOAD_BYTES)} or less.`,
+  too_many_files: `This message already has ${MAX_ATTACHMENTS_PER_MESSAGE} files. Send it, then attach the rest to your next one.`,
+  conversation_full: `This chat is full: its files can add up to ${describeBytes(MAX_CONVERSATION_BYTES)} in total. Start a new chat to attach more.`,
+  part_too_big: "Part of the file was rejected as too large. Remove it and attach it again.",
+  part_wrong_length: "The file changed while it was uploading. Remove it and attach it again."
+};
+
+function isRefusal(value: unknown): value is UploadRefusal {
+  return typeof value === "string" && Object.hasOwn(REFUSALS, value);
+}
+
+/**
+ * What to show for a refused request: this module's own sentence for a reason it knows, else the hub's own `error` —
+ * never swallowed into something generic, because a refusal nothing here has wording for is still the truest thing
+ * anyone can tell the person. The status sentence is the last resort, for a body that is not the hub's shape at all
+ * (a gateway's HTML, say).
+ */
+export function refusalIn(body: string, fallback: string): string {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(body);
-    if (typeof parsed === "object" && parsed !== null && "error" in parsed && typeof parsed.error === "string") {
-      return parsed.error;
-    }
+    parsed = JSON.parse(body);
   } catch {
     return fallback;
   }
-  return fallback;
+  if (typeof parsed !== "object" || parsed === null) {
+    return fallback;
+  }
+  const reason = "reason" in parsed ? parsed.reason : undefined;
+  if (isRefusal(reason)) {
+    return REFUSALS[reason];
+  }
+  return "error" in parsed && typeof parsed.error === "string" ? parsed.error : fallback;
 }
 
 function isCreated(body: unknown): body is CreatedUpload {
@@ -134,11 +164,18 @@ function isCreated(body: unknown): body is CreatedUpload {
     "uploadId" in body &&
     typeof body.uploadId === "string" &&
     "partBytes" in body &&
-    typeof body.partBytes === "number"
+    typeof body.partBytes === "number" &&
+    body.partBytes > 0 &&
+    "parts" in body &&
+    typeof body.parts === "number" &&
+    body.parts > 0
   );
 }
 
-/** Claims an upload and its size of part. The hub decides the stored name, so the one sent here is only a request. */
+/**
+ * Claims an upload, its size of part and its number of parts. The hub decides the stored name, so the one sent here is
+ * only a request, and it answers `201` — `response.ok` rather than a status of its own, so a `200` would do as well.
+ */
 export async function createUpload(
   input: { conversationId: string; name: string; size: number; mediaType: string },
   signal?: AbortSignal
@@ -153,11 +190,16 @@ export async function createUpload(
   if (!response.ok) {
     throw new Error(refusalIn(body, `the file could not be attached (${response.status})`));
   }
-  const parsed: unknown = JSON.parse(body);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error("the hub did not say where to send the file");
+  }
   if (!isCreated(parsed)) {
     throw new Error("the hub did not say where to send the file");
   }
-  return { uploadId: parsed.uploadId, partBytes: parsed.partBytes };
+  return { uploadId: parsed.uploadId, partBytes: parsed.partBytes, parts: parsed.parts };
 }
 
 /** Sends one part, reporting the bytes of it that have left the browser. Resolves only once the hub has it. */
@@ -198,8 +240,9 @@ export function putPart(
 }
 
 /**
- * Throws away an upload the person changed their mind about. Best effort: the hub sweeps an upload no message ever
- * claimed, so a failed discard is not worth telling them about.
+ * Throws away an upload the person changed their mind about. The hub answers `204`; nothing here reads the status,
+ * because this is best effort either way — the sweep expires an upload no message ever claimed, so a failed discard
+ * is not worth telling them about.
  */
 export async function discardUpload(uploadId: string): Promise<void> {
   try {
@@ -224,6 +267,11 @@ export interface UploadRequest {
 /**
  * One file, start to finish, as the upload id a message can carry. Parts go one at a time and in order: the hub
  * counts on that, and sending them together would put four parts of the file in memory at once for no gain.
+ *
+ * The hub's `parts` is checked against the ranges worked out here before anything is sent. It cannot replace them —
+ * a part needs its `[start, end)` to slice the blob, which a count does not give — but a disagreement means the two
+ * ends do not have the same file in mind, and the upload would otherwise sit `pending` for ever while the composer
+ * showed it as finished.
  */
 export async function uploadFile(request: UploadRequest): Promise<string> {
   const created = await createUpload(
@@ -231,8 +279,11 @@ export async function uploadFile(request: UploadRequest): Promise<string> {
     request.signal
   );
   request.onCreated?.(created.uploadId);
-  const partBytes = created.partBytes > 0 ? created.partBytes : PART_BYTES;
-  for (const range of partRanges(request.body.size, partBytes)) {
+  const ranges = partRanges(request.body.size, created.partBytes);
+  if (ranges.length !== created.parts) {
+    throw new Error("the hub expects this file in a different number of pieces; remove it and attach it again");
+  }
+  for (const range of ranges) {
     await putPart(created.uploadId, range.index, request.body.slice(range.start, range.end), {
       signal: request.signal,
       onProgress: (loaded) => request.onProgress?.(range.start + loaded)

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { HttpError } from "@/agent-api/http";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import {
   type Artefact,
@@ -16,7 +17,8 @@ import {
   touchConversation,
   writeArtefact
 } from "@/assistant/store";
-import { attachUploads } from "@/assistant/upload-store";
+import { attachUploads, uploadNames } from "@/assistant/upload-store";
+import { attachedBody, uploadsEnabled } from "@/assistant/uploads";
 import { loadThreadMessage, type ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import { directAsPerson } from "@/messages/send";
@@ -36,9 +38,14 @@ const OFF: { ok: false; error: string } = { ok: false, error: "the HMCTS Assista
 
 const MISSING: { ok: false; error: string } = { ok: false, error: "that conversation no longer exists" };
 
-function checkBody(raw: unknown): string | { ok: false; error: string } {
+/**
+ * The message body, or the refusal. A message of files and no words is a message: handing the assistant a document is
+ * a whole ask on its own, and the envelope names the files whether or not anything was typed. Only a message that is
+ * empty of both is nothing to send.
+ */
+function checkBody(raw: unknown, attachments: number): string | { ok: false; error: string } {
   const body = typeof raw === "string" ? raw : "";
-  if (body.trim() === "") {
+  if (body.trim() === "" && attachments === 0) {
     return { ok: false, error: "write something to send" };
   }
   if (body.length > MAX_BODY) {
@@ -55,14 +62,24 @@ function uploadIdsOf(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
 }
 
-async function send(oid: string, conversation: ConversationRow, body: string, uploadIds: readonly string[] = []): Promise<ThreadMessage> {
+async function send(oid: string, conversation: ConversationRow, typed: string, uploadIds: readonly string[] = []): Promise<ThreadMessage> {
   const agentId = await conversationAgent(prisma, conversation);
+  // Read before the insert, because a message of files and no words still needs a body: see `attachedBody`. The
+  // claim inside the transaction below is what actually decides whether these files may be sent.
+  const names = uploadIds.length === 0 ? [] : await uploadNames(prisma, oid, conversation.id, uploadIds);
+  const wordless = typed.trim() === "";
+  if (wordless && names.length === 0) {
+    throw new HttpError(400, "one of those files is not ready to send; remove it and attach it again");
+  }
+  const body = wordless ? attachedBody(names) : typed;
   // Attached inside the message's own transaction: an id that is not this person's, is not this conversation's, is
   // not finished uploading, or is already on another message refuses the whole send, and no message is written.
   const sent = await directAsPerson(prisma, oid, agentId, body, async (tx, messageId) => {
     await attachUploads(tx, { viewerOid: oid, conversationId: conversation.id, messageId, uploadIds });
   });
-  await touchConversation(prisma, conversation, body);
+  // A conversation opened by attaching a file and never typed in would otherwise be titled after the sentence written
+  // for the person rather than after the only thing they actually chose, which is the file.
+  await touchConversation(prisma, conversation, wordless ? (names[0] ?? body) : typed);
   const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
   if (agent?.status !== "busy" && agent?.status !== "idle") {
     await requestWake(prisma, conversation);
@@ -78,12 +95,35 @@ export async function startConversation(input: { product: unknown; body: unknown
       return OFF;
     }
     const viewer = await requireViewer();
-    const body = checkBody(input.body);
+    const body = checkBody(input.body, 0);
     if (typeof body !== "string") {
       return body;
     }
     const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
     await send(viewer.oid, conversation, body);
+    revalidatePath("/assistant");
+    return { ok: true, id: conversation.id };
+  });
+}
+
+/**
+ * An empty conversation, for the new-chat screen to attach a file to.
+ *
+ * A file has to belong to a conversation before any of its bytes can be sent: the caps are per conversation, the row
+ * lock the caps are read under is the conversation's, and `assistant_upload.conversation_id` is what the pod's
+ * directory is named after. So attaching on the new-chat screen creates the conversation first, and the person's
+ * first message then goes into it rather than starting another.
+ *
+ * It leaves an empty conversation behind if they attach and walk away. `sweepUploads` removes one whose only content
+ * was an attachment nobody ever sent, a few hours later — see the note there for why it is swept rather than left.
+ */
+export async function openConversation(input: { product: unknown }): Promise<ActionResult<{ id: string }>> {
+  return await runAction<{ id: string }>("open conversation", async () => {
+    if (!virtualAgentsEnabled() || !uploadsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
   });
@@ -100,7 +140,8 @@ export async function sendAssistantMessage(input: {
       return OFF;
     }
     const viewer = await requireViewer();
-    const body = checkBody(input.body);
+    const uploadIds = uploadIdsOf(input.uploadIds);
+    const body = checkBody(input.body, uploadIds.length);
     if (typeof body !== "string") {
       return body;
     }
@@ -108,7 +149,7 @@ export async function sendAssistantMessage(input: {
     if (conversation === undefined) {
       return MISSING;
     }
-    return { ok: true, message: await send(viewer.oid, conversation, body, uploadIdsOf(input.uploadIds)) };
+    return { ok: true, message: await send(viewer.oid, conversation, body, uploadIds) };
   });
 }
 

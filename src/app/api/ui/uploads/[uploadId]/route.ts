@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { errorResponse, noContent } from "@/agent-api/http";
 import { discardUpload, writableUpload } from "@/assistant/upload-store";
-import { uploadsEnabled } from "@/assistant/uploads";
+import { type UploadRefusal, uploadsEnabled } from "@/assistant/uploads";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { uiRefusals, uiViewer } from "../../request";
@@ -16,7 +16,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     return viewer;
   }
   if (!virtualAgentsEnabled() || !uploadsEnabled()) {
-    return errorResponse(404, "attaching files is not available on this deployment");
+    return errorResponse(404, "attaching files is not available on this deployment", { reason: "unavailable" satisfies UploadRefusal });
   }
   return await uiRefusals("discard upload", async () => {
     const { uploadId } = await context.params;

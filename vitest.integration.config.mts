@@ -9,7 +9,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
-      "server-only": fileURLToPath(new URL("./test/integration/server-only-stub.ts", import.meta.url))
+      "server-only": fileURLToPath(new URL("./test/integration/server-only-stub.ts", import.meta.url)),
+      // The published client's own source, so the one test that crosses the two halves of the Assistant's uploads
+      // runs the pod's real parser, fetcher and envelope against the hub's real routes. An alias rather than a path
+      // import because `tsconfig.json` excludes `packages` on purpose; `test/integration/pod-client.d.ts` says why
+      // and declares the surface.
+      "pod-client": fileURLToPath(new URL("./packages/agent-hub/src/index.ts", import.meta.url))
     }
   },
   test: {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  attachedBody,
   DEFAULT_MEDIA_TYPE,
   describeBytes,
   fileNameOf,
@@ -164,5 +165,23 @@ describe("describeBytes", () => {
     expect(describeBytes(MAX_UPLOAD_BYTES)).toBe("25 MB");
     expect(describeBytes(PART_BYTES)).toBe("4 MB");
     expect(describeBytes(1_500_000)).toBe("1.4 MB");
+  });
+});
+
+describe("attachedBody", () => {
+  it("should name the one file when a message carries a single one", () => {
+    expect(attachedBody(["letter.pdf"])).toBe("I have attached letter.pdf. Please take a look.");
+  });
+
+  it("should join two files with and", () => {
+    expect(attachedBody(["letter.pdf", "scan.png"])).toBe("I have attached letter.pdf and scan.png. Please take a look.");
+  });
+
+  it("should comma-separate all but the last when a message carries several", () => {
+    expect(attachedBody(["a.pdf", "b.pdf", "c.pdf", "d.pdf"])).toBe("I have attached a.pdf, b.pdf, c.pdf and d.pdf. Please take a look.");
+  });
+
+  it("should give nothing when there are no files, so the caller refuses the send rather than write an empty message", () => {
+    expect(attachedBody([])).toBe("");
   });
 });

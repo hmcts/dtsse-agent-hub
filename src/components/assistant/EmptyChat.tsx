@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { DEFAULT_PRODUCT } from "@/assistant/products";
 import type { Starter, Template } from "@/assistant/starters";
 import { SidebarToggle } from "@/components/assistant/AssistantShell";
@@ -10,23 +10,95 @@ import { ProductSelect } from "@/components/assistant/ProductSelect";
 import type { ActionResult } from "@/web/action";
 
 export type StartAction = (input: { product: unknown; body: unknown }) => Promise<ActionResult<{ id: string }>>;
+export type OpenAction = (input: { product: unknown }) => Promise<ActionResult<{ id: string }>>;
+export type SendAction = (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult>;
+export type ProductAction = (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
+
+export interface EmptyChatActions {
+  /** A conversation and its first message in one go, for the ordinary case where nothing was attached. */
+  start: StartAction;
+  /** An empty conversation, for a file to belong to before any of its bytes can be sent. */
+  open: OpenAction;
+  /** The first message, when attaching has already created the conversation. */
+  send: SendAction;
+  /** The product, when it is changed after attaching has already created the conversation. */
+  setProduct: ProductAction;
+}
 
 /**
  * A new chat: what the person is working on, as a starter card or their own words, and which product it is about.
- * The first message creates the conversation, and the page moves to it.
+ *
+ * Attaching a file is a plausible opening move — handing the assistant a scanned letter and asking what it says — so
+ * the Attach item is offered here as well as in a chat that already exists. A file has to belong to a conversation
+ * before any of its bytes can be sent, so the first attachment creates one, and the first message then goes into it
+ * rather than starting another. Everything else is unchanged: the conversation is created with one more round trip
+ * that the chip's own progress bar already covers, and the page still moves to `/assistant/{id}` on send, not on
+ * attach — moving at attach would unmount this composer and lose both the part in flight and whatever was typed.
  */
-export function EmptyChat({ starters, templates, start }: { starters: readonly Starter[]; templates: readonly Template[]; start: StartAction }) {
+export function EmptyChat({
+  starters,
+  templates,
+  actions,
+  uploads = false
+}: {
+  starters: readonly Starter[];
+  templates: readonly Template[];
+  actions: EmptyChatActions;
+  uploads?: boolean;
+}) {
   const router = useRouter();
   const [product, setProduct] = useState(DEFAULT_PRODUCT);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
 
-  async function begin(body: string): Promise<string | null> {
-    const result = await start({ product, body });
+  // The conversation attaching created, and the request that created it. The promise is held rather than the id so
+  // that four files chosen at once share one conversation: each calls `openConversation`, and all but the first wait
+  // on the call already in flight instead of creating another chat.
+  const opening = useRef<Promise<string> | null>(null);
+  const opened = useRef<string | null>(null);
+
+  async function openConversation(): Promise<string> {
+    opening.current ??= (async () => {
+      const result = await actions.open({ product });
+      if (!result.ok) {
+        // Cleared so the next attempt tries again rather than replaying this failure for the rest of the session.
+        opening.current = null;
+        throw new Error(result.error);
+      }
+      opened.current = result.id;
+      return result.id;
+    })();
+    return await opening.current;
+  }
+
+  async function changeProduct(next: string): Promise<void> {
+    setProduct(next);
+    const conversation = opened.current;
+    if (conversation === null) {
+      // Nothing has been attached, so there is no conversation yet and the first message carries the product.
+      return;
+    }
+    // Attaching created the conversation with the product chosen at the time, so a later change has to reach it, and
+    // a change that did not land is said so rather than left as a control showing a value nothing has.
+    const result = await actions.setProduct({ conversationId: conversation, product: next });
+    setError(result.ok ? null : result.error);
+  }
+
+  async function begin(body: string, uploadIds: string[] = []): Promise<string | null> {
+    const conversation = opened.current;
+    if (conversation === null) {
+      const result = await actions.start({ product, body });
+      if (!result.ok) {
+        return result.error;
+      }
+      router.push(`/assistant/${result.id}`);
+      return null;
+    }
+    const result = await actions.send({ conversationId: conversation, body, uploadIds });
     if (!result.ok) {
       return result.error;
     }
-    router.push(`/assistant/${result.id}`);
+    router.push(`/assistant/${conversation}`);
     return null;
   }
 
@@ -64,7 +136,7 @@ export function EmptyChat({ starters, templates, start }: { starters: readonly S
               </li>
             ))}
           </ul>
-          <ProductSelect value={product} onChange={setProduct} />
+          <ProductSelect value={product} onChange={(next) => void changeProduct(next)} />
           {error === null ? null : (
             <p role="alert" className="text-[13px] text-asst-error">
               {error}
@@ -74,7 +146,7 @@ export function EmptyChat({ starters, templates, start }: { starters: readonly S
       </div>
       <div className="shrink-0 px-4 pb-3.5">
         <div className="mx-auto max-w-[760px]">
-          <Composer templates={templates} onSend={begin} disabled={starting} />
+          <Composer templates={templates} onSend={begin} disabled={starting} uploads={uploads} openConversation={openConversation} />
         </div>
       </div>
     </>

@@ -13,7 +13,8 @@ import {
   PART_BYTES,
   partCount,
   partLength,
-  storedNameOf
+  storedNameOf,
+  type UploadRefusal
 } from "./uploads.ts";
 
 /**
@@ -101,7 +102,7 @@ export async function findUpload(db: Database, id: string): Promise<UploadRow | 
 
 export class UploadNotFound extends HttpError {
   constructor() {
-    super(404, "no such upload");
+    super(404, "no such upload", { reason: "no_such_upload" satisfies UploadRefusal });
   }
 }
 
@@ -130,7 +131,7 @@ export interface CreatedUpload {
  */
 export async function createUpload(prisma: PrismaClient, upload: NewUpload): Promise<CreatedUpload> {
   if (!isUploadSize(upload.size)) {
-    throw new HttpError(400, `a file is 1 byte to ${describeBytes(MAX_UPLOAD_BYTES)}`);
+    throw new HttpError(400, `a file is 1 byte to ${describeBytes(MAX_UPLOAD_BYTES)}`, { reason: "file_too_big" satisfies UploadRefusal });
   }
   const size = upload.size;
   const mediaType = isMediaType(upload.mediaType) ? upload.mediaType.toLowerCase() : DEFAULT_MEDIA_TYPE;
@@ -138,7 +139,7 @@ export async function createUpload(prisma: PrismaClient, upload: NewUpload): Pro
     await tx.$executeRaw`SELECT 1 FROM assistant_conversation WHERE id = ${upload.conversationId}::uuid FOR UPDATE`;
     const pending = await tx.assistantUpload.count({ where: { conversationId: upload.conversationId, messageId: null, state: { in: ["pending", "stored"] } } });
     if (pending >= MAX_ATTACHMENTS_PER_MESSAGE) {
-      throw new HttpError(409, `a message carries at most ${MAX_ATTACHMENTS_PER_MESSAGE} files`);
+      throw new HttpError(409, `a message carries at most ${MAX_ATTACHMENTS_PER_MESSAGE} files`, { reason: "too_many_files" satisfies UploadRefusal });
     }
     const [total] = await tx.$queryRaw<{ bytes: bigint }[]>`
       SELECT COALESCE(sum(bytes), 0)::bigint AS bytes
@@ -146,7 +147,9 @@ export async function createUpload(prisma: PrismaClient, upload: NewUpload): Pro
        WHERE conversation_id = ${upload.conversationId}::uuid AND state <> 'expired'
     `;
     if (Number(total?.bytes ?? 0) + size > MAX_CONVERSATION_BYTES) {
-      throw new HttpError(409, `this conversation's files add up to at most ${describeBytes(MAX_CONVERSATION_BYTES)}`);
+      throw new HttpError(409, `this conversation's files add up to at most ${describeBytes(MAX_CONVERSATION_BYTES)}`, {
+        reason: "conversation_full" satisfies UploadRefusal
+      });
     }
     const created = await tx.assistantUpload.create({
       data: {
@@ -173,7 +176,7 @@ export async function createUpload(prisma: PrismaClient, upload: NewUpload): Pro
 export async function putUploadPart(prisma: PrismaClient, upload: UploadRow, index: number, data: UploadBytes): Promise<{ received: number }> {
   const expected = partLength(upload.bytes, index);
   if (data.byteLength !== expected) {
-    throw new HttpError(400, `part ${index} of this file is ${expected} bytes`);
+    throw new HttpError(400, `part ${index} of this file is ${expected} bytes`, { reason: "part_wrong_length" satisfies UploadRefusal });
   }
   return await prisma.$transaction(async (tx) => {
     // The browser sends parts in parallel, and two of them counting what has arrived at once would each see a
@@ -248,6 +251,26 @@ export async function attachUploads(
       throw new HttpError(409, "one of those files was sent on another message; remove it and attach it again");
     }
   }
+}
+
+/**
+ * The names of the uploads a send names, in the order it names them, for wording a message the person left empty.
+ *
+ * Read before the message is written, because the body has to be decided before the insert, while `attachUploads` is
+ * what claims them inside its transaction. Nothing is trusted to this: an id that is not ready, not this person's or
+ * not this conversation's is simply absent, and the caller refuses the send exactly as the claim would have.
+ */
+export async function uploadNames(db: Database, viewerOid: string, conversationId: string, uploadIds: readonly string[]): Promise<string[]> {
+  const ids = uploadIds.filter((id) => UUID.test(id));
+  const rows = await db.assistantUpload.findMany({
+    where: { id: { in: ids }, ownerOid: viewerOid, conversationId, messageId: null, state: "stored" },
+    select: { id: true, fileName: true }
+  });
+  const named = new Map(rows.map((row) => [row.id, row.fileName]));
+  return uploadIds.flatMap((id) => {
+    const name = named.get(id);
+    return name === undefined ? [] : [name];
+  });
 }
 
 /** The attachments of a message, oldest first, for the thread. Empty for a message with none. */

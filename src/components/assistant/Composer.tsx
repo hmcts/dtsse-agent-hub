@@ -32,8 +32,10 @@ function percentSent(file: Attachment): number {
  * or on `dropZone` — the message pane — so the target is large. `onFocus` lets the page warm a session up before they
  * have finished.
  *
- * Attaching needs a conversation to attach to, so the file controls appear only once `conversationId` is known; a new
- * chat has no conversation until its first message creates one.
+ * Attaching needs two things, and offers nothing at all without either. `uploads` is the deployment's
+ * `ASSISTANT_UPLOADS_ENABLED`, read on the server and passed down: with it off the routes answer 404, so offering an
+ * Attach item would be offering something that cannot work. And a file needs a conversation to belong to — either
+ * `conversationId`, or `openConversation` for the new-chat screen, where attaching is what creates one.
  */
 export function Composer({
   templates,
@@ -41,7 +43,9 @@ export function Composer({
   onFocus,
   disabled = false,
   initialText = "",
+  uploads = false,
   conversationId,
+  openConversation,
   dropZone
 }: {
   templates: readonly Template[];
@@ -50,7 +54,11 @@ export function Composer({
   onFocus?: () => void;
   disabled?: boolean;
   initialText?: string;
+  /** Whether this deployment carries files at all. Off by default, as the flag itself is. */
+  uploads?: boolean;
   conversationId?: string;
+  /** Answers the conversation to attach to, creating it if it does not exist yet. Called once per attached file. */
+  openConversation?: () => Promise<string>;
   dropZone?: RefObject<HTMLElement | null>;
 }) {
   const [text, setText] = useState(initialText);
@@ -100,7 +108,7 @@ export function Composer({
     };
   }, [menu]);
 
-  const attachable = conversationId !== undefined && !disabled;
+  const attachable = uploads && (conversationId !== undefined || openConversation !== undefined) && !disabled;
 
   function update(change: (current: Attachment[]) => Attachment[]): void {
     held.current = change(held.current);
@@ -117,14 +125,21 @@ export function Composer({
 
   async function run(key: string): Promise<void> {
     const file = held.current.find((item) => item.key === key);
-    if (file === undefined || conversationId === undefined) {
+    if (file === undefined) {
       return;
     }
     const controller = new AbortController();
     aborts.current.set(key, controller);
     try {
+      // On the new-chat screen there is no conversation until this call makes one, and a file cannot be sent before
+      // it has one to belong to. A refusal here reaches the chip as the reason it could not be attached, with Try
+      // again beside it, which is the same path as a part that failed — nothing new for the person to learn.
+      const conversation = conversationId ?? (await openConversation?.());
+      if (conversation === undefined || controller.signal.aborted) {
+        return;
+      }
       const uploadId = await uploadFile({
-        conversationId,
+        conversationId: conversation,
         name: file.name,
         mediaType: file.mediaType,
         body: file.body,

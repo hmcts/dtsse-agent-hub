@@ -249,7 +249,17 @@ function useNarrow(): boolean {
  * a change to the conversation itself (its product, title, document or session) re-renders the page, which hands
  * down the new `view`.
  */
-export function ChatView({ view, templates, actions }: { view: ConversationView; templates: readonly Template[]; actions: ChatActions }) {
+export function ChatView({
+  view,
+  templates,
+  actions,
+  uploads = false
+}: {
+  view: ConversationView;
+  templates: readonly Template[];
+  actions: ChatActions;
+  uploads?: boolean;
+}) {
   const router = useRouter();
   const arrivals = useAnnouncer("replies");
   const live = useLiveConversation(view.agentId, view.page, { onReply: () => arrivals.announce("New reply from the assistant") });
@@ -391,6 +401,7 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
             <Composer
               templates={templates}
               onSend={send}
+              uploads={uploads}
               conversationId={view.id}
               dropZone={scroller.ref}
               onFocus={() => {

@@ -1,5 +1,6 @@
 import { HttpError } from "../agent-api/http.ts";
 import type { UploadBytes } from "./upload-store.ts";
+import type { UploadRefusal } from "./uploads.ts";
 
 /**
  * The one request body in the service that is read as bytes rather than text.
@@ -38,5 +39,5 @@ export async function readBytes(request: Request, maxBytes: number): Promise<Upl
 }
 
 function tooLarge(maxBytes: number): HttpError {
-  return new HttpError(413, `this part of the file is larger than ${maxBytes} bytes`);
+  return new HttpError(413, `this part of the file is larger than ${maxBytes} bytes`, { reason: "part_too_big" satisfies UploadRefusal });
 }

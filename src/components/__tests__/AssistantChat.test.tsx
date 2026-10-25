@@ -7,7 +7,7 @@ import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import type { ConversationView } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { Composer } from "@/components/assistant/Composer";
-import { EmptyChat } from "@/components/assistant/EmptyChat";
+import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import type { ConversationPage, TranscriptEntryView } from "@/transcripts/conversation";
 
@@ -563,10 +563,19 @@ describe("Composer", () => {
   });
 });
 
+function emptyActions(start: EmptyChatActions["start"]): EmptyChatActions {
+  return {
+    start,
+    open: vi.fn(async () => ({ ok: true as const, id: "opened" })),
+    send: vi.fn(async () => ({ ok: true as const })),
+    setProduct: vi.fn(async () => ({ ok: true as const }))
+  };
+}
+
 describe("EmptyChat", () => {
   it("should start a conversation with the starter's prompt and the chosen product and go to it when the person picks a starter card", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} start={start} />);
+    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     const starter = STARTERS[0];
@@ -580,7 +589,7 @@ describe("EmptyChat", () => {
 
   it("should start with the default product when the person has not chosen one", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} start={start} />);
+    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
 
     expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("other");
     await type("my own words");
@@ -590,7 +599,7 @@ describe("EmptyChat", () => {
   });
 
   it("should show the error and let the person try again when a starter cannot start", async () => {
-    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} start={vi.fn(async () => ({ ok: false as const, error: "not available" }))} />);
+    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn(async () => ({ ok: false as const, error: "not available" })))} />);
 
     const card = screen.getByRole("button", { name: /Research/ }) as HTMLButtonElement;
     await act(async () => {

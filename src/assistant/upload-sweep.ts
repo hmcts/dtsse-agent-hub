@@ -1,7 +1,9 @@
-import type { PrismaClient } from "../store/prisma.ts";
+import { notify } from "../realtime/notify.ts";
+import type { Database, PrismaClient } from "../store/prisma.ts";
 
 /**
- * The backstop that stops Postgres filling with upload bytes.
+ * The backstop that stops Postgres filling with upload bytes, and that tidies away the conversations attaching a file
+ * on the new-chat screen creates and nobody sends.
  *
  * Normally a pod reports an attachment fetched within seconds of the message and `reportFetched` deletes its parts.
  * This covers the cases where that never happens: a pod that could not start, a browser that uploaded and then closed
@@ -33,6 +35,8 @@ export interface UploadSweepResult {
   expired: number;
   /** Part rows deleted with them. */
   parts: number;
+  /** Conversations deleted because attaching a file was the only thing that ever happened in them. */
+  conversations: number;
 }
 
 /**
@@ -58,13 +62,60 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
        LIMIT ${batch}::int
     `;
     const ids = stale.map((row) => row.id);
-    if (ids.length === 0) {
-      return { expired: 0, parts: 0 };
+    let expired = 0;
+    let parts = 0;
+    if (ids.length > 0) {
+      parts = (await tx.assistantUploadPart.deleteMany({ where: { uploadId: { in: ids } } })).count;
+      expired = (await tx.assistantUpload.updateMany({ where: { id: { in: ids } }, data: { state: "expired", updatedAt: new Date() } })).count;
     }
-    const parts = await tx.assistantUploadPart.deleteMany({ where: { uploadId: { in: ids } } });
-    const expired = await tx.assistantUpload.updateMany({ where: { id: { in: ids } }, data: { state: "expired", updatedAt: new Date() } });
-    return { expired: expired.count, parts: parts.count };
+    return { expired, parts, conversations: await dropAbandoned(tx, retentionHours, batch) };
   });
+}
+
+/**
+ * Deletes the conversations that exist only because someone attached a file on the new-chat screen and never sent it.
+ *
+ * Attaching there has to create the conversation first — a file belongs to one before any of its bytes can be sent —
+ * so walking away at that point leaves an empty chat behind. It is not harmless: the sidebar shows it as a second
+ * "New chat" the person did not make and cannot account for, and it carries a pre-created `agent` row with it. So it
+ * is swept rather than left.
+ *
+ * The conditions are what make this safe to run unattended, and each is load-bearing:
+ *
+ * - **It has uploads.** Nothing else in the service creates a conversation without a message, so this limits the
+ *   sweep to exactly what attaching produced. An empty conversation from any other cause is not its business.
+ * - **No message to or from any of its agents.** One message and the conversation is the person's; this never
+ *   touches a chat that was spoken in, whatever became of its files.
+ * - **No document.** The session may have written one before the person said anything.
+ * - **Its newest upload is older than the retention window.** The window follows the last thing the person actually
+ *   did in it, not when it was created, so attaching a second file hours later puts the clock back rather than
+ *   leaving a live composer to be swept out from under them.
+ */
+async function dropAbandoned(tx: Database, retentionHours: number, batch: number): Promise<number> {
+  const abandoned = await tx.$queryRaw<{ id: string; virtual_agent_id: string; owner_oid: string }[]>`
+    SELECT c.id::text AS id, c.virtual_agent_id::text AS virtual_agent_id, c.owner_oid
+      FROM assistant_conversation c
+     WHERE c.artefact_version = 0
+       AND EXISTS (SELECT 1 FROM assistant_upload u WHERE u.conversation_id = c.id)
+       AND NOT EXISTS (
+             SELECT 1 FROM assistant_upload u
+              WHERE u.conversation_id = c.id
+                AND u.created_at >= now() - make_interval(hours => ${retentionHours}::int)
+           )
+       AND NOT EXISTS (
+             SELECT 1 FROM message m
+              WHERE m.target_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = c.id)
+                 OR m.author_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = c.id)
+           )
+     ORDER BY c.created_at
+     LIMIT ${batch}::int
+  `;
+  for (const row of abandoned) {
+    await tx.assistantConversation.delete({ where: { id: row.id } });
+    // Announced like any other change to it, so a sidebar still open stops showing a chat that has gone.
+    await notify(tx, { type: "assistant_conversation", conversation_id: row.id, virtual_agent_id: row.virtual_agent_id, owner_oid: row.owner_oid });
+  }
+  return abandoned.length;
 }
 
 export interface UploadSweeper {
@@ -86,6 +137,9 @@ export function startUploadSweep(prisma: PrismaClient, intervalMs: number = UPLO
       .then((result) => {
         if (result !== undefined && result.expired > 0) {
           console.info(`upload sweep: ${result.expired} uploads nothing fetched expired, ${result.parts} part rows deleted`);
+        }
+        if (result !== undefined && result.conversations > 0) {
+          console.info(`upload sweep: ${result.conversations} conversations deleted, having only ever held an attachment nobody sent`);
         }
       })
       .catch((error: unknown) => {

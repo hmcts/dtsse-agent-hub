@@ -123,7 +123,13 @@ The person's edits in the web UI follow the same version rule, recorded as `upda
 
 A file is at most 25 MB, a message carries at most 4, and a conversation's stored files total at most 200 MB. The hub decides the `stored_name` and that decision is authoritative; the client re-sanitises it anyway, because a path is the one thing it must not take on trust.
 
-Everything below answers `404` unless the service runs with `ASSISTANT_UPLOADS_ENABLED=true`. The flag exists because nothing reports a pod's client version: with it off, no frame carries `attachments`, so a pod on an older client cannot be sent a file it would silently never fetch.
+Everything below answers `404` unless the service runs with `ASSISTANT_UPLOADS_ENABLED=true`. The flag exists because nothing reports a pod's client version: with it off, no frame carries `attachments`, so a pod on an older client cannot be sent a file it would silently never fetch. It also hides the composer's Attach item, so nothing is offered that cannot work.
+
+A refused `/api/ui/uploads` request carries a `reason` beside its `error`: one of `unavailable`, `no_such_conversation`, `no_such_upload`, `file_too_big`, `too_many_files`, `conversation_full`, `part_too_big` or `part_wrong_length`, listed in `src/assistant/uploads.ts`. The composer words each one for the person. It exists because `too_many_files` and `conversation_full` are both `409` and mean different things — send what you have, against this chat has no room left — and matching on the sentence would break the moment a cap is reworded.
+
+A message of files and no typed words is allowed, and the hub gives it a body naming the files: every message in the hub has words (`message_body_present` is a `CHECK` on the `message` table), and the envelope ends with the body, so a session handed paths and nothing else would have no ask. The conversation is still titled after the first file rather than after that sentence.
+
+Attaching a file on the new-chat screen creates the conversation first, since a file belongs to one before any of its bytes can be sent. If the person then walks away, the upload sweep removes a conversation whose only content was an attachment nobody sent — no message, no document, and no upload inside the retention window.
 
 | Method and path | Body | Response |
 |---|---|---|

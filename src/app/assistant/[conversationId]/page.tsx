@@ -5,6 +5,7 @@ import { saveCredential } from "@/app/_actions/credentials";
 import { pasteLoginCode } from "@/app/_actions/virtual-agents";
 import { TEMPLATES } from "@/assistant/starters";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
+import { uploadsEnabled } from "@/assistant/uploads";
 import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
@@ -34,7 +35,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
   return (
     <AssistantShell viewerName={viewer.name} groups={home.conversations} activeId={view.id} hubLink theme={theme}>
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
-      <ChatView key={view.agentId} view={view} templates={TEMPLATES} actions={ACTIONS} />
+      <ChatView key={view.agentId} view={view} templates={TEMPLATES} actions={ACTIONS} uploads={uploadsEnabled()} />
       <OnboardingGate
         assistant={home.assistant}
         statuses={home.credentials.available ? home.credentials.statuses : []}

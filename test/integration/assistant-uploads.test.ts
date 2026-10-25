@@ -4,7 +4,11 @@
 // The memory assertion in "the hub's memory" is the point of the transport's design and not a formality: every byte
 // of an upload crosses a heap capped at 768 MB on two replicas, so one part at a time has to be measured rather than
 // reasoned about.
+import fs from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { NextRequest } from "next/server";
+import { assistantEnvelope, type EnvelopeMessage, fetchAttachments, type PodApi, parseAssistantFrame, parseAttachments } from "pod-client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as attachmentFetchedRoute from "../../src/app/api/agent/[agentId]/attachments/[uploadId]/fetched/route.ts";
 import * as attachmentPartRoute from "../../src/app/api/agent/[agentId]/attachments/[uploadId]/parts/[index]/route.ts";
@@ -212,7 +216,7 @@ describe("uploading a file", () => {
 
     // Assert
     expect(response.status).toBe(413);
-    expect(await jsonOf(response)).toEqual({ error: `this part of the file is larger than ${PART_BYTES} bytes` });
+    expect(await jsonOf(response)).toEqual({ reason: "part_too_big", error: `this part of the file is larger than ${PART_BYTES} bytes` });
     expect(await prisma.assistantUploadPart.count({ where: { uploadId: created.uploadId } })).toBe(0);
   });
 
@@ -227,7 +231,7 @@ describe("uploading a file", () => {
 
     // Assert
     expect(response.status).toBe(400);
-    expect(await jsonOf(response)).toEqual({ error: `part 0 of this file is ${PART_BYTES} bytes` });
+    expect(await jsonOf(response)).toEqual({ reason: "part_wrong_length", error: `part 0 of this file is ${PART_BYTES} bytes` });
   });
 
   it("should refuse a part number past the end of the file", async () => {
@@ -284,7 +288,7 @@ describe("uploading a file", () => {
 
     // Assert
     expect(response.status).toBe(409);
-    expect(await jsonOf(response)).toEqual({ error: `a message carries at most ${MAX_ATTACHMENTS_PER_MESSAGE} files` });
+    expect(await jsonOf(response)).toEqual({ reason: "too_many_files", error: `a message carries at most ${MAX_ATTACHMENTS_PER_MESSAGE} files` });
   });
 
   it("should refuse a file that would take the conversation past its total", async () => {
@@ -729,19 +733,30 @@ describe("the upload sweep", () => {
     return created.id;
   }
 
+  /**
+   * A conversation that has been spoken in. These tests are about the bytes going, so the conversation is one the
+   * other half of the sweep leaves alone — a conversation with no message and nothing but an old upload is swept
+   * whole, which `the sweep of conversations attaching left behind` covers.
+   */
+  async function spokenIn(): Promise<string> {
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "hello" });
+    return conversation.id;
+  }
+
   it("should drop the bytes of anything nothing fetched in time and leave a recent upload alone", async () => {
     // Arrange
     await startedAssistant();
-    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
-    const abandoned = await stale(conversation.id, 5, "stored");
-    const neverFinished = await stale(conversation.id, 5, "pending");
-    const recent = await stale(conversation.id, 1, "stored");
+    const conversationId = await spokenIn();
+    const abandoned = await stale(conversationId, 5, "stored");
+    const neverFinished = await stale(conversationId, 5, "pending");
+    const recent = await stale(conversationId, 1, "stored");
 
     // Act
     const result = await sweepUploads(prisma, { retentionHours: 3 });
 
     // Assert
-    expect(result).toEqual({ expired: 2, parts: 2 });
+    expect(result).toEqual({ expired: 2, parts: 2, conversations: 0 });
     expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: abandoned } })).toMatchObject({ state: "expired" });
     expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: neverFinished } })).toMatchObject({ state: "expired" });
     expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: recent } })).toMatchObject({ state: "stored" });
@@ -751,8 +766,8 @@ describe("the upload sweep", () => {
   it("should keep the metadata row, so the thread can still say a file was attached", async () => {
     // Arrange
     await startedAssistant();
-    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
-    await stale(conversation.id, 5, "stored");
+    const conversationId = await spokenIn();
+    await stale(conversationId, 5, "stored");
 
     // Act
     await sweepUploads(prisma, { retentionHours: 3 });
@@ -764,22 +779,22 @@ describe("the upload sweep", () => {
   it("should do nothing at all when every upload was fetched or is recent", async () => {
     // Arrange
     await startedAssistant();
-    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
-    await stale(conversation.id, 99, "fetched");
+    const conversationId = await spokenIn();
+    await stale(conversationId, 99, "fetched");
 
     // Act
     const result = await sweepUploads(prisma, { retentionHours: 3 });
 
     // Assert
-    expect(result).toEqual({ expired: 0, parts: 0 });
+    expect(result).toEqual({ expired: 0, parts: 0, conversations: 0 });
   });
 
   it("should take only a batch at a time, so a backlog drains over several ticks", async () => {
     // Arrange
     await startedAssistant();
-    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const conversationId = await spokenIn();
     for (let n = 0; n < 3; n += 1) {
-      await stale(conversation.id, 5, "stored");
+      await stale(conversationId, 5, "stored");
     }
 
     // Act
@@ -787,15 +802,15 @@ describe("the upload sweep", () => {
     const second = await sweepUploads(prisma, { retentionHours: 3, batch: 2 });
 
     // Assert
-    expect(first).toEqual({ expired: 2, parts: 2 });
-    expect(second).toEqual({ expired: 1, parts: 1 });
+    expect(first).toEqual({ expired: 2, parts: 2, conversations: 0 });
+    expect(second).toEqual({ expired: 1, parts: 1, conversations: 0 });
   });
 
   it("should leave the sweep to the other pod when one already holds the lock", async () => {
     // Arrange
     await startedAssistant();
-    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
-    await stale(conversation.id, 5, "stored");
+    const conversationId = await spokenIn();
+    await stale(conversationId, 5, "stored");
 
     // Act: two sweeps in one transaction each, started together, so one finds the advisory lock taken.
     const [one, two] = await Promise.all([sweepUploads(prisma, { retentionHours: 3 }), sweepUploads(prisma, { retentionHours: 3 })]);
@@ -934,5 +949,552 @@ describe("the hub's memory", () => {
     // bytes it asked for are the measurement that cannot be missed — an unbounded read pulls all 24 MB, and this
     // reader stops a chunk past the part's length.
     expect(sent, measured).toBeLessThan(PART_BYTES * 2);
+  });
+});
+
+/**
+ * The seam between the two halves of this feature, which neither half's own tests reach.
+ *
+ * The hub's tests above stop at the `direct` frame; the client's tests in `packages/agent-hub` start from a frame a
+ * test wrote and an `api` a test stubbed. So a file had never been carried the whole way: through the browser-facing
+ * routes, onto a message, out in a real frame, through the client's own parser, down the pod-facing routes and onto a
+ * disk, and finally named in the envelope the session reads. Each end agreed with its own idea of the contract.
+ *
+ * `api` here calls the route handlers directly rather than over HTTP, which is the only part that is not real — the
+ * frame, the parse, the part fetching, the fetched report, the bytes on disk and the envelope all are.
+ */
+describe("a file from the browser to the session's envelope", () => {
+  /** An `Api` whose two attachment calls are the hub's real pod-facing routes, with the pod's own launch token. */
+  function podApi(token: string): PodApi {
+    return {
+      attachmentPart: async (agentId, uploadId, index) => {
+        const response = await pod(attachmentPartRoute.GET, token, `/api/agent/${agentId}/attachments/${uploadId}/parts/${index}`, {
+          agentId,
+          uploadId,
+          index: String(index)
+        });
+        if (!response.ok) {
+          throw new Error(`part ${index} was refused: ${response.status}`);
+        }
+        return new Uint8Array(await response.arrayBuffer());
+      },
+      attachmentFetched: async (agentId, uploadId) => {
+        const response = await pod(
+          attachmentFetchedRoute.POST,
+          token,
+          `/api/agent/${agentId}/attachments/${uploadId}/fetched`,
+          { agentId, uploadId },
+          "POST",
+          {}
+        );
+        if (!response.ok) {
+          throw new Error(`the fetched report was refused: ${response.status}`);
+        }
+        return null;
+      }
+    };
+  }
+
+  /** The `direct` frame the pod would really receive for the conversation's one message. */
+  async function frameFor(token: string, agentId: string): Promise<{ message: EnvelopeMessage; assistant: unknown }> {
+    const abort = new AbortController();
+    const stream = frames(await pod(streamRoute.GET, token, `/api/agent/${agentId}/stream`, { agentId }, "GET", undefined, abort.signal));
+    const [direct] = await stream.named("direct", 1);
+    abort.abort();
+    await stream.cancel();
+    return JSON.parse(direct!.data!) as { message: EnvelopeMessage; assistant: unknown };
+  }
+
+  let root: string;
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(tmpdir(), "agent-hub-uploads-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("should put the person's bytes on the pod's disk and name that path to the session, dropping the parts on the way", async () => {
+    // Arrange: a file big enough to be more than one part, so the join is tested part by part rather than in one go.
+    const { token } = await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const bytes = filled(PART_BYTES + 1234, 7);
+    bytes[0] = 1;
+    bytes[bytes.byteLength - 1] = 255;
+    const uploadId = await upload(conversation.id, "my scanned letter.pdf", bytes);
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "What does this letter say?", uploadIds: [uploadId] });
+    const { agentId, sessionId } = await sessionOf(conversation.id);
+    await register(token, sessionId, conversation.id);
+
+    // Act: exactly what `bridge.ts` does on a `direct` — parse the frame, fetch what it names, then build the envelope.
+    const frame = await frameFor(token, agentId);
+    const assistant = parseAssistantFrame(frame.assistant);
+    const attachments = parseAttachments(assistant?.attachments);
+    const outcomes = await fetchAttachments({ api: podApi(token), agentId, conversationId: conversation.id, attachments, root });
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, outcomes);
+
+    // Assert: the client was willing to act on the frame the route really produced.
+    expect(attachments).toEqual([{ uploadId, name: "my_scanned_letter.pdf", bytes: bytes.byteLength, mediaType: "application/pdf", parts: 2 }]);
+
+    // The file on disk is the person's file, byte for byte, under the conversation's own directory.
+    const written = path.join(root, conversation.id, `${uploadId}-my_scanned_letter.pdf`);
+    expect(outcomes).toEqual([{ name: "my_scanned_letter.pdf", path: written, media_type: "application/pdf", bytes: bytes.byteLength }]);
+    const onDisk = new Uint8Array(await fs.readFile(written));
+    expect(onDisk.byteLength).toBe(bytes.byteLength);
+    expect(onDisk[0]).toBe(1);
+    expect(onDisk[PART_BYTES]).toBe(7);
+    expect(onDisk[onDisk.byteLength - 1]).toBe(255);
+
+    // The envelope names that absolute path, which is the session's only route to the bytes: the message is delivered
+    // over the messaging socket with `skipAttachments`, so an `@name` in the body would be inert.
+    expect(content).toContain(written);
+    expect(content).toContain("already saved on this machine");
+    expect(content).toContain("What does this letter say?");
+
+    // And the fetched report the client sent through the real route is what emptied Postgres of the bytes.
+    expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(0);
+    expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: uploadId } })).toMatchObject({ state: "fetched" });
+  });
+
+  it("should tell the session the file could not be retrieved, and still deliver the message, when the parts have gone", async () => {
+    // Arrange: an upload the sweep has already expired, which is what a pod that never came up within the retention
+    // window finds. The metadata row survives, so the frame still names a file whose bytes do not exist.
+    const { token } = await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const uploadId = await upload(conversation.id, "letter.pdf", filled(20, 3));
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "read this", uploadIds: [uploadId] });
+    const { agentId, sessionId } = await sessionOf(conversation.id);
+    await register(token, sessionId, conversation.id);
+    await prisma.assistantUploadPart.deleteMany({ where: { uploadId } });
+
+    // Act
+    const frame = await frameFor(token, agentId);
+    const assistant = parseAssistantFrame(frame.assistant);
+    const outcomes = await fetchAttachments({
+      api: podApi(token),
+      agentId,
+      conversationId: conversation.id,
+      attachments: parseAttachments(assistant?.attachments),
+      root
+    });
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, outcomes);
+
+    // Assert: said so rather than dropped, because a silent omission leaves the person believing their file was read.
+    expect(outcomes[0]).toMatchObject({ name: "letter.pdf", error: expect.stringContaining("404") });
+    expect(outcomes[0]?.path).toBeUndefined();
+    expect(content).toContain("could not be retrieved");
+    expect(content).toContain("read this");
+  });
+
+  it("should carry every file of a message with four of them, each to its own path", async () => {
+    // Arrange
+    const { token } = await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const names = ["one.pdf", "two.png", "three.csv", "four.txt"];
+    const ids: string[] = [];
+    for (const [index, name] of names.entries()) {
+      ids.push(await upload(conversation.id, name, filled(10 + index, index + 1)));
+    }
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "all four", uploadIds: ids });
+    const { agentId, sessionId } = await sessionOf(conversation.id);
+    await register(token, sessionId, conversation.id);
+
+    // Act
+    const frame = await frameFor(token, agentId);
+    const assistant = parseAssistantFrame(frame.assistant);
+    const outcomes = await fetchAttachments({
+      api: podApi(token),
+      agentId,
+      conversationId: conversation.id,
+      attachments: parseAttachments(assistant?.attachments),
+      root
+    });
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, outcomes);
+
+    // Assert
+    expect(outcomes.map((outcome) => outcome.name)).toEqual(names);
+    expect(outcomes.every((outcome) => typeof outcome.path === "string")).toBe(true);
+    for (const [index, id] of ids.entries()) {
+      const written = path.join(root, conversation.id, `${id}-${names[index]}`);
+      expect((await fs.readFile(written)).byteLength).toBe(10 + index);
+      expect(content).toContain(written);
+    }
+    expect(content).toContain("The user attached 4 files to this message");
+    expect(await prisma.assistantUploadPart.count()).toBe(0);
+  });
+
+  it("should name the file to the session when the message carried no words at all", async () => {
+    // Arrange: a message of files and nothing typed, which `checkBody` allows and the envelope has to stand up to.
+    const { token } = await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const uploadId = await upload(conversation.id, "letter.pdf", filled(12, 4));
+
+    // Act
+    const sent = await actions.sendAssistantMessage({ conversationId: conversation.id, body: "", uploadIds: [uploadId] });
+    const { agentId, sessionId } = await sessionOf(conversation.id);
+    await register(token, sessionId, conversation.id);
+    const frame = await frameFor(token, agentId);
+    const assistant = parseAssistantFrame(frame.assistant);
+    const outcomes = await fetchAttachments({
+      api: podApi(token),
+      agentId,
+      conversationId: conversation.id,
+      attachments: parseAttachments(assistant?.attachments),
+      root
+    });
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, outcomes);
+
+    // Assert: the session gets the paths and a body saying what to do with them, rather than paths and silence.
+    expect(sent).toMatchObject({ ok: true });
+    expect(content).toContain(path.join(root, conversation.id, `${uploadId}-letter.pdf`));
+    expect(content).toContain("already saved on this machine");
+    expect(content).toContain("I have attached letter.pdf. Please take a look.");
+    // And the chat is named after the file, since there are no words to name it after.
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversation.id } })).toMatchObject({ title: "letter.pdf" });
+  });
+
+  it("should carry nothing to the pod while the flag is off, so a pod on an older client is never sent a file", async () => {
+    // Arrange
+    const { token } = await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const uploadId = await upload(conversation.id, "letter.pdf", filled(12, 4));
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "read this", uploadIds: [uploadId] });
+    const { agentId, sessionId } = await sessionOf(conversation.id);
+    await register(token, sessionId, conversation.id);
+    vi.stubEnv("ASSISTANT_UPLOADS_ENABLED", "false");
+
+    // Act
+    const frame = await frameFor(token, agentId);
+    const assistant = parseAssistantFrame(frame.assistant);
+    const attachments = parseAttachments(assistant?.attachments);
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, []);
+
+    // Assert: nothing on the frame, nothing fetched, and not a word about a file in the envelope.
+    expect(attachments).toEqual([]);
+    expect(content).not.toContain("attached");
+    expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(1);
+  });
+});
+
+describe("a message of files and no words", () => {
+  it("should be given a body naming the files, which `message_body_present` requires and the session needs", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const first = await upload(conversation.id, "scanned letter.pdf", filled(6, 1));
+    const second = await upload(conversation.id, "notes.txt", filled(3, 2));
+
+    // Act
+    const result = await actions.sendAssistantMessage({ conversationId: conversation.id, body: "   ", uploadIds: [first, second] });
+
+    // Assert
+    expect(result).toMatchObject({ ok: true, message: { body: "I have attached scanned letter.pdf and notes.txt. Please take a look." } });
+    // The chat is named after the file the person chose, not the sentence written for them.
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversation.id } })).toMatchObject({ title: "scanned letter.pdf" });
+  });
+
+  it("should refuse the send rather than write a wordless message when none of the files is ready", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const half = await jsonOf<Created>(await startUpload(conversation.id, { name: "half.pdf", size: 10 }));
+
+    // Act
+    const result = await actions.sendAssistantMessage({ conversationId: conversation.id, body: "", uploadIds: [half.uploadId] });
+
+    // Assert
+    expect(result).toEqual({ ok: false, error: "one of those files is not ready to send; remove it and attach it again" });
+    expect(await prisma.message.count()).toBe(0);
+  });
+
+  it("should still be refused when there is neither a word nor a file", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+
+    // Act
+    const result = await actions.sendAssistantMessage({ conversationId: conversation.id, body: "  ", uploadIds: [] });
+
+    // Assert
+    expect(result).toEqual({ ok: false, error: "write something to send" });
+    expect(await prisma.message.count()).toBe(0);
+  });
+
+  it("should keep the title the person's own words when they typed some as well", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const uploadId = await upload(conversation.id, "letter.pdf", filled(6, 1));
+
+    // Act
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "What does this say?", uploadIds: [uploadId] });
+
+    // Assert
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversation.id } })).toMatchObject({ title: "What does this say?" });
+  });
+});
+
+describe("attaching on the new-chat screen", () => {
+  it("should open an empty conversation for a file to belong to", async () => {
+    // Arrange
+    await startedAssistant();
+
+    // Act
+    const opened = await actions.openConversation({ product: "pcs" });
+
+    // Assert
+    expect(opened).toMatchObject({ ok: true });
+    const id = (opened as { id: string }).id;
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id } })).toMatchObject({ product: "pcs", title: null });
+    // And a file can go into it straight away, which is the whole point of opening it early.
+    expect(await startUpload(id, { name: "letter.pdf", size: 6 })).toMatchObject({ status: 201 });
+  });
+
+  it("should refuse to open one at all while uploads are switched off, since nothing would be attached to it", async () => {
+    // Arrange
+    await startedAssistant();
+    vi.stubEnv("ASSISTANT_UPLOADS_ENABLED", "false");
+
+    // Act
+    const opened = await actions.openConversation({ product: "pcs" });
+
+    // Assert
+    expect(opened).toEqual({ ok: false, error: "the HMCTS Assistant is not available on this deployment" });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+});
+
+describe("the sweep of conversations attaching left behind", () => {
+  /** A conversation whose only content is one upload, attached `hoursAgo` and never sent. */
+  async function abandoned(hoursAgo: number): Promise<string> {
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    await prisma.assistantUpload.create({
+      data: {
+        conversationId: conversation.id,
+        ownerOid: ALICE.oid,
+        fileName: "a.pdf",
+        storedName: "a.pdf",
+        mediaType: "application/pdf",
+        bytes: 4n,
+        state: "stored",
+        createdAt: new Date(Date.now() - hoursAgo * 3_600_000)
+      }
+    });
+    return conversation.id;
+  }
+
+  it("should delete one whose only content was a file nobody sent, so it stops showing as a second New chat", async () => {
+    // Arrange
+    await startedAssistant();
+    const id = await abandoned(4);
+
+    // Act
+    const result = await sweepUploads(prisma);
+
+    // Assert
+    expect(result).toMatchObject({ conversations: 1 });
+    expect(await prisma.assistantConversation.count({ where: { id } })).toBe(0);
+    // The pre-created agent goes with it, which is the other row an abandoned chat holds.
+    expect(await prisma.agent.count({ where: { assistantConversationId: id } })).toBe(0);
+  });
+
+  it("should leave one whose file was attached inside the window, since the person may still be composing", async () => {
+    // Arrange
+    await startedAssistant();
+    const id = await abandoned(1);
+
+    // Act
+    const result = await sweepUploads(prisma);
+
+    // Assert
+    expect(result).toMatchObject({ conversations: 0 });
+    expect(await prisma.assistantConversation.count({ where: { id } })).toBe(1);
+  });
+
+  it("should put the clock back when a second file was attached recently, rather than sweep a live composer", async () => {
+    // Arrange
+    await startedAssistant();
+    const id = await abandoned(5);
+    await startUpload(id, { name: "second.pdf", size: 6 });
+
+    // Act
+    const result = await sweepUploads(prisma);
+
+    // Assert
+    expect(result).toMatchObject({ conversations: 0 });
+    expect(await prisma.assistantConversation.count({ where: { id } })).toBe(1);
+  });
+
+  it("should leave a conversation that was spoken in, however old its files are", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const uploadId = await upload(conversation.id, "letter.pdf", filled(6, 1));
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "read this", uploadIds: [uploadId] });
+    await prisma.assistantUpload.updateMany({ where: { conversationId: conversation.id }, data: { createdAt: new Date(Date.now() - 48 * 3_600_000) } });
+
+    // Act
+    const result = await sweepUploads(prisma);
+
+    // Assert
+    expect(result).toMatchObject({ conversations: 0 });
+    expect(await prisma.assistantConversation.count({ where: { id: conversation.id } })).toBe(1);
+  });
+
+  it("should leave an empty conversation that nothing was ever attached to, which is not this sweep's business", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    await prisma.assistantConversation.update({ where: { id: conversation.id }, data: { createdAt: new Date(Date.now() - 48 * 3_600_000) } });
+
+    // Act
+    const result = await sweepUploads(prisma);
+
+    // Assert
+    expect(result).toMatchObject({ conversations: 0 });
+    expect(await prisma.assistantConversation.count({ where: { id: conversation.id } })).toBe(1);
+  });
+
+  it("should leave one whose session wrote a document before the person said anything", async () => {
+    // Arrange
+    await startedAssistant();
+    const id = await abandoned(5);
+    await prisma.assistantConversation.update({ where: { id }, data: { artefactVersion: 1, artefactMarkdown: "# what I found" } });
+
+    // Act
+    const result = await sweepUploads(prisma);
+
+    // Assert
+    expect(result).toMatchObject({ conversations: 0 });
+    expect(await prisma.assistantConversation.count({ where: { id } })).toBe(1);
+  });
+
+  it("should announce each deletion, so a sidebar still open stops showing a chat that has gone", async () => {
+    // Arrange
+    await startedAssistant();
+    const id = await abandoned(4);
+    const heard: unknown[] = [];
+    const stop = realtime().hub.subscribe((event) => void heard.push(event));
+
+    // Act
+    await sweepUploads(prisma);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    stop();
+
+    // Assert
+    expect(heard).toContainEqual(expect.objectContaining({ type: "assistant_conversation", conversation_id: id }));
+  });
+});
+
+describe("the refusals the composer words for the person", () => {
+  it("should say which cap a refusal is, so the two 409s can be told apart", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    for (let index = 0; index < MAX_ATTACHMENTS_PER_MESSAGE; index += 1) {
+      await startUpload(conversation.id, { name: `f${index}.pdf`, size: 4 });
+    }
+
+    // Act
+    const fifth = await startUpload(conversation.id, { name: "f4.pdf", size: 4 });
+
+    // Assert
+    expect(fifth.status).toBe(409);
+    expect(await jsonOf(fifth)).toEqual({ reason: "too_many_files", error: `a message carries at most ${MAX_ATTACHMENTS_PER_MESSAGE} files` });
+  });
+
+  it("should give the conversation's cap its own reason, which the browser cannot work out in advance", async () => {
+    // Arrange: a conversation already holding its whole allowance. It takes eight rows, because the per-row CHECK
+    // caps one file at 25 MB; they are `fetched`, so the per-message count of four does not refuse this first.
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    for (let index = 0; index < MAX_CONVERSATION_BYTES / MAX_UPLOAD_BYTES; index += 1) {
+      await prisma.assistantUpload.create({
+        data: {
+          conversationId: conversation.id,
+          ownerOid: ALICE.oid,
+          messageId: null,
+          fileName: `big${index}.zip`,
+          storedName: `big${index}.zip`,
+          mediaType: "application/zip",
+          bytes: BigInt(MAX_UPLOAD_BYTES),
+          state: "fetched"
+        }
+      });
+    }
+
+    // Act
+    const refused = await startUpload(conversation.id, { name: "one.pdf", size: 4 });
+
+    // Assert
+    expect(refused.status).toBe(409);
+    expect(await jsonOf(refused)).toEqual({
+      reason: "conversation_full",
+      error: "this conversation's files add up to at most 200 MB"
+    });
+  });
+
+  it("should give a reason for each of the other refusals the composer has to render", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const created = await jsonOf<Created>(await startUpload(conversation.id, { name: "a.pdf", size: PART_BYTES + 10 }));
+
+    // Act
+    const tooBig = await startUpload(conversation.id, { name: "huge.zip", size: MAX_UPLOAD_BYTES + 1 });
+    const unknown = await ui(discardRoute.DELETE, {
+      path: "/api/ui/uploads/99999999-9999-9999-9999-999999999999",
+      params: { uploadId: "99999999-9999-9999-9999-999999999999" },
+      method: "DELETE"
+    });
+    const partTooBig = await putPart(created.uploadId, 0, filled(PART_BYTES + 1, 9));
+    const partWrong = await putPart(created.uploadId, 0, filled(10, 9));
+    const noConversation = await ui(uploadRoute.POST, {
+      path: "/api/ui/uploads",
+      method: "POST",
+      json: { conversationId: "99999999-9999-9999-9999-999999999999", name: "a.pdf", size: 4, mediaType: "application/pdf" }
+    });
+
+    // Assert
+    expect([tooBig.status, unknown.status, partTooBig.status, partWrong.status, noConversation.status]).toEqual([400, 404, 413, 400, 404]);
+    expect(await jsonOf<{ reason: string }>(tooBig)).toMatchObject({ reason: "file_too_big" });
+    expect(await jsonOf<{ reason: string }>(unknown)).toMatchObject({ reason: "no_such_upload" });
+    expect(await jsonOf<{ reason: string }>(partTooBig)).toMatchObject({ reason: "part_too_big" });
+    expect(await jsonOf<{ reason: string }>(partWrong)).toMatchObject({ reason: "part_wrong_length" });
+    expect(await jsonOf<{ reason: string }>(noConversation)).toMatchObject({ reason: "no_such_conversation" });
+  });
+
+  it("should say the feature is unavailable rather than nothing when the flag is off", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    vi.stubEnv("ASSISTANT_UPLOADS_ENABLED", "false");
+
+    // Act
+    const refused = await startUpload(conversation.id, { name: "a.pdf", size: 4 });
+
+    // Assert
+    expect(refused.status).toBe(404);
+    expect(await jsonOf(refused)).toEqual({ reason: "unavailable", error: "attaching files is not available on this deployment" });
+  });
+
+  it("should answer 204 with no body when an upload is discarded, which is what the composer ignores the status of", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const created = await jsonOf<Created>(await startUpload(conversation.id, { name: "a.pdf", size: 4 }));
+
+    // Act
+    const discarded = await ui(discardRoute.DELETE, {
+      path: `/api/ui/uploads/${created.uploadId}`,
+      params: { uploadId: created.uploadId },
+      method: "DELETE"
+    });
+
+    // Assert
+    expect(discarded.status).toBe(204);
+    expect(await discarded.text()).toBe("");
+    expect(await prisma.assistantUpload.count({ where: { id: created.uploadId } })).toBe(0);
   });
 });

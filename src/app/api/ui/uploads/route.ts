@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { errorResponse, json, readJson } from "@/agent-api/http";
 import { findConversation } from "@/assistant/store";
 import { createUpload } from "@/assistant/upload-store";
-import { uploadsEnabled } from "@/assistant/uploads";
+import { type UploadRefusal, uploadsEnabled } from "@/assistant/uploads";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { uiRefusals, uiViewer } from "../request";
@@ -26,14 +26,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     return viewer;
   }
   if (!virtualAgentsEnabled() || !uploadsEnabled()) {
-    return errorResponse(404, "attaching files is not available on this deployment");
+    return errorResponse(404, "attaching files is not available on this deployment", { reason: "unavailable" satisfies UploadRefusal });
   }
   return await uiRefusals("start upload", async () => {
     const body = (await readJson(request)) as { conversationId?: unknown; name?: unknown; size?: unknown; mediaType?: unknown };
     const conversationId = typeof body.conversationId === "string" ? body.conversationId : "";
     const conversation = await findConversation(prisma, viewer.oid, conversationId);
     if (conversation === undefined) {
-      return errorResponse(404, "that conversation no longer exists");
+      return errorResponse(404, "that conversation no longer exists", { reason: "no_such_conversation" satisfies UploadRefusal });
     }
     const created = await createUpload(prisma, {
       conversationId: conversation.id,
