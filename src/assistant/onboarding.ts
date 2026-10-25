@@ -4,8 +4,8 @@ import type { VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
 /**
  * How far the person's assistant has got, as the getting-ready screen shows it: a bar, a line of plain words, and
  * whether they still have something to connect. Someone with every needed credential stored has onboarded, and is
- * never shown the screen again: an assistant stopped overnight starts while they type, and their first message waits
- * for it.
+ * never asked to connect anything again; they wait on the warming-up screen instead whenever they arrive to an
+ * assistant that is not running.
  */
 
 export interface Readiness {

@@ -24,7 +24,7 @@ export interface AssistantSummary {
   needed: CredentialKind[];
   optional: CredentialKind[];
   logins: LoginView[];
-  /** Every needed credential is stored, so the getting-ready screen is not shown again. */
+  /** Every needed credential is stored, so the connections are not offered again. */
   onboarded: boolean;
 }
 

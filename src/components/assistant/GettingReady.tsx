@@ -3,6 +3,16 @@
 import { useEffect, useState } from "react";
 import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
+import {
+  firstWarmupMessage,
+  nextWarmupMessage,
+  WARMUP_PATIENCE_MS,
+  WARMUP_ROTATE_MS,
+  WARMUP_SIGNPOST,
+  WARMUP_SLOW,
+  type WarmupPhase,
+  warmupPhase
+} from "@/assistant/warmup";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { Mark } from "@/components/assistant/AssistantShell";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
@@ -35,6 +45,31 @@ function useNow(): number {
     return () => clearInterval(timer);
   }, []);
   return now;
+}
+
+/**
+ * The line that rotates while the assistant starts. The first one is the phase's first message, not a random one,
+ * because the server renders this too and a random choice would not survive hydration; the picking begins once the
+ * browser has taken over.
+ */
+function useWarmupMessage(phase: WarmupPhase, rotating: boolean): { message: string; slow: boolean } {
+  const [message, setMessage] = useState(() => firstWarmupMessage(phase));
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!rotating) {
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), WARMUP_PATIENCE_MS);
+    return () => clearTimeout(timer);
+  }, [rotating]);
+  useEffect(() => {
+    if (!rotating || slow) {
+      return;
+    }
+    const timer = setInterval(() => setMessage((previous) => nextWarmupMessage(phase, previous, Math.random())), WARMUP_ROTATE_MS);
+    return () => clearInterval(timer);
+  }, [phase, rotating, slow]);
+  return { message, slow };
 }
 
 /** What to do for a sign-in the assistant is waiting on: a code to enter on a page, or a code to paste back. */
@@ -163,35 +198,17 @@ function Connector({
   );
 }
 
-/**
- * The first visit: the assistant warms up while the person connects the accounts it works with. The sign-ins come
- * from the assistant's pod as it reaches each one, so a connection shows "Connecting…" until its code appears. Once
- * every needed account is connected the person carries on; they are not shown this again.
- */
-export function GettingReady({
-  assistant,
-  statuses,
-  unavailable,
-  paste,
-  save,
-  onDone,
-  theme = "system"
-}: {
+/** What the appearance switch and the heading need, whichever of the two getting-ready screens is showing. */
+interface ScreenProps {
   assistant: AssistantSummary;
-  statuses: CredentialStatus[];
   unavailable: string | null;
-  paste: FormAction;
-  save: FormAction;
-  onDone: () => void;
   /** The appearance the person chose; the screen offers the switch, since it covers the sidebar's. */
   theme?: Theme;
-}) {
-  const now = useNow();
-  const stored = (kind: CredentialKind) => statuses.some((status) => status.kind === kind && status.stored);
-  const kinds = [...assistant.needed, ...assistant.optional.filter((kind) => OFFERED_OPTIONAL.includes(kind))];
+}
+
+/** The shell both getting-ready screens share: the mark, the heading, how far the assistant has got, and why not. */
+function ReadyShell({ assistant, unavailable, theme = "system", subtitle, children }: ScreenProps & { subtitle?: string; children: React.ReactNode }) {
   const { readiness } = assistant;
-  const starting = !readiness.failed && assistant.status !== "running";
-  const canContinue = assistant.onboarded;
   return (
     <div
       role="dialog"
@@ -209,7 +226,7 @@ export function GettingReady({
             <h1 id="getting-ready-title" className="text-[26px] font-medium tracking-tight">
               {readiness.ready ? "Your assistant is ready" : readiness.failed ? "Your assistant could not start" : "Your assistant is getting ready"}
             </h1>
-            <p className="text-pretty text-asst-muted">While it gets ready, connect the tools it needs to work with your repos, tickets and pipelines.</p>
+            {subtitle === undefined ? null : <p className="text-pretty text-asst-muted">{subtitle}</p>}
           </div>
           <div className="flex w-full flex-col gap-1.5">
             <div
@@ -229,46 +246,119 @@ export function GettingReady({
           </div>
         </div>
         {unavailable === null ? null : <p className="text-sm text-asst-error">{unavailable}</p>}
-        <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[14px] border border-asst-line">
-          {kinds.map((kind, index) => (
-            <Connector
-              key={kind}
-              kind={kind}
-              stored={stored(kind)}
-              login={assistant.logins.find((login) => login.kind === kind)}
-              assistantId={assistant.id}
-              starting={starting}
-              paste={paste}
-              save={save}
-              now={now}
-              first={index === 0}
-            />
-          ))}
-        </ul>
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={onDone}
-            disabled={!canContinue}
-            className="h-[42px] rounded-[10px] bg-asst-accent px-5 text-sm font-semibold text-asst-ink disabled:opacity-40"
-          >
-            {canContinue ? "Start chatting" : "Connect the accounts above to continue"}
-          </button>
-        </div>
+        {children}
       </div>
     </div>
   );
 }
 
 /**
- * Shows the getting-ready screen until the person has connected everything, and then until they choose to carry
- * on. Someone already onboarded never sees it, even while their assistant starts again after a night stopped.
+ * The first visit: the assistant warms up while the person connects the accounts it works with. The sign-ins come
+ * from the assistant's pod as it reaches each one, so a connection shows "Connecting…" until its code appears. Once
+ * every needed account is connected the person carries on; they are not shown this again.
+ */
+export function GettingReady({
+  assistant,
+  statuses,
+  unavailable,
+  paste,
+  save,
+  onDone,
+  theme = "system"
+}: ScreenProps & {
+  statuses: CredentialStatus[];
+  paste: FormAction;
+  save: FormAction;
+  onDone: () => void;
+}) {
+  const now = useNow();
+  const stored = (kind: CredentialKind) => statuses.some((status) => status.kind === kind && status.stored);
+  const kinds = [...assistant.needed, ...assistant.optional.filter((kind) => OFFERED_OPTIONAL.includes(kind))];
+  const starting = !assistant.readiness.failed && assistant.status !== "running";
+  const canContinue = assistant.onboarded;
+  return (
+    <ReadyShell
+      assistant={assistant}
+      unavailable={unavailable}
+      theme={theme}
+      subtitle="While it gets ready, connect the tools it needs to work with your repos, tickets and pipelines."
+    >
+      <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[14px] border border-asst-line">
+        {kinds.map((kind, index) => (
+          <Connector
+            key={kind}
+            kind={kind}
+            stored={stored(kind)}
+            login={assistant.logins.find((login) => login.kind === kind)}
+            assistantId={assistant.id}
+            starting={starting}
+            paste={paste}
+            save={save}
+            now={now}
+            first={index === 0}
+          />
+        ))}
+      </ul>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onDone}
+          disabled={!canContinue}
+          className="h-[42px] rounded-[10px] bg-asst-accent px-5 text-sm font-semibold text-asst-ink disabled:opacity-40"
+        >
+          {canContinue ? "Start chatting" : "Connect the accounts above to continue"}
+        </button>
+      </div>
+    </ReadyShell>
+  );
+}
+
+/**
+ * A return visit to an assistant that is not running: the same progress, with nothing to do but wait, so a rotating
+ * line keeps the person company and says how long this takes. The connections are all made, so they are not listed.
+ */
+export function WarmingUp({ assistant, unavailable, theme = "system" }: ScreenProps) {
+  const { failed } = assistant.readiness;
+  const { message, slow } = useWarmupMessage(warmupPhase(assistant.status), !failed);
+  return (
+    <ReadyShell assistant={assistant} unavailable={unavailable} theme={theme}>
+      {failed ? null : (
+        <div className="flex flex-col gap-1.5">
+          {slow ? (
+            <p className="text-pretty text-asst-muted">{WARMUP_SLOW}</p>
+          ) : (
+            <>
+              {/* Not a live region: `readiness.step` is the one that reports progress, and this talks over it. */}
+              <p aria-hidden="true" className="text-pretty text-asst-muted">
+                {message}
+              </p>
+              <p className="text-xs text-asst-faint">{WARMUP_SIGNPOST}</p>
+            </>
+          )}
+        </div>
+      )}
+    </ReadyShell>
+  );
+}
+
+/**
+ * Shows the getting-ready screen until the person has connected everything, and then until they choose to carry on.
+ * Someone who has onboarded already waits on the warming-up screen instead when they arrive to a stopped assistant,
+ * until it is running; once it is, they are not shown it again this visit, and nor is anyone who arrived to one
+ * already running.
  */
 export function OnboardingGate(props: Omit<Parameters<typeof GettingReady>[0], "onDone">) {
   const [needed] = useState(!props.assistant.onboarded);
+  const [waiting] = useState(props.assistant.onboarded && props.assistant.status !== "running");
   const [done, setDone] = useState(false);
+  const [started, setStarted] = useState(false);
+  useEffect(() => {
+    if (props.assistant.status === "running") {
+      setStarted(true);
+    }
+  }, [props.assistant.status]);
   if (props.assistant.onboarded && (!needed || done)) {
-    return null;
+    return waiting && !started ? <WarmingUp assistant={props.assistant} unavailable={props.unavailable} theme={props.theme} /> : null;
   }
   return <GettingReady {...props} onDone={() => setDone(true)} />;
 }

@@ -212,8 +212,8 @@ describe("OnboardingGate", () => {
     return <OnboardingGate assistant={summary} statuses={[]} unavailable={null} paste={ok()} save={ok()} />;
   }
 
-  it("should show nothing when the person had onboarded before the visit, even while the assistant starts", () => {
-    render(gate(assistant("stopped", { onboarded: true })));
+  it("should show nothing when the person had onboarded before the visit and their assistant is running", () => {
+    render(gate(assistant("running", { onboarded: true })));
 
     expect(screen.queryByRole("dialog")).toBeNull();
   });
