@@ -47,11 +47,14 @@ export type CheckedTemplate = { ok: true; template: Template } | { ok: false; er
  * CRLF and a template is pasted straight into the message box — the hub should not put carriage returns, or a leading
  * blank line, into somebody's message.
  *
- * A name one of the built-in templates already uses is refused. The composer offers both lists from one menu and keys
- * its items on the name, so two of a name there is one item the person cannot choose between.
+ * A name's own runs of whitespace collapse to single spaces. A name is one line in a menu, so a tab or a new line in
+ * it has nothing to do; and without this `New\tfeature` is a different string from `New feature` while rendering
+ * identically to it, which would put two items a person cannot tell apart in the one menu.
+ *
+ * A name one of the built-in templates already uses is refused, so nobody shadows a built-in without being told.
  */
 export function checkTemplate(input: { name: unknown; body: unknown }): CheckedTemplate {
-  const name = typeof input.name === "string" ? input.name.trim() : "";
+  const name = typeof input.name === "string" ? input.name.replace(/\s+/g, " ").trim() : "";
   const raw = typeof input.body === "string" ? input.body : "";
   const body = raw.replace(/\r\n?/g, "\n").trim();
   if (name === "") {
@@ -86,14 +89,23 @@ export function templateNameTaken(name: string): string {
 }
 
 /**
- * What the composer's + menu offers: the person's own first, then the built-in ones.
+ * What the composer's + menu offers: the person's own first, then every built-in one whose name is not already one of
+ * theirs.
  *
  * Both lists, rather than theirs replacing the built-in ones, because somebody with three saved prompts still wants
  * the Bug template, and a person with none would otherwise be offered nothing at all. Theirs first because they wrote
- * them and the built-in ones are the fallback. A built-in cannot be hidden: hiding would need a row per person per
- * built-in keyed on a name, which is not a stable id, so renaming a built-in would quietly unhide it for everyone who
- * had hidden it.
+ * them and the built-in ones are the fallback. A built-in cannot be hidden on purpose: that would need a row per
+ * person per built-in keyed on a name, which is not a stable id, so renaming a built-in would quietly unhide it for
+ * everyone who had hidden it.
+ *
+ * **Every name here is distinct, and this is the only thing that guarantees it.** The composer keys its menu items on
+ * the name, so two of a name is one item standing for two templates. `checkTemplate` refuses a name a built-in holds
+ * *at the time of saving*, which stops somebody shadowing one without being told — but it cannot bind a later rename
+ * in `starters.ts` into a name people have already saved. That rename is exactly the instability this module cites to
+ * reject per-person hiding, so the rule it argues for cannot be left resting on it. A clash is resolved in the
+ * person's favour: they wrote theirs, and theirs is the one with an Edit beside it in the settings dialog.
  */
 export function offeredTemplates(mine: readonly Template[]): Template[] {
-  return [...mine, ...TEMPLATES];
+  const taken = new Set(mine.map((template) => template.name));
+  return [...mine, ...TEMPLATES.filter((built) => !taken.has(built.name))];
 }

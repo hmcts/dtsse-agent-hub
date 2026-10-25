@@ -49,9 +49,21 @@ describe("checkTemplate", () => {
     expect(refusal(input)).toContain(error);
   });
 
-  // The composer offers both lists from one menu and keys its items on the name, so two of a name is one item.
+  // Nobody shadows a built-in without being told; `offeredTemplates` is what keeps the menu's names distinct.
   it("should refuse a name one of the built-in templates already uses", () => {
     expect(refusal({ name: TEMPLATES[0]?.name, body: "mine" })).toBe(`"${TEMPLATES[0]?.name}" is one of the built-in templates; give yours another name`);
+  });
+
+  it("should collapse a name's own runs of whitespace, since a name is one line in a menu", () => {
+    const checked = checkTemplate({ name: " Daily\t stand-up \n note ", body: "x" });
+
+    expect(checked.ok ? checked.template.name : undefined).toBe("Daily stand-up note");
+  });
+
+  // Without the collapse this is a different string from the built-in name while rendering identically to it, so the
+  // clash check waves it through and the menu gets two items a person cannot tell apart.
+  it("should refuse a built-in's name written with a tab in it, which renders the same as the built-in", () => {
+    expect(refusal({ name: "New\tfeature", body: "mine" })).toContain("one of the built-in templates");
   });
 
   it("should allow a body of exactly the cap, counted as a person counts it", () => {
@@ -90,9 +102,26 @@ describe("offeredTemplates", () => {
     expect(offeredTemplates([])).toEqual([...TEMPLATES]);
   });
 
-  it("should give every offered template a distinct name, which the composer keys its menu items on", () => {
-    const names = offeredTemplates([{ name: "Stand-up", text: "…" }]).map((template) => template.name);
+  /**
+   * The property, not an example. `checkTemplate` refuses a name a built-in holds at the time of saving, so the only
+   * way into a clash is a built-in being renamed into a name somebody has already saved — which no check can reach
+   * back and prevent. These assert the property over exactly that: a saved template per built-in name.
+   */
+  it("should give every offered template a distinct name, whatever the person has saved", () => {
+    const mine = TEMPLATES.map((built, index) => ({ name: built.name, text: `mine ${index}` }));
+
+    const names = offeredTemplates([...mine, { name: "Stand-up", text: "…" }]).map((template) => template.name);
 
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("should keep the person's own, not the built-in one, when a rename has put the two names together", () => {
+    const clashing = TEMPLATES[2]!;
+    const mine = [{ name: clashing.name, text: "mine, not the built-in one" }];
+
+    const offered = offeredTemplates(mine);
+
+    expect(offered.filter((template) => template.name === clashing.name)).toEqual(mine);
+    expect(offered).toHaveLength(TEMPLATES.length);
   });
 });

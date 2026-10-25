@@ -27,6 +27,11 @@ function allow({ actorOid, ownerOid }: TemplateTarget): void {
   }
 }
 
+/** Holds the owner's `user` row until commit, so two saves by one person cannot both pass the count cap. */
+async function lockOwner(db: Database, ownerOid: string): Promise<void> {
+  await db.$queryRaw`SELECT 1 FROM "user" WHERE oid = ${ownerOid} FOR UPDATE`;
+}
+
 const SELECT = { id: true, name: true, body: true } as const;
 
 function view(row: { id: string; name: string; body: string }): SavedTemplate {
@@ -55,9 +60,8 @@ export interface TemplateWrite extends TemplateTarget {
 /**
  * Adds a template or replaces one of the owner's own, and answers it as saved.
  *
- * The count is read inside the transaction the insert runs in, so two tabs saving at once cannot both see room for
- * the last one. An id that is not one of this person's templates is not an update of somebody else's — the `where`
- * carries the owner, so it matches nothing and the person is told the template has gone.
+ * An id that is not one of this person's templates is not an update of somebody else's — the `where` carries the
+ * owner, so it matches nothing and the person is told the template has gone.
  */
 export async function saveTemplate(prisma: PrismaClient, write: TemplateWrite): Promise<SavedTemplate> {
   allow(write);
@@ -70,6 +74,12 @@ export async function saveTemplate(prisma: PrismaClient, write: TemplateWrite): 
   try {
     return await prisma.$transaction(async (tx) => {
       if (write.id === undefined) {
+        // The owner's row is taken first, so the cap is read and acted on one save at a time. Counting inside the
+        // transaction is not enough on its own: at this server's READ COMMITTED default two tabs each read the same
+        // total, each find room for the last one, and both insert. A row over the cap is worse than an off-by-one,
+        // because `listTemplates` stops at `MAX_TEMPLATES` — the extra row is then invisible in the dialog, which
+        // says the person is full and gives them nothing to delete.
+        await lockOwner(tx, write.ownerOid);
         if ((await tx.assistantTemplate.count({ where: { ownerOid: write.ownerOid } })) >= MAX_TEMPLATES) {
           throw new HttpError(400, TEMPLATES_FULL);
         }

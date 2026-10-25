@@ -5,7 +5,7 @@ import { MAX_TEMPLATES, offeredTemplates, TEMPLATES_FULL, templateNameTaken } fr
 import type { Identity } from "../../src/users/identity.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { assistantTemplates } from "../../src/web/data.ts";
-import { insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { connect, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 
 vi.mock("next/headers", async () => {
   const { jar } = await import("./web-session.ts");
@@ -136,6 +136,41 @@ describe("saving a template", () => {
     }
 
     expect((await actions.saveTemplate(form({ id: ids[0]!, name: "Template 0", body: "Changed" }))).ok).toBe(true);
+    expect(await prisma.assistantTemplate.count()).toBe(MAX_TEMPLATES);
+  });
+
+  /**
+   * Two tabs racing for the last place. The connection here stands in for the one that gets there first: it takes the
+   * same `user` row `saveTemplate` locks and inserts the twentieth template while holding it, so the save under test
+   * is made to do its counting on the far side of somebody else's commit.
+   *
+   * Counting inside the transaction is not enough on its own, and this is what says so: at READ COMMITTED a save
+   * that did not take the lock would read nineteen, find room, and insert, leaving twenty-one rows against a cap of
+   * twenty — and `listTemplates` stops at twenty, so the extra one would be invisible in the dialog while the dialog
+   * told the person they were full.
+   */
+  it("should refuse the one over the cap when two saves race for the last place", async () => {
+    for (let index = 0; index < MAX_TEMPLATES - 1; index += 1) {
+      await given(ALICE, `Template ${index}`);
+    }
+    const first = await connect();
+    try {
+      await first.query("BEGIN");
+      await first.query('SELECT 1 FROM "user" WHERE oid = $1 FOR UPDATE', [ALICE.oid]);
+      // Settled rather than awaited, so a save that does not block leaves no unhandled rejection behind it.
+      const racing = saveTemplate(prisma, { ...own(ALICE), name: "Mine", body: "x" }).then(
+        () => "saved" as const,
+        (error: Error) => error.message
+      );
+      // Long enough for the save to have reached the lock, or to have sailed past it.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await first.query("INSERT INTO assistant_template (owner_oid, name, body) VALUES ($1, $2, $3)", [ALICE.oid, "Theirs", "x"]);
+      await first.query("COMMIT");
+
+      expect(await racing).toBe(TEMPLATES_FULL);
+    } finally {
+      await first.end();
+    }
     expect(await prisma.assistantTemplate.count()).toBe(MAX_TEMPLATES);
   });
 });
