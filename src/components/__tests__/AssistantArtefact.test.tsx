@@ -404,6 +404,29 @@ describe("ArtefactPanel tools", () => {
     expect(screen.getByText("This document is empty.")).toBeTruthy();
   });
 
+  /**
+   * The preview holds no control of its own, so the tab stop is the only way a keyboard user reaches the rest of a
+   * long document. jsdom lays nothing out, so that it overflows at all is a browser check and the violation it raises
+   * an axe one: what is assertable here is the tab stop and the name saying what the focus has landed on.
+   */
+  it("should make the preview a named tab stop so a keyboard user can scroll a long document", () => {
+    render(panel(snapshot({ markdown: "# Original" })));
+
+    const preview = screen.getByRole("region", { name: "Document preview" });
+    expect(preview.tabIndex).toBe(0);
+    expect(preview.className).toContain("overflow-y-auto");
+    expect(preview.textContent).toContain("Original");
+  });
+
+  it("should leave the scroller out of the tab order when editing, where the box is the tab stop and scrolls itself", () => {
+    render(panel(snapshot()));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.queryByRole("region", { name: "Document preview" })).toBeNull();
+    expect(box().closest("div")?.className).toContain("overflow-y-auto");
+  });
+
   it("should format the selection when the person uses the toolbar", () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
