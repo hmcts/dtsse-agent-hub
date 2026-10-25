@@ -163,6 +163,7 @@ model User {
   credentials   Credential[]
   virtualAgents VirtualAgent[]
   assistantConversations AssistantConversation[]
+  assistantUploads       AssistantUpload[]
 
   @@map("user")
 }
@@ -185,6 +186,9 @@ model Agent {
   virtualAgentId  String?     @map("virtual_agent_id") @db.Uuid
   /// The skills its session reported, as [{name, description}]. See src/agents/skills.ts.
   skills          Json        @default("[]")
+  /// What its client claimed it understands of the hub's optional wire fields, as ["name"], or null from a client
+  /// that reported nothing, which claims nothing. See src/agents/client-features.ts.
+  clientFeatures  Json?       @map("client_features")
   /// The assistant conversation this agent is a session of, if any. Visible to and messageable by its owner only.
   assistantConversationId String? @map("assistant_conversation_id") @db.Uuid
 
@@ -251,6 +255,7 @@ model Message {
   topics      MessageTopic[]
   deliveries  Delivery[]
   transcript  TranscriptEntry[]
+  uploads     AssistantUpload[]
 
   @@map("message")
 }
@@ -472,11 +477,50 @@ model AssistantConversation {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  owner        User         @relation(fields: [ownerOid], references: [oid])
-  virtualAgent VirtualAgent @relation(fields: [virtualAgentId], references: [id], onDelete: Cascade)
-  agent        Agent?       @relation("assistantConversationCurrent", fields: [agentId], references: [id], onDelete: SetNull)
-  sessions     Agent[]      @relation("assistantConversationSessions")
+  owner        User             @relation(fields: [ownerOid], references: [oid])
+  virtualAgent VirtualAgent     @relation(fields: [virtualAgentId], references: [id], onDelete: Cascade)
+  agent        Agent?           @relation("assistantConversationCurrent", fields: [agentId], references: [id], onDelete: SetNull)
+  sessions     Agent[]          @relation("assistantConversationSessions")
+  uploads      AssistantUpload[]
 
   @@index([ownerOid, lastActiveAt(sort: Desc)], map: "assistant_conversation_owner_active_idx")
   @@map("assistant_conversation")
+}
+
+/// A file attached to an Assistant message: the metadata, which outlives the bytes in `AssistantUploadPart`.
+model AssistantUpload {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  ownerOid       String   @map("owner_oid")
+  /// Stamped in the sending message's transaction; null while the person is still composing.
+  messageId      BigInt?  @map("message_id")
+  fileName       String   @map("file_name")
+  /// What the pod writes it as. Decided by the hub and constrained in SQL, never built from `fileName`.
+  storedName     String   @map("stored_name")
+  mediaType      String   @map("media_type")
+  bytes          BigInt
+  /// pending, stored, fetched or expired.
+  state          String   @default("pending")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  owner        User                  @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
+  message      Message?              @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  parts        AssistantUploadPart[]
+
+  @@index([conversationId, createdAt], map: "assistant_upload_conversation_idx")
+  @@map("assistant_upload")
+}
+
+/// One 4 MiB slice of an upload. Deleted as soon as the pod says it has the file, or by the sweep if it never does.
+model AssistantUploadPart {
+  uploadId String @map("upload_id") @db.Uuid
+  index    Int
+  data     Bytes
+
+  upload AssistantUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@id([uploadId, index])
+  @@map("assistant_upload_part")
 }

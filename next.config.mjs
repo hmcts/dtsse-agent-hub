@@ -20,9 +20,11 @@ const nextConfig = {
   // The sidebar's agent list is pinned to the bottom left, where the dev indicator sits by default.
   devIndicators: { position: "bottom-right" },
   experimental: {
-    // The proxy buffers every matched request body in memory up to this size. It stays above the agent API's
-    // MAX_REQUEST_BYTES, so a body it truncates is still long enough for `readJson` to refuse with a 413.
-    proxyClientMaxBodySize: "1mb",
+    // The proxy buffers every matched request body in memory up to this size. The largest body the service accepts
+    // is one part of an Assistant upload, PART_BYTES in src/assistant/uploads.ts (4 MiB), and this sits above it so
+    // the part arrives whole; every other route stays bounded by the agent API's own MAX_REQUEST_BYTES, and a body
+    // the proxy truncates is still long enough for `readJson` to refuse with a 413.
+    proxyClientMaxBodySize: "6mb",
     // The largest action is a post or direct message, bounded by the same worst case as MAX_REQUEST_BYTES.
     serverActions: { bodySizeLimit: "256kb" }
   },

@@ -27,6 +27,8 @@ export type StoredAgent = {
   host?: string;
   status?: string;
   skills?: Skill[];
+  /** As the service stores it: whatever the last register reported, and undefined when one reported nothing. */
+  client_features?: string[];
   last_heartbeat_at?: string | null;
   read_cursor?: number;
   conversation_id?: string;
@@ -112,6 +114,7 @@ function transcriptProblem(body: Body, rawBytes: number): string | null {
 }
 
 const SKILL_NAME_RE = /^[a-z0-9][a-z0-9:_-]*$/;
+const CLIENT_FEATURE_NAME_RE = /^[a-z0-9][a-z0-9:_-]*$/;
 
 function skillsProblem(skills: unknown): string | null {
   if (!Array.isArray(skills) || skills.length > 200) {
@@ -126,6 +129,22 @@ function skillsProblem(skills: unknown): string | null {
     }
   }
   return null;
+}
+
+/**
+ * What the service stores for a reported list: sorted, de-duplicated, with anything that is not a name dropped, and
+ * nothing at all for a register that reported none. Over the cap it refuses, like `boundedArray` does. Reproduced
+ * here so a client test cannot pass on a value the service would never have kept.
+ */
+function storedClientFeatures(features: unknown): string[] | "too many" | undefined {
+  if (features === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(features) || features.length > 50) {
+    return "too many";
+  }
+  const names = features.filter((f): f is string => typeof f === "string" && f.length <= 50 && CLIENT_FEATURE_NAME_RE.test(f));
+  return [...new Set(names)].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
 }
 
 export type MockHubOptions = {
@@ -157,6 +176,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const sessionStreams = new Map<string, ServerResponse>();
   // agent id → the conversation's document, for conversations' agents
   const artefacts = new Map<string, Artefact>();
+  // upload id → the parts the pod may still fetch, and whether it has reported having the whole file
+  const attachments = new Map<string, { parts: Uint8Array[]; fetched: boolean }>();
   // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
   const virtuals = new Map<string, VirtualRecord>();
   // person oid → Map(kind → value), the /api/agent/credentials routes
@@ -293,6 +314,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       }
       v.status.push(body.detail ? { phase: body.phase, detail: body.detail } : { phase: body.phase });
       return send(res, 204);
+    }
+    if (req.method === "GET" && area === "conversations" && !kind) {
+      const ids = new Set([...agents.values()].filter((a) => a.conversation_id).map((a) => a.conversation_id as string));
+      return send(res, 200, { conversations: [...ids].map((conversationId) => ({ id: conversationId })) });
     }
     if (area === "sessions" && !kind) {
       if (req.method === "PUT") {
@@ -447,6 +472,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
           return send(res, 400, { error: problem });
         }
       }
+      const features = storedClientFeatures(body.client_features);
+      if (features === "too many") {
+        return send(res, 400, { error: "client_features: at most 50" });
+      }
       Object.assign(agent, {
         session_id: body.session_id,
         name: body.name,
@@ -454,7 +483,9 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         repo: body.repo,
         branch: body.branch,
         host: body.host,
-        status: "idle"
+        status: "idle",
+        // Replaced by every register, unlike the skills below: the service records the build that is running now.
+        client_features: features
       });
       if (body.conversation_id !== undefined) {
         if (!launch) {
@@ -719,6 +750,27 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return send(res, 200, { version: next.version });
       }
     }
+    // The pod-facing half of an Assistant attachment: one part's raw bytes, and the report that deletes them.
+    if (action === "attachments") {
+      const upload = attachments.get(parts[4] as string);
+      if (!upload) {
+        return send(res, 404, { error: "no such upload" });
+      }
+      if (req.method === "POST" && parts[5] === "fetched") {
+        upload.fetched = true;
+        upload.parts = [];
+        return send(res, 204);
+      }
+      if (req.method === "GET" && parts[5] === "parts") {
+        const part = upload.parts[Number(parts[6])];
+        if (!part) {
+          return send(res, 404, { error: "no such part of this file" });
+        }
+        beforeRespond?.();
+        res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(part.byteLength) });
+        return res.end(Buffer.from(part));
+      }
+    }
     if (action === "subscriptions") {
       const subs = subscriptions.get(agent.id) as Set<string>;
       if (req.method === "GET") {
@@ -754,6 +806,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     virtuals,
     personCredentials,
     artefacts,
+    attachments,
     sessionStreams,
     // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session
     // registers for it.

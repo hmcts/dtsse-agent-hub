@@ -84,6 +84,28 @@ describe("activityLabel", () => {
   });
 });
 
+describe("threadItems attachments", () => {
+  it("should carry the files on a message through to its user item", () => {
+    // Arrange
+    const attachments = [{ id: "u1", name: "letter.pdf", bytes: 1024, media_type: "application/pdf" }];
+    const asked: ThreadMessage = { ...person("What does this say?", T(1)), attachments };
+
+    // Act
+    const items = threadItems(conversationItems([asked], []));
+
+    // Assert
+    expect(items).toEqual([{ type: "user", key: `m${asked.id}`, at: T(1), text: "What does this say?", delivery: "delivered", attachments }]);
+  });
+
+  it("should give a message with no attachments an empty list, so the view never sees a missing one", () => {
+    // Act
+    const items = threadItems(conversationItems([person("Hello", T(1))], []));
+
+    // Assert
+    expect(items[0]).toMatchObject({ type: "user", attachments: [] });
+  });
+});
+
 describe("progress", () => {
   function state(items: ConversationItem[], status: "busy" | "idle" | "offline", session: "starting" | "live" | "queued" | null = null) {
     return progress(items, threadItems(items), status, session);

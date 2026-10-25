@@ -1,5 +1,19 @@
 // The pod side of the HMCTS Assistant's conversations: one interactive Claude session per conversation, beside
 // the virtual agent's own. Gathered for the CLI and the package's public surface.
+export type { Attachment, AttachmentFs, FetchAttachmentsOptions, ReconcileUploadsOptions } from "./attachments.ts";
+export {
+  attachmentPath,
+  conversationDir,
+  fetchAttachments,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS,
+  parseAttachments,
+  reconcileUploads,
+  removeConversationUploads,
+  safeName,
+  staleUploadDirs,
+  uploadsRoot
+} from "./attachments.ts";
 export type { RunAssistantSupervisorOptions } from "./run.ts";
 export { runAssistantSupervisor } from "./run.ts";
 export type {

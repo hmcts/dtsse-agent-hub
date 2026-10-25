@@ -87,6 +87,56 @@ describe("POST /api/agent/register", () => {
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills).toEqual([]);
   });
 
+  it("should store the features the client reported, sorted and de-duplicated", async () => {
+    const body = { ...REGISTRATION, client_features: ["voice", "attachments", "voice"] };
+
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body }));
+
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures).toEqual(["attachments", "voice"]);
+  });
+
+  it("should store no features at all when a client registers without reporting any, which is how an old client is known", async () => {
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: REGISTRATION }));
+
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures).toBeNull();
+  });
+
+  it("should replace the stored features with what the latest registration reported, nothing included", async () => {
+    const withFeatures = { ...REGISTRATION, client_features: ["attachments"] };
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: withFeatures }));
+    const stored = async () => (await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures;
+
+    expect(await stored()).toEqual(["attachments"]);
+
+    // A current client that claims nothing is distinguishable from one that reported nothing at all.
+    await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, client_features: [] } });
+    expect(await stored()).toEqual([]);
+
+    // The session is running an older client now, whatever it ran before: the claim does not outlive the build.
+    await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: REGISTRATION });
+    expect(await stored()).toBeNull();
+  });
+
+  it("should keep a feature name it does not recognise, and drop one that is not a name, when a newer client registers", async () => {
+    const body = { ...REGISTRATION, client_features: ["some-later-field", "Not A Name", 7, null] };
+
+    const response = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body });
+
+    expect(response.status).toBe(200);
+    const { agent_id } = await jsonOf(response);
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures).toEqual(["some-later-field"]);
+  });
+
+  it("should refuse a registration reporting more features than the cap, which is what bounds the column", async () => {
+    const body = { ...REGISTRATION, client_features: [...Array(51).keys()].map((index) => `f${index}`) };
+
+    const response = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body });
+
+    expect(response.status).toBe(400);
+    expect((await jsonOf(response)).error).toMatch(/client_features/);
+    expect(await prisma.agent.count()).toBe(0);
+  });
+
   it("should refuse a registration when a skill name is not valid", async () => {
     const response = await call(register, {
       as: ALICE,

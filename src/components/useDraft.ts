@@ -181,28 +181,40 @@ function write(key: string, body: string): void {
 }
 
 /**
- * Forgets the draft of the message that was `sent`, and only that message: the box is not disabled while a send is in
- * flight, so by the time it resolves the person may have started the next message, and that text is the draft now.
+ * Forgets the words that were `sent`, and only those: the box is not disabled while a send is in flight, so by the
+ * time it resolves the person may have typed on past the message they sent, and that much is still theirs.
+ *
+ * The box still shows the sent text while the send is in flight, so anything typed meanwhile lands on the end of it
+ * — which is why what the draft keeps is the remainder after the sent prefix rather than all or nothing. Keeping all
+ * of it would leave words that have already been delivered sitting in the box for Enter to send a second time; a
+ * draft the person rewrote so that it no longer starts with what was sent is left alone, because there is no telling
+ * which part of it went.
  *
  * The text to compare against is the one the key holds — the open box's, which is up to `SAVE_AFTER_MS` ahead of
  * storage, or what was flushed to storage when no box is open on it any more.
  */
 function forgetSent(key: string, sent: string): void {
-  const draft = drafts.get(key);
-  if ((draft?.text ?? readDraft(key)) !== sent) {
+  if (sent === "") {
+    // A message of attachments and no words leaves nothing to forget, and every draft starts with "".
     return;
   }
+  const draft = drafts.get(key);
+  const current = draft?.text ?? readDraft(key);
+  if (!current.startsWith(sent)) {
+    return;
+  }
+  const kept = current.slice(sent.length);
   if (draft !== undefined) {
-    draft.text = "";
+    draft.text = kept;
     draft.owed = null;
     if (draft.timer !== null) {
       clearTimeout(draft.timer);
       draft.timer = null;
     }
   }
-  saveDraft(key, "");
+  saveDraft(key, kept);
   for (const box of draft?.boxes ?? []) {
-    box("");
+    box(kept);
   }
 }
 

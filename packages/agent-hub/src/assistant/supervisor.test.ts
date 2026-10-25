@@ -1,6 +1,7 @@
 // The supervisor's decisions against a fake tmux and a fake clock: which conversations get a session, which wait,
 // which are stopped, and what the hub is told. The sessions stream itself is in `run.test.ts`.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home.ts";
@@ -423,6 +424,60 @@ describe("createAssistantSupervisor close", () => {
     // Assert
     expect(tmux.sent(tmuxName(a.conversation_id))).toEqual([["send-keys", tmuxName(a.conversation_id), "/exit", "Enter"]]);
     expect(lastReport().sessions).toEqual([]);
+  });
+
+  it("should remove the conversation's attached files when it is closed, since the chat they belonged to has gone", async () => {
+    // Arrange
+    const uploads = fs.mkdtempSync(path.join(os.tmpdir(), "agent-hub-sup-uploads-"));
+    const c = conversation();
+    const file = path.join(uploads, c.conversation_id, "u-letter.pdf");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "x");
+    const supervisor = createAssistantSupervisor({
+      api: { putSessions: async () => null },
+      id: "va-assist",
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      uploadsDir: uploads
+    });
+
+    try {
+      // Act
+      await supervisor.close({ conversation_id: c.conversation_id });
+
+      // Assert
+      expect(fs.existsSync(path.dirname(file))).toBe(false);
+    } finally {
+      fs.rmSync(uploads, { recursive: true, force: true });
+    }
+  });
+
+  it("should say why it could not remove the files, and still report, when the uploads cannot be deleted", async () => {
+    // Arrange
+    const said: string[] = [];
+    const supervisor = createAssistantSupervisor({
+      api: { putSessions: async () => null },
+      id: "va-assist",
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      uploadsDir: "/nowhere",
+      say: (m) => said.push(m),
+      fs: {
+        ...fs,
+        rmSync: () => {
+          throw new Error("read-only file system");
+        }
+      }
+    });
+    const c = conversation();
+
+    // Act
+    await supervisor.close({ conversation_id: c.conversation_id });
+
+    // Assert
+    expect(said).toContain(`conversation ${c.conversation_id}: could not remove its uploads: read-only file system`);
   });
 
   it("should start a re-woken conversation again once its stopping session has left", async () => {
