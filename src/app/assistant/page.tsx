@@ -31,7 +31,7 @@ export default async function AssistantPage() {
       connections={connectionsData(home.assistant, home.credentials)}
       plugins={{ ...assistantPluginsData(home.assistant, home.plugins), save: setVirtualAgentPlugins }}
     >
-      <EmptyChat starters={STARTERS} templates={TEMPLATES} start={startConversation} />
+      <EmptyChat starters={STARTERS} templates={TEMPLATES} viewerOid={viewer.oid} start={startConversation} />
       <OnboardingGate
         assistant={home.assistant}
         statuses={home.credentials.available ? home.credentials.statuses : []}
