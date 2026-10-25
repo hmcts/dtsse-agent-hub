@@ -13,7 +13,10 @@ import type { MessageAttachment } from "./upload-store.ts";
  */
 
 export type ThreadItem =
-  /** `attachments` is always an array here, so the view never has to decide what a missing one means. */
+  /**
+   * `attachments` is always an array here, so the view never has to decide what a missing one means. Only the name and
+   * size are shown: the hub drops the bytes once the assistant's machine has them, so there is nothing to hand back.
+   */
   | { type: "user"; key: string; at: string; text: string; delivery: DeliveryView | null; attachments: MessageAttachment[] }
   | { type: "assistant"; key: string; at: string; text: string }
   | { type: "product"; key: string; at: string; label: string };
