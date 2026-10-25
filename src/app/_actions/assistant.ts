@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { canStopAssistantAnswer } from "@/access/rules";
 import { HttpError } from "@/agent-api/http";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import {
@@ -14,6 +15,7 @@ import {
   renameConversation as rename,
   requestWake,
   setProduct,
+  stopAnswer,
   touchConversation,
   writeArtefact
 } from "@/assistant/store";
@@ -170,6 +172,35 @@ export async function warmConversation(input: { conversationId: unknown }): Prom
       await requestWake(prisma, conversation);
     }
     return { ok: true };
+  });
+}
+
+/**
+ * Stops the answer the conversation is working on. Answers `{ok: true}` for a stop that reached the session and for
+ * one that found nothing to stop — pressing it as the answer arrives is a race the person cannot be expected to win,
+ * and nothing happened that they need telling about. A session whose client is too old to act on it is a refusal,
+ * because that one will not stop however long they wait.
+ */
+export async function stopAssistantAnswer(input: { conversationId: unknown }): Promise<ActionResult> {
+  return await runAction("stop assistant answer", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+    if (conversation === undefined) {
+      return MISSING;
+    }
+    // `findConversation` is owner-scoped, so this cannot refuse what it returned: it is here to name the rule
+    // rather than leave "only the owner may interrupt a turn" as a property of one query's WHERE clause, and it is
+    // what catches a read seam that is one day widened. `canStopAssistantAnswer` is where the rule is tested.
+    if (!canStopAssistantAnswer(viewer.oid, conversation)) {
+      return MISSING;
+    }
+    const outcome = await stopAnswer(prisma, conversation);
+    return outcome === "unsupported-client"
+      ? { ok: false, error: "this chat's assistant was started by an older version that cannot be stopped. It can be stopped once it next starts." }
+      : { ok: true };
   });
 }
 

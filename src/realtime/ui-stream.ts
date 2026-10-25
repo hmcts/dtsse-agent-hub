@@ -145,6 +145,10 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       return event.owner_oid === sources.viewerOid
         ? sseEvent({ event: "assistant_conversation", data: JSON.stringify({ conversation_id: event.conversation_id }) })
         : undefined;
+    // Never sent to a browser: it is an instruction to the conversation's pod. The stop is recorded on the
+    // conversation in the same transaction, and the `assistant_conversation` beside it is what redraws the thread.
+    case "assistant_stop":
+      return undefined;
     case "resync":
       return RESYNC;
   }

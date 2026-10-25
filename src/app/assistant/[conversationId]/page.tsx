@@ -1,6 +1,14 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import { deleteConversation, renameConversation, saveArtefact, sendAssistantMessage, setConversationProduct, warmConversation } from "@/app/_actions/assistant";
+import {
+  deleteConversation,
+  renameConversation,
+  saveArtefact,
+  sendAssistantMessage,
+  setConversationProduct,
+  stopAssistantAnswer,
+  warmConversation
+} from "@/app/_actions/assistant";
 import { saveCredential } from "@/app/_actions/credentials";
 import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
@@ -19,6 +27,7 @@ export const dynamic = "force-dynamic";
 const ACTIONS: ChatActions = {
   send: sendAssistantMessage,
   warm: warmConversation,
+  stop: stopAssistantAnswer,
   setProduct: setConversationProduct,
   rename: renameConversation,
   remove: deleteConversation,

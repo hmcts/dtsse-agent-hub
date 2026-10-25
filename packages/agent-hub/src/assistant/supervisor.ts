@@ -68,6 +68,7 @@ export type AssistantSupervisor = {
   queue: Wake[];
   max: number;
   wake: (data: unknown) => Promise<void>;
+  interrupt: (data: unknown) => Promise<void>;
   close: (data: unknown) => Promise<void>;
   tick: () => Promise<void>;
   adopt: () => Promise<void>;
@@ -380,6 +381,32 @@ export function createAssistantSupervisor({
     await report();
   }
 
+  /**
+   * Ends the turn a conversation's session is in the middle of, without stopping the session: `Escape` is Claude
+   * Code's own `chat:cancel` binding, which that session's own keyboard would send, so the conversation, the
+   * transcript and the pane all survive it. Not `C-c`, which the same gesture chain also exits the app on, and not
+   * a signal or `kill-session`, either of which would cost the person the session the stop was meant to preserve.
+   *
+   * Nothing to interrupt is the common case rather than an error: the hub sends an `interrupt` once and never
+   * replays it, so one arriving for a conversation with no session, or with a session already on its way out, is a
+   * stop whose turn has already ended. Escape with no turn running is a key that pane's binding is not listening
+   * for, so acting anyway would be harmless — but saying so in the log is more use than sending it.
+   */
+  async function interrupt(data: unknown): Promise<void> {
+    const cid = asRecord(data)?.conversation_id;
+    const s = typeof cid === "string" ? sessions.get(cid) : undefined;
+    if (!s || s.phase === "stopping") {
+      say(`ignoring an interrupt for conversation ${String(cid)}: ${s ? "its session is stopping" : "it has no session here"}`);
+      return;
+    }
+    try {
+      await tmux.sendKeys(s.name, "Escape");
+      say(`conversation ${s.conversation_id}: interrupted its session`);
+    } catch (e) {
+      say(`conversation ${s.conversation_id}: could not interrupt its session: ${(e as Error).message}`);
+    }
+  }
+
   async function close(data: unknown): Promise<void> {
     const cid = asRecord(data)?.conversation_id;
     const queued = queue.findIndex((w) => w.conversation_id === cid);
@@ -461,6 +488,7 @@ export function createAssistantSupervisor({
     queue,
     max,
     wake: (data) => serial(() => wake(data)),
+    interrupt: (data) => serial(() => interrupt(data)),
     close: (data) => serial(() => close(data)),
     tick: () => serial(tick),
     adopt: () => serial(adopt),

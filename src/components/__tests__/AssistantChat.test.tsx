@@ -106,6 +106,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     product: "ccd",
     productLabel: "CCD",
     productHistory: [],
+    stopHistory: [],
     agentId: AGENT,
     agentStatus: "idle",
     skills: [],
@@ -126,6 +127,7 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
   return {
     send: vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) })),
     warm: ok(),
+    stop: ok(),
     setProduct: ok(),
     rename: ok(),
     remove: ok(),
@@ -261,6 +263,84 @@ describe("ChatView progress", () => {
     emit("agent_status", { agent_id: AGENT, status: "busy" });
     expect(screen.queryByText("Starting your assistant…")).toBeNull();
     expect(screen.getByText("Thinking")).toBeTruthy();
+  });
+});
+
+describe("ChatView stopping an answer", () => {
+  // A session whose client claims `stop`, mid-answer, which is the only state the control is offered in.
+  function working(overrides: Partial<ConversationView> = {}): ConversationView {
+    return conversation({ agentStatus: "busy", clientFeatures: ["stop"], page: page({ messages: [message("1")] }), ...overrides });
+  }
+
+  // Both announcers on the page: the thread's and the message box's own. Which of them carries a sentence is not
+  // what these tests are about, only that a reader is told.
+  function announced(): string {
+    return screen
+      .getAllByTestId("arrivals")
+      .map((region) => region.textContent ?? "")
+      .join(" ");
+  }
+
+  it("should offer a stop while an answer is in flight", () => {
+    render(<ChatView viewerOid={VIEWER} view={working()} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+  });
+
+  it("should offer no stop when nothing is in flight", () => {
+    const settled = page({ messages: [message("1")], entries: [entry("2")] });
+    render(<ChatView viewerOid={VIEWER} view={conversation({ clientFeatures: ["stop"], page: settled })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+
+  it("should offer no stop when the session's client would ignore the interrupt", () => {
+    render(<ChatView viewerOid={VIEWER} view={working({ clientFeatures: null })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByRole("status").textContent).toContain("Thinking");
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+
+  it("should stop this conversation, announce it and re-read the thread when the stop is pressed", async () => {
+    vi.useFakeTimers();
+    const chatActions = actions();
+    render(<ChatView viewerOid={VIEWER} view={working()} templates={TEMPLATES} actions={chatActions} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    });
+
+    expect(chatActions.stop).toHaveBeenCalledWith({ conversationId: CONVERSATION });
+    expect(refresh).toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+    });
+    expect(announced()).toContain("Stopped");
+  });
+
+  it("should say why, and announce nothing, when the stop is refused", async () => {
+    vi.useFakeTimers();
+    const chatActions = actions({ stop: vi.fn(async () => ({ ok: false as const, error: "an older version that cannot be stopped" })) });
+    render(<ChatView viewerOid={VIEWER} view={working()} templates={TEMPLATES} actions={chatActions} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain("an older version that cannot be stopped");
+    expect(announced()).not.toContain("Stopped");
+  });
+
+  it("should read as stopped, with no activity under it, once a stop is on the conversation", () => {
+    const stopped = working({ stopHistory: [{ at: "2026-10-21T09:02:00.000Z" }] });
+    render(<ChatView viewerOid={VIEWER} view={stopped} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByText("You stopped this answer")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
 });
 

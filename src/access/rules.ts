@@ -230,6 +230,21 @@ export function agentAccess(viewerOid: string, agent: AgentRef, grants: readonly
   return grantOver(grants, agent, viewerOid) ?? "none";
 }
 
+/** An HMCTS Assistant conversation, as the rules read one. */
+export interface ConversationRef {
+  id: string;
+  ownerOid: string;
+}
+
+/**
+ * Only its owner stops an answer their conversation is working on. Interrupting a turn is an act on the session, not
+ * a read of it, and a conversation's agent is its owner's alone — `AgentRef.ownerOnly` — so no grant reaches it, not
+ * even a `write` one, which elsewhere lets a grantee send a message.
+ */
+export function canStopAssistantAnswer(actorOid: string, conversation: ConversationRef): boolean {
+  return actorOid === conversation.ownerOid;
+}
+
 export interface VirtualAgentRef {
   id: string;
   ownerOid: string;

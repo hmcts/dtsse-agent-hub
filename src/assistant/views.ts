@@ -117,6 +117,8 @@ export interface ConversationView {
   product: string;
   productLabel: string;
   productHistory: { product: string; at: string }[];
+  /** Every answer the person stopped, so the thread shows where each one was cut off. */
+  stopHistory: { at: string }[];
   agentId: string;
   agentStatus: AgentStatus;
   /**
@@ -132,7 +134,7 @@ export interface ConversationView {
    * deployment.
    *
    * Carried to the screen so the composer can offer — or refuse, and say why — anything the session could not act on.
-   * No component reads it yet, so nothing on the screen says anything either way.
+   * `ChatView` reads it for `stop`, and offers no stop control on a session whose client would ignore the interrupt.
    */
   clientFeatures: string[] | null;
   sessionState: SessionState | null;
@@ -154,6 +156,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     product: conversation.product,
     productLabel: productLabel(conversation.product),
     productHistory: conversation.productHistory,
+    stopHistory: conversation.stopHistory,
     agentId,
     agentStatus: agent?.status ?? "offline",
     skills: storedSkills(agent?.skills),

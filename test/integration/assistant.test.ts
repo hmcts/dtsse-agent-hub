@@ -549,6 +549,70 @@ describe("the sessions stream and report", () => {
     expect((await put({ sessions: [], max: 0 })).status).toBe(400);
   });
 
+  it("should send the pod an interrupt, and record the stop, when the person stops the answer", async () => {
+    const { id: assistantId, token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id, { clientFeatures: ["stop"] });
+    await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
+
+    const abort = new AbortController();
+    const stream = frames(
+      await pod(sessionsRoute.GET, token, `/api/virtual/${assistantId}/sessions`, { virtualAgentId: assistantId }, "GET", undefined, abort.signal)
+    );
+
+    const result = await actions.stopAssistantAnswer({ conversationId: id });
+    const [interrupt] = await stream.named("interrupt", 1);
+    abort.abort();
+    await stream.cancel();
+
+    expect(result).toEqual({ ok: true });
+    expect(JSON.parse(interrupt!.data!)).toEqual({ conversation_id: id });
+    expect((await assistantConversation(VIEWER, id))?.stopHistory).toHaveLength(1);
+  });
+
+  it("should do nothing when there is no answer running to stop", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id, { clientFeatures: ["stop"] });
+    await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "idle" });
+
+    // Pressing stop as the answer lands is a race nobody can be expected to win, so it is not a refusal — but
+    // nothing happened, so nothing goes in the thread to say it did.
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toEqual({ ok: true });
+    expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
+  });
+
+  it("should refuse to stop, and record nothing, when the session's client cannot act on an interrupt", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id);
+    await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
+
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toMatchObject({ ok: false });
+    expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
+  });
+
+  it("should not let anyone but the owner stop a conversation's answer", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id, { clientFeatures: ["stop"] });
+    await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
+    await insertUser(BOB);
+    // A write grant is the most anyone else can hold, and it lets them message any other agent of Alice's. The
+    // refusal comes from the owner-scoped read rather than from `canStopAssistantAnswer`, which the action names
+    // after it and `rules.test.ts` covers; this is the end of it that the person would meet.
+    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
+    actAs("bob");
+
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toMatchObject({ ok: false });
+    actAs("alice");
+    expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
+  });
+
   it("should refuse the sessions routes to another virtual agent's launch token", async () => {
     const { token } = await startedAssistant();
     await insertUser(BOB);

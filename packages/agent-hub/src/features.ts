@@ -13,7 +13,7 @@
  * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
  * from here; keep the two in step, so a name only one side knows is a type error on that side.
  */
-export type ClientFeature = "attachments";
+export type ClientFeature = "attachments" | "stop";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
@@ -23,5 +23,9 @@ export type ClientFeature = "attachments";
  *
  * `attachments` is claimed because `parseAssistantFrame` carries `raw.attachments` and the bridge fetches each file to
  * disk before it delivers the message.
+ *
+ * `stop` is claimed because the assistant supervisor acts on the sessions stream's `interrupt` frame, sending `Escape`
+ * to the conversation's pane. The hub gates the stop on this claim, so a build that did not claim it offers the person
+ * no stop control at all rather than one that does nothing.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments"];
+export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "stop"];

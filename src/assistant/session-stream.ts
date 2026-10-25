@@ -20,14 +20,22 @@ export function closeFrame(conversationId: string): string {
   return sseEvent({ event: "close", data: JSON.stringify({ conversation_id: conversationId }) });
 }
 
+export function interruptFrame(conversationId: string): string {
+  return sseEvent({ event: "interrupt", data: JSON.stringify({ conversation_id: conversationId }) });
+}
+
 /**
  * What `GET /api/virtual/{id}/sessions` sends an assistant's pod: every pending wake on connect, then a wake as each
- * conversation needs a session and a close as each is deleted.
+ * conversation needs a session, an interrupt as the person stops an answer, and a close as each is deleted.
  *
  * Opened in the same order as the agent stream (subscribe, wait for `LISTEN`, then replay), so nothing committed
  * around the replay is missed. A wake is sent at most once per connection for each session id, and again on the
  * next connection until a session registers, which is what clears it. A `resync` replays, since NOTIFYs sent while
  * the listener was down are gone. A failed read ends the stream, and the pod's reconnect replays.
+ *
+ * An interrupt is the exception to all of that: it is neither replayed on connect nor resent on a `resync`, because
+ * it names no state to reach but a turn to end, and the turn a missed one would have ended is over by the time
+ * another stream opens.
  */
 export function sessionStream(virtualAgentId: string, sources: SessionStreamSources): OnOpen {
   return (send, fail) => {
@@ -74,6 +82,12 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
             emit(wake);
           }
         });
+      } else if (event.type === "assistant_stop" && event.virtual_agent_id === virtualAgentId) {
+        // Sent straight out rather than through `enqueue`: there is nothing to read, and a stop that waited behind a
+        // queued wake's database round trip would reach the pane later than the turn it was meant to end.
+        if (open) {
+          send(interruptFrame(event.conversation_id));
+        }
       } else if (event.type === "resync") {
         enqueue(replay);
       }

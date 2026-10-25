@@ -25,6 +25,7 @@ import type { ActionResult } from "@/web/action";
 export interface ChatActions {
   send: (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult<{ message: ThreadMessage }>>;
   warm: (input: { conversationId: unknown }) => Promise<ActionResult>;
+  stop: (input: { conversationId: unknown }) => Promise<ActionResult>;
   setProduct: (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
   rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
@@ -45,7 +46,39 @@ function Dots({ label }: { label: string }) {
   );
 }
 
+/**
+ * Stops the answer being written. Shown only while one is in flight, so there is never a stop here that would do
+ * nothing. `pressed` is what stands in for the control going away: the thread takes a moment to come back with the
+ * stop recorded, and a button that stayed live through it invites a second press at a turn already ending.
+ */
+function StopButton({ onStop }: { onStop: () => Promise<void> }) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={pressed}
+      onClick={() => {
+        setPressed(true);
+        void onStop().finally(() => setPressed(false));
+      }}
+      className="flex items-center gap-1.5 rounded-full border border-asst-strong px-2.5 py-1 text-xs text-asst-muted hover:bg-asst-field disabled:opacity-60"
+    >
+      <span aria-hidden="true" className="h-2 w-2 rounded-[2px] bg-current" />
+      Stop
+    </button>
+  );
+}
+
 function Item({ item }: { item: ThreadItem }) {
+  if (item.type === "stopped") {
+    return (
+      <li className="flex items-center gap-3 text-xs text-asst-faint">
+        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+        You stopped this answer
+        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+      </li>
+    );
+  }
   if (item.type === "product") {
     return (
       <li className="flex items-center gap-3 text-xs text-asst-faint">
@@ -199,8 +232,12 @@ export function ChatView({
 
   // The picker can only show a product it offers, so it and the dialog it opens read the stored one through this.
   const product = storedProduct(view.product);
-  const thread = threadItems(live.items, view.productHistory);
+  const thread = threadItems(live.items, view.productHistory, view.stopHistory);
   const doing: Progress = progress(live.items, thread, status, view.sessionState);
+  // Offered only where the session's client acts on an interrupt. A pod takes the current client when it boots, so a
+  // conversation on an older session has no stop until that session is next started — and showing one anyway would
+  // give the person a button that does nothing, which is worse than the plain wait.
+  const stoppable = view.clientFeatures?.includes("stop") === true;
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
@@ -216,6 +253,17 @@ export function ChatView({
     }
     live.addMessage(result.message);
     return null;
+  }
+
+  async function stop(): Promise<void> {
+    const result = await actions.stop({ conversationId: view.id });
+    setError(result.ok ? null : result.error);
+    if (result.ok) {
+      // Said rather than left to the thread's redraw: the stop is the one thing here a person does and gets no reply
+      // to, and the line that records it is a quiet separator a reader is not sent to.
+      arrivals.announce("Stopped");
+    }
+    router.refresh();
   }
 
   async function changeProduct(product: string): Promise<void> {
@@ -317,7 +365,12 @@ export function ChatView({
                 <Item key={item.key} item={item} />
               ))}
             </ol>
-            {doing.state === "idle" ? null : <Dots label={doing.label} />}
+            {doing.state === "idle" ? null : (
+              <div className="flex items-center gap-3">
+                <Dots label={doing.label} />
+                {stoppable ? <StopButton onStop={stop} /> : null}
+              </div>
+            )}
           </div>
           <AnnouncerRegion text={arrivals.text} />
         </div>

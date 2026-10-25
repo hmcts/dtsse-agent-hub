@@ -70,6 +70,19 @@ describe("threadItems", () => {
     expect(threadItems(items, [{ product: "ccd", at: T(5) }]).map((item) => item.type)).toEqual(["user", "product", "user"]);
     expect(threadItems(items, [{ product: "ccd", at: T(5) }])[1]).toMatchObject({ type: "product", label: "CCD (Core Case Data)" });
   });
+
+  it("should mark where the person stopped an answer, after whatever the assistant had said by then", () => {
+    const items = conversationItems([person("Draft it", T(1))], [entry("assistant", { text: "As a court clerk…" }, T(5))]);
+
+    expect(threadItems(items, [], [{ at: T(5) }]).map((item) => item.type)).toEqual(["user", "assistant", "stopped"]);
+    expect(threadItems(items, [], [{ at: T(5) }]).at(-1)).toEqual({ type: "stopped", key: `s${T(5)}`, at: T(5) });
+  });
+
+  it("should keep each stop in its own place when the person stopped the conversation more than once", () => {
+    const items = conversationItems([person("first", T(1)), person("second", T(5))], []);
+
+    expect(threadItems(items, [], [{ at: T(3) }, { at: T(7) }]).map((item) => item.type)).toEqual(["user", "stopped", "user", "stopped"]);
+  });
 });
 
 describe("activityLabel", () => {
@@ -109,6 +122,10 @@ describe("threadItems attachments", () => {
 describe("progress", () => {
   function state(items: ConversationItem[], status: "busy" | "idle" | "offline", session: "starting" | "live" | "queued" | null = null) {
     return progress(items, threadItems(items), status, session);
+  }
+
+  function stopped(items: ConversationItem[], status: "busy" | "idle" | "offline", stops: { at: string }[]) {
+    return progress(items, threadItems(items, [], stops), status, null);
   }
 
   it("should be idle when the assistant has answered and is not busy", () => {
@@ -154,5 +171,29 @@ describe("progress", () => {
     const items = conversationItems([person("hi", T(1), "expired")], []);
 
     expect(state(items, "offline")).toEqual({ state: "idle" });
+  });
+
+  // The session's status is seconds behind the stop, and "Thinking…" under the line saying they stopped it would
+  // contradict it. This is also what takes the stop control away the moment it has been used.
+  it("should settle as soon as the person has stopped the answer, while the session still says busy", () => {
+    const items = conversationItems([person("hi", T(1))], [entry("assistant", { text: "Working on it" }, T(2))]);
+
+    expect(state(items, "busy").state).toBe("working");
+    expect(stopped(items, "busy", [{ at: T(3) }])).toEqual({ state: "idle" });
+  });
+
+  it("should work again when the assistant carries on past a stop, so the thread does not claim it ended", () => {
+    const items = conversationItems([person("hi", T(1))], [entry("assistant", { text: "Carrying on" }, T(5))]);
+
+    expect(stopped(items, "busy", [{ at: T(3) }])).toEqual({ state: "working", label: "Thinking" });
+  });
+
+  it("should wait on a message the person sent after stopping the answer before it", () => {
+    const items = conversationItems([person("first", T(1)), person("second", T(5))], []);
+
+    expect(progress(items, threadItems(items, [], [{ at: T(3) }]), "offline", null)).toEqual({
+      state: "waking",
+      label: "Starting your assistant…"
+    });
   });
 });

@@ -16,6 +16,7 @@ import {
   canReadMessage,
   canSeeAgentSkills,
   canSessionUseAttachment,
+  canStopAssistantAnswer,
   canUseCredentialRoutes,
   canViewAgent,
   canViewTranscript,
@@ -300,6 +301,19 @@ describe("canManageCredential", () => {
     [false, "stranger"]
   ])("should answer %s when the %s manages the owner's credentials", (expected, role) => {
     expect(canManageCredential(ROLES[role], OWNER)).toBe(expected);
+  });
+});
+
+describe("canStopAssistantAnswer", () => {
+  // A `write` grantee can message any other agent of this owner's, so it is the one worth naming: a conversation's
+  // agent is the owner's alone, and interrupting its turn is further still than sending it something.
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s stops the answer in the owner's conversation", (expected, role) => {
+    expect(canStopAssistantAnswer(ROLES[role], { id: "c-1", ownerOid: OWNER })).toBe(expected);
   });
 });
 
