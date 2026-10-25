@@ -34,7 +34,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
     notFound();
   }
   return (
-    <AssistantShell viewerName={viewer.name} groups={home.conversations} activeId={view.id} hubLink theme={theme}>
+    <AssistantShell viewerName={viewer.name} groups={home.conversations} activeId={view.id} hubLink theme={theme} actions={ACTIONS}>
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
       <ChatView key={view.agentId} view={view} templates={TEMPLATES} viewerOid={viewer.oid} actions={ACTIONS} />
       <OnboardingGate
