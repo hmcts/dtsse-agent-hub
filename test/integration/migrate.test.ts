@@ -265,22 +265,27 @@ describe("migrate waiting for the database", () => {
   });
 });
 
-describe("the bedrock migration", () => {
-  const RENAME = scratchDatabase("migrate_bedrock");
-  const MIGRATION = "20261009090000_bedrock";
+/**
+ * An empty scratch database pointed at by `DATABASE_URL`, and a copy of `prisma/migrations/` with `migration` and
+ * everything after it removed, so a test can migrate to the state just before it, seed rows, and then apply it.
+ *
+ * Registers its own `beforeAll`/`afterAll` against the calling `describe`, which is what lets one migration's test
+ * read as the assertion it is. `earlier()` is a function because the directory does not exist until `beforeAll` runs.
+ */
+function migrationFixture(suffix: string, migration: string): { database: string; earlier: () => string } {
+  const database = scratchDatabase(suffix);
   const original = process.env.DATABASE_URL;
-  let before: string | undefined;
+  let earlier: string | undefined;
 
   beforeAll(async () => {
-    await query("postgres", `DROP DATABASE IF EXISTS "${RENAME}"`);
-    await query("postgres", `CREATE DATABASE "${RENAME}"`);
-    process.env.DATABASE_URL = urlFor(RENAME);
-    before = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
-    await cp(migrationsDirectory(), before, { recursive: true });
-    // The database as it was before this migration: it and every one after it are applied by the test.
-    for (const name of await readdir(before)) {
-      if (/^\d/.test(name) && name >= MIGRATION) {
-        await rm(path.join(before, name), { recursive: true });
+    await query("postgres", `DROP DATABASE IF EXISTS "${database}"`);
+    await query("postgres", `CREATE DATABASE "${database}"`);
+    process.env.DATABASE_URL = urlFor(database);
+    earlier = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
+    await cp(migrationsDirectory(), earlier, { recursive: true });
+    for (const name of await readdir(earlier)) {
+      if (/^\d/.test(name) && name >= migration) {
+        await rm(path.join(earlier, name), { recursive: true });
       }
     }
   });
@@ -294,14 +299,24 @@ describe("the bedrock migration", () => {
     // Guarded because `beforeAll` may have thrown before assigning it: an `rm(undefined)` here would replace that
     // failure with a confusing `TypeError` and, worse, skip the `DROP DATABASE` below, leaking the scratch database
     // until the sweep's `ORPHAN_HOURS` are up.
-    if (before !== undefined) {
-      await rm(before, { recursive: true, force: true });
+    if (earlier !== undefined) {
+      await rm(earlier, { recursive: true, force: true });
     }
-    await query("postgres", `DROP DATABASE IF EXISTS "${RENAME}"`);
+    await query("postgres", `DROP DATABASE IF EXISTS "${database}"`);
   });
 
+  return {
+    database,
+    earlier: () => earlier as string
+  };
+}
+
+describe("the bedrock migration", () => {
+  const MIGRATION = "20261009090000_bedrock";
+  const { database: RENAME, earlier } = migrationFixture("migrate_bedrock", MIGRATION);
+
   it("should move existing gateway virtual agents to bedrock and add the bedrock credential kind when it is applied", async () => {
-    await migrate(before);
+    await migrate(earlier());
     await query(RENAME, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
     await query(
       RENAME,
@@ -336,42 +351,11 @@ describe("the bedrock migration", () => {
 });
 
 describe("the assistant product list migration", () => {
-  const REMAP = scratchDatabase("migrate_product");
   const MIGRATION = "20261025120000_assistant_product_list";
-  const original = process.env.DATABASE_URL;
-  let before: string | undefined;
-
-  beforeAll(async () => {
-    await query("postgres", `DROP DATABASE IF EXISTS "${REMAP}"`);
-    await query("postgres", `CREATE DATABASE "${REMAP}"`);
-    process.env.DATABASE_URL = urlFor(REMAP);
-    before = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
-    await cp(migrationsDirectory(), before, { recursive: true });
-    // The database as it was before this migration: it and every one after it are applied by the test.
-    for (const name of await readdir(before)) {
-      if (/^\d/.test(name) && name >= MIGRATION) {
-        await rm(path.join(before, name), { recursive: true });
-      }
-    }
-  });
-
-  afterAll(async () => {
-    if (original === undefined) {
-      delete process.env.DATABASE_URL;
-    } else {
-      process.env.DATABASE_URL = original;
-    }
-    // Guarded because `beforeAll` may have thrown before assigning it: an `rm(undefined)` here would replace that
-    // failure with a confusing `TypeError` and, worse, skip the `DROP DATABASE` below, leaking the scratch database
-    // until the sweep's `ORPHAN_HOURS` are up.
-    if (before !== undefined) {
-      await rm(before, { recursive: true, force: true });
-    }
-    await query("postgres", `DROP DATABASE IF EXISTS "${REMAP}"`);
-  });
+  const { database: REMAP, earlier } = migrationFixture("migrate_product", MIGRATION);
 
   it("should move conversations off the retired product and default new ones to general when it is applied", async () => {
-    await migrate(before);
+    await migrate(earlier());
     await query(REMAP, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
     await query(REMAP, `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'assistant', 'bedrock')`);
     await query(
