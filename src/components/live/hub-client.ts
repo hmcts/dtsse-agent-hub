@@ -1,4 +1,5 @@
 import type { Match, PostScope } from "@/messages/feed";
+import type { HubEvent } from "@/realtime/events";
 import { sessionEnded } from "./session.ts";
 
 /**
@@ -10,18 +11,18 @@ import { sessionEnded } from "./session.ts";
  * have been missed, so a `resync` is delivered for the page to re-read.
  */
 
-export type HubEventType =
-  | "post"
-  | "agent_status"
-  | "agent_skills"
-  | "direct"
-  | "delivery"
-  | "transcript"
-  | "virtual_agent"
-  | "assistant_conversation"
-  | "resync";
+/**
+ * Every frame name `selectFrame` can send, derived from the hub's own union so a new member of it reaches here.
+ * `grant` and `credential` are not frames: they arrive as `resync`, because what changed is what the viewer may see
+ * rather than anything the page can be handed.
+ */
+export type HubEventType = Exclude<HubEvent["type"], "grant" | "credential">;
 
-export const HUB_EVENT_TYPES: readonly HubEventType[] = [
+/**
+ * Subscribed one at a time below, because `EventSource` dispatches by `event:` name and has no wildcard. A type
+ * missing from this list is silently never delivered to the page, so `Unsubscribed` makes it a compile error.
+ */
+export const HUB_EVENT_TYPES = [
   "post",
   "agent_status",
   "agent_skills",
@@ -31,7 +32,11 @@ export const HUB_EVENT_TYPES: readonly HubEventType[] = [
   "virtual_agent",
   "assistant_conversation",
   "resync"
-];
+] as const satisfies readonly HubEventType[];
+
+/** Errors as "does not satisfy the constraint 'never'", naming the types `HUB_EVENT_TYPES` leaves out. */
+type AssertNever<T extends never> = T;
+type _Unsubscribed = AssertNever<Exclude<HubEventType, (typeof HUB_EVENT_TYPES)[number]>>;
 
 export type HubListener = (type: HubEventType, data: unknown) => void;
 
