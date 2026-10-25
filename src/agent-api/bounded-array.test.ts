@@ -1,6 +1,26 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boundedArray } from "./bounded-array.ts";
+
+const SRC = path.join(fileURLToPath(new URL(".", import.meta.url)), "..");
+const HELPER = "agent-api/bounded-array.ts";
+
+function sourceFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return entry.name === "generated" ? [] : sourceFiles(full);
+    }
+    return /\.tsx?$/.test(entry.name) && !entry.name.includes(".test.") ? [full] : [];
+  });
+}
+
+function relative(file: string): string {
+  return path.relative(SRC, file).split(path.sep).join("/");
+}
 
 const element = z.object({ name: z.string() });
 
@@ -33,5 +53,54 @@ describe("boundedArray", () => {
 
   it("should refuse a value that is not an array", () => {
     expect(boundedArray(element, 10).safeParse("not an array").success).toBe(false);
+  });
+
+  it("should keep the element's input type, so a wrong-shaped default does not compile", () => {
+    const ports = boundedArray(z.number(), 10);
+
+    // @ts-expect-error a string is not the element's input type. If the pipe's own `unknown[]` input ever leaks out
+    // again, this stops being an error, the directive goes unused and `yarn typecheck` fails — which is the point:
+    // `local_only` in virtual-agents/schemas.ts carries a `.default([])` that would then 400 every ports report.
+    const wrong = ports.optional().default(["not a number"]);
+
+    expect(wrong).toBeDefined();
+  });
+
+  it("should give a refinement the parsed elements rather than the input when the array is over the cap", () => {
+    const schema = boundedArray(z.number(), 2, {
+      // `toFixed` exists on the parsed number and not on the raw string fed in below.
+      refine: { check: (values) => values.every((value) => value.toFixed(0) !== "-1"), message: "no minus one" }
+    });
+
+    expect(schema.safeParse(["a", "b", "c"]).success).toBe(false);
+  });
+
+  /**
+   * The audit gate cannot catch a regression here: zod 1243066 is suppressed in `yarn-audit-known-issues` on the
+   * strength of this helper, so a new `z.array(element).max(n)` in a request body would bring back the 450× memory
+   * amplification of GHSA-mrhx-c7xc-m3w5 with every check still green. An element that cannot fail is the one safe
+   * alternative, which is why `topics` is allowed to stay as it is.
+   */
+  it("should leave no array schema in src validating elements outside this helper", () => {
+    const offenders = sourceFiles(SRC)
+      .filter((file) => relative(file) !== HELPER)
+      .flatMap((file) =>
+        readFileSync(file, "utf8")
+          .split("\n")
+          .map((line, index) => ({ at: `${relative(file)}:${index + 1}`, line }))
+          .filter(({ line }) => line.includes(".array(") && !line.includes("z.array(z.unknown())"))
+          .map(({ at }) => at)
+      );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("should apply a refinement to an array within the cap", () => {
+    const schema = boundedArray(z.number(), 10, {
+      refine: { check: (values) => new Set(values).size === values.length, message: "no duplicates" }
+    });
+
+    expect(schema.safeParse([1, 2]).success).toBe(true);
+    expect(schema.safeParse([1, 1]).error?.issues[0]?.message).toBe("no duplicates");
   });
 });
