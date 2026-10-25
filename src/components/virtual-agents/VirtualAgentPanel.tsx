@@ -10,7 +10,7 @@ import { RenameVirtualAgent } from "@/components/virtual-agents/RenameVirtualAge
 import { SizePanel } from "@/components/virtual-agents/SizePanel";
 import { DiskNotice, ModelRouteLine } from "@/components/virtual-agents/VirtualAgentsView";
 import type { VirtualAgentDesired } from "@/virtual-agents/lifecycle";
-import type { PluginOption } from "@/virtual-agents/plugins";
+import { NO_PLUGINS, type PluginOffer } from "@/virtual-agents/plugins";
 import type { VirtualAgentPageView } from "@/web/data";
 
 export interface VirtualAgentActions {
@@ -32,7 +32,7 @@ function OwnerPanels({
   manage: NonNullable<VirtualAgentPageView["manage"]>;
   actions: VirtualAgentActions;
   now: number;
-  plugins: readonly PluginOption[];
+  plugins: PluginOffer;
 }) {
   const { detail, credentials } = manage;
   const agent = detail.card;
@@ -42,7 +42,7 @@ function OwnerPanels({
       {agent.desired === "stopped" ? <DiskNotice agent={agent} now={now} /> : null}
       <RenameVirtualAgent agent={agent} rename={actions.rename} />
       <SizePanel agent={agent} resize={actions.resize} />
-      <PluginsPanel agent={agent} available={plugins} save={actions.plugins} />
+      <PluginsPanel agent={agent} offer={plugins} save={actions.plugins} />
       <PortsPanel agent={agent} />
       <AssistantChatsPanel chats={manage.chats} />
       <OnboardingChecklist
@@ -65,21 +65,21 @@ function OwnerPanels({
 
 /**
  * A virtual agent's side panel. Its owner gets its lifecycle, name, size, plugins (from `plugins`, what
- * `VIRTUAL_AGENT_PLUGINS` offers), ports and sign-ins; anyone else who may see it is told whose it is. Either way the
- * current session's details follow, once a session has registered.
+ * `VIRTUAL_AGENT_PLUGINS` offers or why it could not be read), ports and sign-ins; anyone else who may see it is told
+ * whose it is. Either way the current session's details follow, once a session has registered.
  */
 export function VirtualAgentPanel({
   page,
   actions,
   now,
   session,
-  plugins = []
+  plugins = NO_PLUGINS
 }: {
   page: VirtualAgentPageView;
   actions: VirtualAgentActions;
   now: number;
   session: React.ReactNode;
-  plugins?: readonly PluginOption[];
+  plugins?: PluginOffer;
 }) {
   const { summary, manage } = page;
   return (

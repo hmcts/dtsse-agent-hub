@@ -23,6 +23,16 @@ export interface PluginOption {
 export class PluginConfigurationError extends Error {}
 
 /**
+ * What a plugin form is given: the options `VIRTUAL_AGENT_PLUGINS` offers, or why it could not be read. The two are
+ * separate states because they call for different things from whoever is looking: an empty offer is a hub that has no
+ * plugins to give, and a form that cannot read the configuration has to say so rather than pass itself off as one.
+ */
+export type PluginOffer = { ok: true; available: readonly PluginOption[] } | { ok: false; error: string };
+
+/** An offer of no plugins, which is what an unset `VIRTUAL_AGENT_PLUGINS` gives. */
+export const NO_PLUGINS: PluginOffer = { ok: true, available: [] };
+
+/**
  * `VIRTUAL_AGENT_PLUGINS`, a comma-separated list of `name` or `name=description`, as `pcs=PCS team workflows,dtsse`,
  * in the order given. A name repeated keeps its first entry. Read per call, as the other virtual-agent settings are.
  */
