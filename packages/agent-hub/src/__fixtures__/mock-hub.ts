@@ -27,6 +27,8 @@ export type StoredAgent = {
   host?: string;
   status?: string;
   skills?: Skill[];
+  /** As the service stores it: whatever the last register reported, and undefined when one reported nothing. */
+  client_features?: string[];
   last_heartbeat_at?: string | null;
   read_cursor?: number;
   conversation_id?: string;
@@ -454,7 +456,9 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         repo: body.repo,
         branch: body.branch,
         host: body.host,
-        status: "idle"
+        status: "idle",
+        // Replaced by every register, unlike the skills below: the service records the build that is running now.
+        client_features: body.client_features
       });
       if (body.conversation_id !== undefined) {
         if (!launch) {

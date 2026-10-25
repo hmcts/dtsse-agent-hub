@@ -159,6 +159,8 @@ export {
   ownerDirectEnvelope,
   ownerEnvelope
 } from "./envelope.ts";
+export type { ClientFeature } from "./features.ts";
+export { CLIENT_FEATURES } from "./features.ts";
 export type {
   ChooseIdentityOptions,
   ChosenIdentity,

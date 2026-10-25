@@ -87,6 +87,8 @@ export type RegisterBody = {
   branch?: string | null;
   host?: string | null;
   skills?: Skill[];
+  /** What this build of the client understands of the hub's optional fields; see `features.ts`. */
+  client_features?: string[];
   /** A pod's conversation session only: it adopts the agent the hub made with the conversation. */
   conversation_id?: string;
 };
