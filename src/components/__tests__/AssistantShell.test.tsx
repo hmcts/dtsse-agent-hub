@@ -4,6 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationLink } from "@/assistant/views";
+import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
 import { AssistantShell, SidebarToggle } from "@/components/assistant/AssistantShell";
@@ -20,8 +21,16 @@ vi.mock("@/components/live/HubStream", () => ({
 
 let narrow = false;
 
+const SIDEBAR_KEY = "hmcts-assistant-sidebar-width";
+
+function viewport(width: number): void {
+  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: width });
+}
+
 beforeEach(() => {
   narrow = false;
+  viewport(1024);
+  window.localStorage.clear();
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     writable: true,
@@ -134,6 +143,225 @@ describe("AssistantShell", () => {
     rerender(shell({ activeId: "a" }));
 
     expect(sidebar().hasAttribute("inert")).toBe(true);
+  });
+});
+
+describe("AssistantShell sidebar width", () => {
+  function handle(): HTMLElement {
+    return screen.getByRole("separator", { name: "Resize sidebar" });
+  }
+
+  function missingHandle(): HTMLElement | null {
+    return screen.queryByRole("separator", { name: "Resize sidebar", hidden: true });
+  }
+
+  function drag(to: number, release = true): void {
+    fireEvent.pointerDown(handle());
+    fireEvent.pointerMove(window, { clientX: to });
+    if (release) {
+      fireEvent.pointerUp(window);
+    }
+  }
+
+  it("should widen the sidebar when the handle is dragged towards the chat", () => {
+    viewport(1600);
+    render(shell());
+    expect(handle().getAttribute("aria-valuenow")).toBe("272");
+
+    drag(400);
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("400");
+  });
+
+  it("should narrow the sidebar when the handle is dragged back", () => {
+    viewport(1600);
+    render(shell());
+
+    drag(260);
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("260");
+  });
+
+  it("should remember the width when the drag ends and not while the pointer is still moving", () => {
+    viewport(1600);
+    render(shell());
+
+    fireEvent.pointerDown(handle());
+    fireEvent.pointerMove(window, { clientX: 360 });
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBeNull();
+
+    fireEvent.pointerUp(window);
+
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBe("360");
+  });
+
+  it("should stop following the pointer once the drag has ended", () => {
+    viewport(1600);
+    render(shell());
+
+    drag(360);
+    fireEvent.pointerMove(window, { clientX: 460 });
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("360");
+  });
+
+  it("should stop at its narrowest rather than collapse when dragged off the left of the page", () => {
+    viewport(1600);
+    render(shell());
+
+    drag(-50);
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("240");
+    expect(sidebar().hasAttribute("inert")).toBe(false);
+  });
+
+  it("should stop at its widest when dragged across the page", () => {
+    viewport(1600);
+    render(shell());
+
+    drag(1500);
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("480");
+    expect(handle().getAttribute("aria-valuemax")).toBe("480");
+  });
+
+  it("should keep the chat and a document panel their room when the window is too narrow for the widest sidebar", () => {
+    viewport(1000);
+    render(shell());
+
+    drag(900);
+
+    // The window, less the chat's narrowest 360 and the document panel's 320.
+    expect(handle().getAttribute("aria-valuenow")).toBe("320");
+  });
+
+  it("should move the edge with the arrow keys and remember each width", () => {
+    viewport(1600);
+    render(shell());
+
+    fireEvent.keyDown(handle(), { key: "ArrowRight" });
+    expect(handle().getAttribute("aria-valuenow")).toBe("312");
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBe("312");
+
+    fireEvent.keyDown(handle(), { key: "ArrowLeft" });
+    expect(handle().getAttribute("aria-valuenow")).toBe("272");
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBe("272");
+  });
+
+  it("should go to its narrowest with Home and its widest with End", () => {
+    viewport(1600);
+    render(shell());
+
+    fireEvent.keyDown(handle(), { key: "End" });
+    expect(handle().getAttribute("aria-valuenow")).toBe("480");
+
+    fireEvent.keyDown(handle(), { key: "Home" });
+    expect(handle().getAttribute("aria-valuenow")).toBe("240");
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBe("240");
+  });
+
+  it("should leave the width alone when a key it does not handle is pressed", () => {
+    render(shell());
+
+    fireEvent.keyDown(handle(), { key: "Enter" });
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("272");
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBeNull();
+  });
+
+  it("should describe the handle as a vertical separator between its bounds", () => {
+    viewport(1600);
+    render(shell());
+
+    expect(handle().getAttribute("aria-orientation")).toBe("vertical");
+    expect(handle().getAttribute("aria-valuemin")).toBe("240");
+    expect(handle().getAttribute("aria-valuemax")).toBe("480");
+    expect(handle().tabIndex).toBe(0);
+  });
+
+  it("should start at the remembered width when the Assistant is opened again", () => {
+    viewport(1600);
+    window.localStorage.setItem(SIDEBAR_KEY, "430");
+
+    render(shell());
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("430");
+  });
+
+  it("should start at its usual width when the remembered width is not a number", () => {
+    window.localStorage.setItem(SIDEBAR_KEY, "as wide as before");
+
+    render(shell());
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("272");
+  });
+
+  it("should bring a remembered width back in bounds when the window is smaller than it was", () => {
+    viewport(1000);
+    window.localStorage.setItem(SIDEBAR_KEY, "470");
+
+    render(shell());
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("320");
+  });
+
+  it("should narrow the sidebar when the window is made smaller", () => {
+    viewport(1600);
+    render(shell());
+    drag(480);
+
+    viewport(900);
+    fireEvent(window, new Event("resize"));
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("240");
+  });
+
+  it("should come back to the dragged width when the sidebar is expanded again", () => {
+    viewport(1600);
+    render(shell());
+    drag(380);
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(missingHandle()).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("380");
+  });
+
+  it("should give the drawer its own width and no handle when the screen is narrow", () => {
+    narrow = true;
+    window.localStorage.setItem(SIDEBAR_KEY, "460");
+    render(shell());
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+
+    expect(missingHandle()).toBeNull();
+    // jsdom lays nothing out, so the width the drawer is given is as far as this can be checked.
+    expect(sidebar().style.width).toBe("272px");
+  });
+
+  it("should hold the document panel back from the chat's room as the sidebar is widened", () => {
+    viewport(1600);
+    render(
+      <AssistantShell viewerName="Alice Smith" groups={[]} activeId={null} hubLink={false}>
+        <ArtefactPanel
+          conversationId="22222222-2222-2222-2222-222222222222"
+          artefact={{ title: "Story", markdown: "# Original", version: 2, updatedBy: "user" }}
+          productLabel="CCD"
+          save={async () => ({ ok: true, saved: true, version: 3 })}
+          onClose={() => undefined}
+          narrow={false}
+        />
+      </AssistantShell>
+    );
+    const document = () => screen.getByRole("separator", { name: "Resize document panel" });
+
+    // The window, less the chat's narrowest 360 and the sidebar's width: the three always fit.
+    expect(document().getAttribute("aria-valuemax")).toBe("968");
+
+    drag(480);
+
+    expect(document().getAttribute("aria-valuemax")).toBe("760");
   });
 });
 
