@@ -20,7 +20,7 @@ import type { VirtualAgentCard } from "@/virtual-agents/views";
 
 const refresh = vi.fn();
 const push = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push }), usePathname: () => "/" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push }), usePathname: () => "/hub" }));
 
 const hubHandlers = new Map<string, (data: unknown) => void>();
 vi.mock("@/components/live/HubStream", () => ({
@@ -117,7 +117,7 @@ describe("VirtualAgentsView", () => {
     render(<VirtualAgentsView agents={[card()]} route="bedrock" create={created()} now={NOW} />);
 
     const list = screen.getByRole("list", { name: "Your virtual agents" });
-    expect(within(list).getByRole("link", { name: "pcs-api" }).getAttribute("href")).toBe("/agents/0f8a6a1e-0000-4000-8000-000000000001");
+    expect(within(list).getByRole("link", { name: "pcs-api" }).getAttribute("href")).toBe("/hub/agents/0f8a6a1e-0000-4000-8000-000000000001");
     expect(list.textContent).toContain("Running");
     expect(list.textContent).toContain("idle for 1 h 5 min");
   });
@@ -170,7 +170,7 @@ describe("VirtualAgentsView", () => {
     });
 
     expect((create.mock.calls[0] as unknown as [FormData])[0].get("name")).toBe("pcs-api");
-    expect(push).toHaveBeenCalledWith("/agents/0f8a6a1e-0000-4000-8000-000000000009");
+    expect(push).toHaveBeenCalledWith("/hub/agents/0f8a6a1e-0000-4000-8000-000000000009");
     expect(refresh).not.toHaveBeenCalled();
   });
 
@@ -1099,7 +1099,7 @@ describe("Sidebar", () => {
   it("should link to the viewer's virtual agents and not to a separate credentials page when the feature is on", () => {
     render(<Sidebar data={data} viewer={viewer} signInDisabled virtualAgents />);
 
-    expect(screen.getByRole("link", { name: "Virtual agents" }).getAttribute("href")).toBe("/virtual");
+    expect(screen.getByRole("link", { name: "Virtual agents" }).getAttribute("href")).toBe("/hub/virtual");
     expect(screen.queryByRole("link", { name: "Credentials" })).toBeNull();
   });
 
@@ -1107,6 +1107,6 @@ describe("Sidebar", () => {
     render(<Sidebar data={data} viewer={viewer} signInDisabled />);
 
     expect(screen.queryByRole("link", { name: "Virtual agents" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Credentials" }).getAttribute("href")).toBe("/settings/credentials");
+    expect(screen.getByRole("link", { name: "Credentials" }).getAttribute("href")).toBe("/hub/settings/credentials");
   });
 });

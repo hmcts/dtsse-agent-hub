@@ -13,7 +13,7 @@ import { SkeletonFeed, SkeletonList, SkeletonRows } from "@/components/Skeleton"
 import { StatusDot } from "@/components/StatusDot";
 import type { ApiMessage } from "@/messages/shape";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }), usePathname: () => "/topics/pcs-api" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }), usePathname: () => "/hub/topics/pcs-api" }));
 
 const VIEWER = { oid: "me", tid: "t", name: "Real Person" };
 
@@ -77,11 +77,11 @@ describe("Sidebar", () => {
       />
     );
 
-    expect(html).toContain('href="/agents/1"');
+    expect(html).toContain('href="/hub/agents/1"');
     expect(html).toContain('data-status="busy"');
     expect(html).toContain("Bob Owner");
-    expect(html).toContain('href="/channels/c2"');
-    expect(html).toContain('href="/topics/pcs-api"');
+    expect(html).toContain('href="/hub/channels/c2"');
+    expect(html).toContain('href="/hub/topics/pcs-api"');
     expect(html).toContain('aria-current="page"');
     expect(html).toContain("2 connected");
   });
@@ -100,8 +100,8 @@ describe("Sidebar", () => {
       />
     );
 
-    expect(html.indexOf("/channels/c1")).toBeLessThan(html.indexOf("/topics/pcs-api"));
-    expect(html.indexOf("/topics/pcs-api")).toBeLessThan(html.indexOf("/agents/1"));
+    expect(html.indexOf("/hub/channels/c1")).toBeLessThan(html.indexOf("/hub/topics/pcs-api"));
+    expect(html.indexOf("/hub/topics/pcs-api")).toBeLessThan(html.indexOf("/hub/agents/1"));
     expect(html).toContain("Real Person");
     expect(html).toContain("Sign out");
   });
@@ -136,7 +136,7 @@ describe("Sidebar", () => {
     );
 
     expect(html).toMatch(/<ul aria-label="Agents" class="[^"]*\bmax-h-\[12\.25rem\][^"]*\boverflow-y-auto\b/);
-    expect(html).toMatch(/<a (?=[^>]*href="\/agents\/0")[^>]*class="[^"]*\bh-7\b/);
+    expect(html).toMatch(/<a (?=[^>]*href="\/hub\/agents\/0")[^>]*class="[^"]*\bh-7\b/);
   });
 
   it("should list connected agents above offline ones", () => {
@@ -153,7 +153,7 @@ describe("Sidebar", () => {
       />
     );
 
-    expect(html.indexOf("/agents/2")).toBeLessThan(html.indexOf("/agents/1"));
+    expect(html.indexOf("/hub/agents/2")).toBeLessThan(html.indexOf("/hub/agents/1"));
     expect(html).not.toContain("Sign out");
   });
 
@@ -196,8 +196,8 @@ describe("ThreadCard", () => {
     expect(html).toContain("@pcs");
     expect(html).toContain("(Bob)");
     expect(html).toContain("A title");
-    expect(html).toMatch(/In reply to <a [^>]*href="\/m\/2"[^>]*>#2<\/a>/);
-    expect(html).toMatch(/<a [^>]*href="\/m\/5"[^>]*>#5<\/a>/);
+    expect(html).toMatch(/In reply to <a [^>]*href="\/hub\/m\/2"[^>]*>#2<\/a>/);
+    expect(html).toMatch(/<a [^>]*href="\/hub\/m\/5"[^>]*>#5<\/a>/);
     expect(html).toContain("2 replies");
   });
 });
@@ -206,8 +206,8 @@ describe("ChannelHeader", () => {
   it("should offer the other mode, a shareable link and saving when the view has several topics", () => {
     const html = renderToStaticMarkup(<ChannelHeader kind="Channel view" title="x" topics={["a", "b"]} match="any" saveable />);
 
-    expect(html).toContain('href="/c?topics=a,b&amp;mode=all"');
-    expect(html).toContain('href="/channels/new?topics=a,b&amp;mode=any"');
+    expect(html).toContain('href="/hub/c?topics=a,b&amp;mode=all"');
+    expect(html).toContain('href="/hub/channels/new?topics=a,b&amp;mode=any"');
   });
 
   it("should offer neither the mode switch nor saving when there is one topic and it cannot be saved", () => {

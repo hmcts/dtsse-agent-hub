@@ -11,7 +11,7 @@ import { feedPage } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
-/** An unsaved channel over any topic set: `/c?topics=a,b&mode=any|all`, shareable as it stands. */
+/** An unsaved channel over any topic set: `/hub/c?topics=a,b&mode=any|all`, shareable as it stands. */
 export default async function AdHocChannel({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireViewer();
   const query = await searchParams;
@@ -27,8 +27,8 @@ export default async function AdHocChannel({ searchParams }: { searchParams: Pro
             message={invalid.length > 0 ? `None of these are topics: ${invalid.join(", ")}.` : "Name some topics to watch."}
             detail={
               <>
-                Use <code>/c?topics=pcs-api,database</code>, or{" "}
-                <Link href="/channels/new" className="text-hub-link hover:underline">
+                Use <code>/hub/c?topics=pcs-api,database</code>, or{" "}
+                <Link href="/hub/channels/new" className="text-hub-link hover:underline">
                   build a channel
                 </Link>
                 .

@@ -59,9 +59,9 @@ vi.mock("next/cache", async () => {
 const { actAs, revalidated } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/virtual-agents.ts");
 const { agentActivity, agentRoute, virtualAgentPage, virtualAgentsPage } = await import("../../src/web/data.ts");
-const credentialsPage = await import("../../src/app/(hub)/settings/credentials/page.tsx");
-const agentsPage = await import("../../src/app/(hub)/agents/[id]/page.tsx");
-const oldVirtualAgentPage = await import("../../src/app/(hub)/virtual/[id]/page.tsx");
+const credentialsPage = await import("../../src/app/hub/settings/credentials/page.tsx");
+const agentsPage = await import("../../src/app/hub/agents/[id]/page.tsx");
+const oldVirtualAgentPage = await import("../../src/app/hub/virtual/[id]/page.tsx");
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
 
@@ -1735,11 +1735,11 @@ describe("renaming a virtual agent", () => {
   });
 });
 
-describe("/settings/credentials", () => {
+describe("/hub/settings/credentials", () => {
   it("should send the viewer to the credentials section of the virtual agents page when virtual agents are on", async () => {
     actAs("alice");
 
-    await expect(credentialsPage.default()).rejects.toMatchObject({ digest: expect.stringContaining(";/virtual#credentials;") });
+    await expect(credentialsPage.default()).rejects.toMatchObject({ digest: expect.stringContaining(";/hub/virtual#credentials;") });
   });
 
   it("should render the standalone page when virtual agents are off", async () => {
@@ -2108,7 +2108,7 @@ describe("PUT /api/virtual/{id}/ports", () => {
   });
 });
 
-describe("/agents/{id}", () => {
+describe("/hub/agents/{id}", () => {
   const ALICE_VIEWER = { ...ALICE, tid: "dev", modelRoute: "bedrock" as const };
   const BOB_VIEWER = { ...BOB, tid: "dev", modelRoute: "bedrock" as const };
 
@@ -2140,9 +2140,9 @@ describe("/agents/{id}", () => {
     const second = (await jsonOf(await register(token, "va-session-2"))).agent_id;
     actAs("alice");
 
-    expect(await agentRoute(ALICE_VIEWER, first)).toEqual({ variant: "moved", to: `/agents/${id}` });
-    await expect(visit(first)).rejects.toMatchObject({ digest: expect.stringContaining(`;/agents/${id};`) });
-    await expect(visit(second)).rejects.toMatchObject({ digest: expect.stringContaining(`;/agents/${id};`) });
+    expect(await agentRoute(ALICE_VIEWER, first)).toEqual({ variant: "moved", to: `/hub/agents/${id}` });
+    await expect(visit(first)).rejects.toMatchObject({ digest: expect.stringContaining(`;/hub/agents/${id};`) });
+    await expect(visit(second)).rejects.toMatchObject({ digest: expect.stringContaining(`;/hub/agents/${id};`) });
     expect(await agentRoute(ALICE_VIEWER, id)).toMatchObject({ variant: "virtual", page: { linked: { agent: { id: second } } } });
   });
 
@@ -2166,7 +2166,7 @@ describe("/agents/{id}", () => {
       variant: "virtual",
       page: { summary: { id, owner: { oid: ALICE.oid } }, manage: null, linked: { agent: { id: agentId }, access: "read" } }
     });
-    expect(await agentRoute(BOB_VIEWER, agentId)).toEqual({ variant: "moved", to: `/agents/${id}` });
+    expect(await agentRoute(BOB_VIEWER, agentId)).toEqual({ variant: "moved", to: `/hub/agents/${id}` });
   });
 
   it("should answer not found when a stranger visits a virtual agent, its session, or an id that is nothing", async () => {
@@ -2190,11 +2190,11 @@ describe("/agents/{id}", () => {
     expect(await agentRoute(ALICE_VIEWER, id)).toBeUndefined();
   });
 
-  it("should redirect the old virtual agent address to /agents/{id} when it is visited", async () => {
+  it("should redirect the old virtual agent address to /hub/agents/{id} when it is visited", async () => {
     const agent = await create(ALICE, "pcs-api");
 
     await expect(oldVirtualAgentPage.default({ params: Promise.resolve({ id: agent.id }) })).rejects.toMatchObject({
-      digest: expect.stringContaining(`;/agents/${agent.id};`)
+      digest: expect.stringContaining(`;/hub/agents/${agent.id};`)
     });
   });
 
@@ -2204,7 +2204,7 @@ describe("/agents/{id}", () => {
 
     await actions.stopVirtualAgent(form({ id: agent.id }));
 
-    expect(revalidated).toEqual(expect.arrayContaining(["/virtual", `/agents/${agent.id}`]));
+    expect(revalidated).toEqual(expect.arrayContaining(["/hub/virtual", `/hub/agents/${agent.id}`]));
   });
 });
 
