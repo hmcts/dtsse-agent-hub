@@ -14,10 +14,11 @@
  * - A virtual agent is visible to whoever may see its owner's agents, since its sessions are among them. Only that
  *   person manages it and sees its login codes. A virtual agent's launch token acts
  *   as its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.
- * - An HMCTS Assistant conversation's agent is its owner's alone: no grant extends to it, since the conversation is
- *   a private chat rather than a session they chose to share. Nor to a file attached to one of its messages: only the
- *   person who uploaded it may add parts to it or discard it, and only the session of the conversation it was attached
- *   to may fetch its bytes. Nor to the person's saved Assistant templates, which only they read or change.
+ * - An HMCTS Assistant conversation, and the agent its sessions run as, are its owner's alone: no grant extends to
+ *   either, since the conversation is a private chat rather than a session they chose to share. Nor to a file
+ *   attached to one of its messages: only the person who uploaded it may add parts to it or discard it, and only the
+ *   session of the conversation it was attached to may fetch its bytes. Nor to the person's saved Assistant
+ *   templates, which only they read or change.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
  */
@@ -296,4 +297,19 @@ export function canLaunchTokenReadMessage(sessionAgentIds: readonly string[], me
   }
   const ours = (agent: AgentRef | null) => agent !== null && sessionAgentIds.includes(agent.id);
   return ours(message.targetAgent) || ours(message.authorAgent);
+}
+
+/** The columns every conversation rule reads. */
+export interface ConversationRef {
+  ownerOid: string;
+}
+
+/**
+ * Whether `viewerOid` may see an HMCTS Assistant conversation: its owner, and nobody else. Its own rule rather than
+ * `canViewAgent`'s, because this is about the chat rather than about the agent a session of it runs as, and because
+ * searching, listing and opening one all have to agree on the same single answer. No grant reaches it: the chat is
+ * private, as the note at the top of this file says of its agent.
+ */
+export function canViewConversation(viewerOid: string, conversation: ConversationRef): boolean {
+  return viewerOid === conversation.ownerOid;
 }
