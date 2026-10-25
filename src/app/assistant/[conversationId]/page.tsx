@@ -9,7 +9,7 @@ import {
   stopAssistantAnswer,
   warmConversation
 } from "@/app/_actions/assistant";
-import { saveCredential } from "@/app/_actions/credentials";
+import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
 import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
@@ -20,7 +20,7 @@ import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { requireViewer } from "@/viewer/current";
-import { assistantConversation, openAssistant } from "@/web/data";
+import { assistantConversation, claudeMdSettings, openAssistant } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +40,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const { conversationId } = await params;
-  const [home, view] = await Promise.all([openAssistant(viewer), assistantConversation(viewer, conversationId)]);
+  const [home, view, claudeMd] = await Promise.all([openAssistant(viewer), assistantConversation(viewer, conversationId), claudeMdSettings(viewer)]);
   if (view === undefined) {
     notFound();
   }
@@ -55,6 +55,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
       actions={ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
       plugins={pluginSettings}
+      claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
     >
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
       <ChatView key={view.agentId} view={view} templates={TEMPLATES} viewerOid={viewer.oid} actions={ACTIONS} />
