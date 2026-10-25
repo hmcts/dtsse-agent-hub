@@ -1,5 +1,6 @@
 import { Avatar } from "@/components/Avatar";
 import { MessageBody } from "@/components/feed/MessageBody";
+import { ScrollPane } from "@/components/Markup";
 import { Timestamp } from "@/components/time/Timestamp";
 import { collapse, oneLine, type TranscriptEntryView, toolSummary } from "@/transcripts/conversation";
 import type { RedactedContent, TextContent, ToolResultContent, ToolUseContent } from "@/transcripts/schema";
@@ -28,10 +29,9 @@ const OUTPUT = "mt-1 max-h-80 overflow-auto whitespace-pre rounded-md border bg-
 function Output({ text, error = false }: { text: string; error?: boolean }) {
   const tone = error ? "border-red-800 text-red-300" : "border-hub-line text-hub-text";
   return (
-    // biome-ignore lint/a11y/noNoninteractiveTabindex: a keyboard user needs focus to scroll a long line into view, which axe checks as scrollable-region-focusable
-    <pre tabIndex={0} className={`${OUTPUT} ${tone}`}>
+    <ScrollPane as="pre" className={`${OUTPUT} ${tone}`}>
       {text}
-    </pre>
+    </ScrollPane>
   );
 }
 

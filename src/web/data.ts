@@ -5,7 +5,7 @@ import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
-import { conversationAgent, ensureAssistant, findAssistant, findConversation } from "../assistant/store.ts";
+import { conversationAgent, ensureAssistant, findConversation } from "../assistant/store.ts";
 import {
   type AssistantSummary,
   assistantSummary,
@@ -319,21 +319,6 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
  */
 export async function unsentNewChat(viewer: Viewer): Promise<UnsentChat | undefined> {
   return await unsentChat(prisma, viewer.oid);
-}
-
-/** The sidebar and the assistant's state alone, for pages that must not start or create it. */
-export async function assistantSidebar(viewer: Viewer): Promise<AssistantHome | undefined> {
-  const assistant = await findAssistant(prisma, viewer.oid);
-  if (assistant === undefined) {
-    return undefined;
-  }
-  const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
-  return {
-    assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)),
-    credentials,
-    conversations,
-    plugins: pluginSettings(assistant)
-  };
 }
 
 /** One of the viewer's conversations, or `undefined` for the not-found the page answers. */
