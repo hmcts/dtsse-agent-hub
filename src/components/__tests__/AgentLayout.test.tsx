@@ -65,7 +65,7 @@ function page(overrides: Partial<VirtualAgentPageView> = {}): VirtualAgentPageVi
     summary: { id: VIRTUAL_ID, name: "pcs-api", desired: "running", status: "running", agentId: null, owner: { oid: "alice", name: "Alice", tid: "a-tenant" } },
     manage: {
       detail: { card: CARD, logins: [], needed: ["github", "azure", "bedrock"], optional: ["jenkins"] },
-      credentials: { available: true, modelRoute: "bedrock", statuses: [] },
+      credentials: { available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: [] },
       chats: []
     },
     linked: null,

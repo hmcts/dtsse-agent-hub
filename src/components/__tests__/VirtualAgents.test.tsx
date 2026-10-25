@@ -392,7 +392,7 @@ describe("the plugins choice", () => {
       },
       manage: {
         detail: { card: agent, logins: [], needed: ["github"], optional: [] },
-        credentials: { available: true, modelRoute: "bedrock", statuses: [stored("github")] },
+        credentials: { available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: [stored("github")] },
         chats: []
       },
       linked: null

@@ -104,8 +104,9 @@ test.describe("accessibility @nightly", () => {
 
   /**
    * The Assistant, which is audited as a first visit renders it: the shell, its sidebar and the new-chat screen, with
-   * the getting-ready screen over them. That is the whole of the Assistant a deployment can show without a pod — a
-   * conversation, its thread and its document panel all need one running, so they stay outside this gate.
+   * the connections banner asking for the accounts nothing has connected yet. That is the whole of the Assistant a
+   * deployment can show without a pod — a conversation, its thread and its document panel all need one running, so
+   * they stay outside this gate.
    *
    * It skips wherever the Assistant is off, which is every environment `Jenkinsfile_nightly` can target:
    * `values.aat.template.yaml` and `values.preview.template.yaml` both set `VIRTUAL_AGENTS_ENABLED: "false"`, and the
@@ -120,7 +121,7 @@ test.describe("accessibility @nightly", () => {
     test.skip(response?.status() === 404, "the Assistant is off on this deployment");
     expect(response?.status()).toBe(200);
 
-    // The new-chat screen is behind whichever getting-ready screen the visit shows, so both are in the audited page.
+    // The new-chat screen is under whichever getting-ready surface the visit shows, so both are in the audited page.
     await expect(page.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
     await expectNoViolations(page);
   });
