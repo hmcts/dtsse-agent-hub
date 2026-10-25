@@ -10,27 +10,37 @@ const TRIGGER = "flex h-[34px] w-[34px] items-center justify-center rounded-[9px
  */
 const PANEL_HEIGHT = 170;
 
+/** How wide the panel is wherever there is room for it; the sidebar can be dragged narrower than this. */
+const PANEL_WIDTH = 240;
+
+/** Kept between the panel's left edge and whatever would clip it, so it never sits flush against the sidebar. */
+const PANEL_INSET = 4;
+
 /** What an action that rejects gets instead of its own refusal, having never reached the server to be refused. */
 const UNREACHABLE = (what: string) => `the ${what} could not be sent; check your connection and try again`;
 
 /**
- * The room above and below `element` before the nearest edge that would clip the panel: whichever is closer, the
- * window or a scrolling ancestor. The sidebar's list of chats scrolls and ends well above the bottom of the window,
- * so the window alone is not the bound.
+ * The room around `element` before the nearest edge that would clip the panel: whichever is closer, the window or a
+ * scrolling ancestor. Both matter in the sidebar, whose list of chats scrolls, ends well above the bottom of the
+ * window, and can be dragged narrower than the panel's own width.
+ *
+ * `beside` is measured to the left, because the panel hangs from the element's right edge.
  */
-function room(element: HTMLElement): { above: number; below: number } {
+function room(element: HTMLElement): { above: number; below: number; beside: number } {
   const rect = element.getBoundingClientRect();
   let top = 0;
   let bottom = window.innerHeight;
+  let left = 0;
   for (let node = element.parentElement; node !== null; node = node.parentElement) {
     const overflow = getComputedStyle(node).overflowY;
     if (overflow === "auto" || overflow === "scroll" || overflow === "hidden") {
       const box = node.getBoundingClientRect();
       top = Math.max(top, box.top);
       bottom = Math.min(bottom, box.bottom);
+      left = Math.max(left, box.left);
     }
   }
-  return { above: rect.top - top, below: bottom - rect.bottom };
+  return { above: rect.top - top, below: bottom - rect.bottom, beside: rect.right - left - PANEL_INSET };
 }
 
 /**
@@ -62,6 +72,7 @@ export function ChatMenu({
   const [draft, setDraft] = useState(title);
   const [problem, setProblem] = useState<string | null>(null);
   const [above, setAbove] = useState(false);
+  const [width, setWidth] = useState(PANEL_WIDTH);
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const titleBox = useRef<HTMLInputElement>(null);
@@ -117,9 +128,10 @@ export function ChatMenu({
       return;
     }
     const space = trigger.current === null ? null : room(trigger.current);
-    // An environment without layout, such as jsdom, measures zeros, so the panel opens downward as it does whenever
-    // there is room below.
+    // An environment without layout, such as jsdom, measures zeros, so the panel opens downward at its full width,
+    // as it does wherever there is room for it.
     setAbove(space !== null && space.below < PANEL_HEIGHT && space.above >= PANEL_HEIGHT);
+    setWidth(space === null || space.beside <= 0 ? PANEL_WIDTH : Math.min(PANEL_WIDTH, space.beside));
     onOpen?.();
     show("menu");
   }
@@ -155,7 +167,8 @@ export function ChatMenu({
       </button>
       {open === "closed" ? null : (
         <div
-          className={`absolute right-0 z-30 flex w-[240px] flex-col gap-0.5 rounded-xl border border-asst-strong bg-asst-hover p-1.5 shadow-2xl ${
+          style={{ width }}
+          className={`absolute right-0 z-30 flex flex-col gap-0.5 rounded-xl border border-asst-strong bg-asst-hover p-1.5 shadow-2xl ${
             above ? "bottom-[calc(100%+6px)]" : "top-[calc(100%+6px)]"
           }`}
         >
