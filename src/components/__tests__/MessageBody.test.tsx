@@ -3,7 +3,7 @@
  */
 import { cleanup, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MessageBody } from "@/components/feed/MessageBody";
 import { MAX_BODY } from "@/messages/limits";
 
@@ -140,6 +140,28 @@ describe("MessageBody", () => {
     expect(ordered.querySelectorAll(":scope > li")).toHaveLength(2);
     expect(ordered.querySelector("li ul li")!.textContent).toBe("nested");
     expect(container.querySelectorAll(":scope > div > ul > li")).toHaveLength(1);
+  });
+
+  it("should fail loudly rather than render nothing when a block type has no case", async () => {
+    vi.doMock("@/messages/markup", async (original) => ({
+      ...(await original<typeof import("@/messages/markup")>()),
+      parseMarkup: () => [{ type: "footnote" }]
+    }));
+    vi.resetModules();
+    const { MessageBody: Unguarded } = await import("@/components/feed/MessageBody");
+    // React re-throws through an error event and logs the render it gave up on; both are the point of the test.
+    const swallow = (event: ErrorEvent) => event.preventDefault();
+    window.addEventListener("error", swallow);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      expect(() => render(<Unguarded body="anything" />)).toThrow("Markup has no case for the footnote block");
+    } finally {
+      logged.mockRestore();
+      window.removeEventListener("error", swallow);
+      vi.doUnmock("@/messages/markup");
+      vi.resetModules();
+    }
   });
 });
 
