@@ -6,6 +6,7 @@ import { GET as people } from "../../src/app/api/ui/people/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
 import { shareRecipients } from "../../src/assistant/shares.ts";
 import { ensureAssistant, readArtefact, writeArtefact } from "../../src/assistant/store.ts";
+import { conversationMatches } from "../../src/assistant/views.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { insertUser, type Person, prisma, resetDatabase } from "./database.ts";
@@ -304,6 +305,18 @@ describe("a stranger handed the link", () => {
     expect(roster.agents.map((agent) => agent.agent_id)).not.toContain(agentId);
     // A live watch on the conversation's agent, which is how the thread would reach her browser.
     expect((await stream(request("carol", `/api/ui/stream?agent=${agentId}`))).status).toBe(404);
+  });
+
+  // Sharing and the sidebar's search were built separately, and this is where they meet: a share is of one chat,
+  // reached by its own address, and does not put that chat into anyone else's search. Being able to read something
+  // is not the same as having it offered among your own chats.
+  it("should not put a shared chat into the recipient's search, nor anyone else's", async () => {
+    const { id } = await chat();
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+
+    expect((await conversationMatches(prisma, ALICE.oid, "possession")).map((match) => match.id)).toEqual([id]);
+    expect(await conversationMatches(prisma, BOB.oid, "possession")).toEqual([]);
+    expect(await conversationMatches(prisma, CAROL.oid, "possession")).toEqual([]);
   });
 
   it("should be refused the same way whether the conversation exists or not", async () => {
