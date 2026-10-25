@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentView } from "../../src/agents/views.ts";
 import { saveChannel } from "../../src/channels/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
@@ -235,9 +235,13 @@ describe("messagePage", () => {
 });
 
 // The one catch a malformed `VIRTUAL_AGENT_PLUGINS` gets, so no page that offers plugins can let it throw. The hub's
-// own plugin surfaces show `error` in place of their plugin form; the Assistant hides its section. Neither may answer
+// own plugin surfaces show `error` in place of the ticks; the Assistant hides its section. Neither may answer
 // an unreadable configuration with an empty offer, which is why the two are separate states here.
 describe("pluginOffer", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("should offer what the hub is configured with, in the order given", () => {
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "pcs=PCS team workflows,dtsse");
 

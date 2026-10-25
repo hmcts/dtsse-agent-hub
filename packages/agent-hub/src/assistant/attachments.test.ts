@@ -264,9 +264,11 @@ describe("fetchAttachments", () => {
       say: (m) => said.push(m)
     });
 
-    // Assert
+    // Assert: and nothing at the path. The outcome carries no `path`, so the envelope never names it, but a session
+    // listing the conversation's uploads directory would otherwise find an empty file and read it as the attachment.
     expect(outcomes).toEqual([{ name: "letter.pdf", media_type: "application/pdf", bytes: 10, error: "503 from the hub" }]);
     expect(said.some((m) => m.includes("could not fetch letter.pdf: 503 from the hub"))).toBe(true);
+    expect(fs.existsSync(attachmentPath(root, CONVERSATION, UPLOAD, "letter.pdf"))).toBe(false);
   });
 
   it("should still tell the session where the file is when the fetched report fails, since the bytes are on this disk", async () => {
@@ -313,9 +315,10 @@ describe("fetchAttachments", () => {
     // Act
     const outcomes = await fetchAttachments({ api, agentId: "agent-1", conversationId: CONVERSATION, attachments: [attachment({ bytes: 10 })], root });
 
-    // Assert
+    // Assert: and the short file is gone, not left for a session to read as the whole attachment.
     expect(outcomes[0]?.error).toBe("wrote 4 bytes of an expected 10");
     expect(api.fetched).toEqual([]);
+    expect(fs.existsSync(attachmentPath(root, CONVERSATION, UPLOAD, "letter.pdf"))).toBe(false);
   });
 
   it("should stop a part that would take the file past the claimed length", async () => {
@@ -349,8 +352,10 @@ describe("fetchAttachments", () => {
     // Act
     const outcomes = await fetchAttachments({ api, agentId: "agent-1", conversationId: CONVERSATION, attachments: [attachment()], root });
 
-    // Assert
+    // Assert: the bytes are untouched. Nothing on the failure path may remove a file at its full claimed length,
+    // because that file is all there is — the hub deleted its parts when the first delivery reported it fetched.
     expect(outcomes).toEqual([{ name: "letter.pdf", path: file, media_type: "application/pdf", bytes: 10 }]);
+    expect([...fs.readFileSync(file)]).toEqual([...new Uint8Array(10).fill(4)]);
   });
 
   it("should fetch each of several attachments and answer about each in turn", async () => {
