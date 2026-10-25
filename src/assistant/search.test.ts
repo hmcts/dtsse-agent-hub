@@ -35,6 +35,18 @@ describe("searchTerms", () => {
     expect(terms).toEqual(["one", "two", "three", "four", "five", "six"]);
   });
 
+  // A backslash is the one character that must not reach the query: `quote_literal` answers with its `E'…'` escape
+  // form for anything carrying one, and that form is not valid tsquery input. A space rather than nothing, because
+  // a backslash separates words, and the text-search parser splits a path at the same place.
+  it.each([
+    ["c:\\temp", ["c:", "temp"]],
+    ["src\\main\\java", ["src", "main", "java"]],
+    ["d:\\", ["d:"]],
+    ["\\\\share\\logs", ["share", "logs"]]
+  ])("should look for the words either side of a backslash when the query has one, as %s does", (query, expected) => {
+    expect(searchTerms(query)).toEqual(expected);
+  });
+
   it("should cut a term down when one word is longer than a term may be", () => {
     expect(searchTerms("x".repeat(MAX_TERM + 10))).toEqual(["x".repeat(MAX_TERM)]);
   });

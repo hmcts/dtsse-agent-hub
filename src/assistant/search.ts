@@ -43,6 +43,23 @@ export const SNIPPET_MIN_WORDS = 12;
 export const SNIPPET_LENGTH = 160;
 
 /**
+ * `query` with every backslash turned into a space, which is the one character a term may not carry.
+ *
+ * The query puts each term through `quote_literal` so that nothing in it is read as tsquery syntax. A backslash
+ * defeats that: `quote_literal` answers with the `E'…'` escape form as soon as its input holds one, and that form is
+ * not valid tsquery input — `to_tsquery` either refuses it outright (`c:\temp`, because of the colon) or reads the
+ * leading `E` as a word of its own and matches nothing ever again (`src\main` becomes `'e' <-> 'src' <-> 'main'`).
+ * Removing them here keeps `quote_literal` on its plain `'…'` form, where the quoting does work.
+ *
+ * A space rather than nothing, because a backslash separates words wherever a person types one: searching
+ * `src\main` then looks for both, and finds the chat that mentions the path, which the text-search parser has split
+ * at the same place.
+ */
+function withoutBackslashes(query: string): string {
+  return query.replace(/\\/g, " ");
+}
+
+/**
  * The words a query looks for: lower-cased, without repeats, in the order they were typed.
  *
  * Every one of them has to match for a chat to count, and each may match the title or any one message, so
@@ -51,7 +68,7 @@ export const SNIPPET_LENGTH = 160;
  */
 export function searchTerms(query: string): string[] {
   const terms: string[] = [];
-  for (const word of collapse(query).toLowerCase().split(" ")) {
+  for (const word of collapse(withoutBackslashes(query)).toLowerCase().split(" ")) {
     const term = word.slice(0, MAX_TERM);
     if (term.length >= MIN_TERM && !terms.includes(term)) {
       terms.push(term);

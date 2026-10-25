@@ -171,6 +171,23 @@ describe("searching conversations", () => {
     }
   });
 
+  /**
+   * A path, which is what sent an engineer looking for one of these chats in the first place.
+   *
+   * Asserted as a match rather than as a miss, which is the only way this can be checked: a term that breaks the
+   * query matches nothing, so every "finds nothing" assertion above passes just as well when the query is broken as
+   * when it works. The two forms here are the two ways a backslash used to break it — with a colon the query was
+   * refused outright and the box reported a connection problem, and without one it quietly became a phrase that
+   * could never match.
+   */
+  it.each([["c:\\temp"], ["src\\main"], ["d:\\logs"]])("should find a chat that mentions a path when %s is searched for", async (query) => {
+    await chat(ALICE, ["Where did the build output go?", "The log is in c:\\temp, the dump in d:\\logs and the code in src\\main\\java"]);
+    await chat(ALICE, ["Nothing like that here"]);
+
+    // The title carries none of it, so the match is in the message, where a path is actually written.
+    expect(await found(ALICE, query)).toEqual(["Where did the build output go?"]);
+  });
+
   // "the" has nothing of its own to match on, so it is dropped rather than left to refuse every chat beside a word
   // that does.
   it("should ignore a word of the query that carries no meaning of its own", async () => {

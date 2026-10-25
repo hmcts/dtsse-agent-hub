@@ -271,9 +271,12 @@ export async function searchConversations(db: Database, ownerOid: string, query:
   }
   const rows = await db.$queryRaw<{ id: string; ownerOid: string; title: string | null; product: string; lastActiveAt: Date; excerpt: string | null }[]>`
     WITH query AS (
-      -- quote_literal is what makes a typed term safe to put in a query: whatever it holds becomes one quoted
-      -- lexeme, so none of tsquery's own operators can come out of it. An empty query is a term the dictionary has
-      -- nothing to match on, which is dropped rather than left to refuse every chat.
+      -- quote_literal is what makes a typed term safe to put in a query. A single-quoted string in a tsquery is
+      -- re-lexed by the text-search parser, and several tokens out of one become a phrase, joined by <->, never
+      -- boolean operators: so quoting a term can only narrow what it matches, and can never widen or negate it.
+      -- It holds only on quote_literal's plain '…' form, which is why searchTerms has already taken the backslashes
+      -- out: one of those switches it to E'…', which is not valid tsquery input at all. An empty query is a term the
+      -- dictionary has nothing to match on, which is dropped rather than left to refuse every chat.
       SELECT n, tsq
         FROM unnest(${terms}::text[]) WITH ORDINALITY AS u(term, n),
              LATERAL (SELECT to_tsquery('english', quote_literal(u.term) || ':*') AS tsq) q
