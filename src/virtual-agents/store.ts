@@ -137,7 +137,7 @@ export async function createVirtualAgent(prisma: PrismaClient, request: NewVirtu
   if (!size.ok) {
     throw new HttpError(400, size.error);
   }
-  const plugins = checkPlugins(request.plugins, offeredPlugins());
+  const plugins = checkPlugins(request.plugins, offeredPlugins);
   if (!plugins.ok) {
     throw new HttpError(400, plugins.error);
   }
@@ -315,7 +315,7 @@ export async function setVirtualAgentPlugins(
     if (row.desired === "deleted") {
       throw new HttpError(409, "that virtual agent is being deleted");
     }
-    const checked = checkPlugins(plugins, [...offeredPlugins(), ...row.plugins]);
+    const checked = checkPlugins(plugins, () => [...offeredPlugins(), ...row.plugins]);
     if (!checked.ok) {
       throw new HttpError(400, checked.error);
     }

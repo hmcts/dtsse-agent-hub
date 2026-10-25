@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
 import { type Api, ApiError, createApi, createTokenProvider, DEFAULT_SCOPE, DEFAULT_URL, parseAzToken, type RunAz, requireAzureLogin } from "./api.ts";
+import { CLIENT_FEATURES } from "./features.ts";
 
 const VID = "0f8a6a1e-1234-4000-8000-00000000000a";
 const LAUNCH = `launch-${"q".repeat(16)}`;
@@ -20,7 +21,17 @@ beforeAll(async () => {
   url = await hub.listen();
   api = createApi({ env: {}, baseUrl: url, devUser: DEV_USER });
   pod = createApi({ env: {}, baseUrl: url, launchToken: LAUNCH });
-  agentId = (await api.register({ session_id: "sid-api-test", name: "alice-pcs-api", cwd: "/work", repo: "pcs-api", branch: "main", host: "box" })).agent_id;
+  agentId = (
+    await api.register({
+      session_id: "sid-api-test",
+      name: "alice-pcs-api",
+      cwd: "/work",
+      repo: "pcs-api",
+      branch: "main",
+      host: "box",
+      client_features: [...CLIENT_FEATURES]
+    })
+  ).agent_id;
 });
 
 afterAll(async () => {
@@ -558,8 +569,14 @@ describe("createApi conversations", () => {
 
   it("should read the document back, save it with the base version and give the current one on a conflict", async () => {
     // Arrange
-    const conversationAgent = (await pod.register({ session_id: "sid-api-conv", name: "conv", conversation_id: "0f8a6a1e-0000-4000-8000-00000000000b" }))
-      .agent_id;
+    const conversationAgent = (
+      await pod.register({
+        session_id: "sid-api-conv",
+        name: "conv",
+        conversation_id: "0f8a6a1e-0000-4000-8000-00000000000b",
+        client_features: [...CLIENT_FEATURES]
+      })
+    ).agent_id;
 
     // Act
     const before = await pod.getArtefact(conversationAgent);

@@ -1849,6 +1849,22 @@ describe("a virtual agent's plugins", () => {
     expect((await row(created.id)).plugins).toEqual([]);
   });
 
+  // The offer list is only read once a name is ticked, so a hub whose configuration is malformed can still create the
+  // virtual agents nobody asked plugins for — every Assistant, among them. Ticking one is a use of the configuration
+  // and still fails loudly.
+  it("should create an agent with no plugins when the hub's plugin configuration is malformed", async () => {
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    expect((await createWith([])).plugins).toEqual([]);
+  });
+
+  it("should fail to create an agent with a ticked plugin when the hub's plugin configuration is malformed", async () => {
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    await expect(createWith(["pcs"])).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
+    expect(await prisma.virtualAgent.count()).toBe(0);
+  });
+
   it("should refuse to create an agent with a plugin the hub does not offer, and create nothing", async () => {
     await insertUser(ALICE);
     actAs("alice");
@@ -1906,6 +1922,23 @@ describe("a virtual agent's plugins", () => {
 
     await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["civil"])).rejects.toMatchObject({ status: 400 });
     expect(await row(agent.id)).toMatchObject({ plugins: [], generation: agent.generation });
+  });
+
+  // Unticking everything needs no offer list, so it is the one change that still works while the configuration is
+  // broken — which is what lets an owner get a pod off a plugin they can no longer save around.
+  it("should let the owner clear every plugin while the hub's plugin configuration is malformed", async () => {
+    const agent = await createWith(["pcs"]);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, [])).toMatchObject({ plugins: [] });
+  });
+
+  it("should fail to tick a plugin while the hub's plugin configuration is malformed", async () => {
+    const agent = await createWith(["pcs"]);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "dtsse"])).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
+    expect((await row(agent.id)).plugins).toEqual(["pcs"]);
   });
 
   it("should keep a plugin no longer offered when the owner leaves it ticked, but not let it be added again once unticked", async () => {

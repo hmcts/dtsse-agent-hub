@@ -23,11 +23,31 @@ function urlFor(database: string): string {
  */
 const RUN = `${process.pid.toString(36)}_${randomBytes(4).toString("hex")}`;
 
+/** The namespace every scratch database this file creates sits in, shared with `SCRATCH_PATTERN` so the two cannot drift. */
+const SCRATCH_PREFIX = "agent_hub_scratch";
+
+/**
+ * Every database this file creates is named through here. A fixed name looks harmless because the suite drops it
+ * first, but a sibling run drops and recreates the same one mid-test: the symptoms are a `CREATE DATABASE` that
+ * collides on `pg_database_datname_index`, or a query that fails because the other run's `afterAll` has just dropped
+ * the database out from under it.
+ */
 function scratchDatabase(suffix: string): string {
-  return `agent_hub_${suffix}_${RUN}`;
+  return `${SCRATCH_PREFIX}_${suffix}_${RUN}`;
 }
 
 const SCRATCH = scratchDatabase("migrate");
+
+/** How long ago a scratch database must have been created before a later run treats it as abandoned and reclaims it. */
+const ORPHAN_HOURS = 2;
+
+/**
+ * Every name `scratchDatabase` can produce: the namespace, any suffix at all, and a `RUN`. The suffix is deliberately
+ * unconstrained, because a pattern that spelled out the suffixes this file happens to use today would silently stop
+ * matching the day someone added another one — and a sweep that matches nothing looks exactly like a sweep with
+ * nothing to do. The trailing `RUN` is what keeps a hand-made database out of it.
+ */
+const SCRATCH_PATTERN = `^${SCRATCH_PREFIX}_.+_[0-9a-z]+_[0-9a-f]{8}$`;
 
 async function query<T extends pg.QueryResultRow>(database: string, statement: string): Promise<T[]> {
   const client = new pg.Client({ connectionString: urlFor(database) });
@@ -38,6 +58,40 @@ async function query<T extends pg.QueryResultRow>(database: string, statement: s
     await client.end();
   }
 }
+
+/**
+ * Drops the scratch databases earlier runs abandoned. A per-run name is never reused, so a run killed between
+ * `beforeAll` and `afterAll` would otherwise leave its databases on the server for good — the fixed names this file
+ * used to use at least got reclaimed by the next run.
+ *
+ * Age — the mtime of `PG_VERSION`, which is written when the database is created — is the only safe evidence that a
+ * database is finished with. Having no connection is not: `query` opens one per statement and closes it, so a
+ * concurrent run's scratch database is idle most of the time, and dropping an idle one would recreate the cross-run
+ * interference the per-run names exist to prevent. This runs before the file creates any of its own, so the window
+ * only has to outlast a run of this file.
+ *
+ * Best-effort, because reading a database's age needs privileges the pipeline's user may not have, and leftover
+ * clutter is not worth failing the suite over.
+ */
+async function dropAbandonedScratchDatabases(): Promise<void> {
+  try {
+    const abandoned = await query<{ datname: string }>(
+      "postgres",
+      `SELECT datname FROM pg_database
+        WHERE datname ~ '${SCRATCH_PATTERN}'
+          AND (pg_stat_file('base/' || oid || '/PG_VERSION')).modification < now() - make_interval(hours => ${ORPHAN_HOURS})`
+    );
+    for (const { datname } of abandoned) {
+      await query("postgres", `DROP DATABASE IF EXISTS "${datname}"`);
+    }
+  } catch {
+    // Nothing here is worth a failure: the suite's own databases do not depend on the sweep having run.
+  }
+}
+
+beforeAll(async () => {
+  await dropAbandonedScratchDatabases();
+});
 
 describe("migrate", () => {
   const original = process.env.DATABASE_URL;
@@ -213,22 +267,27 @@ describe("migrate waiting for the database", () => {
   });
 });
 
-describe("the bedrock migration", () => {
-  const RENAME = scratchDatabase("migrate_bedrock");
-  const MIGRATION = "20261009090000_bedrock";
+/**
+ * An empty scratch database pointed at by `DATABASE_URL`, and a copy of `prisma/migrations/` with `migration` and
+ * everything after it removed, so a test can migrate to the state just before it, seed rows, and then apply it.
+ *
+ * Registers its own `beforeAll`/`afterAll` against the calling `describe`, which is what lets one migration's test
+ * read as the assertion it is. `earlier()` is a function because the directory does not exist until `beforeAll` runs.
+ */
+function migrationFixture(suffix: string, migration: string): { database: string; earlier: () => string } {
+  const database = scratchDatabase(suffix);
   const original = process.env.DATABASE_URL;
-  let before: string;
+  let earlier: string | undefined;
 
   beforeAll(async () => {
-    await query("postgres", `DROP DATABASE IF EXISTS "${RENAME}"`);
-    await query("postgres", `CREATE DATABASE "${RENAME}"`);
-    process.env.DATABASE_URL = urlFor(RENAME);
-    before = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
-    await cp(migrationsDirectory(), before, { recursive: true });
-    // The database as it was before this migration: it and every one after it are applied by the test.
-    for (const name of await readdir(before)) {
-      if (/^\d/.test(name) && name >= MIGRATION) {
-        await rm(path.join(before, name), { recursive: true });
+    await query("postgres", `DROP DATABASE IF EXISTS "${database}"`);
+    await query("postgres", `CREATE DATABASE "${database}"`);
+    process.env.DATABASE_URL = urlFor(database);
+    earlier = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
+    await cp(migrationsDirectory(), earlier, { recursive: true });
+    for (const name of await readdir(earlier)) {
+      if (/^\d/.test(name) && name >= migration) {
+        await rm(path.join(earlier, name), { recursive: true });
       }
     }
   });
@@ -239,12 +298,27 @@ describe("the bedrock migration", () => {
     } else {
       process.env.DATABASE_URL = original;
     }
-    await rm(before, { recursive: true, force: true });
-    await query("postgres", `DROP DATABASE IF EXISTS "${RENAME}"`);
+    // Guarded because `beforeAll` may have thrown before assigning it: an `rm(undefined)` here would replace that
+    // failure with a confusing `TypeError` and, worse, skip the `DROP DATABASE` below, leaking the scratch database
+    // until the sweep's `ORPHAN_HOURS` are up.
+    if (earlier !== undefined) {
+      await rm(earlier, { recursive: true, force: true });
+    }
+    await query("postgres", `DROP DATABASE IF EXISTS "${database}"`);
   });
 
+  return {
+    database,
+    earlier: () => earlier as string
+  };
+}
+
+describe("the bedrock migration", () => {
+  const MIGRATION = "20261009090000_bedrock";
+  const { database: RENAME, earlier } = migrationFixture("migrate_bedrock", MIGRATION);
+
   it("should move existing gateway virtual agents to bedrock and add the bedrock credential kind when it is applied", async () => {
-    await migrate(before);
+    await migrate(earlier());
     await query(RENAME, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
     await query(
       RENAME,
@@ -279,37 +353,11 @@ describe("the bedrock migration", () => {
 });
 
 describe("the assistant product list migration", () => {
-  const REMAP = "agent_hub_migrate_product_test";
   const MIGRATION = "20261025120000_assistant_product_list";
-  const original = process.env.DATABASE_URL;
-  let before: string;
-
-  beforeAll(async () => {
-    await query("postgres", `DROP DATABASE IF EXISTS "${REMAP}"`);
-    await query("postgres", `CREATE DATABASE "${REMAP}"`);
-    process.env.DATABASE_URL = urlFor(REMAP);
-    before = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
-    await cp(migrationsDirectory(), before, { recursive: true });
-    // The database as it was before this migration: it and every one after it are applied by the test.
-    for (const name of await readdir(before)) {
-      if (/^\d/.test(name) && name >= MIGRATION) {
-        await rm(path.join(before, name), { recursive: true });
-      }
-    }
-  });
-
-  afterAll(async () => {
-    if (original === undefined) {
-      delete process.env.DATABASE_URL;
-    } else {
-      process.env.DATABASE_URL = original;
-    }
-    await rm(before, { recursive: true, force: true });
-    await query("postgres", `DROP DATABASE IF EXISTS "${REMAP}"`);
-  });
+  const { database: REMAP, earlier } = migrationFixture("migrate_product", MIGRATION);
 
   it("should move conversations off the retired product and default new ones to general when it is applied", async () => {
-    await migrate(before);
+    await migrate(earlier());
     await query(REMAP, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
     await query(REMAP, `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'assistant', 'bedrock')`);
     await query(
@@ -333,5 +381,34 @@ describe("the assistant product list migration", () => {
       { title: "new", product: "general", product_history: [] },
       { title: "on a product", product: "ccd", product_history: [] }
     ]);
+  });
+});
+
+/**
+ * The sweep's pattern and the name generator have to agree, and nothing else in the suite would notice if they
+ * stopped: an unswept name leaks silently, and `dropAbandonedScratchDatabases` swallows its own errors by design.
+ */
+describe("the scratch database sweep's pattern", () => {
+  const pattern = new RegExp(SCRATCH_PATTERN);
+
+  it.each([
+    "migrate",
+    "migrate_bedrock",
+    "migrate_product",
+    "assistant2",
+    "x",
+    "a_much_longer_suffix_9"
+  ])("should match the name the generator produces for the %s suffix", (suffix) => {
+    expect(scratchDatabase(suffix)).toMatch(pattern);
+  });
+
+  it.each([
+    "agent_hub",
+    "agent_hub_test",
+    "agent_hub_migrate_probe",
+    "agent_hub_scratch_probe",
+    `${SCRATCH_PREFIX}_migrate`
+  ])("should leave %s alone, because nothing generated it", (name) => {
+    expect(name).not.toMatch(pattern);
   });
 });

@@ -89,6 +89,13 @@ export type RegisterBody = {
   branch?: string | null;
   host?: string | null;
   skills?: Skill[];
+  /**
+   * What this build of the client understands of the hub's optional fields; see `features.ts`. Optional on the wire,
+   * where leaving it out is how an older client reports nothing, but required here: the service replaces the stored
+   * list with whatever a register carries, so a call site that omits it downgrades the session to "claims nothing".
+   * A register this client sends always says.
+   */
+  client_features: string[];
   /** A pod's conversation session only: it adopts the agent the hub made with the conversation. */
   conversation_id?: string;
 };

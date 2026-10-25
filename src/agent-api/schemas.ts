@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_CLIENT_FEATURES, normaliseClientFeatures } from "../agents/client-features.ts";
 import { MAX_SKILL_DESCRIPTION, MAX_SKILL_NAME, MAX_SKILLS, normaliseSkills, SKILL_NAME } from "../agents/skills.ts";
 import { MAX_BODY, MAX_TITLE, messageIdOf } from "../messages/limits.ts";
 import { boundedArray } from "./bounded-array.ts";
@@ -34,6 +35,15 @@ const skills = boundedArray(
   .transform(normaliseSkills)
   .optional();
 
+/**
+ * Elements are `z.unknown()` and narrowed in the transform, not refused: a name this hub does not recognise is a
+ * newer client claiming a field a later hub will send, and `normaliseClientFeatures` drops it rather than fail the
+ * registration. Only a list over the cap is refused, which bounds the column.
+ */
+const clientFeatures = boundedArray(z.unknown(), MAX_CLIENT_FEATURES, { message: `at most ${MAX_CLIENT_FEATURES} client features` })
+  .transform(normaliseClientFeatures)
+  .optional();
+
 export const registerBody = z.object({
   session_id: z.string().trim().min(1).max(MAX_NAME),
   name: z.string().trim().min(1).max(MAX_NAME),
@@ -42,6 +52,7 @@ export const registerBody = z.object({
   branch: optionalText(MAX_NAME),
   host: optionalText(MAX_NAME),
   skills,
+  client_features: clientFeatures,
   conversation_id: z.string().trim().min(1).max(MAX_NAME).nullish()
 });
 

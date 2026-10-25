@@ -77,12 +77,19 @@ async function startedAssistant(): Promise<{ id: string; token: string; claimed:
   return { id: assistant.id, token: claimed.launch_token!, claimed };
 }
 
-function register(token: string, sessionId: string, conversationId?: string, skills?: { name: string; description: string }[]): Promise<Response> {
+function register(
+  token: string,
+  sessionId: string,
+  conversationId?: string,
+  reported: { skills?: { name: string; description: string }[]; clientFeatures?: string[] } = {}
+): Promise<Response> {
   return pod(registerRoute.POST, token, "/api/agent/register", {}, "POST", {
     session_id: sessionId,
     name: "session",
     ...(conversationId === undefined ? {} : { conversation_id: conversationId }),
-    ...(skills === undefined ? {} : { skills })
+    ...(reported.skills === undefined ? {} : { skills: reported.skills }),
+    // Left out unless a test is a newer client: a pod runs whatever client version its image booted with.
+    ...(reported.clientFeatures === undefined ? {} : { client_features: reported.clientFeatures })
   });
 }
 
@@ -145,24 +152,32 @@ describe("the person's assistant", () => {
     expect((await openAssistant(VIEWER)).plugins).toEqual({ available: [], checked: [] });
   });
 
-  // Not an empty list: the Assistant would then tell the person each plugin they load is one the hub no longer
-  // offers, and `setVirtualAgentPlugins` reads the same malformed configuration and would refuse every save.
-  it("should offer no plugins at all, rather than none, when the hub's plugin configuration is malformed", async () => {
+  // A malformed configuration hides the plugins section and leaves the rest of the Assistant working, because it is
+  // someone's whole chat surface and they can neither see the configuration nor fix it. Both halves of that are load
+  // bearing: the section hides because `offeredPlugins` catches, and the first visit gets that far at all because
+  // `createVirtualAgent` reads the offer list only when plugins are ticked. The hub's own plugin pages still fail
+  // loudly, which is where the fault is actionable.
+  it("should create the assistant and hide the plugins section on a first visit when the configuration is malformed", async () => {
     await insertUser(ALICE);
-    await ensureAssistant(prisma, VIEWER);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
-    expect((await openAssistant(VIEWER)).plugins).toBeNull();
+    const home = await openAssistant(VIEWER);
+
+    expect(home.plugins).toBeNull();
+    expect(await prisma.virtualAgent.findMany({ where: { ownerOid: ALICE.oid }, select: { name: true, plugins: true } })).toEqual([
+      { name: "assistant", plugins: [] }
+    ]);
   });
 
-  // Creating one validates the configuration itself, in `createVirtualAgent`, which the Assistant does not guard: a
-  // malformed list therefore still fails a first visit outright, and only a return visit degrades to hiding the
-  // section. Asserted so the inconsistency is recorded rather than discovered.
-  it("should fail a first visit outright when the hub's plugin configuration is malformed", async () => {
+  it("should hide the plugins section on a return visit when the configuration is malformed", async () => {
     await insertUser(ALICE);
+    const existing = await ensureAssistant(prisma, VIEWER);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
-    await expect(openAssistant(VIEWER)).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
+    const home = await openAssistant(VIEWER);
+
+    expect(home.plugins).toBeNull();
+    expect(home.assistant.id).toBe(existing.id);
   });
 
   it("should use the person's first virtual agent when they already have several", async () => {
@@ -343,10 +358,12 @@ describe("conversations", () => {
     const { sessionId } = await sessionOf(id);
 
     expect((await assistantConversation(VIEWER, id))?.skills).toEqual([]);
-    await register(token, sessionId, id, [
-      { name: "cft-how-to", description: "Find a how-to recipe" },
-      { name: "cft-explain", description: "Answer a what is X question" }
-    ]);
+    await register(token, sessionId, id, {
+      skills: [
+        { name: "cft-how-to", description: "Find a how-to recipe" },
+        { name: "cft-explain", description: "Answer a what is X question" }
+      ]
+    });
 
     expect((await assistantConversation(VIEWER, id))?.skills).toEqual([
       { name: "cft-explain", description: "Answer a what is X question" },
@@ -401,6 +418,42 @@ describe("conversations", () => {
     // The session keeps the subject it was started in; its label is the slug, since the list has no name for it.
     expect(await assistantFrame(prisma, agentId)).toMatchObject({ product: "other", product_label: "other" });
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.product)).toEqual(["other"]);
+  });
+
+  it("should send a session that claimed no features only the frame fields every client reads", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+    // A client from before client features existed: it reports none, so it claims none. Anything the hub adds to
+    // the frame for a claimed feature would be dropped here without the session, or the person, ever hearing of it.
+    await register(token, sessionId, id);
+
+    const { agentId } = await sessionOf(id);
+
+    expect(await assistantFrame(prisma, agentId)).toEqual({
+      conversation_id: id,
+      product: "general",
+      product_label: "General",
+      artefact_version: 0,
+      artefact_updated_by: null
+    });
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).clientFeatures).toBeNull();
+  });
+
+  it("should offer the conversation what its session's client claimed, so the composer can act on it", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+
+    // Before any session has registered, and after an old client's, the conversation claims nothing.
+    expect((await assistantConversation(VIEWER, id))!.clientFeatures).toBeNull();
+    await register(token, sessionId, id);
+    expect((await assistantConversation(VIEWER, id))!.clientFeatures).toBeNull();
+
+    // The pod is restarted on a newer client, which re-registers the same session.
+    await register(token, sessionId, id, { clientFeatures: ["attachments"] });
+
+    expect((await assistantConversation(VIEWER, id))!.clientFeatures).toEqual(["attachments"]);
   });
 
   it("should rename and delete a conversation with everything it holds", async () => {

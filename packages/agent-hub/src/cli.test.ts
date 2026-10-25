@@ -25,6 +25,7 @@ import { captureStderr } from "./__fixtures__/pod-shims.ts";
 import { createApi, type RegisterBody } from "./api.ts";
 import { parseFlags, readStdinText, runCli, USAGE, UsageError } from "./cli.ts";
 import type { Env } from "./env.ts";
+import { CLIENT_FEATURES } from "./features.ts";
 import { VIRTUAL_USAGE } from "./virtual/index.ts";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -1275,7 +1276,7 @@ describe("artefact, in an assistant conversation", () => {
   // A session with comms enabled, registered for a conversation unless `conversation` is false.
   async function session({ conversation = true }: { conversation?: boolean } = {}): Promise<{ sid: string; agentId: string }> {
     const sid = `artefact-sess-${++nextSession}`;
-    const body: RegisterBody = { session_id: sid, name: sid };
+    const body: RegisterBody = { session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] };
     if (conversation) {
       body.conversation_id = `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`;
     }

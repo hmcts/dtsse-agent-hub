@@ -23,6 +23,7 @@ import {
   runBridge
 } from "./bridge.ts";
 import type { Env } from "./env.ts";
+import { CLIENT_FEATURES } from "./features.ts";
 import { ensureStateDir, statePath, writeJson } from "./session.ts";
 import { type SkillListing, skillsHash } from "./skills.ts";
 import { setTranscriptOff } from "./transcript-sync.ts";
@@ -106,7 +107,7 @@ async function startBridge(hubOptions: MockHubOptions, { env: extraEnv, ...bridg
   const url = await hub.listen();
   const api = createApi({ baseUrl: url, devUser: DEV_USER });
   const sid = `bridge-test-${++nextSession}`;
-  const { agent_id: agentId } = await api.register({ session_id: sid, name: sid });
+  const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
   ensureStateDir(sid);
   fs.writeFileSync(statePath(sid, "enabled"), "");
   writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, ...savedAgent });
@@ -463,7 +464,7 @@ describe("runBridge", () => {
     const url = await hub.listen();
     const api = createApi({ baseUrl: url, devUser: DEV_USER });
     const sid = `bridge-test-${++nextSession}`;
-    const { agent_id: agentId } = await api.register({ session_id: sid, name: sid });
+    const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
     ensureStateDir(sid);
     fs.writeFileSync(statePath(sid, "enabled"), "");
     writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid });
@@ -635,7 +636,7 @@ describe("runBridge", () => {
       const url = await hub.listen();
       const api = createApi({ baseUrl: url, devUser: DEV_USER });
       const sid = `bridge-test-${++nextSession}`;
-      const { agent_id: agentId } = await api.register({ session_id: sid, name: sid });
+      const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
       ensureStateDir(sid);
       fs.writeFileSync(statePath(sid, "enabled"), "");
       writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid });

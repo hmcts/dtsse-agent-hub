@@ -492,7 +492,21 @@ export async function writeArtefact(
   });
 }
 
-/** What a direct frame to a conversation's agent carries, or `undefined` for any other agent. */
+/**
+ * What a direct frame to a conversation's agent carries, or `undefined` for any other agent.
+ *
+ * Every field here is one that every published client reads, so the frame is safe to send to any of them. A field
+ * that is not — one only a client claiming a feature reads — must be left out for a client that did not claim it,
+ * or the pod ignores it and the person who asked for it is told nothing. `client_features` on register
+ * (`src/agents/client-features.ts`) is what says which.
+ *
+ * For the first such field, the Assistant's file attachments, that is three lines:
+ *   1. `clientFeatures: true` in the `select` below. It is free: a column of the `agent` row this read already
+ *      fetches, so it widens the projection and adds no statement;
+ *   2. `...(clientSupports(row.clientFeatures, "attachments") ? { attachments } : {})` in the returned frame;
+ *   3. `"attachments"` in `CLIENT_FEATURES` (`packages/agent-hub/src/features.ts`), in the change that teaches
+ *      `parseAssistantFrame` to carry `raw.attachments`.
+ */
 export interface AssistantFrame {
   conversation_id: string;
   product: string;
