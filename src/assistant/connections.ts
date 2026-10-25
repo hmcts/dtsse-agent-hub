@@ -1,6 +1,7 @@
 import type { CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
 import type { LoginView } from "../virtual-agents/logins.ts";
+import type { ConnectionsAsk } from "./onboarding.ts";
 
 /**
  * The sign-ins the hub holds for a person, as the Assistant's settings show them, and the prompt the sidebar shows
@@ -134,9 +135,56 @@ export function connections(data: ConnectionsData | undefined, checklist: (store
   });
 }
 
+/** "A", "A and B", "A, B and C". */
+export function inWords(names: readonly string[]): string {
+  return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+export interface ConnectionsPrompt {
+  /** The banner's accessible name, so which of the two it is does not depend on reading the sentence. */
+  label: string;
+  message: string;
+  /** What the button that opens the getting-ready screen is called. */
+  action: string;
+}
+
+/**
+ * What the Assistant's connections banner says, or `null` when it has nothing to say. Which of the three it is is
+ * `connectionsAsk`'s answer, from every credential the hub holds; this only words it, from the statuses the
+ * connections screen was given.
+ *
+ * A `connect` names the connections rather than counting them: "two connections" tells nobody what to go and get.
+ * Anything with no wording of its own is named by its kind, so a credential added to a route before this list gets a
+ * row still reads as something rather than disappearing from the ask. And when there is nothing to name it asks in
+ * general rather than going quiet.
+ *
+ * An `unknown` is the opposite message, and the one thing it must never read as is the first: nothing is missing as
+ * far as anybody knows, the hub simply cannot see the sign-ins, and there is nothing for the person to do. Telling
+ * someone who has connected everything to connect it again is the mistake these two wordings exist to keep apart.
+ */
+export function connectionsPrompt(ask: ConnectionsAsk, needed: readonly CredentialKind[], stored: ReadonlySet<CredentialKind>): ConnectionsPrompt | null {
+  if (ask === "done") {
+    return null;
+  }
+  if (ask === "unknown") {
+    return {
+      label: "Your sign-ins cannot be checked",
+      message:
+        "Your sign-ins cannot be checked just now. Whatever you have already connected is still connected, and there is nothing for you to set up again.",
+      action: "Show progress"
+    };
+  }
+  const names = needed.filter((kind) => !stored.has(kind)).map((kind) => CONNECTORS[kind]?.name ?? kind);
+  return {
+    label: "Connect your accounts",
+    message: `Your assistant needs ${names.length === 0 ? "you to connect your accounts" : inWords(names)} before it can work for you.`,
+    action: "Connect accounts"
+  };
+}
+
 /**
  * The sign-ins the cog prompts about, and when. Model access is left out of both on purpose: nobody can use the
- * Assistant at all without it, so the getting-ready screen holds them there until they have it.
+ * Assistant at all without it, and the connections banner asks for it until it is there.
  *
  * A needed sign-in is prompted about whenever it is not usable, because the person has to have it. An optional one is
  * prompted about only once it has lapsed: never setting Atlassian up is a choice, and a badge nobody can ever clear
@@ -151,11 +199,6 @@ function needsAttention(row: Connection): boolean {
     return !isUsable(row.state);
   }
   return PROMPTED_WHEN_LAPSED.includes(row.kind) && hasLapsed(row.state);
-}
-
-/** "A", "A and B", "A, B and C". */
-function inWords(names: readonly string[]): string {
-  return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
 /**

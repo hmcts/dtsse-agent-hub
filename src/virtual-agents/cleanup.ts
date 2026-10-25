@@ -106,10 +106,6 @@ export function isIdle(linkedStatus: string | null, lastActiveAt: Date, now: Dat
   return linkedStatus !== "busy" && now.getTime() - lastActiveAt.getTime() >= idleMinutes * 60_000;
 }
 
-export function provisioningTimedOut(lastHeardAt: Date, now: Date): boolean {
-  return now.getTime() - lastHeardAt.getTime() >= PROVISIONING_TIMEOUT_MS;
-}
-
 export function diskExpiresAt(stoppedAt: Date, ttlDays: number): Date {
   return new Date(stoppedAt.getTime() + ttlDays * DAY_MS);
 }
