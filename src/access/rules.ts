@@ -302,3 +302,13 @@ export interface ConversationRef {
 export function canViewConversation(viewerOid: string, conversation: ConversationRef): boolean {
   return viewerOid === conversation.ownerOid;
 }
+
+/**
+ * Only its owner stops an answer their conversation is working on. The same single answer as
+ * `canViewConversation`'s, and its own rule for the same reason: interrupting a turn is an act on the session rather
+ * than a read of the chat, so it is worth saying separately that no grant reaches it — not even a `write` one, which
+ * elsewhere lets a grantee message an agent.
+ */
+export function canStopAssistantAnswer(actorOid: string, conversation: ConversationRef): boolean {
+  return actorOid === conversation.ownerOid;
+}

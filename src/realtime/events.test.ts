@@ -39,7 +39,10 @@ describe("encodeEvent and decodeEvent", () => {
     ["a virtual agent without an owner", JSON.stringify({ type: "virtual_agent", virtual_agent_id: "va" })],
     ["a conversation without an id", JSON.stringify({ type: "assistant_conversation", virtual_agent_id: "va", owner_oid: "o" })],
     ["a conversation without its assistant", JSON.stringify({ type: "assistant_conversation", conversation_id: "c", owner_oid: "o" })],
-    ["a conversation without an owner", JSON.stringify({ type: "assistant_conversation", conversation_id: "c", virtual_agent_id: "va" })]
+    ["a conversation without an owner", JSON.stringify({ type: "assistant_conversation", conversation_id: "c", virtual_agent_id: "va" })],
+    ["a stop without a conversation", JSON.stringify({ type: "assistant_stop", virtual_agent_id: "va", owner_oid: "o" })],
+    ["a stop without its assistant", JSON.stringify({ type: "assistant_stop", conversation_id: "c", owner_oid: "o" })],
+    ["a stop without an owner", JSON.stringify({ type: "assistant_stop", conversation_id: "c", virtual_agent_id: "va" })]
   ])("should ignore %s", (_label, payload) => {
     expect(decodeEvent(payload)).toBeUndefined();
   });

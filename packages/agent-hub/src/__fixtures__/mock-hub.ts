@@ -815,6 +815,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       v.wakes.push(data);
       sessionStreams.get(virtualId)?.write(`event: wake\ndata: ${JSON.stringify(data)}\n\n`);
     },
+    // Stopping an answer. Unlike a wake it is not kept: the hub sends one once and never replays it.
+    sendInterrupt(virtualId: string, data: { conversation_id: string }) {
+      sessionStreams.get(virtualId)?.write(`event: interrupt\ndata: ${JSON.stringify(data)}\n\n`);
+    },
     sendClose(virtualId: string, data: { conversation_id: string }) {
       const v = virtuals.get(virtualId) as VirtualRecord;
       v.wakes = v.wakes.filter((w) => w.conversation_id !== data.conversation_id);

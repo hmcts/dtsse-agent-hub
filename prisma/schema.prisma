@@ -463,6 +463,8 @@ model AssistantConversation {
   product           String    @default("general")
   /// Every change of product, as [{product, at}].
   productHistory    Json      @default("[]") @map("product_history")
+  /// Every answer the person stopped, as [{at}].
+  stopHistory       Json      @default("[]") @map("stop_history")
   wakeRequestedAt   DateTime? @map("wake_requested_at") @db.Timestamptz(6)
   /// What the pod's supervisor last reported: starting, live or queued; null for no session.
   sessionState      String?   @map("session_state")

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEventHub } from "../realtime/hub.ts";
-import { closeFrame, sessionStream, wakeFrame } from "./session-stream.ts";
+import { closeFrame, interruptFrame, sessionStream, wakeFrame } from "./session-stream.ts";
 import type { Wake } from "./store.ts";
 
 const ASSISTANT = "va-1";
@@ -11,6 +11,10 @@ function wake(conversation: string, session = `s-${conversation}`): Wake {
 
 function changed(conversation: string, virtualAgent = ASSISTANT) {
   return { type: "assistant_conversation" as const, conversation_id: conversation, virtual_agent_id: virtualAgent, owner_oid: "o" };
+}
+
+function stopped(conversation: string, virtualAgent = ASSISTANT) {
+  return { type: "assistant_stop" as const, conversation_id: conversation, virtual_agent_id: virtualAgent, owner_oid: "o" };
 }
 
 async function settle(): Promise<void> {
@@ -24,8 +28,9 @@ function noFail(error: unknown): void {
 }
 
 describe("frames", () => {
-  it("should frame a wake and a close as the contract's events when written", () => {
+  it("should frame a wake, an interrupt and a close as the contract's events when written", () => {
     expect(wakeFrame(wake("c1"))).toBe(`event: wake\ndata: ${JSON.stringify(wake("c1"))}\n\n`);
+    expect(interruptFrame("c1")).toBe(`event: interrupt\ndata: {"conversation_id":"c1"}\n\n`);
     expect(closeFrame("c1")).toBe(`event: close\ndata: {"conversation_id":"c1"}\n\n`);
   });
 });
@@ -87,6 +92,46 @@ describe("sessionStream", () => {
     await settle();
 
     expect(frames).toEqual([]);
+  });
+
+  it("should send an interrupt when the person stops the answer, without reading the conversation", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    const one = vi.fn(async (id: string) => wake(id));
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: one })((frame) => frames.push(frame), noFail);
+    await settle();
+    hub.publish(stopped("c1"));
+    await settle();
+
+    expect(frames).toEqual([interruptFrame("c1")]);
+    expect(one, "an interrupt names a turn to end, not a row to re-read").not.toHaveBeenCalled();
+  });
+
+  it("should ignore an interrupt for another assistant's conversation", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined })((frame) => frames.push(frame), noFail);
+    await settle();
+    hub.publish(stopped("c1", "va-other"));
+    await settle();
+
+    expect(frames).toEqual([]);
+  });
+
+  // The turn a replayed interrupt would end is over, and sending it again would interrupt whatever came after.
+  it("should not replay an interrupt on a resync or send one after the stream is closed", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    const close = await sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined })((frame) => frames.push(frame), noFail);
+    hub.publish(stopped("c1"));
+    await settle();
+    hub.publish({ type: "resync" });
+    await settle();
+    close();
+    hub.publish(stopped("c1"));
+    await settle();
+
+    expect(frames).toEqual([interruptFrame("c1")]);
   });
 
   it("should ignore other assistants' conversations and other events", async () => {

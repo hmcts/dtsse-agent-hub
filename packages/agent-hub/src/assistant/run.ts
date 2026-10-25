@@ -1,6 +1,6 @@
-// The long-lived half: consume the virtual agent's sessions stream, hand each wake and close to the supervisor,
-// and tick it so idle sessions stop and queued ones start. Reconnects as the bridge does, because the stream is
-// framed as the agent stream and ends the same way.
+// The long-lived half: consume the virtual agent's sessions stream, hand each wake, interrupt and close to the
+// supervisor, and tick it so idle sessions stop and queued ones start. Reconnects as the bridge does, because the
+// stream is framed as the agent stream and ends the same way.
 import type { Api } from "../api.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../bridge.ts";
 import { createSseParser, type SseEvent } from "../sse.ts";
@@ -76,6 +76,8 @@ export async function runAssistantSupervisor({
       onEvent: (event) => {
         if (event.event === "wake") {
           handle(supervisor.wake, event);
+        } else if (event.event === "interrupt") {
+          handle(supervisor.interrupt, event);
         } else if (event.event === "close") {
           handle(supervisor.close, event);
         } else if (event.event === "reconnect") {

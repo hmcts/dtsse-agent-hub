@@ -14,9 +14,10 @@ import { sessionEnded } from "./session.ts";
 /**
  * Every frame name `selectFrame` can send, derived from the hub's own union so a new member of it reaches here.
  * `grant` and `credential` are not frames: they arrive as `resync`, because what changed is what the viewer may see
- * rather than anything the page can be handed.
+ * rather than anything the page can be handed. `assistant_stop` is not one either, and for a different reason: it is
+ * an instruction to a conversation's pod, and the thread redraws from the `assistant_conversation` beside it.
  */
-export type HubEventType = Exclude<HubEvent["type"], "grant" | "credential">;
+export type HubEventType = Exclude<HubEvent["type"], "grant" | "credential" | "assistant_stop">;
 
 /**
  * Subscribed one at a time below, because `EventSource` dispatches by `event:` name and has no wildcard. A type
