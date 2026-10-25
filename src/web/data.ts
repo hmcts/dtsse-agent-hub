@@ -268,10 +268,18 @@ function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
 
 /**
  * What the Assistant may offer: an empty list when `VIRTUAL_AGENT_PLUGINS` is unset, and `null` when it is malformed.
- * A malformed list does not fail the page, because the Assistant is someone's whole chat and the hub's own
- * virtual-agent pages still report the error to whoever has to fix it. It cannot read as an empty list either: the
- * person's own plugins would then each read as one the hub no longer offers, and the write path's own unguarded
- * `availablePlugins` would refuse every save. `null` is what hides the section instead.
+ * An empty list is not available for the malformed case: the person's own plugins would each read as one the hub no
+ * longer offers. `null` hides the section instead.
+ *
+ * This is the only place a malformed configuration is tolerated, and the asymmetry is deliberate. The Assistant is
+ * someone's whole chat surface, and a configuration they cannot see, let alone fix, must not take it away from them;
+ * `createVirtualAgent` reads the offer list only when plugins are actually ticked, so the Assistant no longer fails
+ * on a first visit either, and hiding the section is now the whole of the behaviour rather than half of it.
+ *
+ * `/hub/virtual` and `/hub/agents/{id}` call `availablePlugins` directly and still fail loudly, which is right: the
+ * person looking at the hub's own plugin pages is the person who can fix the configuration. Do not "make this
+ * consistent" by catching there too, and do not remove the catch here — one of those breaks every Assistant, the
+ * other hides the fault from the only people who can act on it.
  */
 function offeredPlugins(): PluginOption[] | null {
   try {

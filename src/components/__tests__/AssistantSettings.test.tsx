@@ -387,8 +387,8 @@ describe("the Assistant's team tools", () => {
   });
 
   // `assistantPluginsData` gives nothing when `VIRTUAL_AGENT_PLUGINS` is malformed, rather than an empty list: the
-  // hub cannot then tell which of the person's plugins it still offers, so a section would mislabel every one of them
-  // and its own save would be refused.
+  // hub cannot then tell which of the person's plugins it still offers, so a section would mislabel every one of them.
+  // The rest of the dialog still renders, because the Assistant is someone's whole chat surface.
   it("should show nothing at all when the page passes no plugins", () => {
     open({ plugins: undefined });
 

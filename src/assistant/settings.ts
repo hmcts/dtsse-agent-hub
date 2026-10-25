@@ -20,8 +20,9 @@ export interface AssistantPluginsData {
  * plugins panel uses: a pod exists from the moment the orchestrator has acted on a `running` agent, which is every
  * status but `requested`.
  *
- * A `null` configuration hides the section rather than showing an empty one, because the hub cannot then tell which
- * of the person's own plugins it still offers, and would both mislabel every one of them and refuse every save.
+ * `null` plugins are a configuration the hub could not read, and hide the section rather than showing an empty one:
+ * the hub cannot then tell which of the person's own plugins it still offers, so a section would mislabel every one
+ * of them. A hub that simply offers none gives an empty `available`, which is a different state and still shown.
  */
 export function assistantPluginsData(
   assistant: { id: string; desired: VirtualAgentDesired; status: VirtualAgentStatus },

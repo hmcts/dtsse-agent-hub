@@ -50,21 +50,26 @@ export type CheckedPlugins = { ok: true; plugins: string[] } | { ok: false; erro
 /**
  * A form that sends none ticks none. Otherwise each value has to be one of `allowed`, and what is kept is the
  * distinct names in code-point order, so the same set is always stored, and passed to the pod, the same way.
+ *
+ * `allowed` is a function because reading the hub's offer list can throw on a malformed `VIRTUAL_AGENT_PLUGINS`, and
+ * nothing that ticks no plugins needs the list to be readable. Creating a virtual agent is the case that matters:
+ * every Assistant creates one, so evaluating the list eagerly failed people who had asked for no plugins at all.
  */
-export function checkPlugins(raw: unknown, allowed: readonly string[]): CheckedPlugins {
+export function checkPlugins(raw: unknown, allowed: () => readonly string[]): CheckedPlugins {
   if (raw === undefined || raw === null) {
     return { ok: true, plugins: [] };
   }
   if (!Array.isArray(raw)) {
     return { ok: false, error: "plugins are a list of names" };
   }
+  const offered = raw.length === 0 ? [] : allowed();
   const names = new Set<string>();
   for (const value of raw) {
     const name = typeof value === "string" ? value.trim().toLowerCase() : "";
     if (!PLUGIN_NAME.test(name)) {
       return { ok: false, error: "a plugin name is lowercase letters, digits and hyphens" };
     }
-    if (!allowed.includes(name)) {
+    if (!offered.includes(name)) {
       return { ok: false, error: `${name} is not a plugin this hub offers` };
     }
     names.add(name);

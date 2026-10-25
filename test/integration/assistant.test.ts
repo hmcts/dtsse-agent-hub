@@ -146,24 +146,32 @@ describe("the person's assistant", () => {
     expect((await openAssistant(VIEWER)).plugins).toEqual({ available: [], checked: [] });
   });
 
-  // Not an empty list: the Assistant would then tell the person each plugin they load is one the hub no longer
-  // offers, and `setVirtualAgentPlugins` reads the same malformed configuration and would refuse every save.
-  it("should offer no plugins at all, rather than none, when the hub's plugin configuration is malformed", async () => {
+  // A malformed configuration hides the plugins section and leaves the rest of the Assistant working, because it is
+  // someone's whole chat surface and they can neither see the configuration nor fix it. Both halves of that are load
+  // bearing: the section hides because `offeredPlugins` catches, and the first visit gets that far at all because
+  // `createVirtualAgent` reads the offer list only when plugins are ticked. The hub's own plugin pages still fail
+  // loudly, which is where the fault is actionable.
+  it("should create the assistant and hide the plugins section on a first visit when the configuration is malformed", async () => {
     await insertUser(ALICE);
-    await ensureAssistant(prisma, VIEWER);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
-    expect((await openAssistant(VIEWER)).plugins).toBeNull();
+    const home = await openAssistant(VIEWER);
+
+    expect(home.plugins).toBeNull();
+    expect(await prisma.virtualAgent.findMany({ where: { ownerOid: ALICE.oid }, select: { name: true, plugins: true } })).toEqual([
+      { name: "assistant", plugins: [] }
+    ]);
   });
 
-  // Creating one validates the configuration itself, in `createVirtualAgent`, which the Assistant does not guard: a
-  // malformed list therefore still fails a first visit outright, and only a return visit degrades to hiding the
-  // section. Asserted so the inconsistency is recorded rather than discovered.
-  it("should fail a first visit outright when the hub's plugin configuration is malformed", async () => {
+  it("should hide the plugins section on a return visit when the configuration is malformed", async () => {
     await insertUser(ALICE);
+    const existing = await ensureAssistant(prisma, VIEWER);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
-    await expect(openAssistant(VIEWER)).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
+    const home = await openAssistant(VIEWER);
+
+    expect(home.plugins).toBeNull();
+    expect(home.assistant.id).toBe(existing.id);
   });
 
   it("should use the person's first virtual agent when they already have several", async () => {
