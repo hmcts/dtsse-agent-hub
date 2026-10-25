@@ -226,13 +226,13 @@ export function AssistantShell({
               <span className="min-w-0 truncate text-sm font-medium">{viewerName}</span>
               <AssistantSettings theme={theme} connections={connections} plugins={plugins} />
             </div>
-            <div className="flex items-center gap-2">
-              {hubLink ? (
+            {hubLink ? (
+              <div className="flex items-center gap-2">
                 <Link href="/" className="ml-auto shrink-0 rounded px-2 py-1 text-xs text-asst-muted hover:bg-asst-hover hover:text-asst-text">
                   Agent Hub
                 </Link>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
           </div>
           {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,
               and the width dragged here is the one it comes back to. */}

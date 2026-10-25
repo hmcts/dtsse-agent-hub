@@ -116,6 +116,15 @@ describe("AssistantShell", () => {
     expect(screen.getByRole("button", { name: "Settings. GitHub needs your attention" })).toBeTruthy();
   });
 
+  // The sidebar is transformed to slide the drawer in and out, which makes it the containing block of anything
+  // `fixed` inside it, so the settings have to be rendered outside it or a narrow screen would clip them to the rail.
+  it("should render the settings outside the sidebar when they are open", () => {
+    render(shell());
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(sidebar().contains(screen.getByRole("dialog"))).toBe(false);
+  });
+
   it("should link to the hub only when the viewer also uses it", () => {
     const { rerender } = render(shell());
     expect(screen.queryByRole("link", { name: "Agent Hub" })).toBeNull();
