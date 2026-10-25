@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtefactSnapshot, SaveArtefactResult } from "@/app/_actions/assistant";
-import { ArtefactPanel, format, type SaveArtefactAction, starterDocument } from "@/components/assistant/ArtefactPanel";
+import { ArtefactPanel, fileName, format, type SaveArtefactAction, starterDocument } from "@/components/assistant/ArtefactPanel";
 import type { ActionResult } from "@/web/action";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
@@ -13,6 +13,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   window.localStorage.clear();
 });
 
@@ -275,15 +276,34 @@ describe("ArtefactPanel conflicts", () => {
 });
 
 describe("ArtefactPanel tools", () => {
-  it("should copy the markdown and say so when the person clicks Copy", async () => {
+  it("should copy the markdown and say so when the person copies the document", () => {
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
     render(panel(snapshot()));
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(screen.queryByText("Document copied")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Copy document" }));
 
     expect(writeText).toHaveBeenCalledWith("# Original");
-    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
+    expect(screen.getByText("Document copied").getAttribute("role")).toBe("status");
+  });
+
+  it("should stop saying it copied when the acknowledgement has had its time", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn(async () => undefined) } });
+    render(panel(snapshot()));
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy document" }));
+    await pause(1400);
+
+    expect(screen.queryByText("Document copied")).toBeNull();
+  });
+
+  it("should name the icon-only buttons for what they do when the toolbar has no labels", () => {
+    render(panel(snapshot()));
+
+    expect(screen.getByRole("button", { name: "Copy document" }).textContent).toBe("");
+    expect(screen.getByRole("button", { name: "Download document" }).textContent).toBe("");
   });
 
   it("should open a written document as a preview and switch to editing when the person chooses Edit", () => {
@@ -355,5 +375,191 @@ describe("ArtefactPanel tools", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close document" }));
 
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("fileName", () => {
+  it("should name the file after the document when the title is already safe", () => {
+    expect(fileName("Hearing outcomes", "md")).toBe("Hearing outcomes.md");
+  });
+
+  it("should take out the characters a filename cannot hold when the title has them", () => {
+    expect(fileName('Costs: draft <v2> "final"/*?', "md")).toBe("Costs draft v2 final.md");
+  });
+
+  it("should fall back to document when the title leaves nothing usable", () => {
+    expect(fileName("  ... ", "md")).toBe("document.md");
+    expect(fileName("", "md")).toBe("document.md");
+  });
+
+  it("should fall back to document when the title is a name Windows reserves", () => {
+    expect(fileName("NUL", "md")).toBe("document.md");
+    expect(fileName("com1", "md")).toBe("document.md");
+  });
+
+  it("should shorten a very long title when it would make an unwieldy filename", () => {
+    expect(fileName("w".repeat(200), "md")).toBe(`${"w".repeat(80)}.md`);
+  });
+});
+
+describe("ArtefactPanel download", () => {
+  function downloads(): { files: { type: string; text: Promise<string> }[]; names: string[]; revoked: string[] } {
+    const files: { type: string; text: Promise<string> }[] = [];
+    const names: string[] = [];
+    const revoked: string[] = [];
+    // jsdom has neither blob URLs nor downloads: these record what the browser would have been handed.
+    vi.stubGlobal("URL", {
+      createObjectURL: (blob: Blob) => {
+        files.push({ type: blob.type, text: blob.text() });
+        return `blob:${files.length}`;
+      },
+      revokeObjectURL: (url: string) => revoked.push(url)
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      names.push(this.download);
+    });
+    return { files, names, revoked };
+  }
+
+  function openMenu(): HTMLElement {
+    const trigger = screen.getByRole("button", { name: "Download document" });
+    fireEvent.click(trigger);
+    return trigger;
+  }
+
+  it("should offer Markdown and PDF when the person opens the download menu", () => {
+    render(panel(snapshot()));
+
+    const trigger = openMenu();
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    const menu = screen.getByRole("menu", { name: "Download" });
+    expect(menu.getAttribute("id")).toBe(trigger.getAttribute("aria-controls"));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Markdown (.md)", "PDF (opens your print dialogue)"]);
+  });
+
+  it("should close the menu and put focus back on the trigger when the person presses Escape", () => {
+    render(panel(snapshot()));
+
+    const trigger = openMenu();
+    screen.getByRole("menuitem", { name: "Markdown (.md)" }).focus();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("should close the menu when the person clicks outside it", () => {
+    render(panel(snapshot()));
+
+    openMenu();
+    fireEvent.mouseDown(screen.getByRole("textbox", { name: "Document title" }));
+
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("should leave the menu open when the click is inside it", () => {
+    render(panel(snapshot()));
+
+    openMenu();
+    fireEvent.mouseDown(screen.getByRole("menuitem", { name: "Markdown (.md)" }));
+
+    expect(screen.getByRole("menu", { name: "Download" })).toBeTruthy();
+  });
+
+  it("should close the menu when the person clicks the trigger again", () => {
+    render(panel(snapshot()));
+
+    const trigger = openMenu();
+    fireEvent.click(trigger);
+
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("should download the document's markdown under its title when the person chooses Markdown", async () => {
+    const { files, names, revoked } = downloads();
+    vi.useFakeTimers();
+    render(panel(snapshot()));
+
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Markdown (.md)" }));
+
+    expect(names).toEqual(["Story.md"]);
+    expect(files.map((file) => file.type)).toEqual(["text/markdown;charset=utf-8"]);
+    expect(await Promise.all(files.map((file) => file.text))).toEqual(["# Original"]);
+    expect(screen.queryByRole("menu")).toBeNull();
+    await pause(0);
+    expect(revoked).toEqual(["blob:1"]);
+  });
+
+  it("should download the edited text rather than the saved version when the person has typed since", async () => {
+    const { files } = downloads();
+    render(panel(snapshot()));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine, unsaved");
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Markdown (.md)" }));
+
+    expect(await Promise.all(files.map((file) => file.text))).toEqual(["# Mine, unsaved"]);
+  });
+
+  it("should name the file after the fallback title when the document has no title", () => {
+    const { names } = downloads();
+    render(panel(snapshot({ title: null })));
+
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Markdown (.md)" }));
+
+    expect(names).toEqual(["Untitled document.md"]);
+  });
+
+  it("should print the document, and only the document, when the person chooses PDF", () => {
+    // What the dialogue is asked to print: the sheet the print rules show, which is the only h1 on the page.
+    const printed: string[] = [];
+    vi.stubGlobal(
+      "print",
+      vi.fn(() => {
+        const sheet = document.querySelector("h1")?.parentElement;
+        printed.push(...Array.from(sheet?.querySelectorAll("h1, h3, p") ?? [], (node) => node.textContent ?? ""));
+      })
+    );
+    render(panel(snapshot({ markdown: "# A heading\n\nA paragraph." })));
+
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "PDF (opens your print dialogue)" }));
+
+    expect(window.print).toHaveBeenCalledTimes(1);
+    expect(printed).toEqual(["Story", "A heading", "A paragraph."]);
+    // Once in the panel's own preview, once on the sheet.
+    expect(screen.getAllByText("A paragraph.")).toHaveLength(2);
+  });
+
+  it("should print the rendered document rather than the markdown when the person is editing it", () => {
+    vi.stubGlobal("print", vi.fn());
+    render(panel(snapshot()));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    edit("# Mine\n\nTyped, and not saved yet.");
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "PDF (opens your print dialogue)" }));
+
+    const sheet = screen.getByRole("heading", { level: 1, name: "Story" }).parentElement;
+    expect(Array.from(sheet?.querySelectorAll("h3, p") ?? [], (node) => node.textContent)).toEqual(["Mine", "Typed, and not saved yet."]);
+  });
+
+  it("should take the printed sheet back out when the print dialogue has been dealt with", () => {
+    vi.stubGlobal("print", vi.fn());
+    render(panel(snapshot()));
+
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "PDF (opens your print dialogue)" }));
+    expect(screen.getByRole("heading", { level: 1, name: "Story" })).toBeTruthy();
+
+    fireEvent(window, new Event("afterprint"));
+
+    expect(screen.queryByRole("heading", { level: 1, name: "Story" })).toBeNull();
   });
 });
