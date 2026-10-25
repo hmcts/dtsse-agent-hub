@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { carriesSecret, exempt } from "@/auth/guard";
 import { readSession, SESSION_COOKIE } from "@/auth/session";
 import { authRequired, sessionSecret } from "@/auth/settings";
+import { movedHubPath } from "@/web/home";
 
 /**
  * Sends a person with no session to sign in, before anything renders. Named `proxy`: Next 16 replaced the
@@ -14,6 +15,13 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // Ahead of the sign-in check, which would otherwise copy the query into the login's `redirect=`.
   if (carriesSecret(request.method, request.nextUrl.pathname, request.nextUrl.searchParams)) {
     return NextResponse.redirect(new URL(request.nextUrl.pathname, request.nextUrl.origin), 303);
+  }
+  // The hub's bare addresses are sent to `/hub` from here, and never from `redirects()` in next.config.mjs, which
+  // Next checks ahead of the proxy: a 308 from there repeats the query into its own `Location`, and Traefik's access
+  // log keeps it. Below `carriesSecret`, so a pasted secret is already stripped by the time this builds a URL.
+  const moved = movedHubPath(request.nextUrl.pathname);
+  if (moved !== undefined) {
+    return NextResponse.redirect(new URL(`${moved}${request.nextUrl.search}`, request.nextUrl.origin), 308);
   }
   if (!authRequired() || exempt(request.nextUrl.pathname)) {
     return NextResponse.next();

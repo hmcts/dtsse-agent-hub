@@ -10,12 +10,12 @@ export const dynamic = "force-dynamic";
 
 /**
  * The viewer's own credentials: whether each is stored, never what it is. With virtual agents on they are a section
- * of `/virtual`, so this sends people there; with them off this is their only page, since a laptop's workspace reads
+ * of `/hub/virtual`, so this sends people there; with them off this is their only page, since a laptop's workspace reads
  * the Bedrock API key too.
  */
 export default async function CredentialsPage() {
   if (virtualAgentsEnabled()) {
-    redirect(`/virtual#${CREDENTIALS_ANCHOR}`);
+    redirect(`/hub/virtual#${CREDENTIALS_ANCHOR}`);
   }
   const viewer = await requireViewer();
   const settings = await credentialSettings(viewer);

@@ -37,7 +37,7 @@ async function Overview({ viewer }: { viewer: Identity }) {
         subtitle={topics.length > 0 ? "Recent activity on the topics of your channels" : "Recent activity on every topic"}
         actions={
           topics.length > 0 ? null : (
-            <Link href="/channels/new" className={PANE_ACTION}>
+            <Link href="/hub/channels/new" className={PANE_ACTION}>
               Build a channel
             </Link>
           )

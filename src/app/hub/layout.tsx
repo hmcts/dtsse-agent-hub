@@ -7,7 +7,7 @@ import { sidebarData } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
-/** The hub's own pages, with its sidebar. The HMCTS Assistant has a layout of its own under `/assistant`. */
+/** The hub's own pages, under `/hub` because the HMCTS Assistant has `/`, with its sidebar. The HMCTS Assistant has a layout of its own under `/assistant`. */
 export default async function HubLayout({ children }: { children: React.ReactNode }) {
   const viewer = await currentViewer();
   const sidebar = viewer === undefined ? undefined : await sidebarData(viewer);

@@ -6,7 +6,7 @@ test.describe("virtual agents @regression", () => {
     const context = await asPersona(browser, unique("va-none"), baseURL!);
     try {
       const page = await context.newPage();
-      const response = await page.goto("/virtual");
+      const response = await page.goto("/hub/virtual");
       test.skip(response?.status() === 404, "virtual agents are off on this deployment");
 
       expect(response?.status()).toBe(200);
@@ -24,7 +24,7 @@ test.describe("virtual agents @regression", () => {
     const context = await asPersona(browser, persona, baseURL!);
     try {
       const page = await context.newPage();
-      const response = await page.goto("/virtual");
+      const response = await page.goto("/hub/virtual");
       test.skip(response?.status() === 404, "virtual agents are off on this deployment");
 
       await expect(page.getByRole("heading", { level: 1, name: "Virtual agents" })).toBeVisible();
@@ -32,14 +32,14 @@ test.describe("virtual agents @regression", () => {
       const name = unique("e2e").toLowerCase();
       await page.getByLabel("Name").fill(name);
       await page.getByRole("button", { name: "Create" }).click();
-      await page.waitForURL(/\/agents\/[0-9a-f-]{36}$/);
+      await page.waitForURL(/\/hub\/agents\/[0-9a-f-]{36}$/);
       const id = new URL(page.url()).pathname.split("/").at(-1)!;
       await expect(page.getByText("Starting…")).toBeVisible();
 
-      await page.goto("/virtual");
-      expect(await page.getByRole("link", { name }).getAttribute("href")).toBe(`/agents/${id}`);
-      await page.goto(`/virtual/${id}`);
-      await page.waitForURL(new RegExp(`/agents/${id}$`));
+      await page.goto("/hub/virtual");
+      expect(await page.getByRole("link", { name }).getAttribute("href")).toBe(`/hub/agents/${id}`);
+      await page.goto(`/hub/virtual/${id}`);
+      await page.waitForURL(new RegExp(`/hub/agents/${id}$`));
       await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
       await expect(page.getByRole("list", { name: "Sign-ins" }).getByRole("heading", { name: "GitHub" })).toBeVisible();
       await expect(page.getByText("No web servers running")).toBeVisible();
@@ -90,17 +90,17 @@ test.describe("virtual agents @regression", () => {
     const other = await asPersona(browser, unique("va-other"), baseURL!);
     try {
       const page = await owner.newPage();
-      const response = await page.goto("/virtual");
+      const response = await page.goto("/hub/virtual");
       test.skip(response?.status() === 404, "virtual agents are off on this deployment");
       const name = unique("mine").toLowerCase();
       await page.getByLabel("Name").fill(name);
       await page.getByRole("button", { name: "Create" }).click();
-      await page.waitForURL(/\/agents\/[0-9a-f-]{36}$/);
+      await page.waitForURL(/\/hub\/agents\/[0-9a-f-]{36}$/);
       const path = new URL(page.url()).pathname;
 
       const theirs = await other.newPage();
       expect((await theirs.goto(path))?.status()).toBe(404);
-      await theirs.goto("/virtual");
+      await theirs.goto("/hub/virtual");
       await expect(theirs.getByRole("link", { name })).toHaveCount(0);
 
       await page.getByRole("button", { name: "Delete" }).click();

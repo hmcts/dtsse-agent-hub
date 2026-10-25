@@ -22,6 +22,96 @@ body {
   background: #565856;
 }
 
+/* BEGIN: printing an Assistant document
+ *
+ * "PDF" in the document panel's download menu mounts `.asst-print-sheet` on the body and calls `window.print()`, so
+ * the browser's own "Save as PDF" writes the file. These rules make the printed page the document alone: the app's
+ * chrome is every other child of the body, and the sheet is outside the theme, so it carries no screen colours.
+ *
+ * Every rule that reaches outside the sheet is scoped with `:has(.asst-print-sheet)`, so pressing Ctrl+P anywhere
+ * else in the app prints what the browser would have printed before any of this existed. Nothing sets a page margin,
+ * for the same reason: the margins are the ones in the person's print dialogue.
+ *
+ * None of it needs `!important`, which the lint forbids: each selector either beats the Tailwind utility it has to
+ * override on specificity, or ties with it and wins on order, because this block sits after `@tailwind utilities`.
+ */
+.asst-print-sheet {
+  display: none;
+}
+
+@media print {
+  html:has(.asst-print-sheet),
+  html:has(.asst-print-sheet) > body {
+    height: auto;
+    overflow: visible;
+    background: #fff;
+  }
+
+  body:has(.asst-print-sheet) > *:not(.asst-print-sheet) {
+    display: none;
+  }
+
+  body > .asst-print-sheet {
+    display: block;
+    max-width: 170mm;
+    color: #000;
+    font-size: 11pt;
+    line-height: 1.5;
+  }
+
+  .asst-print-sheet * {
+    color: #000;
+    background: transparent;
+  }
+
+  .asst-print-sheet h1 {
+    font-size: 20pt;
+    font-weight: 600;
+    margin-bottom: 8pt;
+  }
+
+  .asst-print-sheet h1,
+  .asst-print-sheet h3,
+  .asst-print-sheet h4,
+  .asst-print-sheet h5 {
+    break-after: avoid;
+  }
+
+  .asst-print-sheet a {
+    text-decoration: underline;
+  }
+
+  .asst-print-sheet pre,
+  .asst-print-sheet code {
+    background: #f2f2f2;
+    break-inside: avoid;
+  }
+
+  .asst-print-sheet pre {
+    white-space: pre-wrap;
+    border: 1px solid #ddd;
+  }
+
+  /* A document's tables render once `AssistantMarkdown` draws them; on paper the borders are what hold the grid. */
+  .asst-print-sheet table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .asst-print-sheet th,
+  .asst-print-sheet td {
+    border: 1px solid #999;
+    padding: 3pt 5pt;
+    vertical-align: top;
+  }
+
+  .asst-print-sheet tr,
+  .asst-print-sheet li {
+    break-inside: avoid;
+  }
+}
+/* END: printing an Assistant document */
+
 /*
  * The HMCTS Assistant's themes. Dark unless the person chose light, or chose to follow their system and it is light.
  * `data-theme` is the person's choice, from the `asst_theme` cookie; with none, the system decides.

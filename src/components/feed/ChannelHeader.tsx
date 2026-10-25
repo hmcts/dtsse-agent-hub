@@ -43,7 +43,7 @@ export function ChannelHeader({
             Shareable link
           </Link>
           {saveable ? (
-            <Link href={`/channels/new?${save.toString().replaceAll("%2C", ",")}`} className={PANE_ACTION}>
+            <Link href={`/hub/channels/new?${save.toString().replaceAll("%2C", ",")}`} className={PANE_ACTION}>
               Save as channel
             </Link>
           ) : null}

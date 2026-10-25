@@ -6,7 +6,7 @@ import { InvalidTopics, MAX_POST_TOPICS, MIN_POST_TOPICS, normaliseSlug, normali
  * person types, and the server action that saves, which checks again because a direct POST skips the builder.
  *
  * A saved channel carries `MIN_POST_TOPICS` to `MAX_POST_TOPICS` topics, the same bounds as a post, so the composer on a channel can always post to
- * every one of its topics. A `/c?topics=` view is not saved and may name more.
+ * every one of its topics. A `/hub/c?topics=` view is not saved and may name more.
  */
 
 export const MAX_CHANNEL_NAME = 80;
@@ -122,5 +122,5 @@ export function viewHref(topics: readonly string[], match: Match): string {
   if (match === "all") {
     query.set("mode", "all");
   }
-  return `/c?${query.toString().replaceAll("%2C", ",")}`;
+  return `/hub/c?${query.toString().replaceAll("%2C", ",")}`;
 }

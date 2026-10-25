@@ -135,7 +135,7 @@ export function CredentialSettingsView({ settings, actions }: { settings: Creden
 
 export const CREDENTIALS_ANCHOR = "credentials";
 
-/** The credentials as a part of the virtual agents page, which `/settings/credentials` sends people to, with `children` after them. */
+/** The credentials as a part of the virtual agents page, which `/hub/settings/credentials` sends people to, with `children` after them. */
 export function CredentialsSection({ settings, actions, children }: { settings: CredentialSettings; actions: CredentialActions; children?: React.ReactNode }) {
   return (
     <section id={CREDENTIALS_ANCHOR} aria-labelledby="credentials-heading" className="scroll-mt-5 space-y-6">
