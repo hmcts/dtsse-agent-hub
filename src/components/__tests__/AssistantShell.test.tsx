@@ -125,6 +125,21 @@ describe("AssistantShell", () => {
     expect(sidebar().contains(screen.getByRole("dialog"))).toBe(false);
   });
 
+  // Escape closing both would take the cog the settings hand focus back to `inert` with the drawer, dropping focus.
+  it("should close only the settings, not the drawer behind them, on Escape when the screen is narrow", () => {
+    narrow = true;
+    render(shell());
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+    const cog = screen.getByRole("button", { name: "Settings" });
+    fireEvent.click(cog);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sidebar().hasAttribute("inert")).toBe(false);
+    expect(document.activeElement).toBe(cog);
+  });
+
   it("should link to the hub only when the viewer also uses it", () => {
     const { rerender } = render(shell());
     expect(screen.queryByRole("link", { name: "Agent Hub" })).toBeNull();

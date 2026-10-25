@@ -124,6 +124,46 @@ describe("the person's assistant", () => {
     expect(first.assistant).toMatchObject({ needed: ["github", "azure", "claude"], onboarded: false, readiness: { percent: 10 } });
   });
 
+  it("should offer the plugins the hub is configured with, and the ones the assistant loads", async () => {
+    await insertUser(ALICE);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "pcs=PCS team workflows,dtsse");
+
+    expect((await openAssistant(VIEWER)).plugins).toEqual({
+      available: [
+        { name: "pcs", description: "PCS team workflows" },
+        { name: "dtsse", description: "" }
+      ],
+      checked: []
+    });
+  });
+
+  it("should offer an empty list of plugins when the hub is configured with none", async () => {
+    await insertUser(ALICE);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "");
+
+    expect((await openAssistant(VIEWER)).plugins).toEqual({ available: [], checked: [] });
+  });
+
+  // Not an empty list: the Assistant would then tell the person each plugin they load is one the hub no longer
+  // offers, and `setVirtualAgentPlugins` reads the same malformed configuration and would refuse every save.
+  it("should offer no plugins at all, rather than none, when the hub's plugin configuration is malformed", async () => {
+    await insertUser(ALICE);
+    await ensureAssistant(prisma, VIEWER);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    expect((await openAssistant(VIEWER)).plugins).toBeNull();
+  });
+
+  // Creating one validates the configuration itself, in `createVirtualAgent`, which the Assistant does not guard: a
+  // malformed list therefore still fails a first visit outright, and only a return visit degrades to hiding the
+  // section. Asserted so the inconsistency is recorded rather than discovered.
+  it("should fail a first visit outright when the hub's plugin configuration is malformed", async () => {
+    await insertUser(ALICE);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    await expect(openAssistant(VIEWER)).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
+  });
+
   it("should use the person's first virtual agent when they already have several", async () => {
     await insertUser(ALICE);
     const first = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "pcs-api" });

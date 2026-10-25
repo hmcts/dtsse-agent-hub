@@ -253,8 +253,11 @@ export interface AssistantHome {
   assistant: AssistantSummary;
   credentials: CredentialSettings;
   conversations: { label: DateGroup; items: ConversationLink[] }[];
-  /** The workspace plugins this hub offers, and the ones the viewer's assistant loads. */
-  plugins: { available: PluginOption[]; checked: string[] };
+  /**
+   * The workspace plugins this hub offers, and the ones the viewer's assistant loads; `null` when the configuration
+   * cannot be read, which is not the same as its offering nothing.
+   */
+  plugins: { available: PluginOption[]; checked: string[] } | null;
 }
 
 function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
@@ -262,19 +265,26 @@ function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
 }
 
 /**
- * What the Assistant may offer, which is nothing when `VIRTUAL_AGENT_PLUGINS` is unset. A malformed list offers
- * nothing rather than failing the page: the Assistant is someone's whole chat, and the hub's own virtual-agent pages
- * still report the configuration error to whoever has to fix it.
+ * What the Assistant may offer: an empty list when `VIRTUAL_AGENT_PLUGINS` is unset, and `null` when it is malformed.
+ * A malformed list does not fail the page, because the Assistant is someone's whole chat and the hub's own
+ * virtual-agent pages still report the error to whoever has to fix it. It cannot read as an empty list either: the
+ * person's own plugins would then each read as one the hub no longer offers, and the write path's own unguarded
+ * `availablePlugins` would refuse every save. `null` is what hides the section instead.
  */
-function offeredPlugins(): PluginOption[] {
+function offeredPlugins(): PluginOption[] | null {
   try {
     return availablePlugins();
   } catch (error) {
     if (error instanceof PluginConfigurationError) {
-      return [];
+      return null;
     }
     throw error;
   }
+}
+
+function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugins"] {
+  const available = offeredPlugins();
+  return available === null ? null : { available, checked: assistant.plugins };
 }
 
 /**
@@ -288,7 +298,7 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
     assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)),
     credentials,
     conversations,
-    plugins: { available: offeredPlugins(), checked: assistant.plugins }
+    plugins: pluginSettings(assistant)
   };
 }
 
@@ -303,7 +313,7 @@ export async function assistantSidebar(viewer: Viewer): Promise<AssistantHome | 
     assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)),
     credentials,
     conversations,
-    plugins: { available: offeredPlugins(), checked: assistant.plugins }
+    plugins: pluginSettings(assistant)
   };
 }
 

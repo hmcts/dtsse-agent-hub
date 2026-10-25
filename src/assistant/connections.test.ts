@@ -11,8 +11,11 @@ import {
   connections,
   connectionsData,
   connectionsWarning,
+  hasLapsed,
   isConnection,
-  PROMPTED_CONNECTIONS
+  isUsable,
+  PROMPTED_CONNECTIONS,
+  PROMPTED_WHEN_LAPSED
 } from "./connections.ts";
 
 const NOW = Date.parse("2026-10-25T12:00:00.000Z");
@@ -48,35 +51,59 @@ describe("isConnection", () => {
 
 describe("connectionState", () => {
   it("should be connected when the credential is stored", () => {
-    expect(connectionState("stored", undefined)).toBe("connected");
+    expect(connectionState("stored", undefined, true)).toBe("connected");
   });
 
   it("should be connected when the credential is stored and an older sign-in failed", () => {
-    expect(connectionState("stored", login("github", "failed"))).toBe("connected");
+    expect(connectionState("stored", login("github", "failed"), true)).toBe("connected");
   });
 
-  it("should be signing in when a sign-in is waiting for the person", () => {
-    expect(connectionState("login", login("github", "pending"))).toBe("signing-in");
+  it("should be signing in when a sign-in is waiting for a person who has none stored", () => {
+    expect(connectionState("login", login("github", "pending"), false)).toBe("signing-in");
+  });
+
+  it("should be refreshing when a sign-in is relayed for a credential that is already stored", () => {
+    expect(connectionState("login", login("github", "pending"), true)).toBe("refreshing");
   });
 
   it("should be waiting when nothing is stored and no sign-in has been asked for", () => {
-    expect(connectionState("waiting", undefined)).toBe("waiting");
+    expect(connectionState("waiting", undefined, false)).toBe("waiting");
   });
 
   it("should be waiting when a sign-in completed but its credential is no longer stored", () => {
-    expect(connectionState("waiting", login("github", "completed"))).toBe("waiting");
+    expect(connectionState("waiting", login("github", "completed"), false)).toBe("waiting");
   });
 
   it("should be failed when the last sign-in failed and nothing is stored", () => {
-    expect(connectionState("waiting", login("azure", "failed"))).toBe("failed");
+    expect(connectionState("waiting", login("azure", "failed"), false)).toBe("failed");
   });
 
   it("should be expired when the last sign-in expired and nothing is stored", () => {
-    expect(connectionState("waiting", login("azure", "expired"))).toBe("expired");
+    expect(connectionState("waiting", login("azure", "expired"), false)).toBe("expired");
   });
 
   it("should be expired when a sign-in is still pending but its code ran out", () => {
-    expect(connectionState("waiting", login("azure", "pending", new Date(NOW - 1000).toISOString()))).toBe("expired");
+    expect(connectionState("waiting", login("azure", "pending", new Date(NOW - 1000).toISOString()), false)).toBe("expired");
+  });
+});
+
+describe("isUsable", () => {
+  it.each(["connected", "refreshing"] as const)("should count %s as a sign-in the person can use", (state) => {
+    expect(isUsable(state)).toBe(true);
+  });
+
+  it.each(["signing-in", "expired", "failed", "waiting"] as const)("should not count %s as a sign-in the person can use", (state) => {
+    expect(isUsable(state)).toBe(false);
+  });
+});
+
+describe("hasLapsed", () => {
+  it.each(["expired", "failed"] as const)("should count %s as a sign-in that has lapsed", (state) => {
+    expect(hasLapsed(state)).toBe(true);
+  });
+
+  it.each(["connected", "refreshing", "signing-in", "waiting"] as const)("should not count %s as a sign-in that has lapsed", (state) => {
+    expect(hasLapsed(state)).toBe(false);
   });
 });
 
@@ -153,39 +180,72 @@ describe("connections", () => {
 });
 
 describe("connectionsWarning", () => {
-  it("should be nothing when GitHub, Azure and Atlassian are all connected", () => {
+  it("should be nothing when every prompted sign-in is connected", () => {
     const rows = list(["github", "azure", "bedrock", "atlassian"], [status("github", true), status("azure", true), status("atlassian", true)]);
 
     expect(connectionsWarning(rows)).toBeNull();
+  });
+
+  it("should prompt about the needed sign-ins and, once lapsed, the optional one", () => {
+    expect([...PROMPTED_CONNECTIONS]).toEqual(["github", "azure"]);
+    expect([...PROMPTED_WHEN_LAPSED]).toEqual(["atlassian"]);
   });
 
   it("should be nothing when there are no sign-ins to report on", () => {
     expect(connectionsWarning([])).toBeNull();
   });
 
-  it.each(["github", "azure", "atlassian"] as const)("should name %s when it alone is not connected", (kind) => {
+  it.each(["github", "azure"] as const)("should name %s when it alone is not connected", (kind) => {
     const stored = PROMPTED_CONNECTIONS.filter((other) => other !== kind).map((other) => status(other, true));
     const rows = list([...PROMPTED_CONNECTIONS], stored);
 
     expect(connectionsWarning(rows)).toBe(`${CONNECTORS[kind]?.name} needs your attention`);
   });
 
-  it("should name both when two of the three are not connected", () => {
-    const rows = list(["github", "azure", "atlassian"], [status("azure", true)]);
+  it("should name both when neither needed sign-in is connected", () => {
+    const rows = list(["github", "azure", "atlassian"], [status("atlassian", true)]);
 
-    expect(connectionsWarning(rows)).toBe("GitHub and Atlassian need your attention");
+    expect(connectionsWarning(rows)).toBe("GitHub and Azure need your attention");
   });
 
-  it("should name all three when none of them is connected", () => {
-    const rows = list(["github", "azure", "atlassian"], []);
+  it("should name all three when none of them is connected and the optional one has lapsed", () => {
+    const rows = list(["github", "azure", "atlassian"], [], [login("atlassian", "expired")]);
 
     expect(connectionsWarning(rows)).toBe("GitHub, Azure and Atlassian need your attention");
   });
 
-  it("should warn when a sign-in is still waiting for the person", () => {
+  it("should warn when a needed sign-in is still waiting for the person", () => {
     const rows = list(["github", "azure", "atlassian"], [status("azure", true), status("atlassian", true)], [login("github", "pending")]);
 
     expect(connectionsWarning(rows)).toBe("GitHub needs your attention");
+  });
+
+  it("should not warn about a sign-in being refreshed behind one that is already stored", () => {
+    const rows = list(["github", "azure", "atlassian"], [status("github", true), status("azure", true)], [login("github", "pending")]);
+
+    expect(connectionsWarning(rows)).toBeNull();
+  });
+
+  it("should not warn about an optional sign-in nobody ever set up", () => {
+    const rows = list(["github", "azure", "atlassian"], [status("github", true), status("azure", true)]);
+
+    expect(connectionsWarning(rows)).toBeNull();
+  });
+
+  it.each(["expired", "failed"] as const)("should warn about an optional sign-in once it has %s", (state) => {
+    const rows = list(["github", "azure", "atlassian"], [status("github", true), status("azure", true)], [login("atlassian", state)]);
+
+    expect(connectionsWarning(rows)).toBe("Atlassian needs your attention");
+  });
+
+  it("should not warn about an optional sign-in that is merely being refreshed", () => {
+    const rows = list(
+      ["github", "azure", "atlassian"],
+      [status("github", true), status("azure", true), status("atlassian", true)],
+      [login("atlassian", "pending")]
+    );
+
+    expect(connectionsWarning(rows)).toBeNull();
   });
 
   it("should not warn about model access when it is the only thing missing", () => {

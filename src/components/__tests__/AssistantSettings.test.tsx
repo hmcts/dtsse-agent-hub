@@ -47,6 +47,19 @@ function open(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}): voi
   fireEvent.click(cog());
 }
 
+/**
+ * The cog as a page has it: inside the element the `--asst-*` colours are declared on, which the Assistant's layout
+ * puts inside the body. The dialog has to be rendered inside this element to inherit them.
+ */
+function themed(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, theme = "system"): HTMLElement {
+  const root = document.createElement("div");
+  root.className = "asst-theme";
+  root.dataset.theme = theme;
+  document.body.append(root);
+  render(<AssistantSettings connections={data(ALL_SIGNED_IN)} {...props} />, { container: root });
+  return root;
+}
+
 /** The dialog's own focusable controls, in tab order: its close button, the appearance choices, then any others. */
 function stops(): HTMLElement[] {
   return [...screen.getByRole("dialog").querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled])")];
@@ -62,18 +75,37 @@ describe("the Assistant's settings cog", () => {
 
   it.each([
     ["github", "GitHub needs your attention"],
-    ["azure", "Azure needs your attention"],
-    ["atlassian", "Atlassian needs your attention"]
+    ["azure", "Azure needs your attention"]
   ] as const)("should warn that %s needs attention when it alone is not connected", (missing, warning) => {
     render(<AssistantSettings connections={data(ALL_SIGNED_IN.filter((kind) => kind !== missing))} />);
 
     expect(cog().getAttribute("aria-label")).toBe(`Settings. ${warning}`);
   });
 
-  it("should name all three when none of the sign-ins it prompts about is connected", () => {
-    render(<AssistantSettings connections={data(["bedrock"])} />);
+  it("should name all three when the needed sign-ins are missing and the optional one has lapsed", () => {
+    render(<AssistantSettings connections={data(["bedrock"], [login("atlassian", "expired")])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub, Azure and Atlassian need your attention");
+  });
+
+  it("should not nag about Atlassian when the person has simply never set it up", () => {
+    render(<AssistantSettings connections={data(["github", "azure", "bedrock"])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings");
+    expect(cog().textContent).toBe("");
+  });
+
+  it.each(["expired", "failed"] as const)("should warn about Atlassian once its sign-in has %s", (state) => {
+    render(<AssistantSettings connections={data(["github", "azure", "bedrock"], [login("atlassian", state)])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs your attention");
+  });
+
+  it("should not say a sign-in needs attention while it is only being refreshed behind a working one", () => {
+    render(<AssistantSettings connections={data(ALL_SIGNED_IN, [login("github", "pending")])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings");
+    expect(cog().textContent).toBe("");
   });
 
   it("should mark the cog with a visible exclamation, not colour alone, when a sign-in needs attention", () => {
@@ -207,6 +239,45 @@ describe("the Assistant's settings dialog", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
+  // Every Assistant colour is `oklch(var(--asst-x))`, and those properties are declared on `.asst-theme`. A dialog
+  // rendered beside that element rather than inside it inherits none of them and loses every background and border.
+  it("should render inside the element the theme's colours are declared on when it opens", () => {
+    const root = themed();
+    fireEvent.click(cog());
+
+    expect(root.contains(screen.getByRole("dialog"))).toBe(true);
+    root.remove();
+  });
+
+  it("should keep Escape from reaching the page behind it, which would take the sidebar's drawer with it", () => {
+    open();
+    let reachedWindow = false;
+    const listener = () => {
+      reachedWindow = true;
+    };
+    window.addEventListener("keydown", listener);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    window.removeEventListener("keydown", listener);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(reachedWindow).toBe(false);
+  });
+
+  it("should start the appearance switch from the appearance the page is showing when it is reopened", () => {
+    const root = themed({}, "system");
+    fireEvent.click(cog());
+    fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    fireEvent.click(cog());
+
+    expect(root.dataset.theme).toBe("dark");
+    expect(screen.getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Match my device" }).getAttribute("aria-checked")).toBe("false");
+    root.remove();
+  });
+
   it("should offer the appearance the person chose, and switch it, from its new home in the dialog", () => {
     const page = document.createElement("div");
     page.className = "asst-theme";
@@ -315,10 +386,21 @@ describe("the Assistant's team tools", () => {
     expect(screen.queryByRole("heading", { name: "Team tools" })).toBeNull();
   });
 
+  // `assistantPluginsData` gives nothing when `VIRTUAL_AGENT_PLUGINS` is malformed, rather than an empty list: the
+  // hub cannot then tell which of the person's plugins it still offers, so a section would mislabel every one of them
+  // and its own save would be refused.
   it("should show nothing at all when the page passes no plugins", () => {
     open({ plugins: undefined });
 
     expect(screen.queryByRole("heading", { name: "Team tools" })).toBeNull();
+    expect(screen.queryByText(/No longer offered/)).toBeNull();
+  });
+
+  it("should still offer the appearance and the connections when there are no team tools to show", () => {
+    open({ plugins: undefined });
+
+    expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
   });
 
   it("should describe each tool in the hub's own words, with its name underneath, when it opens", () => {

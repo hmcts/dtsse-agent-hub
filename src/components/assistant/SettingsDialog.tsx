@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { type Connection, type ConnectionsData, connections, connectionsWarning } from "@/assistant/connections";
 import type { AssistantPluginsData } from "@/assistant/settings";
-import type { Theme } from "@/assistant/theme";
+import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
@@ -25,6 +25,8 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
 
 const STATE_CLASS: Record<Connection["state"], string> = {
   connected: "text-asst-ok",
+  // A sign-in being renewed behind a working one is news, not a problem, so it is not coloured like one.
+  refreshing: "text-asst-muted",
   "signing-in": "text-asst-accent-soft",
   expired: "text-asst-warn",
   failed: "text-asst-error",
@@ -160,6 +162,10 @@ function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        // Escape dismisses the innermost thing only. The shell closes its drawer on Escape from `window`, which is
+        // the next stop after `document`, so the dialog would otherwise take the whole sidebar with it — and the cog
+        // focus is handed back to goes `inert` with it, which drops focus to the body.
+        event.stopPropagation();
         onClose();
         return;
       }
@@ -228,9 +234,29 @@ export function AssistantSettings({
   // Read once, and again whenever the dialog opens: a sign-in's deadline moves slowly and a timer on every page to
   // watch it would cost more than it is worth.
   const [now, setNow] = useState(() => Date.now());
+  // The appearance the switch starts from. `ThemeSwitch` writes the person's choice to the cookie and to the theme
+  // root, not to the server tree, so `theme` keeps the value the page was rendered with and the dialog, which
+  // unmounts when it closes, would otherwise reopen showing a choice the page has moved on from.
+  const [shownTheme, setShownTheme] = useState<Theme>(theme);
 
   const list = connections(data, (stored, login) => checklistState(stored, login, now));
   const warning = connectionsWarning(list);
+
+  /**
+   * The element the `--asst-*` colours are declared on. The dialog is rendered into it rather than into `body`: it
+   * has to leave the sidebar, which is transformed and would clip anything `fixed` inside it, but a sibling of the
+   * theme root inherits none of the custom properties the Assistant's every colour is built from. The theme root
+   * sets no containing block of its own, so `fixed` still means the viewport.
+   */
+  function themeRoot(): HTMLElement {
+    return cog.current?.closest<HTMLElement>(".asst-theme") ?? document.body;
+  }
+
+  /** What the page is actually showing, or the appearance it was rendered with when nothing is there to say. */
+  function shownNow(): Theme {
+    const live = themeRoot().dataset.theme;
+    return live === undefined ? theme : themeOf(live);
+  }
 
   function close(): void {
     setOpen(false);
@@ -248,6 +274,7 @@ export function AssistantSettings({
         title="Settings"
         onClick={() => {
           setNow(Date.now());
+          setShownTheme(shownNow());
           setOpen(true);
         }}
         className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"
@@ -262,7 +289,9 @@ export function AssistantSettings({
           </span>
         )}
       </button>
-      {open ? createPortal(<Dialog view={{ theme, list, unavailable: data?.unavailable ?? null, warning, plugins }} onClose={close} />, document.body) : null}
+      {open
+        ? createPortal(<Dialog view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins }} onClose={close} />, themeRoot())
+        : null}
     </>
   );
 }

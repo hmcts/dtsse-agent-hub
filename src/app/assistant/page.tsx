@@ -21,6 +21,8 @@ export default async function AssistantPage() {
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const home = await openAssistant(viewer);
+  const plugins = assistantPluginsData(home.assistant, home.plugins);
+  const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
   return (
     <AssistantShell
       viewerName={viewer.name}
@@ -29,7 +31,7 @@ export default async function AssistantPage() {
       hubLink
       theme={theme}
       connections={connectionsData(home.assistant, home.credentials)}
-      plugins={{ ...assistantPluginsData(home.assistant, home.plugins), save: setVirtualAgentPlugins }}
+      plugins={pluginSettings}
     >
       <EmptyChat starters={STARTERS} templates={TEMPLATES} viewerOid={viewer.oid} start={startConversation} />
       <OnboardingGate

@@ -35,6 +35,8 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
   if (view === undefined) {
     notFound();
   }
+  const plugins = assistantPluginsData(home.assistant, home.plugins);
+  const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
   return (
     <AssistantShell
       viewerName={viewer.name}
@@ -43,7 +45,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
       hubLink
       theme={theme}
       connections={connectionsData(home.assistant, home.credentials)}
-      plugins={{ ...assistantPluginsData(home.assistant, home.plugins), save: setVirtualAgentPlugins }}
+      plugins={pluginSettings}
     >
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
       <ChatView key={view.agentId} view={view} templates={TEMPLATES} viewerOid={viewer.oid} actions={ACTIONS} />

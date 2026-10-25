@@ -59,21 +59,34 @@ export function isConnection(kind: CredentialKind): boolean {
 }
 
 /**
- * Where one sign-in stands. `connected` and `signing-in` are `checklistState`'s "stored" and "login"; the rest split
- * its "waiting" by what became of the last sign-in, so a lapsed one reads as lapsed rather than as never set up.
+ * Where one sign-in stands. `checklistState` answers "login" for any sign-in a pod has relayed, whether or not one is
+ * already stored, so that answer splits in two here: `refreshing` keeps a working credential reading as working,
+ * since `startLogin` does not delete one. Its "waiting" splits by what became of the last sign-in, so a lapsed one
+ * reads as lapsed rather than as never set up.
  */
-export type ConnectionState = "connected" | "signing-in" | "expired" | "failed" | "waiting";
+export type ConnectionState = "connected" | "refreshing" | "signing-in" | "expired" | "failed" | "waiting";
 
 /** What `checklistState` answers, named here so this module does not import the checklist that owns those states. */
 export type ChecklistAnswer = "stored" | "login" | "waiting";
 
 const DETAILS: Record<ConnectionState, string> = {
   connected: "Connected",
+  refreshing: "Signing in again",
   "signing-in": "Waiting for you",
   expired: "Sign-in expired",
   failed: "Last sign-in failed",
   waiting: "Not connected"
 };
+
+/** A sign-in the person can use right now, whatever the pod is doing about it in the background. */
+export function isUsable(state: ConnectionState): boolean {
+  return state === "connected" || state === "refreshing";
+}
+
+/** A sign-in that worked once and has stopped working, as opposed to one nobody ever set up. */
+export function hasLapsed(state: ConnectionState): boolean {
+  return state === "expired" || state === "failed";
+}
 
 export interface Connection extends Connector {
   kind: CredentialKind;
@@ -85,12 +98,14 @@ export interface Connection extends Connector {
 }
 
 /** A stored credential is connected whatever its last sign-in did, so a stale failure never contradicts the tick. */
-export function connectionState(checklist: ChecklistAnswer, login: LoginView | undefined): ConnectionState {
+export function connectionState(checklist: ChecklistAnswer, login: LoginView | undefined, stored: boolean): ConnectionState {
   if (checklist === "stored") {
     return "connected";
   }
   if (checklist === "login") {
-    return "signing-in";
+    // A pod relays a fresh sign-in without deleting the credential it already has, so one already stored still works
+    // while the person completes it. Only a sign-in with nothing behind it is waiting on them.
+    return stored ? "refreshing" : "signing-in";
   }
   if (login === undefined || login.state === "completed") {
     return "waiting";
@@ -113,16 +128,30 @@ export function connections(data: ConnectionsData | undefined, checklist: (store
   return data.kinds.filter(isConnection).map((kind) => {
     const status = data.statuses.find((candidate) => candidate.kind === kind);
     const login = data.logins.find((candidate) => candidate.kind === kind);
-    const state = connectionState(checklist(status?.stored === true, login), login);
+    const stored = status?.stored === true;
+    const state = connectionState(checklist(stored, login), login, stored);
     return { kind, ...(CONNECTORS[kind] as Connector), state, detail: DETAILS[state], accountLabel: status?.accountLabel ?? null };
   });
 }
 
 /**
- * The sign-ins worth prompting about in the sidebar. Model access is left out on purpose: nobody can use the
+ * The sign-ins the cog prompts about, and when. Model access is left out of both on purpose: nobody can use the
  * Assistant at all without it, so the getting-ready screen holds them there until they have it.
+ *
+ * A needed sign-in is prompted about whenever it is not usable, because the person has to have it. An optional one is
+ * prompted about only once it has lapsed: never setting Atlassian up is a choice, and a badge nobody can ever clear
+ * teaches people to ignore the one that matters. A lapsed sign-in is exactly what nothing tells anyone about today.
  */
-export const PROMPTED_CONNECTIONS: readonly CredentialKind[] = ["github", "azure", "atlassian"];
+export const PROMPTED_CONNECTIONS: readonly CredentialKind[] = ["github", "azure"];
+export const PROMPTED_WHEN_LAPSED: readonly CredentialKind[] = ["atlassian"];
+
+/** Whether a row is worth the person's attention, by the rule its kind is prompted under. */
+function needsAttention(row: Connection): boolean {
+  if (PROMPTED_CONNECTIONS.includes(row.kind)) {
+    return !isUsable(row.state);
+  }
+  return PROMPTED_WHEN_LAPSED.includes(row.kind) && hasLapsed(row.state);
+}
 
 /** "A", "A and B", "A, B and C". */
 function inWords(names: readonly string[]): string {
@@ -134,7 +163,7 @@ function inWords(names: readonly string[]): string {
  * Assistant is broken, because none of these stops someone chatting and Atlassian is optional besides.
  */
 export function connectionsWarning(list: readonly Connection[]): string | null {
-  const names = list.filter((row) => PROMPTED_CONNECTIONS.includes(row.kind) && row.state !== "connected").map((row) => row.name);
+  const names = list.filter(needsAttention).map((row) => row.name);
   if (names.length === 0) {
     return null;
   }
