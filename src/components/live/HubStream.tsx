@@ -2,12 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { whenOnline } from "./connectivity";
 import { connectHub, type HubEventType, type HubListener, type StreamWatch, streamUrl } from "./hub-client";
 
 /**
  * One live connection per tab, shared by the sidebar and the page. The page says what it is showing with
  * `useWatch`; the sidebar's agent statuses arrive whatever it watches. A `resync` re-renders the server components,
  * so anything missed while disconnected is read again.
+ *
+ * A `resync` usually follows a dropped connection, so the network may still be down when it arrives. Refreshing
+ * then fails the RSC request and takes the page to the error boundary, so the refresh waits for the network. One
+ * waiting refresh covers every `resync` that arrived while the network was down: they all re-read the same page.
  *
  * Once the session has ended, found by the stream or by any request the page makes, the stream stays closed and
  * `useSessionEnded` says so.
@@ -31,6 +36,16 @@ export function HubStreamProvider({ children }: { children: React.ReactNode }) {
   const [ended, setEnded] = useState(false);
   const url = streamUrl(watched);
   const endSession = useCallback(() => setEnded(true), []);
+  const waitingRefresh = useRef<(() => void) | null>(null);
+
+  // Only on unmount: a refresh waiting for the network outlives a change to what the page watches.
+  useEffect(
+    () => () => {
+      waitingRefresh.current?.();
+      waitingRefresh.current = null;
+    },
+    []
+  );
 
   useEffect(() => {
     if (ended) {
@@ -38,8 +53,11 @@ export function HubStreamProvider({ children }: { children: React.ReactNode }) {
     }
     return connectHub(url, {
       event: (type, data) => {
-        if (type === "resync") {
-          router.refresh();
+        if (type === "resync" && waitingRefresh.current === null) {
+          waitingRefresh.current = whenOnline(() => {
+            waitingRefresh.current = null;
+            router.refresh();
+          });
         }
         for (const listener of [...listeners.current]) {
           listener(type, data);
