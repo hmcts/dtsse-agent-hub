@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { clientSupports } from "@/agents/client-features";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
@@ -237,7 +238,7 @@ export function ChatView({
   // Offered only where the session's client acts on an interrupt. A pod takes the current client when it boots, so a
   // conversation on an older session has no stop until that session is next started — and showing one anyway would
   // give the person a button that does nothing, which is worse than the plain wait.
-  const stoppable = view.clientFeatures?.includes("stop") === true;
+  const stoppable = clientSupports(view.clientFeatures, "stop");
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
