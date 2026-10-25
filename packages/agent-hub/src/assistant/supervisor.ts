@@ -7,6 +7,7 @@ import { workspaceRoot } from "../agent.ts";
 import type { Api, SessionReport } from "../api.ts";
 import type { Env } from "../env.ts";
 import { hubHome, projectTranscriptPath, statePath, validSessionId } from "../session.ts";
+import { removeConversationUploads, uploadsRoot } from "./attachments.ts";
 import { canRunProgram, claudeCommand, commandProgram, createTmux, type ProgramCheck, type Tmux, tmuxName } from "./tmux.ts";
 
 export const DEFAULT_MAX_SESSIONS = 2;
@@ -76,7 +77,7 @@ export type AssistantSupervisor = {
 export type ReportOutcome = "unchanged" | "reported" | "error";
 
 /** The filesystem calls the supervisor makes; a test passes `node:fs` or its own. */
-export type SupervisorFs = Pick<typeof nodeFs, "statSync" | "readFileSync" | "writeFileSync" | "existsSync" | "mkdirSync" | "renameSync">;
+export type SupervisorFs = Pick<typeof nodeFs, "statSync" | "readFileSync" | "writeFileSync" | "existsSync" | "mkdirSync" | "renameSync" | "rmSync">;
 
 export type CreateAssistantSupervisorOptions = {
   api: Pick<Api, "putSessions">;
@@ -91,6 +92,8 @@ export type CreateAssistantSupervisorOptions = {
   /** Where each conversation's session runs, and so what a relative path in its command resolves against: the
    * workspace checkout root, because `claudeCommand` names the prompt file through a path relative to it. */
   cwd?: string;
+  /** Where conversations' attachments live; a deleted conversation's directory goes with its session. */
+  uploadsDir?: string;
   max?: number;
   idleMs?: number;
   exitGraceMs?: number;
@@ -144,6 +147,7 @@ export function createAssistantSupervisor({
   now = Date.now,
   say = () => {},
   cwd = workspaceRoot(),
+  uploadsDir = uploadsRoot(env, cwd),
   max = maxSessions(env),
   idleMs = idleMinutes(env) * 60000,
   exitGraceMs = EXIT_GRACE_MS,
@@ -385,6 +389,15 @@ export function createAssistantSupervisor({
     const s = typeof cid === "string" ? sessions.get(cid) : undefined;
     if (s) {
       await stop(s, "the conversation was deleted");
+    }
+    // The chat is gone, so the files the person attached to it have nothing left to belong to. A conversation deleted
+    // while this pod was stopped sends no `close`; `reconcileUploads` is what catches that one.
+    if (typeof cid === "string") {
+      try {
+        removeConversationUploads(uploadsDir, cid, fs);
+      } catch (e) {
+        say(`conversation ${cid}: could not remove its uploads: ${(e as Error).message}`);
+      }
     }
     await report();
   }

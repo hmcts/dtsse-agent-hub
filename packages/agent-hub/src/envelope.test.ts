@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type AssistantFrame,
   assistantEnvelope,
+  attachmentLines,
   directEnvelope,
   type EnvelopeMessage,
   formatMessage,
@@ -170,6 +171,54 @@ describe("assistantEnvelope", () => {
     expect(text.split("\n")).toContain("Product area: not chosen.");
   });
 
+  it("should name the absolute path of a file already on disk, before the separator, when one was attached", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, pcs, null, {
+      attachments: [{ name: "letter.pdf", path: "/workspace/uploads/c1/u1-letter.pdf", media_type: "application/pdf", bytes: 1_500_000 }]
+    });
+
+    // Assert
+    const lines = text.split("\n");
+    expect(lines).toContain(
+      "The user attached a file to this message. It is already saved on this machine at the absolute path below — read it from there, and do not ask for it to be sent again:"
+    );
+    expect(lines).toContain("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1.4 MB)");
+    expect(lines.indexOf("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1.4 MB)")).toBeLessThan(lines.indexOf("---"));
+  });
+
+  it("should say so, and ask for it again, when a file could not be retrieved", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, pcs, null, {
+      attachments: [{ name: "scan.png", media_type: "image/png", bytes: 2048, error: "503 from the hub" }]
+    });
+
+    // Assert
+    expect(text.split("\n")).toContain(
+      "A file the user attached could not be retrieved and is not on this machine: scan.png. Tell them so in your answer and ask them to attach it again; do not guess at the contents."
+    );
+    expect(text).not.toMatch(/already saved/);
+  });
+
+  it("should count both when some files arrived and others did not", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, pcs, null, {
+      attachments: [
+        { name: "a.pdf", path: "/workspace/uploads/c1/u1-a.pdf", media_type: "application/pdf", bytes: 2 * 1024 * 1024 },
+        { name: "b.pdf", path: "/workspace/uploads/c1/u2-b.pdf", media_type: "application/pdf", bytes: 1024 },
+        { name: "c.png", media_type: "image/png", error: "timed out" },
+        { name: "d.png", path: "", media_type: "image/png", error: "timed out" }
+      ]
+    });
+
+    // Assert
+    expect(text).toMatch(/The user attached 2 files to this message\. They are already saved/);
+    expect(text).toMatch(/- \/workspace\/uploads\/c1\/u2-b\.pdf \(application\/pdf, 1 KB\)/);
+    expect(text).toMatch(/2 files the user attached could not be retrieved and are not on this machine: c\.png, d\.png\./);
+  });
+
+  it("should say nothing about attachments when the message carried none", () => {
+    expect(assistantEnvelope(personMessage, pcs, null, { attachments: [] })).not.toMatch(/attached/);
+  });
   it("should ask for the skill to be run as the user typed it when the body starts with one the session has", () => {
     // Arrange
     const skills = new Set(["cft-explain"]);
@@ -195,6 +244,28 @@ describe("assistantEnvelope", () => {
     expect(text.endsWith("\n---\n/cft-explain what is CDAM?")).toBe(true);
   });
 
+  it("should name the file above the skill line when a message is both a slash command and an attachment", () => {
+    // The order is load-bearing, not incidental. The skill line says "the rest of the message as its arguments", so
+    // it has to sit against the separator and the body; absolute paths between the two would read as arguments.
+    // Arrange
+    const skills = new Set(["cft-explain"]);
+
+    // Act
+    const text = assistantEnvelope({ ...personMessage, body: "/cft-explain what does this say?" }, pcs, null, {
+      skills,
+      attachments: [{ name: "letter.pdf", path: "/workspace/uploads/c1/u1-letter.pdf", media_type: "application/pdf", bytes: 1024 }]
+    });
+
+    // Assert: both instructions are there, the skill line last, and the paths above it.
+    const lines = text.split("\n");
+    const sep = lines.indexOf("---");
+    expect(lines[sep - 1]).toBe(
+      "It starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments, as if your user had typed it."
+    );
+    expect(lines.indexOf("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1 KB)")).toBeLessThan(sep - 1);
+    expect(text.endsWith("\n---\n/cft-explain what does this say?")).toBe(true);
+  });
+
   it("should say nothing about a skill when the body has no leading slash command", () => {
     // Arrange
     const skills = new Set(["cft-explain"]);
@@ -205,6 +276,28 @@ describe("assistantEnvelope", () => {
     // Assert
     expect(text).not.toMatch(/skill/);
     expect(text).toBe(assistantEnvelope(personMessage, pcs, null));
+  });
+});
+
+describe("attachmentLines", () => {
+  it("should say nothing at all for no attachments, so an envelope without files is unchanged", () => {
+    expect(attachmentLines()).toEqual([]);
+    expect(attachmentLines([])).toEqual([]);
+  });
+
+  it("should fall back to unknown when the hub described neither the type nor the size", () => {
+    expect(attachmentLines([{ name: "x", path: "/p/x" }])).toEqual([
+      "The user attached a file to this message. It is already saved on this machine at the absolute path below — read it from there, and do not ask for it to be sent again:",
+      "- /p/x (unknown type, unknown size)"
+    ]);
+  });
+
+  it.each([
+    [null, "unknown size"],
+    [-1, "unknown size"],
+    [Number.NaN, "unknown size"]
+  ])("should not claim a size when the frame said %s", (bytes, expected) => {
+    expect(attachmentLines([{ name: "x", path: "/p/x", bytes }])[1]).toContain(expected);
   });
 });
 

@@ -112,12 +112,73 @@ export type AssistantFrame = {
   product_label?: string | null;
   artefact_version?: number | null;
   artefact_updated_by?: string | null;
+  /** The files attached to this message. Absent from a hub with uploads off, or one older than them. */
+  attachments?: unknown;
 };
+
+/**
+ * What became of one attachment: the absolute path it was written to, or why it could not be fetched. Structural for
+ * the same reason the rest of this module is — `assistant/attachments.ts` produces these, and the envelope only reads.
+ */
+export type AttachmentOutcome = {
+  name: string;
+  path?: string | null;
+  media_type?: string | null;
+  bytes?: number | null;
+  error?: string | null;
+};
+
+function describeSize(bytes: number | null | undefined): string {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
+    return "";
+  }
+  const mb = bytes / (1024 * 1024);
+  return mb >= 0.1 ? ` ${mb.toFixed(1)} MB` : ` ${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * The lines that tell the session about the files attached to a message, spliced in before the `---` separator.
+ *
+ * The file is already on disk by the time this is written, so the envelope names the path and nothing depends on the
+ * model choosing to run a command to go and get it — which is what `jiraExportLines` has to depend on. A file that
+ * could not be fetched is said so explicitly: a dropped attachment nobody mentions leaves the person believing their
+ * file was read.
+ */
+export function attachmentLines(attachments: readonly AttachmentOutcome[] = []): string[] {
+  if (attachments.length === 0) {
+    return [];
+  }
+  const got = attachments.filter((attachment) => typeof attachment.path === "string" && attachment.path !== "");
+  const lost = attachments.filter((attachment) => !got.includes(attachment));
+  const lines: string[] = [];
+  if (got.length > 0) {
+    lines.push(
+      `The user attached ${got.length === 1 ? "a file" : `${got.length} files`} to this message. ${got.length === 1 ? "It is" : "They are"} already saved on this machine at the absolute ${got.length === 1 ? "path" : "paths"} below — read ${got.length === 1 ? "it" : "them"} from there, and do not ask for ${got.length === 1 ? "it" : "them"} to be sent again:`,
+      ...got.map((attachment) => `- ${attachment.path} (${attachment.media_type || "unknown type"},${describeSize(attachment.bytes) || " unknown size"})`)
+    );
+  }
+  if (lost.length > 0) {
+    lines.push(
+      `${lost.length === 1 ? "A file the user attached" : `${lost.length} files the user attached`} could not be retrieved and ${lost.length === 1 ? "is" : "are"} not on this machine: ${lost.map((attachment) => attachment.name).join(", ")}. Tell them so in your answer and ask them to attach ${lost.length === 1 ? "it" : "them"} again; do not guess at the contents.`
+    );
+  }
+  return lines;
+}
 
 /** The product area of the last message delivered to a conversation's session, as the bridge records it. */
 export type AssistantProduct = {
   product: string | null;
   product_label: string | null;
+};
+
+/**
+ * What an Assistant conversation's envelope takes beyond the message itself: the skills the session can run, as every
+ * envelope takes, and what became of each file attached to the message. Attachments are only ever an Assistant thing,
+ * so they go here rather than on `EnvelopeOptions`, where the other two envelopes would have to ignore them.
+ */
+export type AssistantEnvelopeOptions = EnvelopeOptions & {
+  /** Already fetched to this machine's disk by the time this is built, which is what lets the lines name paths. */
+  attachments?: readonly AttachmentOutcome[];
 };
 
 // A message to one of a virtual agent's HMCTS Assistant conversations, from the person whose conversation it is.
@@ -126,7 +187,7 @@ export function assistantEnvelope(
   message: EnvelopeMessage,
   assistant: AssistantFrame = {},
   previousProduct: AssistantProduct | null = null,
-  { skills }: EnvelopeOptions = {}
+  { skills, attachments }: AssistantEnvelopeOptions = {}
 ): string {
   const owner = message.author?.owner_name || "your user";
   const label = assistant.product_label || assistant.product || "not chosen";
@@ -149,6 +210,12 @@ export function assistantEnvelope(
     `Product area: ${label}.`,
     ...switched,
     ...edited,
+    // Files before the skill line, and the skill line last, for one reason: it says "the rest of the message as its
+    // arguments", so it has to sit against the `---` and the body it is talking about. A block of absolute paths
+    // between the two reads as though the paths were part of those arguments. The attachment lines carry no such
+    // dependency — they are self-contained facts about where the bytes already are — so they lose nothing by going
+    // above. A message that is both `/skill` and a file therefore reads as: here is the file, now run the skill.
+    ...attachmentLines(attachments),
     ...skillLine(message.body, skills, ownerSkillLine),
     "---",
     message.body

@@ -157,6 +157,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const sessionStreams = new Map<string, ServerResponse>();
   // agent id → the conversation's document, for conversations' agents
   const artefacts = new Map<string, Artefact>();
+  // upload id → the parts the pod may still fetch, and whether it has reported having the whole file
+  const attachments = new Map<string, { parts: Uint8Array[]; fetched: boolean }>();
   // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
   const virtuals = new Map<string, VirtualRecord>();
   // person oid → Map(kind → value), the /api/agent/credentials routes
@@ -293,6 +295,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       }
       v.status.push(body.detail ? { phase: body.phase, detail: body.detail } : { phase: body.phase });
       return send(res, 204);
+    }
+    if (req.method === "GET" && area === "conversations" && !kind) {
+      const ids = new Set([...agents.values()].filter((a) => a.conversation_id).map((a) => a.conversation_id as string));
+      return send(res, 200, { conversations: [...ids].map((conversationId) => ({ id: conversationId })) });
     }
     if (area === "sessions" && !kind) {
       if (req.method === "PUT") {
@@ -719,6 +725,27 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return send(res, 200, { version: next.version });
       }
     }
+    // The pod-facing half of an Assistant attachment: one part's raw bytes, and the report that deletes them.
+    if (action === "attachments") {
+      const upload = attachments.get(parts[4] as string);
+      if (!upload) {
+        return send(res, 404, { error: "no such upload" });
+      }
+      if (req.method === "POST" && parts[5] === "fetched") {
+        upload.fetched = true;
+        upload.parts = [];
+        return send(res, 204);
+      }
+      if (req.method === "GET" && parts[5] === "parts") {
+        const part = upload.parts[Number(parts[6])];
+        if (!part) {
+          return send(res, 404, { error: "no such part of this file" });
+        }
+        beforeRespond?.();
+        res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(part.byteLength) });
+        return res.end(Buffer.from(part));
+      }
+    }
     if (action === "subscriptions") {
       const subs = subscriptions.get(agent.id) as Set<string>;
       if (req.method === "GET") {
@@ -754,6 +781,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     virtuals,
     personCredentials,
     artefacts,
+    attachments,
     sessionStreams,
     // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session
     // registers for it.

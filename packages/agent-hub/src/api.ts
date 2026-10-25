@@ -11,6 +11,8 @@ export const DEFAULT_URL = "https://agent-hub.aat.platform.hmcts.net";
 export const DEFAULT_SCOPE = "api://dtsse-agent-hub/.default";
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
+/** One attachment part is up to 4 MiB, which a slow pod connection will not pull inside the JSON timeout. */
+const PART_TIMEOUT_MS = 60000;
 
 /** The credential kinds `docs/agent-api.md` defines; any other gives 404. */
 export const CREDENTIAL_KINDS = ["github", "azure", "claude", "bedrock", "jenkins", "atlassian", "claude_md", "git_identity"] as const;
@@ -166,6 +168,11 @@ export type ArtefactBody = {
 
 export type ArtefactResponse = { version: number };
 
+/** One conversation of a virtual agent, as `conversations` lists them for the uploads reconciliation. */
+export type ConversationSummary = { id: string };
+
+export type ConversationsResponse = { conversations: ConversationSummary[] };
+
 export type RegisterResponse = { agent_id: string; name: string };
 export type MessageResponse = { message: Message };
 export type MessagesResponse = { messages: Message[] };
@@ -297,8 +304,13 @@ export type Api = {
   loginComplete: (id: string, kind: CredentialKind, body?: LoginCompleteBody) => Promise<null>;
   sessionsStream: (id: string, opts?: StreamOptions) => Promise<Response>;
   putSessions: (id: string, body: SessionsBody) => Promise<null>;
+  conversations: (virtualId: string) => Promise<ConversationsResponse>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
+  /** One part of a file attached to a message in this agent's conversation. One part, never the whole file. */
+  attachmentPart: (agentId: string, uploadId: string, index: number) => Promise<Uint8Array>;
+  /** The whole file is on this pod's disk, which is what makes the hub delete its part rows. */
+  attachmentFetched: (agentId: string, uploadId: string) => Promise<null>;
   stream: (id: string, opts?: StreamOptions) => Promise<Response>;
 };
 
@@ -372,6 +384,24 @@ export function createApi({
       }
       throw e;
     });
+  /**
+   * A response read as bytes rather than JSON, for one part of an attachment. `arrayBuffer` here is one part — at
+   * most `part_bytes` from the frame — and never the file, which is the whole point of fetching it in parts; the
+   * caller appends each part to the file on disk and lets it go.
+   *
+   * Its own timeout, because 4 MiB over a slow connection takes longer than the 15 seconds a JSON call is given.
+   */
+  async function requestBytes(path: string, timeoutMs = PART_TIMEOUT_MS): Promise<Uint8Array> {
+    const res = await fetchImpl(`${base}${path}`, { headers: await headers(), signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) {
+      let json: ApiErrorBody | null = null;
+      try {
+        json = { error: (await res.text()).slice(0, 200) };
+      } catch {}
+      throw new ApiError(res.status, json, "GET", path);
+    }
+    return new Uint8Array(await res.arrayBuffer());
+  }
   // Both streams are framed alike, so the agent stream and a pod's sessions stream open the same way.
   async function openStream(path: string, { signal, lastEventId }: StreamOptions = {}): Promise<Response> {
     const h = await headers({ Accept: "text/event-stream" });
@@ -433,8 +463,11 @@ export function createApi({
     // supervisor runs.
     sessionsStream: (id, opts) => openStream(v(id, "sessions"), opts),
     putSessions: (id, body) => request<null>("PUT", v(id, "sessions"), body),
+    conversations: (virtualId) => request<ConversationsResponse>("GET", v(virtualId, "conversations")),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
+    attachmentPart: (agentId, uploadId, index) => requestBytes(`${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/parts/${index}`),
+    attachmentFetched: (agentId, uploadId) => request<null>("POST", `${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/fetched`),
     stream: (id, opts) => openStream(`${a(id)}/stream`, opts)
   };
 }
