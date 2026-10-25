@@ -17,6 +17,20 @@ test-results/
 allure-results/
 allure-report/
 
+# Scratch files the pipeline's yarn-audit-with-suppressions.sh writes into the repository root. Listed one by one
+# because yarn-audit-known-issues, which sits among them, is tracked: a `yarn-audit-*` glob would swallow it. Each is
+# anchored with a leading `/`, because the last three are ordinary enough words that an unanchored pattern would
+# silently untrack a file or directory of that name anywhere in the tree.
+/yarn-audit-result
+/yarn-audit-result-formatted
+/yarn-audit-known-issues-formatted
+/yarn-audit-known-issues-result
+/sorted-yarn-audit-issues
+/sorted-yarn-audit-known-issues
+/new_vulnerabilities
+/unneeded_suppressions
+/active_suppressions
+
 src/store/generated/
 
 charts/*/charts/
