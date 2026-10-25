@@ -479,8 +479,9 @@ export function ArtefactPanel({
           </button>
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {mode === "edit" ? (
+      {mode === "edit" ? (
+        // The textarea fills the scroller and scrolls itself, so the tab stop a keyboard user needs is the box.
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <textarea
             ref={box}
             value={markdown}
@@ -489,12 +490,15 @@ export function ArtefactPanel({
             spellCheck
             className="block h-full min-h-full w-full resize-none border-none bg-transparent px-[22px] py-5 font-plex-mono text-[13.5px] leading-[1.7] text-asst-body outline-none"
           />
-        ) : (
-          <div className="px-[26px] pb-10 pt-5 text-asst-body">
-            {markdown.trim() === "" ? <p className="text-asst-faint">This document is empty.</p> : <AssistantMarkdown source={markdown} document />}
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        // `group` rather than a second landmark inside the panel's own, because an element that takes focus needs a
+        // role that permits the name telling a screen-reader user what they have landed on.
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the preview holds no control of its own, so a keyboard user needs focus on it to scroll the rest of a long document into view, which axe checks as scrollable-region-focusable
+        <div tabIndex={0} role="group" aria-label="Document preview" className="min-h-0 flex-1 overflow-y-auto px-[26px] pb-10 pt-5 text-asst-body">
+          {markdown.trim() === "" ? <p className="text-asst-faint">This document is empty.</p> : <AssistantMarkdown source={markdown} document />}
+        </div>
+      )}
       {printing ? <PrintSheet title={title} markdown={markdown} /> : null}
     </section>
   );
