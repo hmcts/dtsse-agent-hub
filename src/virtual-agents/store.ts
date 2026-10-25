@@ -172,6 +172,16 @@ export async function listVirtualAgents(db: Database, ownerOid: string): Promise
   return rows.map(toRow);
 }
 
+/**
+ * The model routes the owner's live virtual agents are on, without repeats and in no particular order: what decides
+ * which credentials any pod of theirs will ask for, since each pod boots on its own row's route. Deleted agents are
+ * left out because nothing boots from them again.
+ */
+export async function liveModelRoutes(db: Database, ownerOid: string): Promise<ModelRoute[]> {
+  const rows = await db.virtualAgent.findMany({ where: { ownerOid, desired: { not: "deleted" } }, select: { modelRoute: true } });
+  return [...new Set(rows.map((row) => toRoute(row.modelRoute)))];
+}
+
 const NO_TOKEN = { launchTokenHash: null, launchTokenIssuedAt: null } as const;
 
 /** A pod that is shut down listens on nothing, so what it last reported would only list dead URLs. */
