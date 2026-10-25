@@ -9,7 +9,8 @@
  *   owner.
  * - Only an owner changes their grants, and only to people the hub already knows.
  * - Only a person saves, replaces or deletes their own credentials. No grant extends to them. Of their values, they
- *   may read back only their own Amazon Bedrock API key, with their own token.
+ *   may read back their own Amazon Bedrock API key, their CLAUDE.md and their git identity, with their own token;
+ *   every other kind is write-only for them. `canOwnerReadCredential` says why those three and nothing else.
  * - A virtual agent is visible to whoever may see its owner's agents, since its sessions are among them. Only that
  *   person manages it and sees its login codes. A virtual agent's launch token acts
  *   as its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.

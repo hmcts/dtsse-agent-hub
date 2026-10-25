@@ -4,7 +4,7 @@ import { Timestamp } from "@/components/time/Timestamp";
 import type { ModelRoute } from "@/viewer/identity";
 import { diskWarningDays } from "@/virtual-agents/cleanup";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "@/virtual-agents/limits";
-import { NO_PLUGINS, type PluginOffer } from "@/virtual-agents/plugins";
+import type { PluginOffer } from "@/virtual-agents/plugins";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 import { type CreateAction, CreateVirtualAgentForm } from "./CreateVirtualAgentForm";
 import { idleFor, statusLabel, stopReasonLabel } from "./labels";
@@ -68,17 +68,7 @@ function Row({ agent, now }: { agent: VirtualAgentCard; now: number }) {
   );
 }
 
-export function CreateVirtualAgent({
-  route,
-  create,
-  refusal,
-  plugins = NO_PLUGINS
-}: {
-  route: ModelRoute;
-  create: CreateAction;
-  refusal?: string;
-  plugins?: PluginOffer;
-}) {
+export function CreateVirtualAgent({ route, create, refusal, plugins }: { route: ModelRoute; create: CreateAction; refusal?: string; plugins: PluginOffer }) {
   return (
     <Section heading="Create a virtual agent">
       <div className="space-y-3 text-sm">
@@ -105,19 +95,22 @@ function liveCount(agents: readonly VirtualAgentCard[]): number {
   return agents.filter((agent) => agent.desired !== "deleted").length;
 }
 
-/** `plugins` is what `VIRTUAL_AGENT_PLUGINS` offers, for the create form to tick, or why it could not be read. */
+/**
+ * `plugins` is what `VIRTUAL_AGENT_PLUGINS` offers, for the create form to tick, or why it could not be read. It is
+ * required, here and on everything it is passed on to: see `CreateVirtualAgentForm`.
+ */
 export function VirtualAgentsView({
   agents,
   route,
   create,
   now,
-  plugins = NO_PLUGINS
+  plugins
 }: {
   agents: VirtualAgentCard[];
   route: ModelRoute;
   create: CreateAction;
   now: number;
-  plugins?: PluginOffer;
+  plugins: PluginOffer;
 }) {
   return (
     <>

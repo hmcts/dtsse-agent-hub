@@ -77,7 +77,7 @@ change it first when the contract changes.
 | `yarn build` | `next build` plus the CLIs, `dist/cli/migrate.js` and `dist/cli/orchestrator.js` |
 
 `yarn lint` checks nothing inside a worktree under `.claude/worktrees/`, because `biome.json` excludes that path. Run
-`yarn biome check src test` there instead.
+`yarn biome check src test packages` there instead — `packages` as well, or the published client goes unchecked.
 
 ## Charts
 

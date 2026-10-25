@@ -209,8 +209,9 @@ export async function fetchAttachments({
   const base = root ?? uploadsRoot(env);
   const outcomes: AttachmentOutcome[] = [];
   for (const attachment of attachments) {
+    let file: string | undefined;
     try {
-      const file = attachmentPath(base, conversationId, attachment.uploadId, attachment.name);
+      file = attachmentPath(base, conversationId, attachment.uploadId, attachment.name);
       // Already here at its full length: a message the hub replayed because the last delivery was not acked. Fetching
       // again would fail, since the report deleted the parts, and would then tell the session a file it has could not
       // be retrieved.
@@ -226,6 +227,14 @@ export async function fetchAttachments({
       outcomes.push({ name: safeName(attachment.name), path: file, media_type: attachment.mediaType, bytes: attachment.bytes });
     } catch (e) {
       const reason = (e as Error).message;
+      // Nothing half-written left at the path. An error outcome carries no `path`, so the envelope never names it, but
+      // the file is in the conversation's uploads directory and a session listing that directory would find it and
+      // read it as the attachment — an empty file for a refused first part, a truncated one for a refused later part.
+      // Guarded on the length rather than on how far the fetch got: a file at its full claimed length is the one a
+      // replay reuses, and must survive whatever else went wrong.
+      if (file !== undefined && sizeOf(file, fs) !== attachment.bytes) {
+        fs.rmSync(file, { force: true });
+      }
       say(`conversation ${conversationId}: could not fetch ${attachment.name}: ${reason}`);
       outcomes.push({ name: safeName(attachment.name), media_type: attachment.mediaType, bytes: attachment.bytes, error: reason });
     }
