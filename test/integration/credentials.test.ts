@@ -5,6 +5,7 @@ import { credentialBackend } from "../../src/credentials/backend.ts";
 import { DEFAULT_CLAUDE_MD } from "../../src/credentials/claude-md.ts";
 import { credentialStatus, deleteCredential, putCredential, readCredential, type SecretStore } from "../../src/credentials/store.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
+import { createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { connect, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 
@@ -429,6 +430,59 @@ describe("saveCredential and removeCredential", () => {
 
     expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toEqual({ ok: true, confirmation: "Your Claude token is stored" });
     expect(await readCredential(prisma, localStore(), devIdentity("own-licence").oid, "claude")).toBe(CLAUDE);
+  });
+
+  it.each([
+    ["bedrock", "bedrock", false],
+    ["own-licence", "own-licence", true]
+  ] as const)("should leave a Claude token as it was when the viewer is on %s and so is their agent", async (persona, route, stored) => {
+    const who = person(persona);
+    await insertUser(who);
+    await createVirtualAgent(prisma, { owner: who, modelRoute: route, name: "assistant" });
+    actAs(persona);
+
+    await saveCredential(form({ kind: "claude", value: CLAUDE }));
+
+    expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(stored ? CLAUDE : undefined);
+  });
+
+  // The agent's route is fixed on its row when it is created, and its pod boots on that; the viewer's follows their
+  // `AIGateway.User` app role. Someone granted that role afterwards is on Bedrock while an agent of theirs is still
+  // on their own licence, waiting for the Claude token the web refused to take.
+  it("should save a Claude token when the viewer is on Bedrock but an agent of theirs is on their own licence", async () => {
+    await insertUser(ALICE);
+    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
+    actAs("alice");
+
+    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toEqual({ ok: true, confirmation: "Your Claude token is stored" });
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "claude")).toBe(CLAUDE);
+  });
+
+  it("should save a Claude token when the viewer is on their own licence but every agent of theirs is on Bedrock", async () => {
+    const who = person("own-licence");
+    await insertUser(who);
+    await createVirtualAgent(prisma, { owner: who, modelRoute: "bedrock", name: "assistant" });
+    actAs("own-licence");
+
+    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toEqual({ ok: true, confirmation: "Your Claude token is stored" });
+    expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(CLAUDE);
+  });
+
+  it("should refuse a Claude token when the only agent that wanted one is being deleted", async () => {
+    await insertUser(ALICE);
+    const agent = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
+    await setDesired(prisma, ALICE.oid, agent.id, "deleted");
+    actAs("alice");
+
+    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toMatchObject({ ok: false, error: expect.stringContaining("Amazon Bedrock") });
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
+  it("should tell the settings page a Claude token is wanted when the viewer is on Bedrock and an agent of theirs is not", async () => {
+    await insertUser(ALICE);
+    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
+
+    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" })).toMatchObject({ modelRoute: "bedrock", claudeTokenUsable: true });
   });
 
   it.each(["alice", "own-licence"])("should save a pasted Bedrock API key from the web when the viewer is the %s persona", async (persona) => {

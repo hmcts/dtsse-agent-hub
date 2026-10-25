@@ -46,7 +46,6 @@ export default async function AssistantPage() {
       viewerName={viewer.name}
       groups={home.conversations}
       activeId={null}
-      hubLink
       theme={theme}
       actions={ROW_ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}

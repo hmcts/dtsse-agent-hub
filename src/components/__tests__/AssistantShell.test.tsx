@@ -58,7 +58,6 @@ function shell(props: Partial<Parameters<typeof AssistantShell>[0]> = {}) {
         { label: "Older", items: [link("c", "Old chat")] }
       ]}
       activeId="b"
-      hubLink={false}
       {...props}
     >
       <SidebarToggle />
@@ -138,14 +137,6 @@ describe("AssistantShell", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(sidebar().hasAttribute("inert")).toBe(false);
     expect(document.activeElement).toBe(cog);
-  });
-
-  it("should link to the hub only when the viewer also uses it", () => {
-    const { rerender } = render(shell());
-    expect(screen.queryByRole("link", { name: "Agent Hub" })).toBeNull();
-
-    rerender(shell({ hubLink: true }));
-    expect(screen.getByRole("link", { name: "Agent Hub" }).getAttribute("href")).toBe("/hub");
   });
 
   it("should take the sidebar out of reach when collapsed and bring it back from the page's toggle", () => {
@@ -449,7 +440,7 @@ describe("AssistantShell sidebar width", () => {
   it("should hold the document panel back from the chat's room as the sidebar is widened", () => {
     viewport(1600);
     render(
-      <AssistantShell viewerName="Alice Smith" groups={[]} activeId={null} hubLink={false}>
+      <AssistantShell viewerName="Alice Smith" groups={[]} activeId={null}>
         <ArtefactPanel
           conversationId="22222222-2222-2222-2222-222222222222"
           artefact={{ title: "Story", markdown: "# Original", version: 2, updatedBy: "user" }}

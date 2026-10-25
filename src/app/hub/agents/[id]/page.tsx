@@ -118,9 +118,8 @@ function LocalAgent({ viewer, view }: { viewer: Viewer; view: AgentView }) {
 }
 
 /**
- * The virtual agent and its current session. A `virtual_agent` event re-reads the page for its owner, and a newly
- * registered agent re-reads it for anyone else through the sidebar, so a `/clear` brings the new session's
- * conversation in without a reload.
+ * The virtual agent and its current session. A `virtual_agent` event re-reads the page for anyone who may see it, so a
+ * `/clear` brings the new session's conversation in without a reload.
  */
 function VirtualAgent({ viewer, page }: { viewer: Viewer; page: VirtualAgentPageView }) {
   const { summary, linked } = page;

@@ -207,6 +207,22 @@ describe("GettingReady continue", () => {
 
     expect(onDone).toHaveBeenCalled();
   });
+
+  it("should offer the way out of the screen while a needed account is still to connect", () => {
+    const onLeave = vi.fn();
+    render(ready({ onLeave }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to your chats" }));
+
+    expect(onLeave).toHaveBeenCalled();
+  });
+
+  it("should offer no way out beside Start chatting once every needed account is connected", () => {
+    render(ready({ assistant: assistant("running", { onboarded: true }), statuses: statuses("github", "azure", "claude"), onLeave: vi.fn() }));
+
+    expect(screen.getByRole("button", { name: "Start chatting" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
+  });
 });
 
 /**
@@ -245,8 +261,8 @@ describe("GettingReady when the hub cannot read the credentials", () => {
 });
 
 describe("OnboardingGate", () => {
-  function gate(summary: AssistantSummary) {
-    return <OnboardingGate assistant={summary} statuses={[]} unavailable={null} paste={ok()} save={ok()} />;
+  function gate(summary: AssistantSummary, stored: CredentialStatus[] = [], dismissed = false) {
+    return <OnboardingGate assistant={summary} statuses={stored} unavailable={null} paste={ok()} save={ok()} dismissed={dismissed} />;
   }
 
   it("should ask for nothing when every needed account is connected and the hub can read them", () => {
@@ -264,21 +280,61 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
   });
 
-  it("should let the person into their chat when the hub cannot read the credentials it would gate them on", () => {
-    render(
-      <OnboardingGate
-        assistant={assistant("running")}
-        statuses={[]}
-        unavailable="this deployment has no credentials vault, so credentials cannot be stored here"
-        paste={ok()}
-        save={ok()}
-      />
-    );
+  const UNREADABLE = "this deployment has no credentials vault, so credentials cannot be stored here";
 
+  /** What the page passes when the hub cannot read the credential store: the reason, and no statuses to go on. */
+  function unreadable(summary: AssistantSummary = assistant("running"), dismissed = false) {
+    return <OnboardingGate assistant={summary} statuses={[]} unavailable={UNREADABLE} paste={ok()} save={ok()} dismissed={dismissed} />;
+  }
+
+  it("should let the person into their chat, and ask them for nothing, when the hub cannot read the credentials", () => {
+    render(unreadable());
+
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect accounts" })).toBeNull();
+    const banner = screen.getByRole("region", { name: "Your sign-ins cannot be checked" });
+    expect(banner.textContent).toContain("still connected");
+    for (const name of ["GitHub", "Azure", "Claude"]) {
+      expect(banner.textContent).not.toContain(name);
+    }
+  });
 
+  it("should say why on the screen when someone the hub cannot read the credentials for opens it", () => {
+    render(unreadable());
+
+    fireEvent.click(screen.getByRole("button", { name: "Show progress" }));
+
+    expect(screen.getByText(/cannot read your sign-ins/)).toBeTruthy();
+    expect(screen.getByText(UNREADABLE)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Carry on" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  // Unlike the ask to connect, this one can be sent away: there is nothing for the person to do about it, so saying
+  // it once is enough. The same cookie carries that choice, so a navigation does not say it again.
+  it("should go when the person sends away a message about sign-ins that cannot be checked", () => {
+    render(unreadable());
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide this message" }));
+
+    expect(screen.queryByRole("region", { name: "Your sign-ins cannot be checked" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should stay gone across a navigation when the page has read that choice from the cookie", () => {
+    render(unreadable(assistant("running"), true));
+
+    expect(screen.queryByRole("region", { name: "Your sign-ins cannot be checked" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should never offer to hide the ask to connect, which is the one with something left to do", () => {
+    render(gate(assistant("awaiting_credentials")));
+
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Hide this message" })).toBeNull();
   });
 
   it("should show nothing when the person had onboarded before the visit and their assistant is running", () => {
@@ -287,8 +343,63 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // Nothing covers the page until the person asks for it. The connections screen is `fixed inset-0`, so showing it
+  // unbidden takes away the sidebar, every conversation and the settings that could fix whatever is missing — and
+  // whether a needed credential can be stored at all is not only up to them.
+  it("should ask on a banner, over nothing, when the person has a connection still to make", () => {
+    render(gate(assistant("awaiting_credentials"), statuses("github")));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const banner = screen.getByRole("region", { name: "Connect your accounts" });
+    expect(banner.textContent).toContain("Your assistant needs Azure and Claude before it can work for you.");
+    expect(within(banner).getByRole("button", { name: "Connect accounts" })).toBeTruthy();
+  });
+
+  it("should name every needed connection when the person has stored none of them", () => {
+    render(gate(assistant()));
+
+    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).toContain("needs GitHub, Azure and Claude");
+  });
+
+  it("should open the connections when the person asks for them from the banner", () => {
+    render(gate(assistant()));
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+  });
+
+  it("should put the banner back when the person leaves the connections with one still to make", () => {
+    render(gate(assistant()));
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to your chats" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+  });
+
+  it("should leave the connections on Escape when one is still to make", () => {
+    render(gate(assistant()));
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+  });
+
+  it("should keep asking on the banner across a navigation when the person has yet to connect everything", () => {
+    render(gate(assistant(), [], true));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+  });
+
   it("should stay until the person chooses Start chatting when they finish onboarding during the visit", () => {
     const { rerender } = render(gate(assistant()));
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
 
     expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
 
@@ -297,5 +408,6 @@ describe("OnboardingGate", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Start chatting" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Connect your accounts" })).toBeNull();
   });
 });

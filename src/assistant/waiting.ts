@@ -1,5 +1,6 @@
 /**
- * That the person has sent their assistant's waiting screen away, kept in a cookie.
+ * That the person has sent one of their assistant's getting-ready screens away — the wait, or the connections
+ * they have yet to finish — kept in a cookie.
  *
  * The screen is rendered by each of the Assistant's pages rather than by the layout around them, and the App Router
  * remounts a page's subtree on every navigation, so a choice held only inside the screen is forgotten the moment

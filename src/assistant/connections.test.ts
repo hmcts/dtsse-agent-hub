@@ -10,8 +10,10 @@ import {
   connectionState,
   connections,
   connectionsData,
+  connectionsPrompt,
   connectionsWarning,
   hasLapsed,
+  inWords,
   isConnection,
   isUsable,
   PROMPTED_CONNECTIONS,
@@ -291,5 +293,74 @@ describe("connectionsData", () => {
 
     expect(data.statuses).toEqual([]);
     expect(data.unavailable).toBe("the credentials Key Vault is not configured");
+  });
+});
+
+describe("connectionsPrompt", () => {
+  const NOTHING = new Set<CredentialKind>();
+
+  it("should name the one connection left when only one is", () => {
+    expect(connectionsPrompt("connect", ["github", "azure", "claude"], new Set<CredentialKind>(["github", "azure"]))).toEqual({
+      label: "Connect your accounts",
+      message: "Your assistant needs Claude before it can work for you.",
+      action: "Connect accounts"
+    });
+  });
+
+  it("should name every connection left, in the order the screen lists them, when several are", () => {
+    expect(connectionsPrompt("connect", ["github", "azure", "bedrock"], new Set<CredentialKind>(["azure"]))?.message).toBe(
+      "Your assistant needs GitHub and AI model access before it can work for you."
+    );
+    expect(connectionsPrompt("connect", ["github", "azure", "bedrock"], NOTHING)?.message).toBe(
+      "Your assistant needs GitHub, Azure and AI model access before it can work for you."
+    );
+  });
+
+  // The ask is shown because `connectionsAsk` said there is something to connect, so it asks in general rather than
+  // going quiet when the lists it was handed name nothing.
+  it("should ask in general when nothing it was given names anything to do", () => {
+    expect(connectionsPrompt("connect", [], NOTHING)?.message).toBe("Your assistant needs you to connect your accounts before it can work for you.");
+  });
+
+  it("should name a credential by its kind when there is no wording for it", () => {
+    expect(connectionsPrompt("connect", ["claude_md"], NOTHING)?.message).toBe("Your assistant needs claude_md before it can work for you.");
+  });
+
+  // The whole point of `unknown`: it must not read as "connect these", because as far as anyone knows they are
+  // connected and there is nothing the person can do about the hub not being able to see them.
+  it("should say the sign-ins cannot be checked, and name no connection, when the hub cannot read them", () => {
+    const prompt = connectionsPrompt("unknown", ["github", "azure", "claude"], NOTHING);
+
+    expect(prompt?.label).toBe("Your sign-ins cannot be checked");
+    expect(prompt?.message).toContain("still connected");
+    expect(prompt?.message).toContain("nothing for you to set up again");
+    expect(prompt?.message).not.toContain("needs");
+    for (const name of ["GitHub", "Azure", "Claude"]) {
+      expect(prompt?.message).not.toContain(name);
+    }
+  });
+
+  it("should word the two asks differently so neither can be read as the other", () => {
+    const connect = connectionsPrompt("connect", ["github"], NOTHING);
+    const unknown = connectionsPrompt("unknown", ["github"], NOTHING);
+
+    expect(connect?.label).not.toBe(unknown?.label);
+    expect(connect?.message).not.toBe(unknown?.message);
+    expect(connect?.action).not.toBe(unknown?.action);
+  });
+
+  it("should have nothing to say when every needed connection is made", () => {
+    expect(connectionsPrompt("done", ["github"], new Set<CredentialKind>(["github"]))).toBeNull();
+  });
+});
+
+describe("inWords", () => {
+  it.each([
+    [[], ""],
+    [["A"], "A"],
+    [["A", "B"], "A and B"],
+    [["A", "B", "C"], "A, B and C"]
+  ])("should read %j as %j", (names, expected) => {
+    expect(inWords(names)).toBe(expected);
   });
 });

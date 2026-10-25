@@ -324,8 +324,18 @@ describe("OnboardingGate while the assistant starts", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("should offer the connections rather than the warming-up screen when the person has yet to onboard", () => {
+  it("should ask for the connections on a banner rather than a screen when the person has yet to onboard", () => {
     render(gate(assistant("provisioning", { onboarded: false })));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+    expect(screen.queryByText(WARMUP_SIGNPOST)).toBeNull();
+  });
+
+  it("should offer the connections rather than the warming-up screen when someone who has yet to onboard opens them", () => {
+    render(gate(assistant("provisioning", { onboarded: false })));
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
 
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
     expect(screen.queryByText(WARMUP_SIGNPOST)).toBeNull();
@@ -333,6 +343,7 @@ describe("OnboardingGate while the assistant starts", () => {
 
   it("should not follow onboarding with the warming-up screen when the person has just carried on", () => {
     const { rerender } = render(gate(assistant("cloning", { onboarded: false })));
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
 
     rerender(gate(assistant("cloning")));
     act(() => screen.getByRole("button", { name: "Start chatting" }).click());
