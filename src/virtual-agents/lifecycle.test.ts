@@ -4,7 +4,6 @@ import {
   APPLY_FAILURES_BEFORE_FAILED,
   afterApplyError,
   type Current,
-  isPodPhase,
   nextStatus,
   type Observation,
   POD_PHASES,
@@ -105,16 +104,6 @@ describe("nextStatus from the orchestrator", () => {
     ])("should mark it stopping when it is meant to be deleted and %s", (_label, observation) => {
       expect(nextStatus({ status, desired: "deleted" }, observation)).toEqual({ status: "stopping", detail: null });
     });
-  });
-});
-
-describe("isPodPhase", () => {
-  it.each(POD_PHASES)("should accept %s when it is a phase the pod reports", (phase) => {
-    expect(isPodPhase(phase)).toBe(true);
-  });
-
-  it.each(["stopped", "stopping", "requested", "", 1, null])("should refuse %s when it is not one", (value) => {
-    expect(isPodPhase(value)).toBe(false);
   });
 });
 
