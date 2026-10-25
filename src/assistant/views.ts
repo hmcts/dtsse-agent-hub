@@ -20,11 +20,15 @@ export interface AssistantSummary {
   desired: VirtualAgentDesired;
   status: VirtualAgentStatus;
   statusDetail: string | null;
+  /** When it last changed what it is doing, so the waiting screen can say when one step is taking too long. */
+  statusChangedAt: string;
+  /** When it was last asked to run, which names one wait: a choice about watching it does not outlive it. */
+  startedAt: string;
   readiness: Readiness;
   needed: CredentialKind[];
   optional: CredentialKind[];
   logins: LoginView[];
-  /** Every needed credential is stored, so the getting-ready screen is not shown again. */
+  /** Every needed credential is stored, so the connections are offered again only for a sign-in the pod asks for. */
   onboarded: boolean;
 }
 
@@ -46,6 +50,8 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
     desired: assistant.desired,
     status: assistant.status,
     statusDetail: assistant.statusDetail,
+    statusChangedAt: assistant.statusChangedAt.toISOString(),
+    startedAt: assistant.startedAt.toISOString(),
     readiness: readiness(assistant.status),
     needed,
     optional: OPTIONAL_CREDENTIALS,

@@ -4,6 +4,9 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ArtefactSnapshot, SaveArtefactResult } from "@/app/_actions/assistant";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
+import { useSidebarWidth } from "@/components/assistant/AssistantShell";
+import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
+import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { CopyIcon, DownloadIcon, TickIcon } from "@/components/sidebar/icons";
 import type { ActionResult } from "@/web/action";
 
@@ -16,8 +19,6 @@ export type SaveArtefactAction = (input: {
 
 /** A pause in typing this long saves the document. */
 const SAVE_AFTER_MS = 1000;
-const MIN_WIDTH = 320;
-const WIDTH_KEY = "hmcts-assistant-artefact-width";
 
 /** `draft`: the starting outline of a document nobody has written yet, which an update from the assistant replaces. */
 type SaveState = "draft" | "saved" | "saving" | "unsaved" | "failed";
@@ -192,18 +193,20 @@ export function ArtefactPanel({
   const [conflict, setConflict] = useState<ArtefactSnapshot | null>(null);
   const [copied, setCopied] = useState(false);
   const [printing, setPrinting] = useState(false);
-  const [width, setWidth] = useState(480);
+  const sidebarWidth = useSidebarWidth();
+  const resize = useResizableWidth({
+    storageKey: "hmcts-assistant-artefact-width",
+    label: "Resize document panel",
+    initial: ARTEFACT_WIDTH,
+    min: ARTEFACT_MIN_WIDTH,
+    // The chat keeps its room between this panel and the sidebar, however wide the sidebar has been dragged.
+    reserve: () => CHAT_MIN_WIDTH + sidebarWidth,
+    edge: "right"
+  });
   const box = useRef<HTMLTextAreaElement>(null);
   // A save in flight counts: an update arriving before its reply would otherwise replace what is being saved.
   const dirty = state === "unsaved" || state === "failed" || state === "saving";
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    const stored = Number(window.localStorage.getItem(WIDTH_KEY));
-    if (Number.isFinite(stored) && stored >= MIN_WIDTH) {
-      setWidth(Math.min(stored, window.innerWidth - 360));
-    }
-  }, []);
 
   /**
    * Printing is what makes a PDF here: the sheet is mounted on the body, where `@media print` in `globals.css` hides
@@ -305,21 +308,6 @@ export function ArtefactPanel({
     });
   }
 
-  function startResize(event: React.PointerEvent<HTMLDivElement>): void {
-    event.preventDefault();
-    const move = (moved: PointerEvent) => setWidth(Math.max(MIN_WIDTH, Math.min(window.innerWidth - 360, window.innerWidth - moved.clientX)));
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      setWidth((current) => {
-        window.localStorage.setItem(WIDTH_KEY, String(current));
-        return current;
-      });
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  }
-
   const saveLabel = { draft: "Not saved yet", saved: "Saved", saving: "Saving…", unsaved: "Not saved yet", failed: "Could not save; keep typing to try again" }[
     state
   ];
@@ -329,26 +317,11 @@ export function ArtefactPanel({
     <section
       aria-label="Document"
       className={`z-[25] flex h-full shrink-0 flex-col border-l border-asst-line bg-asst-panel ${narrow ? "fixed inset-0" : "relative"}`}
-      style={narrow ? undefined : { width }}
+      style={narrow ? undefined : { width: resize.width }}
     >
       {narrow ? null : (
         <div
-          role="separator"
-          tabIndex={0}
-          aria-orientation="vertical"
-          aria-label="Resize document panel"
-          aria-valuenow={width}
-          aria-valuemin={MIN_WIDTH}
-          onPointerDown={startResize}
-          onKeyDown={(event) => {
-            const step = event.key === "ArrowLeft" ? 40 : event.key === "ArrowRight" ? -40 : 0;
-            if (step !== 0) {
-              event.preventDefault();
-              const next = Math.max(MIN_WIDTH, Math.min(window.innerWidth - 360, width + step));
-              setWidth(next);
-              window.localStorage.setItem(WIDTH_KEY, String(next));
-            }
-          }}
+          {...resize.separator}
           className="absolute -left-1 bottom-0 top-0 z-[2] w-2 cursor-col-resize hover:bg-asst-accent/25 focus:bg-asst-accent/40 focus:outline-none"
         />
       )}

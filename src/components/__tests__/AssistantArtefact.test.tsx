@@ -9,12 +9,18 @@ import type { ActionResult } from "@/web/action";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
 
+/** jsdom lays nothing out, but the panel's bounds are worked out from the window's width. */
+function viewport(width: number): void {
+  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: width });
+}
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   window.localStorage.clear();
+  viewport(1024);
 });
 
 function snapshot(overrides: Partial<ArtefactSnapshot> = {}): ArtefactSnapshot {
@@ -355,6 +361,31 @@ describe("ArtefactPanel tools", () => {
     expect(separator.getAttribute("aria-valuenow")).toBe("440");
   });
 
+  it("should widen the panel as its separator is dragged towards the chat and remember the width", () => {
+    render(panel(snapshot()));
+
+    const separator = screen.getByRole("separator", { name: "Resize document panel" });
+    fireEvent.pointerDown(separator);
+    fireEvent.pointerMove(window, { clientX: window.innerWidth - 600 });
+    expect(separator.getAttribute("aria-valuenow")).toBe("600");
+    expect(window.localStorage.getItem("hmcts-assistant-artefact-width")).toBeNull();
+
+    fireEvent.pointerUp(window);
+
+    expect(window.localStorage.getItem("hmcts-assistant-artefact-width")).toBe("600");
+  });
+
+  it("should stop at its narrowest when its separator is dragged off the right of the page", () => {
+    render(panel(snapshot()));
+
+    const separator = screen.getByRole("separator", { name: "Resize document panel" });
+    fireEvent.pointerDown(separator);
+    fireEvent.pointerMove(window, { clientX: window.innerWidth + 40 });
+    fireEvent.pointerUp(window);
+
+    expect(separator.getAttribute("aria-valuenow")).toBe("320");
+  });
+
   it("should restore the remembered width when the panel opens again", () => {
     window.localStorage.setItem("hmcts-assistant-artefact-width", "600");
     render(panel(snapshot()));
@@ -366,6 +397,18 @@ describe("ArtefactPanel tools", () => {
     render(panel(snapshot(), saving(), { narrow: true }));
 
     expect(screen.queryByRole("separator")).toBeNull();
+  });
+
+  it("should keep the remembered width through a narrow screen, where the panel covers the page instead", () => {
+    window.localStorage.setItem("hmcts-assistant-artefact-width", "400");
+    viewport(700);
+    const { rerender } = render(panel(snapshot(), saving(), { narrow: true }));
+
+    viewport(1600);
+    fireEvent(window, new Event("resize"));
+    rerender(panel(snapshot(), saving(), { narrow: false }));
+
+    expect(screen.getByRole("separator").getAttribute("aria-valuenow")).toBe("400");
   });
 
   it("should close when the person clicks Close document", () => {
