@@ -154,9 +154,9 @@ describe("the person's assistant", () => {
 
   // A malformed configuration hides the plugins section and leaves the rest of the Assistant working, because it is
   // someone's whole chat surface and they can neither see the configuration nor fix it. Both halves of that are load
-  // bearing: the section hides because `offeredPlugins` catches, and the first visit gets that far at all because
-  // `createVirtualAgent` reads the offer list only when plugins are ticked. The hub's own plugin pages still fail
-  // loudly, which is where the fault is actionable.
+  // bearing: the section hides because `pluginOffer` catches, and the first visit gets that far at all because
+  // `createVirtualAgent` reads the offer list only when plugins are ticked. The hub's own plugin surfaces read the
+  // same catch and name the fault in place of their plugin form, which is where it is actionable.
   it("should create the assistant and hide the plugins section on a first visit when the configuration is malformed", async () => {
     await insertUser(ALICE);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");

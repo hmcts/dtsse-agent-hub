@@ -33,7 +33,7 @@ import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
-import { availablePlugins, PluginConfigurationError, type PluginOption } from "../virtual-agents/plugins.ts";
+import { availablePlugins, PluginConfigurationError, type PluginOffer, type PluginOption } from "../virtual-agents/plugins.ts";
 import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
 import {
   type VirtualAgentCard,
@@ -267,34 +267,34 @@ function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
 }
 
 /**
- * What the Assistant may offer: an empty list when `VIRTUAL_AGENT_PLUGINS` is unset, and `null` when it is malformed.
- * An empty list is not available for the malformed case: the person's own plugins would each read as one the hub no
- * longer offers. `null` hides the section instead.
+ * `VIRTUAL_AGENT_PLUGINS` as a plugin form can use it: its options, or the reason it is unreadable. The one catch a
+ * malformed configuration gets, which every surface that offers plugins reads through, so none of them can let it
+ * throw out through a page.
  *
- * This is the only place a malformed configuration is tolerated, and the asymmetry is deliberate. The Assistant is
- * someone's whole chat surface, and a configuration they cannot see, let alone fix, must not take it away from them;
- * `createVirtualAgent` reads the offer list only when plugins are actually ticked, so the Assistant no longer fails
- * on a first visit either, and hiding the section is now the whole of the behaviour rather than half of it.
+ * What a surface then does with an unreadable configuration differs, and the asymmetry is deliberate. The hub's own
+ * plugin surfaces, `/hub/virtual` and `/hub/agents/{id}`, name the variable and the fault in place of the plugin
+ * form, because the person reading them is the person who can fix it, and that now costs the plugin form alone
+ * rather than the whole page. The Assistant says nothing and hides the section, because it is someone's whole chat
+ * surface and a configuration they can neither see nor fix must not put a hub error in front of their chats.
  *
- * `/hub/virtual` and `/hub/agents/{id}` call `availablePlugins` directly and still fail loudly, which is right: the
- * person looking at the hub's own plugin pages is the person who can fix the configuration. Do not "make this
- * consistent" by catching there too, and do not remove the catch here — one of those breaks every Assistant, the
- * other hides the fault from the only people who can act on it.
+ * Neither may answer an unreadable configuration with an empty offer. "The hub offers none" is a state a person can
+ * trust and act on; "the configuration cannot be read" is not, and silently merging the two would show every plugin
+ * an agent already loads as one the hub no longer offers.
  */
-function offeredPlugins(): PluginOption[] | null {
+export function pluginOffer(): PluginOffer {
   try {
-    return availablePlugins();
+    return { ok: true, available: availablePlugins() };
   } catch (error) {
     if (error instanceof PluginConfigurationError) {
-      return null;
+      return { ok: false, error: error.message };
     }
     throw error;
   }
 }
 
 function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugins"] {
-  const available = offeredPlugins();
-  return available === null ? null : { available, checked: assistant.plugins };
+  const offer = pluginOffer();
+  return offer.ok ? { available: [...offer.available], checked: assistant.plugins } : null;
 }
 
 /**

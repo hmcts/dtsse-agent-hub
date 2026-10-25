@@ -4,7 +4,7 @@ import { Timestamp } from "@/components/time/Timestamp";
 import type { ModelRoute } from "@/viewer/identity";
 import { diskWarningDays } from "@/virtual-agents/cleanup";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "@/virtual-agents/limits";
-import type { PluginOption } from "@/virtual-agents/plugins";
+import { NO_PLUGINS, type PluginOffer } from "@/virtual-agents/plugins";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 import { type CreateAction, CreateVirtualAgentForm } from "./CreateVirtualAgentForm";
 import { idleFor, statusLabel, stopReasonLabel } from "./labels";
@@ -72,12 +72,12 @@ export function CreateVirtualAgent({
   route,
   create,
   refusal,
-  plugins = []
+  plugins = NO_PLUGINS
 }: {
   route: ModelRoute;
   create: CreateAction;
   refusal?: string;
-  plugins?: readonly PluginOption[];
+  plugins?: PluginOffer;
 }) {
   return (
     <Section heading="Create a virtual agent">
@@ -105,19 +105,19 @@ function liveCount(agents: readonly VirtualAgentCard[]): number {
   return agents.filter((agent) => agent.desired !== "deleted").length;
 }
 
-/** `plugins` is what `VIRTUAL_AGENT_PLUGINS` offers, for the create form to tick. */
+/** `plugins` is what `VIRTUAL_AGENT_PLUGINS` offers, for the create form to tick, or why it could not be read. */
 export function VirtualAgentsView({
   agents,
   route,
   create,
   now,
-  plugins = []
+  plugins = NO_PLUGINS
 }: {
   agents: VirtualAgentCard[];
   route: ModelRoute;
   create: CreateAction;
   now: number;
-  plugins?: readonly PluginOption[];
+  plugins?: PluginOffer;
 }) {
   return (
     <>
