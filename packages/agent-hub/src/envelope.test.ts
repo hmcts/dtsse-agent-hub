@@ -169,6 +169,43 @@ describe("assistantEnvelope", () => {
     expect(text).toMatch(/^\[agent-hub\] Direct message #7 from your user, your user, typed into the HMCTS Assistant\.$/m);
     expect(text.split("\n")).toContain("Product area: not chosen.");
   });
+
+  it("should ask for the skill to be run as the user typed it when the body starts with one the session has", () => {
+    // Arrange
+    const skills = new Set(["cft-explain"]);
+
+    // Act
+    const text = assistantEnvelope({ ...personMessage, body: "/cft-explain what is CDAM?" }, pcs, null, { skills });
+
+    // Assert
+    const lines = text.split("\n");
+    const sep = lines.indexOf("---");
+    expect(lines[sep - 1]).toBe(
+      "It starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments, as if your user had typed it."
+    );
+    expect(text.endsWith("\n---\n/cft-explain what is CDAM?")).toBe(true);
+  });
+
+  it("should say nothing about a skill when the body names one the session does not have", () => {
+    // Act
+    const text = assistantEnvelope({ ...personMessage, body: "/cft-explain what is CDAM?" }, pcs, null, { skills: new Set(["pcs:start-env"]) });
+
+    // Assert
+    expect(text).not.toMatch(/skill/);
+    expect(text.endsWith("\n---\n/cft-explain what is CDAM?")).toBe(true);
+  });
+
+  it("should say nothing about a skill when the body has no leading slash command", () => {
+    // Arrange
+    const skills = new Set(["cft-explain"]);
+
+    // Act
+    const text = assistantEnvelope(personMessage, pcs, null, { skills });
+
+    // Assert
+    expect(text).not.toMatch(/skill/);
+    expect(text).toBe(assistantEnvelope(personMessage, pcs, null));
+  });
 });
 
 describe("envelopes", () => {
