@@ -10,15 +10,19 @@ import { useEffect, useState } from "react";
 const SAVE_AFTER_MS = 300;
 
 /**
- * Which box a draft belongs to. Every box that keeps one names its kind, so a direct message to an agent and a message
- * to the assistant about the same subject are never the same draft.
+ * Every box that keeps a draft, by kind. Each box names its kind, so a direct message to an agent and a message to the
+ * assistant about the same subject are never the same draft.
  *
- * `direct-draft` is the string the hub's drafts have always been stored under, and stays that way: changing it would
- * throw away the half-written message of everyone with a tab open across a deploy.
+ * `direct-draft` is the string the hub's drafts are stored under, and stays that way: changing it would throw away the
+ * half-written message of everyone with a tab open across a deploy.
  */
-export type DraftKind = "direct-draft" | "assistant-draft";
+export const KINDS = ["direct-draft", "assistant-draft"] as const;
 
-const KINDS: readonly DraftKind[] = ["direct-draft", "assistant-draft"];
+/**
+ * Which box a draft belongs to, derived from `KINDS` rather than written out again, because `forgetOtherViewers` walks
+ * the array: a kind only the type knew about would be one person's unsent text left in the next person's tab.
+ */
+export type DraftKind = (typeof KINDS)[number];
 
 /** What every draft key starts with, so a mount can tell one from everything else the app keeps in the tab. */
 const KEY_PREFIX = "agent-hub:";
