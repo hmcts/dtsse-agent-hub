@@ -29,11 +29,27 @@ vi.mock("@/components/live/HubStream", () => ({
   useWatch: () => undefined
 }));
 
+/** Every observer the message box made, so a test can deliver the resize jsdom never will. */
+const resizes: (() => void)[] = [];
+
 beforeEach(() => {
+  resizes.length = 0;
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     writable: true,
     value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })
+  });
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    configurable: true,
+    writable: true,
+    value: class {
+      constructor(callback: () => void) {
+        resizes.push(callback);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
   });
 });
 
@@ -817,11 +833,17 @@ describe("Composer draft", () => {
     expect(stored(CONVERSATION)).toBe("quick");
   });
 
-  it("should grow the box to the height of the restored draft when a draft of several lines is put back", () => {
-    // jsdom does no layout, so the box's height comes from the lines in its value.
+  // jsdom does no layout, so a test about the box's height says how wide the box is and how tall its text is. Width
+  // comes first because a box of no width cannot be measured at all.
+  function laidOut(width: number, height: (box: HTMLTextAreaElement) => number): void {
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(width);
     vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function scrollHeight(this: Element) {
-      return ((this as HTMLTextAreaElement).value?.split("\n").length ?? 1) * 20;
+      return height(this as HTMLTextAreaElement);
     });
+  }
+
+  it("should grow the box to the height of the restored draft when a draft of several lines is put back", () => {
+    laidOut(248, (box) => (box.value?.split("\n").length ?? 1) * 20);
     write(composer(), "line one\nline two\nline three");
     cleanup();
 
@@ -832,11 +854,49 @@ describe("Composer draft", () => {
   });
 
   it("should stop growing the box at the height it starts scrolling at when the restored draft is longer still", () => {
-    vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(() => 600);
+    laidOut(248, () => 600);
     write(composer(), "a very long draft");
     cleanup();
 
     expect(composer().style.height).toBe("200px");
+  });
+
+  it("should leave the box one line tall when it is measured before it has been given a width", () => {
+    // With no width the text wraps at nothing, a line per character, and the box would be given the whole of the
+    // height it is allowed to hold an empty message. One line is what an empty box needs.
+    laidOut(0, () => 485);
+
+    expect(composer().style.height).toBe("auto");
+  });
+
+  it("should measure the box again when it is given a width, which on a phone is after the sidebar becomes a drawer", () => {
+    let width = 0;
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(() => width);
+    vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(() => (width === 0 ? 485 : 35));
+    const box = composer();
+
+    width = 248;
+    act(() => {
+      for (const resize of resizes) {
+        resize();
+      }
+    });
+
+    expect(box.style.height).toBe("35px");
+  });
+
+  it("should leave the box alone when it is told of a change that is not a change of width", () => {
+    laidOut(248, () => 35);
+    const box = composer();
+    box.style.height = "99px";
+
+    act(() => {
+      for (const resize of resizes) {
+        resize();
+      }
+    });
+
+    expect(box.style.height).toBe("99px");
   });
 
   it("should keep the draft of a conversation the person switched away from and came back to", () => {

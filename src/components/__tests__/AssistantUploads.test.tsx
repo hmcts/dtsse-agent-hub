@@ -57,6 +57,16 @@ beforeEach(() => {
     writable: true,
     value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })
   });
+  // The message box watches its own width, which jsdom has neither an observer nor a layout for.
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    configurable: true,
+    writable: true,
+    value: class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  });
 });
 
 afterEach(() => {
