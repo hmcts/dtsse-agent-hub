@@ -44,6 +44,11 @@ const CAROL = persona("carol");
 
 const viewerOf = (who: Person) => ({ ...who, tid: "dev", modelRoute: "own-licence" as const });
 
+/** Long enough for a NOTIFY committed before it to have reached this pod's hub. */
+function settle(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 250));
+}
+
 function request(as: string, path: string): NextRequest {
   return new NextRequest(`http://localhost:3000${path}`, { headers: { cookie: `ah_dev_persona=${as}` } });
 }
@@ -144,8 +149,40 @@ describe("sharing a conversation", () => {
       }
     });
     try {
+      // The notifies of creating the chat arrive through Postgres, so they can land after this subscription. Settling
+      // and then emptying what was heard is what makes each expectation below the share's own announcement.
+      await settle();
+      heard.length = 0;
+
       await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
-      await vi.waitFor(() => expect(heard).toContain(ALICE.oid), { timeout: 5000 });
+      await vi.waitFor(() => expect(heard).toEqual([ALICE.oid]), { timeout: 5000 });
+
+      heard.length = 0;
+      await shareActions.unshareChat({ conversationId: id, recipientOid: BOB.oid });
+      await vi.waitFor(() => expect(heard).toEqual([ALICE.oid]), { timeout: 5000 });
+    } finally {
+      stop();
+    }
+  });
+
+  it("should say nothing when the owner shares with someone the hub does not know, since nothing was written", async () => {
+    const { id } = await chat();
+    const heard: string[] = [];
+    const stop = realtime().hub.subscribe((event) => {
+      if (event.type === "assistant_conversation" && event.conversation_id === id) {
+        heard.push(event.owner_oid);
+      }
+    });
+    try {
+      await settle();
+      heard.length = 0;
+
+      await shareActions.shareChat({ conversationId: id, recipientOid: "dev-nobody" });
+      // Unsharing someone who was never named is the other write that changes nothing.
+      await shareActions.unshareChat({ conversationId: id, recipientOid: CAROL.oid });
+      await settle();
+
+      expect(heard).toEqual([]);
     } finally {
       stop();
     }
