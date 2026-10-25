@@ -12,6 +12,7 @@ import { ArtefactPanel, type SaveArtefactAction } from "@/components/assistant/A
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { Composer } from "@/components/assistant/Composer";
+import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { fileSizeLabel } from "@/components/assistant/uploadClient";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
@@ -234,7 +235,7 @@ function ChatMenu({ title, onRename, onDelete }: { title: string; onRename: (tit
 function useNarrow(): boolean {
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 900px)");
+    const query = window.matchMedia(`(max-width: ${ARTEFACT_OVERLAY_MAX_WIDTH}px)`);
     const update = () => setNarrow(query.matches);
     update();
     query.addEventListener("change", update);

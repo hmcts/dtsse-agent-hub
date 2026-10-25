@@ -6,6 +6,7 @@ import { pasteLoginCode } from "@/app/_actions/virtual-agents";
 import { TEMPLATES } from "@/assistant/starters";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
 import { uploadsEnabled } from "@/assistant/uploads";
+import { WAITING_COOKIE, waitingDismissed } from "@/assistant/waiting";
 import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
@@ -26,7 +27,8 @@ const ACTIONS: ChatActions = {
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */
 export default async function ConversationPage({ params }: { params: Promise<{ conversationId: string }> }) {
   const viewer = await requireViewer();
-  const theme = themeOf((await cookies()).get(THEME_COOKIE)?.value);
+  const jar = await cookies();
+  const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const { conversationId } = await params;
   const [home, view] = await Promise.all([openAssistant(viewer), assistantConversation(viewer, conversationId)]);
   if (view === undefined) {
@@ -42,6 +44,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
         unavailable={home.credentials.available ? null : home.credentials.reason}
         paste={pasteLoginCode}
         save={saveCredential}
+        dismissed={waitingDismissed(jar.get(WAITING_COOKIE)?.value, home.assistant.id, home.assistant.startedAt)}
         theme={theme}
       />
     </AssistantShell>
