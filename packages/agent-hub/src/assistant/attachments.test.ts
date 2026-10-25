@@ -4,16 +4,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { attachmentLines } from "../envelope.ts";
 import {
   type Attachment,
   attachmentPath,
   conversationDir,
   fetchAttachments,
   parseAttachments,
+  readAttachments,
   reconcileUploads,
   removeConversationUploads,
   safeName,
   staleUploadDirs,
+  unfetchedAttachments,
   uploadsRoot
 } from "./attachments.ts";
 
@@ -165,6 +168,55 @@ describe("parseAttachments", () => {
   });
 });
 
+describe("readAttachments", () => {
+  const whole = { upload_id: UPLOAD, name: "letter.pdf", bytes: 10, media_type: "application/pdf", part_bytes: 10, parts: 1 };
+
+  it("should carry nothing dropped when every entry is one this client acts on", () => {
+    expect(readAttachments([whole])).toEqual({
+      attachments: [{ uploadId: UPLOAD, name: "letter.pdf", bytes: 10, mediaType: "application/pdf", parts: 1 }],
+      dropped: []
+    });
+  });
+
+  it.each([
+    ["an entry that is not an object", "nope", "an unnamed file"],
+    ["an upload id that is not a UUID", { ...whole, upload_id: "x" }, "letter.pdf"],
+    ["no name", { ...whole, name: "" }, "an unnamed file"],
+    ["no size", { ...whole, bytes: undefined }, "letter.pdf"],
+    ["a size past the cap", { ...whole, bytes: 26 * 1024 * 1024 }, "letter.pdf"],
+    ["no part size", { ...whole, part_bytes: undefined }, "letter.pdf"],
+    ["a part count that disagrees with the size", { ...whole, parts: 3 }, "letter.pdf"]
+  ])("should answer with an error outcome for %s, so the envelope names it rather than saying nothing", (_label, entry, name) => {
+    const { attachments, dropped } = readAttachments([entry]);
+
+    expect(attachments).toEqual([]);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]?.name).toBe(name);
+    expect(attachmentLines(dropped).join("\n")).toContain(`could not be retrieved and is not on this machine: ${name}`);
+  });
+
+  it("should say nothing about the entries past the hub's own cap of four, which no hub can send", () => {
+    expect(readAttachments(Array.from({ length: 9 }, () => whole)).dropped).toEqual([]);
+  });
+
+  it("should read nothing, and refuse nothing, from a frame that carries no attachments", () => {
+    expect(readAttachments(undefined)).toEqual({ attachments: [], dropped: [] });
+    expect(readAttachments([])).toEqual({ attachments: [], dropped: [] });
+  });
+});
+
+describe("unfetchedAttachments", () => {
+  it("should word each file as one the envelope says could not be retrieved", () => {
+    const lines = attachmentLines(unfetchedAttachments([attachment({ name: "a letter.pdf" })], "no agent id")).join("\n");
+
+    expect(unfetchedAttachments([attachment()], "no agent id")).toEqual([
+      { name: "letter.pdf", media_type: "application/pdf", bytes: 10, error: "no agent id" }
+    ]);
+    expect(lines).toContain("A file the user attached could not be retrieved and is not on this machine: a_letter.pdf.");
+    expect(lines).toContain("ask them to attach it again");
+  });
+});
+
 describe("fetchAttachments", () => {
   it("should write the file part by part at 0600 and report it fetched", async () => {
     // Arrange
@@ -215,6 +267,42 @@ describe("fetchAttachments", () => {
     // Assert
     expect(outcomes).toEqual([{ name: "letter.pdf", media_type: "application/pdf", bytes: 10, error: "503 from the hub" }]);
     expect(said.some((m) => m.includes("could not fetch letter.pdf: 503 from the hub"))).toBe(true);
+  });
+
+  it("should still tell the session where the file is when the fetched report fails, since the bytes are on this disk", async () => {
+    // Arrange: every part arrives and the length checks out, then the report is lost — a transient 5xx or a dropped
+    // connection. The hub keeps its part rows a while longer and its sweep is the backstop for them.
+    const root = tempRoot();
+    const bytes = new Uint8Array(10).fill(9);
+    const api = {
+      attachmentPart: async () => bytes,
+      attachmentFetched: async () => {
+        throw new Error("502 from the hub");
+      }
+    };
+    const said: string[] = [];
+
+    // Act
+    const outcomes = await fetchAttachments({
+      api,
+      agentId: "agent-1",
+      conversationId: CONVERSATION,
+      attachments: [attachment()],
+      root,
+      say: (m) => said.push(m)
+    });
+    const lines = attachmentLines(outcomes).join("\n");
+
+    // Assert: the envelope names the path and tells the session to read it, and says nothing about a file that could
+    // not be retrieved — the file is there, complete, so asking the person to attach it again would ask for nothing.
+    const file = attachmentPath(root, CONVERSATION, UPLOAD, "letter.pdf");
+    expect(lines).toContain("already saved on this machine");
+    expect(lines).toContain(`- ${file} (application/pdf,`);
+    expect(lines).not.toContain("could not be retrieved");
+    expect(outcomes).toEqual([{ name: "letter.pdf", path: file, media_type: "application/pdf", bytes: 10 }]);
+    expect([...fs.readFileSync(file)]).toEqual([...bytes]);
+    // Logged, because the hub is still holding bytes nothing has told it to drop.
+    expect(said.some((m) => m.includes("saved letter.pdf, but could not report it fetched: 502 from the hub"))).toBe(true);
   });
 
   it("should refuse to report fetched when the bytes do not add up to what the frame claimed", async () => {
