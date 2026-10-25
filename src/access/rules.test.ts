@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type AgentRef,
   agentAccess,
+  attachmentDownload,
   canActAsVirtualAgent,
   canAgentMessageAgent,
   canAttachUpload,
@@ -526,6 +527,47 @@ describe("the upload rules", () => {
 
     it.each([["pending"], ["expired"]] as const)("should refuse a fetched report when the upload is %s", (state) => {
       expect(canSessionUseAttachment(CONVERSATION, upload({ state, messageId: "41" }), "fetched")).toBe(false);
+    });
+  });
+
+  describe("attachmentDownload", () => {
+    const NOW = new Date("2026-10-21T12:00:00.000Z");
+    const SOON = new Date("2026-10-21T14:00:00.000Z");
+    const PASSED = new Date("2026-10-21T11:00:00.000Z");
+    const sent = upload({ state: "fetched", messageId: "41" });
+
+    it.each([["stored"], ["fetched"]] as const)("should let the owner download their own upload when it is %s", (state) => {
+      expect(attachmentDownload(OWNER, upload({ state, messageId: "41" }), SOON, NOW)).toBe("ok");
+    });
+
+    it("should let the owner download an upload that never reached a message, since it is still their file", () => {
+      expect(attachmentDownload(OWNER, upload({ state: "stored" }), SOON, NOW)).toBe("ok");
+    });
+
+    it("should refuse anyone but the owner, grant or no grant, as though the upload did not exist", () => {
+      expect(attachmentDownload(WRITER, sent, SOON, NOW)).toBe("not_yours");
+      expect(attachmentDownload(READER, sent, SOON, NOW)).toBe("not_yours");
+      expect(attachmentDownload(STRANGER, sent, SOON, NOW)).toBe("not_yours");
+    });
+
+    it("should tell the owner the bytes are gone once the window has closed", () => {
+      expect(attachmentDownload(OWNER, sent, PASSED, NOW)).toBe("not_held");
+    });
+
+    it("should refuse the instant the window closes, rather than at the instant after it", () => {
+      expect(attachmentDownload(OWNER, sent, NOW, NOW)).toBe("not_held");
+    });
+
+    it("should refuse an expired upload even inside the window, which is a sweep that has already run", () => {
+      expect(attachmentDownload(OWNER, upload({ state: "expired", messageId: "41" }), SOON, NOW)).toBe("not_held");
+    });
+
+    it("should refuse an upload still arriving, whose parts would make a file with holes in it", () => {
+      expect(attachmentDownload(OWNER, upload({ state: "pending" }), SOON, NOW)).toBe("not_held");
+    });
+
+    it("should refuse someone else's expired upload as not theirs, saying nothing about its state", () => {
+      expect(attachmentDownload(STRANGER, upload({ state: "expired", messageId: "41" }), PASSED, NOW)).toBe("not_yours");
     });
   });
 });

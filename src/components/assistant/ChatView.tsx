@@ -14,7 +14,7 @@ import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
-import { fileSizeLabel } from "@/components/assistant/uploadClient";
+import { MessageAttachments } from "@/components/assistant/MessageAttachments";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubEvent } from "@/components/live/HubStream";
@@ -62,21 +62,7 @@ function Item({ item }: { item: ThreadItem }) {
         {item.text === "" ? null : (
           <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-[18px_18px_4px_18px] bg-asst-bubble px-4 py-2.5">{item.text}</div>
         )}
-        {item.attachments.length === 0 ? null : (
-          <ul aria-label="Files sent with this message" className="flex max-w-[82%] flex-wrap justify-end gap-1.5">
-            {item.attachments.map((file) => (
-              <li
-                key={file.id}
-                title="Sent to the assistant. It is not kept here, so it cannot be opened or downloaded from this page."
-                className="flex items-center gap-1.5 rounded-lg border border-asst-line px-2 py-1 text-xs text-asst-muted"
-              >
-                <span aria-hidden="true">📎</span>
-                <span className="max-w-[200px] truncate">{file.name}</span>
-                <span className="shrink-0 text-asst-faint">{fileSizeLabel(file.bytes)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <MessageAttachments attachments={item.attachments} />
         {item.delivery === "expired" ? <span className="text-xs text-asst-error">Not delivered. Send it again.</span> : null}
       </li>
     );

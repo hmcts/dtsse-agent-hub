@@ -8,6 +8,7 @@ import type { ConversationView, UnsentChat } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { Composer } from "@/components/assistant/Composer";
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
+import { NO_LONGER_HELD, STILL_HELD } from "@/components/assistant/MessageAttachments";
 import type { UploadRequest } from "@/components/assistant/uploadClient";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import type { ConversationPage } from "@/transcripts/conversation";
@@ -528,11 +529,21 @@ function message(overrides: Partial<ThreadMessage> = {}): ThreadMessage {
   };
 }
 
-/** A message carrying files, as `messageAttachments` loads them: the person's own name, and the size. */
-function withAttachments(attachments: { name: string; bytes: number }[], overrides: Partial<ThreadMessage> = {}): ThreadMessage {
+/** Far enough ahead that the chips are inside the hub's retention window for as long as any test runs. */
+const HELD_UNTIL = "2099-01-01T00:00:00.000Z";
+
+/**
+ * A message carrying files, as `messageAttachments` loads them: the person's own name, the size, and when the hub
+ * stops holding the bytes. Held by default, since that is a message just sent; `available_until: null` is a file the
+ * sweep has taken.
+ */
+function withAttachments(
+  attachments: { name: string; bytes: number; available_until?: string | null }[],
+  overrides: Partial<ThreadMessage> = {}
+): ThreadMessage {
   return {
     ...message(overrides),
-    attachments: attachments.map((file, index) => ({ id: `u${index + 1}`, media_type: "application/pdf", ...file }))
+    attachments: attachments.map((file, index) => ({ id: `u${index + 1}`, media_type: "application/pdf", available_until: HELD_UNTIL, ...file }))
   };
 }
 
@@ -588,18 +599,57 @@ describe("ChatView attachments in the thread", () => {
     expect(within(screen.getByRole("list", { name: "Conversation" })).getByText("have a look at this")).toBeTruthy();
   });
 
-  it("should say the file cannot be opened from the page when describing a chip", () => {
+  /** The one chip of a thread whose message carried `files`. */
+  function chipFor(files: { name: string; bytes: number; available_until?: string | null }[]): HTMLElement {
     render(
-      <ChatView
-        viewerOid={VIEWER}
-        view={conversation({ page: page({ messages: [withAttachments([{ name: "letter.pdf", bytes: 10 }])] }) })}
-        templates={TEMPLATES}
-        actions={actions()}
-      />
+      <ChatView viewerOid={VIEWER} view={conversation({ page: page({ messages: [withAttachments(files)] }) })} templates={TEMPLATES} actions={actions()} />
     );
+    return within(screen.getByRole("list", { name: "Files sent with this message" })).getAllByRole("listitem")[0]!;
+  }
 
-    const chip = within(screen.getByRole("list", { name: "Files sent with this message" })).getAllByRole("listitem")[0];
-    expect(chip?.getAttribute("title")).toBe("Sent to the assistant. It is not kept here, so it cannot be opened or downloaded from this page.");
+  it("should offer the file back as a download when the hub is still holding its bytes", () => {
+    const chip = chipFor([{ name: "letter.pdf", bytes: 10 }]);
+
+    const link = within(chip).getByRole("link");
+    expect(link.getAttribute("href")).toBe("/api/ui/uploads/u1/content");
+    // The person's own name on the saved copy, accents, spaces and all.
+    expect(link.getAttribute("download")).toBe("letter.pdf");
+    expect(chip.getAttribute("title")).toBe(STILL_HELD);
+  });
+
+  it("should offer no download at all, and say the file has gone, when the hub no longer holds it", () => {
+    const chip = chipFor([{ name: "letter.pdf", bytes: 10, available_until: null }]);
+
+    expect(within(chip).queryByRole("link")).toBeNull();
+    expect(chip.getAttribute("title")).toBe(NO_LONGER_HELD);
+    // Still a chip, and still named: the file was attached, whatever became of the bytes.
+    expect(chip.textContent).toBe("📎letter.pdf10 bytes");
+  });
+
+  it("should offer no download once the window has already closed, whatever state the sweep left the row in", () => {
+    const chip = chipFor([{ name: "letter.pdf", bytes: 10, available_until: "2020-01-01T00:00:00.000Z" }]);
+
+    expect(within(chip).queryByRole("link")).toBeNull();
+    expect(chip.getAttribute("title")).toBe(NO_LONGER_HELD);
+  });
+
+  it("should take the download away while the thread is open, when the window closes under it", () => {
+    vi.useFakeTimers();
+    try {
+      const chip = chipFor([{ name: "letter.pdf", bytes: 10, available_until: new Date(Date.now() + 60_000).toISOString() }]);
+      expect(within(chip).queryByRole("link")).not.toBeNull();
+
+      // Act: the window closes with nothing else on the screen changing, which is a thread left open for hours.
+      act(() => {
+        vi.advanceTimersByTime(61_001);
+      });
+
+      const after = within(screen.getByRole("list", { name: "Files sent with this message" })).getAllByRole("listitem")[0]!;
+      expect(within(after).queryByRole("link")).toBeNull();
+      expect(after.getAttribute("title")).toBe(NO_LONGER_HELD);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("should show the chips without an empty bubble when the message was only files", () => {
@@ -874,7 +924,7 @@ describe("EmptyChat remounted after a file was attached", () => {
   const unsent: UnsentChat = {
     id: CONVERSATION,
     product: "pcs",
-    attachments: [{ id: "u1", name: "scanned letter.pdf", bytes: 2048, media_type: "application/pdf" }]
+    attachments: [{ id: "u1", name: "scanned letter.pdf", bytes: 2048, media_type: "application/pdf", available_until: HELD_UNTIL }]
   };
 
   function newChat(acts: EmptyChatActions, resumed?: UnsentChat) {
