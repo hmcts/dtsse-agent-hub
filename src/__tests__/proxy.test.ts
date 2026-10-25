@@ -31,10 +31,10 @@ describe("proxy sign-in guard", () => {
   });
 
   it("should carry the path and query through the sign-in, so a shared channel link survives it", async () => {
-    const response = await proxy(ask("/c?topics=pcs-api,database&mode=any"));
+    const response = await proxy(ask("/hub/c?topics=pcs-api,database&mode=any"));
 
     const location = new URL(response.headers.get("location") ?? "");
-    expect(location.searchParams.get("redirect")).toBe("/c?topics=pcs-api,database&mode=any");
+    expect(location.searchParams.get("redirect")).toBe("/hub/c?topics=pcs-api,database&mode=any");
   });
 
   it("should let a person with a valid session through", async () => {
@@ -95,7 +95,7 @@ describe("proxy matcher", () => {
     const [matcher] = config.matcher;
     const pattern = new RegExp(`^${matcher}$`);
     expect(pattern.test("/")).toBe(true);
-    expect(pattern.test("/c")).toBe(true);
+    expect(pattern.test("/hub/c")).toBe(true);
     expect(pattern.test("/_next/static/chunks/main.js")).toBe(false);
   });
 });
@@ -122,18 +122,18 @@ describe("proxy secret-in-query guard", () => {
     "Value",
     "TOKEN"
   ])("should redirect 303 to the bare path when a GET carries a %s parameter", async (name) => {
-    const response = await proxy(askWith("GET", `/virtual/va-1?kind=jenkins&${name}=11a2b3c4d5e6f708192a3b4c5d`));
+    const response = await proxy(askWith("GET", `/hub/virtual/va-1?kind=jenkins&${name}=11a2b3c4d5e6f708192a3b4c5d`));
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("https://agent-hub.example/virtual/va-1");
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/hub/virtual/va-1");
   });
 
   it("should redirect a HEAD that carries a secret parameter too", async () => {
-    expect((await proxy(askWith("HEAD", "/agents/va-1?value=x"))).status).toBe(303);
+    expect((await proxy(askWith("HEAD", "/hub/agents/va-1?value=x"))).status).toBe(303);
   });
 
   it("should refuse the secret before the sign-in redirect, which would otherwise copy it into redirect=", async () => {
-    const response = await proxy(askWith("GET", "/agents/va-1?value=a-pasted-token"));
+    const response = await proxy(askWith("GET", "/hub/agents/va-1?value=a-pasted-token"));
 
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).not.toContain("a-pasted-token");
@@ -142,7 +142,25 @@ describe("proxy secret-in-query guard", () => {
   it("should refuse the secret even when sign-in is disabled", async () => {
     vi.stubEnv("AUTH_DISABLED", "true");
 
-    expect((await proxy(askWith("GET", "/settings/credentials?token=x"))).status).toBe(303);
+    expect((await proxy(askWith("GET", "/hub/settings/credentials?token=x"))).status).toBe(303);
+  });
+
+  // The bare addresses redirect to `/hub`, and that redirect sits below this guard on purpose: run above it, or from
+  // `redirects()` in next.config.mjs, it would answer with a `Location` repeating the secret.
+  it.each([
+    "/settings/credentials?token=sk-ant-0000000000000000000000",
+    "/agents/va-1?value=a-pasted-token",
+    "/virtual/va-1?kind=jenkins&code=11a2b3c4d5e6f708192a3b4c5d",
+    "/settings/credentials?TOKEN=sk-ant-0000000000000000000000"
+  ])("should strip the secret from %s before redirecting it under /hub", async (path) => {
+    vi.stubEnv("AUTH_DISABLED", "true");
+
+    const response = await proxy(askWith("GET", path));
+
+    expect(response.status).toBe(303);
+    const location = response.headers.get("location") ?? "";
+    expect(location).toBe(`https://agent-hub.example${path.split("?")[0]}`);
+    expect(location).not.toContain("?");
   });
 
   it("should let the OpenID Connect callback keep its authorisation code", async () => {
@@ -152,20 +170,77 @@ describe("proxy secret-in-query guard", () => {
   it("should leave a POST alone when it is a form posted to the page", async () => {
     vi.stubEnv("AUTH_DISABLED", "true");
 
-    expect((await proxy(askWith("POST", "/agents/va-1?value=x"))).status).toBe(200);
+    expect((await proxy(askWith("POST", "/hub/agents/va-1?value=x"))).status).toBe(200);
   });
 
   it.each([
-    "/agents/va-1?kind=jenkins",
-    "/c?topics=pcs-api,database&mode=any",
+    "/hub/agents/va-1?kind=jenkins",
+    "/hub/c?topics=pcs-api,database&mode=any",
     "/api/ui/feed?topics=a&before=5",
     "/api/ui/stream?topics=a&after=3",
     "/api/ui/topics?prefix=p",
-    "/topics?q=pcs",
-    "/agents/va-1?values=x&codes=y"
+    "/hub/topics?q=pcs",
+    "/hub/agents/va-1?values=x&codes=y"
   ])("should let %s through when it carries no secret parameter", async (path) => {
     vi.stubEnv("AUTH_DISABLED", "true");
 
     expect((await proxy(askWith("GET", path))).status).toBe(200);
+  });
+});
+
+describe("proxy hub address redirect", () => {
+  beforeEach(() => {
+    vi.stubEnv("AUTH_DISABLED", "true");
+    vi.stubEnv("SESSION_SECRET", SECRET);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ["/access", "/hub/access"],
+    ["/agents/0f8a", "/hub/agents/0f8a"],
+    ["/c", "/hub/c"],
+    ["/channels/new", "/hub/channels/new"],
+    ["/m/42", "/hub/m/42"],
+    ["/settings/credentials", "/hub/settings/credentials"],
+    ["/topics", "/hub/topics"],
+    ["/topics/pcs-api", "/hub/topics/pcs-api"],
+    ["/virtual", "/hub/virtual"],
+    ["/virtual/0f8a", "/hub/virtual/0f8a"]
+  ])("should redirect the bare address %s to %s", async (from, to) => {
+    const response = await proxy(askWith("GET", from));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(`https://agent-hub.example${to}`);
+  });
+
+  it("should keep the query when it carries no secret, so a shared channel view survives the redirect", async () => {
+    const response = await proxy(askWith("GET", "/c?topics=pcs-api,database&mode=all"));
+
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/hub/c?topics=pcs-api,database&mode=all");
+  });
+
+  it.each([
+    "/",
+    "/hub",
+    "/hub/topics",
+    "/assistant",
+    "/assistant/abc",
+    "/auth/login",
+    "/api/ui/feed",
+    "/health",
+    "/topicsfoo"
+  ])("should leave %s alone, so the front door and the moved pages themselves never redirect", async (path) => {
+    expect((await proxy(askWith("GET", path))).status).toBe(200);
+  });
+
+  it("should redirect before the sign-in check, so the login's redirect= carries the new address", async () => {
+    vi.stubEnv("AUTH_DISABLED", "");
+
+    const response = await proxy(askWith("GET", "/topics/pcs-api"));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/hub/topics/pcs-api");
   });
 });

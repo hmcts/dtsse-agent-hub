@@ -82,7 +82,7 @@ export function ChannelBuilder({
     try {
       const result = await save({ name, topics, match, shared });
       if (result.ok) {
-        router.push(`/channels/${result.id}`);
+        router.push(`/hub/channels/${result.id}`);
         router.refresh();
       } else {
         setError(result.error);

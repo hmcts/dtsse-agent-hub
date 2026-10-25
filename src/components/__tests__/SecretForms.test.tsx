@@ -13,7 +13,7 @@ import { OnboardingChecklist } from "@/components/virtual-agents/OnboardingCheck
 import type { CredentialStatus } from "@/credentials/store";
 import type { LoginView } from "@/virtual-agents/logins";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/hub" }));
 vi.mock("@/components/live/HubStream", () => ({ useEndSession: () => () => undefined }));
 
 afterEach(() => {
@@ -49,7 +49,7 @@ function pasteLogin(kind: LoginView["kind"]): LoginView {
 
 /** Where a browser goes when the form is submitted natively, with no script to intercept it. */
 function nativeSubmitUrl(form: HTMLFormElement): string {
-  const target = new URL(form.getAttribute("action") || "/agents/va-1", "https://agent-hub.example");
+  const target = new URL(form.getAttribute("action") || "/hub/agents/va-1", "https://agent-hub.example");
   if (form.method === "get") {
     const query = new URLSearchParams();
     for (const [name, value] of new FormData(form)) {
@@ -99,7 +99,7 @@ describe("a form carrying a credential", () => {
     const form = new DOMParser().parseFromString(markup, "text/html").querySelector("form") as HTMLFormElement;
 
     expect(form.method).toBe("post");
-    expect(nativeSubmitUrl(form)).toBe("https://agent-hub.example/agents/va-1");
+    expect(nativeSubmitUrl(form)).toBe("https://agent-hub.example/hub/agents/va-1");
   });
 
   it("should post every sign-in form on the virtual agent page when keys are missing and a code is waiting to be pasted", () => {
@@ -183,7 +183,7 @@ describe("a form carrying a credential", () => {
 });
 
 /** The topic searches, whose one field is the search itself and belongs in a shareable URL. */
-const GET_FORMS = new Set(["src/app/(hub)/topics/page.tsx", "src/components/Sidebar.tsx"]);
+const GET_FORMS = new Set(["src/app/hub/topics/page.tsx", "src/components/Sidebar.tsx"]);
 
 function sources(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

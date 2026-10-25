@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ArtefactSnapshot, SaveArtefactResult } from "@/app/_actions/assistant";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
+import { CopyIcon, DownloadIcon, TickIcon } from "@/components/sidebar/icons";
 import type { ActionResult } from "@/web/action";
 
 export type SaveArtefactAction = (input: {
@@ -20,6 +22,25 @@ const SAVE_AFTER_MS = 1000;
 
 /** `draft`: the starting outline of a document nobody has written yet, which an update from the assistant replaces. */
 type SaveState = "draft" | "saved" | "saving" | "unsaved" | "failed";
+
+/** What the toolbar has to say about the last copy or print. A failure is on screen; success only needs announcing. */
+type Notice = "copied" | "copyFailed" | "printFailed";
+
+const NOTICES: Record<Notice, string> = {
+  copied: "Document copied",
+  copyFailed: "Could not copy. Select the text in the document and copy it yourself.",
+  printFailed: "Could not open the print dialogue. Download the markdown instead."
+};
+
+/** How long the tick and its announcement stay after a copy. A failure stays until the next attempt. */
+const COPIED_FOR_MS = 1400;
+
+/**
+ * How long to wait for `afterprint` before taking the sheet out anyway. Browsers that open a dialogue all send the
+ * event; one that silently never does — a WebView, or a blocked dialogue — would otherwise leave the panel believing
+ * a print is still in flight and refusing every later one.
+ */
+const PRINT_GIVE_UP_MS = 60_000;
 
 /** Wraps the selection in `before` and `after`, or puts a list marker at the start of each selected line. */
 export function format(
@@ -36,6 +57,131 @@ export function format(
   const lines = text.slice(lineStart, end).split("\n");
   const marked = lines.map((line, index) => `${kind === "bullets" ? "- " : `${index + 1}. `}${line}`).join("\n");
   return { text: `${text.slice(0, lineStart)}${marked}${text.slice(end)}`, start: lineStart, end: lineStart + marked.length };
+}
+
+/**
+ * Windows refuses these as the part before the first dot, whatever follows it, so `NUL.txt` is as unusable as `NUL`
+ * and both download under the fallback name.
+ */
+const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+/** Long enough for any title worth reading in a downloads list, short enough to leave room in a path. */
+const NAME_LIMIT = 80;
+
+/**
+ * The download's filename: the document's title, with everything a Windows, macOS or Linux filename cannot hold
+ * taken out. A title that is only punctuation, or is a name Windows reserves, falls back to `document`.
+ */
+export function fileName(title: string, extension: string): string {
+  const cleaned = title
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: a filename cannot hold them, which is why they go
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ")
+    .replace(/\s+/g, " ")
+    .slice(0, NAME_LIMIT)
+    // Leading and trailing dots and spaces are stripped by Windows and hide a file on Unix, so they go here instead.
+    .replace(/^[\s.]+|[\s.]+$/g, "");
+  const stem = cleaned.split(".")[0] ?? "";
+  return `${cleaned === "" || RESERVED_NAMES.test(stem) ? "document" : cleaned}.${extension}`;
+}
+
+/** Downloads `text` as `name`, through the one mechanism a browser gives a page: a blob URL on a clicked anchor. */
+function download(text: string, name: string, type: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  // The click has started the download by the next task; releasing the URL inside this one can cancel it.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/**
+ * The toolbar's download menu, in the same shape as the hub's other menus: `aria-haspopup`, a `role="menu"` of
+ * `role="menuitem"` buttons, and Escape or a click outside to dismiss. Closing from the keyboard puts focus back on
+ * the trigger; a click elsewhere leaves focus where the click put it.
+ */
+function DownloadMenu({ onMarkdown, onPdf }: { onMarkdown: () => void; onPdf: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+
+  const close = useCallback(() => {
+    if (ref.current?.contains(document.activeElement)) {
+      trigger.current?.focus();
+    }
+    setOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const dismiss = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !ref.current?.contains(event.target as Node)) {
+        close();
+      }
+    };
+    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", dismiss);
+    return () => {
+      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("keydown", dismiss);
+    };
+  }, [close, open]);
+
+  function choose(action: () => void): void {
+    close();
+    action();
+  }
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        ref={trigger}
+        type="button"
+        onClick={() => (open ? close() : setOpen(true))}
+        aria-label="Download document"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        className="flex h-[30px] w-[30px] items-center justify-center rounded-lg text-asst-muted hover:bg-asst-field hover:text-asst-text"
+      >
+        <DownloadIcon />
+      </button>
+      {open ? (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label="Download"
+          className="absolute right-0 top-[calc(100%+6px)] z-30 flex w-[230px] flex-col gap-0.5 rounded-xl border border-asst-strong bg-asst-hover p-1.5 shadow-2xl"
+        >
+          <button type="button" role="menuitem" onClick={() => choose(onMarkdown)} className="rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active">
+            Markdown (.md)
+          </button>
+          <button type="button" role="menuitem" onClick={() => choose(onPdf)} className="rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active">
+            PDF (opens your print dialogue)
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * What the printer is given: the document, rendered, on the body rather than inside the panel, so nothing above it
+ * clips the pages and the app's theme does not colour it. `globals.css` hides it on screen.
+ *
+ * The cast is the portal's return type: `@types/react-dom` 18 pulls in its own `@types/react` 19, whose `ReactPortal`
+ * this project's React 18 types do not recognise.
+ */
+function PrintSheet({ title, markdown }: { title: string; markdown: string }): React.ReactElement {
+  return createPortal(
+    <div className="asst-print-sheet">
+      <h1>{title}</h1>
+      <AssistantMarkdown source={markdown} document />
+    </div>,
+    document.body
+  ) as React.ReactElement;
 }
 
 export function starterDocument(productLabel: string): string {
@@ -68,7 +214,8 @@ export function ArtefactPanel({
   const [state, setState] = useState<SaveState>(artefact.version === 0 ? "draft" : "saved");
   const [mode, setMode] = useState<"edit" | "preview">(artefact.version === 0 ? "edit" : "preview");
   const [conflict, setConflict] = useState<ArtefactSnapshot | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [printing, setPrinting] = useState(false);
   const sidebarWidth = useSidebarWidth();
   const resize = useResizableWidth({
     storageKey: "hmcts-assistant-artefact-width",
@@ -83,6 +230,32 @@ export function ArtefactPanel({
   // A save in flight counts: an update arriving before its reply would otherwise replace what is being saved.
   const dirty = state === "unsaved" || state === "failed" || state === "saving";
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Printing is what makes a PDF here: the sheet is mounted on the body, where `@media print` in `globals.css` hides
+   * the app around it, and the dialogue only opens once that render has committed. `afterprint` takes the sheet back
+   * out, whether the person saved the PDF or cancelled; the timer and the `catch` are so that a browser which opens
+   * no dialogue cannot strand the panel with a sheet it will never take out.
+   */
+  useEffect(() => {
+    if (!printing) {
+      return;
+    }
+    const done = () => setPrinting(false);
+    window.addEventListener("afterprint", done);
+    const giveUp = setTimeout(done, PRINT_GIVE_UP_MS);
+    try {
+      window.print();
+    } catch {
+      setNotice("printFailed");
+      done();
+    }
+    return () => {
+      clearTimeout(giveUp);
+      window.removeEventListener("afterprint", done);
+    };
+  }, [printing]);
 
   // The assistant, or this person in another tab, saved a newer version.
   useEffect(() => {
@@ -137,9 +310,28 @@ export function ArtefactPanel({
       if (timer.current !== null) {
         clearTimeout(timer.current);
       }
+      if (noticeTimer.current !== null) {
+        clearTimeout(noticeTimer.current);
+      }
     },
     []
   );
+
+  /** Says what happened only once it has: a tick and an announcement are the whole acknowledgement, so they must be true. */
+  async function copy(): Promise<void> {
+    if (noticeTimer.current !== null) {
+      clearTimeout(noticeTimer.current);
+      noticeTimer.current = null;
+    }
+    try {
+      await navigator.clipboard.writeText(markdown);
+    } catch {
+      setNotice("copyFailed");
+      return;
+    }
+    setNotice("copied");
+    noticeTimer.current = setTimeout(() => setNotice(null), COPIED_FOR_MS);
+  }
 
   function takeTheirs(current: ArtefactSnapshot): void {
     setTitle(current.title ?? "Untitled document");
@@ -255,15 +447,18 @@ export function ArtefactPanel({
           </div>
           <button
             type="button"
-            onClick={() => {
-              void navigator.clipboard?.writeText(markdown);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1400);
-            }}
-            className="h-[30px] rounded-lg px-2.5 text-[13px] text-asst-muted hover:bg-asst-field"
+            onClick={() => void copy()}
+            aria-label="Copy document"
+            className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-field hover:text-asst-text"
           >
-            {copied ? "Copied" : "Copy"}
+            {/* A tick in place of the copy icon says it worked, by shape rather than by colour; the status says it aloud. */}
+            {notice === "copied" ? <TickIcon /> : <CopyIcon />}
           </button>
+          <DownloadMenu onMarkdown={() => download(markdown, fileName(title, "md"), "text/markdown;charset=utf-8")} onPdf={() => setPrinting(true)} />
+          {/* A failure has to be read, so it is on screen; the tick already shows a copy worked. */}
+          <span role="status" className={notice === null || notice === "copied" ? "sr-only" : "max-w-[220px] text-[13px] text-asst-error"}>
+            {notice === null ? "" : NOTICES[notice]}
+          </span>
         </div>
       </div>
       {conflict === null ? null : (
@@ -300,6 +495,7 @@ export function ArtefactPanel({
           </div>
         )}
       </div>
+      {printing ? <PrintSheet title={title} markdown={markdown} /> : null}
     </section>
   );
 }

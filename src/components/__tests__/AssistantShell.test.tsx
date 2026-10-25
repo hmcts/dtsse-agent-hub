@@ -106,7 +106,7 @@ describe("AssistantShell", () => {
     expect(screen.queryByRole("link", { name: "Agent Hub" })).toBeNull();
 
     rerender(shell({ hubLink: true }));
-    expect(screen.getByRole("link", { name: "Agent Hub" }).getAttribute("href")).toBe("/");
+    expect(screen.getByRole("link", { name: "Agent Hub" }).getAttribute("href")).toBe("/hub");
   });
 
   it("should take the sidebar out of reach when collapsed and bring it back from the page's toggle", () => {

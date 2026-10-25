@@ -22,7 +22,7 @@ import { type ActionResult, runAction, text } from "@/web/action";
  */
 
 /** The standalone page, and the virtual agents page that has them as a section when the feature is on. */
-const CREDENTIALS_PATHS = ["/settings/credentials", "/virtual"] as const;
+const CREDENTIALS_PATHS = ["/hub/settings/credentials", "/hub/virtual"] as const;
 
 function revalidate(): void {
   for (const path of CREDENTIALS_PATHS) {

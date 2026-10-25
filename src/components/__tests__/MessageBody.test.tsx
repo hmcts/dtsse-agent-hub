@@ -216,7 +216,7 @@ describe("MessageBody message references", () => {
     renderBody("see #1234 and `#99`");
 
     const reference = screen.getByRole("link", { name: "#1234" });
-    expect(reference.getAttribute("href")).toBe("/m/1234");
+    expect(reference.getAttribute("href")).toBe("/hub/m/1234");
     expect(reference.hasAttribute("target")).toBe(false);
     expect(screen.getAllByRole("link")).toHaveLength(1);
   });

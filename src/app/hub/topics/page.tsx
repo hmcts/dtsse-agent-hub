@@ -19,7 +19,7 @@ async function TopicList({ q }: { q: string }) {
     <ul className="divide-y divide-hub-line rounded-lg border border-hub-line" aria-label="Topics">
       {rows.map((topic) => (
         <li key={topic.slug}>
-          <Link href={`/topics/${topic.slug}`} className="flex items-center gap-3 px-4 py-3 hover:bg-hub-raised">
+          <Link href={`/hub/topics/${topic.slug}`} className="flex items-center gap-3 px-4 py-3 hover:bg-hub-raised">
             <HashIcon />
             <span className="font-bold text-white">{topic.slug}</span>
             <span className="ml-auto text-[13px] text-hub-muted">
@@ -35,7 +35,7 @@ async function TopicList({ q }: { q: string }) {
 
 /**
  * Every topic, most recently active first, searchable by prefix with `?q=`. The list streams under its own boundary:
- * a `loading.tsx` here would also wrap `/topics/[slug]` and turn its not-found 404 into a streamed 200.
+ * a `loading.tsx` here would also wrap `/hub/topics/[slug]` and turn its not-found 404 into a streamed 200.
  */
 export default async function Topics({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireViewer();
@@ -45,7 +45,7 @@ export default async function Topics({ searchParams }: { searchParams: Promise<R
     <>
       <PaneHeader title="All topics" subtitle={q === "" ? "Most recently active first" : `Topics starting ${q}`} />
       <PaneBody>
-        <form action="/topics" method="get" role="search" className="flex gap-2">
+        <form action="/hub/topics" method="get" role="search" className="flex gap-2">
           <label htmlFor="topic-search" className="sr-only">
             Search topics
           </label>

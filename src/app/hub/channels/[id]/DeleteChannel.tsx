@@ -15,7 +15,7 @@ export function DeleteChannel({ id }: { id: string }) {
         event.preventDefault();
         const result = await removeChannel(new FormData(event.currentTarget));
         if (result.ok) {
-          router.push("/");
+          router.push("/hub");
           router.refresh();
         } else {
           setError(result.error);
