@@ -248,7 +248,12 @@ describe("ChatView progress", () => {
 describe("ChatView product", () => {
   it("should draw the chosen product's label itself when the header shows the picker", () => {
     render(
-      <ChatView view={conversation({ product: "sscs", productLabel: "SSCS (Social Security and Child Support)" })} templates={TEMPLATES} actions={actions()} />
+      <ChatView
+        viewerOid={VIEWER}
+        view={conversation({ product: "sscs", productLabel: "SSCS (Social Security and Child Support)" })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
     );
 
     const drawn = screen.getAllByText("SSCS (Social Security and Child Support)").filter((node) => node.tagName !== "OPTION");
@@ -316,7 +321,9 @@ describe("ChatView product", () => {
 
   it("should show the default and change from it when the conversation is on a product no longer offered", () => {
     const setProduct = ok();
-    render(<ChatView view={conversation({ product: "other", productLabel: "other" })} templates={TEMPLATES} actions={actions({ setProduct })} />);
+    render(
+      <ChatView viewerOid={VIEWER} view={conversation({ product: "other", productLabel: "other" })} templates={TEMPLATES} actions={actions({ setProduct })} />
+    );
 
     const select = screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement;
     expect(select.value).toBe("general");
@@ -893,7 +900,7 @@ describe("EmptyChat", () => {
       fireEvent.click(screen.getByRole("button", { name: new RegExp(STARTERS[0]?.title ?? "") }));
     });
 
-    expect(start).toHaveBeenCalledWith({ product: "other", body: STARTERS[0]?.prompt });
+    expect(start).toHaveBeenCalledWith({ product: "general", body: STARTERS[0]?.prompt });
     expect(box().value).toBe("a thought I have not finished");
     cleanup();
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} start={start} />);
