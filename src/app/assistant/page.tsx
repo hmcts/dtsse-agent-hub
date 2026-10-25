@@ -1,7 +1,9 @@
 import { cookies } from "next/headers";
 import { deleteConversation, renameConversation, startConversation } from "@/app/_actions/assistant";
 import { saveCredential } from "@/app/_actions/credentials";
-import { pasteLoginCode } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { connectionsData } from "@/assistant/connections";
+import { assistantPluginsData } from "@/assistant/settings";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
 import { WAITING_COOKIE, waitingDismissed } from "@/assistant/waiting";
@@ -21,8 +23,19 @@ export default async function AssistantPage() {
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const home = await openAssistant(viewer);
+  const plugins = assistantPluginsData(home.assistant, home.plugins);
+  const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
   return (
-    <AssistantShell viewerName={viewer.name} groups={home.conversations} activeId={null} hubLink theme={theme} actions={ACTIONS}>
+    <AssistantShell
+      viewerName={viewer.name}
+      groups={home.conversations}
+      activeId={null}
+      hubLink
+      theme={theme}
+      actions={ACTIONS}
+      connections={connectionsData(home.assistant, home.credentials)}
+      plugins={pluginSettings}
+    >
       <EmptyChat starters={STARTERS} templates={TEMPLATES} viewerOid={viewer.oid} start={startConversation} />
       <OnboardingGate
         assistant={home.assistant}
