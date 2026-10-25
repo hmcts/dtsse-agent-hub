@@ -20,19 +20,15 @@ describe("assistantPluginsData", () => {
   });
 
   it.each(VIRTUAL_AGENT_STATUSES.filter((status) => status !== "requested"))("should have a pod when the agent is wanted running and %s", (status) => {
-    expect(assistantPluginsData(assistant(status), { available: OFFERED, checked: [] })?.podRunning).toBe(true);
+    expect(assistantPluginsData(assistant(status), { available: OFFERED, checked: [] }).podRunning).toBe(true);
   });
 
   it("should have no pod yet when the agent has only just been requested", () => {
-    expect(assistantPluginsData(assistant("requested"), { available: OFFERED, checked: [] })?.podRunning).toBe(false);
+    expect(assistantPluginsData(assistant("requested"), { available: OFFERED, checked: [] }).podRunning).toBe(false);
   });
 
   it.each(["stopped", "deleted"] as const)("should have no pod when the agent is wanted %s", (desired) => {
-    expect(assistantPluginsData(assistant("running", desired), { available: OFFERED, checked: [] })?.podRunning).toBe(false);
-  });
-
-  it("should have nothing to show when the plugin configuration cannot be read", () => {
-    expect(assistantPluginsData(assistant("running"), null)).toBeUndefined();
+    expect(assistantPluginsData(assistant("running", desired), { available: OFFERED, checked: [] }).podRunning).toBe(false);
   });
 
   it("should still have something to show when the hub simply offers no plugins", () => {

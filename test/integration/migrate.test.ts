@@ -23,11 +23,23 @@ function urlFor(database: string): string {
  */
 const RUN = `${process.pid.toString(36)}_${randomBytes(4).toString("hex")}`;
 
+/**
+ * Every database this file creates is named through here. A fixed name looks harmless because the suite drops it
+ * first, but a sibling run drops and recreates the same one mid-test: the symptoms are a `CREATE DATABASE` that
+ * collides on `pg_database_datname_index`, or a query that fails because the other run's `afterAll` has just dropped
+ * the database out from under it.
+ */
 function scratchDatabase(suffix: string): string {
   return `agent_hub_${suffix}_${RUN}`;
 }
 
 const SCRATCH = scratchDatabase("migrate");
+
+/** How long ago a scratch database must have been created before a later run treats it as abandoned and reclaims it. */
+const ORPHAN_HOURS = 2;
+
+/** `agent_hub_migrate`, an optional suffix, and a `RUN`: only the names `scratchDatabase` generates, never a hand-made one. */
+const SCRATCH_PATTERN = "^agent_hub_migrate(_[a-z_]+)?_[0-9a-z]+_[0-9a-f]{8}$";
 
 async function query<T extends pg.QueryResultRow>(database: string, statement: string): Promise<T[]> {
   const client = new pg.Client({ connectionString: urlFor(database) });
@@ -38,6 +50,40 @@ async function query<T extends pg.QueryResultRow>(database: string, statement: s
     await client.end();
   }
 }
+
+/**
+ * Drops the scratch databases earlier runs abandoned. A per-run name is never reused, so a run killed between
+ * `beforeAll` and `afterAll` would otherwise leave its databases on the server for good — the fixed names this file
+ * used to use at least got reclaimed by the next run.
+ *
+ * Age — the mtime of `PG_VERSION`, which is written when the database is created — is the only safe evidence that a
+ * database is finished with. Having no connection is not: `query` opens one per statement and closes it, so a
+ * concurrent run's scratch database is idle most of the time, and dropping an idle one would recreate the cross-run
+ * interference the per-run names exist to prevent. This runs before the file creates any of its own, so the window
+ * only has to outlast a run of this file.
+ *
+ * Best-effort, because reading a database's age needs privileges the pipeline's user may not have, and leftover
+ * clutter is not worth failing the suite over.
+ */
+async function dropAbandonedScratchDatabases(): Promise<void> {
+  try {
+    const abandoned = await query<{ datname: string }>(
+      "postgres",
+      `SELECT datname FROM pg_database
+        WHERE datname ~ '${SCRATCH_PATTERN}'
+          AND (pg_stat_file('base/' || oid || '/PG_VERSION')).modification < now() - make_interval(hours => ${ORPHAN_HOURS})`
+    );
+    for (const { datname } of abandoned) {
+      await query("postgres", `DROP DATABASE IF EXISTS "${datname}"`);
+    }
+  } catch {
+    // Nothing here is worth a failure: the suite's own databases do not depend on the sweep having run.
+  }
+}
+
+beforeAll(async () => {
+  await dropAbandonedScratchDatabases();
+});
 
 describe("migrate", () => {
   const original = process.env.DATABASE_URL;
@@ -277,7 +323,7 @@ describe("the bedrock migration", () => {
 });
 
 describe("the assistant product list migration", () => {
-  const REMAP = "agent_hub_migrate_product_test";
+  const REMAP = scratchDatabase("migrate_product");
   const MIGRATION = "20261025120000_assistant_product_list";
   const original = process.env.DATABASE_URL;
   let before: string;

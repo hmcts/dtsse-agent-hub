@@ -23,8 +23,7 @@ export default async function AssistantPage() {
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const home = await openAssistant(viewer);
-  const plugins = assistantPluginsData(home.assistant, home.plugins);
-  const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
+  const pluginSettings = { ...assistantPluginsData(home.assistant, home.plugins), save: setVirtualAgentPlugins };
   return (
     <AssistantShell
       viewerName={viewer.name}

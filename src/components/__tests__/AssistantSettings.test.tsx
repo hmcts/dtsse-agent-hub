@@ -386,9 +386,8 @@ describe("the Assistant's team tools", () => {
     expect(screen.queryByRole("heading", { name: "Team tools" })).toBeNull();
   });
 
-  // `assistantPluginsData` gives nothing when `VIRTUAL_AGENT_PLUGINS` is malformed, rather than an empty list: the
-  // hub cannot then tell which of the person's plugins it still offers, so a section would mislabel every one of them
-  // and its own save would be refused.
+  // The section is an optional half of the dialog: a caller that passes none gets the rest of it, exactly as a hub
+  // that offers none does.
   it("should show nothing at all when the page passes no plugins", () => {
     open({ plugins: undefined });
 

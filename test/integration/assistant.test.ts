@@ -144,21 +144,18 @@ describe("the person's assistant", () => {
     expect((await openAssistant(VIEWER)).plugins).toEqual({ available: [], checked: [] });
   });
 
-  // Not an empty list: the Assistant would then tell the person each plugin they load is one the hub no longer
-  // offers, and `setVirtualAgentPlugins` reads the same malformed configuration and would refuse every save.
-  it("should offer no plugins at all, rather than none, when the hub's plugin configuration is malformed", async () => {
-    await insertUser(ALICE);
-    await ensureAssistant(prisma, VIEWER);
-    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
-
-    expect((await openAssistant(VIEWER)).plugins).toBeNull();
-  });
-
-  // Creating one validates the configuration itself, in `createVirtualAgent`, which the Assistant does not guard: a
-  // malformed list therefore still fails a first visit outright, and only a return visit degrades to hiding the
-  // section. Asserted so the inconsistency is recorded rather than discovered.
+  // One loud failure on every visit, rather than a first visit that fails in `createVirtualAgent` and a return visit
+  // that quietly hides the section: a malformed list is a deployment fault, and nothing the person can act on.
   it("should fail a first visit outright when the hub's plugin configuration is malformed", async () => {
     await insertUser(ALICE);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    await expect(openAssistant(VIEWER)).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
+  });
+
+  it("should fail a return visit too when the hub's plugin configuration is malformed", async () => {
+    await insertUser(ALICE);
+    await ensureAssistant(prisma, VIEWER);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
 
     await expect(openAssistant(VIEWER)).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");

@@ -35,8 +35,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
   if (view === undefined) {
     notFound();
   }
-  const plugins = assistantPluginsData(home.assistant, home.plugins);
-  const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
+  const pluginSettings = { ...assistantPluginsData(home.assistant, home.plugins), save: setVirtualAgentPlugins };
   return (
     <AssistantShell
       viewerName={viewer.name}
