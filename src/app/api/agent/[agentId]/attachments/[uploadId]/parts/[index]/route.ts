@@ -2,7 +2,7 @@ import { HttpError } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
 import { conversationOfAgent } from "@/assistant/store";
 import { readUploadPart, sessionAttachment } from "@/assistant/upload-store";
-import { partIndexOf, uploadsEnabled } from "@/assistant/uploads";
+import { partIndexOf } from "@/assistant/uploads";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
  * through Postgres the transport rather than a proxy to the pod.
  */
 export const GET = ownedAgentRoute<{ agentId: string; uploadId: string; index: string }>(async ({ agent, params }) => {
-  if (!virtualAgentsEnabled() || !uploadsEnabled()) {
+  if (!virtualAgentsEnabled()) {
     throw new HttpError(404, "not found");
   }
   const conversation = await conversationOfAgent(prisma, agent.id);

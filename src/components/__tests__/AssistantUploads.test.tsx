@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
-import type { ConversationView } from "@/assistant/views";
+import type { ConversationView, UnsentChat } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { Composer } from "@/components/assistant/Composer";
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
@@ -65,6 +65,8 @@ afterEach(() => {
   uploads.discarded.length = 0;
   refresh.mockReset();
   push.mockReset();
+  // The draft text and the remembered product both live here, and both outlive a `cleanup()` by design.
+  sessionStorage.clear();
 });
 
 function file(name: string, size: number, type = "application/pdf"): File {
@@ -92,7 +94,7 @@ async function finished(index = 0, uploadId = "u1"): Promise<void> {
 }
 
 function composer(onSend: (text: string, uploadIds: string[]) => Promise<string | null> = vi.fn(async () => null), props: object = {}) {
-  render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={onSend} uploads conversationId="c1" {...props} />);
+  render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={onSend} conversationId="c1" {...props} />);
   return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
 }
 
@@ -161,7 +163,7 @@ describe("Composer attaching", () => {
   });
 
   it("should attach a file dropped on the message pane when the pane is the drop zone", async () => {
-    render(<ChatView view={conversation()} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} uploads />);
+    render(<ChatView view={conversation()} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} />);
 
     await act(async () => {
       fireEvent.drop(screen.getByRole("list", { name: "Conversation" }), { dataTransfer: { files: [file("notes.pdf", 100)], types: ["Files"] } });
@@ -246,7 +248,7 @@ describe("Composer attaching", () => {
   });
 
   it("should offer no file controls when there is no conversation to attach to and none can be opened", () => {
-    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} uploads />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} />);
 
     expect(screen.getByRole("button", { name: "Add a template" })).toBeTruthy();
     expect(screen.queryByLabelText("Files to attach")).toBeNull();
@@ -256,13 +258,12 @@ describe("Composer attaching", () => {
 });
 
 /**
- * `ASSISTANT_UPLOADS_ENABLED` is off by default and the routes answer 404 while it is, so the composer must not offer
- * a control that cannot work. The flag is read on the server and reaches the component as `uploads`, which is why
- * every one of these renders without it rather than stubbing an environment.
+ * A box with nowhere to put a file offers nothing to put one in: no `conversationId` and no `openConversation`, so
+ * nothing can be attached and every control that would suggest otherwise stays away.
  */
-describe("Composer with uploads switched off", () => {
-  it("should offer no Attach item in the add menu, even with a conversation to attach to", () => {
-    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} conversationId="c1" />);
+describe("Composer with nowhere to attach to", () => {
+  it("should offer no Attach item in the add menu", () => {
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
 
@@ -271,13 +272,13 @@ describe("Composer with uploads switched off", () => {
   });
 
   it("should offer no file picker at all", () => {
-    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} conversationId="c1" />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} />);
 
     expect(screen.queryByLabelText("Files to attach")).toBeNull();
   });
 
   it("should leave a pasted screenshot to the box rather than attaching it", () => {
-    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} conversationId="c1" />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} />);
     const box = screen.getByRole("textbox", { name: "Message" });
 
     const delivered = fireEvent.paste(box, { clipboardData: { files: [file("", 512, "image/png")] } });
@@ -287,7 +288,7 @@ describe("Composer with uploads switched off", () => {
   });
 
   it("should upload nothing when a file is dropped on it", async () => {
-    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} conversationId="c1" />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} />);
     const box = screen.getByRole("textbox", { name: "Message" });
 
     await act(async () => {
@@ -299,7 +300,7 @@ describe("Composer with uploads switched off", () => {
   });
 
   it("should not say files can be dropped while one is dragged over it", () => {
-    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} conversationId="c1" />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} />);
 
     act(() => {
       fireEvent.dragOver(screen.getByRole("textbox", { name: "Message" }), { dataTransfer: { files: [], types: ["Files"] } });
@@ -625,8 +626,8 @@ describe("EmptyChat attaching before the chat exists", () => {
     };
   }
 
-  function newChat(acts: EmptyChatActions, uploadsOn = true) {
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} uploads={uploadsOn} />);
+  function newChat(acts: EmptyChatActions, unsent?: UnsentChat) {
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} unsent={unsent} />);
     return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
   }
 
@@ -763,14 +764,6 @@ describe("EmptyChat attaching before the chat exists", () => {
     expect(open).toHaveBeenCalledTimes(2);
     expect(request(0).conversationId).toBe(CONVERSATION);
   });
-
-  it("should offer no Attach item here either when uploads are switched off", () => {
-    newChat(emptyActions(), false);
-
-    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
-
-    expect(screen.queryByRole("menuitem", { name: "Attach files" })).toBeNull();
-  });
 });
 
 describe("EmptyChat when the first message into an opened conversation is refused", () => {
@@ -781,7 +774,7 @@ describe("EmptyChat when the first message into an opened conversation is refuse
       send: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" })),
       setProduct: vi.fn(async () => ({ ok: true as const }))
     };
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} />);
     const box = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "have a look" } });
     await choose(file("letter.pdf", 2048));
@@ -812,7 +805,7 @@ describe("EmptyChat when the person changes their mind while the chat is being o
       send: vi.fn(async () => ({ ok: true as const })),
       setProduct: vi.fn(async () => ({ ok: true as const }))
     };
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} />);
     await choose(file("letter.pdf", 2048));
 
     // Removed while the conversation is still being created, so there is no upload id to discard yet.
@@ -837,7 +830,7 @@ describe("EmptyChat when a later change of product cannot be saved", () => {
       send: vi.fn(async () => ({ ok: true as const })),
       setProduct: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" }))
     };
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} />);
     await choose(file("letter.pdf", 2048));
     await finished();
 
@@ -846,5 +839,183 @@ describe("EmptyChat when a later change of product cannot be saved", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toBe("that conversation no longer exists");
+  });
+});
+
+/**
+ * The whole point of the resumed state. The route unmounts and remounts this screen on a trip to another conversation
+ * and back, and the draft text survives that, so the conversation it was attached to has to survive it too. Without
+ * this, a send after the remount started a *second* conversation and left the person's file in the first for the
+ * sweep to delete — their words came back and their file silently did not.
+ */
+describe("EmptyChat remounted after a file was attached", () => {
+  function actionsFor(overrides: Partial<EmptyChatActions> = {}): EmptyChatActions {
+    return {
+      start: vi.fn(async () => ({ ok: true as const, id: "started" })),
+      open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
+      send: vi.fn(async () => ({ ok: true as const })),
+      setProduct: vi.fn(async () => ({ ok: true as const })),
+      ...overrides
+    };
+  }
+
+  const unsent: UnsentChat = {
+    id: CONVERSATION,
+    product: "pcs",
+    attachments: [{ id: "u1", name: "scanned letter.pdf", bytes: 2048, media_type: "application/pdf" }]
+  };
+
+  function newChat(acts: EmptyChatActions, resumed?: UnsentChat) {
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} unsent={resumed} />);
+    return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+  }
+
+  it("should show the file the hub is still holding as a finished chip", () => {
+    newChat(actionsFor(), unsent);
+
+    expect(chips()).toHaveLength(1);
+    expect(chips()[0]?.textContent).toContain("scanned letter.pdf");
+    expect(chips()[0]?.textContent).toContain("2 KB");
+    // Finished, not uploading: the hub would not have reported it otherwise.
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("should send into the conversation the file is already in, rather than starting a second one", async () => {
+    const acts = actionsFor();
+    const box = newChat(acts, unsent);
+    fireEvent.change(box, { target: { value: "what does this say?" } });
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(acts.start).not.toHaveBeenCalled();
+    expect(acts.send).toHaveBeenCalledWith({ conversationId: CONVERSATION, body: "what does this say?", uploadIds: ["u1"] });
+    expect(push).toHaveBeenCalledWith(`/assistant/${CONVERSATION}`);
+  });
+
+  it("should put the product the file was attached under back on the select", () => {
+    newChat(actionsFor(), unsent);
+
+    expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("pcs");
+  });
+
+  it("should attach another file to the same conversation without opening a second one", async () => {
+    const acts = actionsFor();
+    newChat(acts, unsent);
+
+    await choose(file("notes.txt", 10));
+
+    expect(acts.open).not.toHaveBeenCalled();
+    expect(request().conversationId).toBe(CONVERSATION);
+    expect(chips()).toHaveLength(2);
+  });
+
+  it("should discard a resumed file at the hub when the person removes its chip", async () => {
+    newChat(actionsFor(), unsent);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove scanned letter.pdf" }));
+    });
+
+    expect(uploads.discarded).toEqual(["u1"]);
+    expect(chips()).toHaveLength(0);
+  });
+
+  it("should upload nothing for a resumed chip, since its bytes are already at the hub", () => {
+    newChat(actionsFor(), unsent);
+
+    expect(uploads.pending).toHaveLength(0);
+  });
+
+  it("should carry a change of product through to the conversation that already exists", async () => {
+    const acts = actionsFor();
+    newChat(acts, unsent);
+
+    await act(async () => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "ccd" } });
+    });
+
+    expect(acts.setProduct).toHaveBeenCalledWith({ conversationId: CONVERSATION, product: "ccd" });
+  });
+
+  it("should start a conversation the ordinary way when the hub has nothing unsent", async () => {
+    const acts = actionsFor();
+    const box = newChat(acts);
+    fireEvent.change(box, { target: { value: "just words" } });
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(chips()).toHaveLength(0);
+    expect(acts.start).toHaveBeenCalledWith({ product: "other", body: "just words" });
+  });
+});
+
+/**
+ * The product is remembered for the same reason and in the same place as the draft text: coming back to find the
+ * words restored and the product back to its default is how a message gets sent about the wrong thing.
+ */
+describe("EmptyChat remembering the product with no conversation yet", () => {
+  function newChat() {
+    render(
+      <EmptyChat
+        viewerOid={VIEWER}
+        starters={STARTERS}
+        templates={TEMPLATES}
+        actions={{
+          start: vi.fn(async () => ({ ok: true as const, id: "started" })),
+          open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
+          send: vi.fn(async () => ({ ok: true as const })),
+          setProduct: vi.fn(async () => ({ ok: true as const }))
+        }}
+      />
+    );
+    return screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement;
+  }
+
+  it("should put the chosen product back after the screen is remounted", async () => {
+    const select = newChat();
+
+    await act(async () => {
+      fireEvent.change(select, { target: { value: "pcs" } });
+    });
+    cleanup();
+
+    expect(newChat().value).toBe("pcs");
+  });
+
+  it("should fall back to the default when what was remembered is not a product any more", () => {
+    sessionStorage.setItem(`agent-hub:assistant-product:${VIEWER}`, "a-product-that-was-retired");
+
+    expect(newChat().value).toBe("other");
+  });
+});
+
+describe("EmptyChat when the tab will not keep anything", () => {
+  it("should still open, with the default product, when storage refuses to answer", () => {
+    // Safari private browsing throws on access rather than returning null. Losing the choice is never worth
+    // breaking the screen, which is the same bargain `useDraft` makes with the text.
+    const storage = vi.spyOn(window, "sessionStorage", "get").mockImplementation(() => {
+      throw new Error("the quota is exceeded");
+    });
+
+    render(
+      <EmptyChat
+        viewerOid={VIEWER}
+        starters={STARTERS}
+        templates={TEMPLATES}
+        actions={{
+          start: vi.fn(async () => ({ ok: true as const, id: "started" })),
+          open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
+          send: vi.fn(async () => ({ ok: true as const })),
+          setProduct: vi.fn(async () => ({ ok: true as const }))
+        }}
+      />
+    );
+
+    expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("other");
+    storage.mockRestore();
   });
 });

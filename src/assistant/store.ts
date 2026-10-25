@@ -6,7 +6,6 @@ import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow 
 import { DEFAULT_PRODUCT, isProduct, productLabel } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
 import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
-import { uploadsEnabled } from "./uploads.ts";
 
 /**
  * The HMCTS Assistant: each person's one assistant virtual agent, and its conversations.
@@ -183,6 +182,40 @@ export async function listConversations(db: Database, ownerOid: string, limit = 
     take: limit
   });
   return rows.map(toRow);
+}
+
+/**
+ * The owner's newest conversation that exists only because the new-chat screen opened it for a file and nobody has
+ * sent it yet: no message to or from any of its agents, no document, and at least one file finished uploading and
+ * still unclaimed.
+ *
+ * This is what lets that screen survive being remounted. Without it the screen comes back with the draft text and no
+ * conversation, sends, and starts a *second* conversation — leaving the first with the person's file in it for
+ * `sweepUploads` to delete hours later, which is silent data loss.
+ *
+ * The conditions are the same ones `dropAbandoned` sweeps on, minus the retention window, which is deliberate: a
+ * conversation is resumable for exactly as long as it is not yet rubbish. `state = 'stored'` rather than any
+ * unclaimed upload, because a half-uploaded file cannot be sent and there is nothing to hand back.
+ */
+export async function unsentConversation(db: Database, ownerOid: string): Promise<ConversationRow | undefined> {
+  const [row] = await db.$queryRaw<{ id: string }[]>`
+    SELECT c.id::text AS id
+      FROM assistant_conversation c
+     WHERE c.owner_oid = ${ownerOid}
+       AND c.artefact_version = 0
+       AND EXISTS (
+             SELECT 1 FROM assistant_upload u
+              WHERE u.conversation_id = c.id AND u.message_id IS NULL AND u.state = 'stored'
+           )
+       AND NOT EXISTS (
+             SELECT 1 FROM message m
+              WHERE m.target_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = c.id)
+                 OR m.author_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = c.id)
+           )
+     ORDER BY c.created_at DESC
+     LIMIT 1
+  `;
+  return row === undefined ? undefined : await findConversation(db, ownerOid, row.id);
 }
 
 /**
@@ -463,8 +496,9 @@ export interface AssistantFrame {
   artefact_updated_by: "user" | "agent" | null;
   /**
    * The files the person attached to this message, for the pod to fetch to its disk before it delivers the message.
-   * Left out entirely while `ASSISTANT_UPLOADS_ENABLED` is off, so a pod whose client predates attachments is never
-   * sent one: nothing reports a pod's client version, so the flag is the only signal there is.
+   * Absent from a frame built without a message — a wake rather than a delivery — and an empty array for a message
+   * nothing was attached to. A client that predates attachments ignores the field, which is what makes it safe to
+   * send to every pod: see `parseAttachments` in the published client.
    */
   attachments?: FrameAttachment[];
 }
@@ -486,7 +520,7 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     product_label: productLabel(conversation.product),
     artefact_version: artefact.version,
     artefact_updated_by: artefact.updatedBy,
-    ...(uploadsEnabled() && messageId !== undefined ? { attachments: await frameAttachments(db, messageId) } : {})
+    ...(messageId === undefined ? {} : { attachments: await frameAttachments(db, messageId) })
   };
 }
 

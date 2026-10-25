@@ -273,6 +273,20 @@ export async function uploadNames(db: Database, viewerOid: string, conversationI
   });
 }
 
+/**
+ * The files waiting on a conversation's next message, oldest first, so the composer can show them again after the
+ * screen has been remounted. Only `stored` ones: a `pending` upload has no complete set of bytes behind it, cannot be
+ * sent, and showing it as a finished chip would be a lie the person would act on.
+ */
+export async function unsentAttachments(db: Database, conversationId: string): Promise<MessageAttachment[]> {
+  const rows = await db.assistantUpload.findMany({
+    where: { conversationId, messageId: null, state: "stored" },
+    select: { id: true, fileName: true, bytes: true, mediaType: true },
+    orderBy: { createdAt: "asc" }
+  });
+  return rows.map((row) => ({ id: row.id, name: row.fileName, bytes: Number(row.bytes), media_type: row.mediaType }));
+}
+
 /** The attachments of a message, oldest first, for the thread. Empty for a message with none. */
 export async function messageAttachments(db: Database, messageId: bigint): Promise<MessageAttachment[]> {
   const rows = await db.assistantUpload.findMany({

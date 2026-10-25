@@ -254,15 +254,13 @@ export function ChatView({
   view,
   templates,
   viewerOid,
-  actions,
-  uploads = false
+  actions
 }: {
   view: ConversationView;
   templates: readonly Template[];
   /** Who is reading, which the composer keys its draft on. */
   viewerOid: string;
   actions: ChatActions;
-  uploads?: boolean;
 }) {
   const router = useRouter();
   const arrivals = useAnnouncer("replies");
@@ -409,7 +407,6 @@ export function ChatView({
               // half-written message belongs to the conversation the person never left.
               draftId={view.id}
               onSend={send}
-              uploads={uploads}
               conversationId={view.id}
               dropZone={scroller.ref}
               onFocus={() => {

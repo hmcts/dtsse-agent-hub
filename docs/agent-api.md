@@ -123,13 +123,15 @@ The person's edits in the web UI follow the same version rule, recorded as `upda
 
 A file is at most 25 MB, a message carries at most 4, and a conversation's stored files total at most 200 MB. The hub decides the `stored_name` and that decision is authoritative; the client re-sanitises it anyway, because a path is the one thing it must not take on trust.
 
-Everything below answers `404` unless the service runs with `ASSISTANT_UPLOADS_ENABLED=true`. The flag exists because nothing reports a pod's client version: with it off, no frame carries `attachments`, so a pod on an older client cannot be sent a file it would silently never fetch. It also hides the composer's Attach item, so nothing is offered that cannot work.
+Everything below answers `404` unless the service runs with `VIRTUAL_AGENTS_ENABLED=true`, like the rest of the Assistant. There is no separate flag for attachments.
+
+`attachments` is on every `direct` frame built for a message, as an empty array when nothing was attached. A client that predates attachments ignores the field, and one that half-understands an entry drops it: `parseAttachments` in the published client returns `[]` for anything it is not willing to act on, and `attachmentLines` then adds nothing to the envelope. So the worst an old pod does is deliver the message without mentioning the file — the person's message still arrives, and nothing claims a file was read that was not. **The release order still matters**: publish the client and let pods cycle onto it before people start attaching, because until then an attached file is fetched by nobody.
 
 A refused `/api/ui/uploads` request carries a `reason` beside its `error`: one of `unavailable`, `no_such_conversation`, `no_such_upload`, `file_too_big`, `too_many_files`, `conversation_full`, `part_too_big` or `part_wrong_length`, listed in `src/assistant/uploads.ts`. The composer words each one for the person. It exists because `too_many_files` and `conversation_full` are both `409` and mean different things — send what you have, against this chat has no room left — and matching on the sentence would break the moment a cap is reworded.
 
 A message of files and no typed words is allowed, and the hub gives it a body naming the files: every message in the hub has words (`message_body_present` is a `CHECK` on the `message` table), and the envelope ends with the body, so a session handed paths and nothing else would have no ask. The conversation is still titled after the first file rather than after that sentence.
 
-Attaching a file on the new-chat screen creates the conversation first, since a file belongs to one before any of its bytes can be sent. If the person then walks away, the upload sweep removes a conversation whose only content was an attachment nobody sent — no message, no document, and no upload inside the retention window.
+Attaching a file on the new-chat screen creates the conversation first, since a file belongs to one before any of its bytes can be sent. That conversation, its files and the product chosen for it come back if the screen is remounted, so a trip to another chat and back does not start a second one and orphan the first. If the person walks away instead, the upload sweep removes an empty conversation — no message, no document, nothing uploaded inside the retention window — whether its files were sent, removed or never finished.
 
 | Method and path | Body | Response |
 |---|---|---|

@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { errorResponse, HttpError, json } from "@/agent-api/http";
 import { readBytes } from "@/assistant/upload-body";
 import { putUploadPart, writableUpload } from "@/assistant/upload-store";
-import { partIndexOf, partLength, type UploadRefusal, uploadsEnabled } from "@/assistant/uploads";
+import { partIndexOf, partLength, type UploadRefusal } from "@/assistant/uploads";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { uiRefusals, uiViewer } from "../../../../request";
@@ -23,7 +23,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ upl
   if (viewer instanceof Response) {
     return viewer;
   }
-  if (!virtualAgentsEnabled() || !uploadsEnabled()) {
+  if (!virtualAgentsEnabled()) {
     return errorResponse(404, "attaching files is not available on this deployment", { reason: "unavailable" satisfies UploadRefusal });
   }
   return await uiRefusals("upload part", async () => {

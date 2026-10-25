@@ -3,17 +3,6 @@
  * routes, the pod-facing routes, the sweep and the frame, so there is one answer to every size question.
  */
 
-export type Environment = Readonly<Record<string, string | undefined>>;
-
-/**
- * Off unless set to exactly `true`. Load-bearing rather than hygiene: nothing reports a pod's client version, so the
- * hub cannot tell whether a pod understands an `attachments` frame, and a pod on an older client would never fetch the
- * file and never say so — leaving the person believing the agent had read it.
- */
-export function uploadsEnabled(env: Environment = process.env): boolean {
-  return env.ASSISTANT_UPLOADS_ENABLED === "true";
-}
-
 /** 25 MB, the largest single file. Every byte of it crosses the hub's heap and its database. */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
@@ -129,7 +118,7 @@ export function partIndexOf(value: string, bytes: number): number | undefined {
  * and must not be told in the same words. Matching on the sentence instead would break the moment a cap is reworded.
  */
 export type UploadRefusal =
-  /** The deployment has `ASSISTANT_UPLOADS_ENABLED` off, so there is nothing to attach to. */
+  /** The deployment runs without virtual agents, so there is no Assistant to attach to. */
   | "unavailable"
   | "no_such_conversation"
   /** No such upload, or someone else's: the two are deliberately indistinguishable. */

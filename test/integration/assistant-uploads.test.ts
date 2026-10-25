@@ -23,6 +23,7 @@ import * as conversationsRoute from "../../src/app/api/virtual/[virtualAgentId]/
 import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
 import { sweepUploads } from "../../src/assistant/upload-sweep.ts";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_BYTES, MAX_UPLOAD_BYTES, PART_BYTES } from "../../src/assistant/uploads.ts";
+import { unsentChat } from "../../src/assistant/views.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import { DEV_PERSONA_COOKIE } from "../../src/viewer/identity.ts";
 import { type ClaimResult, createVirtualAgent } from "../../src/virtual-agents/store.ts";
@@ -169,7 +170,6 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
-  vi.stubEnv("ASSISTANT_UPLOADS_ENABLED", "true");
   vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
   await resetDatabase();
   actAs("alice");
@@ -350,12 +350,12 @@ describe("uploading a file", () => {
     expect(response.status).toBe(404);
   });
 
-  it("should answer 404 for every upload route while the flag is off", async () => {
+  it("should answer 404 for every upload route on a deployment without virtual agents", async () => {
     // Arrange
     await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
     const created = await jsonOf<Created>(await startUpload(conversation.id, { name: "a.pdf", size: 4 }));
-    vi.stubEnv("ASSISTANT_UPLOADS_ENABLED", "false");
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
 
     // Act & Assert
     expect((await startUpload(conversation.id, { name: "a.pdf", size: 4 })).status).toBe(404);
@@ -546,15 +546,15 @@ describe("the frame the pod reads", () => {
     ]);
   });
 
-  it("should leave attachments off the frame entirely while the flag is off, so an older pod is never sent one", async () => {
+  it("should carry an empty attachments array for a message nothing was attached to", async () => {
+    // Nothing holds this back any more, so every delivery names its files — none of them, here. A client that
+    // predates the field ignores it, which is what makes sending it to every pod safe.
     // Arrange
     const { token } = await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
-    const uploadId = await upload(conversation.id, "letter.pdf", filled(6, 1));
-    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "read this", uploadIds: [uploadId] });
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "just words" });
     const { agentId, sessionId } = await sessionOf(conversation.id);
     await register(token, sessionId, conversation.id);
-    vi.stubEnv("ASSISTANT_UPLOADS_ENABLED", "false");
 
     // Act
     const abort = new AbortController();
@@ -566,7 +566,7 @@ describe("the frame the pod reads", () => {
     // Assert
     const { assistant } = JSON.parse(direct!.data!);
     expect(assistant).toMatchObject({ conversation_id: conversation.id, product: "pcs" });
-    expect("attachments" in assistant).toBe(false);
+    expect(assistant.attachments).toEqual([]);
   });
 });
 
@@ -668,15 +668,17 @@ describe("the pod fetching an attachment", () => {
     expect(response.status).toBe(404);
   });
 
-  it("should answer 404 on both pod routes while the flag is off", async () => {
+  it("should put both pod routes out of reach on a deployment without virtual agents", async () => {
+    // 401 rather than 404: a conversation's agent is only ever reached with a virtual agent's launch token, and
+    // without virtual agents that token is not honoured at all, so the refusal comes before the route is entered.
     // Arrange
     const { token, agentId, uploadId } = await attached();
-    vi.stubEnv("ASSISTANT_UPLOADS_ENABLED", "false");
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
 
     // Act & Assert
-    expect((await pod(attachmentPartRoute.GET, token, partPath(agentId, uploadId, 0), { agentId, uploadId, index: "0" })).status).toBe(404);
+    expect((await pod(attachmentPartRoute.GET, token, partPath(agentId, uploadId, 0), { agentId, uploadId, index: "0" })).status).toBe(401);
     expect((await pod(attachmentFetchedRoute.POST, token, `/api/agent/${agentId}/attachments/${uploadId}/fetched`, { agentId, uploadId }, "POST")).status).toBe(
-      404
+      401
     );
   });
 
@@ -1154,7 +1156,11 @@ describe("a file from the browser to the session's envelope", () => {
     expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversation.id } })).toMatchObject({ title: "letter.pdf" });
   });
 
-  it("should carry nothing to the pod while the flag is off, so a pod on an older client is never sent a file", async () => {
+  it("should tell a client that cannot read the frame nothing at all, rather than mislead the person", async () => {
+    // This is what stands in for the flag that used to hold the hub back. Every pod is now sent the attachments, so
+    // the question is what a pod whose client predates them does — and the answer has to be "say nothing", not
+    // "claim the file was read". `parseAttachments` answers `[]` for anything it will not act on, `attachmentLines`
+    // then adds nothing, and the person's message is still delivered.
     // Arrange
     const { token } = await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
@@ -1162,17 +1168,19 @@ describe("a file from the browser to the session's envelope", () => {
     await actions.sendAssistantMessage({ conversationId: conversation.id, body: "read this", uploadIds: [uploadId] });
     const { agentId, sessionId } = await sessionOf(conversation.id);
     await register(token, sessionId, conversation.id);
-    vi.stubEnv("ASSISTANT_UPLOADS_ENABLED", "false");
 
-    // Act
+    // Act: the frame as it really is, then read as a client that knows nothing of the field would read it.
     const frame = await frameFor(token, agentId);
     const assistant = parseAssistantFrame(frame.assistant);
-    const attachments = parseAttachments(assistant?.attachments);
-    const content = assistantEnvelope(frame.message, assistant ?? {}, null, []);
+    const unreadable = parseAttachments(undefined);
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, unreadable);
 
-    // Assert: nothing on the frame, nothing fetched, and not a word about a file in the envelope.
-    expect(attachments).toEqual([]);
+    // Assert: the hub did send them, and an old client still says not a word about a file it never fetched.
+    expect(parseAttachments(assistant?.attachments)).toHaveLength(1);
+    expect(unreadable).toEqual([]);
     expect(content).not.toContain("attached");
+    expect(content).toContain("read this");
+    // And the bytes stay in Postgres for the pod that does understand, once one is running.
     expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(1);
   });
 });
@@ -1251,10 +1259,10 @@ describe("attaching on the new-chat screen", () => {
     expect(await startUpload(id, { name: "letter.pdf", size: 6 })).toMatchObject({ status: 201 });
   });
 
-  it("should refuse to open one at all while uploads are switched off, since nothing would be attached to it", async () => {
+  it("should refuse to open one at all without virtual agents, since there would be no Assistant to attach to", async () => {
     // Arrange
     await startedAssistant();
-    vi.stubEnv("ASSISTANT_UPLOADS_ENABLED", "false");
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
 
     // Act
     const opened = await actions.openConversation({ product: "pcs" });
@@ -1268,7 +1276,11 @@ describe("attaching on the new-chat screen", () => {
 describe("the sweep of conversations attaching left behind", () => {
   /** A conversation whose only content is one upload, attached `hoursAgo` and never sent. */
   async function abandoned(hoursAgo: number): Promise<string> {
+    const at = new Date(Date.now() - hoursAgo * 3_600_000);
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    // The conversation is backdated as well as its file: an upload cannot predate the conversation it belongs to,
+    // and the sweep looks at both, so a helper that aged only one would be arranging something impossible.
+    await prisma.assistantConversation.update({ where: { id: conversation.id }, data: { createdAt: at } });
     await prisma.assistantUpload.create({
       data: {
         conversationId: conversation.id,
@@ -1278,7 +1290,7 @@ describe("the sweep of conversations attaching left behind", () => {
         mediaType: "application/pdf",
         bytes: 4n,
         state: "stored",
-        createdAt: new Date(Date.now() - hoursAgo * 3_600_000)
+        createdAt: at
       }
     });
     return conversation.id;
@@ -1342,7 +1354,10 @@ describe("the sweep of conversations attaching left behind", () => {
     expect(await prisma.assistantConversation.count({ where: { id: conversation.id } })).toBe(1);
   });
 
-  it("should leave an empty conversation that nothing was ever attached to, which is not this sweep's business", async () => {
+  it("should delete an old empty conversation whatever became of its files, since nobody ever spoke in it", async () => {
+    // It used to take an upload still being present, which left anything whose file had been removed — or whose
+    // very first message failed after the row was created — showing in the sidebar for ever with nothing to
+    // collect it.
     // Arrange
     await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
@@ -1352,8 +1367,8 @@ describe("the sweep of conversations attaching left behind", () => {
     const result = await sweepUploads(prisma);
 
     // Assert
-    expect(result).toMatchObject({ conversations: 0 });
-    expect(await prisma.assistantConversation.count({ where: { id: conversation.id } })).toBe(1);
+    expect(result).toMatchObject({ conversations: 1 });
+    expect(await prisma.assistantConversation.count({ where: { id: conversation.id } })).toBe(0);
   });
 
   it("should leave one whose session wrote a document before the person said anything", async () => {
@@ -1465,11 +1480,11 @@ describe("the refusals the composer words for the person", () => {
     expect(await jsonOf<{ reason: string }>(noConversation)).toMatchObject({ reason: "no_such_conversation" });
   });
 
-  it("should say the feature is unavailable rather than nothing when the flag is off", async () => {
+  it("should say the feature is unavailable rather than nothing without virtual agents", async () => {
     // Arrange
     await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
-    vi.stubEnv("ASSISTANT_UPLOADS_ENABLED", "false");
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
 
     // Act
     const refused = await startUpload(conversation.id, { name: "a.pdf", size: 4 });
@@ -1496,5 +1511,140 @@ describe("the refusals the composer words for the person", () => {
     expect(discarded.status).toBe(204);
     expect(await discarded.text()).toBe("");
     expect(await prisma.assistantUpload.count({ where: { id: created.uploadId } })).toBe(0);
+  });
+});
+
+/**
+ * The server half of the new-chat screen surviving a remount. The screen holds no copy of any of this: the bytes are
+ * in Postgres against the conversation and the product is on its row, so the hub is asked rather than the browser.
+ */
+describe("the unsent new chat the screen comes back to", () => {
+  it("should answer the conversation, its product and its finished files", async () => {
+    // Arrange
+    await startedAssistant();
+    const opened = await actions.openConversation({ product: "pcs" });
+    const id = (opened as { id: string }).id;
+    const first = await upload(id, "scanned letter.pdf", filled(6, 1));
+    const second = await upload(id, "notes.txt", filled(3, 2));
+
+    // Act
+    const resumed = await unsentChat(prisma, ALICE.oid);
+
+    // Assert
+    expect(resumed).toEqual({
+      id,
+      product: "pcs",
+      attachments: [
+        { id: first, name: "scanned letter.pdf", bytes: 6, media_type: "application/pdf" },
+        { id: second, name: "notes.txt", bytes: 3, media_type: "application/pdf" }
+      ]
+    });
+  });
+
+  it("should answer nothing once the message has been sent, the moment the draft is discarded too", async () => {
+    // The two have to agree: text coming back without the file it belonged with is the bug this prevents.
+    // Arrange
+    await startedAssistant();
+    const opened = await actions.openConversation({ product: "pcs" });
+    const id = (opened as { id: string }).id;
+    const uploadId = await upload(id, "letter.pdf", filled(6, 1));
+
+    // Act
+    await actions.sendAssistantMessage({ conversationId: id, body: "what does this say?", uploadIds: [uploadId] });
+
+    // Assert
+    expect(await unsentChat(prisma, ALICE.oid)).toBeUndefined();
+  });
+
+  it("should answer nothing when the only file never finished uploading, since a half-sent file cannot be sent", async () => {
+    // Arrange
+    await startedAssistant();
+    const opened = await actions.openConversation({ product: "pcs" });
+    const id = (opened as { id: string }).id;
+    await startUpload(id, { name: "half.pdf", size: PART_BYTES + 10 });
+
+    // Act & Assert
+    expect(await unsentChat(prisma, ALICE.oid)).toBeUndefined();
+  });
+
+  it("should answer nothing once the person has removed the only chip", async () => {
+    // Arrange
+    await startedAssistant();
+    const opened = await actions.openConversation({ product: "pcs" });
+    const id = (opened as { id: string }).id;
+    const uploadId = await upload(id, "letter.pdf", filled(6, 1));
+
+    // Act
+    await ui(discardRoute.DELETE, { path: `/api/ui/uploads/${uploadId}`, params: { uploadId }, method: "DELETE" });
+
+    // Assert
+    expect(await unsentChat(prisma, ALICE.oid)).toBeUndefined();
+  });
+
+  it("should answer the newest when more than one was left unsent, since only one screen is composing", async () => {
+    // Arrange
+    await startedAssistant();
+    const older = ((await actions.openConversation({ product: "ccd" })) as { id: string }).id;
+    await upload(older, "old.pdf", filled(6, 1));
+    await prisma.assistantConversation.update({ where: { id: older }, data: { createdAt: new Date(Date.now() - 60_000) } });
+    const newer = ((await actions.openConversation({ product: "pcs" })) as { id: string }).id;
+    await upload(newer, "new.pdf", filled(6, 2));
+
+    // Act & Assert
+    expect(await unsentChat(prisma, ALICE.oid)).toMatchObject({ id: newer, product: "pcs" });
+  });
+
+  it("should never answer with somebody else's unsent chat", async () => {
+    // Arrange
+    await startedAssistant();
+    const opened = ((await actions.openConversation({ product: "pcs" })) as { id: string }).id;
+    await upload(opened, "letter.pdf", filled(6, 1));
+
+    // Act & Assert
+    expect(await unsentChat(prisma, BOB.oid)).toBeUndefined();
+  });
+
+  it("should answer nothing for a conversation that was spoken in and has a file still unsent", async () => {
+    // A chat with a message in it is not the new-chat screen's to resume; its own page shows it.
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "hello" });
+    await upload(conversation.id, "later.pdf", filled(6, 1));
+
+    // Act & Assert
+    expect(await unsentChat(prisma, ALICE.oid)).toBeUndefined();
+  });
+});
+
+describe("the sweep and a conversation whose file was removed", () => {
+  it("should delete one left empty by removing the only chip, which nothing else would ever collect", async () => {
+    // Arrange: attached, then thought better of it. The upload row is gone, so a sweep that required one would
+    // leave this conversation showing as a "New chat" the person cannot account for, for ever.
+    await startedAssistant();
+    const opened = ((await actions.openConversation({ product: "pcs" })) as { id: string }).id;
+    const uploadId = await upload(opened, "letter.pdf", filled(6, 1));
+    await ui(discardRoute.DELETE, { path: `/api/ui/uploads/${uploadId}`, params: { uploadId }, method: "DELETE" });
+    await prisma.assistantConversation.update({ where: { id: opened }, data: { createdAt: new Date(Date.now() - 5 * 3_600_000) } });
+
+    // Act
+    const result = await sweepUploads(prisma);
+
+    // Assert
+    expect(result).toMatchObject({ conversations: 1 });
+    expect(await prisma.assistantConversation.count({ where: { id: opened } })).toBe(0);
+  });
+
+  it("should leave an empty conversation made within the window alone, since a screen may still be composing in it", async () => {
+    // Arrange
+    await startedAssistant();
+    const opened = ((await actions.openConversation({ product: "pcs" })) as { id: string }).id;
+
+    // Act
+    const result = await sweepUploads(prisma);
+
+    // Assert
+    expect(result).toMatchObject({ conversations: 0 });
+    expect(await prisma.assistantConversation.count({ where: { id: opened } })).toBe(1);
   });
 });

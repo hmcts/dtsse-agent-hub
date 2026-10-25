@@ -82,21 +82,25 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  *
  * The conditions are what make this safe to run unattended, and each is load-bearing:
  *
- * - **It has uploads.** Nothing else in the service creates a conversation without a message, so this limits the
- *   sweep to exactly what attaching produced. An empty conversation from any other cause is not its business.
  * - **No message to or from any of its agents.** One message and the conversation is the person's; this never
  *   touches a chat that was spoken in, whatever became of its files.
  * - **No document.** The session may have written one before the person said anything.
- * - **Its newest upload is older than the retention window.** The window follows the last thing the person actually
- *   did in it, not when it was created, so attaching a second file hours later puts the clock back rather than
- *   leaving a live composer to be swept out from under them.
+ * - **It was created longer ago than the retention window, and holds no upload newer than it.** The window follows
+ *   the last thing the person actually did in the conversation rather than only when it was made, so attaching a
+ *   second file hours later puts the clock back rather than leaving a live composer to be swept out from under them.
+ *
+ * It deliberately does **not** require the conversation to still have an upload. Attaching a file and then removing
+ * the chip deletes the upload row and leaves a conversation nothing would ever collect, showing in the sidebar as a
+ * "New chat" that cannot be explained; the same is true of a `startConversation` whose first message failed after
+ * the row was created. An empty conversation is one nobody has said anything in, whatever route produced it, and
+ * after the window it is rubbish either way.
  */
 async function dropAbandoned(tx: Database, retentionHours: number, batch: number): Promise<number> {
   const abandoned = await tx.$queryRaw<{ id: string; virtual_agent_id: string; owner_oid: string }[]>`
     SELECT c.id::text AS id, c.virtual_agent_id::text AS virtual_agent_id, c.owner_oid
       FROM assistant_conversation c
      WHERE c.artefact_version = 0
-       AND EXISTS (SELECT 1 FROM assistant_upload u WHERE u.conversation_id = c.id)
+       AND c.created_at < now() - make_interval(hours => ${retentionHours}::int)
        AND NOT EXISTS (
              SELECT 1 FROM assistant_upload u
               WHERE u.conversation_id = c.id
@@ -123,8 +127,8 @@ export interface UploadSweeper {
 }
 
 /**
- * Runs `sweepUploads` on an interval, with the timer unreferenced as the other sweeps' are. Started whatever
- * `ASSISTANT_UPLOADS_ENABLED` says, because rows left over from a deployment that had it on still hold bytes.
+ * Runs `sweepUploads` on an interval, with the timer unreferenced as the other sweeps' are. Started unconditionally: part rows
+ * hold bytes whether or not anyone is attaching anything right now.
  */
 export function startUploadSweep(prisma: PrismaClient, intervalMs: number = UPLOAD_SWEEP_INTERVAL_MS): UploadSweeper {
   let running = false;

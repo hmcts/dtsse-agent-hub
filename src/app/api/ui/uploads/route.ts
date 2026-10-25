@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { errorResponse, json, readJson } from "@/agent-api/http";
 import { findConversation } from "@/assistant/store";
 import { createUpload } from "@/assistant/upload-store";
-import { type UploadRefusal, uploadsEnabled } from "@/assistant/uploads";
+import type { UploadRefusal } from "@/assistant/uploads";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { uiRefusals, uiViewer } from "../request";
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (viewer instanceof Response) {
     return viewer;
   }
-  if (!virtualAgentsEnabled() || !uploadsEnabled()) {
+  if (!virtualAgentsEnabled()) {
     return errorResponse(404, "attaching files is not available on this deployment", { reason: "unavailable" satisfies UploadRefusal });
   }
   return await uiRefusals("start upload", async () => {

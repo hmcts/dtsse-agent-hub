@@ -2,8 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { DEFAULT_PRODUCT } from "@/assistant/products";
+import { DEFAULT_PRODUCT, isProduct } from "@/assistant/products";
 import type { Starter, Template } from "@/assistant/starters";
+import type { UnsentChat } from "@/assistant/views";
 import { SidebarToggle } from "@/components/assistant/AssistantShell";
 import { Composer } from "@/components/assistant/Composer";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
@@ -31,32 +32,68 @@ export interface EmptyChatActions {
  */
 export const NEW_CHAT_DRAFT = "new";
 
+/** Where the new chat's product choice is remembered, scoped to the viewer as the drafts are and for the same reason. */
+const PRODUCT_KEY = "agent-hub:assistant-product:";
+
+/**
+ * The product the new chat was last set to, in `sessionStorage`.
+ *
+ * It has to be remembered, and it has to be remembered *here*, because the draft text is: coming back to find the
+ * words restored and the product silently back to its default is how a message gets sent about the wrong thing. Same
+ * store, same per-tab lifetime, so the two always agree. Every access is wrapped for the same reasons `useDraft`
+ * wraps its own — storage throws in Safari private browsing and is absent server-side.
+ */
+function rememberedProduct(viewerOid: string): string | undefined {
+  try {
+    const stored = window.sessionStorage.getItem(`${PRODUCT_KEY}${viewerOid}`);
+    return stored !== null && isProduct(stored) ? stored : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function rememberProduct(viewerOid: string, product: string): void {
+  try {
+    window.sessionStorage.setItem(`${PRODUCT_KEY}${viewerOid}`, product);
+  } catch {
+    // Nothing to do: the choice is still on the screen, it just will not outlive it.
+  }
+}
+
 /**
  * A new chat: what the person is working on, as a starter card or their own words, and which product it is about.
  *
  * Attaching a file is a plausible opening move — handing the assistant a scanned letter and asking what it says — so
  * the Attach item is offered here as well as in a chat that already exists. A file has to belong to a conversation
  * before any of its bytes can be sent, so the first attachment creates one, and the first message then goes into it
- * rather than starting another. Everything else is unchanged: the conversation is created with one more round trip
- * that the chip's own progress bar already covers, and the page still moves to `/assistant/{id}` on send, not on
- * attach — moving at attach would unmount this composer and lose both the part in flight and whatever was typed.
+ * rather than starting another. The page still moves to `/assistant/{id}` on send, not on attach — moving at attach
+ * would unmount this composer and lose both the part in flight and whatever was typed.
+ *
+ * **Everything this screen holds has to survive a remount of it**, because the draft text does. The route unmounts
+ * and remounts on a trip to another conversation and back, and words returning without the conversation they were
+ * attached to was data loss: `begin` would read no conversation, start a second one, and leave the first with the
+ * person's file in it for the sweep to take. So the conversation and its files come back from the hub through
+ * `unsent` — authoritative, because the bytes are already there — and the product comes back with them, from the
+ * conversation's own row when there is one and from `sessionStorage` when there is not.
  */
 export function EmptyChat({
   starters,
   templates,
   viewerOid,
-  actions,
-  uploads = false
+  unsent,
+  actions
 }: {
   starters: readonly Starter[];
   templates: readonly Template[];
   /** Who is reading, which the composer keys its draft on. */
   viewerOid: string;
+  /** The conversation this screen already opened for a file and never sent, if there is one. */
+  unsent?: UnsentChat;
   actions: EmptyChatActions;
-  uploads?: boolean;
 }) {
   const router = useRouter();
-  const [product, setProduct] = useState(DEFAULT_PRODUCT);
+  // The conversation's own product wins: it is what the file was attached under, and what the session will be told.
+  const [product, setProduct] = useState(() => unsent?.product ?? rememberedProduct(viewerOid) ?? DEFAULT_PRODUCT);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
 
@@ -64,9 +101,13 @@ export function EmptyChat({
   // that four files chosen at once share one conversation: each calls `openConversation`, and all but the first wait
   // on the call already in flight instead of creating another chat.
   const opening = useRef<Promise<string> | null>(null);
-  const opened = useRef<string | null>(null);
+  const opened = useRef<string | null>(unsent?.id ?? null);
 
   async function openConversation(): Promise<string> {
+    // Already have one — this mount opened it, or the hub handed it back after a remount — so nothing is created.
+    if (opened.current !== null) {
+      return opened.current;
+    }
     opening.current ??= (async () => {
       const result = await actions.open({ product });
       if (!result.ok) {
@@ -82,6 +123,7 @@ export function EmptyChat({
 
   async function changeProduct(next: string): Promise<void> {
     setProduct(next);
+    rememberProduct(viewerOid, next);
     const conversation = opened.current;
     if (conversation === null) {
       // Nothing has been attached, so there is no conversation yet and the first message carries the product.
@@ -164,8 +206,8 @@ export function EmptyChat({
             draftId={NEW_CHAT_DRAFT}
             onSend={begin}
             disabled={starting}
-            uploads={uploads}
             openConversation={openConversation}
+            attached={unsent?.attachments}
           />
         </div>
       </div>

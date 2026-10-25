@@ -12,22 +12,8 @@ import {
   partCount,
   partIndexOf,
   partLength,
-  storedNameOf,
-  uploadsEnabled
+  storedNameOf
 } from "./uploads.ts";
-
-describe("uploadsEnabled", () => {
-  it("should be off when the variable is unset", () => {
-    expect(uploadsEnabled({})).toBe(false);
-  });
-
-  it("should be on only for exactly true", () => {
-    expect(uploadsEnabled({ ASSISTANT_UPLOADS_ENABLED: "true" })).toBe(true);
-    expect(uploadsEnabled({ ASSISTANT_UPLOADS_ENABLED: "TRUE" })).toBe(false);
-    expect(uploadsEnabled({ ASSISTANT_UPLOADS_ENABLED: "1" })).toBe(false);
-    expect(uploadsEnabled({ ASSISTANT_UPLOADS_ENABLED: "yes" })).toBe(false);
-  });
-});
 
 describe("the part size", () => {
   it("should be 4 MiB, the size the ingress read timeout allows for", () => {

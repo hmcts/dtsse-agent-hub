@@ -53,10 +53,6 @@ nodejs:
     # The client id from ENTRA_CLIENT_ID is accepted as an audience as well; v2 access tokens carry that.
     AGENT_API_AUDIENCE: api://dtsse-agent-hub
     VIRTUAL_AGENTS_ENABLED: "true"
-    # Attaching files to an HMCTS Assistant message. Off until a pod has demonstrably cycled onto a client that
-    # fetches attachments: nothing reports a pod's client version, so with it on too early a person would be told
-    # their file was sent to an agent that never fetched it and never mentioned it.
-    ASSISTANT_UPLOADS_ENABLED: "false"
     # The workspace marketplace plugins an owner can tick for a virtual agent, as `name=description`, comma-separated.
     # Each name must be in the workspace's .claude-plugin/marketplace.json for the pod to load it.
     VIRTUAL_AGENT_PLUGINS: "pcs=PCS team workflows,dtsse=DTSSE docs"

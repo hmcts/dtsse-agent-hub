@@ -2,6 +2,7 @@
 
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import type { Template } from "@/assistant/starters";
+import type { MessageAttachment } from "@/assistant/upload-store";
 import { admitFiles, discardUpload, fileSizeLabel, pastedName, UploadAborted, uploadFile } from "@/components/assistant/uploadClient";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useDraft } from "@/components/useDraft";
@@ -17,7 +18,8 @@ interface Attachment {
   name: string;
   mediaType: string;
   size: number;
-  body: File;
+  /** `null` for a chip rebuilt from the hub: the bytes are already there, so there is nothing here to send again. */
+  body: File | null;
   /** The hub's id, from the moment the upload is claimed, so it can be discarded while its parts are still going. */
   uploadId: string | null;
   state: Attaching;
@@ -25,6 +27,19 @@ interface Attachment {
 
 function percentSent(file: Attachment): number {
   return file.state.stage === "uploading" ? Math.min(100, Math.round((file.state.sent / file.size) * 100)) : 100;
+}
+
+/** The files the hub is already holding, as chips: finished, because the hub would not report them otherwise. */
+function chipsFor(attached: readonly MessageAttachment[] = []): Attachment[] {
+  return attached.map((file) => ({
+    key: `h${file.id}`,
+    name: file.name,
+    mediaType: file.media_type,
+    size: file.bytes,
+    body: null,
+    uploadId: file.id,
+    state: { stage: "ready" }
+  }));
 }
 
 /**
@@ -36,11 +51,15 @@ function percentSent(file: Attachment): number {
  * What is in the box is kept as a draft per `draftId`, because each conversation is its own page: going to another one
  * and back unmounts and remounts the box, and a half-written message has to outlive that. A template the person
  * picked and then left is kept the same way — it is the same "I was part-way through" — and emptying the box by hand
- * is what drops it. Attachments are not kept: the chips belong to this mount, and the bytes are already at the hub.
+ * is what drops it.
  *
- * Attaching needs two things, and offers nothing at all without either. `uploads` is the deployment's
- * `ASSISTANT_UPLOADS_ENABLED`, read on the server and passed down: with it off the routes answer 404, so offering an
- * Attach item would be offering something that cannot work. And a file needs a conversation to belong to — either
+ * Files already uploaded and not yet sent come back the same way, through `attached`, but they are read from the hub
+ * rather than kept here: by the time a remount happens the bytes are in Postgres against the conversation, so the
+ * hub is the only honest source for what is still waiting to be sent. A chip rebuilt that way has no `File` behind
+ * it, which is why `body` is nullable — there is nothing left in the browser to retry with, and nothing that needs
+ * one, because a file the hub has is already uploaded.
+ *
+ * A file needs a conversation to belong to, so the attach controls appear only with one in prospect: either
  * `conversationId`, or `openConversation` for the new-chat screen, where attaching is what creates one.
  */
 export function Composer({
@@ -50,9 +69,9 @@ export function Composer({
   disabled = false,
   viewerOid,
   draftId,
-  uploads = false,
   conversationId,
   openConversation,
+  attached,
   dropZone
 }: {
   templates: readonly Template[];
@@ -64,18 +83,20 @@ export function Composer({
   viewerOid: string;
   /** What the draft is kept under: the conversation, or the new chat that has not created one yet. */
   draftId: string;
-  /** Whether this deployment carries files at all. Off by default, as the flag itself is. */
-  uploads?: boolean;
   conversationId?: string;
   /** Answers the conversation to attach to, creating it if it does not exist yet. Called once per attached file. */
   openConversation?: () => Promise<string>;
+  /** Files the hub is already holding for the next message, shown as chips again on a remount of the screen. */
+  attached?: readonly MessageAttachment[];
   dropZone?: RefObject<HTMLElement | null>;
 }) {
   const { body: text, setBody: setText, discard } = useDraft({ kind: "assistant-draft", viewerOid, draftId });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<"closed" | "open" | "templates">("closed");
-  const [attachments, setAttachments] = useState<readonly Attachment[]>([]);
+  // Seeded once, on mount: `attached` is what the hub was holding when the page was rendered, and from then on this
+  // list is the live one. A later render handing down a stale `attached` must not overwrite it.
+  const [attachments, setAttachments] = useState<readonly Attachment[]>(() => chipsFor(attached));
   const [dragging, setDragging] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -86,8 +107,8 @@ export function Composer({
   const files = useAnnouncer("files");
 
   // The attachments are held here as well as in state: a progress event or a Remove reads the list it was started
-  // from, not the one a later render closed over.
-  const held = useRef<Attachment[]>([]);
+  // from, not the one a later render closed over. Starts as the same array the state did.
+  const held = useRef<Attachment[]>([...attachments]);
   const aborts = useRef(new Map<string, AbortController>());
   const keys = useRef(0);
   const attachNow = useRef<(chosen: readonly File[]) => void>(() => undefined);
@@ -118,7 +139,7 @@ export function Composer({
     };
   }, [menu]);
 
-  const attachable = uploads && (conversationId !== undefined || openConversation !== undefined) && !disabled;
+  const attachable = (conversationId !== undefined || openConversation !== undefined) && !disabled;
 
   function update(change: (current: Attachment[]) => Attachment[]): void {
     held.current = change(held.current);
@@ -135,7 +156,8 @@ export function Composer({
 
   async function run(key: string): Promise<void> {
     const file = held.current.find((item) => item.key === key);
-    if (file === undefined) {
+    // A chip rebuilt from the hub has no bytes here to upload, and needs none: the hub already has the file.
+    if (file === undefined || file.body === null) {
       return;
     }
     const controller = new AbortController();

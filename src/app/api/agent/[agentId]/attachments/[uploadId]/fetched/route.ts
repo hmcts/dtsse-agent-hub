@@ -2,7 +2,6 @@ import { HttpError, noContent } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
 import { conversationOfAgent } from "@/assistant/store";
 import { reportFetched, sessionAttachment } from "@/assistant/upload-store";
-import { uploadsEnabled } from "@/assistant/uploads";
 import { prisma } from "@/store/prisma";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 
@@ -18,7 +17,7 @@ export const dynamic = "force-dynamic";
  * otherwise be stuck retrying a refusal.
  */
 export const POST = ownedAgentRoute<{ agentId: string; uploadId: string }>(async ({ agent, params }) => {
-  if (!virtualAgentsEnabled() || !uploadsEnabled()) {
+  if (!virtualAgentsEnabled()) {
     throw new HttpError(404, "not found");
   }
   const conversation = await conversationOfAgent(prisma, agent.id);

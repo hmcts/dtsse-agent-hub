@@ -4,13 +4,12 @@ import { saveCredential } from "@/app/_actions/credentials";
 import { pasteLoginCode } from "@/app/_actions/virtual-agents";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
-import { uploadsEnabled } from "@/assistant/uploads";
 import { WAITING_COOKIE, waitingDismissed } from "@/assistant/waiting";
 import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { requireViewer } from "@/viewer/current";
-import { openAssistant } from "@/web/data";
+import { openAssistant, unsentNewChat } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -26,10 +25,10 @@ export default async function AssistantPage() {
   const viewer = await requireViewer();
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
-  const home = await openAssistant(viewer);
+  const [home, unsent] = await Promise.all([openAssistant(viewer), unsentNewChat(viewer)]);
   return (
     <AssistantShell viewerName={viewer.name} groups={home.conversations} activeId={null} hubLink theme={theme}>
-      <EmptyChat starters={STARTERS} templates={TEMPLATES} viewerOid={viewer.oid} actions={ACTIONS} uploads={uploadsEnabled()} />
+      <EmptyChat starters={STARTERS} templates={TEMPLATES} viewerOid={viewer.oid} unsent={unsent} actions={ACTIONS} />
       <OnboardingGate
         assistant={home.assistant}
         statuses={home.credentials.available ? home.credentials.statuses : []}

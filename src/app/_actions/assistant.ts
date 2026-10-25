@@ -18,7 +18,7 @@ import {
   writeArtefact
 } from "@/assistant/store";
 import { attachUploads, uploadNames } from "@/assistant/upload-store";
-import { attachedBody, uploadsEnabled } from "@/assistant/uploads";
+import { attachedBody } from "@/assistant/uploads";
 import { loadThreadMessage, type ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import { directAsPerson } from "@/messages/send";
@@ -119,7 +119,7 @@ export async function startConversation(input: { product: unknown; body: unknown
  */
 export async function openConversation(input: { product: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("open conversation", async () => {
-    if (!virtualAgentsEnabled() || !uploadsEnabled()) {
+    if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
