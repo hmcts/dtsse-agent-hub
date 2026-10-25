@@ -95,10 +95,6 @@ export const FAILING_REASONS: ReadonlySet<string> = new Set([
 /** Statuses from which a StatefulSet the orchestrator has just applied for `running` is still coming up. */
 const NOT_YET_STARTED: readonly VirtualAgentStatus[] = ["requested", "stopping", "stopped"];
 
-export function isPodPhase(value: unknown): value is PodPhase {
-  return typeof value === "string" && (POD_PHASES as readonly string[]).includes(value);
-}
-
 function fromPod(current: Current, report: PodReport): Outcome {
   if (current.desired !== "running") {
     return { refused: `the agent is meant to be ${current.desired}, so its pod's reports no longer apply` };

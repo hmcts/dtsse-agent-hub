@@ -231,6 +231,25 @@ describe("the person's assistant", () => {
 
     expect((await ensureAssistant(prisma, VIEWER)).desired).toBe("running");
   });
+
+  // `ensureAssistant` leaves an existing row's `model_route` alone, and the pod boots on it, so an `AIGateway.User`
+  // app role granted after the row was made puts the viewer on a different route from their own assistant. What
+  // `/assistant` asks for must then be storable: it asks for the row's credentials, and the only Claude token the
+  // hub will ever hand that pod is the one this page can take.
+  it.each([
+    ["bedrock", "own-licence", ["github", "azure", "claude"], true],
+    ["own-licence", "bedrock", ["github", "azure", "bedrock"], true],
+    ["own-licence", "own-licence", ["github", "azure", "claude"], true],
+    ["bedrock", "bedrock", ["github", "azure", "bedrock"], false]
+  ] as const)("should ask for the assistant's own credentials and allow every one of them when the viewer is on %s and the row on %s", async (viewerRoute, rowRoute, needed, claudeTokenUsable) => {
+    await insertUser(ALICE);
+    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: rowRoute, name: "assistant" });
+
+    const home = await openAssistant({ ...ALICE, tid: "dev", modelRoute: viewerRoute });
+
+    expect(home.assistant.needed).toEqual(needed);
+    expect(home.credentials).toMatchObject({ modelRoute: viewerRoute, claudeTokenUsable });
+  });
 });
 
 describe("conversations", () => {
