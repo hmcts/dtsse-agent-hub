@@ -81,8 +81,36 @@ export type ReadAttachments = {
 };
 
 /** The name to put on a refused entry's outcome, for an entry whose `name` is not a string this client can use. */
-function droppedName(raw: Record<string, unknown> | null): string {
+function droppedName(entry: unknown): string {
+  const raw = asRecord(entry);
   return raw !== null && typeof raw.name === "string" && raw.name !== "" ? safeName(raw.name) : "an unnamed file";
+}
+
+/**
+ * One entry of a frame's `attachments`: the file to fetch, or the reason this client will not act on it.
+ *
+ * Each check has a reason of its own because each reason is something the person can be told. They are asked in the
+ * order a fetch would need them — an id and a name to build the path, then a length, then the parts to read it in.
+ */
+function readEntry(entry: unknown, partBytesFallback: number | undefined): { attachment: Attachment } | { refusal: string } {
+  const raw = asRecord(entry);
+  if (!raw || typeof raw.upload_id !== "string" || !UUID.test(raw.upload_id) || typeof raw.name !== "string" || raw.name === "") {
+    return { refusal: "this client could not read the file's id or name on the frame" };
+  }
+  const bytes = raw.bytes;
+  if (typeof bytes !== "number" || !Number.isInteger(bytes) || bytes < 1 || bytes > MAX_ATTACHMENT_BYTES) {
+    return { refusal: "the frame gave a size this client cannot fetch" };
+  }
+  const partBytes = typeof raw.part_bytes === "number" ? raw.part_bytes : partBytesFallback;
+  if (typeof partBytes !== "number" || !Number.isInteger(partBytes) || partBytes < 1) {
+    return { refusal: "the frame gave no part size this client could use" };
+  }
+  const parts = typeof raw.parts === "number" && Number.isInteger(raw.parts) && raw.parts > 0 ? raw.parts : Math.ceil(bytes / partBytes);
+  if (parts !== Math.ceil(bytes / partBytes)) {
+    return { refusal: "the frame's part count does not match its size" };
+  }
+  const mediaType = typeof raw.media_type === "string" && raw.media_type !== "" ? raw.media_type : "application/octet-stream";
+  return { attachment: { uploadId: raw.upload_id, name: raw.name, bytes, mediaType, parts } };
 }
 
 /**
@@ -106,34 +134,12 @@ export function readAttachments(value: unknown, partBytesFallback?: number): Rea
   const attachments: Attachment[] = [];
   const dropped: AttachmentOutcome[] = [];
   for (const entry of value.slice(0, MAX_ATTACHMENTS)) {
-    const raw = asRecord(entry);
-    const refuse = (reason: string) => dropped.push({ name: droppedName(raw), error: reason });
-    if (!raw || typeof raw.upload_id !== "string" || !UUID.test(raw.upload_id) || typeof raw.name !== "string" || raw.name === "") {
-      refuse("this client could not read the file's id or name on the frame");
-      continue;
+    const read = readEntry(entry, partBytesFallback);
+    if ("refusal" in read) {
+      dropped.push({ name: droppedName(entry), error: read.refusal });
+    } else {
+      attachments.push(read.attachment);
     }
-    const bytes = raw.bytes;
-    const partBytes = typeof raw.part_bytes === "number" ? raw.part_bytes : partBytesFallback;
-    if (typeof bytes !== "number" || !Number.isInteger(bytes) || bytes < 1 || bytes > MAX_ATTACHMENT_BYTES) {
-      refuse("the frame gave a size this client cannot fetch");
-      continue;
-    }
-    if (typeof partBytes !== "number" || !Number.isInteger(partBytes) || partBytes < 1) {
-      refuse("the frame gave no part size this client could use");
-      continue;
-    }
-    const parts = typeof raw.parts === "number" && Number.isInteger(raw.parts) && raw.parts > 0 ? raw.parts : Math.ceil(bytes / partBytes);
-    if (parts !== Math.ceil(bytes / partBytes)) {
-      refuse("the frame's part count does not match its size");
-      continue;
-    }
-    attachments.push({
-      uploadId: raw.upload_id,
-      name: raw.name,
-      bytes,
-      mediaType: typeof raw.media_type === "string" && raw.media_type !== "" ? raw.media_type : "application/octet-stream",
-      parts
-    });
   }
   return { attachments, dropped };
 }
