@@ -1,7 +1,8 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +10,10 @@ import { readiness } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
 import { firstWarmupMessage, WARMUP_PATIENCE_MS, WARMUP_ROTATE_MS, WARMUP_SIGNPOST, WARMUP_SLOW, warmupPhase, warmupPool } from "@/assistant/warmup";
 import { OnboardingGate, WarmingUp } from "@/components/assistant/GettingReady";
+import type { CredentialKind } from "@/credentials/names";
+import type { CredentialStatus } from "@/credentials/store";
 import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
+import type { LoginView } from "@/virtual-agents/logins";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/assistant" }));
 
@@ -41,7 +45,24 @@ function assistant(status: VirtualAgentStatus = "stopped", overrides: Partial<As
 }
 
 function warming(status: VirtualAgentStatus = "stopped", overrides: Partial<AssistantSummary> = {}) {
-  return <WarmingUp assistant={assistant(status, overrides)} unavailable={null} />;
+  return <WarmingUp assistant={assistant(status, overrides)} unavailable={null} onDismiss={() => undefined} />;
+}
+
+function stored(...kinds: CredentialKind[]): CredentialStatus[] {
+  return kinds.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: null, updatedVia: null }));
+}
+
+/** A sign-in the pod has relayed and is waiting on, as one does when a returning person's Azure token has expired. */
+function login(kind: CredentialKind): LoginView {
+  return {
+    kind,
+    prompt: "device_code",
+    userCode: "ABCD-1234",
+    verificationUri: "https://example.com/device",
+    expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    state: "pending",
+    codeWaiting: false
+  };
 }
 
 /** What the rotating line says; it is hidden from the accessibility tree, so it is found by that, not by a role. */
@@ -166,7 +187,7 @@ describe("WarmingUp", () => {
   });
 
   it("should say the assistant is unavailable when the page says so", () => {
-    render(<WarmingUp assistant={assistant()} unavailable="Virtual agents are not available here" theme="dark" />);
+    render(<WarmingUp assistant={assistant()} unavailable="Virtual agents are not available here" theme="dark" onDismiss={() => undefined} />);
 
     expect(screen.getByText("Virtual agents are not available here")).toBeTruthy();
   });
@@ -208,9 +229,9 @@ describe("WarmingUp hydration", () => {
 });
 
 describe("OnboardingGate while the assistant starts", () => {
-  function gate(summary: AssistantSummary) {
+  function gate(summary: AssistantSummary, statuses: CredentialStatus[] = []) {
     const noop = vi.fn(async () => ({ ok: true as const }));
-    return <OnboardingGate assistant={summary} statuses={[]} unavailable={null} paste={noop} save={noop} />;
+    return <OnboardingGate assistant={summary} statuses={statuses} unavailable={null} paste={noop} save={noop} />;
   }
 
   it("should wait on the warming-up screen when someone who has onboarded arrives to a stopped assistant", () => {
@@ -253,5 +274,107 @@ describe("OnboardingGate while the assistant starts", () => {
     act(() => screen.getByRole("button", { name: "Start chatting" }).click());
 
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should offer the sign-in rather than a line to read when a returning person's assistant is waiting on them", () => {
+    render(gate(assistant("awaiting_login", { logins: [login("azure")] }), stored("github", "azure", "claude")));
+
+    const azure = within(screen.getByRole("list", { name: "Connections" }))
+      .getAllByRole("listitem")
+      .find((item) => within(item).queryByText("Azure", { exact: true }) !== null) as HTMLElement;
+    expect(within(azure).getByText("Waiting for you")).toBeTruthy();
+    expect(within(azure).getByText("ABCD-1234")).toBeTruthy();
+    expect(within(azure).getByRole("link", { name: "the Azure sign-in page" }).getAttribute("href")).toBe("https://example.com/device");
+    expect(screen.getByText("Your assistant is waiting for you to sign in again before it can carry on.")).toBeTruthy();
+    expect(screen.queryByText(WARMUP_SIGNPOST)).toBeNull();
+  });
+
+  it("should take a returning person to their chats rather than onboarding when they leave the sign-in", () => {
+    render(gate(assistant("awaiting_login", { logins: [login("azure")] }), stored("github", "azure", "claude")));
+
+    fireEvent.click(screen.getByRole("button", { name: "Carry on without waiting" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Waiting for you to connect your accounts…");
+  });
+
+  it("should let the person carry on to their conversations when their assistant could not start", () => {
+    render(gate(assistant("failed", { statusDetail: "image pull failed" })));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant could not start" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Carry on without it" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Your assistant could not start");
+  });
+
+  it("should close the waiting screen when the person presses Escape", () => {
+    render(gate(assistant("cloning")));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Preparing your workspace…");
+  });
+
+  it("should stay on the waiting screen when the person presses a key other than Escape", () => {
+    render(gate(assistant("cloning")));
+
+    fireEvent.keyDown(window, { key: "Enter" });
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+  });
+
+  it("should bring the screen back when someone who sent it away asks to see the progress again", () => {
+    render(gate(assistant("stopped")));
+
+    fireEvent.click(screen.getByRole("button", { name: "Carry on while it starts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show progress" }));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+    expect(screen.getByText(WARMUP_SIGNPOST)).toBeTruthy();
+  });
+
+  it("should still say when the assistant came up to someone who sent the screen away", () => {
+    const { rerender } = render(gate(assistant("stopped")));
+
+    fireEvent.click(screen.getByRole("button", { name: "Carry on while it starts" }));
+    rerender(gate(assistant("running")));
+
+    expect(screen.getByRole("status").textContent).toBe("Your assistant is ready");
+    expect(screen.queryByRole("button", { name: "Show progress" })).toBeNull();
+  });
+
+  it("should leave nothing on the page when the person hides the notice too", () => {
+    render(gate(assistant("stopped")));
+
+    fireEvent.click(screen.getByRole("button", { name: "Carry on while it starts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide your assistant's progress" }));
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should never paint the screen saying the assistant is ready when it reaches running", () => {
+    const painted: (string | null)[] = [];
+    // A layout effect reads the DOM React has just committed, before the browser paints it and before the gate's own
+    // effects run, which is the frame the person would see.
+    function Probe() {
+      useLayoutEffect(() => {
+        painted.push(document.querySelector("[role='dialog'] h1")?.textContent ?? null);
+      });
+      return null;
+    }
+    const view = (status: VirtualAgentStatus) => (
+      <>
+        {gate(assistant(status))}
+        <Probe />
+      </>
+    );
+
+    const { rerender } = render(view("cloning"));
+    rerender(view("running"));
+
+    expect(painted).toEqual(["Your assistant is getting ready", null]);
   });
 });

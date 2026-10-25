@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
 import {
@@ -11,6 +11,7 @@ import {
   WARMUP_SIGNPOST,
   WARMUP_SLOW,
   type WarmupPhase,
+  waitingForPerson,
   warmupPhase
 } from "@/assistant/warmup";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
@@ -37,6 +38,9 @@ const OFFERED_OPTIONAL: readonly CredentialKind[] = ["atlassian"];
 const INPUT =
   "min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 font-plex-mono text-sm text-asst-text outline-none focus:border-asst-accent-line";
 const PRIMARY = "shrink-0 rounded-[9px] bg-asst-accent px-3.5 py-1.5 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover";
+const FOOTER = "h-[42px] rounded-[10px] px-5 text-sm";
+const FOOTER_PRIMARY = `${FOOTER} bg-asst-accent font-semibold text-asst-ink disabled:opacity-40`;
+const FOOTER_QUIET = `${FOOTER} border border-asst-strong font-medium text-asst-body hover:bg-asst-active`;
 
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
@@ -253,9 +257,12 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
 }
 
 /**
- * The first visit: the assistant warms up while the person connects the accounts it works with. The sign-ins come
- * from the assistant's pod as it reaches each one, so a connection shows "Connecting…" until its code appears. Once
- * every needed account is connected the person carries on; they are not shown this again.
+ * The connections and the sign-ins the assistant's pod relays as it reaches each one, so a connection shows
+ * "Connecting…" until its code appears. On a first visit it is the whole of getting ready: the assistant warms up
+ * while the person connects the accounts it works with, and once every needed one is connected they carry on.
+ * `returning` is the other way in — someone who connected everything on an earlier visit, whose assistant has
+ * stopped to ask them to sign in again — so the screen asks for that rather than introducing the connections, and
+ * its button leaves rather than finishing anything.
  */
 export function GettingReady({
   assistant,
@@ -264,12 +271,14 @@ export function GettingReady({
   paste,
   save,
   onDone,
+  returning = false,
   theme = "system"
 }: ScreenProps & {
   statuses: CredentialStatus[];
   paste: FormAction;
   save: FormAction;
   onDone: () => void;
+  returning?: boolean;
 }) {
   const now = useNow();
   const stored = (kind: CredentialKind) => statuses.some((status) => status.kind === kind && status.stored);
@@ -281,7 +290,11 @@ export function GettingReady({
       assistant={assistant}
       unavailable={unavailable}
       theme={theme}
-      subtitle="While it gets ready, connect the tools it needs to work with your repos, tickets and pipelines."
+      subtitle={
+        returning
+          ? "Your assistant is waiting for you to sign in again before it can carry on."
+          : "While it gets ready, connect the tools it needs to work with your repos, tickets and pipelines."
+      }
     >
       <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[14px] border border-asst-line">
         {kinds.map((kind, index) => (
@@ -300,13 +313,8 @@ export function GettingReady({
         ))}
       </ul>
       <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={onDone}
-          disabled={!canContinue}
-          className="h-[42px] rounded-[10px] bg-asst-accent px-5 text-sm font-semibold text-asst-ink disabled:opacity-40"
-        >
-          {canContinue ? "Start chatting" : "Connect the accounts above to continue"}
+        <button type="button" onClick={onDone} disabled={!canContinue} className={FOOTER_PRIMARY}>
+          {canContinue ? (returning ? "Carry on without waiting" : "Start chatting") : "Connect the accounts above to continue"}
         </button>
       </div>
     </ReadyShell>
@@ -314,10 +322,12 @@ export function GettingReady({
 }
 
 /**
- * A return visit to an assistant that is not running: the same progress, with nothing to do but wait, so a rotating
- * line keeps the person company and says how long this takes. The connections are all made, so they are not listed.
+ * A return visit to an assistant that is not running and is not waiting on the person: the same progress, with
+ * nothing to do but wait, so a rotating line keeps them company and says how long this takes. Every connection is
+ * made and the pod is asking for none, so they are not listed. The button leaves: an assistant that could not start
+ * stays failed until a new pod starts reporting, so without one the screen would shut the person out of the hub.
  */
-export function WarmingUp({ assistant, unavailable, theme = "system" }: ScreenProps) {
+export function WarmingUp({ assistant, unavailable, theme = "system", onDismiss }: ScreenProps & { onDismiss: () => void }) {
   const { failed } = assistant.readiness;
   const { message, slow } = useWarmupMessage(warmupPhase(assistant.status), !failed);
   return (
@@ -337,28 +347,95 @@ export function WarmingUp({ assistant, unavailable, theme = "system" }: ScreenPr
           )}
         </div>
       )}
+      <div className="flex justify-end">
+        <button type="button" onClick={onDismiss} className={failed ? FOOTER_PRIMARY : FOOTER_QUIET}>
+          {failed ? "Carry on without it" : "Carry on while it starts"}
+        </button>
+      </div>
     </ReadyShell>
   );
 }
 
 /**
- * Shows the getting-ready screen until the person has connected everything, and then until they choose to carry on.
- * Someone who has onboarded already waits on the warming-up screen instead when they arrive to a stopped assistant,
- * until it is running; once it is, they are not shown it again this visit, and nor is anyone who arrived to one
- * already running.
+ * What is left once the person sends the waiting screen away: the step the screen was reporting, live, so someone
+ * who went off to read an old conversation is still told when their assistant comes up, and a way back to the screen
+ * until it has.
  */
-export function OnboardingGate(props: Omit<Parameters<typeof GettingReady>[0], "onDone">) {
+function WaitingNotice({ assistant, onShow, onHide }: { assistant: AssistantSummary; onShow: () => void; onHide: () => void }) {
+  const { ready, step } = assistant.readiness;
+  return (
+    <div className="fixed bottom-4 left-1/2 z-40 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-full border border-asst-line bg-asst-raised py-2 pl-4 pr-2.5 font-plex text-asst-text shadow-lg">
+      <p role="status" className="min-w-0 truncate text-[13px] text-asst-body">
+        {step}
+      </p>
+      {ready ? null : (
+        <button type="button" onClick={onShow} className="shrink-0 rounded-full px-2.5 py-1 text-[13px] font-medium text-asst-accent-soft hover:bg-asst-active">
+          Show progress
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onHide}
+        aria-label="Hide your assistant's progress"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-asst-muted hover:bg-asst-active hover:text-asst-text"
+      >
+        <span aria-hidden="true">✕</span>
+      </button>
+    </div>
+  );
+}
+
+/** Closes the waiting screen on Escape, which `aria-modal` leads a keyboard user to expect, while it is the one up. */
+function useEscape(active: boolean, close: () => void): void {
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, close]);
+}
+
+/**
+ * Shows the getting-ready screen until the person has connected everything, and then until they choose to carry on.
+ * Someone who has onboarded already waits instead when they arrive to an assistant that is not running: on the
+ * connections screen while its pod is asking them to sign in, so they can act on it, and on the warming-up screen
+ * otherwise. Either can be sent away, by its button or by Escape, leaving a notice that reports the rest of the
+ * wait. Once the assistant is running neither comes back this visit, and nor is either shown to someone who arrived
+ * to one already running.
+ */
+export function OnboardingGate(props: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning">) {
   const [needed] = useState(!props.assistant.onboarded);
   const [waiting] = useState(props.assistant.onboarded && props.assistant.status !== "running");
   const [done, setDone] = useState(false);
-  const [started, setStarted] = useState(false);
-  useEffect(() => {
-    if (props.assistant.status === "running") {
-      setStarted(true);
-    }
-  }, [props.assistant.status]);
-  if (props.assistant.onboarded && (!needed || done)) {
-    return waiting && !started ? <WarmingUp assistant={props.assistant} unavailable={props.unavailable} theme={props.theme} /> : null;
+  const [view, setView] = useState<"screen" | "notice" | "gone">("screen");
+  const running = props.assistant.status === "running";
+  // Latched while rendering rather than in an effect, which runs after paint: the frame the person would see at the
+  // moment their assistant came up would be this screen saying it was ready, bar full, and then gone. An assistant
+  // that stops again later in the visit does not bring the screen back.
+  const [ranOnce, setRanOnce] = useState(running);
+  if (running && !ranOnce) {
+    setRanOnce(true);
   }
-  return <GettingReady {...props} onDone={() => setDone(true)} />;
+  const started = running || ranOnce;
+  const dismiss = useCallback(() => setView("notice"), []);
+  const onboarding = !props.assistant.onboarded || (needed && !done);
+  const screen = waiting && !started && !onboarding && view === "screen";
+  useEscape(screen, dismiss);
+  if (onboarding) {
+    return <GettingReady {...props} onDone={() => setDone(true)} />;
+  }
+  if (screen) {
+    return waitingForPerson(props.assistant.status) ? (
+      <GettingReady {...props} returning onDone={dismiss} />
+    ) : (
+      <WarmingUp assistant={props.assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} />
+    );
+  }
+  return view === "notice" ? <WaitingNotice assistant={props.assistant} onShow={() => setView("screen")} onHide={() => setView("gone")} /> : null;
 }

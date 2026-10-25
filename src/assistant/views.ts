@@ -24,7 +24,7 @@ export interface AssistantSummary {
   needed: CredentialKind[];
   optional: CredentialKind[];
   logins: LoginView[];
-  /** Every needed credential is stored, so the connections are not offered again. */
+  /** Every needed credential is stored, so the connections are offered again only for a sign-in the pod asks for. */
   onboarded: boolean;
 }
 

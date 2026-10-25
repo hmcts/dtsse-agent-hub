@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
-import { firstWarmupMessage, nextWarmupMessage, pickMessage, WARMUP_ANY, type WarmupPhase, warmupPhase, warmupPool } from "./warmup.ts";
+import { VIRTUAL_AGENT_STATUSES, type VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
+import { firstWarmupMessage, nextWarmupMessage, pickMessage, WARMUP_ANY, type WarmupPhase, waitingForPerson, warmupPhase, warmupPool } from "./warmup.ts";
 
 describe("warmupPhase", () => {
   it.each([
@@ -15,6 +15,19 @@ describe("warmupPhase", () => {
     ["failed", "any"]
   ] satisfies [VirtualAgentStatus, WarmupPhase][])("should be the %s phase when the assistant is %s", (status, phase) => {
     expect(warmupPhase(status)).toBe(phase);
+  });
+});
+
+describe("waitingForPerson", () => {
+  it("should be true when the assistant has stopped to ask the person for a sign-in", () => {
+    expect(waitingForPerson("awaiting_credentials")).toBe(true);
+    expect(waitingForPerson("awaiting_login")).toBe(true);
+  });
+
+  it("should be false for every other status, so the two lists cannot drift apart", () => {
+    const others = VIRTUAL_AGENT_STATUSES.filter((status) => status !== "awaiting_credentials" && status !== "awaiting_login");
+
+    expect(others.map((status) => waitingForPerson(status))).toEqual(others.map(() => false));
   });
 });
 

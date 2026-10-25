@@ -56,6 +56,15 @@ export function warmupPhase(status: VirtualAgentStatus): WarmupPhase {
   }
 }
 
+/**
+ * Whether the pod is blocked on the person rather than getting on with it: it has relayed a sign-in and is waiting
+ * for a code or a credential, so the screen has to offer them that rather than something to read. Defined through
+ * the phase so there is one list of the statuses it covers.
+ */
+export function waitingForPerson(status: VirtualAgentStatus): boolean {
+  return warmupPhase(status) === "signing_in";
+}
+
 export function warmupPool(phase: WarmupPhase): readonly string[] {
   return WARMUP_MESSAGES[phase] ?? WARMUP_ANY;
 }
