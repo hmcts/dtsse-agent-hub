@@ -336,6 +336,7 @@ export function ChatView({
               draftId={view.id}
               onSend={send}
               conversationId={view.id}
+              skills={view.skills}
               dropZone={scroller.ref}
               onFocus={() => {
                 if (!warmed.current && status === "offline") {

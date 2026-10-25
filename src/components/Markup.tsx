@@ -87,14 +87,21 @@ function List({ list, theme }: { list: ListBlock; theme: MarkupTheme }) {
 }
 
 /**
- * A region that scrolls when its content overflows. A wide table and a long code line both need the scroller itself
- * to take focus, or a keyboard user cannot reach what overflows; axe checks that as scrollable-region-focusable. The
- * `tabIndex` is therefore deliberate on an element that is not otherwise interactive, and `noNoninteractiveTabindex`
- * does not see it to object: the tag is a parameter, so the rule cannot tell which element it lands on.
+ * A region that scrolls when its content overflows. A wide table, a long code line and a long document all need the
+ * scroller itself to take focus, or a keyboard user cannot reach what overflows; axe checks that as
+ * scrollable-region-focusable. The `tabIndex` is therefore deliberate on an element that is not otherwise
+ * interactive, and `noNoninteractiveTabindex` does not see it to object: the tag is a parameter, so the rule cannot
+ * tell which element it lands on.
+ *
+ * Only a `section` takes a name, and must: a named `section` is a region, which is a role that permits the name
+ * telling a screen-reader user what their focus has landed on, where a `div` or `pre` is generic and `aria-label` is
+ * prohibited on it. So a pane whose content needs announcing is a `section`, and the types say which it is.
  */
-function ScrollPane({ as: Tag, className, children }: { as: "div" | "pre"; className: string; children: ReactNode }) {
+type ScrollPaneProps = { className: string; children: ReactNode } & ({ as: "div" | "pre"; label?: never } | { as: "section"; label: string });
+
+export function ScrollPane({ as: Tag, label, className, children }: ScrollPaneProps) {
   return (
-    <Tag tabIndex={0} className={className}>
+    <Tag tabIndex={0} aria-label={label} className={className}>
       {children}
     </Tag>
   );

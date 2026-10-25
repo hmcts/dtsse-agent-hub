@@ -7,6 +7,7 @@ import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
+import { ScrollPane } from "@/components/Markup";
 import { CopyIcon, DownloadIcon, TickIcon } from "@/components/sidebar/icons";
 import type { ActionResult } from "@/web/action";
 
@@ -479,8 +480,9 @@ export function ArtefactPanel({
           </button>
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {mode === "edit" ? (
+      {mode === "edit" ? (
+        // The textarea fills the scroller and scrolls itself, so the tab stop a keyboard user needs is the box.
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <textarea
             ref={box}
             value={markdown}
@@ -489,12 +491,15 @@ export function ArtefactPanel({
             spellCheck
             className="block h-full min-h-full w-full resize-none border-none bg-transparent px-[22px] py-5 font-plex-mono text-[13.5px] leading-[1.7] text-asst-body outline-none"
           />
-        ) : (
-          <div className="px-[26px] pb-10 pt-5 text-asst-body">
-            {markdown.trim() === "" ? <p className="text-asst-faint">This document is empty.</p> : <AssistantMarkdown source={markdown} document />}
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        // The same focusable scroller a wide table and a long code line use, because the preview holds no control of
+        // its own and a keyboard user needs focus on it to scroll the rest of a long document into view. It is a
+        // named region, nested in the panel's own, so the focus says what it has landed on.
+        <ScrollPane as="section" label="Document preview" className="min-h-0 flex-1 overflow-y-auto px-[26px] pb-10 pt-5 text-asst-body">
+          {markdown.trim() === "" ? <p className="text-asst-faint">This document is empty.</p> : <AssistantMarkdown source={markdown} document />}
+        </ScrollPane>
+      )}
       {printing ? <PrintSheet title={title} markdown={markdown} /> : null}
     </section>
   );

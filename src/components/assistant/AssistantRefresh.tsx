@@ -9,8 +9,10 @@ import { useHubEvent } from "@/components/live/HubStream";
 const SETTLE_MS = 250;
 
 /**
- * Re-renders the Assistant's server components when the viewer's assistant or one of their conversations changes:
- * the events carry only ids, so the page reads what changed itself.
+ * Re-renders the Assistant's server components when the viewer's assistant, one of their conversations, or the skills
+ * the open conversation's session offers changes: the events carry only ids, so the page reads what changed itself.
+ * Every one of them is refreshed here rather than where it is shown, so a cold chat coming up — which reports its
+ * status, its skills and its conversation from the one transaction — re-reads the page once.
  *
  * The settled refresh waits for the network, because refreshing without one takes the page to the error boundary;
  * see `live/connectivity.ts`. One waiting refresh covers every event that arrived while the network was down, so
@@ -45,5 +47,8 @@ export function AssistantRefresh() {
   };
   useHubEvent("assistant_conversation", refresh);
   useHubEvent("virtual_agent", refresh);
+  // Unfiltered, unlike the hub's agent page: the stream only carries skills for the agent the tab watches, which in
+  // the Assistant is the open conversation's.
+  useHubEvent("agent_skills", refresh);
   return null;
 }
