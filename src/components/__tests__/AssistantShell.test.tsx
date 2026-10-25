@@ -101,6 +101,45 @@ describe("AssistantShell", () => {
     expect(screen.getByText("AS")).toBeTruthy();
   });
 
+  it("should offer settings beside the viewer's name, and the appearance only from there", () => {
+    render(shell({ theme: "dark" }));
+
+    expect(screen.queryByRole("radiogroup", { name: "Appearance" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(screen.getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("should warn on the cog when a sign-in the viewer has to act on is missing", () => {
+    render(shell({ connections: { kinds: ["github"], statuses: [], logins: [], unavailable: null } }));
+
+    expect(screen.getByRole("button", { name: "Settings. GitHub needs your attention" })).toBeTruthy();
+  });
+
+  // The sidebar is transformed to slide the drawer in and out, which makes it the containing block of anything
+  // `fixed` inside it, so the settings have to be rendered outside it or a narrow screen would clip them to the rail.
+  it("should render the settings outside the sidebar when they are open", () => {
+    render(shell());
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(sidebar().contains(screen.getByRole("dialog"))).toBe(false);
+  });
+
+  // Escape closing both would take the cog the settings hand focus back to `inert` with the drawer, dropping focus.
+  it("should close only the settings, not the drawer behind them, on Escape when the screen is narrow", () => {
+    narrow = true;
+    render(shell());
+    fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
+    const cog = screen.getByRole("button", { name: "Settings" });
+    fireEvent.click(cog);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sidebar().hasAttribute("inert")).toBe(false);
+    expect(document.activeElement).toBe(cog);
+  });
+
   it("should link to the hub only when the viewer also uses it", () => {
     const { rerender } = render(shell());
     expect(screen.queryByRole("link", { name: "Agent Hub" })).toBeNull();
@@ -603,14 +642,14 @@ describe("AssistantRefresh", () => {
 describe("ProductSelect", () => {
   it("should offer every product and report the one picked", () => {
     const onChange = vi.fn();
-    render(<ProductSelect value="other" onChange={onChange} />);
+    render(<ProductSelect value="general" onChange={onChange} />);
 
     const select = screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement;
     expect(
       within(select)
         .getAllByRole("option")
         .map((option) => option.textContent)
-    ).toContain("No Fault Divorce");
+    ).toContain("No Fault Divorce (NFDIV)");
     fireEvent.change(select, { target: { value: "nfdiv" } });
 
     expect(onChange).toHaveBeenCalledWith("nfdiv");

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
-import { PRODUCTS, productLabel } from "@/assistant/products";
+import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
 import { type Progress, progress, type ThreadItem, threadItems } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
@@ -179,6 +179,8 @@ export function ChatView({
     seenVersion.current = Math.max(seenVersion.current, view.artefact.version);
   }, [view.artefact.version, view.artefact.updatedBy, arrivals]);
 
+  // The picker can only show a product it offers, so it and the dialog it opens read the stored one through this.
+  const product = storedProduct(view.product);
   const thread = threadItems(live.items, view.productHistory);
   const doing: Progress = progress(live.items, thread, status, view.sessionState);
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
@@ -210,33 +212,51 @@ export function ChatView({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-asst-field px-4">
           <SidebarToggle />
-          <h1 className="min-w-0 truncate text-[15px] font-medium">{view.title}</h1>
+          {/* Gives way long before the product chip beside it, keeping 4rem so the start of the name always shows. */}
+          <h1 className="min-w-[4rem] shrink-[999] truncate text-[15px] font-medium">{view.title}</h1>
           <label className="sr-only" htmlFor="chat-product">
             Product
           </label>
-          <select
-            id="chat-product"
-            value={view.product}
-            onChange={(event) => setPendingProduct(event.target.value)}
-            className="shrink-0 cursor-pointer appearance-none rounded-md border border-asst-accent-line bg-transparent px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft outline-none focus:border-asst-accent"
-          >
-            {PRODUCTS.map((product) => (
-              <option key={product.slug} value={product.slug} className="bg-asst-raised normal-case">
-                {product.label}
-              </option>
-            ))}
-          </select>
+          {/*
+            The chip draws the chosen label itself, truncated, and its own arrow, with the real select laid over it
+            at full size and invisible: a native select is as wide as its widest option, the longest label here runs
+            to 40 characters, and how a select renders a value too long for it is the engine's business rather than
+            `text-overflow`'s. The chip never goes below 4rem, so it stays readable and operable in a 320px header.
+          */}
+          <div className="relative flex min-w-[4rem] max-w-[9.5rem] shrink items-center gap-1.5 rounded-md border border-asst-accent-line px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft focus-within:border-asst-accent">
+            <span aria-hidden="true" className="min-w-0 truncate">
+              {productLabel(product)}
+            </span>
+            <span aria-hidden="true" className="shrink-0 text-[7px] leading-none text-asst-accent">
+              ▼
+            </span>
+            <select
+              id="chat-product"
+              value={product}
+              onChange={(event) => setPendingProduct(event.target.value)}
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 outline-none"
+            >
+              {PRODUCTS.map((offered) => (
+                <option key={offered.slug} value={offered.slug} className="bg-asst-raised normal-case">
+                  {offered.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
             {panel ? null : (
               <button
                 type="button"
                 onClick={() => setPanel(true)}
-                className="flex h-[34px] items-center gap-2 whitespace-nowrap rounded-[9px] border border-asst-strong pl-2.5 pr-3 text-[13px] hover:border-asst-accent-line hover:bg-asst-field"
+                // Named here as well, because below 480px the icon stands alone so that a 320px header still fits
+                // the title, the product chip and both buttons.
+                aria-label={view.artefact.version > 0 ? "Open document" : "Add document"}
+                className="flex h-[34px] items-center whitespace-nowrap rounded-[9px] border border-asst-strong px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3"
               >
                 <span aria-hidden="true" className="text-lg leading-none text-asst-accent">
                   +
                 </span>
-                {view.artefact.version > 0 ? "Open document" : "Add document"}
+                <span className="hidden min-[480px]:inline">{view.artefact.version > 0 ? "Open document" : "Add document"}</span>
               </button>
             )}
             <ChatMenu
@@ -317,8 +337,8 @@ export function ChatView({
           narrow={narrow}
         />
       ) : null}
-      {pendingProduct !== null && pendingProduct !== view.product ? (
-        <ConfirmProduct from={view.product} to={pendingProduct} onCancel={() => setPendingProduct(null)} onConfirm={() => void changeProduct(pendingProduct)} />
+      {pendingProduct !== null && pendingProduct !== product ? (
+        <ConfirmProduct from={product} to={pendingProduct} onCancel={() => setPendingProduct(null)} onConfirm={() => void changeProduct(pendingProduct)} />
       ) : null}
     </div>
   );
