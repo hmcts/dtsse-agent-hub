@@ -495,17 +495,20 @@ export async function writeArtefact(
 /**
  * What a direct frame to a conversation's agent carries, or `undefined` for any other agent.
  *
- * Every field here is one that every published client reads, so the frame is safe to send to any of them. A field
- * that is not — one only a client claiming a feature reads — must be left out for a client that did not claim it,
- * or the pod ignores it and the person who asked for it is told nothing. `client_features` on register
- * (`src/agents/client-features.ts`) is what says which.
+ * A field only some clients read must be left out for a client that did not claim it, or the pod ignores it and the
+ * person who asked for it is told nothing. `client_features` on register (`src/agents/client-features.ts`) is what
+ * says which. No field here is gated on it: every field but `attachments` is one every published client reads, and
+ * `attachments` goes to every session, so a client older than attachments drops that message's files in silence.
  *
- * For the first such field, the Assistant's file attachments, that is three lines:
+ * Closing that is two lines:
  *   1. `clientFeatures: true` in the `select` below. It is free: a column of the `agent` row this read already
  *      fetches, so it widens the projection and adds no statement;
- *   2. `...(clientSupports(row.clientFeatures, "attachments") ? { attachments } : {})` in the returned frame;
- *   3. `"attachments"` in `CLIENT_FEATURES` (`packages/agent-hub/src/features.ts`), in the change that teaches
- *      `parseAssistantFrame` to carry `raw.attachments`.
+ *   2. `...(clientSupports(row.clientFeatures, "attachments") ? { attachments } : {})` in the returned frame.
+ *
+ * The published client claims `attachments` (`CLIENT_FEATURES` in `packages/agent-hub/src/features.ts`), so the gate
+ * answers true for a session on a current build. A session registered by a build published before that claim claims
+ * nothing and loses the field until it restarts: a pod takes the current client on boot and every session reports its
+ * claim on register, so the window is the life of the sessions already running, not anything to migrate.
  */
 export interface AssistantFrame {
   conversation_id: string;
@@ -516,8 +519,7 @@ export interface AssistantFrame {
   /**
    * The files the person attached to this message, for the pod to fetch to its disk before it delivers the message.
    * Absent from a frame built without a message — a wake rather than a delivery — and an empty array for a message
-   * nothing was attached to. A client that predates attachments ignores the field, which is what makes it safe to
-   * send to every pod: see `parseAttachments` in the published client.
+   * nothing was attached to. `parseAttachments` in the published client is what decides which entries a pod acts on.
    */
   attachments?: FrameAttachment[];
 }

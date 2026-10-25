@@ -39,10 +39,18 @@ const skills = boundedArray(
  * Elements are `z.unknown()` and narrowed in the transform, not refused: a name this hub does not recognise is a
  * newer client claiming a field a later hub will send, and `normaliseClientFeatures` drops it rather than fail the
  * registration. Only a list over the cap is refused, which bounds the column.
+ *
+ * Anything that is not a list — `null` included — reads as a client that reported nothing, the same as leaving the
+ * field out, and the same as how `storedClientFeatures` reads the column back. The point of this field is to leave a
+ * session one field short rather than locked out, so refusing the whole registration over the shape of the claim
+ * would defeat it: a hand-rolled client could not register at all.
  */
-const clientFeatures = boundedArray(z.unknown(), MAX_CLIENT_FEATURES, { message: `at most ${MAX_CLIENT_FEATURES} client features` })
-  .transform(normaliseClientFeatures)
-  .optional();
+const clientFeatures = z.preprocess(
+  (value) => (Array.isArray(value) ? value : undefined),
+  boundedArray(z.unknown(), MAX_CLIENT_FEATURES, { message: `at most ${MAX_CLIENT_FEATURES} client features` })
+    .transform(normaliseClientFeatures)
+    .optional()
+);
 
 export const registerBody = z.object({
   session_id: z.string().trim().min(1).max(MAX_NAME),

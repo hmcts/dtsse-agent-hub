@@ -1924,8 +1924,9 @@ describe("a virtual agent's plugins", () => {
     expect(await row(agent.id)).toMatchObject({ plugins: [], generation: agent.generation });
   });
 
-  // Unticking everything needs no offer list, so it is the one change that still works while the configuration is
-  // broken — which is what lets an owner get a pod off a plugin they can no longer save around.
+  // What the store checks is the names being ticked, so unticking everything never reads the offer list and so never
+  // raises its error. No UI reaches this while the configuration is broken: the Assistant hides the section, and both
+  // hub pages that render the form call `availablePlugins()` and throw. This pins the store, not a recovery route.
   it("should let the owner clear every plugin while the hub's plugin configuration is malformed", async () => {
     const agent = await createWith(["pcs"]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");

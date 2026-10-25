@@ -395,24 +395,22 @@ describe("conversations", () => {
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.product)).toEqual(["other"]);
   });
 
-  it("should send a session that claimed no features only the frame fields every client reads", async () => {
+  it("should carry attachments on a frame built for a delivery and leave them out of one built for a wake", async () => {
     const { token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { sessionId } = await sessionOf(id);
-    // A client from before client features existed: it reports none, so it claims none. Anything the hub adds to
-    // the frame for a claimed feature would be dropped here without the session, or the person, ever hearing of it.
+    // A client from before client features existed: it reports none, so it claims none. No frame field is gated on
+    // the claim yet, so what decides `attachments` is the message, not the session — see `AssistantFrame`.
     await register(token, sessionId, id);
-
     const { agentId } = await sessionOf(id);
-
-    expect(await assistantFrame(prisma, agentId)).toEqual({
-      conversation_id: id,
-      product: "general",
-      product_label: "General",
-      artefact_version: 0,
-      artefact_updated_by: null
-    });
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).clientFeatures).toBeNull();
+
+    const { id: messageId } = await prisma.message.findFirstOrThrow({ where: { kind: "direct" }, select: { id: true } });
+    const frame = { conversation_id: id, product: "general", product_label: "General", artefact_version: 0, artefact_updated_by: null };
+
+    // A wake is "this conversation needs a session", so there is no message whose files the field could name.
+    expect(await assistantFrame(prisma, agentId)).toEqual(frame);
+    expect(await assistantFrame(prisma, agentId, messageId)).toEqual({ ...frame, attachments: [] });
   });
 
   it("should offer the conversation what its session's client claimed, so the composer can act on it", async () => {

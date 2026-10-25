@@ -127,6 +127,23 @@ describe("POST /api/agent/register", () => {
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures).toEqual(["some-later-field"]);
   });
 
+  it("should register the session as reporting no features when the features field is not a list", async () => {
+    const reported = { ...REGISTRATION, client_features: ["attachments"] };
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: reported }));
+    const stored = async () => (await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures;
+
+    // A hand-rolled client sending the field as `null`, which its neighbour `conversation_id` has always allowed. The
+    // field exists to leave a session one field short, so it must not be the thing that keeps a client off the hub.
+    const asNull = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, client_features: null } });
+    expect(asNull.status).toBe(200);
+    expect(await stored()).toBeNull();
+
+    await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: reported });
+    const asText = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, client_features: "attachments" } });
+    expect(asText.status).toBe(200);
+    expect(await stored()).toBeNull();
+  });
+
   it("should refuse a registration reporting more features than the cap, which is what bounds the column", async () => {
     const body = { ...REGISTRATION, client_features: [...Array(51).keys()].map((index) => `f${index}`) };
 
