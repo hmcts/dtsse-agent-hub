@@ -202,7 +202,11 @@ export async function putUploadPart(prisma: PrismaClient, upload: UploadRow, ind
   });
 }
 
-/** Throws away a pending upload and its parts. Nothing announces it: only the tab that made it knows it existed. */
+/**
+ * Throws away an upload and its parts, whether its bytes finished arriving or not: `canWriteUpload` admits a
+ * `pending` or a `stored` upload that is not yet on a message, and removing a finished chip from the composer is the
+ * `stored` case. Nothing announces it: only the tab that made it knows it existed.
+ */
 export async function discardUpload(prisma: PrismaClient, uploadId: string): Promise<void> {
   await prisma.assistantUpload.delete({ where: { id: uploadId } });
 }
