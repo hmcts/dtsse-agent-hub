@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
-import { type Progress, progress, type ThreadItem, threadItems } from "@/assistant/thread";
+import { type Progress, progress, progressAnnouncement, progressLabel, type ThreadItem, threadItems } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
 import { useLiveConversation } from "@/components/agents/useLiveConversation";
 import { ArtefactPanel, type SaveArtefactAction } from "@/components/assistant/ArtefactPanel";
@@ -31,16 +31,20 @@ export interface ChatActions {
   saveArtefact: SaveArtefactAction;
 }
 
-function Dots({ label }: { label: string }) {
+/**
+ * What the assistant is doing, shown while it works. Not itself a live region: the activity changes with every tool
+ * call, and the one region on the page announces only the facts that settle (`progressAnnouncement`).
+ */
+function Dots({ doing }: { doing: Progress }) {
   return (
-    <div className="flex items-center gap-3.5" role="status">
+    <div className="flex items-center gap-3.5">
       <Mark size="sm" />
       <span className="flex items-center gap-1" aria-hidden="true">
         {[0, 1, 2].map((dot) => (
           <span key={dot} className="h-1.5 w-1.5 animate-asst-dot rounded-full bg-asst-accent" style={{ animationDelay: `${dot * 0.15}s` }} />
         ))}
       </span>
-      <span className="text-[13px] text-asst-muted">{label}</span>
+      <span className="text-[13px] text-asst-muted">{progressLabel(doing)}</span>
     </div>
   );
 }
@@ -154,7 +158,9 @@ function useNarrow(): boolean {
 
 /**
  * One conversation: what the person and the assistant said, a line saying what the assistant is doing while it
- * works, and the composer; beside it, the conversation's document. Kept live by the conversation's agent's events;
+ * works and how many subagents it is waiting on, and the composer; beside it, the conversation's document. The line
+ * comes from the session's transcript and its own status, both already streamed here, so no page read follows a tool
+ * call. Kept live by the conversation's agent's events;
  * a change to the conversation itself (its product, title, document or session) re-renders the page, which hands
  * down the new `view`.
  */
@@ -317,7 +323,15 @@ export function ChatView({
                 <Item key={item.key} item={item} />
               ))}
             </ol>
-            {doing.state === "idle" ? null : <Dots label={doing.label} />}
+            {doing.state === "idle" ? null : <Dots doing={doing} />}
+            {/*
+              Always in the page, even with nothing to say: a live region added to the document at the same moment as
+              its first text is not reliably announced. Emptying it as the answer settles is deliberate too, so the
+              next thing it says is read as new.
+            */}
+            <p role="status" className="sr-only">
+              {progressAnnouncement(doing)}
+            </p>
           </div>
           <AnnouncerRegion text={arrivals.text} />
         </div>
