@@ -119,7 +119,14 @@ export function runningHelpers(items: readonly ConversationItem[], since: string
       continue;
     }
     const { role, content } = item.entry;
-    if (role === "tool_use" && "name" in content && "id" in content && typeof content.id === "string" && HELPER_TOOLS.includes(String(content.name))) {
+    if (
+      role === "tool_use" &&
+      "id" in content &&
+      typeof content.id === "string" &&
+      "name" in content &&
+      typeof content.name === "string" &&
+      HELPER_TOOLS.includes(content.name)
+    ) {
       launched.add(content.id);
     } else if (role === "tool_result") {
       if (!("tool_use_id" in content)) {
