@@ -13,5 +13,5 @@ export function parseMessageRef(raw: string): bigint | null {
 }
 
 export function messageHref(id: string): string {
-  return `/m/${id}`;
+  return `/hub/m/${id}`;
 }

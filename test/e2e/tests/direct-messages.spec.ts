@@ -13,20 +13,20 @@ test.describe("direct messages @regression", () => {
     try {
       const viewing = await viewer.newPage();
       // Visiting once makes the viewer a known person, which a grant needs.
-      await viewing.goto(`/agents/${agent}`);
+      await viewing.goto(`/hub/agents/${agent}`);
       await expect(viewing.getByRole("heading", { name: "Not found" })).toBeVisible();
 
       const owning = await owner.newPage();
-      await owning.goto("/access");
+      await owning.goto("/hub/access");
       await owning.getByLabel("Their email address").fill(`${viewerPersona}@dev.invalid`);
       await owning.getByRole("button", { name: "Grant" }).click();
       await expect(owning.getByRole("status")).toContainText("now has read access");
 
-      await viewing.goto(`/agents/${agent}`);
+      await viewing.goto(`/hub/agents/${agent}`);
       await expect(viewing.getByText("You have read access to this agent.")).toBeVisible();
       await expect(viewing.getByRole("form", { name: "Message this agent" })).toHaveCount(0);
 
-      await owning.goto(`/agents/${agent}`);
+      await owning.goto(`/hub/agents/${agent}`);
       const message = `hello from the e2e suite ${unique("dm")}`;
       await owning.getByRole("textbox", { name: "Message this agent" }).fill(message);
       await owning.getByRole("button", { name: "Send" }).click();

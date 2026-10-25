@@ -28,7 +28,7 @@ export default async function AdHocChannel({ searchParams }: { searchParams: Pro
             detail={
               <>
                 Use <code>/c?topics=pcs-api,database</code>, or{" "}
-                <Link href="/channels/new" className="text-hub-link hover:underline">
+                <Link href="/hub/channels/new" className="text-hub-link hover:underline">
                   build a channel
                 </Link>
                 .

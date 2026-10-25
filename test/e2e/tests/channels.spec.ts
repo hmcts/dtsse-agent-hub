@@ -12,7 +12,7 @@ test.describe("channels @regression", () => {
       await expect(writing.getByRole("heading", { level: 1, name: `E2E ${topic}` })).toBeVisible();
 
       const watching = await reader.newPage();
-      await watching.goto(`/c?topics=${topic}`);
+      await watching.goto(`/hub/c?topics=${topic}`);
       await expect(watching.getByText("Nothing has been posted on these topics yet.")).toBeVisible();
 
       const body = `Posted by the e2e suite ${unique("body")}`;
@@ -30,7 +30,7 @@ test.describe("channels @regression", () => {
 
   test("should offer to save an ad-hoc view as a channel with its topics filled in @regression", async ({ page }) => {
     const topics = [unique("e2e"), unique("e2e")];
-    await page.goto(`/c?topics=${topics.join(",")}&mode=all`);
+    await page.goto(`/hub/c?topics=${topics.join(",")}&mode=all`);
 
     await page.getByRole("link", { name: "Save as channel" }).click();
 

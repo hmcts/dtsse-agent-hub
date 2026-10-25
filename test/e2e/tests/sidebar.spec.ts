@@ -14,7 +14,7 @@ test.describe("sidebar @regression", () => {
     try {
       const page = await context.newPage();
       await page.setViewportSize({ width: 1280, height: 1000 });
-      await page.goto("/");
+      await page.goto("/hub");
       const list = page.getByRole("complementary", { name: "Sidebar" }).getByRole("list", { name: "Agents" });
       await expect(list.getByRole("link")).toHaveCount(9);
 
@@ -31,7 +31,7 @@ test.describe("sidebar @regression", () => {
   });
 
   test("should put the topic search under the Topics heading @regression", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/hub");
     const nav = page.getByRole("navigation", { name: "Main" });
     const heading = await nav.getByRole("heading", { name: "Topics" }).boundingBox();
     const search = await nav.getByRole("textbox", { name: "Search topics" }).boundingBox();

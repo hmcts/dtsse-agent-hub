@@ -7,7 +7,7 @@ import type { AgentCard } from "@/agents/views";
 import { HubStreamProvider } from "@/components/live/HubStream";
 import { AgentRoster } from "@/components/sidebar/AgentRoster";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }), usePathname: () => "/" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }), usePathname: () => "/hub" }));
 
 class FakeSource {
   static last: FakeSource | undefined;
@@ -62,7 +62,7 @@ describe("AgentRoster", () => {
         <AgentRoster mine={[agent("1", "alpha", "idle"), agent("2", "beta", "offline")]} shared={[agent("3", "gamma", "busy")]} />
       </HubStreamProvider>
     );
-    expect(hrefs()).toEqual(["/agents/3", "/agents/1", "/agents/2"]);
+    expect(hrefs()).toEqual(["/hub/agents/3", "/hub/agents/1", "/hub/agents/2"]);
     expect(screen.getByText("2 connected")).toBeTruthy();
 
     await act(async () => {
@@ -70,7 +70,7 @@ describe("AgentRoster", () => {
       FakeSource.last?.emit("agent_status", { agent_id: "3", status: "offline" });
     });
 
-    expect(hrefs()).toEqual(["/agents/2", "/agents/1", "/agents/3"]);
+    expect(hrefs()).toEqual(["/hub/agents/2", "/hub/agents/1", "/hub/agents/3"]);
     expect(screen.getByText("2 connected")).toBeTruthy();
     expect(within(screen.getByRole("link", { name: /gamma/ })).getByText("offline")).toBeTruthy();
   });
@@ -82,7 +82,7 @@ describe("AgentRoster", () => {
       </HubStreamProvider>
     );
 
-    expect(hrefs()).toEqual(["/agents/va-1", "/agents/2"]);
+    expect(hrefs()).toEqual(["/hub/agents/va-1", "/hub/agents/2"]);
     expect(within(screen.getByRole("link", { name: /alpha/ })).getByText("virtual")).toBeTruthy();
     expect(within(screen.getByRole("link", { name: /beta/ })).queryByText("virtual")).toBeNull();
   });

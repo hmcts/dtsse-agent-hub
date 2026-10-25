@@ -25,9 +25,9 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * `setVirtualAgentPlugins`, `storePastedCode` and `reconnectSignIn` refuse one that is not the viewer's.
  */
 
-const LIST_PATH = "/virtual";
+const LIST_PATH = "/hub/virtual";
 
-const PAGE_PATH = "/agents";
+const PAGE_PATH = "/hub/agents";
 
 const OFF: { ok: false; error: string } = { ok: false, error: "virtual agents are not available on this deployment" };
 
@@ -187,7 +187,7 @@ export async function reconnectSignIn(form: FormData): Promise<ActionResult<{ co
     }
     const row = await reconnect(prisma, backend.store, viewer.oid, id, kind);
     revalidate(id);
-    revalidatePath("/settings/credentials");
+    revalidatePath("/hub/settings/credentials");
     const title = SIGN_IN_TITLES[kind];
     return {
       ok: true,

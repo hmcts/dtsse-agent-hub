@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { redirectAway, redirectTo } from "./redirect.ts";
 
 describe("redirectTo", () => {
-  it.each(["/", "/agents/0f8a", "/auth/login", "/c?topics=pcs-api"])("should emit %s as a RELATIVE location", (path) => {
+  it.each(["/", "/hub/agents/0f8a", "/auth/login", "/hub/c?topics=pcs-api"])("should emit %s as a RELATIVE location", (path) => {
     const location = redirectTo(path).headers.get("location");
 
     expect(location).toBe(path);

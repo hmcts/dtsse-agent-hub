@@ -289,7 +289,7 @@ describe("Conversation direct messages", () => {
   it("should link each message's id to its message page when rendering the conversation", () => {
     render(view({ initial: page({ messages: [message("41")] }) }));
 
-    expect(screen.getByRole("link", { name: "#41" }).getAttribute("href")).toBe("/m/41");
+    expect(screen.getByRole("link", { name: "#41" }).getAttribute("href")).toBe("/hub/m/41");
   });
 
   it("should say the conversation is empty when there is nothing in it", () => {
