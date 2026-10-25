@@ -134,9 +134,28 @@ export function connections(data: ConnectionsData | undefined, checklist: (store
   });
 }
 
+/** "A", "A and B", "A, B and C". */
+export function inWords(names: readonly string[]): string {
+  return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+/**
+ * What the Assistant's connections banner says is still to do. Whether to ask at all is `onboarded`'s to answer, from
+ * every credential the hub holds; this only words the ask, from the statuses the connections screen was given.
+ *
+ * It names the connections rather than counting them: "two connections" tells nobody what to go and get. Anything
+ * with no wording of its own is named by its kind, so a credential added to a route before this list gets a row still
+ * reads as something rather than disappearing from the ask. And when there is nothing to name — the hub could not
+ * read the statuses, so none of them says anything either way — it asks in general rather than going quiet.
+ */
+export function onboardingPrompt(needed: readonly CredentialKind[], stored: ReadonlySet<CredentialKind>): string {
+  const names = needed.filter((kind) => !stored.has(kind)).map((kind) => CONNECTORS[kind]?.name ?? kind);
+  return `Your assistant needs ${names.length === 0 ? "you to connect your accounts" : inWords(names)} before it can work for you.`;
+}
+
 /**
  * The sign-ins the cog prompts about, and when. Model access is left out of both on purpose: nobody can use the
- * Assistant at all without it, so the getting-ready screen holds them there until they have it.
+ * Assistant at all without it, and the connections banner asks for it until it is there.
  *
  * A needed sign-in is prompted about whenever it is not usable, because the person has to have it. An optional one is
  * prompted about only once it has lapsed: never setting Atlassian up is a choice, and a badge nobody can ever clear
@@ -151,11 +170,6 @@ function needsAttention(row: Connection): boolean {
     return !isUsable(row.state);
   }
   return PROMPTED_WHEN_LAPSED.includes(row.kind) && hasLapsed(row.state);
-}
-
-/** "A", "A and B", "A, B and C". */
-function inWords(names: readonly string[]): string {
-  return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
 /**

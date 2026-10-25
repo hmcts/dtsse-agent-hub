@@ -207,11 +207,27 @@ describe("GettingReady continue", () => {
 
     expect(onDone).toHaveBeenCalled();
   });
+
+  it("should offer the way out of the screen while a needed account is still to connect", () => {
+    const onLeave = vi.fn();
+    render(ready({ onLeave }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to your chats" }));
+
+    expect(onLeave).toHaveBeenCalled();
+  });
+
+  it("should offer no way out beside Start chatting once every needed account is connected", () => {
+    render(ready({ assistant: assistant("running", { onboarded: true }), statuses: statuses("github", "azure", "claude"), onLeave: vi.fn() }));
+
+    expect(screen.getByRole("button", { name: "Start chatting" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
+  });
 });
 
 describe("OnboardingGate", () => {
-  function gate(summary: AssistantSummary) {
-    return <OnboardingGate assistant={summary} statuses={[]} unavailable={null} paste={ok()} save={ok()} />;
+  function gate(summary: AssistantSummary, stored: CredentialStatus[] = [], dismissed = false) {
+    return <OnboardingGate assistant={summary} statuses={stored} unavailable={null} paste={ok()} save={ok()} dismissed={dismissed} />;
   }
 
   it("should show nothing when the person had onboarded before the visit and their assistant is running", () => {
@@ -220,8 +236,63 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // Nothing covers the page until the person asks for it. The connections screen is `fixed inset-0`, so showing it
+  // unbidden takes away the sidebar, every conversation and the settings that could fix whatever is missing — and
+  // whether a needed credential can be stored at all is not only up to them.
+  it("should ask on a banner, over nothing, when the person has a connection still to make", () => {
+    render(gate(assistant("awaiting_credentials"), statuses("github")));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const banner = screen.getByRole("region", { name: "Connect your accounts" });
+    expect(banner.textContent).toContain("Your assistant needs Azure and Claude before it can work for you.");
+    expect(within(banner).getByRole("button", { name: "Connect accounts" })).toBeTruthy();
+  });
+
+  it("should name every connection in general when the hub could not read what is stored", () => {
+    render(gate(assistant(), [], false));
+
+    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).toContain("needs GitHub, Azure and Claude");
+  });
+
+  it("should open the connections when the person asks for them from the banner", () => {
+    render(gate(assistant()));
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+  });
+
+  it("should put the banner back when the person leaves the connections with one still to make", () => {
+    render(gate(assistant()));
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to your chats" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+  });
+
+  it("should leave the connections on Escape when one is still to make", () => {
+    render(gate(assistant()));
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+  });
+
+  it("should keep asking on the banner across a navigation when the person has yet to connect everything", () => {
+    render(gate(assistant(), [], true));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+  });
+
   it("should stay until the person chooses Start chatting when they finish onboarding during the visit", () => {
     const { rerender } = render(gate(assistant()));
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
 
     expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
 
@@ -230,5 +301,6 @@ describe("OnboardingGate", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Start chatting" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Connect your accounts" })).toBeNull();
   });
 });

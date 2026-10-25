@@ -12,8 +12,10 @@ import {
   connectionsData,
   connectionsWarning,
   hasLapsed,
+  inWords,
   isConnection,
   isUsable,
+  onboardingPrompt,
   PROMPTED_CONNECTIONS,
   PROMPTED_WHEN_LAPSED
 } from "./connections.ts";
@@ -291,5 +293,43 @@ describe("connectionsData", () => {
 
     expect(data.statuses).toEqual([]);
     expect(data.unavailable).toBe("the credentials Key Vault is not configured");
+  });
+});
+
+describe("onboardingPrompt", () => {
+  it("should name the one connection left when only one is", () => {
+    expect(onboardingPrompt(["github", "azure", "claude"], new Set<CredentialKind>(["github", "azure"]))).toBe(
+      "Your assistant needs Claude before it can work for you."
+    );
+  });
+
+  it("should name every connection left, in the order the screen lists them, when several are", () => {
+    expect(onboardingPrompt(["github", "azure", "bedrock"], new Set<CredentialKind>(["azure"]))).toBe(
+      "Your assistant needs GitHub and AI model access before it can work for you."
+    );
+    expect(onboardingPrompt(["github", "azure", "bedrock"], new Set<CredentialKind>())).toBe(
+      "Your assistant needs GitHub, Azure and AI model access before it can work for you."
+    );
+  });
+
+  // The banner is shown because `onboarded` said something is missing, so it asks in general rather than going
+  // quiet: an empty list of statuses means the hub could not read them, not that there is nothing to do.
+  it("should ask in general when nothing it was given names anything to do", () => {
+    expect(onboardingPrompt([], new Set<CredentialKind>())).toBe("Your assistant needs you to connect your accounts before it can work for you.");
+  });
+
+  it("should name a credential by its kind when there is no wording for it", () => {
+    expect(onboardingPrompt(["claude_md"], new Set<CredentialKind>())).toBe("Your assistant needs claude_md before it can work for you.");
+  });
+});
+
+describe("inWords", () => {
+  it.each([
+    [[], ""],
+    [["A"], "A"],
+    [["A", "B"], "A and B"],
+    [["A", "B", "C"], "A, B and C"]
+  ])("should read %j as %j", (names, expected) => {
+    expect(inWords(names)).toBe(expected);
   });
 });
