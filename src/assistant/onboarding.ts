@@ -37,3 +37,22 @@ export function readiness(status: VirtualAgentStatus): Readiness {
 export function onboarded(needed: readonly CredentialKind[], stored: ReadonlySet<CredentialKind>): boolean {
   return needed.every((kind) => stored.has(kind));
 }
+
+/**
+ * What the getting-ready screen asks of the person: to connect their accounts, nothing because they have, or
+ * nothing because the hub cannot tell.
+ *
+ * `onboarded` alone cannot say which of the last two it is. It is built from the credentials the hub managed to
+ * read, so it is false both for someone who has connected nothing and for someone whose stored sign-ins the hub
+ * could not see — and `unavailable` is the only thing that tells the two apart. Reading the second as the first
+ * walks a person who has signed in everywhere back through connections they already made, and holds them behind a
+ * button they can never satisfy, so it is the mistake worth going out of the way to avoid.
+ */
+export type ConnectionsAsk = "connect" | "done" | "unknown";
+
+export function connectionsAsk(onboarded: boolean, unavailable: string | null): ConnectionsAsk {
+  if (unavailable !== null) {
+    return "unknown";
+  }
+  return onboarded ? "done" : "connect";
+}

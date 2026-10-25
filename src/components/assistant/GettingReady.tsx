@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { type ConnectionsAsk, connectionsAsk } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
 import { waitingCookie } from "@/assistant/waiting";
@@ -225,6 +226,30 @@ function Connector({
   );
 }
 
+/**
+ * What the screen says it is for. The `unknown` line neither claims the person has connected anything nor asks them
+ * to: the hub has not read their credentials, and someone who has signed in everywhere must not be told otherwise.
+ */
+function subtitleFor(ask: ConnectionsAsk, returning: boolean): string {
+  if (ask === "unknown") {
+    return "Your sign-ins cannot be checked just now, so your assistant may ask you for one as it goes.";
+  }
+  return returning
+    ? "Your assistant is waiting for you to sign in again before it can carry on."
+    : "While it gets ready, connect the tools it needs to work with your repos, tickets and pipelines.";
+}
+
+/** The footer button, which leaves rather than blocks unless there is something the person can actually connect. */
+function continueLabel(ask: ConnectionsAsk, returning: boolean): string {
+  if (ask === "unknown") {
+    return "Carry on";
+  }
+  if (ask === "connect") {
+    return "Connect the accounts above to continue";
+  }
+  return returning ? "Carry on without waiting" : "Start chatting";
+}
+
 /** What the appearance switch and the heading need, whichever of the two getting-ready screens is showing. */
 interface ScreenProps {
   assistant: AssistantSummary;
@@ -286,6 +311,10 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
  * `returning` is the other way in — someone who connected everything on an earlier visit, whose assistant has
  * stopped to ask them to sign in again — so the screen asks for that rather than introducing the connections, and
  * its button leaves rather than finishing anything.
+ *
+ * `unavailable` is the third way in, and the connections are not listed at all for it: the hub has not read them,
+ * so every row would say "Connect" about a sign-in that may well be there. It says why instead, and its button
+ * leaves, because holding someone behind a checklist the hub cannot check is a door with no handle.
  */
 export function GettingReady({
   assistant,
@@ -304,40 +333,38 @@ export function GettingReady({
   returning?: boolean;
 }) {
   const now = useNow();
+  const ask = connectionsAsk(assistant.onboarded, unavailable);
   const stored = (kind: CredentialKind) => statuses.some((status) => status.kind === kind && status.stored);
   const kinds = [...assistant.needed, ...assistant.optional.filter((kind) => OFFERED_OPTIONAL.includes(kind))];
   const starting = !assistant.readiness.failed && assistant.status !== "running";
-  const canContinue = assistant.onboarded;
   return (
-    <ReadyShell
-      assistant={assistant}
-      unavailable={unavailable}
-      theme={theme}
-      subtitle={
-        returning
-          ? "Your assistant is waiting for you to sign in again before it can carry on."
-          : "While it gets ready, connect the tools it needs to work with your repos, tickets and pipelines."
-      }
-    >
-      <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[14px] border border-asst-line">
-        {kinds.map((kind, index) => (
-          <Connector
-            key={kind}
-            kind={kind}
-            stored={stored(kind)}
-            login={assistant.logins.find((login) => login.kind === kind)}
-            assistantId={assistant.id}
-            starting={starting}
-            paste={paste}
-            save={save}
-            now={now}
-            first={index === 0}
-          />
-        ))}
-      </ul>
+    <ReadyShell assistant={assistant} unavailable={unavailable} theme={theme} subtitle={subtitleFor(ask, returning)}>
+      {ask === "unknown" ? (
+        <p className="text-pretty text-asst-body">
+          Whatever you have already connected is still connected — the hub just cannot read your sign-ins at the moment, so it is not listing them. There is
+          nothing for you to set up again.
+        </p>
+      ) : (
+        <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[14px] border border-asst-line">
+          {kinds.map((kind, index) => (
+            <Connector
+              key={kind}
+              kind={kind}
+              stored={stored(kind)}
+              login={assistant.logins.find((login) => login.kind === kind)}
+              assistantId={assistant.id}
+              starting={starting}
+              paste={paste}
+              save={save}
+              now={now}
+              first={index === 0}
+            />
+          ))}
+        </ul>
+      )}
       <div className="flex justify-end">
-        <button type="button" onClick={onDone} disabled={!canContinue} className={FOOTER_PRIMARY}>
-          {canContinue ? (returning ? "Carry on without waiting" : "Start chatting") : "Connect the accounts above to continue"}
+        <button type="button" onClick={onDone} disabled={ask === "connect"} className={FOOTER_PRIMARY}>
+          {continueLabel(ask, returning)}
         </button>
       </div>
     </ReadyShell>
@@ -446,12 +473,19 @@ function rememberDismissal(assistant: AssistantSummary, dismissed: boolean): voi
  * to send it away is in the cookie `dismissed` is the page's reading of, and that the assistant has been running is
  * in the visit the layout holds. Hiding the notice is the one thing not carried: it is small, and a navigation
  * bringing it back is what tells someone who hid it that their assistant has come up.
+ *
+ * Nobody is taken through the connections while the hub cannot read their credentials. `assistant.onboarded` is
+ * false then whatever the person has stored, so onboarding on it would put the first-visit screen over the chat of
+ * someone who has connected everything, and its button — satisfied only by the credentials the hub is failing to
+ * read — would never let them past. They are told why once instead, and sending that away is remembered in the
+ * same cookie a wait's is, so moving between pages does not bring it back.
  */
 export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean }) {
   const { assistant } = props;
   const visit = useVisit();
-  const [needed] = useState(!assistant.onboarded);
-  const [waiting] = useState(assistant.onboarded && assistant.status !== "running");
+  const ask = connectionsAsk(assistant.onboarded, props.unavailable);
+  const [needed] = useState(ask === "connect");
+  const [waiting] = useState(ask === "done" && assistant.status !== "running");
   const [done, setDone] = useState(false);
   const [view, setView] = useState<"screen" | "notice" | "gone">(dismissed ? "notice" : "screen");
   const running = assistant.status === "running";
@@ -477,11 +511,15 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
     setView("screen");
     rememberDismissal(assistant, false);
   };
-  const onboarding = !assistant.onboarded || (needed && !done);
+  const onboarding = ask === "connect" || (needed && !done);
+  const unknown = ask === "unknown" && view === "screen";
   const screen = waiting && !started && !onboarding && view === "screen";
-  useEscape(screen, dismiss);
+  useEscape(screen || unknown, dismiss);
   if (onboarding) {
     return <GettingReady {...props} onDone={() => setDone(true)} />;
+  }
+  if (unknown) {
+    return <GettingReady {...props} onDone={dismiss} />;
   }
   if (screen) {
     return waitingForPerson(assistant.status) ? (
