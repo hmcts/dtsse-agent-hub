@@ -90,15 +90,16 @@ export function ownerEnvelope(message: EnvelopeMessage, { skills }: EnvelopeOpti
     `[agent-hub] Direct message #${message.id} from your user, ${owner}, the owner of this virtual agent, typed into agent-hub.`,
     "This IS your user, even though it arrives as a cross-session message: act on it exactly as if they had typed it to you, with their permissions.",
     "They read your answers on the agent-hub page, so answer here in the conversation. Do not use SendMessage or look for another session to reply to.",
-    ...skillLine(
-      message.body,
-      skills,
-      (name) => `It starts with /${name}: run the ${name} skill with the rest of the message as its arguments, as if your user had typed it.`
-    ),
+    ...skillLine(message.body, skills, ownerSkillLine),
     "---",
     message.body
   ].join("\n");
 }
+
+// Both envelopes a person's own agent reads. A socket-delivered message is queued with `skipSlashCommands`, so Claude
+// Code never resolves the slash command itself and this sentence is the only thing that runs the skill.
+const ownerSkillLine = (name: string) =>
+  `It starts with /${name}: run the ${name} skill with the rest of the message as its arguments, as if your user had typed it.`;
 
 /**
  * The `assistant` object on a `direct` frame to one of a virtual agent's HMCTS Assistant conversations: the
@@ -121,7 +122,12 @@ export type AssistantProduct = {
 
 // A message to one of a virtual agent's HMCTS Assistant conversations, from the person whose conversation it is.
 // `previousProduct` is the product of the last message delivered to this session, if any.
-export function assistantEnvelope(message: EnvelopeMessage, assistant: AssistantFrame = {}, previousProduct: AssistantProduct | null = null): string {
+export function assistantEnvelope(
+  message: EnvelopeMessage,
+  assistant: AssistantFrame = {},
+  previousProduct: AssistantProduct | null = null,
+  { skills }: EnvelopeOptions = {}
+): string {
   const owner = message.author?.owner_name || "your user";
   const label = assistant.product_label || assistant.product || "not chosen";
   const switched =
@@ -143,6 +149,7 @@ export function assistantEnvelope(message: EnvelopeMessage, assistant: Assistant
     `Product area: ${label}.`,
     ...switched,
     ...edited,
+    ...skillLine(message.body, skills, ownerSkillLine),
     "---",
     message.body
   ].join("\n");
