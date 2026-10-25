@@ -2,6 +2,16 @@ import { expect, test } from "@playwright/test";
 import { asPersona, buildChannel, unique } from "./hub";
 
 test.describe("channels @regression", () => {
+  // The copy has to quote the address the person is on. The bare `/c?topics=` only reaches this page through the
+  // proxy's redirect, so quoting it would contradict their own address bar.
+  test("should tell a person with no topics how to name them, at this page's own address @regression", async ({ page }) => {
+    await page.goto("/hub/c");
+
+    await expect(page.getByText("Name some topics to watch.")).toBeVisible();
+    await expect(page.getByRole("code")).toHaveText("/hub/c?topics=pcs-api,database");
+    await expect(page.getByRole("link", { name: "build a channel" })).toHaveAttribute("href", "/hub/channels/new");
+  });
+
   test("should build a channel, post to it and see the post arrive live in a second page @regression", async ({ browser, baseURL }) => {
     const topic = unique("e2e");
     const writer = await asPersona(browser, unique("writer"), baseURL!);

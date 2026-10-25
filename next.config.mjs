@@ -7,16 +7,6 @@ const securityHeaders = [
   { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }
 ];
 
-/**
- * The hub's pages are served under `/hub`, and each also answers on its bare address with a 308. Those bare addresses
- * are what people paste into chats and tickets — `/agents/{id}` is the one URL for any agent, local or virtual — so a
- * 404 there is a regression even though no code links to them.
- *
- * One rule per segment, never a catch-all: `/`, `/assistant`, `/auth/…`, `/api/…` and `/health…` must not be matched.
- * Redirects are checked before the filesystem, so a catch-all would shadow the front door.
- */
-const HUB_SEGMENTS = ["access", "agents", "c", "channels", "m", "settings", "topics", "virtual"];
-
 const nextConfig = {
   output: "standalone",
   // Off for two reasons. The AAT front door stalls on an origin-compressed .css/.js (see dtsse-github-metrics'
@@ -37,16 +27,11 @@ const nextConfig = {
     serverActions: { bodySizeLimit: "256kb" }
   },
   serverExternalPackages: ["@hmcts-cft/cloud-native-platform", "applicationinsights", "@prisma/client", "pg"],
+  // No `redirects()`. The hub's bare addresses are redirected from `src/proxy.ts` instead, because Next checks
+  // config redirects ahead of the proxy and a 308 from here would repeat a pasted secret into its own `Location`,
+  // before `carriesSecret` ever sees the request.
   headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
-  },
-  redirects() {
-    // Both forms per segment: `:path*` matches zero segments, but only the exact source keeps `/access` off a
-    // trailing slash and so out of a second hop.
-    return HUB_SEGMENTS.flatMap((segment) => [
-      { source: `/${segment}`, destination: `/hub/${segment}`, permanent: true },
-      { source: `/${segment}/:path*`, destination: `/hub/${segment}/:path*`, permanent: true }
-    ]);
   }
 };
 

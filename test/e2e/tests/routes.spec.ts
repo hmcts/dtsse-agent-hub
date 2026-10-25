@@ -36,12 +36,39 @@ test.describe("routes @regression", () => {
     expect(new URL(page.url()).pathname).toMatch(/^\/(assistant|hub)$/);
   });
 
+  // The not-found page renders outside the hub's layout, so this link is the only way back into it.
+  test("should offer the hub as the way back from an unmatched hub address @regression", async ({ page }) => {
+    const response = await page.goto("/hub/nonsense");
+
+    expect(response?.status()).toBe(404);
+    await expect(page.getByRole("link", { name: "Back to home" })).toHaveAttribute("href", "/hub");
+  });
+
+  test("should offer the front door from an unmatched address outside the hub @regression", async ({ page }) => {
+    const response = await page.goto("/nonsense");
+
+    expect(response?.status()).toBe(404);
+    await expect(page.getByRole("link", { name: "Back to home" })).toHaveAttribute("href", "/");
+  });
+
   for (const [from, to] of MOVED) {
     test(`should redirect ${from} to ${to} @regression`, async ({ request }) => {
       const response = await request.get(from, { maxRedirects: 0 });
 
       expect(response.status()).toBe(308);
       expect(response.headers().location).toBe(to);
+    });
+  }
+
+  // A secret pasted into one of the bare addresses must not reach the 308's `Location`: Traefik's access log keeps
+  // it. `src/proxy.ts` strips it first, which is why these are not config `redirects()`.
+  for (const bare of ["/settings/credentials", "/agents/va-1", "/virtual/va-1"]) {
+    test(`should strip a secret from ${bare} rather than repeat it in the redirect @regression`, async ({ request }) => {
+      const response = await request.get(`${bare}?token=sk-ant-0000000000000000000000`, { maxRedirects: 0 });
+
+      expect(response.status()).toBe(303);
+      expect(response.headers().location).toBe(bare);
+      expect(response.headers().location).not.toContain("sk-ant-");
     });
   }
 });
