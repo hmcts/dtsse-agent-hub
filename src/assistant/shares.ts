@@ -1,11 +1,11 @@
 import {
   type ConversationAccess,
-  type ConversationRef,
   type ConversationShare,
   canManageConversationShares,
   canShareConversationWith,
   canViewSharedConversation,
-  conversationAccess
+  conversationAccess,
+  type SharedConversationRef
 } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/store.ts";
@@ -23,7 +23,7 @@ import { ConversationNotFound } from "./store.ts";
  */
 
 /** The conversation as the share rules read it, whoever is asking. `findConversation` is the owner's read. */
-export interface SharedConversationRow extends ConversationRef {
+export interface SharedConversationRow extends SharedConversationRef {
   virtualAgentId: string;
 }
 

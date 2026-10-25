@@ -17,6 +17,13 @@ import { UNTITLED } from "./views.ts";
  * the assistant to read rather than for a colleague to be shown a list of. A message that carried files says so and
  * says how many.
  *
+ * The files stay out for a second reason, which matters to anyone adding a download here. An attachment's media type
+ * is what the uploading browser claimed it was, so a person can store a `text/html` file of their own making against
+ * their own conversation; while only they can fetch it that is theirs to run, and nobody else's session is at risk.
+ * Serving one to a recipient from this origin would make it stored cross-user scripting. A download for a share would
+ * therefore have to force the served type to `application/octet-stream` for everything outside a small allowlist,
+ * rather than echo the claim back.
+ *
  * One residue is worth knowing: a person who attached a file and typed nothing sends a message the hub words for
  * them, "I have attached <name>. Please take a look.", and that is their message, so a share shows it as written.
  * Rewriting a stored body at read time would make the share disagree with the chat it claims to be.

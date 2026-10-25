@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   type AgentRef,
   agentAccess,
-  type ConversationRef,
   type ConversationShare,
   canActAsVirtualAgent,
   canAgentMessageAgent,
@@ -36,6 +35,7 @@ import {
   MIN_PEOPLE_QUERY,
   peopleLookup,
   replyRoute,
+  type SharedConversationRef,
   type UploadRef
 } from "./rules.ts";
 
@@ -541,7 +541,7 @@ describe("the upload rules", () => {
 });
 
 describe("the conversation share rules", () => {
-  const CONVERSATION: ConversationRef = { id: "conv-1", ownerOid: OWNER };
+  const CONVERSATION: SharedConversationRef = { id: "conv-1", ownerOid: OWNER };
   const RECIPIENT = "oid-recipient";
   const SHARES: ConversationShare[] = [
     { conversationId: CONVERSATION.id, recipientOid: RECIPIENT },

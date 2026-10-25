@@ -278,7 +278,8 @@ export function canUseCredentialRoutes(caller: { virtualAgentId?: string }): boo
   return caller.virtualAgentId === undefined;
 }
 
-export interface ConversationRef {
+/** A conversation as the share rules read it. The id as well as the owner, because a share is of one conversation. */
+export interface SharedConversationRef {
   id: string;
   ownerOid: string;
 }
@@ -299,7 +300,7 @@ export type ConversationAccess = "owner" | "reader" | "none";
  * A link to a shared conversation is a convenience for reaching one of these, never what grants it: someone handed
  * the link who is not named in a row gets `none`, exactly as if the conversation did not exist.
  */
-export function conversationAccess(viewerOid: string, conversation: ConversationRef, shares: readonly ConversationShare[]): ConversationAccess {
+export function conversationAccess(viewerOid: string, conversation: SharedConversationRef, shares: readonly ConversationShare[]): ConversationAccess {
   if (viewerOid === conversation.ownerOid) {
     return "owner";
   }
@@ -315,12 +316,12 @@ export function conversationAccess(viewerOid: string, conversation: Conversation
  * `canPersonMessageAgent` and `canSeeAgentSkills` still answer for a recipient as they do for a stranger, and with
  * them `/api/ui/stream`, every `/api/agent/{agent_id}/…` route and the hub's rosters.
  */
-export function canViewSharedConversation(viewerOid: string, conversation: ConversationRef, shares: readonly ConversationShare[]): boolean {
+export function canViewSharedConversation(viewerOid: string, conversation: SharedConversationRef, shares: readonly ConversationShare[]): boolean {
   return conversationAccess(viewerOid, conversation, shares) !== "none";
 }
 
 /** Only the owner sees who a conversation is shared with, adds someone, or takes them off the list. */
-export function canManageConversationShares(actorOid: string, conversation: ConversationRef): boolean {
+export function canManageConversationShares(actorOid: string, conversation: SharedConversationRef): boolean {
   return actorOid === conversation.ownerOid;
 }
 
@@ -328,7 +329,7 @@ export function canManageConversationShares(actorOid: string, conversation: Conv
  * Whether `actorOid` may share their conversation with `recipientOid`. `recipientKnown` means a `user` row exists, as
  * `canGrant` requires of a grantee: the hub shares with a person it has seen, not with an address.
  */
-export function canShareConversationWith(actorOid: string, conversation: ConversationRef, recipientOid: string, recipientKnown: boolean): boolean {
+export function canShareConversationWith(actorOid: string, conversation: SharedConversationRef, recipientOid: string, recipientKnown: boolean): boolean {
   return canManageConversationShares(actorOid, conversation) && recipientKnown && recipientOid !== conversation.ownerOid;
 }
 

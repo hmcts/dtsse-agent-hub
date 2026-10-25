@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const TRIGGER = "flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-lg text-asst-muted hover:bg-asst-field hover:text-asst-text";
@@ -44,8 +45,12 @@ function room(element: HTMLElement): { above: number; below: number; beside: num
 }
 
 /**
- * A conversation's options: rename it, or delete it and its document. Shown from the chat's header for the open
- * conversation and from every row of the sidebar, so the destructive confirmation is written once.
+ * A conversation's options: share it read-only, rename it, or delete it and its document. Shown from the chat's
+ * header for the open conversation and from every row of the sidebar, so the destructive confirmation is written
+ * once.
+ *
+ * Share is a link rather than a pane of its own: the dialog lives at the chat's own address, so it can be reached
+ * from anywhere and the browser's back button closes it.
  *
  * Dismissed by Escape or a click outside, in the same shape as the hub's other menus: closing from the keyboard puts
  * focus back on the trigger, while a click elsewhere leaves focus where the click put it. The panel opens upward when
@@ -53,6 +58,7 @@ function room(element: HTMLElement): { above: number; below: number; beside: num
  */
 export function ChatMenu({
   title,
+  shareHref,
   onRename,
   onDelete,
   onOpen,
@@ -60,6 +66,8 @@ export function ChatMenu({
   triggerClassName = TRIGGER
 }: {
   title: string;
+  /** Where the share dialog for this chat is. */
+  shareHref: string;
   onRename: (title: string) => Promise<void>;
   onDelete: () => Promise<void>;
   /** Called as the menu opens, so whatever is shown about the last attempt can be dropped. */
@@ -174,6 +182,9 @@ export function ChatMenu({
         >
           {open === "menu" ? (
             <div role="menu" aria-label={label} className="flex flex-col gap-0.5">
+              <Link href={shareHref} role="menuitem" className={item} onClick={close}>
+                Share
+              </Link>
               <button
                 type="button"
                 role="menuitem"
