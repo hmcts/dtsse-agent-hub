@@ -7,7 +7,9 @@ import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
+import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
+import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import type { ActionResult } from "@/web/action";
 
 /** What a sidebar row's options menu does. The pages pass the same server actions the chat's own header uses. */
@@ -19,9 +21,16 @@ export interface ConversationActions {
 interface ShellContextValue {
   sidebarOpen: boolean;
   openSidebar: () => void;
+  /** How much of the row the sidebar takes: nothing while it is collapsed, or a drawer over the page. */
+  sidebarWidth: number;
 }
 
-const ShellContext = createContext<ShellContextValue>({ sidebarOpen: true, openSidebar: () => {} });
+const ShellContext = createContext<ShellContextValue>({ sidebarOpen: true, openSidebar: () => {}, sidebarWidth: 0 });
+
+/** How much of the row the Assistant's sidebar takes, which a panel on the other side of the chat must leave. */
+export function useSidebarWidth(): number {
+  return useContext(ShellContext).sidebarWidth;
+}
 
 /** The button a page's header shows while the sidebar is collapsed, or always on a narrow screen. */
 export function SidebarToggle() {
@@ -71,7 +80,8 @@ export function Mark({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
 
 /**
  * The Assistant's frame: its sidebar of conversations, newest first under date headings, beside the page. On a wide
- * screen the sidebar collapses to give the chat the room; on a narrow one it is a drawer over the page.
+ * screen the sidebar is dragged to the width the person wants and collapses to give the chat the room; on a narrow
+ * one it is a drawer over the page, at its own width, whatever width was dragged on a wide screen.
  */
 export function AssistantShell({
   viewerName,
@@ -98,6 +108,19 @@ export function AssistantShell({
   const [narrow, setNarrow] = useState(false);
   const [failed, setFailed] = useState<{ id: string; error: string } | null>(null);
   const sidebar = useRef<HTMLElement>(null);
+  const resize = useResizableWidth({
+    storageKey: "hmcts-assistant-sidebar-width",
+    label: "Resize sidebar",
+    initial: SIDEBAR_WIDTH,
+    min: SIDEBAR_MIN_WIDTH,
+    ceiling: SIDEBAR_MAX_WIDTH,
+    // The sidebar cannot see whether the document panel is open, so it leaves room for one wherever one would take a
+    // column of the row.
+    reserve: besideSidebar,
+    edge: "left"
+  });
+  // The drawer is its own width over the page, so a width dragged on a wide screen never reaches it.
+  const width = narrow ? SIDEBAR_WIDTH : resize.width;
 
   // A collapsed sidebar is out of the tab order. Set on the element itself, since React 18 and the React 19 the app
   // router runs disagree on how `inert` is written as a prop.
@@ -106,7 +129,7 @@ export function AssistantShell({
   }, [open]);
 
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 767px)");
+    const query = window.matchMedia(`(max-width: ${SIDEBAR_DRAWER_MAX_WIDTH}px)`);
     const update = () => {
       setNarrow(query.matches);
       if (query.matches) {
@@ -145,16 +168,17 @@ export function AssistantShell({
   useEffect(() => setFailed(null), [activeId]);
 
   return (
-    <ShellContext.Provider value={{ sidebarOpen: open, openSidebar: () => setOpen(true) }}>
+    <ShellContext.Provider value={{ sidebarOpen: open, openSidebar: () => setOpen(true), sidebarWidth: narrow || !open ? 0 : width }}>
       <div className="relative flex min-h-0 flex-1 overflow-hidden bg-asst-bg font-plex text-[15px] leading-normal text-asst-text">
         {narrow && open ? (
           <button type="button" aria-label="Close sidebar" onClick={() => setOpen(false)} className="fixed inset-0 z-[19] bg-black/55" />
         ) : null}
         <aside
           aria-label="Conversations"
-          className={`z-20 flex h-full w-[272px] shrink-0 flex-col border-r border-asst-active bg-asst-rail transition-[margin,transform] duration-200 ${
-            narrow ? `fixed left-0 top-0 ${open ? "translate-x-0" : "-translate-x-full"}` : open ? "ml-0" : "-ml-[272px]"
+          className={`z-20 flex h-full shrink-0 flex-col border-r border-asst-active bg-asst-rail transition-[margin,transform] duration-200 ${
+            narrow ? `fixed left-0 top-0 ${open ? "translate-x-0" : "-translate-x-full"}` : "relative"
           }`}
+          style={{ width, marginLeft: narrow || open ? 0 : -width }}
           ref={sidebar}
         >
           <div className="flex items-center gap-2.5 px-4 pb-3 pt-4">
@@ -263,6 +287,14 @@ export function AssistantShell({
               ) : null}
             </div>
           </div>
+          {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,
+              and the width dragged here is the one it comes back to. */}
+          {narrow || !open ? null : (
+            <div
+              {...resize.separator}
+              className="absolute -right-1 bottom-0 top-0 z-[2] w-2 cursor-col-resize hover:bg-asst-accent/25 focus:bg-asst-accent/40 focus:outline-none"
+            />
+          )}
         </aside>
         <main className="flex h-full min-w-0 flex-1 flex-col">{children}</main>
       </div>

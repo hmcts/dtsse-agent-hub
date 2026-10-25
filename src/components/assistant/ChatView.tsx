@@ -13,6 +13,7 @@ import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
+import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubEvent } from "@/components/live/HubStream";
@@ -124,7 +125,7 @@ function ConfirmProduct({ from, to, onCancel, onConfirm }: { from: string; to: s
 function useNarrow(): boolean {
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 900px)");
+    const query = window.matchMedia(`(max-width: ${ARTEFACT_OVERLAY_MAX_WIDTH}px)`);
     const update = () => setNarrow(query.matches);
     update();
     query.addEventListener("change", update);
