@@ -209,10 +209,77 @@ describe("GettingReady continue", () => {
   });
 });
 
+/**
+ * The hub failing to read someone's credentials looks exactly like their having stored none — `onboarded` is false
+ * either way — so these pin the two apart from the person's side: nobody is asked to connect what the hub has not
+ * looked at, and the screen says which of the two it is.
+ */
+describe("GettingReady when the hub cannot read the credentials", () => {
+  const REASON = "this deployment has no credentials vault, so credentials cannot be stored here";
+
+  /** What the page passes when the credential store cannot be read: the reason, and no statuses to go on. */
+  function unreadable(props: Partial<Parameters<typeof GettingReady>[0]> = {}) {
+    return ready({ unavailable: REASON, statuses: [], ...props });
+  }
+
+  it("should say the sign-ins cannot be read, and why, when the credential store cannot be read", () => {
+    render(unreadable());
+
+    expect(screen.getByText(/cannot read your sign-ins/)).toBeTruthy();
+    expect(screen.getByText(REASON)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+  });
+
+  it("should ask for no account, and let the person past, when the hub cannot tell what they have connected", () => {
+    const onDone = vi.fn();
+    render(unreadable({ onDone }));
+
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect the accounts above to continue" })).toBeNull();
+    const carryOn = screen.getByRole("button", { name: "Carry on" }) as HTMLButtonElement;
+    expect(carryOn.disabled).toBe(false);
+
+    fireEvent.click(carryOn);
+    expect(onDone).toHaveBeenCalled();
+  });
+});
+
 describe("OnboardingGate", () => {
   function gate(summary: AssistantSummary) {
     return <OnboardingGate assistant={summary} statuses={[]} unavailable={null} paste={ok()} save={ok()} />;
   }
+
+  it("should ask for nothing when every needed account is connected and the hub can read them", () => {
+    render(
+      <OnboardingGate
+        assistant={assistant("running", { onboarded: true })}
+        statuses={statuses("github", "azure", "claude")}
+        unavailable={null}
+        paste={ok()}
+        save={ok()}
+      />
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+  });
+
+  it("should let the person into their chat when the hub cannot read the credentials it would gate them on", () => {
+    render(
+      <OnboardingGate
+        assistant={assistant("running")}
+        statuses={[]}
+        unavailable="this deployment has no credentials vault, so credentials cannot be stored here"
+        paste={ok()}
+        save={ok()}
+      />
+    );
+
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Carry on" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 
   it("should show nothing when the person had onboarded before the visit and their assistant is running", () => {
     render(gate(assistant("running", { onboarded: true })));
