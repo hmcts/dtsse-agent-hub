@@ -283,7 +283,9 @@ export function AssistantShell({
               <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-asst-line text-xs font-semibold">
                 {initials(viewerName)}
               </span>
-              <span className="min-w-0 truncate text-sm font-medium">{viewerName}</span>
+              {/* The name takes the room between the two: the cog belongs at the end of the row, in line with the
+                  Agent Hub link under it, wherever a name happens to end. */}
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">{viewerName}</span>
               <AssistantSettings theme={theme} connections={connections} plugins={plugins} />
             </div>
             {hubLink ? (
