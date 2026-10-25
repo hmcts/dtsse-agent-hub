@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { type Block, type Inline, type ListBlock, parseMarkup } from "@/messages/markup";
+import { type Block, type Inline, type ListBlock, parseMarkup, type TableBlock } from "@/messages/markup";
 
 /**
  * The assistant's answers and documents, rendered from the hub's markdown subset in the Assistant's own styles. As
@@ -14,7 +14,9 @@ function renderInline(nodes: Inline[]): ReactNode[] {
         return node.text;
       case "code":
         return (
-          <code key={index} className="rounded bg-asst-active px-1.5 py-px font-plex-mono text-[0.9em]">
+          // A code span keeps its own spacing wherever it sits, so the same span reads the same in a paragraph and in
+          // a table cell, which sets `whitespace-normal` for its text.
+          <code key={index} className="whitespace-pre-wrap rounded bg-asst-active px-1.5 py-px font-plex-mono text-[0.9em]">
             {node.text}
           </code>
         );
@@ -55,6 +57,41 @@ function List({ list }: { list: ListBlock }) {
   );
 }
 
+const ALIGNMENT = { left: "text-left", center: "text-center", right: "text-right" } as const;
+
+function Table({ table }: { table: TableBlock }) {
+  // A column the delimiter row left alone reads left, which a `th` would otherwise centre.
+  const cell = (column: number) => `border border-asst-line px-2 py-1 align-top ${ALIGNMENT[table.align[column] ?? "left"]}`;
+  return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: a keyboard user needs focus to scroll a wide table into view, which axe checks as scrollable-region-focusable
+    <div tabIndex={0} className="overflow-x-auto rounded-lg">
+      {/* Cell text wraps as normal text: the container's `whitespace-pre-wrap` would keep the runs of spaces an author padded their pipes with. A code span sets its own, so only the padding collapses. */}
+      <table className="min-w-full border-collapse whitespace-normal text-[13px] leading-5">
+        <thead>
+          <tr>
+            {table.header.map((children, column) => (
+              <th key={column} scope="col" className={`${cell(column)} bg-asst-raised font-semibold text-asst-text`}>
+                {renderInline(children)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row, index) => (
+            <tr key={index}>
+              {row.map((children, column) => (
+                <td key={column} className={cell(column)}>
+                  {renderInline(children)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** A document's headings are real headings, under the panel's own; an answer's are bold lines, as in the hub. */
 function Heading({ level, document, children }: { level: number; document: boolean; children: ReactNode }) {
   if (!document) {
@@ -88,7 +125,20 @@ function renderBlock(block: Block, index: number, document: boolean): ReactNode 
       );
     case "list":
       return <List key={index} list={block} />;
+    case "table":
+      return <Table key={index} table={block} />;
+    default:
+      return noCaseFor(block);
   }
+}
+
+/**
+ * Every block `parseMarkup` yields must have a case above. `block` is `never` only while the switch is total, so a
+ * block type added to the parser fails the typecheck here rather than rendering as nothing and dropping an answer's
+ * content without a trace.
+ */
+function noCaseFor(block: never): never {
+  throw new Error(`AssistantMarkdown has no case for the ${(block as Block).type} block`);
 }
 
 export function AssistantMarkdown({ source, document = false }: { source: string; document?: boolean }) {

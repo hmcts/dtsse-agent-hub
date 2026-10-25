@@ -456,7 +456,8 @@ export async function runBridge({
           ? ownerDirectEnvelope
           : directEnvelope;
       try {
-        const content = assistant ? assistantEnvelope(message, assistant, previousProduct) : envelope(message, { skills: skillNames() });
+        const skills = skillNames();
+        const content = assistant ? assistantEnvelope(message, assistant, previousProduct, { skills }) : envelope(message, { skills });
         await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, content);
         remember(message.id);
         if (assistant) {
