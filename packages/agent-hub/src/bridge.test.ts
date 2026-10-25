@@ -700,6 +700,71 @@ describe("runBridge", () => {
     }
   });
 
+  it("should write an attached file to disk, report it fetched and name its path when the frame carries attachments", async () => {
+    // Arrange
+    const conversationId = "1dc5f5a0-1234-4000-8000-00000000000c";
+    const uploadId = "2dc5f5a0-1234-4000-8000-00000000000d";
+    const uploads = fs.mkdtempSync(path.join(home.root, "uploads-"));
+    const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: conversationId, AGENT_HUB_UPLOADS_DIR: uploads } });
+    bridge.hub.attachments.set(uploadId, { parts: [new Uint8Array(4).fill(1), new Uint8Array(2).fill(2)], fetched: false });
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Act
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "what does this say?", {
+        assistant: {
+          conversation_id: conversationId,
+          product: "pcs",
+          product_label: "Possession claims",
+          artefact_version: 0,
+          artefact_updated_by: null,
+          attachments: [{ upload_id: uploadId, name: "letter.pdf", bytes: 6, media_type: "application/pdf", part_bytes: 4, parts: 2 }]
+        }
+      });
+      await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
+
+      // Assert
+      const file = path.join(uploads, conversationId, `${uploadId}-letter.pdf`);
+      expect([...fs.readFileSync(file)]).toEqual([1, 1, 1, 1, 2, 2]);
+      expect(bridge.hub.attachments.get(uploadId)).toEqual({ parts: [], fetched: true });
+      expect(bridge.socketWrites[0]).toMatch(/already saved on this machine at the absolute path below/);
+      expect(bridge.socketWrites[0]).toContain(`- ${file} (application/pdf,`);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  it("should still deliver the message, saying the file could not be retrieved, when the attachment cannot be fetched", async () => {
+    // Arrange
+    const conversationId = "3dc5f5a0-1234-4000-8000-00000000000e";
+    const uploads = fs.mkdtempSync(path.join(home.root, "uploads-"));
+    const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: conversationId, AGENT_HUB_UPLOADS_DIR: uploads } });
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Act: the hub knows nothing of this upload, so every part is a 404.
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "what does this say?", {
+        assistant: {
+          conversation_id: conversationId,
+          product: "pcs",
+          product_label: "Possession claims",
+          artefact_version: 0,
+          artefact_updated_by: null,
+          attachments: [{ upload_id: "4dc5f5a0-1234-4000-8000-00000000000f", name: "scan.png", bytes: 6, media_type: "image/png", part_bytes: 4, parts: 2 }]
+        }
+      });
+      await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
+
+      // Assert
+      expect(bridge.socketWrites[0]).toMatch(/could not be retrieved and is not on this machine: scan\.png/);
+      expect(bridge.socketWrites[0]).toMatch(/\n---\nwhat does this say\?$/);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
   it("should keep the peer framing when an assistant frame comes from someone other than the owner", async () => {
     // Arrange
     const bridge = await startBridge({ pingMs: 5000 }, { env: VIRTUAL });

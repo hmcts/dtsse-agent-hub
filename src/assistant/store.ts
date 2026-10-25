@@ -5,6 +5,8 @@ import type { ModelRoute } from "../viewer/identity.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
 import { DEFAULT_PRODUCT, isProduct, productLabel } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
+import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
+import { uploadsEnabled } from "./uploads.ts";
 
 /**
  * The HMCTS Assistant: each person's one assistant virtual agent, and its conversations.
@@ -181,6 +183,16 @@ export async function listConversations(db: Database, ownerOid: string, limit = 
     take: limit
   });
   return rows.map(toRow);
+}
+
+/**
+ * Every conversation id of the virtual agent, so its pod can reconcile its `/workspace/uploads/<id>/` directories
+ * against them. A conversation deleted while the pod was stopped sends no `close`, so without this read its
+ * attachments would stay on the disk until the volume went.
+ */
+export async function conversationIdsOf(db: Database, virtualAgentId: string): Promise<string[]> {
+  const rows = await db.assistantConversation.findMany({ where: { virtualAgentId }, select: { id: true }, orderBy: { id: "asc" } });
+  return rows.map((row) => row.id);
 }
 
 /** Creates the conversation's agent: offline, the assistant's, under a session id the pod will start a session as. */
@@ -449,9 +461,16 @@ export interface AssistantFrame {
   product_label: string;
   artefact_version: number;
   artefact_updated_by: "user" | "agent" | null;
+  /**
+   * The files the person attached to this message, for the pod to fetch to its disk before it delivers the message.
+   * Left out entirely while `ASSISTANT_UPLOADS_ENABLED` is off, so a pod whose client predates attachments is never
+   * sent one: nothing reports a pod's client version, so the flag is the only signal there is.
+   */
+  attachments?: FrameAttachment[];
 }
 
-export async function assistantFrame(db: Database, agentId: string): Promise<AssistantFrame | undefined> {
+/** `messageId` is the direct being framed, which is what the attachments hang off. */
+export async function assistantFrame(db: Database, agentId: string, messageId?: bigint): Promise<AssistantFrame | undefined> {
   const row = await db.agent.findUnique({
     where: { id: agentId },
     select: { assistantConversation: { select: { id: true, product: true, ...ARTEFACT_SELECT } } }
@@ -466,7 +485,8 @@ export async function assistantFrame(db: Database, agentId: string): Promise<Ass
     product: conversation.product,
     product_label: productLabel(conversation.product),
     artefact_version: artefact.version,
-    artefact_updated_by: artefact.updatedBy
+    artefact_updated_by: artefact.updatedBy,
+    ...(uploadsEnabled() && messageId !== undefined ? { attachments: await frameAttachments(db, messageId) } : {})
   };
 }
 

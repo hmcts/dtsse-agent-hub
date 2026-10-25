@@ -14,7 +14,9 @@
  *   person manages it and sees its login codes. A virtual agent's launch token acts
  *   as its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.
  * - An HMCTS Assistant conversation's agent is its owner's alone: no grant extends to it, since the conversation is
- *   a private chat rather than a session they chose to share.
+ *   a private chat rather than a session they chose to share. Nor to a file attached to one of its messages: only the
+ *   person who uploaded it may add parts to it or discard it, and only the session of the conversation it was attached
+ *   to may fetch its bytes.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
  */
@@ -175,6 +177,47 @@ export function canOwnerReadCredential(kind: string): boolean {
  */
 export function canVirtualAgentStoreCredential(kind: string): boolean {
   return kind !== "claude_md" && kind !== "git_identity";
+}
+
+export type UploadState = "pending" | "stored" | "fetched" | "expired";
+
+/** The columns every upload rule reads. */
+export interface UploadRef {
+  conversationId: string;
+  ownerOid: string;
+  /** The message it was attached to, or `null` while the person is still composing. */
+  messageId: string | null;
+  state: UploadState;
+}
+
+/**
+ * Whether `viewerOid` may add a part to an upload or discard it. Its own rule rather than `canViewAgent`'s: an upload
+ * belongs to the person who started it, and no grant over their agents extends to a file they are part-way through
+ * attaching. Once it is attached to a message it is finished with, so there is nothing left to write.
+ */
+export function canWriteUpload(viewerOid: string, upload: UploadRef): boolean {
+  return viewerOid === upload.ownerOid && upload.messageId === null && (upload.state === "pending" || upload.state === "stored");
+}
+
+/** Whether an upload may be stamped onto a message of `conversationId`: a finished one of that conversation, once. */
+export function canAttachUpload(viewerOid: string, conversationId: string, upload: UploadRef): boolean {
+  return viewerOid === upload.ownerOid && upload.conversationId === conversationId && upload.messageId === null && upload.state === "stored";
+}
+
+/** `part` reads one part's bytes; `fetched` reports the whole file is on the pod's disk. */
+export type AttachmentUse = "part" | "fetched";
+
+/**
+ * Whether the session of `conversationId` may do `use` to an attachment. Only an attachment of its own conversation,
+ * and only one that reached a message — an upload still being composed is not the pod's business. `part` needs the
+ * bytes to still be there; `fetched` also accepts an upload already reported, so a pod that retries after a lost
+ * response is answered rather than refused.
+ */
+export function canSessionUseAttachment(conversationId: string | null, upload: UploadRef, use: AttachmentUse): boolean {
+  if (conversationId === null || upload.conversationId !== conversationId || upload.messageId === null) {
+    return false;
+  }
+  return use === "part" ? upload.state === "stored" : upload.state === "stored" || upload.state === "fetched";
 }
 
 export type AgentAccess = "owner" | "write" | "read" | "none";

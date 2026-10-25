@@ -17,6 +17,10 @@ export default defineConfig({
     include: ["test/integration/**/*.test.ts"],
     globalSetup: ["./test/integration/setup.ts"],
     pool: "forks",
+    // `--expose-gc` so the upload suite can measure what the hub *retains* while parts are in flight rather than how
+    // much it allocated and threw away. Without it `heapUsed` is dominated by uncollected garbage and a reader that
+    // buffered a whole file would be indistinguishable from one that holds a single part.
+    execArgv: ["--expose-gc"],
     maxWorkers: 1,
     fileParallelism: false,
     testTimeout: 30_000,

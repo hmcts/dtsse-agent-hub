@@ -3,6 +3,7 @@ import type { AgentStatus } from "../realtime/events.ts";
 import { byCodePoint } from "../topics/slug.ts";
 import type { ConversationItem } from "../transcripts/conversation.ts";
 import { productLabel } from "./products.ts";
+import type { MessageAttachment } from "./upload-store.ts";
 
 /**
  * An assistant conversation as a non-technical reader sees it: what they wrote, what the assistant answered, and
@@ -12,7 +13,8 @@ import { productLabel } from "./products.ts";
  */
 
 export type ThreadItem =
-  | { type: "user"; key: string; at: string; text: string; delivery: DeliveryView | null }
+  /** `attachments` is always an array here, so the view never has to decide what a missing one means. */
+  | { type: "user"; key: string; at: string; text: string; delivery: DeliveryView | null; attachments: MessageAttachment[] }
   | { type: "assistant"; key: string; at: string; text: string }
   | { type: "product"; key: string; at: string; label: string };
 
@@ -42,7 +44,7 @@ export function threadItems(items: readonly ConversationItem[], products: readon
       const message = item.message;
       thread.push(
         message.author.type === "user"
-          ? { type: "user", key: item.key, at: item.at, text: message.body, delivery: message.delivery }
+          ? { type: "user", key: item.key, at: item.at, text: message.body, delivery: message.delivery, attachments: message.attachments ?? [] }
           : { type: "assistant", key: item.key, at: item.at, text: message.body }
       );
     } else if (item.entry.role === "assistant") {

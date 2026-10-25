@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type AssistantFrame,
   assistantEnvelope,
+  attachmentLines,
   directEnvelope,
   type EnvelopeMessage,
   formatMessage,
@@ -168,6 +169,73 @@ describe("assistantEnvelope", () => {
     // Assert
     expect(text).toMatch(/^\[agent-hub\] Direct message #7 from your user, your user, typed into the HMCTS Assistant\.$/m);
     expect(text.split("\n")).toContain("Product area: not chosen.");
+  });
+
+  it("should name the absolute path of a file already on disk, before the separator, when one was attached", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, pcs, null, [
+      { name: "letter.pdf", path: "/workspace/uploads/c1/u1-letter.pdf", media_type: "application/pdf", bytes: 1_500_000 }
+    ]);
+
+    // Assert
+    const lines = text.split("\n");
+    expect(lines).toContain(
+      "The user attached a file to this message. It is already saved on this machine at the absolute path below — read it from there, and do not ask for it to be sent again:"
+    );
+    expect(lines).toContain("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1.4 MB)");
+    expect(lines.indexOf("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1.4 MB)")).toBeLessThan(lines.indexOf("---"));
+  });
+
+  it("should say so, and ask for it again, when a file could not be retrieved", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, pcs, null, [{ name: "scan.png", media_type: "image/png", bytes: 2048, error: "503 from the hub" }]);
+
+    // Assert
+    expect(text.split("\n")).toContain(
+      "A file the user attached could not be retrieved and is not on this machine: scan.png. Tell them so in your answer and ask them to attach it again; do not guess at the contents."
+    );
+    expect(text).not.toMatch(/already saved/);
+  });
+
+  it("should count both when some files arrived and others did not", () => {
+    // Act
+    const text = assistantEnvelope(personMessage, pcs, null, [
+      { name: "a.pdf", path: "/workspace/uploads/c1/u1-a.pdf", media_type: "application/pdf", bytes: 2 * 1024 * 1024 },
+      { name: "b.pdf", path: "/workspace/uploads/c1/u2-b.pdf", media_type: "application/pdf", bytes: 1024 },
+      { name: "c.png", media_type: "image/png", error: "timed out" },
+      { name: "d.png", path: "", media_type: "image/png", error: "timed out" }
+    ]);
+
+    // Assert
+    expect(text).toMatch(/The user attached 2 files to this message\. They are already saved/);
+    expect(text).toMatch(/- \/workspace\/uploads\/c1\/u2-b\.pdf \(application\/pdf, 1 KB\)/);
+    expect(text).toMatch(/2 files the user attached could not be retrieved and are not on this machine: c\.png, d\.png\./);
+  });
+
+  it("should say nothing about attachments when the message carried none", () => {
+    expect(assistantEnvelope(personMessage, pcs, null, [])).not.toMatch(/attached/);
+  });
+});
+
+describe("attachmentLines", () => {
+  it("should say nothing at all for no attachments, so an envelope without files is unchanged", () => {
+    expect(attachmentLines()).toEqual([]);
+    expect(attachmentLines([])).toEqual([]);
+  });
+
+  it("should fall back to unknown when the hub described neither the type nor the size", () => {
+    expect(attachmentLines([{ name: "x", path: "/p/x" }])).toEqual([
+      "The user attached a file to this message. It is already saved on this machine at the absolute path below — read it from there, and do not ask for it to be sent again:",
+      "- /p/x (unknown type, unknown size)"
+    ]);
+  });
+
+  it.each([
+    [null, "unknown size"],
+    [-1, "unknown size"],
+    [Number.NaN, "unknown size"]
+  ])("should not claim a size when the frame said %s", (bytes, expected) => {
+    expect(attachmentLines([{ name: "x", path: "/p/x", bytes }])[1]).toContain(expected);
   });
 });
 

@@ -111,7 +111,58 @@ export type AssistantFrame = {
   product_label?: string | null;
   artefact_version?: number | null;
   artefact_updated_by?: string | null;
+  /** The files attached to this message. Absent from a hub with uploads off, or one older than them. */
+  attachments?: unknown;
 };
+
+/**
+ * What became of one attachment: the absolute path it was written to, or why it could not be fetched. Structural for
+ * the same reason the rest of this module is — `assistant/attachments.ts` produces these, and the envelope only reads.
+ */
+export type AttachmentOutcome = {
+  name: string;
+  path?: string | null;
+  media_type?: string | null;
+  bytes?: number | null;
+  error?: string | null;
+};
+
+function describeSize(bytes: number | null | undefined): string {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
+    return "";
+  }
+  const mb = bytes / (1024 * 1024);
+  return mb >= 0.1 ? ` ${mb.toFixed(1)} MB` : ` ${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * The lines that tell the session about the files attached to a message, spliced in before the `---` separator.
+ *
+ * The file is already on disk by the time this is written, so the envelope names the path and nothing depends on the
+ * model choosing to run a command to go and get it — which is what `jiraExportLines` has to depend on. A file that
+ * could not be fetched is said so explicitly: a dropped attachment nobody mentions leaves the person believing their
+ * file was read.
+ */
+export function attachmentLines(attachments: readonly AttachmentOutcome[] = []): string[] {
+  if (attachments.length === 0) {
+    return [];
+  }
+  const got = attachments.filter((attachment) => typeof attachment.path === "string" && attachment.path !== "");
+  const lost = attachments.filter((attachment) => !got.includes(attachment));
+  const lines: string[] = [];
+  if (got.length > 0) {
+    lines.push(
+      `The user attached ${got.length === 1 ? "a file" : `${got.length} files`} to this message. ${got.length === 1 ? "It is" : "They are"} already saved on this machine at the absolute ${got.length === 1 ? "path" : "paths"} below — read ${got.length === 1 ? "it" : "them"} from there, and do not ask for ${got.length === 1 ? "it" : "them"} to be sent again:`,
+      ...got.map((attachment) => `- ${attachment.path} (${attachment.media_type || "unknown type"},${describeSize(attachment.bytes) || " unknown size"})`)
+    );
+  }
+  if (lost.length > 0) {
+    lines.push(
+      `${lost.length === 1 ? "A file the user attached" : `${lost.length} files the user attached`} could not be retrieved and ${lost.length === 1 ? "is" : "are"} not on this machine: ${lost.map((attachment) => attachment.name).join(", ")}. Tell them so in your answer and ask them to attach ${lost.length === 1 ? "it" : "them"} again; do not guess at the contents.`
+    );
+  }
+  return lines;
+}
 
 /** The product area of the last message delivered to a conversation's session, as the bridge records it. */
 export type AssistantProduct = {
@@ -120,8 +171,14 @@ export type AssistantProduct = {
 };
 
 // A message to one of a virtual agent's HMCTS Assistant conversations, from the person whose conversation it is.
-// `previousProduct` is the product of the last message delivered to this session, if any.
-export function assistantEnvelope(message: EnvelopeMessage, assistant: AssistantFrame = {}, previousProduct: AssistantProduct | null = null): string {
+// `previousProduct` is the product of the last message delivered to this session, if any; `attachments` is what became
+// of each file attached to it, already fetched to this machine's disk by the time this is built.
+export function assistantEnvelope(
+  message: EnvelopeMessage,
+  assistant: AssistantFrame = {},
+  previousProduct: AssistantProduct | null = null,
+  attachments: readonly AttachmentOutcome[] = []
+): string {
   const owner = message.author?.owner_name || "your user";
   const label = assistant.product_label || assistant.product || "not chosen";
   const switched =
@@ -143,6 +200,7 @@ export function assistantEnvelope(message: EnvelopeMessage, assistant: Assistant
     `Product area: ${label}.`,
     ...switched,
     ...edited,
+    ...attachmentLines(attachments),
     "---",
     message.body
   ].join("\n");

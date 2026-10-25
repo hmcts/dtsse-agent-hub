@@ -16,6 +16,7 @@ import {
   touchConversation,
   writeArtefact
 } from "@/assistant/store";
+import { attachUploads } from "@/assistant/upload-store";
 import { loadThreadMessage, type ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import { directAsPerson } from "@/messages/send";
@@ -46,9 +47,21 @@ function checkBody(raw: unknown): string | { ok: false; error: string } {
   return body;
 }
 
-async function send(oid: string, conversation: ConversationRow, body: string): Promise<ThreadMessage> {
+/**
+ * The upload ids an argument carries, as the composer sends them. Anything that is not a string is dropped here, and
+ * every id is checked against the conversation in `attachUploads` — nothing in this list is trusted.
+ */
+function uploadIdsOf(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
+}
+
+async function send(oid: string, conversation: ConversationRow, body: string, uploadIds: readonly string[] = []): Promise<ThreadMessage> {
   const agentId = await conversationAgent(prisma, conversation);
-  const sent = await directAsPerson(prisma, oid, agentId, body);
+  // Attached inside the message's own transaction: an id that is not this person's, is not this conversation's, is
+  // not finished uploading, or is already on another message refuses the whole send, and no message is written.
+  const sent = await directAsPerson(prisma, oid, agentId, body, async (tx, messageId) => {
+    await attachUploads(tx, { viewerOid: oid, conversationId: conversation.id, messageId, uploadIds });
+  });
   await touchConversation(prisma, conversation, body);
   const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
   if (agent?.status !== "busy" && agent?.status !== "idle") {
@@ -76,7 +89,12 @@ export async function startConversation(input: { product: unknown; body: unknown
   });
 }
 
-export async function sendAssistantMessage(input: { conversationId: unknown; body: unknown }): Promise<ActionResult<{ message: ThreadMessage }>> {
+/** `uploadIds` is optional, so a caller that attaches nothing sends exactly as before. */
+export async function sendAssistantMessage(input: {
+  conversationId: unknown;
+  body: unknown;
+  uploadIds?: unknown;
+}): Promise<ActionResult<{ message: ThreadMessage }>> {
   return await runAction<{ message: ThreadMessage }>("assistant message", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
@@ -90,7 +108,7 @@ export async function sendAssistantMessage(input: { conversationId: unknown; bod
     if (conversation === undefined) {
       return MISSING;
     }
-    return { ok: true, message: await send(viewer.oid, conversation, body) };
+    return { ok: true, message: await send(viewer.oid, conversation, body, uploadIdsOf(input.uploadIds)) };
   });
 }
 

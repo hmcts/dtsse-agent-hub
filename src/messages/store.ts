@@ -83,6 +83,12 @@ export interface NewDirect {
   targetAgentId: string | null;
   inReplyTo: bigint | null;
   body: string;
+  /**
+   * Work that belongs to the message and must share its transaction, run once the message has an id: the Assistant
+   * stamps its attachments here, so a message is never delivered naming a file that was not claimed, and a file is
+   * never claimed by a message that was not written. Throwing from it rolls the message back.
+   */
+  alongside?: (tx: Database, messageId: bigint) => Promise<void>;
 }
 
 /** Writes a direct message and, when it targets an agent, the queued delivery its stream will send. */
@@ -102,6 +108,7 @@ export async function createDirect(prisma: PrismaClient, direct: NewDirect): Pro
     if (direct.targetAgentId !== null) {
       await tx.delivery.create({ data: { messageId: message.id, agentId: direct.targetAgentId } });
     }
+    await direct.alongside?.(tx, message.id);
     await notify(tx, {
       type: "direct",
       message_id: message.id.toString(),
