@@ -8,8 +8,8 @@ describe("warmupPhase", () => {
     ["provisioning", "starting"],
     ["stopping", "starting"],
     ["stopped", "starting"],
-    ["awaiting_credentials", "signing_in"],
-    ["awaiting_login", "signing_in"],
+    ["awaiting_credentials", "any"],
+    ["awaiting_login", "any"],
     ["cloning", "cloning"],
     ["running", "any"],
     ["failed", "any"]
@@ -24,7 +24,7 @@ describe("waitingForPerson", () => {
     expect(waitingForPerson("awaiting_login")).toBe(true);
   });
 
-  it("should be false for every other status, so the two lists cannot drift apart", () => {
+  it("should be false for every other status, so nothing else is sent to the connections", () => {
     const others = VIRTUAL_AGENT_STATUSES.filter((status) => status !== "awaiting_credentials" && status !== "awaiting_login");
 
     expect(others.map((status) => waitingForPerson(status))).toEqual(others.map(() => false));
@@ -35,14 +35,13 @@ describe("warmupPool", () => {
   it("should offer the phase's own messages when it has some", () => {
     expect(warmupPool("cloning")).toContain("Working out what SSCS stands for.");
     expect(warmupPool("starting")).toContain("Putting the kettle on.");
-    expect(warmupPool("signing_in")).toEqual(["Having a quick word with Azure.", "Asking IDAM nicely."]);
   });
 
   it("should fall back to the messages that fit any phase when the phase has none of its own", () => {
     expect(warmupPool("any")).toBe(WARMUP_ANY);
   });
 
-  it.each(["starting", "signing_in", "cloning", "any"] satisfies WarmupPhase[])("should have something to say in the %s phase", (phase) => {
+  it.each(["starting", "cloning", "any"] satisfies WarmupPhase[])("should have something to say in the %s phase", (phase) => {
     expect(warmupPool(phase).length).toBeGreaterThan(0);
   });
 });
@@ -96,8 +95,7 @@ describe("nextWarmupMessage", () => {
     expect(next).not.toBe(first);
   });
 
-  it("should alternate between the two sign-in messages", () => {
-    expect(nextWarmupMessage("signing_in", "Having a quick word with Azure.", 0.9)).toBe("Asking IDAM nicely.");
-    expect(nextWarmupMessage("signing_in", "Asking IDAM nicely.", 0.9)).toBe("Having a quick word with Azure.");
+  it("should fall back to the lines that fit any phase when the assistant is doing something with none", () => {
+    expect(WARMUP_ANY).toContain(nextWarmupMessage("any", firstWarmupMessage("any"), 0.9));
   });
 });

@@ -8,6 +8,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readiness } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
+import { WAITING_COOKIE, waitingCookie, waitingDismissed } from "@/assistant/waiting";
 import { firstWarmupMessage, WARMUP_PATIENCE_MS, WARMUP_ROTATE_MS, WARMUP_SIGNPOST, WARMUP_SLOW, warmupPhase, warmupPool } from "@/assistant/warmup";
 import { OnboardingGate, WarmingUp } from "@/components/assistant/GettingReady";
 import type { CredentialKind } from "@/credentials/names";
@@ -24,9 +25,20 @@ vi.mock("@/components/live/HubStream", () => ({
 
 afterEach(() => {
   cleanup();
+  // biome-ignore lint/suspicious/noDocumentCookie: the component writes the cookie the same way, so the test clears it the same way
+  document.cookie = waitingCookie(null);
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
+
+/** What the page reads of the cookie the screen writes, which is all that carries the choice across a navigation. */
+function dismissedByCookie(assistantId: string): boolean {
+  const value = document.cookie
+    .split("; ")
+    .find((entry) => entry.startsWith(`${WAITING_COOKIE}=`))
+    ?.slice(WAITING_COOKIE.length + 1);
+  return waitingDismissed(value, assistantId);
+}
 
 function assistant(status: VirtualAgentStatus = "stopped", overrides: Partial<AssistantSummary> = {}): AssistantSummary {
   return {
@@ -35,6 +47,7 @@ function assistant(status: VirtualAgentStatus = "stopped", overrides: Partial<As
     desired: "running",
     status,
     statusDetail: null,
+    statusChangedAt: new Date().toISOString(),
     readiness: readiness(status),
     needed: ["github", "azure", "claude"],
     optional: ["jenkins", "atlassian"],
@@ -143,18 +156,6 @@ describe("WarmingUp", () => {
     }
   });
 
-  it("should keep going round a phase with only two lines", () => {
-    vi.useFakeTimers();
-    render(warming("awaiting_login"));
-    const [azure, idam] = warmupPool("signing_in");
-
-    expect(rotating()).toBe(azure);
-    tick();
-    expect(rotating()).toBe(idam);
-    tick();
-    expect(rotating()).toBe(azure);
-  });
-
   it("should stop rotating and say it is taking a while when three minutes have passed", () => {
     vi.useFakeTimers();
     render(warming());
@@ -169,6 +170,16 @@ describe("WarmingUp", () => {
 
     tick(5);
     expect(screen.getByText(WARMUP_SLOW)).toBeTruthy();
+  });
+
+  it("should say it is taking a while from the moment it opens when the assistant has been on one step too long", () => {
+    const stuck = new Date(Date.now() - 10 * 60_000).toISOString();
+
+    render(warming("cloning", { statusChangedAt: stuck }));
+
+    expect(screen.getByText(WARMUP_SLOW)).toBeTruthy();
+    expect(screen.queryByText(WARMUP_SIGNPOST)).toBeNull();
+    expect(rotating()).toBeNull();
   });
 
   it("should say nothing amusing and why it stopped when the assistant failed", () => {
@@ -229,9 +240,9 @@ describe("WarmingUp hydration", () => {
 });
 
 describe("OnboardingGate while the assistant starts", () => {
-  function gate(summary: AssistantSummary, statuses: CredentialStatus[] = []) {
+  function gate(summary: AssistantSummary, statuses: CredentialStatus[] = [], dismissed = false) {
     const noop = vi.fn(async () => ({ ok: true as const }));
-    return <OnboardingGate assistant={summary} statuses={statuses} unavailable={null} paste={noop} save={noop} />;
+    return <OnboardingGate assistant={summary} statuses={statuses} unavailable={null} paste={noop} save={noop} dismissed={dismissed} />;
   }
 
   it("should wait on the warming-up screen when someone who has onboarded arrives to a stopped assistant", () => {
@@ -343,6 +354,43 @@ describe("OnboardingGate while the assistant starts", () => {
 
     expect(screen.getByRole("status").textContent).toBe("Your assistant is ready");
     expect(screen.queryByRole("button", { name: "Show progress" })).toBeNull();
+  });
+
+  it("should stay out of the way across a navigation when the person has sent the waiting screen away", () => {
+    const summary = assistant("stopped");
+    const { unmount } = render(gate(summary));
+
+    fireEvent.click(screen.getByRole("button", { name: "Carry on while it starts" }));
+    // Going to a conversation remounts the page's whole subtree, so only the cookie carries the choice.
+    unmount();
+    render(gate(summary, [], dismissedByCookie(summary.id)));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Starting your assistant again…");
+  });
+
+  it("should wait on the screen again across a navigation when the person has asked to watch the progress", () => {
+    const summary = assistant("stopped");
+    const { unmount } = render(gate(summary));
+
+    fireEvent.click(screen.getByRole("button", { name: "Carry on while it starts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show progress" }));
+    unmount();
+    render(gate(summary, [], dismissedByCookie(summary.id)));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+  });
+
+  it("should keep the notice clear of the band the composer owns when the screen has been sent away", () => {
+    render(gate(assistant("stopped")));
+
+    fireEvent.click(screen.getByRole("button", { name: "Carry on while it starts" }));
+
+    // The composer centres its error line and its guidance at the bottom of the chat; only a browser shows the
+    // overlap, so this holds the notice to the other end of the page.
+    const notice = screen.getByRole("status").parentElement as HTMLElement;
+    expect(notice.className).toContain("top-[68px]");
+    expect(notice.className).not.toContain("bottom-");
   });
 
   it("should leave nothing on the page when the person hides the notice too", () => {

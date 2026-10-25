@@ -6,7 +6,7 @@ import type { VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
  * the lines that fit any of them.
  */
 
-export type WarmupPhase = "starting" | "signing_in" | "cloning" | "any";
+export type WarmupPhase = "starting" | "cloning" | "any";
 
 /** Lines that fit any phase, and the pool for a phase with none of its own. */
 export const WARMUP_ANY: readonly string[] = ["Still going. Nothing's broken.", "Not stuck, just thorough.", "Nearly there. Biscuit?", "Won't be long now."];
@@ -20,7 +20,6 @@ const WARMUP_MESSAGES: Readonly<Partial<Record<WarmupPhase, readonly string[]>>>
     "Waking your assistant. It isn't a morning person.",
     "Queueing, politely."
   ],
-  signing_in: ["Having a quick word with Azure.", "Asking IDAM nicely."],
   cloning: [
     "Cloning the workspace — all of it, I'm afraid.",
     "Reading rather a lot of CLAUDE.md files.",
@@ -46,9 +45,6 @@ export function warmupPhase(status: VirtualAgentStatus): WarmupPhase {
     case "stopping":
     case "stopped":
       return "starting";
-    case "awaiting_credentials":
-    case "awaiting_login":
-      return "signing_in";
     case "cloning":
       return "cloning";
     default:
@@ -57,12 +53,15 @@ export function warmupPhase(status: VirtualAgentStatus): WarmupPhase {
 }
 
 /**
- * Whether the pod is blocked on the person rather than getting on with it: it has relayed a sign-in and is waiting
- * for a code or a credential, so the screen has to offer them that rather than something to read. Defined through
- * the phase so there is one list of the statuses it covers.
+ * The statuses where the pod is blocked on the person rather than getting on with it: it has relayed a sign-in and
+ * is waiting for a code or a credential. They have no lines of their own, because they never reach the warming-up
+ * screen — the person is sent to the connections, where they can act on the sign-in, and reading a joke is not what
+ * they need.
  */
+const WAITING_ON_PERSON: readonly VirtualAgentStatus[] = ["awaiting_credentials", "awaiting_login"];
+
 export function waitingForPerson(status: VirtualAgentStatus): boolean {
-  return warmupPhase(status) === "signing_in";
+  return WAITING_ON_PERSON.includes(status);
 }
 
 export function warmupPool(phase: WarmupPhase): readonly string[] {
