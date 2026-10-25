@@ -528,7 +528,7 @@ function message(overrides: Partial<ThreadMessage> = {}): ThreadMessage {
   };
 }
 
-/** A message carrying files, as `messageAttachments` loads them: the person's own name, and the size. */
+/** A message carrying files, as the thread loads them: the person's own name, and the size. */
 function withAttachments(attachments: { name: string; bytes: number }[], overrides: Partial<ThreadMessage> = {}): ThreadMessage {
   return {
     ...message(overrides),

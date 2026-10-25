@@ -51,7 +51,6 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
       viewerName={viewer.name}
       groups={home.conversations}
       activeId={view.id}
-      hubLink
       theme={theme}
       actions={ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}

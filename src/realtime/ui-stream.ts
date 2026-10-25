@@ -1,4 +1,4 @@
-import { type AgentRef, canReadMessage, canSeeAgentSkills, canViewAgent, canViewTranscript, type Grant } from "../access/rules.ts";
+import { type AgentRef, canReadMessage, canSeeAgentSkills, canViewAgent, canViewTranscript, canViewVirtualAgent, type Grant } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
 import type { Match, PostScope } from "../messages/feed.ts";
 import type { ApiMessage } from "../messages/shape.ts";
@@ -22,8 +22,10 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   it. Only the id is sent; the page reads the entries through `/api/ui/agents/{id}/transcript`.
  * - `agent_skills`: the watched agent reported a changed list of skills, when the viewer may see them. Only the id is
  *   sent; the page re-reads, which hands its composer the new list.
- * - `virtual_agent`: one of the viewer's own virtual agents changed. Only the id is sent, and only to its owner, since
- *   the page it updates can show login codes; the page re-reads.
+ * - `virtual_agent`: a virtual agent the viewer may see changed, their own or one a grant from its owner reaches, so
+ *   the live view keeps up with the page rather than quietly going stale. Only the id is sent, which is no more than
+ *   the page already shows them: its login codes and settings are its owner's alone, and the page re-reads each under
+ *   its own rule.
  * - `assistant_conversation`: one of the viewer's own assistant conversations changed. Only the id is sent, and only
  *   to its owner; the page re-reads it.
  * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, a grant the viewer holds changed
@@ -138,7 +140,7 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     case "credential":
       return event.owner_oid === sources.viewerOid ? RESYNC : undefined;
     case "virtual_agent":
-      return event.owner_oid === sources.viewerOid
+      return canViewVirtualAgent(sources.viewerOid, { id: event.virtual_agent_id, ownerOid: event.owner_oid }, await sources.grants())
         ? sseEvent({ event: "virtual_agent", data: JSON.stringify({ virtual_agent_id: event.virtual_agent_id }) })
         : undefined;
     case "assistant_conversation":
