@@ -12,6 +12,7 @@ import { ArtefactPanel, type SaveArtefactAction } from "@/components/assistant/A
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { Composer } from "@/components/assistant/Composer";
+import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubEvent } from "@/components/live/HubStream";
@@ -216,7 +217,7 @@ function ChatMenu({ title, onRename, onDelete }: { title: string; onRename: (tit
 function useNarrow(): boolean {
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 900px)");
+    const query = window.matchMedia(`(max-width: ${ARTEFACT_OVERLAY_MAX_WIDTH}px)`);
     const update = () => setNarrow(query.matches);
     update();
     query.addEventListener("change", update);
@@ -231,7 +232,18 @@ function useNarrow(): boolean {
  * a change to the conversation itself (its product, title, document or session) re-renders the page, which hands
  * down the new `view`.
  */
-export function ChatView({ view, templates, actions }: { view: ConversationView; templates: readonly Template[]; actions: ChatActions }) {
+export function ChatView({
+  view,
+  templates,
+  viewerOid,
+  actions
+}: {
+  view: ConversationView;
+  templates: readonly Template[];
+  /** Who is reading, which the composer keys its draft on. */
+  viewerOid: string;
+  actions: ChatActions;
+}) {
   const router = useRouter();
   const arrivals = useAnnouncer("replies");
   const live = useLiveConversation(view.agentId, view.page, { onReply: () => arrivals.announce("New reply from the assistant") });
@@ -372,6 +384,10 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
             )}
             <Composer
               templates={templates}
+              viewerOid={viewerOid}
+              // The conversation, not its agent: a /clear registers a new agent and remounts the page, and the
+              // half-written message belongs to the conversation the person never left.
+              draftId={view.id}
               onSend={send}
               onFocus={() => {
                 if (!warmed.current && status === "offline") {

@@ -12,10 +12,27 @@ import type { ActionResult } from "@/web/action";
 export type StartAction = (input: { product: unknown; body: unknown }) => Promise<ActionResult<{ id: string }>>;
 
 /**
+ * What the new chat's draft is kept under. There is no conversation to key it on until the first message creates one,
+ * and a conversation id is a UUID, so this can never be mistaken for one.
+ */
+export const NEW_CHAT_DRAFT = "new";
+
+/**
  * A new chat: what the person is working on, as a starter card or their own words, and which product it is about.
  * The first message creates the conversation, and the page moves to it.
  */
-export function EmptyChat({ starters, templates, start }: { starters: readonly Starter[]; templates: readonly Template[]; start: StartAction }) {
+export function EmptyChat({
+  starters,
+  templates,
+  viewerOid,
+  start
+}: {
+  starters: readonly Starter[];
+  templates: readonly Template[];
+  /** Who is reading, which the composer keys its draft on. */
+  viewerOid: string;
+  start: StartAction;
+}) {
   const router = useRouter();
   const [product, setProduct] = useState(DEFAULT_PRODUCT);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +91,9 @@ export function EmptyChat({ starters, templates, start }: { starters: readonly S
       </div>
       <div className="shrink-0 px-4 pb-3.5">
         <div className="mx-auto max-w-[760px]">
-          <Composer templates={templates} onSend={begin} disabled={starting} />
+          {/* The draft is forgotten when the message that was typed here creates the conversation, so the next new
+              chat starts empty; a starter card sends its own words and leaves what is in the box alone. */}
+          <Composer templates={templates} viewerOid={viewerOid} draftId={NEW_CHAT_DRAFT} onSend={begin} disabled={starting} />
         </div>
       </div>
     </>
