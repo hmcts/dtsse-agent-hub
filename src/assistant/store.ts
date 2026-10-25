@@ -99,7 +99,8 @@ function toRow(row: {
   const state = row.sessionState;
   return {
     ...row,
-    // Nothing leaves the store carrying a product the list no longer offers, so every page agrees with the picker.
+    // A row reads as a product the list offers, so every page agrees with the picker. What a session is told does
+    // not go through here: `assistantFrame` and `pendingWakes` carry the slug as stored.
     product: storedProduct(row.product),
     productHistory: storedHistory(row.productHistory),
     sessionState: state === "starting" || state === "live" || state === "queued" ? state : null
@@ -465,11 +466,12 @@ export async function assistantFrame(db: Database, agentId: string): Promise<Ass
     return undefined;
   }
   const artefact = toArtefact(conversation);
-  const product = storedProduct(conversation.product);
   return {
     conversation_id: conversation.id,
-    product,
-    product_label: productLabel(product),
+    // What the conversation is stored as, not what the picker can show: this is the subject the session has been
+    // working in, and a product dropped from the list still names it. `productLabel` falls back to the slug.
+    product: conversation.product,
+    product_label: productLabel(conversation.product),
     artefact_version: artefact.version,
     artefact_updated_by: artefact.updatedBy
   };
@@ -483,16 +485,18 @@ export interface Wake {
   product: string;
 }
 
-/** Every pending wake of the assistant, oldest first. `resume` once the session has sent a transcript entry. */
+/**
+ * Every pending wake of the assistant, oldest first. `resume` once the session has sent a transcript entry. The
+ * product is the stored one, as the frame's is: what the pod is told is what the conversation holds.
+ */
 export async function pendingWakes(db: Database, virtualAgentId: string): Promise<Wake[]> {
-  const wakes = await db.$queryRaw<Wake[]>`
+  return await db.$queryRaw<Wake[]>`
     SELECT c.id::text AS conversation_id, a.session_id, EXISTS (SELECT 1 FROM transcript_entry t WHERE t.agent_id = a.id) AS resume, c.product
       FROM assistant_conversation c
       JOIN agent a ON a.id = c.agent_id
      WHERE c.virtual_agent_id = ${virtualAgentId}::uuid AND c.wake_requested_at IS NOT NULL
      ORDER BY c.wake_requested_at, c.id
   `;
-  return wakes.map((wake) => ({ ...wake, product: storedProduct(wake.product) }));
 }
 
 /** The wake for one conversation, if it has one pending; `null` when the conversation is gone. */

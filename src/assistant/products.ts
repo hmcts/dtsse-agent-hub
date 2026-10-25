@@ -62,9 +62,9 @@ export function productLabel(slug: string): string {
 /**
  * The offered product a conversation's stored slug stands for: one that is not offered stands for the default. A
  * slug can be stored and then stop being offered — a product retired from the list, or one written by a replica
- * still on the previous bundle during a rolling deploy — and the picker can only show what it offers, so every
- * reader of the current product uses this to agree with it. `product_history` is not coerced: it records what was
- * picked at the time.
+ * still on the previous bundle during a rolling deploy — and the picker can only show what it offers, so what the
+ * hub renders goes through this. What a session is told does not: its frame and wake carry the stored slug, so a
+ * conversation keeps the subject it was started in, as does `product_history`, which records what was picked.
  */
 export function storedProduct(slug: string): string {
   return isProduct(slug) ? slug : DEFAULT_PRODUCT;

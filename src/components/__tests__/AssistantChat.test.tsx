@@ -225,6 +225,17 @@ describe("ChatView progress", () => {
 });
 
 describe("ChatView product", () => {
+  it("should draw the chosen product's label itself when the header shows the picker", () => {
+    render(
+      <ChatView view={conversation({ product: "sscs", productLabel: "SSCS (Social Security and Child Support)" })} templates={TEMPLATES} actions={actions()} />
+    );
+
+    const drawn = screen.getAllByText("SSCS (Social Security and Child Support)").filter((node) => node.tagName !== "OPTION");
+
+    expect(drawn).toHaveLength(1);
+    expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("sscs");
+  });
+
   it("should change the product only once the person confirms when they pick another product", async () => {
     const setProduct = ok();
     render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ setProduct })} />);

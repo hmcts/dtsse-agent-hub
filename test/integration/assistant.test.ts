@@ -320,8 +320,8 @@ describe("conversations", () => {
     expect((await findConversation(prisma, ALICE.oid, id))!.productHistory.map((change) => change.product)).toEqual(["general"]);
   });
 
-  it("should read as the default everywhere when a conversation is on a product no longer offered", async () => {
-    const { id: assistantId } = await startedAssistant();
+  it("should read as the default on every page when a conversation is on a product no longer offered", async () => {
+    await startedAssistant();
     const id = ((await actions.startConversation({ product: "ccd", body: "hi" })) as { id: string }).id;
     // What a replica still on the previous bundle writes during a rolling deploy, and what a retirement leaves.
     await prisma.$executeRaw`UPDATE assistant_conversation SET product = 'other' WHERE id = ${id}::uuid`;
@@ -330,8 +330,19 @@ describe("conversations", () => {
 
     expect(view).toMatchObject({ product: "general", productLabel: "General" });
     expect((await findConversation(prisma, ALICE.oid, id))!.product).toBe("general");
-    expect(await assistantFrame(prisma, view.agentId)).toMatchObject({ product: "general", product_label: "General" });
-    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.product)).toEqual(["general"]);
+    expect((await openAssistant(VIEWER)).conversations.flatMap((group) => group.items)).toMatchObject([{ id, product: "general", productLabel: "General" }]);
+  });
+
+  it("should tell the session the stored product when a conversation is on one no longer offered", async () => {
+    const { id: assistantId } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "ccd", body: "hi" })) as { id: string }).id;
+    await prisma.$executeRaw`UPDATE assistant_conversation SET product = 'other' WHERE id = ${id}::uuid`;
+
+    const { agentId } = await sessionOf(id);
+
+    // The session keeps the subject it was started in; its label is the slug, since the list has no name for it.
+    expect(await assistantFrame(prisma, agentId)).toMatchObject({ product: "other", product_label: "other" });
+    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.product)).toEqual(["other"]);
   });
 
   it("should rename and delete a conversation with everything it holds", async () => {

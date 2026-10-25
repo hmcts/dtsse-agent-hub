@@ -292,40 +292,51 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-asst-field px-4">
           <SidebarToggle />
-          {/* Gives way long before the product control beside it, keeping 4rem so the start of the name always shows. */}
+          {/* Gives way long before the product chip beside it, keeping 4rem so the start of the name always shows. */}
           <h1 className="min-w-[4rem] shrink-[999] truncate text-[15px] font-medium">{view.title}</h1>
           <label className="sr-only" htmlFor="chat-product">
             Product
           </label>
           {/*
-            A native select is as wide as its widest option, and the longest label runs to 40 characters, so the
-            control is capped at 9.5rem and ellipsises the rest. The title is weighted to shrink first, so the cap
-            holds whatever the chat is called; the control only gives up width in a column too narrow for both, and
-            "Open document" and the chat menu keep their place.
+            The chip draws the chosen label itself, truncated, and its own arrow, with the real select laid over it
+            at full size and invisible: a native select is as wide as its widest option, the longest label here runs
+            to 40 characters, and how a select renders a value too long for it is the engine's business rather than
+            `text-overflow`'s. The chip never goes below 4rem, so it stays readable and operable in a 320px header.
           */}
-          <select
-            id="chat-product"
-            value={product}
-            onChange={(event) => setPendingProduct(event.target.value)}
-            className="min-w-0 max-w-[9.5rem] shrink cursor-pointer truncate appearance-none rounded-md border border-asst-accent-line bg-transparent px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft outline-none focus:border-asst-accent"
-          >
-            {PRODUCTS.map((offered) => (
-              <option key={offered.slug} value={offered.slug} className="bg-asst-raised normal-case">
-                {offered.label}
-              </option>
-            ))}
-          </select>
+          <div className="relative flex min-w-[4rem] max-w-[9.5rem] shrink items-center gap-1.5 rounded-md border border-asst-accent-line px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft focus-within:border-asst-accent">
+            <span aria-hidden="true" className="min-w-0 truncate">
+              {productLabel(product)}
+            </span>
+            <span aria-hidden="true" className="shrink-0 text-[7px] leading-none text-asst-accent">
+              ▼
+            </span>
+            <select
+              id="chat-product"
+              value={product}
+              onChange={(event) => setPendingProduct(event.target.value)}
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 outline-none"
+            >
+              {PRODUCTS.map((offered) => (
+                <option key={offered.slug} value={offered.slug} className="bg-asst-raised normal-case">
+                  {offered.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
             {panel ? null : (
               <button
                 type="button"
                 onClick={() => setPanel(true)}
-                className="flex h-[34px] items-center gap-2 whitespace-nowrap rounded-[9px] border border-asst-strong pl-2.5 pr-3 text-[13px] hover:border-asst-accent-line hover:bg-asst-field"
+                // Named here as well, because below 480px the icon stands alone so that a 320px header still fits
+                // the title, the product chip and both buttons.
+                aria-label={view.artefact.version > 0 ? "Open document" : "Add document"}
+                className="flex h-[34px] items-center whitespace-nowrap rounded-[9px] border border-asst-strong px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3"
               >
                 <span aria-hidden="true" className="text-lg leading-none text-asst-accent">
                   +
                 </span>
-                {view.artefact.version > 0 ? "Open document" : "Add document"}
+                <span className="hidden min-[480px]:inline">{view.artefact.version > 0 ? "Open document" : "Add document"}</span>
               </button>
             )}
             <ChatMenu
