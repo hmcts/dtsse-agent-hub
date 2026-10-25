@@ -602,6 +602,26 @@ describe("AssistantRefresh", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * The activity line is built in the browser from the transcript the conversation already streams, so a turn making
+   * hundreds of tool calls costs no page reads at all. Wiring it through a refresh instead would make every one of
+   * them a server render.
+   */
+  it("should never read the page again for a session's transcript, however much activity arrives", async () => {
+    vi.useFakeTimers();
+    render(<AssistantRefresh />);
+
+    expect(hubHandlers.has("transcript")).toBe(false);
+    for (let n = 0; n < 50; n += 1) {
+      hubHandlers.get("transcript")?.({ agent_id: "a", last_id: String(n) });
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it("should refresh once when a cold chat reports its skills and its conversation together", async () => {
     vi.useFakeTimers();
     render(<AssistantRefresh />);

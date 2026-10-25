@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setGrant } from "../../src/access/load.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
@@ -8,6 +9,7 @@ import * as agentsRoute from "../../src/app/api/agent/agents/route.ts";
 import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
+import * as uiTranscriptRoute from "../../src/app/api/ui/agents/[id]/transcript/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
 import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
@@ -91,6 +93,12 @@ function register(
     // Left out unless a test is a newer client: a pod runs whatever client version its image booted with.
     ...(reported.clientFeatures === undefined ? {} : { client_features: reported.clientFeatures })
   });
+}
+
+/** The browser's own read of a session's transcript, as the person named by `persona`. */
+function uiTranscript(persona: string, agentId: string): Promise<Response> {
+  const request = new NextRequest(`http://localhost:3000/api/ui/agents/${agentId}/transcript`, { headers: { cookie: `ah_dev_persona=${persona}` } });
+  return uiTranscriptRoute.GET(request, { params: Promise.resolve({ id: agentId }) });
 }
 
 async function sessionOf(conversationId: string): Promise<{ agentId: string; sessionId: string }> {
@@ -369,6 +377,30 @@ describe("conversations", () => {
     expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "bedrock" }, id)).toBeUndefined();
     actAs("bob");
     expect(await actions.sendAssistantMessage({ conversationId: id, body: "hi" })).toEqual({ ok: false, error: "that conversation no longer exists" });
+  });
+
+  /**
+   * The activity line, including how many subagents the answer is waiting on, is derived in the browser from these
+   * entries. Nothing says so on the wire, so what keeps it from a non-owner is the transcript read itself.
+   */
+  it("should send a session's tool calls to the owner and to nobody else, so only they see what it is doing", async () => {
+    const { token } = await startedAssistant();
+    await insertUser(BOB);
+    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
+    const id = ((await actions.startConversation({ product: "general", body: "look into this" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id);
+    await pod(transcriptRoute.POST, token, `/api/agent/${agentId}/transcript`, { agentId }, "POST", {
+      session_id: sessionId,
+      entries: [{ key: "e1", role: "tool_use", content: { id: "t1", name: "Agent", input: { description: "dig" } }, occurred_at: new Date().toISOString() }]
+    });
+
+    const owner = await uiTranscript("alice", agentId);
+    expect(owner.status).toBe(200);
+    expect((await jsonOf(owner)).entries).toMatchObject([{ role: "tool_use", content: { id: "t1", name: "Agent" } }]);
+
+    expect((await uiTranscript("bob", agentId)).status).toBe(404);
+    expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "bedrock" }, id)).toBeUndefined();
   });
 
   it("should carry the session's skills to the conversation page, and none before a session registers", async () => {

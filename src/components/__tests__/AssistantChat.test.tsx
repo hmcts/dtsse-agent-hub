@@ -234,7 +234,7 @@ describe("ChatView progress", () => {
     });
     render(<ChatView viewerOid={VIEWER} view={conversation({ agentStatus: "busy", page: initial })} templates={TEMPLATES} actions={actions()} />);
 
-    expect(screen.getByRole("status").textContent).toContain("Reading");
+    expect(screen.getByText("Reading")).toBeTruthy();
   });
 
   it("should show nothing in progress when the assistant has answered and is idle", () => {
@@ -243,6 +243,58 @@ describe("ChatView progress", () => {
 
     expect(screen.queryByText("Thinking")).toBeNull();
     expect(screen.queryByText(/Starting your assistant/)).toBeNull();
+  });
+
+  it("should say how many subagents it is waiting on when the assistant has handed work out", () => {
+    const initial = page({
+      messages: [message("1")],
+      entries: [
+        entry("2", { role: "tool_use", content: { id: "t1", name: "Agent", input: {} } }),
+        entry("3", { role: "tool_use", content: { id: "t2", name: "Agent", input: {} }, occurred_at: "2026-10-21T09:01:10.000Z" }),
+        entry("4", { role: "tool_use", content: { id: "t3", name: "Agent", input: {} }, occurred_at: "2026-10-21T09:01:20.000Z" }),
+        entry("5", {
+          role: "tool_result",
+          content: { tool_use_id: "t2", output: "done", is_error: false },
+          occurred_at: "2026-10-21T09:01:30.000Z"
+        })
+      ]
+    });
+    render(<ChatView viewerOid={VIEWER} view={conversation({ agentStatus: "busy", page: initial })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByText("Working through it · 2 helpers running")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Working on your answer, with 2 helpers running");
+  });
+
+  it("should clear the line and the announcement when a stopped answer leaves the session idle", () => {
+    const initial = page({
+      messages: [message("1")],
+      entries: [entry("2", { role: "tool_use", content: { id: "t1", name: "Agent", input: {} } })]
+    });
+    render(<ChatView viewerOid={VIEWER} view={conversation({ agentStatus: "busy", page: initial })} templates={TEMPLATES} actions={actions()} />);
+    expect(screen.getByRole("status").textContent).toBe("Working on your answer, with 1 helper running");
+
+    emit("agent_status", { agent_id: AGENT, status: "idle" });
+
+    expect(screen.queryByText(/helper/)).toBeNull();
+    expect(screen.queryByText("Working through it")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
+  it("should keep a live region in the page before there is anything to announce, so the first thing it says is read", () => {
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
+  it("should not read the activity out, since it changes with every tool call", () => {
+    const initial = page({
+      messages: [message("1")],
+      entries: [entry("2", { role: "tool_use", content: { id: "t1", name: "Grep", input: {} } })]
+    });
+    render(<ChatView viewerOid={VIEWER} view={conversation({ agentStatus: "busy", page: initial })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByText("Searching")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Working on your answer");
   });
 
   it("should follow the agent's status from the stream when an agent_status event names this agent", () => {
