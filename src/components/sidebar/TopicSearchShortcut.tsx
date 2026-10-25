@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-/** The topic search inputs, the `/topics` page's own before the sidebar's, so `/` on that page lands on the one in view. */
+/** The topic search inputs, the `/hub/topics` page's own before the sidebar's, so `/` on that page lands on the one in view. */
 export const TOPIC_SEARCH_IDS = ["topic-search", "sidebar-topic-search"] as const;
 
 const NOT_TYPED_INTO = new Set(["button", "checkbox", "color", "file", "image", "radio", "range", "reset", "submit"]);

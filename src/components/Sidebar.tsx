@@ -70,22 +70,22 @@ export function Sidebar({
 
         <nav aria-label="Main" className="min-h-0 flex-1 space-y-4 overflow-y-auto py-3">
           <div className="space-y-0.5">
-            <NavLink href="/">
+            <NavLink href="/hub">
               <HomeIcon />
               Home
             </NavLink>
-            <NavLink href="/access">
+            <NavLink href="/hub/access">
               <KeyIcon />
               Access
             </NavLink>
             {/* With virtual agents on, credentials are a section of their page. */}
             {virtualAgents ? (
-              <NavLink href="/virtual">
+              <NavLink href="/hub/virtual">
                 <ServerIcon />
                 Virtual agents
               </NavLink>
             ) : (
-              <NavLink href="/settings/credentials">
+              <NavLink href="/hub/settings/credentials">
                 <LockIcon />
                 Credentials
               </NavLink>
@@ -106,7 +106,7 @@ export function Sidebar({
               <ul aria-label="Channels" className="space-y-0.5">
                 {channels.map((channel) => (
                   <li key={channel.id}>
-                    <NavLink href={`/channels/${channel.id}`}>
+                    <NavLink href={`/hub/channels/${channel.id}`}>
                       <StackIcon />
                       <span className="truncate">{channel.name}</span>
                       {channel.shared ? <span className="ml-auto text-[10px] uppercase tracking-wide">shared</span> : null}
@@ -115,14 +115,14 @@ export function Sidebar({
                 ))}
               </ul>
             )}
-            <NavLink href="/channels/new">
+            <NavLink href="/hub/channels/new">
               <PlusIcon />
               Add a channel
             </NavLink>
           </Group>
 
           <Group label="Topics">
-            <form action="/topics" method="get" role="search" className="px-2 pb-1">
+            <form action="/hub/topics" method="get" role="search" className="px-2 pb-1">
               <label htmlFor="sidebar-topic-search" className="sr-only">
                 Search topics
               </label>
@@ -140,7 +140,7 @@ export function Sidebar({
               <ul aria-label="Most active topics" className="space-y-0.5">
                 {data.topics.map((topic) => (
                   <li key={topic.slug}>
-                    <NavLink href={`/topics/${topic.slug}`}>
+                    <NavLink href={`/hub/topics/${topic.slug}`}>
                       <HashIcon />
                       <span className="truncate">{topic.slug}</span>
                       <span className="ml-auto text-xs" title={`${topic.message_count} posts this week`}>
@@ -151,7 +151,7 @@ export function Sidebar({
                 ))}
               </ul>
             )}
-            <NavLink href="/topics">
+            <NavLink href="/hub/topics">
               <PlusIcon />
               Browse all topics
             </NavLink>

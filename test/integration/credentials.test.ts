@@ -413,7 +413,7 @@ describe("saveCredential and removeCredential", () => {
     expect(result).toEqual({ ok: true, confirmation: "Your GitHub token is stored" });
     const row = await prisma.credential.findFirstOrThrow();
     expect(row).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "github", updatedVia: "web" });
-    expect(revalidated).toContain("/settings/credentials");
+    expect(revalidated).toContain("/hub/settings/credentials");
     expect(JSON.stringify(result)).not.toContain(GITHUB);
   });
 
@@ -517,7 +517,7 @@ describe("a Jenkins API token", () => {
 
     const statuses = await credentialStatus(prisma, devIdentity("alice").oid);
     expect(statuses.map((status) => [status.kind, status.stored])).toContainEqual(["jenkins", true]);
-    expect(revalidated).toEqual(expect.arrayContaining(["/settings/credentials", "/virtual"]));
+    expect(revalidated).toEqual(expect.arrayContaining(["/hub/settings/credentials", "/hub/virtual"]));
   });
 });
 
@@ -589,7 +589,7 @@ describe("a CLAUDE.md", () => {
     expect(result).toEqual({ ok: true, confirmation: "Your CLAUDE.md is saved. Each agent uses it from its next Claude start" });
     expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "claude_md")).toBe("# Me\n\nBe brief.\n");
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "claude_md", updatedVia: "web" });
-    expect(revalidated).toContain("/virtual");
+    expect(revalidated).toContain("/hub/virtual");
   });
 
   it("should say why and store nothing when the web save is refused", async () => {
@@ -714,7 +714,7 @@ describe("a git identity", () => {
     expect(result).toEqual({ ok: true, confirmation: "Your git identity is saved. Each agent uses it from its next Claude start" });
     expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "git_identity")).toBe('{"email":"alice@example.com"}');
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "git_identity", updatedVia: "web" });
-    expect(revalidated).toContain("/virtual");
+    expect(revalidated).toContain("/hub/virtual");
   });
 
   it("should say why and store nothing when the web save has neither field", async () => {
