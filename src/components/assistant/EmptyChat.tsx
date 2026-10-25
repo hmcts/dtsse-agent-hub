@@ -26,6 +26,12 @@ export interface EmptyChatActions {
 }
 
 /**
+ * What the new chat's draft is kept under. There is no conversation to key it on until the first message creates one,
+ * and a conversation id is a UUID, so this can never be mistaken for one.
+ */
+export const NEW_CHAT_DRAFT = "new";
+
+/**
  * A new chat: what the person is working on, as a starter card or their own words, and which product it is about.
  *
  * Attaching a file is a plausible opening move — handing the assistant a scanned letter and asking what it says — so
@@ -38,11 +44,14 @@ export interface EmptyChatActions {
 export function EmptyChat({
   starters,
   templates,
+  viewerOid,
   actions,
   uploads = false
 }: {
   starters: readonly Starter[];
   templates: readonly Template[];
+  /** Who is reading, which the composer keys its draft on. */
+  viewerOid: string;
   actions: EmptyChatActions;
   uploads?: boolean;
 }) {
@@ -146,7 +155,18 @@ export function EmptyChat({
       </div>
       <div className="shrink-0 px-4 pb-3.5">
         <div className="mx-auto max-w-[760px]">
-          <Composer templates={templates} onSend={begin} disabled={starting} uploads={uploads} openConversation={openConversation} />
+          {/* The draft is forgotten when the message typed here is sent, which is also when the page moves to the
+              conversation — not when the conversation is created, because attaching a file creates one while the
+              person is still typing into this box. A starter card sends its own words and leaves the box alone. */}
+          <Composer
+            templates={templates}
+            viewerOid={viewerOid}
+            draftId={NEW_CHAT_DRAFT}
+            onSend={begin}
+            disabled={starting}
+            uploads={uploads}
+            openConversation={openConversation}
+          />
         </div>
       </div>
     </>

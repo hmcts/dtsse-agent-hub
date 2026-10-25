@@ -35,6 +35,9 @@ vi.mock("@/components/assistant/uploadClient", async (importOriginal) => {
   };
 });
 
+/** Who is reading, which the composer keys its draft on. */
+const VIEWER = "dev-alice";
+
 const AGENT = "11111111-1111-1111-1111-111111111111";
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
 
@@ -89,7 +92,7 @@ async function finished(index = 0, uploadId = "u1"): Promise<void> {
 }
 
 function composer(onSend: (text: string, uploadIds: string[]) => Promise<string | null> = vi.fn(async () => null), props: object = {}) {
-  render(<Composer templates={TEMPLATES} onSend={onSend} uploads conversationId="c1" {...props} />);
+  render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={onSend} uploads conversationId="c1" {...props} />);
   return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
 }
 
@@ -158,7 +161,7 @@ describe("Composer attaching", () => {
   });
 
   it("should attach a file dropped on the message pane when the pane is the drop zone", async () => {
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} uploads />);
+    render(<ChatView view={conversation()} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} uploads />);
 
     await act(async () => {
       fireEvent.drop(screen.getByRole("list", { name: "Conversation" }), { dataTransfer: { files: [file("notes.pdf", 100)], types: ["Files"] } });
@@ -212,7 +215,7 @@ describe("Composer attaching", () => {
   });
 
   it("should leave a pasted file alone when there is no conversation to attach it to", () => {
-    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} />);
     const box = screen.getByRole("textbox", { name: "Message" });
 
     const delivered = fireEvent.paste(box, { clipboardData: { files: [file("letter.pdf", 10)] } });
@@ -243,7 +246,7 @@ describe("Composer attaching", () => {
   });
 
   it("should offer no file controls when there is no conversation to attach to and none can be opened", () => {
-    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} uploads />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} uploads />);
 
     expect(screen.getByRole("button", { name: "Add a template" })).toBeTruthy();
     expect(screen.queryByLabelText("Files to attach")).toBeNull();
@@ -259,7 +262,7 @@ describe("Composer attaching", () => {
  */
 describe("Composer with uploads switched off", () => {
   it("should offer no Attach item in the add menu, even with a conversation to attach to", () => {
-    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} conversationId="c1" />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} conversationId="c1" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
 
@@ -268,13 +271,13 @@ describe("Composer with uploads switched off", () => {
   });
 
   it("should offer no file picker at all", () => {
-    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} conversationId="c1" />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} conversationId="c1" />);
 
     expect(screen.queryByLabelText("Files to attach")).toBeNull();
   });
 
   it("should leave a pasted screenshot to the box rather than attaching it", () => {
-    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} conversationId="c1" />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} conversationId="c1" />);
     const box = screen.getByRole("textbox", { name: "Message" });
 
     const delivered = fireEvent.paste(box, { clipboardData: { files: [file("", 512, "image/png")] } });
@@ -284,7 +287,7 @@ describe("Composer with uploads switched off", () => {
   });
 
   it("should upload nothing when a file is dropped on it", async () => {
-    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} conversationId="c1" />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} conversationId="c1" />);
     const box = screen.getByRole("textbox", { name: "Message" });
 
     await act(async () => {
@@ -296,7 +299,7 @@ describe("Composer with uploads switched off", () => {
   });
 
   it("should not say files can be dropped while one is dragged over it", () => {
-    render(<Composer templates={TEMPLATES} onSend={vi.fn(async () => null)} conversationId="c1" />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId="c1" onSend={vi.fn(async () => null)} conversationId="c1" />);
 
     act(() => {
       fireEvent.dragOver(screen.getByRole("textbox", { name: "Message" }), { dataTransfer: { files: [], types: ["Files"] } });
@@ -308,6 +311,7 @@ describe("Composer with uploads switched off", () => {
   it("should still show the chips of a message that was sent while it was on, since the file did reach the assistant", () => {
     render(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation({ page: page({ messages: [withAttachments([{ name: "letter.pdf", bytes: 2048 }])] }) })}
         templates={TEMPLATES}
         actions={actions()}
@@ -561,7 +565,7 @@ describe("ChatView attachments in the thread", () => {
         ]
       })
     });
-    render(<ChatView view={view} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView view={view} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} />);
 
     const sent = screen.getByRole("list", { name: "Files sent with this message" });
     const shown = within(sent).getAllByRole("listitem");
@@ -574,6 +578,7 @@ describe("ChatView attachments in the thread", () => {
   it("should say the file cannot be opened from the page when describing a chip", () => {
     render(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation({ page: page({ messages: [withAttachments([{ name: "letter.pdf", bytes: 10 }])] }) })}
         templates={TEMPLATES}
         actions={actions()}
@@ -587,6 +592,7 @@ describe("ChatView attachments in the thread", () => {
   it("should show the chips without an empty bubble when the message was only files", () => {
     render(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation({ page: page({ messages: [withAttachments([{ name: "letter.pdf", bytes: 10 }], { body: "" })] }) })}
         templates={TEMPLATES}
         actions={actions()}
@@ -598,7 +604,7 @@ describe("ChatView attachments in the thread", () => {
   });
 
   it("should show no attachment list when the message carried no files", () => {
-    render(<ChatView view={conversation({ page: page({ messages: [message()] }) })} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView view={conversation({ page: page({ messages: [message()] }) })} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} />);
 
     expect(screen.queryByRole("list", { name: "Files sent with this message" })).toBeNull();
   });
@@ -620,7 +626,7 @@ describe("EmptyChat attaching before the chat exists", () => {
   }
 
   function newChat(acts: EmptyChatActions, uploadsOn = true) {
-    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={acts} uploads={uploadsOn} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} uploads={uploadsOn} />);
     return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
   }
 
@@ -775,7 +781,7 @@ describe("EmptyChat when the first message into an opened conversation is refuse
       send: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" })),
       setProduct: vi.fn(async () => ({ ok: true as const }))
     };
-    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
     const box = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "have a look" } });
     await choose(file("letter.pdf", 2048));
@@ -806,7 +812,7 @@ describe("EmptyChat when the person changes their mind while the chat is being o
       send: vi.fn(async () => ({ ok: true as const })),
       setProduct: vi.fn(async () => ({ ok: true as const }))
     };
-    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
     await choose(file("letter.pdf", 2048));
 
     // Removed while the conversation is still being created, so there is no upload id to discard yet.
@@ -831,7 +837,7 @@ describe("EmptyChat when a later change of product cannot be saved", () => {
       send: vi.fn(async () => ({ ok: true as const })),
       setProduct: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" }))
     };
-    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} uploads />);
     await choose(file("letter.pdf", 2048));
     await finished();
 

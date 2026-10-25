@@ -7,12 +7,16 @@ import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import type { ConversationView } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { Composer } from "@/components/assistant/Composer";
-import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
+import { EmptyChat, type EmptyChatActions, NEW_CHAT_DRAFT } from "@/components/assistant/EmptyChat";
+import { draftKey } from "@/components/useDraft";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import type { ConversationPage, TranscriptEntryView } from "@/transcripts/conversation";
 
 const AGENT = "11111111-1111-1111-1111-111111111111";
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
+const OTHER_CONVERSATION = "33333333-3333-3333-3333-333333333333";
+const VIEWER = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const OTHER_VIEWER = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
 const refresh = vi.fn();
 const push = vi.fn();
@@ -38,6 +42,8 @@ afterEach(() => {
   refresh.mockReset();
   push.mockReset();
   hubHandlers.clear();
+  sessionStorage.clear();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -134,7 +140,7 @@ describe("ChatView thread", () => {
         entry("5", { role: "assistant", content: { text: "Add it to the definition." }, occurred_at: "2026-10-21T09:02:00.000Z" })
       ]
     });
-    render(<ChatView view={conversation({ page: initial })} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation({ page: initial })} templates={TEMPLATES} actions={actions()} />);
 
     const thread = screen.getByRole("list", { name: "Conversation" });
     expect(within(thread).getByText("How do I add an event?")).toBeTruthy();
@@ -147,14 +153,26 @@ describe("ChatView thread", () => {
 
   it("should mark a product change in the thread when the conversation's product history has one", () => {
     render(
-      <ChatView view={conversation({ productHistory: [{ product: "pcs", at: "2026-10-21T08:00:00.000Z" }] })} templates={TEMPLATES} actions={actions()} />
+      <ChatView
+        viewerOid={VIEWER}
+        view={conversation({ productHistory: [{ product: "pcs", at: "2026-10-21T08:00:00.000Z" }] })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
     );
 
     expect(screen.getByText(/Product changed to Civil Possessions/)).toBeTruthy();
   });
 
   it("should say the message was not delivered when it expired", () => {
-    render(<ChatView view={conversation({ page: page({ messages: [message("1", { delivery: "expired" })] }) })} templates={TEMPLATES} actions={actions()} />);
+    render(
+      <ChatView
+        viewerOid={VIEWER}
+        view={conversation({ page: page({ messages: [message("1", { delivery: "expired" })] }) })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
 
     expect(screen.getByText("Not delivered. Send it again.")).toBeTruthy();
   });
@@ -164,6 +182,7 @@ describe("ChatView progress", () => {
   it("should say the assistant is starting when the last message is undelivered and the agent is offline", () => {
     render(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation({ agentStatus: "offline", page: page({ messages: [message("1", { delivery: "queued" })] }) })}
         templates={TEMPLATES}
         actions={actions()}
@@ -176,6 +195,7 @@ describe("ChatView progress", () => {
   it("should say it is waiting for a free assistant when the session is queued", () => {
     render(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation({ agentStatus: "offline", sessionState: "queued", page: page({ messages: [message("1", { delivery: "queued" })] }) })}
         templates={TEMPLATES}
         actions={actions()}
@@ -193,14 +213,14 @@ describe("ChatView progress", () => {
         entry("3", { role: "tool_use", content: { id: "t2", name: "Read", input: {} }, occurred_at: "2026-10-21T09:01:30.000Z" })
       ]
     });
-    render(<ChatView view={conversation({ agentStatus: "busy", page: initial })} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation({ agentStatus: "busy", page: initial })} templates={TEMPLATES} actions={actions()} />);
 
     expect(screen.getByRole("status").textContent).toContain("Reading");
   });
 
   it("should show nothing in progress when the assistant has answered and is idle", () => {
     const initial = page({ messages: [message("1")], entries: [entry("2")] });
-    render(<ChatView view={conversation({ page: initial })} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation({ page: initial })} templates={TEMPLATES} actions={actions()} />);
 
     expect(screen.queryByText("Thinking")).toBeNull();
     expect(screen.queryByText(/Starting your assistant/)).toBeNull();
@@ -209,6 +229,7 @@ describe("ChatView progress", () => {
   it("should follow the agent's status from the stream when an agent_status event names this agent", () => {
     render(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation({ agentStatus: "offline", page: page({ messages: [message("1", { delivery: "queued" })] }) })}
         templates={TEMPLATES}
         actions={actions()}
@@ -227,7 +248,7 @@ describe("ChatView progress", () => {
 describe("ChatView product", () => {
   it("should change the product only once the person confirms when they pick another product", async () => {
     const setProduct = ok();
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ setProduct })} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ setProduct })} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     const dialog = screen.getByRole("dialog", { name: "Change product?" });
@@ -246,7 +267,7 @@ describe("ChatView product", () => {
 
   it("should leave the product alone when the person cancels the change", () => {
     const setProduct = ok();
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ setProduct })} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ setProduct })} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -256,7 +277,7 @@ describe("ChatView product", () => {
   });
 
   it("should close the confirmation when the person presses Escape", () => {
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     fireEvent.keyDown(window, { key: "Escape" });
@@ -267,6 +288,7 @@ describe("ChatView product", () => {
   it("should show the refusal when the product cannot be changed", async () => {
     render(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation()}
         templates={TEMPLATES}
         actions={actions({ setProduct: vi.fn(async () => ({ ok: false as const, error: "no such product" })) })}
@@ -285,7 +307,7 @@ describe("ChatView product", () => {
 describe("ChatView sending", () => {
   it("should send the message and show it in the thread when sending succeeds", async () => {
     const send = vi.fn(async () => ({ ok: true as const, message: message("9", { body: "hello assistant" }) }));
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ send })} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ send })} />);
 
     await type("hello assistant");
 
@@ -297,6 +319,7 @@ describe("ChatView sending", () => {
   it("should show the error and keep the text when sending fails", async () => {
     render(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation()}
         templates={TEMPLATES}
         actions={actions({ send: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" })) })}
@@ -311,7 +334,7 @@ describe("ChatView sending", () => {
 
   it("should warm the session once when the person focuses the composer and the agent is offline", () => {
     const warm = ok();
-    render(<ChatView view={conversation({ agentStatus: "offline" })} templates={TEMPLATES} actions={actions({ warm })} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation({ agentStatus: "offline" })} templates={TEMPLATES} actions={actions({ warm })} />);
 
     const box = screen.getByRole("textbox", { name: "Message" });
     fireEvent.focus(box);
@@ -324,7 +347,7 @@ describe("ChatView sending", () => {
 
   it("should not warm the session when the agent is already running", () => {
     const warm = ok();
-    render(<ChatView view={conversation({ agentStatus: "idle" })} templates={TEMPLATES} actions={actions({ warm })} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation({ agentStatus: "idle" })} templates={TEMPLATES} actions={actions({ warm })} />);
 
     fireEvent.focus(screen.getByRole("textbox", { name: "Message" }));
 
@@ -334,7 +357,7 @@ describe("ChatView sending", () => {
 
 describe("ChatView document", () => {
   it("should open the document panel when the person chooses Add document", () => {
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Add document/ }));
@@ -349,6 +372,7 @@ describe("ChatView document", () => {
   it("should offer to open the document when one has been written", () => {
     render(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation({ artefact: { title: "Story", markdown: "x", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } })}
         templates={TEMPLATES}
         actions={actions()}
@@ -359,10 +383,11 @@ describe("ChatView document", () => {
   });
 
   it("should open the panel when the assistant writes a newer version of the document", () => {
-    const { rerender } = render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    const { rerender } = render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     rerender(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation({ artefact: { title: "Story", markdown: "# Drafted", version: 1, updatedBy: "agent", updatedAt: "2026-10-21T09:00:00.000Z" } })}
         templates={TEMPLATES}
         actions={actions()}
@@ -373,10 +398,11 @@ describe("ChatView document", () => {
   });
 
   it("should leave the panel closed when the newer version is the person's own", () => {
-    const { rerender } = render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    const { rerender } = render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     rerender(
       <ChatView
+        viewerOid={VIEWER}
         view={conversation({ artefact: { title: "Story", markdown: "# Mine", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } })}
         templates={TEMPLATES}
         actions={actions()}
@@ -390,7 +416,7 @@ describe("ChatView document", () => {
 describe("ChatView menu", () => {
   it("should rename the chat when the person saves a new name from the options menu", async () => {
     const rename = ok();
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ rename })} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ rename })} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
@@ -408,7 +434,7 @@ describe("ChatView menu", () => {
 
   it("should delete the chat and go to a new chat when the person confirms the delete", async () => {
     const remove = ok();
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions({ remove })} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ remove })} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete chat" }));
@@ -423,7 +449,12 @@ describe("ChatView menu", () => {
 
   it("should show the refusal and stay when the chat cannot be deleted", async () => {
     render(
-      <ChatView view={conversation()} templates={TEMPLATES} actions={actions({ remove: vi.fn(async () => ({ ok: false as const, error: "gone already" })) })} />
+      <ChatView
+        viewerOid={VIEWER}
+        view={conversation()}
+        templates={TEMPLATES}
+        actions={actions({ remove: vi.fn(async () => ({ ok: false as const, error: "gone already" })) })}
+      />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
@@ -437,7 +468,7 @@ describe("ChatView menu", () => {
   });
 
   it("should close the options menu when the person presses Escape", () => {
-    render(<ChatView view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
     expect(screen.getByRole("menu", { name: "Chat options" })).toBeTruthy();
@@ -449,7 +480,7 @@ describe("ChatView menu", () => {
 
 describe("Composer", () => {
   function composer(onSend: (text: string) => Promise<string | null> = vi.fn(async () => null), props: Partial<Parameters<typeof Composer>[0]> = {}) {
-    render(<Composer templates={TEMPLATES} onSend={onSend} {...props} />);
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId={CONVERSATION} onSend={onSend} {...props} />);
     return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
   }
 
@@ -572,10 +603,210 @@ function emptyActions(start: EmptyChatActions["start"]): EmptyChatActions {
   };
 }
 
+/** Unmounting flushes whatever the throttle still owes, so none of these has to wait on its timer. */
+describe("Composer draft", () => {
+  function composer(props: Partial<Parameters<typeof Composer>[0]> = {}) {
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId={CONVERSATION} onSend={vi.fn(async () => null)} {...props} />);
+    return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+  }
+
+  function write(box: HTMLTextAreaElement, value: string): void {
+    fireEvent.change(box, { target: { value } });
+  }
+
+  function stored(draftId: string, viewerOid = VIEWER): string | null {
+    return sessionStorage.getItem(draftKey("assistant-draft", viewerOid, draftId));
+  }
+
+  it("should restore the unsent message when the composer mounts again for the same conversation", () => {
+    write(composer(), "half a thought about CDAM");
+
+    cleanup();
+    const box = composer();
+
+    expect(box.value).toBe("half a thought about CDAM");
+    expect(stored(CONVERSATION)).toBe("half a thought about CDAM");
+  });
+
+  it("should keep each conversation's draft apart when both have one", () => {
+    write(composer(), "meant for this conversation");
+    cleanup();
+    write(composer({ draftId: OTHER_CONVERSATION }), "meant for the other one");
+    cleanup();
+
+    const box = composer();
+
+    expect(box.value).toBe("meant for this conversation");
+    expect(stored(OTHER_CONVERSATION)).toBe("meant for the other one");
+  });
+
+  it("should start empty when the conversation has no draft of its own", () => {
+    write(composer(), "meant for this conversation");
+    cleanup();
+
+    const box = composer({ draftId: OTHER_CONVERSATION });
+
+    expect(box.value).toBe("");
+    expect(stored(OTHER_CONVERSATION)).toBeNull();
+  });
+
+  it("should forget the draft when the message is sent", async () => {
+    const box = composer();
+    write(box, "all finished");
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(box.value).toBe("");
+    expect(stored(CONVERSATION)).toBeNull();
+    cleanup();
+    expect(composer().value).toBe("");
+  });
+
+  it("should keep the draft when the send is refused", async () => {
+    const box = composer({ onSend: vi.fn(async () => "the assistant is not available") });
+    write(box, "worth keeping");
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("the assistant is not available");
+    cleanup();
+    expect(composer().value).toBe("worth keeping");
+  });
+
+  it("should keep the next message when it was typed while the send was in flight", async () => {
+    // The box is not disabled while the send is in flight, so the next message is typed before the send resolves.
+    const onSend = vi.fn(async () => {
+      write(screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement, "and the next thought");
+      return null;
+    });
+    const box = composer({ onSend });
+    write(box, "all finished");
+
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter" });
+    });
+
+    expect(onSend).toHaveBeenCalledWith("all finished", []);
+    expect(box.value).toBe("and the next thought");
+    cleanup();
+    expect(composer().value).toBe("and the next thought");
+  });
+
+  it("should leave no draft behind when the box is emptied by hand", () => {
+    const box = composer();
+    write(box, "second thoughts");
+    write(box, "");
+
+    cleanup();
+
+    expect(composer().value).toBe("");
+    expect(stored(CONVERSATION)).toBeNull();
+  });
+
+  it("should keep the draft without waiting for the box to go away once the throttle has run", () => {
+    // The usual way a draft is lost is a crash or a closed laptop with the box still open, so it has to reach
+    // storage while the person is still on the page rather than only when the box goes away.
+    vi.useFakeTimers();
+    write(composer(), "still typing");
+    expect(stored(CONVERSATION)).toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(stored(CONVERSATION)).toBe("still typing");
+  });
+
+  it("should keep a template the person picked and then left as a draft", () => {
+    composer();
+    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Templates" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Bug" }));
+
+    cleanup();
+
+    expect(composer().value).toBe(TEMPLATES.find((template) => template.name === "Bug")?.text);
+  });
+
+  it("should show no draft of the person who signed out when someone else signs in on the same tab", () => {
+    write(composer(), "not for anyone else to see");
+    cleanup();
+
+    const box = composer({ viewerOid: OTHER_VIEWER });
+
+    expect(box.value).toBe("");
+    expect(stored(CONVERSATION, OTHER_VIEWER)).toBeNull();
+  });
+
+  it("should leave none of the signed-out person's drafts of any kind in the tab when someone else signs in", () => {
+    write(composer(), "not for anyone else to see");
+    cleanup();
+    sessionStorage.setItem(draftKey("direct-draft", VIEWER, AGENT), "nor this message to an agent");
+    sessionStorage.setItem("agent-hub:something-else", "not a draft");
+
+    composer({ viewerOid: OTHER_VIEWER });
+
+    expect(stored(CONVERSATION)).toBeNull();
+    expect(sessionStorage.getItem(draftKey("direct-draft", VIEWER, AGENT))).toBeNull();
+    expect(sessionStorage.getItem("agent-hub:something-else")).toBe("not a draft");
+  });
+
+  it("should keep the draft when the page is hidden before the throttle has written it", () => {
+    // React cleanup does not run on a page unload, so without a flush on hide the first 300ms of a message is lost.
+    write(composer(), "quick");
+    expect(stored(CONVERSATION)).toBeNull();
+
+    fireEvent(window, new Event("pagehide"));
+
+    expect(stored(CONVERSATION)).toBe("quick");
+  });
+
+  it("should grow the box to the height of the restored draft when a draft of several lines is put back", () => {
+    // jsdom does no layout, so the box's height comes from the lines in its value.
+    vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function scrollHeight(this: Element) {
+      return ((this as HTMLTextAreaElement).value?.split("\n").length ?? 1) * 20;
+    });
+    write(composer(), "line one\nline two\nline three");
+    cleanup();
+
+    const box = composer();
+
+    expect(box.value).toBe("line one\nline two\nline three");
+    expect(box.style.height).toBe("60px");
+  });
+
+  it("should stop growing the box at the height it starts scrolling at when the restored draft is longer still", () => {
+    vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(() => 600);
+    write(composer(), "a very long draft");
+    cleanup();
+
+    expect(composer().style.height).toBe("200px");
+  });
+
+  it("should keep the draft of a conversation the person switched away from and came back to", () => {
+    // Each conversation is its own page, so switching unmounts this chat and mounts the other one's.
+    const box = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+    write(box(), "half a thought about CDAM");
+    cleanup();
+
+    render(<ChatView viewerOid={VIEWER} view={conversation({ id: OTHER_CONVERSATION })} templates={TEMPLATES} actions={actions()} />);
+    expect(box().value).toBe("");
+    cleanup();
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
+    expect(box().value).toBe("half a thought about CDAM");
+  });
+});
+
 describe("EmptyChat", () => {
   it("should start a conversation with the starter's prompt and the chosen product and go to it when the person picks a starter card", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     const starter = STARTERS[0];
@@ -589,7 +820,7 @@ describe("EmptyChat", () => {
 
   it("should start with the default product when the person has not chosen one", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
 
     expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("other");
     await type("my own words");
@@ -599,7 +830,14 @@ describe("EmptyChat", () => {
   });
 
   it("should show the error and let the person try again when a starter cannot start", async () => {
-    render(<EmptyChat starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn(async () => ({ ok: false as const, error: "not available" })))} />);
+    render(
+      <EmptyChat
+        viewerOid={VIEWER}
+        starters={STARTERS}
+        templates={TEMPLATES}
+        actions={emptyActions(vi.fn(async () => ({ ok: false as const, error: "not available" })))}
+      />
+    );
 
     const card = screen.getByRole("button", { name: /Research/ }) as HTMLButtonElement;
     await act(async () => {
@@ -609,5 +847,46 @@ describe("EmptyChat", () => {
     expect(screen.getByRole("alert").textContent).toBe("not available");
     expect(card.disabled).toBe(false);
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("should keep what was typed in the new chat when the person goes away and comes back", () => {
+    const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
+    const box = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    fireEvent.change(box(), { target: { value: "a thought I have not finished" } });
+
+    cleanup();
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+
+    expect(box().value).toBe("a thought I have not finished");
+    expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBe("a thought I have not finished");
+  });
+
+  it("should forget the new chat's draft once the first message has created the conversation", async () => {
+    const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+
+    await type("my own words");
+
+    expect(push).toHaveBeenCalledWith("/assistant/abc");
+    expect(sessionStorage.getItem(draftKey("assistant-draft", VIEWER, NEW_CHAT_DRAFT))).toBeNull();
+  });
+
+  it("should keep what is in the box when a starter card starts a conversation instead", async () => {
+    // The card sends its own words, so what the person typed is still unsent and is still theirs to come back to.
+    const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
+    const box = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    fireEvent.change(box(), { target: { value: "a thought I have not finished" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(STARTERS[0]?.title ?? "") }));
+    });
+
+    expect(start).toHaveBeenCalledWith({ product: "other", body: STARTERS[0]?.prompt });
+    expect(box().value).toBe("a thought I have not finished");
+    cleanup();
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    expect(box().value).toBe("a thought I have not finished");
   });
 });

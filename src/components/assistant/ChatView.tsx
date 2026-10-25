@@ -253,11 +253,14 @@ function useNarrow(): boolean {
 export function ChatView({
   view,
   templates,
+  viewerOid,
   actions,
   uploads = false
 }: {
   view: ConversationView;
   templates: readonly Template[];
+  /** Who is reading, which the composer keys its draft on. */
+  viewerOid: string;
   actions: ChatActions;
   uploads?: boolean;
 }) {
@@ -401,6 +404,10 @@ export function ChatView({
             )}
             <Composer
               templates={templates}
+              viewerOid={viewerOid}
+              // The conversation, not its agent: a /clear registers a new agent and remounts the page, and the
+              // half-written message belongs to the conversation the person never left.
+              draftId={view.id}
               onSend={send}
               uploads={uploads}
               conversationId={view.id}
