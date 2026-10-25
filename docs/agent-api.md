@@ -119,9 +119,12 @@ ignored.
 
 Unlike a wake, an `interrupt` is sent once and never replayed: a pod that was not connected to hear it has no turn
 left to end by the time it reconnects, and a stop that fired late would interrupt whatever the session had moved on
-to. So the hub only sends one when it can see a turn to stop — the conversation's current agent is `busy` — and
-answers "there is nothing to stop" otherwise, recording nothing. Stopping is gated on the `stop` client feature: the
-hub refuses it for a session whose client never claimed it, rather than record a stop that the pane would ignore.
+to. So the hub only sends one when it can see a turn to stop — the conversation's current agent is `busy`. Asked to
+stop a conversation with no busy agent it does nothing at all: no frame, no record, and no message, since the web UI
+offers the control only while that agent reads `busy` and the status it reads is at most a few seconds stale, so the
+only way to get here is an answer that landed between the press and the read. Stopping is gated on the `stop` client
+feature, and that one *is* refused in words: the hub will not record a stop for a session whose client never claimed
+it, because waiting will not make that session stoppable.
 
 **Artefacts.** Each conversation has one markdown document, its artefact, which the person and the session can both edit.
 

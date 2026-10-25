@@ -617,7 +617,7 @@ describe("the sessions stream and report", () => {
     abort.abort();
     await stream.cancel();
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, stopped: true });
     expect(JSON.parse(interrupt!.data!)).toEqual({ conversation_id: id });
     expect((await assistantConversation(VIEWER, id))?.stopHistory).toHaveLength(1);
   });
@@ -630,8 +630,8 @@ describe("the sessions stream and report", () => {
     await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "idle" });
 
     // Pressing stop as the answer lands is a race nobody can be expected to win, so it is not a refusal — but
-    // nothing happened, so nothing goes in the thread to say it did.
-    expect(await actions.stopAssistantAnswer({ conversationId: id })).toEqual({ ok: true });
+    // `stopped: false` is what keeps the caller from saying it stopped, and nothing goes in the thread either.
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toEqual({ ok: true, stopped: false });
     expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
   });
 

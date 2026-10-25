@@ -560,7 +560,7 @@ function actions(): ChatActions {
   return {
     send: vi.fn(async () => ({ ok: true as const, message: message({ id: "99" }) })),
     warm: vi.fn(async () => ({ ok: true as const })),
-    stop: vi.fn(async () => ({ ok: true as const })),
+    stop: vi.fn(async () => ({ ok: true as const, stopped: true })),
     setProduct: vi.fn(async () => ({ ok: true as const })),
     rename: vi.fn(async () => ({ ok: true as const })),
     remove: vi.fn(async () => ({ ok: true as const })),

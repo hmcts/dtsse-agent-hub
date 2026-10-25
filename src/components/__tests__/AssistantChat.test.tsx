@@ -127,7 +127,7 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
   return {
     send: vi.fn(async () => ({ ok: true as const, message: message("99", { body: "sent" }) })),
     warm: ok(),
-    stop: ok(),
+    stop: vi.fn(async () => ({ ok: true as const, stopped: true })),
     setProduct: ok(),
     rename: ok(),
     remove: ok(),
@@ -346,6 +346,37 @@ describe("ChatView stopping an answer", () => {
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
 
+  // A session still starting has no turn to interrupt, so a button beside "Starting your assistant…" could only do
+  // nothing. This is also the state a conversation whose session was idle-reaped comes back in: `clientFeatures` is
+  // written at registration and never cleared, so it still claims `stop` and only the status says it is not running.
+  it.each([
+    ["starting its session", null, "Starting your assistant…"],
+    ["waiting for a free session", "queued" as const, "Waiting for a free assistant…"]
+  ])("should offer no stop while the assistant is %s", (_what, sessionState, label) => {
+    const waking = conversation({
+      agentStatus: "offline",
+      sessionState,
+      clientFeatures: ["stop"],
+      page: page({ messages: [message("1", { delivery: "queued" })] })
+    });
+    render(<ChatView viewerOid={VIEWER} view={waking} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+
+  it("should offer no stop while the message is still being sent, which no turn has started for", () => {
+    const sending = conversation({
+      agentStatus: "idle",
+      clientFeatures: ["stop"],
+      page: page({ messages: [message("1", { delivery: "queued" })] })
+    });
+    render(<ChatView viewerOid={VIEWER} view={sending} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByText("Sending your message…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+
   it("should offer no stop when the session's client would ignore the interrupt", () => {
     render(<ChatView viewerOid={VIEWER} view={working({ clientFeatures: null })} templates={TEMPLATES} actions={actions()} />);
 
@@ -385,6 +416,25 @@ describe("ChatView stopping an answer", () => {
 
     expect(screen.getByRole("alert").textContent).toContain("an older version that cannot be stopped");
     expect(announced()).not.toContain("Stopped");
+  });
+
+  // The answer landed between the press and the hub's read of the status. Nothing was recorded, so announcing
+  // "Stopped" would tell a screen-reader user something that did not happen — and there is nothing else to say.
+  it("should announce nothing, and say nothing, when the answer beat the stop", async () => {
+    vi.useFakeTimers();
+    const chatActions = actions({ stop: vi.fn(async () => ({ ok: true as const, stopped: false })) });
+    render(<ChatView viewerOid={VIEWER} view={working()} templates={TEMPLATES} actions={chatActions} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+    });
+
+    expect(announced()).not.toContain("Stopped");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(refresh).toHaveBeenCalled();
   });
 
   it("should read as stopped, with no activity under it, once a stop is on the conversation", () => {

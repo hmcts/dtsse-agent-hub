@@ -176,13 +176,18 @@ export async function warmConversation(input: { conversationId: unknown }): Prom
 }
 
 /**
- * Stops the answer the conversation is working on. Answers `{ok: true}` for a stop that reached the session and for
- * one that found nothing to stop — pressing it as the answer arrives is a race the person cannot be expected to win,
- * and nothing happened that they need telling about. A session whose client is too old to act on it is a refusal,
- * because that one will not stop however long they wait.
+ * Stops the answer the conversation is working on.
+ *
+ * `stopped` says whether a turn was actually ended, because the caller must not tell the person it was when it was
+ * not. It is `false` only for the race: the UI offers the control while the session reads `busy`, and that is at most
+ * a few seconds stale, so an answer can land between the press and the read. Nothing is recorded and nothing is
+ * said — a separator under a completed answer would be a worse lie than silence.
+ *
+ * A session whose client is too old to act on an interrupt is a refusal rather than a quiet `false`, because waiting
+ * will not make that one stoppable.
  */
-export async function stopAssistantAnswer(input: { conversationId: unknown }): Promise<ActionResult> {
-  return await runAction("stop assistant answer", async () => {
+export async function stopAssistantAnswer(input: { conversationId: unknown }): Promise<ActionResult<{ stopped: boolean }>> {
+  return await runAction<{ stopped: boolean }>("stop assistant answer", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
     }
@@ -191,16 +196,17 @@ export async function stopAssistantAnswer(input: { conversationId: unknown }): P
     if (conversation === undefined) {
       return MISSING;
     }
-    // `findConversation` is owner-scoped, so this cannot refuse what it returned: it is here to name the rule
-    // rather than leave "only the owner may interrupt a turn" as a property of one query's WHERE clause, and it is
-    // what catches a read seam that is one day widened. `canStopAssistantAnswer` is where the rule is tested.
+    // The owner-scoped read above is the enforcement: it reports anyone else's conversation as missing. This names
+    // the rule, so that "only the owner may interrupt a turn" is written down and tested somewhere rather than
+    // living in one query's WHERE clause, and so a future unscoped read seam has something to fail against.
     if (!canStopAssistantAnswer(viewer.oid, conversation)) {
       return MISSING;
     }
     const outcome = await stopAnswer(prisma, conversation);
-    return outcome === "unsupported-client"
-      ? { ok: false, error: "this chat's assistant was started by an older version that cannot be stopped. It can be stopped once it next starts." }
-      : { ok: true };
+    if (outcome === "unsupported-client") {
+      return { ok: false, error: "this chat's assistant was started by an older version that cannot be stopped. It can be stopped once it next starts." };
+    }
+    return { ok: true, stopped: outcome === "stopped" };
   });
 }
 
