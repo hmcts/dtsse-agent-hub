@@ -4,11 +4,16 @@ import { buildChannel, PERSONA_COOKIE, registerAgent, sampleTranscript, unique, 
 
 const PERSONA = unique("a11y");
 
+/** Audits the page as it stands, which is what a surface reached by interacting rather than by its own address needs. */
+async function expectNoViolations(page: Page): Promise<void> {
+  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(results.violations).toEqual([]);
+}
+
 async function audit(page: Page, path: string, status = 200): Promise<void> {
   const response = await page.goto(path);
   expect(response?.status()).toBe(status);
-  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
-  expect(results.violations).toEqual([]);
+  await expectNoViolations(page);
 }
 
 test.describe("accessibility @nightly", () => {
@@ -94,7 +99,29 @@ test.describe("accessibility @nightly", () => {
 
     await audit(page, `/hub/agents/${agent}`);
     await page.locator("details summary").first().click();
-    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
-    expect(results.violations).toEqual([]);
+    await expectNoViolations(page);
+  });
+
+  /**
+   * The Assistant, which is audited as a first visit renders it: the shell, its sidebar and the new-chat screen, with
+   * the getting-ready screen over them. That is the whole of the Assistant a deployment can show without a pod — a
+   * conversation, its thread and its document panel all need one running, so they stay outside this gate.
+   *
+   * It skips wherever the Assistant is off, which is every environment `Jenkinsfile_nightly` can target:
+   * `values.aat.template.yaml` and `values.preview.template.yaml` both set `VIRTUAL_AGENTS_ENABLED: "false"`, and the
+   * layout answers 404 while it is. So this runs against `next dev` with the flag on, and goes live here the moment a
+   * deployment turns it on. A skip is the point of the status check: without it the spec would pass on the 404.
+   */
+  test("should raise no WCAG A or AA violations on the Assistant's new chat and getting-ready screen @nightly @a11y", async ({ page }) => {
+    const response = await page.goto("/assistant");
+    // Conditional on the deployment rather than a test put aside: `VIRTUAL_AGENTS_ENABLED` is `"false"` in every
+    // environment `Jenkinsfile_nightly` targets, so the layout answers 404 there. Turning the flag on in one is all
+    // this needs to run, and the audit below then runs unchanged.
+    test.skip(response?.status() === 404, "the Assistant is off on this deployment");
+    expect(response?.status()).toBe(200);
+
+    // The new-chat screen is behind whichever getting-ready screen the visit shows, so both are in the audited page.
+    await expect(page.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
+    await expectNoViolations(page);
   });
 });

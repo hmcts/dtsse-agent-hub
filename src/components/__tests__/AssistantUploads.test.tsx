@@ -545,6 +545,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     productHistory: [],
     agentId: AGENT,
     agentStatus: "idle",
+    skills: [],
     clientFeatures: null,
     sessionState: null,
     sessionDetail: null,
