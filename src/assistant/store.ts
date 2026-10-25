@@ -525,7 +525,9 @@ export interface AssistantFrame {
   /**
    * The files the person attached to this message, for the pod to fetch to its disk before it delivers the message.
    * Absent from a frame built without a message — a wake rather than a delivery — and an empty array for a message
-   * nothing was attached to. `parseAttachments` in the published client is what decides which entries a pod acts on.
+   * nothing was attached to. `readAttachments` in the published client is what the pod decides on: it answers the
+   * entries it will fetch and an error outcome for each it refuses, so an entry this hub and that client disagree
+   * about reaches the session as a file that could not be retrieved rather than as nothing.
    */
   attachments?: FrameAttachment[];
 }

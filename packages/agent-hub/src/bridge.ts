@@ -165,7 +165,8 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     product_label: asNullableString(raw.product_label),
     artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
     artefact_updated_by: asNullableString(raw.artefact_updated_by),
-    // Left as it came: `parseAttachments` is what decides which entries this client is willing to act on.
+    // Left as it came: `readAttachments`, at the point of delivery, is what decides which entries this client will
+    // fetch and what the envelope says about the rest, so checking them here would only do it twice.
     attachments: raw.attachments
   };
 }

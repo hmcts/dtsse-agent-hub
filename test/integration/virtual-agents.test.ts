@@ -62,6 +62,7 @@ const { agentActivity, agentRoute, virtualAgentPage, virtualAgentsPage } = await
 const credentialsPage = await import("../../src/app/hub/settings/credentials/page.tsx");
 const agentsPage = await import("../../src/app/hub/agents/[id]/page.tsx");
 const oldVirtualAgentPage = await import("../../src/app/hub/virtual/[id]/page.tsx");
+const virtualHubPage = await import("../../src/app/hub/virtual/page.tsx");
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
 
@@ -1925,8 +1926,8 @@ describe("a virtual agent's plugins", () => {
   });
 
   // What the store checks is the names being ticked, so unticking everything never reads the offer list and so never
-  // raises its error. No UI reaches this while the configuration is broken: the Assistant hides the section, and both
-  // hub pages that render the form call `availablePlugins()` and throw. This pins the store, not a recovery route.
+  // raises its error. That is the recovery route the owner gets: `PluginsPanel` keeps its form, with one control that
+  // submits an empty list, whenever an agent has plugins and the offer could not be read.
   it("should let the owner clear every plugin while the hub's plugin configuration is malformed", async () => {
     const agent = await createWith(["pcs"]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
@@ -1980,6 +1981,28 @@ describe("a virtual agent's plugins", () => {
       prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: Array.from({ length: 21 }, (_unused, index) => `p-${index}`) } })
     ).rejects.toThrow(/virtual_agent_plugins_check/);
     await expect(prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: { pcs: true } } })).rejects.toThrow(/virtual_agent_plugins_check/);
+  });
+
+  /*
+   * `/hub/virtual` calls `pluginOffer()` in the body of its async default export, so awaiting the page function runs
+   * it: this rejected with `PluginConfigurationError` before the offer was caught, and resolves now. Awaiting the
+   * function is the whole of what this suite can do with a page — it gets the element tree back unrendered, because
+   * rendering one would need SSR of a tree holding client components and server actions, which nothing here does.
+   *
+   * That is why `/hub/agents/{id}` has no twin of this test rather than being an omission. There `pluginOffer()` sits
+   * inside a nested, non-async `VirtualAgent` component, so an awaited page call returns a tree with it unrendered
+   * and never calls it; only a real render would reach a throw in it.
+   *
+   * The type guarantee is narrower than it looks, so it is no substitute. `plugins` being required stops the prop
+   * being left off, and `PluginOffer` being a union stops `plugins={availablePlugins()}`, but
+   * `plugins={{ ok: true, available: availablePlugins() }}` typechecks, throws, and 500s the page.
+   */
+  it("should answer /hub/virtual with the plugin fault rather than throw when the hub's plugin configuration is malformed", async () => {
+    await insertUser(ALICE);
+    actAs("alice");
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    await expect(virtualHubPage.default()).resolves.toBeDefined();
   });
 });
 
