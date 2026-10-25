@@ -151,7 +151,7 @@ describe("grantAccess and revokeAccess", () => {
     expect(await prisma.agentGrant.findMany({ select: { ownerOid: true, granteeOid: true, level: true } })).toEqual([
       { ownerOid: ALICE.oid, granteeOid: BOB.oid, level: "write" }
     ]);
-    expect(revalidated).toContain("/access");
+    expect(revalidated).toContain("/hub/access");
 
     expect(await revokeAccess(form({ grantee: BOB.oid }))).toEqual({ ok: true });
     expect(await prisma.agentGrant.count()).toBe(0);

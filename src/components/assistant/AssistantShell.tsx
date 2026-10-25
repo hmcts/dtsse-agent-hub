@@ -281,7 +281,7 @@ export function AssistantShell({
             <div className="flex items-center gap-2">
               <ThemeSwitch initial={theme} />
               {hubLink ? (
-                <Link href="/" className="ml-auto shrink-0 rounded px-2 py-1 text-xs text-asst-muted hover:bg-asst-hover hover:text-asst-text">
+                <Link href="/hub" className="ml-auto shrink-0 rounded px-2 py-1 text-xs text-asst-muted hover:bg-asst-hover hover:text-asst-text">
                   Agent Hub
                 </Link>
               ) : null}

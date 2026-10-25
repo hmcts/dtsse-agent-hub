@@ -29,7 +29,7 @@ export async function grantAccess(form: FormData): Promise<ActionResult<{ confir
     }
     const grantee = matches[0]!;
     await setGrant(prisma, viewer.oid, grantee.oid, level);
-    revalidatePath("/access");
+    revalidatePath("/hub/access");
     return { ok: true, confirmation: `${grantee.name} now has ${level} access to your agents` };
   });
 }
@@ -42,7 +42,7 @@ export async function revokeAccess(form: FormData): Promise<ActionResult> {
       return { ok: false, error: "no grant was named" };
     }
     await revokeGrant(prisma, viewer.oid, grantee);
-    revalidatePath("/access");
+    revalidatePath("/hub/access");
     return { ok: true };
   });
 }

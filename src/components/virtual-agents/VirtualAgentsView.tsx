@@ -45,7 +45,7 @@ function Row({ agent, now }: { agent: VirtualAgentCard; now: number }) {
   return (
     <li className="space-y-1 border-b border-hub-line px-4 py-3 last:border-b-0">
       <div className="flex flex-wrap items-baseline gap-x-3">
-        <a href={`/agents/${agent.id}`} className="font-bold text-hub-link hover:underline">
+        <a href={`/hub/agents/${agent.id}`} className="font-bold text-hub-link hover:underline">
           {agent.name}
         </a>
         <span className="text-xs text-hub-muted">{statusLabel(agent.status, agent.desired)}</span>

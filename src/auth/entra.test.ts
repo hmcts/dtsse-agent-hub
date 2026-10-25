@@ -64,15 +64,15 @@ describe("configuration", () => {
 
 describe("beginSignIn", () => {
   it("should carry the state, nonce and verifier the callback will be checked against", () => {
-    const signIn = beginSignIn("/agents/0f8a");
+    const signIn = beginSignIn("/hub/agents/0f8a");
 
-    expect(signIn).toEqual({ state: "a-state", nonce: "a-nonce", codeVerifier: "a-verifier", returnTo: "/agents/0f8a" });
+    expect(signIn).toEqual({ state: "a-state", nonce: "a-nonce", codeVerifier: "a-verifier", returnTo: "/hub/agents/0f8a" });
   });
 });
 
 describe("sealSignIn and readSignIn", () => {
   it("should carry a sign-in back out unchanged", async () => {
-    const signIn = beginSignIn("/c?topics=pcs-api");
+    const signIn = beginSignIn("/hub/c?topics=pcs-api");
 
     expect(await readSignIn(await sealSignIn(signIn, SETTINGS.sessionSecret), SETTINGS.sessionSecret)).toEqual(signIn);
   });
