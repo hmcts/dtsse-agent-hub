@@ -475,6 +475,83 @@ describe("AssistantMarkdown", () => {
     expect(container.querySelector("ol")?.getAttribute("start")).toBe("3");
     expect(container.querySelector("pre")?.textContent).toBe("block");
   });
+
+  it.each([
+    ["an answer", false],
+    ["a document", true]
+  ])("should render a focusable, scrollable table with aligned column headers when %s has a pipe table", (_what, document) => {
+    const { container } = render(
+      <AssistantMarkdown source={"| left | centre | right |\n| :--- | :----: | -----: |\n| a | b | c |\n| d |"} document={document} />
+    );
+
+    const node = container.querySelector("table")!;
+    expect(node.parentElement!.tabIndex).toBe(0);
+    expect(node.parentElement!.className).toContain("overflow-x-auto");
+    const headers = [...node.querySelectorAll("thead th")];
+    expect(headers.map((header) => header.textContent)).toEqual(["left", "centre", "right"]);
+    expect(headers.map((header) => header.getAttribute("scope"))).toEqual(["col", "col", "col"]);
+    expect(headers.map((header) => header.className.match(/text-(?:left|center|right)/)![0])).toEqual(["text-left", "text-center", "text-right"]);
+    // A short row is padded to the header's width, so the cells line up with the alignments by index.
+    const rows = [...node.querySelectorAll("tbody tr")].map((row) => [...row.querySelectorAll("td")].map((cell) => cell.textContent));
+    expect(rows).toEqual([
+      ["a", "b", "c"],
+      ["d", "", ""]
+    ]);
+  });
+
+  it("should render a cell's own markup when a table cell holds a link or bold text", () => {
+    const { container } = render(<AssistantMarkdown source={"| a | b |\n| - | - |\n| [docs](https://example.com/docs) | **bold** |"} />);
+
+    expect(screen.getByRole("link", { name: "docs" }).getAttribute("href")).toBe("https://example.com/docs");
+    expect(container.querySelector("td strong")!.textContent).toBe("bold");
+  });
+
+  it("should keep a code span's own spacing when it sits in a table cell", () => {
+    const { container } = render(<AssistantMarkdown source={"| cmd |\n| --- |\n| `git log  --oneline` |"} />);
+
+    const span = container.querySelector("td code")!;
+    expect(span.textContent).toBe("git log  --oneline");
+    // No stylesheet runs here, so the classes are what carry it: the cell's text collapses its pipe padding, the span does not.
+    expect(span.className).toContain("whitespace-pre-wrap");
+    expect(container.querySelector("table")!.className).toContain("whitespace-normal");
+  });
+
+  it("should keep the author's pipes as text, losing nothing, when a table's delimiter row is missing", () => {
+    const { container } = render(<AssistantMarkdown source={"| a | b |\n| c | d |"} />);
+
+    expect(container.querySelector("table")).toBeNull();
+    expect(container.textContent).toBe("| a | b |\n| c | d |");
+  });
+
+  it("should keep an over-wide row's words in its last cell when a cell holds an unescaped pipe", () => {
+    const { container } = render(<AssistantMarkdown source={"| a | b |\n| - | - |\n| one | two | three |"} />);
+
+    // The overflow stays in the last cell as the author wrote it, pipes and all, rather than being truncated away.
+    const cells = [...container.querySelectorAll("tbody td")].map((cell) => cell.textContent);
+    expect(cells).toEqual(["one", "two | three"]);
+  });
+
+  it("should fail loudly rather than render nothing when a block type has no case", async () => {
+    vi.doMock("@/messages/markup", async (original) => ({
+      ...(await original<typeof import("@/messages/markup")>()),
+      parseMarkup: () => [{ type: "footnote" }]
+    }));
+    vi.resetModules();
+    const { AssistantMarkdown: Unguarded } = await import("@/components/assistant/AssistantMarkdown");
+    // React re-throws through an error event and logs the render it gave up on; both are the point of the test.
+    const swallow = (event: ErrorEvent) => event.preventDefault();
+    window.addEventListener("error", swallow);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      expect(() => render(<Unguarded source="anything" />)).toThrow("Markup has no case for the footnote block");
+    } finally {
+      logged.mockRestore();
+      window.removeEventListener("error", swallow);
+      vi.doUnmock("@/messages/markup");
+      vi.resetModules();
+    }
+  });
 });
 
 describe("AssistantRefresh", () => {
