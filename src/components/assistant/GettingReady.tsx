@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { type ConnectionsPrompt, connectionsPrompt } from "@/assistant/connections";
 import { type ConnectionsAsk, connectionsAsk } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
@@ -306,8 +307,8 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
 
 /**
  * The connections and the sign-ins the assistant's pod relays as it reaches each one, so a connection shows
- * "Connecting…" until its code appears. On a first visit it is the whole of getting ready: the assistant warms up
- * while the person connects the accounts it works with, and once every needed one is connected they carry on.
+ * "Connecting…" until its code appears. On a first visit it is where the person connects the accounts their assistant
+ * works with, opened from the connections banner while the assistant warms up behind it.
  * `returning` is the other way in — someone who connected everything on an earlier visit, whose assistant has
  * stopped to ask them to sign in again — so the screen asks for that rather than introducing the connections, and
  * its button leaves rather than finishing anything.
@@ -315,6 +316,9 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
  * `unavailable` is the third way in, and the connections are not listed at all for it: the hub has not read them,
  * so every row would say "Connect" about a sign-in that may well be there. It says why instead, and its button
  * leaves, because holding someone behind a checklist the hub cannot check is a door with no handle.
+ *
+ * `onLeave` is how the screen is closed while a connection is still missing, and it is why the screen may cover the
+ * page at all: it is a thing the person opened from the banner and can close again, not a gate across the Assistant.
  */
 export function GettingReady({
   assistant,
@@ -323,6 +327,7 @@ export function GettingReady({
   paste,
   save,
   onDone,
+  onLeave,
   returning = false,
   theme = "system"
 }: ScreenProps & {
@@ -330,6 +335,7 @@ export function GettingReady({
   paste: FormAction;
   save: FormAction;
   onDone: () => void;
+  onLeave?: () => void;
   returning?: boolean;
 }) {
   const now = useNow();
@@ -362,12 +368,60 @@ export function GettingReady({
           ))}
         </ul>
       )}
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-3">
+        {/* Beside the one button that is ever disabled, so the screen they opened is never one they cannot close. */}
+        {ask === "connect" && onLeave !== undefined ? (
+          <button type="button" onClick={onLeave} className={FOOTER_QUIET}>
+            Go to your chats
+          </button>
+        ) : null}
         <button type="button" onClick={onDone} disabled={ask === "connect"} className={FOOTER_PRIMARY}>
           {continueLabel(ask, returning)}
         </button>
       </div>
     </ReadyShell>
+  );
+}
+
+/**
+ * What the Assistant has to ask or tell someone about their connections, and the way to the screen it is about.
+ *
+ * A banner and not a screen over everything, because being wrong about this is not symmetric. "You must do this
+ * first" is unrecoverable: it takes away the sidebar, every conversation and the settings that could fix it, over a
+ * state the person may not be able to satisfy — a model route their session disagrees with, a credentials vault that
+ * is down. A banner somebody scrolls past costs them only the thing they were already not doing. So the page stays
+ * theirs, and the screen opens only when they ask for it.
+ *
+ * `onHide` is left out for an ask there is something to do about, which is the whole of a `connect`: the ask has to
+ * outlast their attention, or they lose the only thing telling them why nothing works. An `unknown` has it, because
+ * there is nothing for them to do and saying so once is enough.
+ */
+function ConnectionsBanner({ prompt, onShow, onHide }: { prompt: ConnectionsPrompt; onShow: () => void; onHide?: () => void }) {
+  return (
+    <div
+      role="region"
+      aria-label={prompt.label}
+      className={`fixed left-1/2 top-[68px] z-40 flex w-[min(calc(100%-2rem),44rem)] -translate-x-1/2 flex-wrap items-center gap-3 rounded-[12px] border border-asst-accent-line bg-asst-raised py-2.5 pl-4 font-plex text-asst-text shadow-lg ${onHide === undefined ? "pr-4" : "pr-2.5"}`}
+    >
+      <p className="min-w-0 flex-1 text-[13px] text-asst-body">{prompt.message}</p>
+      <button
+        type="button"
+        onClick={onShow}
+        className="shrink-0 rounded-[9px] bg-asst-accent px-3.5 py-1.5 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover"
+      >
+        {prompt.action}
+      </button>
+      {onHide === undefined ? null : (
+        <button
+          type="button"
+          onClick={onHide}
+          aria-label="Hide this message"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-asst-muted hover:bg-asst-active hover:text-asst-text"
+        >
+          <span aria-hidden="true">✕</span>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -439,7 +493,7 @@ function WaitingNotice({ assistant, onShow, onHide }: { assistant: AssistantSumm
   );
 }
 
-/** Closes the waiting screen on Escape, which `aria-modal` leads a keyboard user to expect, while it is the one up. */
+/** Closes whichever getting-ready screen is up on Escape, which `aria-modal` leads a keyboard user to expect. */
 function useEscape(active: boolean, close: () => void): void {
   useEffect(() => {
     if (!active) {
@@ -462,23 +516,45 @@ function rememberDismissal(assistant: AssistantSummary, dismissed: boolean): voi
 }
 
 /**
- * Shows the getting-ready screen until the person has connected everything, and then until they choose to carry on.
- * Someone who has onboarded already waits instead when they arrive to an assistant that is not running: on the
- * connections screen while its pod is asking them to sign in, so they can act on it, and on the warming-up screen
- * otherwise. Either can be sent away, by its button or by Escape, leaving a notice that reports the rest of the
- * wait. Once the assistant is running neither comes back this visit, and nor is either shown to someone who arrived
- * to one already running.
+ * Where a surface that is not a `done` starts, and where the cookie puts it again on the next page.
  *
- * Neither screen's state can live here alone, because each of the Assistant's pages mounts this afresh: the choice
- * to send it away is in the cookie `dismissed` is the page's reading of, and that the assistant has been running is
- * in the visit the layout holds. Hiding the notice is the one thing not carried: it is small, and a navigation
+ * Only a `done` opens on a screen, and only to report a wait: nothing covers the Assistant over an ask, which is
+ * what the banner is for. An `unknown` sent away is gone rather than back on its banner, because it has said the one
+ * thing it had to say; a `connect` sent away is back on its banner, because what it asked for is still missing.
+ */
+function initialView(ask: ConnectionsAsk, dismissed: boolean): "screen" | "notice" | "gone" {
+  if (ask === "done") {
+    return dismissed ? "notice" : "screen";
+  }
+  return dismissed && ask === "unknown" ? "gone" : "notice";
+}
+
+/** The kinds the hub has read a stored credential for, which is all the banner's wording needs of them. */
+function storedKinds(statuses: CredentialStatus[]): Set<CredentialKind> {
+  return new Set(statuses.filter((status) => status.stored).map((status) => status.kind));
+}
+
+/**
+ * Which of the getting-ready surfaces the Assistant's pages show, if any.
+ *
+ * Someone with a connection still to make gets the banner, and the connections screen when they open it from there.
+ * Someone who has onboarded waits instead when they arrive to an assistant that is not running: on the connections
+ * screen while its pod is asking them to sign in, so they can act on it, and on the warming-up screen otherwise.
+ * Every screen can be sent away, by its button or by Escape. What each leaves behind is what it still has to say: the
+ * waiting ones a notice reporting the rest of the wait, the connections the banner that sent them, and the one about
+ * sign-ins that cannot be checked nothing at all. Once the assistant is running no screen comes back this visit, and
+ * nor is one shown to someone who arrived to one already running.
+ *
+ * No screen's state can live here alone, because each of the Assistant's pages mounts this afresh: the choice to send
+ * one away is in the cookie `dismissed` is the page's reading of, and that the assistant has been running is in the
+ * visit the layout holds. Hiding the waiting notice is the one thing not carried: it is small, and a navigation
  * bringing it back is what tells someone who hid it that their assistant has come up.
  *
  * Nobody is taken through the connections while the hub cannot read their credentials. `assistant.onboarded` is
- * false then whatever the person has stored, so onboarding on it would put the first-visit screen over the chat of
- * someone who has connected everything, and its button — satisfied only by the credentials the hub is failing to
- * read — would never let them past. They are told why once instead, and sending that away is remembered in the
- * same cookie a wait's is, so moving between pages does not bring it back.
+ * false then whatever the person has stored, so asking on it would tell someone who has connected everything to
+ * connect it again, and a screen on it would be satisfied only by the credentials the hub is failing to read. They
+ * are told why once instead, on a banner they can send away, and that is remembered in the same cookie a wait's is,
+ * so moving between pages does not bring it back.
  */
 export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean }) {
   const { assistant } = props;
@@ -487,7 +563,7 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
   const [needed] = useState(ask === "connect");
   const [waiting] = useState(ask === "done" && assistant.status !== "running");
   const [done, setDone] = useState(false);
-  const [view, setView] = useState<"screen" | "notice" | "gone">(dismissed ? "notice" : "screen");
+  const [view, setView] = useState<"screen" | "notice" | "gone">(() => initialView(ask, dismissed));
   const running = assistant.status === "running";
   // Latched while rendering rather than in an effect, which runs after paint: the frame the person would see at the
   // moment their assistant came up would be this screen saying it was ready, bar full, and then gone. Latched in the
@@ -511,15 +587,20 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
     setView("screen");
     rememberDismissal(assistant, false);
   };
-  const onboarding = ask === "connect" || (needed && !done);
+  // An `unknown` sent away has nothing left to say, so it goes rather than leaving its banner behind.
+  const hide = useCallback(() => {
+    setView("gone");
+    rememberDismissal(assistant, true);
+  }, [assistant]);
+  const onboarding = (ask === "connect" || (needed && !done)) && view === "screen";
   const unknown = ask === "unknown" && view === "screen";
-  const screen = waiting && !started && !onboarding && view === "screen";
-  useEscape(screen || unknown, dismiss);
+  const screen = waiting && !started && !onboarding && !unknown && view === "screen";
+  useEscape(onboarding || unknown || screen, unknown ? hide : dismiss);
   if (onboarding) {
-    return <GettingReady {...props} onDone={() => setDone(true)} />;
+    return <GettingReady {...props} onDone={() => setDone(true)} onLeave={dismiss} />;
   }
   if (unknown) {
-    return <GettingReady {...props} onDone={dismiss} />;
+    return <GettingReady {...props} onDone={hide} />;
   }
   if (screen) {
     return waitingForPerson(assistant.status) ? (
@@ -527,6 +608,13 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
     ) : (
       <WarmingUp assistant={assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} />
     );
+  }
+  // Sent away for good, which only an `unknown` is ever allowed to be: an ask with something still to connect
+  // outlasts anything the person closes, because it is the only thing telling them why nothing works.
+  const silenced = view === "gone" && ask === "unknown";
+  const prompt = silenced ? null : connectionsPrompt(ask, assistant.needed, storedKinds(props.statuses));
+  if (prompt !== null) {
+    return <ConnectionsBanner prompt={prompt} onShow={show} onHide={ask === "unknown" ? hide : undefined} />;
   }
   // Only for a wait this visit began on: someone who arrives to an assistant already up is not shown the end of a
   // wait they never saw, however recently they sent one away.
