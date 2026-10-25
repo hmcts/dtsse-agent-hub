@@ -8,6 +8,7 @@ import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
+import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
@@ -91,6 +92,7 @@ export function AssistantShell({
   theme = "system",
   connections,
   plugins,
+  claudeMd,
   actions,
   children
 }: {
@@ -103,6 +105,8 @@ export function AssistantShell({
   connections?: ConnectionsData;
   /** The workspace plugins the footer's settings lets the person tick. */
   plugins?: AssistantPlugins;
+  /** The person's own CLAUDE.md, which the footer's settings shows and edits. */
+  claudeMd?: AssistantClaudeMd;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
   actions?: ConversationActions;
   children: React.ReactNode;
@@ -282,7 +286,7 @@ export function AssistantShell({
             {/* The name takes whatever room is left between the two, so the cog sits at the end of the row rather
                 than against a short name. */}
             <span className="min-w-0 flex-1 truncate text-sm font-medium">{viewerName}</span>
-            <AssistantSettings theme={theme} connections={connections} plugins={plugins} />
+            <AssistantSettings theme={theme} connections={connections} plugins={plugins} claudeMd={claudeMd} />
           </div>
           {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,
               and the width dragged here is the one it comes back to. */}

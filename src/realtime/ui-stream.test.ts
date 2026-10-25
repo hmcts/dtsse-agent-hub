@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Grant, MessageRef } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
@@ -525,5 +526,17 @@ describe("uiStream", () => {
     await settle();
 
     expect(frames).toEqual([]);
+  });
+});
+
+describe("selectFrame's cover of HubEvent", () => {
+  // `selectFrame` returns `string | undefined`, so a `HubEvent` member it has no arm for would fall off the end of
+  // the switch as `undefined` — the same answer as "not yours to see" — and the page would never hear about it.
+  // `noImplicitReturns` is the whole guard: with it, that case is TS7030 at the function. Nothing else in the suite
+  // fails if the flag goes, so this reads it.
+  it("should be guarded by noImplicitReturns, which turns a missing arm into a compile error", async () => {
+    const tsconfig = await readFile(new URL("../../tsconfig.json", import.meta.url), "utf8");
+
+    expect(tsconfig).toMatch(/"noImplicitReturns":\s*true/);
   });
 });

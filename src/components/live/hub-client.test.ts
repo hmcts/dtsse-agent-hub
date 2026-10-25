@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { connectHub, type HubClientDependencies, type HubEventType, type HubHandlers, retryDelay, streamUrl } from "./hub-client.ts";
+import { NOTIFIED_EVENT_TYPES } from "@/realtime/__fixtures__/events";
+import { connectHub, HUB_EVENT_TYPES, type HubClientDependencies, type HubEventType, type HubHandlers, retryDelay, streamUrl } from "./hub-client.ts";
 
 class FakeSource {
   readyState = 0;
@@ -54,6 +55,17 @@ async function giveUp(source: FakeSource): Promise<void> {
   source.emit("error");
   await Promise.resolve();
 }
+
+describe("HUB_EVENT_TYPES", () => {
+  // A type missing from the list is subscribed to by nobody, and `EventSource` says nothing about an event with no
+  // listener, so the page just never updates. The samples record enumerates the hub's union at runtime, so a new
+  // member of it fails here as well as at the type-level check in hub-client.ts.
+  it("should subscribe to every event that crosses pods, and to the resync the other two arrive as", () => {
+    const frames = NOTIFIED_EVENT_TYPES.filter((type) => type !== "grant" && type !== "credential");
+
+    expect(new Set(HUB_EVENT_TYPES)).toEqual(new Set([...frames, "resync"]));
+  });
+});
 
 describe("streamUrl", () => {
   it("should ask for nothing but statuses when nothing is watched", () => {

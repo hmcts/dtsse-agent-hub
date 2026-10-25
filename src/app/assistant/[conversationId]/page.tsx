@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { deleteConversation, renameConversation, saveArtefact, sendAssistantMessage, setConversationProduct, warmConversation } from "@/app/_actions/assistant";
-import { saveCredential } from "@/app/_actions/credentials";
+import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
@@ -14,7 +14,7 @@ import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { ShareGate } from "@/components/assistant/ShareGate";
 import { requireViewer } from "@/viewer/current";
-import { assistantConversation, chatShares, openAssistant } from "@/web/data";
+import { assistantConversation, chatShares, claudeMdSettings, openAssistant } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +39,12 @@ export default async function ConversationPage({
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const { conversationId } = await params;
-  const [home, view, query] = await Promise.all([openAssistant(viewer), assistantConversation(viewer, conversationId), searchParams]);
+  const [home, view, claudeMd, query] = await Promise.all([
+    openAssistant(viewer),
+    assistantConversation(viewer, conversationId),
+    claudeMdSettings(viewer),
+    searchParams
+  ]);
   if (view === undefined) {
     notFound();
   }
@@ -56,6 +61,7 @@ export default async function ConversationPage({
       actions={ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
       plugins={pluginSettings}
+      claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
     >
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
       <ChatView key={view.agentId} view={view} templates={TEMPLATES} viewerOid={viewer.oid} actions={ACTIONS} />
