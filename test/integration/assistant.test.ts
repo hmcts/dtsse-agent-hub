@@ -308,6 +308,18 @@ describe("conversations", () => {
     expect(conversation.productHistory.map((change) => change.product)).toEqual(["ccd"]);
   });
 
+  it("should store and record the pick when the product picked is the default a retired slug reads as", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "ccd", body: "hi" })) as { id: string }).id;
+    await prisma.$executeRaw`UPDATE assistant_conversation SET product = 'other' WHERE id = ${id}::uuid`;
+
+    expect(await actions.setConversationProduct({ conversationId: id, product: "general" })).toEqual({ ok: true });
+
+    const [row] = await prisma.$queryRaw<{ product: string }[]>`SELECT product FROM assistant_conversation WHERE id = ${id}::uuid`;
+    expect(row!.product).toBe("general");
+    expect((await findConversation(prisma, ALICE.oid, id))!.productHistory.map((change) => change.product)).toEqual(["general"]);
+  });
+
   it("should read as the default everywhere when a conversation is on a product no longer offered", async () => {
     const { id: assistantId } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "ccd", body: "hi" })) as { id: string }).id;

@@ -336,16 +336,18 @@ export async function setProduct(prisma: PrismaClient, ownerOid: string, id: str
   if (conversation === undefined) {
     throw new ConversationNotFound();
   }
-  if (conversation.product === product) {
-    return;
-  }
   const history = [...conversation.productHistory, { product, at: now.toISOString() }].slice(-MAX_PRODUCT_HISTORY);
   await prisma.$transaction(async (tx) => {
-    await tx.assistantConversation.update({
-      where: { id },
-      data: { product, productHistory: history.map((change) => ({ product: change.product, at: change.at })), updatedAt: now }
-    });
-    await announce(tx, conversation);
+    // The row decides whether this is a change, because a conversation left on a slug the list no longer offers
+    // reads as the default: picking that default is a real change, which this stores and records in the history.
+    const changed = await tx.$executeRaw`
+      UPDATE assistant_conversation
+         SET product = ${product}, product_history = ${JSON.stringify(history)}::jsonb, updated_at = ${now}
+       WHERE id = ${id}::uuid AND product <> ${product}
+    `;
+    if (changed > 0) {
+      await announce(tx, conversation);
+    }
   });
 }
 

@@ -292,14 +292,16 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-asst-field px-4">
           <SidebarToggle />
-          <h1 className="min-w-0 truncate text-[15px] font-medium">{view.title}</h1>
+          {/* Gives way long before the product control beside it, keeping 4rem so the start of the name always shows. */}
+          <h1 className="min-w-[4rem] shrink-[999] truncate text-[15px] font-medium">{view.title}</h1>
           <label className="sr-only" htmlFor="chat-product">
             Product
           </label>
           {/*
             A native select is as wide as its widest option, and the longest label runs to 40 characters, so the
-            control is capped and may shrink: the title, "Open document" and the chat menu keep their place at the
-            360px the document panel leaves, and the closed control ellipsises what does not fit.
+            control is capped at 9.5rem and ellipsises the rest. The title is weighted to shrink first, so the cap
+            holds whatever the chat is called; the control only gives up width in a column too narrow for both, and
+            "Open document" and the chat menu keep their place.
           */}
           <select
             id="chat-product"
