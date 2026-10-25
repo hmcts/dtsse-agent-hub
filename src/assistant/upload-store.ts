@@ -297,10 +297,17 @@ export async function messageAttachments(db: Database, messageId: bigint): Promi
   return rows.map((row) => ({ id: row.id, name: row.fileName, bytes: Number(row.bytes), media_type: row.mediaType }));
 }
 
-/** The attachments a `direct` frame names, so the pod can fetch each one part by part before the message is delivered. */
+/**
+ * The attachments a `direct` frame names, so the pod can fetch each one part by part before the message is delivered.
+ *
+ * An `expired` upload is named too, even though the sweep has taken its bytes: the pod's fetch for it then fails, and
+ * the envelope tells the session the file could not be retrieved and to ask for it again. Leaving it out of the frame
+ * would take the file off the message altogether, and a message naming no file reads as though none was attached —
+ * which leaves the person believing the agent read theirs.
+ */
 export async function frameAttachments(db: Database, messageId: bigint): Promise<FrameAttachment[]> {
   const rows = await db.assistantUpload.findMany({
-    where: { messageId, state: { in: ["stored", "fetched"] } },
+    where: { messageId, state: { in: ["stored", "fetched", "expired"] } },
     select: { id: true, storedName: true, bytes: true, mediaType: true },
     orderBy: { createdAt: "asc" }
   });

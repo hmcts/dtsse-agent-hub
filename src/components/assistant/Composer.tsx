@@ -9,8 +9,24 @@ import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { type SkillMenuTheme, useSkillMenu } from "@/components/SkillMenu";
 import { useDraft } from "@/components/useDraft";
 
-/** Above this the box scrolls rather than grows. */
+/** Above this the box scrolls rather than grows. Eight lines, which is a quarter of a phone's screen. */
 const MAX_HEIGHT = 200;
+
+/**
+ * Gives the box the height its text needs, up to `MAX_HEIGHT`, and one line when it is empty.
+ *
+ * How tall the text is depends on how wide the box is, so a box that has not been laid out yet cannot be measured:
+ * with no width, `scrollHeight` is the height of the text wrapped at nothing — a line per character — and the box
+ * would be given the whole of `MAX_HEIGHT` to hold an empty message. Left at `auto` it is one line, which is what a
+ * box nobody has typed in needs, until a width arrives to measure against.
+ */
+function fitHeight(element: HTMLTextAreaElement): void {
+  element.style.height = "auto";
+  if (element.clientWidth === 0) {
+    return;
+  }
+  element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT)}px`;
+}
 
 /**
  * The "/" list, as a popover above the box rather than in the flow: the box here grows with what is typed, and a list
@@ -141,10 +157,29 @@ export function Composer({
   useEffect(() => {
     const element = box.current;
     if (element) {
-      element.style.height = "auto";
-      element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT)}px`;
+      fitHeight(element);
     }
   }, [text]);
+
+  // The box is also re-measured whenever it changes width, because that is what its text wraps against. The width it
+  // mounts at is not the width it keeps: the shell renders the sidebar as a column of the row until its media query
+  // reports a narrow screen, so on a phone the chat beside it is first laid out too narrow to give the box any width
+  // at all. A change of height is this effect's own doing, so only a change of width is acted on.
+  useEffect(() => {
+    const element = box.current;
+    if (element === null) {
+      return;
+    }
+    let width = element.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth !== width) {
+        width = element.clientWidth;
+        fitHeight(element);
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (menu === "closed") {

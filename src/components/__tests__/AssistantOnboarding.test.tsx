@@ -225,10 +225,117 @@ describe("GettingReady continue", () => {
   });
 });
 
+/**
+ * The hub failing to read someone's credentials looks exactly like their having stored none — `onboarded` is false
+ * either way — so these pin the two apart from the person's side: nobody is asked to connect what the hub has not
+ * looked at, and the screen says which of the two it is.
+ */
+describe("GettingReady when the hub cannot read the credentials", () => {
+  const REASON = "this deployment has no credentials vault, so credentials cannot be stored here";
+
+  /** What the page passes when the credential store cannot be read: the reason, and no statuses to go on. */
+  function unreadable(props: Partial<Parameters<typeof GettingReady>[0]> = {}) {
+    return ready({ unavailable: REASON, statuses: [], ...props });
+  }
+
+  it("should say the sign-ins cannot be read, and why, when the credential store cannot be read", () => {
+    render(unreadable());
+
+    expect(screen.getByText(/cannot read your sign-ins/)).toBeTruthy();
+    expect(screen.getByText(REASON)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+  });
+
+  it("should ask for no account, and let the person past, when the hub cannot tell what they have connected", () => {
+    const onDone = vi.fn();
+    render(unreadable({ onDone }));
+
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect the accounts above to continue" })).toBeNull();
+    const carryOn = screen.getByRole("button", { name: "Carry on" }) as HTMLButtonElement;
+    expect(carryOn.disabled).toBe(false);
+
+    fireEvent.click(carryOn);
+    expect(onDone).toHaveBeenCalled();
+  });
+});
+
 describe("OnboardingGate", () => {
   function gate(summary: AssistantSummary, stored: CredentialStatus[] = [], dismissed = false) {
     return <OnboardingGate assistant={summary} statuses={stored} unavailable={null} paste={ok()} save={ok()} dismissed={dismissed} />;
   }
+
+  it("should ask for nothing when every needed account is connected and the hub can read them", () => {
+    render(
+      <OnboardingGate
+        assistant={assistant("running", { onboarded: true })}
+        statuses={statuses("github", "azure", "claude")}
+        unavailable={null}
+        paste={ok()}
+        save={ok()}
+      />
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+  });
+
+  const UNREADABLE = "this deployment has no credentials vault, so credentials cannot be stored here";
+
+  /** What the page passes when the hub cannot read the credential store: the reason, and no statuses to go on. */
+  function unreadable(summary: AssistantSummary = assistant("running"), dismissed = false) {
+    return <OnboardingGate assistant={summary} statuses={[]} unavailable={UNREADABLE} paste={ok()} save={ok()} dismissed={dismissed} />;
+  }
+
+  it("should let the person into their chat, and ask them for nothing, when the hub cannot read the credentials", () => {
+    render(unreadable());
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect accounts" })).toBeNull();
+    const banner = screen.getByRole("region", { name: "Your sign-ins cannot be checked" });
+    expect(banner.textContent).toContain("still connected");
+    for (const name of ["GitHub", "Azure", "Claude"]) {
+      expect(banner.textContent).not.toContain(name);
+    }
+  });
+
+  it("should say why on the screen when someone the hub cannot read the credentials for opens it", () => {
+    render(unreadable());
+
+    fireEvent.click(screen.getByRole("button", { name: "Show progress" }));
+
+    expect(screen.getByText(/cannot read your sign-ins/)).toBeTruthy();
+    expect(screen.getByText(UNREADABLE)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Carry on" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  // Unlike the ask to connect, this one can be sent away: there is nothing for the person to do about it, so saying
+  // it once is enough. The same cookie carries that choice, so a navigation does not say it again.
+  it("should go when the person sends away a message about sign-ins that cannot be checked", () => {
+    render(unreadable());
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide this message" }));
+
+    expect(screen.queryByRole("region", { name: "Your sign-ins cannot be checked" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should stay gone across a navigation when the page has read that choice from the cookie", () => {
+    render(unreadable(assistant("running"), true));
+
+    expect(screen.queryByRole("region", { name: "Your sign-ins cannot be checked" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should never offer to hide the ask to connect, which is the one with something left to do", () => {
+    render(gate(assistant("awaiting_credentials")));
+
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Hide this message" })).toBeNull();
+  });
 
   it("should show nothing when the person had onboarded before the visit and their assistant is running", () => {
     render(gate(assistant("running", { onboarded: true })));
@@ -248,8 +355,8 @@ describe("OnboardingGate", () => {
     expect(within(banner).getByRole("button", { name: "Connect accounts" })).toBeTruthy();
   });
 
-  it("should name every connection in general when the hub could not read what is stored", () => {
-    render(gate(assistant(), [], false));
+  it("should name every needed connection when the person has stored none of them", () => {
+    render(gate(assistant()));
 
     expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).toContain("needs GitHub, Azure and Claude");
   });

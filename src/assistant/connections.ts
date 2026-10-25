@@ -1,6 +1,7 @@
 import type { CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
 import type { LoginView } from "../virtual-agents/logins.ts";
+import type { ConnectionsAsk } from "./onboarding.ts";
 
 /**
  * The sign-ins the hub holds for a person, as the Assistant's settings show them, and the prompt the sidebar shows
@@ -139,18 +140,46 @@ export function inWords(names: readonly string[]): string {
   return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
+export interface ConnectionsPrompt {
+  /** The banner's accessible name, so which of the two it is does not depend on reading the sentence. */
+  label: string;
+  message: string;
+  /** What the button that opens the getting-ready screen is called. */
+  action: string;
+}
+
 /**
- * What the Assistant's connections banner says is still to do. Whether to ask at all is `onboarded`'s to answer, from
- * every credential the hub holds; this only words the ask, from the statuses the connections screen was given.
+ * What the Assistant's connections banner says, or `null` when it has nothing to say. Which of the three it is is
+ * `connectionsAsk`'s answer, from every credential the hub holds; this only words it, from the statuses the
+ * connections screen was given.
  *
- * It names the connections rather than counting them: "two connections" tells nobody what to go and get. Anything
- * with no wording of its own is named by its kind, so a credential added to a route before this list gets a row still
- * reads as something rather than disappearing from the ask. And when there is nothing to name — the hub could not
- * read the statuses, so none of them says anything either way — it asks in general rather than going quiet.
+ * A `connect` names the connections rather than counting them: "two connections" tells nobody what to go and get.
+ * Anything with no wording of its own is named by its kind, so a credential added to a route before this list gets a
+ * row still reads as something rather than disappearing from the ask. And when there is nothing to name it asks in
+ * general rather than going quiet.
+ *
+ * An `unknown` is the opposite message, and the one thing it must never read as is the first: nothing is missing as
+ * far as anybody knows, the hub simply cannot see the sign-ins, and there is nothing for the person to do. Telling
+ * someone who has connected everything to connect it again is the mistake these two wordings exist to keep apart.
  */
-export function onboardingPrompt(needed: readonly CredentialKind[], stored: ReadonlySet<CredentialKind>): string {
+export function connectionsPrompt(ask: ConnectionsAsk, needed: readonly CredentialKind[], stored: ReadonlySet<CredentialKind>): ConnectionsPrompt | null {
+  if (ask === "done") {
+    return null;
+  }
+  if (ask === "unknown") {
+    return {
+      label: "Your sign-ins cannot be checked",
+      message:
+        "Your sign-ins cannot be checked just now. Whatever you have already connected is still connected, and there is nothing for you to set up again.",
+      action: "Show progress"
+    };
+  }
   const names = needed.filter((kind) => !stored.has(kind)).map((kind) => CONNECTORS[kind]?.name ?? kind);
-  return `Your assistant needs ${names.length === 0 ? "you to connect your accounts" : inWords(names)} before it can work for you.`;
+  return {
+    label: "Connect your accounts",
+    message: `Your assistant needs ${names.length === 0 ? "you to connect your accounts" : inWords(names)} before it can work for you.`,
+    action: "Connect accounts"
+  };
 }
 
 /**

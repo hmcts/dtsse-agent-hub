@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import { loadAgent, registerAgent, type StoredAgent } from "./agent.ts";
 import { type Api, ApiError, createApi } from "./api.ts";
-import { fetchAttachments, parseAttachments } from "./assistant/attachments.ts";
+import { fetchAttachments, readAttachments, unfetchedAttachments } from "./assistant/attachments.ts";
 import { peerOf, recordDirect } from "./directs.ts";
 import type { Env } from "./env.ts";
 import {
@@ -423,15 +423,27 @@ export async function runBridge({
     }
   }
 
-  /** The files on an assistant frame, written to this pod's disk. Empty for any frame that names none. */
+  /**
+   * The files on an assistant frame, written to this pod's disk.
+   *
+   * Empty only for a frame that names no file: an outcome missing from this list is a file the envelope says nothing
+   * about, and a message delivered without a word about the file attached to it leaves the person believing it was
+   * read. So a frame that names files this pod cannot go and get — no conversation id to build a path from, no agent
+   * id to fetch with, or entries the client will not act on — answers with an error outcome for each of them.
+   */
   async function fetchForDelivery(messageId: string, assistant: AssistantFrame | null): Promise<AttachmentOutcome[]> {
     const conversationId = assistant?.conversation_id;
     const agentId = agent?.agent_id;
-    const attachments = parseAttachments(assistant?.attachments);
-    if (attachments.length === 0 || conversationId === undefined || agentId === undefined) {
-      return [];
+    const { attachments, dropped } = readAttachments(assistant?.attachments);
+    if (attachments.length === 0) {
+      return dropped;
     }
-    return await fetchAttachments({
+    if (conversationId === undefined || agentId === undefined) {
+      const reason = conversationId === undefined ? "the frame named no conversation to fetch it for" : "this session has no agent id to fetch it with";
+      log(sid, `#${messageId}: cannot fetch ${attachments.length} attached file(s): ${reason}`);
+      return [...unfetchedAttachments(attachments, reason), ...dropped];
+    }
+    const outcomes = await fetchAttachments({
       api,
       agentId,
       conversationId,
@@ -439,6 +451,7 @@ export async function runBridge({
       env,
       say: (m) => log(sid, `#${messageId}: ${m}`)
     });
+    return [...outcomes, ...dropped];
   }
 
   async function handleDirect(event: SseEvent): Promise<void> {

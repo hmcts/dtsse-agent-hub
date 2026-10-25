@@ -125,7 +125,9 @@ A file is at most 25 MB, a message carries at most 4, and a conversation's store
 
 Everything below answers `404` unless the service runs with `VIRTUAL_AGENTS_ENABLED=true`, like the rest of the Assistant. There is no separate flag for attachments.
 
-`attachments` is on every `direct` frame built for a message, as an empty array when nothing was attached. A client that predates attachments ignores the field, and one that half-understands an entry drops it: `parseAttachments` in the published client returns `[]` for anything it is not willing to act on, and `attachmentLines` then adds nothing to the envelope. So the worst an old pod does is deliver the message without mentioning the file — the person's message still arrives, and nothing claims a file was read that was not. **The release order still matters**: publish the client and let pods cycle onto it before people start attaching, because until then an attached file is fetched by nobody.
+`attachments` is on every `direct` frame built for a message, as an empty array when nothing was attached. A client that predates attachments ignores the field entirely, so the worst an old pod does is deliver the message without mentioning the file — the person's message still arrives, and nothing claims a file was read that was not. **The release order still matters**: publish the client and let pods cycle onto it before people start attaching, because until then an attached file is fetched by nobody.
+
+A current client that half-understands an entry refuses to act on it but still says so. `readAttachments` answers both the entries it will fetch and an error outcome for each it will not, and the bridge sends those outcomes to the envelope with the rest, so a file the client could not read off the frame is named as one that could not be retrieved rather than left out. `parseAttachments` is the same read without the refusals, for callers that only want the fetchable ones. Entries past the fourth are the one exception and are dropped with nothing said: the hub refuses a message carrying more than four on the send and again on the claim, so a longer array is not a disagreement about one file but a hub the client does not understand at all.
 
 A refused `/api/ui/uploads` request carries a `reason` beside its `error`: one of `unavailable`, `no_such_conversation`, `no_such_upload`, `file_too_big`, `too_many_files`, `conversation_full`, `part_too_big` or `part_wrong_length`, listed in `src/assistant/uploads.ts`. The composer words each one for the person. It exists because `too_many_files` and `conversation_full` are both `409` and mean different things — send what you have, against this chat has no room left — and matching on the sentence would break the moment a cap is reworded.
 
@@ -140,7 +142,11 @@ Attaching a file on the new-chat screen creates the conversation first, since a 
 
 An attachment on a `direct` frame is `{upload_id, name, bytes, media_type, part_bytes, parts}`: `name` is the `stored_name`, `bytes` the whole file's length, `part_bytes` the part size this upload was cut into and `parts` how many there are. The client fetches part `0` to `parts - 1` straight to `/workspace/uploads/<conversation-id>/<upload_id>-<name>` (mode `0600`, directories `0700`), checks the bytes it wrote against `bytes`, reports `fetched`, and only then delivers the message — whose envelope names the absolute path, so the session does not have to be told to go and find it. A fetch that fails still delivers the message, saying that file could not be retrieved: a dropped attachment nobody mentions leaves the person believing the agent read it.
 
-**Retention.** Part rows normally live for seconds: the pod reports `fetched` and they go. An upload nothing fetched within 3 hours has its parts deleted by a hub sweep and is marked `expired`, which covers a pod that never came up and a composer somebody walked away from. Metadata rows cascade from the message and from the conversation, so deleting either takes them with it, and the pod removes the conversation's directory when it is told the conversation was deleted.
+**Retention.** Part rows normally live for seconds: the pod reports `fetched` and they go. An upload nothing fetched within 3 hours has its parts deleted by a hub sweep and is marked `expired`, which covers a pod that never came up and a composer somebody walked away from. An upload already on a sent message is swept on the same clock as one still in a composer, so a pod stopped for longer than the window — the idle stop is 120 minutes and there is an evening stop — comes back to a file whose bytes have gone. The frame still names an `expired` upload: the pod's fetch for it is then refused with `404` and the envelope tells the session the file could not be retrieved and to ask for it again, which is the point. Leaving it off the frame would deliver a message that named no file at all.
+
+A fetched report that fails after the bytes are written does not change any of this. The file is on the pod's disk and its length has been checked, so the envelope names the path; the failure is logged, the hub keeps the part rows until the sweep takes them, and nothing tells the person to attach a file that is already there.
+
+Metadata rows cascade from the message and from the conversation, so deleting either takes them with it, and the pod removes the conversation's directory when it is told the conversation was deleted.
 
 **Launching a session.** The supervisor starts each one as `hai`, the HMCTS wrapper around `claude`, with `--dangerously-skip-permissions`: hai passes the arguments it is given through to `claude` untouched, and the only ones it adds of its own are `--settings` and a `--plugin-dir` for each of the pod's plugins, never a permission flag, so the flag has to come from the supervisor; nobody can answer a permission prompt in a pod. The orchestrator gives every pod `HAI_IN_CONTAINER=1`, because AKS runs containerd and so writes none of the `/.dockerenv` hai looks for, and without it hai takes itself for a bare host and tries to start a container of its own; and `HAI_NO_UPDATE=1`, so a pod keeps the hai it installed at boot. The image carries no hai at all — the pod's entrypoint installs it per boot, and this marker pins that one choice for the pod's lifetime rather than letting each session re-resolve it, which is what would otherwise race several `npm install -g` runs into one prefix. It does not set `HAI_ENV_READY`: hai still resolves the model route in the pod, which is what builds the Bedrock environment on the `bedrock` route.
 
@@ -188,6 +194,7 @@ The web UI's credentials list shows only whether each kind is stored, when and h
 - At most 200 entries. `name` is at most 100 characters matching `^[a-z0-9][a-z0-9:_-]*$`, a plugin's skills being namespaced `plugin:skill`. Any entry that breaks this, or more than 200, refuses the whole request with `400` naming `skills`, so the client drops such entries before sending.
 - `description` is optional, trimmed, and cut to 300 characters rather than refused. The list is stored sorted by name, keeping the first of a repeated name.
 - `[]` clears the list. Leaving `skills` out changes nothing.
+- `null`, and any other value that is not a list, reads the same way as leaving `skills` out rather than refusing the request. The shape of the field is not worth a `400`, which would keep the client off the hub entirely; this is the same rule as `client_features` below.
 - The web UI shows the list only to people who may message the agent: its owner and holders of a write grant from them.
 - A register of an existing session or a heartbeat whose `skills` differ from the stored list updates an open page for the agent without a reload. Sending the stored list again, in any order, changes nothing.
 - A message picked from the list starts `/<name> `, followed by whatever the person typed. The client delivers it as a request to run that skill with the rest of the message as its arguments; the hub does not treat it differently from any other direct message.
@@ -214,7 +221,9 @@ field out and the UI can say that the feature is not available on that session y
   version number: the published version is set from the npm feed at publish time
   (`.github/workflows/release.yml`), so it is not a fact about what the code in a build can do.
 - **Leaving `client_features` out means a client from before this existed**, and the hub treats it as claiming
-  nothing. There is nothing to adopt and no flag to set: absence is the signal, from the first deploy.
+  nothing. There is nothing to adopt and no flag to set: absence is the signal, from the first deploy. `null`, and any
+  value that is not a list, reads the same way rather than refusing the registration — the field exists to leave a
+  session one field short, so it must not be the thing that keeps a client off the hub.
 - The client sends the list on **every** register, and it replaces whatever was stored for that session — including
   with nothing, when a register of an existing `session_id` omits it. The last client to register is the one running,
   so a downgrade is recorded as honestly as an upgrade. `skills` keeps the stored value instead; this field does not,
@@ -222,8 +231,10 @@ field out and the UI can say that the feature is not available on that session y
 - It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
   been upgraded re-registers.
 
-No feature name is in use yet: the clients published from this repo today claim nothing, because every wire field
-they are sent is one they already read.
+`attachments` is the one name in use. The clients published from this repo claim it, because they read the
+`attachments` on an Assistant `direct` frame and fetch each file to the pod's disk. No hub field is gated on it yet —
+the frame carries `attachments` to every session — so a client too old to claim it still gets the frame, and drops
+that message's files.
 
 ## Replies
 

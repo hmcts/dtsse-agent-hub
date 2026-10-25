@@ -73,42 +73,93 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
+/** What a frame's `attachments` came to: the entries this client will act on, and an outcome for each it will not. */
+export type ReadAttachments = {
+  attachments: Attachment[];
+  /** Error outcomes for the entries that were refused, so the envelope says a file was lost rather than nothing. */
+  dropped: AttachmentOutcome[];
+};
+
+/** The name to put on a refused entry's outcome, for an entry whose `name` is not a string this client can use. */
+function droppedName(entry: unknown): string {
+  const raw = asRecord(entry);
+  return raw !== null && typeof raw.name === "string" && raw.name !== "" ? safeName(raw.name) : "an unnamed file";
+}
+
 /**
- * The attachments on a frame, as this client is willing to act on them. Anything missing, out of range or of the wrong
- * type is dropped: the frame comes from a hub that may be older or newer than this client, and a half-understood
- * attachment is worse than none, because the message would name a path that holds the wrong bytes.
+ * One entry of a frame's `attachments`: the file to fetch, or the reason this client will not act on it.
+ *
+ * Each check has a reason of its own because each reason is something the person can be told. They are asked in the
+ * order a fetch would need them — an id and a name to build the path, then a length, then the parts to read it in.
  */
-export function parseAttachments(value: unknown, partBytesFallback?: number): Attachment[] {
+function readEntry(entry: unknown, partBytesFallback: number | undefined): { attachment: Attachment } | { refusal: string } {
+  const raw = asRecord(entry);
+  if (!raw || typeof raw.upload_id !== "string" || !UUID.test(raw.upload_id) || typeof raw.name !== "string" || raw.name === "") {
+    return { refusal: "this client could not read the file's id or name on the frame" };
+  }
+  const bytes = raw.bytes;
+  if (typeof bytes !== "number" || !Number.isInteger(bytes) || bytes < 1 || bytes > MAX_ATTACHMENT_BYTES) {
+    return { refusal: "the frame gave a size this client cannot fetch" };
+  }
+  const partBytes = typeof raw.part_bytes === "number" ? raw.part_bytes : partBytesFallback;
+  if (typeof partBytes !== "number" || !Number.isInteger(partBytes) || partBytes < 1) {
+    return { refusal: "the frame gave no part size this client could use" };
+  }
+  const parts = typeof raw.parts === "number" && Number.isInteger(raw.parts) && raw.parts > 0 ? raw.parts : Math.ceil(bytes / partBytes);
+  if (parts !== Math.ceil(bytes / partBytes)) {
+    return { refusal: "the frame's part count does not match its size" };
+  }
+  const mediaType = typeof raw.media_type === "string" && raw.media_type !== "" ? raw.media_type : "application/octet-stream";
+  return { attachment: { uploadId: raw.upload_id, name: raw.name, bytes, mediaType, parts } };
+}
+
+/**
+ * The attachments on a frame, as this client is willing to act on them, and an error outcome for each entry it is not.
+ *
+ * Anything missing, out of range or of the wrong type is refused: the frame comes from a hub that may be older or
+ * newer than this client, and a half-understood attachment is worse than acting on none of it, because the message
+ * would name a path that holds the wrong bytes. But refusing it is not the same as dropping it — an entry that was on
+ * the frame is a file the person attached, so it comes back as an outcome the envelope names and says could not be
+ * retrieved. Today the hub's caps and the checks here agree and nothing reaches this, which is exactly why the
+ * outcome matters: the one frame that ever does disagree must not deliver in silence.
+ *
+ * Entries past `MAX_ATTACHMENTS` are the exception, and are left out with nothing said. The hub refuses a message
+ * carrying more than that on the send and again on the claim, so a longer array is not a disagreement about one file
+ * but a hub this client does not understand at all, and an unbounded array would otherwise word an unbounded envelope.
+ */
+export function readAttachments(value: unknown, partBytesFallback?: number): ReadAttachments {
   if (!Array.isArray(value)) {
-    return [];
+    return { attachments: [], dropped: [] };
   }
-  const out: Attachment[] = [];
+  const attachments: Attachment[] = [];
+  const dropped: AttachmentOutcome[] = [];
   for (const entry of value.slice(0, MAX_ATTACHMENTS)) {
-    const raw = asRecord(entry);
-    if (!raw || typeof raw.upload_id !== "string" || !UUID.test(raw.upload_id) || typeof raw.name !== "string" || raw.name === "") {
-      continue;
+    const read = readEntry(entry, partBytesFallback);
+    if ("refusal" in read) {
+      dropped.push({ name: droppedName(entry), error: read.refusal });
+    } else {
+      attachments.push(read.attachment);
     }
-    const bytes = raw.bytes;
-    const partBytes = typeof raw.part_bytes === "number" ? raw.part_bytes : partBytesFallback;
-    if (typeof bytes !== "number" || !Number.isInteger(bytes) || bytes < 1 || bytes > MAX_ATTACHMENT_BYTES) {
-      continue;
-    }
-    if (typeof partBytes !== "number" || !Number.isInteger(partBytes) || partBytes < 1) {
-      continue;
-    }
-    const parts = typeof raw.parts === "number" && Number.isInteger(raw.parts) && raw.parts > 0 ? raw.parts : Math.ceil(bytes / partBytes);
-    if (parts !== Math.ceil(bytes / partBytes)) {
-      continue;
-    }
-    out.push({
-      uploadId: raw.upload_id,
-      name: raw.name,
-      bytes,
-      mediaType: typeof raw.media_type === "string" && raw.media_type !== "" ? raw.media_type : "application/octet-stream",
-      parts
-    });
   }
-  return out;
+  return { attachments, dropped };
+}
+
+/** Just the attachments this client will act on, for the callers that have nothing to say about the rest. */
+export function parseAttachments(value: unknown, partBytesFallback?: number): Attachment[] {
+  return readAttachments(value, partBytesFallback).attachments;
+}
+
+/**
+ * Error outcomes for attachments this pod cannot even attempt to fetch, so the envelope names each file and says it
+ * could not be retrieved. Delivering the message with them left out would read as though nothing had been attached.
+ */
+export function unfetchedAttachments(attachments: readonly Attachment[], reason: string): AttachmentOutcome[] {
+  return attachments.map((attachment) => ({
+    name: safeName(attachment.name),
+    media_type: attachment.mediaType,
+    bytes: attachment.bytes,
+    error: reason
+  }));
 }
 
 /** The filesystem calls this module makes; a test passes `node:fs` or its own. */
@@ -169,7 +220,7 @@ export async function fetchAttachments({
         if (written !== attachment.bytes) {
           throw new Error(`wrote ${written} bytes of an expected ${attachment.bytes}`);
         }
-        await api.attachmentFetched(agentId, attachment.uploadId);
+        await reportFetched({ api, agentId, uploadId: attachment.uploadId, name: attachment.name, conversationId, say });
         say(`conversation ${conversationId}: saved ${attachment.name} to ${file}`);
       }
       outcomes.push({ name: safeName(attachment.name), path: file, media_type: attachment.mediaType, bytes: attachment.bytes });
@@ -180,6 +231,37 @@ export async function fetchAttachments({
     }
   }
   return outcomes;
+}
+
+/**
+ * Tells the hub the bytes are on this disk, which is what lets it delete its part rows.
+ *
+ * Best effort relative to the outcome, and deliberately so: by the time this runs the file is written and its length
+ * checked, so the outcome is a success whatever the hub answers. Letting a transient 5xx or a dropped connection
+ * reach the caller's `catch` would label a file that is sitting there, complete and readable, as one that "could not
+ * be retrieved and is not on this machine" — telling the person to attach it again for nothing. A report that failed
+ * costs the hub its part rows a while longer, and its sweep is the backstop for those.
+ */
+async function reportFetched({
+  api,
+  agentId,
+  uploadId,
+  name,
+  conversationId,
+  say
+}: {
+  api: Pick<Api, "attachmentFetched">;
+  agentId: string;
+  uploadId: string;
+  name: string;
+  conversationId: string;
+  say: (message: string) => void;
+}): Promise<void> {
+  try {
+    await api.attachmentFetched(agentId, uploadId);
+  } catch (e) {
+    say(`conversation ${conversationId}: saved ${name}, but could not report it fetched: ${(e as Error).message}`);
+  }
 }
 
 async function writeParts({

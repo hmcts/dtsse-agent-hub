@@ -43,6 +43,12 @@ export interface UploadSweepResult {
  * Deletes the parts of a batch of the uploads that nobody fetched within `retentionHours`, and marks those uploads
  * `expired`. Nothing is announced: a page showing the chip keeps it, which is right — the file was attached.
  *
+ * An upload already on a sent message is taken on the same clock as one still in a composer. The bytes are what the
+ * window bounds, and a file nobody fetched costs the same 25 MB whichever it is; a longer window for the sent ones
+ * would only move the same expiry later while holding the bytes past what the retention design intends. What the
+ * expiry must not be is silent, and that is `frameAttachments`' job: it still names an `expired` upload, so the pod's
+ * fetch fails and the envelope tells the session the file could not be retrieved and to ask for it again.
+ *
  * The same transaction-scoped `pg_try_advisory_xact_lock` as the other sweeps, so one pod sweeps per tick.
  * `undefined` means another pod held the lock.
  */

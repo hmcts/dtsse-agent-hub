@@ -154,9 +154,9 @@ describe("the person's assistant", () => {
 
   // A malformed configuration hides the plugins section and leaves the rest of the Assistant working, because it is
   // someone's whole chat surface and they can neither see the configuration nor fix it. Both halves of that are load
-  // bearing: the section hides because `offeredPlugins` catches, and the first visit gets that far at all because
-  // `createVirtualAgent` reads the offer list only when plugins are ticked. The hub's own plugin pages still fail
-  // loudly, which is where the fault is actionable.
+  // bearing: the section hides because `pluginOffer` catches, and the first visit gets that far at all because
+  // `createVirtualAgent` reads the offer list only when plugins are ticked. The hub's own plugin surfaces read the
+  // same catch and name the fault in place of their plugin form, which is where it is actionable.
   it("should create the assistant and hide the plugins section on a first visit when the configuration is malformed", async () => {
     await insertUser(ALICE);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
@@ -439,24 +439,22 @@ describe("conversations", () => {
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.product)).toEqual(["other"]);
   });
 
-  it("should send a session that claimed no features only the frame fields every client reads", async () => {
+  it("should carry attachments on a frame built for a delivery and leave them out of one built for a wake", async () => {
     const { token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { sessionId } = await sessionOf(id);
-    // A client from before client features existed: it reports none, so it claims none. Anything the hub adds to
-    // the frame for a claimed feature would be dropped here without the session, or the person, ever hearing of it.
+    // A client from before client features existed: it reports none, so it claims none. No frame field is gated on
+    // the claim yet, so what decides `attachments` is the message, not the session — see `AssistantFrame`.
     await register(token, sessionId, id);
-
     const { agentId } = await sessionOf(id);
-
-    expect(await assistantFrame(prisma, agentId)).toEqual({
-      conversation_id: id,
-      product: "general",
-      product_label: "General",
-      artefact_version: 0,
-      artefact_updated_by: null
-    });
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).clientFeatures).toBeNull();
+
+    const { id: messageId } = await prisma.message.findFirstOrThrow({ where: { kind: "direct" }, select: { id: true } });
+    const frame = { conversation_id: id, product: "general", product_label: "General", artefact_version: 0, artefact_updated_by: null };
+
+    // A wake is "this conversation needs a session", so there is no message whose files the field could name.
+    expect(await assistantFrame(prisma, agentId)).toEqual(frame);
+    expect(await assistantFrame(prisma, agentId, messageId)).toEqual({ ...frame, attachments: [] });
   });
 
   it("should offer the conversation what its session's client claimed, so the composer can act on it", async () => {

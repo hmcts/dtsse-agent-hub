@@ -1089,6 +1089,40 @@ describe("a file from the browser to the session's envelope", () => {
     expect(content).toContain("read this");
   });
 
+  it("should tell the session the file could not be retrieved when the sweep expired one already on a sent message", async () => {
+    // Arrange: a pod stopped for longer than the retention window, which is routine — the idle stop is 120 minutes
+    // and there is an evening stop at 19:00. The sweep takes the bytes of a file already on a sent message, and this
+    // is what the session must then be told, rather than being handed a message that names no file at all.
+    const { token } = await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const uploadId = await upload(conversation.id, "scan.png", filled(20, 3));
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "read this", uploadIds: [uploadId] });
+    const { agentId, sessionId } = await sessionOf(conversation.id);
+    await register(token, sessionId, conversation.id);
+    await prisma.assistantUpload.update({ where: { id: uploadId }, data: { createdAt: new Date(Date.now() - 5 * 3_600_000) } });
+    const swept = await sweepUploads(prisma, { retentionHours: 3 });
+
+    // Act
+    const frame = await frameFor(token, agentId);
+    const assistant = parseAssistantFrame(frame.assistant);
+    const attachments = parseAttachments(assistant?.attachments);
+    const outcomes = await fetchAttachments({ api: podApi(token), agentId, conversationId: conversation.id, attachments, root });
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { attachments: outcomes });
+
+    // Assert: the expiry is narrated. The envelope names the file and says it could not be retrieved, so the session
+    // cannot answer as though it had read it — and the message itself is still delivered.
+    expect(content).toContain("A file the user attached could not be retrieved and is not on this machine: scan.png.");
+    expect(content).toContain("ask them to attach it again");
+    expect(content).toContain("read this");
+    expect(content).not.toContain("already saved on this machine");
+    // Which it can only say because the frame still named the file the sweep had taken the bytes of, and the fetch of
+    // it was refused rather than the entry ceasing to exist.
+    expect(swept).toMatchObject({ expired: 1, parts: 1 });
+    expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: uploadId } })).toMatchObject({ state: "expired" });
+    expect(attachments).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({ name: "scan.png", error: expect.stringContaining("404") });
+  });
+
   it("should carry every file of a message with four of them, each to its own path", async () => {
     // Arrange
     const { token } = await startedAssistant();

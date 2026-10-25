@@ -81,6 +81,7 @@ export type {
   CreateTmuxOptions,
   FetchAttachmentsOptions,
   ProgramCheck,
+  ReadAttachments,
   ReconcileUploadsOptions,
   ReportOutcome,
   RunAssistantSupervisorOptions,
@@ -116,12 +117,14 @@ export {
   parseWake,
   REFUSAL_EVERY_MS,
   REPORT_EVERY_MS,
+  readAttachments,
   reconcileUploads,
   removeConversationUploads,
   runAssistantSupervisor,
   safeName,
   staleUploadDirs,
   tmuxName,
+  unfetchedAttachments,
   uploadsRoot
 } from "./assistant/index.ts";
 export type { Deliver, DirectEventAuthor, DirectEventMessage, ReconnectDecision, RetryState, RunBridgeOptions, StreamEnd } from "./bridge.ts";
