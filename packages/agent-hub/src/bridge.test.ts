@@ -766,6 +766,38 @@ describe("runBridge", () => {
     }
   });
 
+  it("should say the file could not be retrieved when the frame names one but no conversation to fetch it for", async () => {
+    // Arrange: a frame carrying attachments and no `conversation_id`, which is the shape a hub this client does not
+    // fully understand would send. Without it there is no directory to write to, so nothing can be fetched.
+    const conversationId = "5dc5f5a0-1234-4000-8000-000000000010";
+    const uploads = fs.mkdtempSync(path.join(home.root, "uploads-"));
+    const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: conversationId, AGENT_HUB_UPLOADS_DIR: uploads } });
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Act
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "what does this say?", {
+        assistant: {
+          product: "pcs",
+          product_label: "Possession claims",
+          artefact_version: 0,
+          artefact_updated_by: null,
+          attachments: [{ upload_id: "6dc5f5a0-1234-4000-8000-000000000011", name: "scan.png", bytes: 6, media_type: "image/png", part_bytes: 4, parts: 2 }]
+        }
+      });
+      await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
+
+      // Assert: the message is delivered and names the file as one that could not be retrieved. Delivering it with
+      // the file left out would read as though nothing had been attached, which is the one thing this must not do.
+      expect(bridge.socketWrites[0]).toMatch(/could not be retrieved and is not on this machine: scan\.png/);
+      expect(bridge.socketWrites[0]).toMatch(/ask them to attach it again/);
+      expect(bridge.socketWrites[0]).toMatch(/\n---\nwhat does this say\?$/);
+    } finally {
+      await bridge.stop();
+    }
+  });
+
   it("should ask the assistant conversation to run the skill when the user's message starts with one the session has", async () => {
     // Arrange
     const bridge = await startBridge(
