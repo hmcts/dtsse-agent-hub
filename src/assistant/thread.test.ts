@@ -68,7 +68,7 @@ describe("threadItems", () => {
     const items = conversationItems([person("first", T(1)), person("second", T(5))], []);
 
     expect(threadItems(items, [{ product: "ccd", at: T(5) }]).map((item) => item.type)).toEqual(["user", "product", "user"]);
-    expect(threadItems(items, [{ product: "ccd", at: T(5) }])[1]).toMatchObject({ type: "product", label: "CCD" });
+    expect(threadItems(items, [{ product: "ccd", at: T(5) }])[1]).toMatchObject({ type: "product", label: "CCD (Core Case Data)" });
   });
 });
 

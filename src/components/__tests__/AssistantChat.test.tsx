@@ -150,7 +150,7 @@ describe("ChatView thread", () => {
       <ChatView view={conversation({ productHistory: [{ product: "pcs", at: "2026-10-21T08:00:00.000Z" }] })} templates={TEMPLATES} actions={actions()} />
     );
 
-    expect(screen.getByText(/Product changed to Civil Possessions/)).toBeTruthy();
+    expect(screen.getByText(/Product changed to Possession Claims Service \(PCS\)/)).toBeTruthy();
   });
 
   it("should say the message was not delivered when it expired", () => {
@@ -232,7 +232,7 @@ describe("ChatView product", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
     const dialog = screen.getByRole("dialog", { name: "Change product?" });
     expect(dialog.textContent).toContain("CCD");
-    expect(dialog.textContent).toContain("Civil Possessions");
+    expect(dialog.textContent).toContain("Possession Claims Service (PCS)");
     expect(setProduct).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -582,10 +582,10 @@ describe("EmptyChat", () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
     render(<EmptyChat starters={STARTERS} templates={TEMPLATES} start={start} />);
 
-    expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("other");
+    expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("general");
     await type("my own words");
 
-    expect(start).toHaveBeenCalledWith({ product: "other", body: "my own words" });
+    expect(start).toHaveBeenCalledWith({ product: "general", body: "my own words" });
     expect(push).toHaveBeenCalledWith("/assistant/abc");
   });
 

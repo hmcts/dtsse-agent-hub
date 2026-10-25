@@ -231,14 +231,14 @@ describe("AssistantRefresh", () => {
 describe("ProductSelect", () => {
   it("should offer every product and report the one picked", () => {
     const onChange = vi.fn();
-    render(<ProductSelect value="other" onChange={onChange} />);
+    render(<ProductSelect value="general" onChange={onChange} />);
 
     const select = screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement;
     expect(
       within(select)
         .getAllByRole("option")
         .map((option) => option.textContent)
-    ).toContain("No Fault Divorce");
+    ).toContain("No Fault Divorce (NFDIV)");
     fireEvent.change(select, { target: { value: "nfdiv" } });
 
     expect(onChange).toHaveBeenCalledWith("nfdiv");
