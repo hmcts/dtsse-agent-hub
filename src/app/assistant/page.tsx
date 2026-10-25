@@ -19,7 +19,7 @@ export default async function AssistantPage() {
   const home = await openAssistant(viewer);
   return (
     <AssistantShell viewerName={viewer.name} groups={home.conversations} activeId={null} hubLink theme={theme}>
-      <EmptyChat starters={STARTERS} templates={TEMPLATES} start={startConversation} />
+      <EmptyChat starters={STARTERS} templates={TEMPLATES} viewerOid={viewer.oid} start={startConversation} />
       <OnboardingGate
         assistant={home.assistant}
         statuses={home.credentials.available ? home.credentials.statuses : []}
