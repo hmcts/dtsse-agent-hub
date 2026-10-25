@@ -188,6 +188,7 @@ The web UI's credentials list shows only whether each kind is stored, when and h
 - At most 200 entries. `name` is at most 100 characters matching `^[a-z0-9][a-z0-9:_-]*$`, a plugin's skills being namespaced `plugin:skill`. Any entry that breaks this, or more than 200, refuses the whole request with `400` naming `skills`, so the client drops such entries before sending.
 - `description` is optional, trimmed, and cut to 300 characters rather than refused. The list is stored sorted by name, keeping the first of a repeated name.
 - `[]` clears the list. Leaving `skills` out changes nothing.
+- `null`, and any other value that is not a list, reads the same way as leaving `skills` out rather than refusing the request. The shape of the field is not worth a `400`, which would keep the client off the hub entirely; this is the same rule as `client_features` below.
 - The web UI shows the list only to people who may message the agent: its owner and holders of a write grant from them.
 - A register of an existing session or a heartbeat whose `skills` differ from the stored list updates an open page for the agent without a reload. Sending the stored list again, in any order, changes nothing.
 - A message picked from the list starts `/<name> `, followed by whatever the person typed. The client delivers it as a request to run that skill with the rest of the message as its arguments; the hub does not treat it differently from any other direct message.
@@ -214,7 +215,9 @@ field out and the UI can say that the feature is not available on that session y
   version number: the published version is set from the npm feed at publish time
   (`.github/workflows/release.yml`), so it is not a fact about what the code in a build can do.
 - **Leaving `client_features` out means a client from before this existed**, and the hub treats it as claiming
-  nothing. There is nothing to adopt and no flag to set: absence is the signal, from the first deploy.
+  nothing. There is nothing to adopt and no flag to set: absence is the signal, from the first deploy. `null`, and any
+  value that is not a list, reads the same way rather than refusing the registration — the field exists to leave a
+  session one field short, so it must not be the thing that keeps a client off the hub.
 - The client sends the list on **every** register, and it replaces whatever was stored for that session — including
   with nothing, when a register of an existing `session_id` omits it. The last client to register is the one running,
   so a downgrade is recorded as honestly as an upgrade. `skills` keeps the stored value instead; this field does not,
@@ -222,8 +225,10 @@ field out and the UI can say that the feature is not available on that session y
 - It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
   been upgraded re-registers.
 
-No feature name is in use yet: the clients published from this repo today claim nothing, because every wire field
-they are sent is one they already read.
+`attachments` is the one name in use. The clients published from this repo claim it, because they read the
+`attachments` on an Assistant `direct` frame and fetch each file to the pod's disk. No hub field is gated on it yet —
+the frame carries `attachments` to every session — so a client too old to claim it still gets the frame, and drops
+that message's files.
 
 ## Replies
 

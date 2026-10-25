@@ -126,10 +126,13 @@ export interface ConversationView {
    */
   skills: Skill[];
   /**
-   * What the client running this conversation's session claimed it understands, so the composer can offer — or
-   * refuse, and say why — anything the session could not act on. `null` from a client that reported nothing, which
-   * claims nothing; ask with `clientSupports` rather than reading the list, so old and current clients answer the
-   * same way. A pod runs whatever client version it booted with, so this is per conversation, not per deployment.
+   * What the client running this conversation's session claimed it understands. `null` from a client that reported
+   * nothing, which claims nothing; ask with `clientSupports` rather than reading the list, so old and current clients
+   * answer the same way. A pod runs whatever client version it booted with, so this is per conversation, not per
+   * deployment.
+   *
+   * Carried to the screen so the composer can offer — or refuse, and say why — anything the session could not act on.
+   * No component reads it yet, so nothing on the screen says anything either way.
    */
   clientFeatures: string[] | null;
   sessionState: SessionState | null;

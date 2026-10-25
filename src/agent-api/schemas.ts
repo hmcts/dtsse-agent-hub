@@ -20,29 +20,47 @@ const optionalText = (max: number) =>
     .nullish()
     .transform((value) => (value === undefined || value === null || value.trim() === "" ? null : value));
 
+/**
+ * An optional list field whose *shape* is not refused: anything that is not an array — `null` included — reads as the
+ * field not being sent, which both fields below already define a meaning for, and which is how both read their column
+ * back (`storedSkills`, `storedClientFeatures`). Elements and the cap are unaffected, so a bad entry or an over-long
+ * list refuses the request exactly as it would bare.
+ *
+ * Both fields exist to leave a session one field short rather than locked out, and a `400` from
+ * `POST /api/agent/register` is locked out: a hand-rolled client that sends either as `null` could not register at
+ * all, which is worse than the degradation the field was added to allow.
+ *
+ * The cast restores the input type `z.preprocess` erases — it types its input `unknown` — so a `transform` or
+ * `default` built on the result is still checked against the values the schema accepts, as it is for `boundedArray`.
+ */
+function listOrAbsent<S extends z.ZodTypeAny>(schema: S): z.ZodType<z.output<S> | undefined, z.ZodTypeDef, z.input<S> | undefined> {
+  const tolerant = z.preprocess((value) => (Array.isArray(value) ? value : undefined), schema.optional());
+  return tolerant as unknown as z.ZodType<z.output<S> | undefined, z.ZodTypeDef, z.input<S> | undefined>;
+}
+
 /** A description over the limit is cut rather than refused, so one long description does not lose the whole list. */
-const skills = boundedArray(
-  z.object({
-    name: z.string().max(MAX_SKILL_NAME).regex(SKILL_NAME, "must match ^[a-z0-9][a-z0-9:_-]*$"),
-    description: z
-      .string()
-      .nullish()
-      .transform((value) => (value ?? "").trim().slice(0, MAX_SKILL_DESCRIPTION))
-  }),
-  MAX_SKILLS,
-  { message: `at most ${MAX_SKILLS} skills` }
-)
-  .transform(normaliseSkills)
-  .optional();
+const skills = listOrAbsent(
+  boundedArray(
+    z.object({
+      name: z.string().max(MAX_SKILL_NAME).regex(SKILL_NAME, "must match ^[a-z0-9][a-z0-9:_-]*$"),
+      description: z
+        .string()
+        .nullish()
+        .transform((value) => (value ?? "").trim().slice(0, MAX_SKILL_DESCRIPTION))
+    }),
+    MAX_SKILLS,
+    { message: `at most ${MAX_SKILLS} skills` }
+  ).transform(normaliseSkills)
+);
 
 /**
  * Elements are `z.unknown()` and narrowed in the transform, not refused: a name this hub does not recognise is a
  * newer client claiming a field a later hub will send, and `normaliseClientFeatures` drops it rather than fail the
  * registration. Only a list over the cap is refused, which bounds the column.
  */
-const clientFeatures = boundedArray(z.unknown(), MAX_CLIENT_FEATURES, { message: `at most ${MAX_CLIENT_FEATURES} client features` })
-  .transform(normaliseClientFeatures)
-  .optional();
+const clientFeatures = listOrAbsent(
+  boundedArray(z.unknown(), MAX_CLIENT_FEATURES, { message: `at most ${MAX_CLIENT_FEATURES} client features` }).transform(normaliseClientFeatures)
+);
 
 export const registerBody = z.object({
   session_id: z.string().trim().min(1).max(MAX_NAME),

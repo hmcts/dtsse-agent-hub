@@ -17,11 +17,11 @@ export type ClientFeature = "attachments";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
- * that makes it read it: claiming a field it ignores is exactly the silence this list exists to prevent.
+ * that makes it read it: claiming a field it ignores is exactly the silence this list exists to prevent, and claiming
+ * nothing while reading a field is the trap the other way round, since a hub that then gates on it drops a field this
+ * build would have acted on.
  *
- * Empty today, honestly: every field the hub sends this client is one it already reads. The Assistant's file
- * attachments are the first field that will not be — to turn that on, this becomes `["attachments"]` in the change
- * that teaches `parseAssistantFrame` to carry `raw.attachments`, alongside the one conditional named in
- * `assistantFrame` (`src/assistant/store.ts`).
+ * `attachments` is claimed because `parseAssistantFrame` carries `raw.attachments` and the bridge fetches each file to
+ * disk before it delivers the message.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = [];
+export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments"];
