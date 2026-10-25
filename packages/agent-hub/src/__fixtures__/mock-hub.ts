@@ -114,6 +114,7 @@ function transcriptProblem(body: Body, rawBytes: number): string | null {
 }
 
 const SKILL_NAME_RE = /^[a-z0-9][a-z0-9:_-]*$/;
+const CLIENT_FEATURE_NAME_RE = /^[a-z0-9][a-z0-9:_-]*$/;
 
 function skillsProblem(skills: unknown): string | null {
   if (!Array.isArray(skills) || skills.length > 200) {
@@ -128,6 +129,22 @@ function skillsProblem(skills: unknown): string | null {
     }
   }
   return null;
+}
+
+/**
+ * What the service stores for a reported list: sorted, de-duplicated, with anything that is not a name dropped, and
+ * nothing at all for a register that reported none. Over the cap it refuses, like `boundedArray` does. Reproduced
+ * here so a client test cannot pass on a value the service would never have kept.
+ */
+function storedClientFeatures(features: unknown): string[] | "too many" | undefined {
+  if (features === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(features) || features.length > 50) {
+    return "too many";
+  }
+  const names = features.filter((f): f is string => typeof f === "string" && f.length <= 50 && CLIENT_FEATURE_NAME_RE.test(f));
+  return [...new Set(names)].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
 }
 
 export type MockHubOptions = {
@@ -449,6 +466,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
           return send(res, 400, { error: problem });
         }
       }
+      const features = storedClientFeatures(body.client_features);
+      if (features === "too many") {
+        return send(res, 400, { error: "client_features: at most 50" });
+      }
       Object.assign(agent, {
         session_id: body.session_id,
         name: body.name,
@@ -458,7 +479,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         host: body.host,
         status: "idle",
         // Replaced by every register, unlike the skills below: the service records the build that is running now.
-        client_features: body.client_features
+        client_features: features
       });
       if (body.conversation_id !== undefined) {
         if (!launch) {

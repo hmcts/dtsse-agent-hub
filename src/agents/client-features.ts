@@ -12,6 +12,16 @@ import { byCodePoint } from "../topics/slug.ts";
  * claims nothing, so there is no flag to set and nothing to adopt.
  */
 
+/**
+ * Every feature name the hub and the published client have agreed on, so a gate naming one neither side defines is a
+ * type error rather than a `false` that looks exactly like "no client claims it yet".
+ *
+ * Mirrored by hand from `ClientFeature` in `packages/agent-hub/src/features.ts`, because the hub does not depend on
+ * the client package. Reported names are *not* checked against it: an unrecognised one is kept, since it is a newer
+ * client claiming a field a later hub will send.
+ */
+export type ClientFeature = "attachments";
+
 export const MAX_CLIENT_FEATURES = 50;
 export const MAX_CLIENT_FEATURE_NAME = 50;
 export const CLIENT_FEATURE_NAME = /^[a-z0-9][a-z0-9:_-]*$/;
@@ -48,6 +58,6 @@ export function storedClientFeatures(value: unknown): string[] | null {
  * A client that reported nothing claims nothing: the answer for an old client is the same `false` as for a current
  * one without the feature, which is what makes absence a usable signal rather than a case to special-case.
  */
-export function clientSupports(stored: unknown, feature: string): boolean {
+export function clientSupports(stored: unknown, feature: ClientFeature): boolean {
   return storedClientFeatures(stored)?.includes(feature) === true;
 }

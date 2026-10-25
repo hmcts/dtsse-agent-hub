@@ -8,7 +8,11 @@
  * workflow sets from the npm feed at publish time and so says nothing about what the code in a build can do.
  */
 
-/** Every feature name the hub and this client have agreed on, whether or not this build claims it. */
+/**
+ * Every feature name the hub and this client have agreed on, whether or not this build claims it. Mirrored by
+ * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
+ * from here; keep the two in step, so a name only one side knows is a type error on that side.
+ */
 export type ClientFeature = "attachments";
 
 /**
