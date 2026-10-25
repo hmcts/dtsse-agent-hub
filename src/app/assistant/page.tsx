@@ -28,7 +28,7 @@ export default async function AssistantPage() {
         unavailable={home.credentials.available ? null : home.credentials.reason}
         paste={pasteLoginCode}
         save={saveCredential}
-        dismissed={waitingDismissed(jar.get(WAITING_COOKIE)?.value, home.assistant.id)}
+        dismissed={waitingDismissed(jar.get(WAITING_COOKIE)?.value, home.assistant.id, home.assistant.startedAt)}
         theme={theme}
       />
     </AssistantShell>

@@ -22,6 +22,8 @@ export interface AssistantSummary {
   statusDetail: string | null;
   /** When it last changed what it is doing, so the waiting screen can say when one step is taking too long. */
   statusChangedAt: string;
+  /** When it was last asked to run, which names one wait: a choice about watching it does not outlive it. */
+  startedAt: string;
   readiness: Readiness;
   needed: CredentialKind[];
   optional: CredentialKind[];
@@ -49,6 +51,7 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
     status: assistant.status,
     statusDetail: assistant.statusDetail,
     statusChangedAt: assistant.statusChangedAt.toISOString(),
+    startedAt: assistant.startedAt.toISOString(),
     readiness: readiness(assistant.status),
     needed,
     optional: OPTIONAL_CREDENTIALS,

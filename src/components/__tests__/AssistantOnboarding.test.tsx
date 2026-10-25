@@ -36,6 +36,7 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
     status,
     statusDetail: null,
     statusChangedAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
     readiness: readiness(status),
     needed: ["github", "azure", "claude"],
     optional: ["jenkins", "atlassian"],

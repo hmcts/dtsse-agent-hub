@@ -7,17 +7,25 @@
  * full-screen wait would come straight back over it. The server reads the cookie as it renders the next page, so the
  * screen is gone from the first frame rather than painted and then withdrawn.
  *
- * It names the assistant, so a different one asks again, and has no `Max-Age`, so it lasts the browser session: a
- * later visit to a cold assistant is a new wait and shows the screen.
+ * It names one start of one assistant: `startedAt` moves only when the assistant is asked to run again, so the
+ * choice holds for every step of the wait it was made in, and an assistant stopped and started again later — by the
+ * idle sweep overnight, say — is a new wait that asks again, however long the browser has been open.
  */
 
 export const WAITING_COOKIE = "asst_waiting";
 
-export function waitingDismissed(value: string | undefined, assistantId: string): boolean {
-  return value === assistantId;
+/** A uuid and an ISO timestamp, neither of which needs escaping to sit in a cookie value. */
+function value(assistantId: string, startedAt: string): string {
+  return `${assistantId}|${startedAt}`;
+}
+
+export function waitingDismissed(cookie: string | undefined, assistantId: string, startedAt: string): boolean {
+  return cookie === value(assistantId, startedAt);
 }
 
 /** The cookie that remembers the choice, or clears it; not `HttpOnly`, since the screen writes it from the browser. */
-export function waitingCookie(assistantId: string | null): string {
-  return assistantId === null ? `${WAITING_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax` : `${WAITING_COOKIE}=${assistantId}; Path=/; SameSite=Lax`;
+export function waitingCookie(assistant: { id: string; startedAt: string } | null): string {
+  return assistant === null
+    ? `${WAITING_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
+    : `${WAITING_COOKIE}=${value(assistant.id, assistant.startedAt)}; Path=/; SameSite=Lax`;
 }

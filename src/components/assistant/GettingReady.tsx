@@ -17,6 +17,7 @@ import {
 } from "@/assistant/warmup";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { Mark } from "@/components/assistant/AssistantShell";
+import { useVisit } from "@/components/assistant/AssistantVisit";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { LoginCountdown } from "@/components/virtual-agents/LoginCountdown";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
@@ -52,6 +53,15 @@ function useNow(): number {
   return now;
 }
 
+/** False until the browser has taken the page over, so a decision needing its clock is not made in a server render. */
+function useTicked(): boolean {
+  const [ticked, setTicked] = useState(false);
+  useEffect(() => {
+    setTicked(true);
+  }, []);
+  return ticked;
+}
+
 /**
  * The line that rotates while the assistant starts. The first one is the phase's first message, not a random one,
  * because the server renders this too and a random choice would not survive hydration; the picking begins once the
@@ -63,16 +73,29 @@ function useNow(): number {
  * for a step that has already taken ten.
  */
 function useWarmupMessage(phase: WarmupPhase, rotating: boolean, since: number): { message: string; slow: boolean } {
-  const [message, setMessage] = useState(() => firstWarmupMessage(phase));
+  // Keyed to the phase as well as held, so the pod moving on to the next step changes the line with the step beside
+  // it rather than at the next tick: "Preparing your workspace…" must not sit under "Putting the kettle on.".
+  const [shown, setShown] = useState(() => ({ phase, message: firstWarmupMessage(phase) }));
+  if (shown.phase !== phase) {
+    setShown({ phase, message: firstWarmupMessage(phase) });
+  }
+  const message = shown.phase === phase ? shown.message : firstWarmupMessage(phase);
+  // The server renders this too and its clock is not the browser's, so `slow` waits for the browser's: a wait
+  // crossing three minutes between the two renders would otherwise send the joke and hydrate the other line. The
+  // cost is that a screen opening on a wait already past three minutes shows a joke for one frame.
+  const ticked = useTicked();
   const now = useNow();
-  const slow = rotating && now - since >= WARMUP_PATIENCE_MS;
+  const slow = ticked && rotating && now - since >= WARMUP_PATIENCE_MS;
   useEffect(() => {
     if (!rotating || slow) {
       return;
     }
-    const timer = setInterval(() => setMessage((previous) => nextWarmupMessage(phase, previous, Math.random())), WARMUP_ROTATE_MS);
+    const timer = setInterval(
+      () => setShown((previous) => ({ phase: previous.phase, message: nextWarmupMessage(previous.phase, previous.message, Math.random()) })),
+      WARMUP_ROTATE_MS
+    );
     return () => clearInterval(timer);
-  }, [phase, rotating, slow]);
+  }, [rotating, slow]);
   return { message, slow };
 }
 
@@ -406,9 +429,9 @@ function useEscape(active: boolean, close: () => void): void {
 }
 
 /** Remembers the person's choice where a navigation cannot lose it, or forgets it when they ask to watch again. */
-function rememberDismissal(assistantId: string, dismissed: boolean): void {
+function rememberDismissal(assistant: AssistantSummary, dismissed: boolean): void {
   // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API is missing from browsers HMCTS staff still use
-  document.cookie = waitingCookie(dismissed ? assistantId : null);
+  document.cookie = waitingCookie(dismissed ? assistant : null);
 }
 
 /**
@@ -419,45 +442,55 @@ function rememberDismissal(assistantId: string, dismissed: boolean): void {
  * wait. Once the assistant is running neither comes back this visit, and nor is either shown to someone who arrived
  * to one already running.
  *
- * `dismissed` is the page's reading of the cookie that carries the choice between the Assistant's pages, since each
- * of them mounts this afresh. Hiding the notice is not carried: it is small, and a navigation bringing it back is
- * what tells someone who hid it that their assistant has come up.
+ * Neither screen's state can live here alone, because each of the Assistant's pages mounts this afresh: the choice
+ * to send it away is in the cookie `dismissed` is the page's reading of, and that the assistant has been running is
+ * in the visit the layout holds. Hiding the notice is the one thing not carried: it is small, and a navigation
+ * bringing it back is what tells someone who hid it that their assistant has come up.
  */
 export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean }) {
-  const [needed] = useState(!props.assistant.onboarded);
-  const [waiting] = useState(props.assistant.onboarded && props.assistant.status !== "running");
+  const { assistant } = props;
+  const visit = useVisit();
+  const [needed] = useState(!assistant.onboarded);
+  const [waiting] = useState(assistant.onboarded && assistant.status !== "running");
   const [done, setDone] = useState(false);
   const [view, setView] = useState<"screen" | "notice" | "gone">(dismissed ? "notice" : "screen");
-  const running = props.assistant.status === "running";
+  const running = assistant.status === "running";
   // Latched while rendering rather than in an effect, which runs after paint: the frame the person would see at the
-  // moment their assistant came up would be this screen saying it was ready, bar full, and then gone. An assistant
-  // that stops again later in the visit does not bring the screen back.
-  const [ranOnce, setRanOnce] = useState(running);
+  // moment their assistant came up would be this screen saying it was ready, bar full, and then gone. Latched in the
+  // visit as well, so an assistant that stops again — the idle sweep while they read — does not put the screen over
+  // the page they are on, however many times they have moved between pages since it was up.
+  const [ranOnce, setRanOnce] = useState(running || visit.ran);
   if (running && !ranOnce) {
     setRanOnce(true);
   }
   const started = running || ranOnce;
-  const assistantId = props.assistant.id;
+  useEffect(() => {
+    if (running) {
+      visit.sawRunning();
+    }
+  }, [running, visit]);
   const dismiss = useCallback(() => {
     setView("notice");
-    rememberDismissal(assistantId, true);
-  }, [assistantId]);
+    rememberDismissal(assistant, true);
+  }, [assistant]);
   const show = () => {
     setView("screen");
-    rememberDismissal(assistantId, false);
+    rememberDismissal(assistant, false);
   };
-  const onboarding = !props.assistant.onboarded || (needed && !done);
+  const onboarding = !assistant.onboarded || (needed && !done);
   const screen = waiting && !started && !onboarding && view === "screen";
   useEscape(screen, dismiss);
   if (onboarding) {
     return <GettingReady {...props} onDone={() => setDone(true)} />;
   }
   if (screen) {
-    return waitingForPerson(props.assistant.status) ? (
+    return waitingForPerson(assistant.status) ? (
       <GettingReady {...props} returning onDone={dismiss} />
     ) : (
-      <WarmingUp assistant={props.assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} />
+      <WarmingUp assistant={assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} />
     );
   }
-  return view === "notice" ? <WaitingNotice assistant={props.assistant} onShow={show} onHide={() => setView("gone")} /> : null;
+  // Only for a wait this visit began on: someone who arrives to an assistant already up is not shown the end of a
+  // wait they never saw, however recently they sent one away.
+  return waiting && view === "notice" ? <WaitingNotice assistant={assistant} onShow={show} onHide={() => setView("gone")} /> : null;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { VIRTUAL_AGENT_STATUSES, type VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
-import { firstWarmupMessage, nextWarmupMessage, pickMessage, WARMUP_ANY, type WarmupPhase, waitingForPerson, warmupPhase, warmupPool } from "./warmup.ts";
+import { firstWarmupMessage, nextWarmupMessage, pickMessage, WARMUP_GENERAL, type WarmupPhase, waitingForPerson, warmupPhase, warmupPool } from "./warmup.ts";
 
 describe("warmupPhase", () => {
   it.each([
@@ -8,11 +8,7 @@ describe("warmupPhase", () => {
     ["provisioning", "starting"],
     ["stopping", "starting"],
     ["stopped", "starting"],
-    ["awaiting_credentials", "any"],
-    ["awaiting_login", "any"],
-    ["cloning", "cloning"],
-    ["running", "any"],
-    ["failed", "any"]
+    ["cloning", "cloning"]
   ] satisfies [VirtualAgentStatus, WarmupPhase][])("should be the %s phase when the assistant is %s", (status, phase) => {
     expect(warmupPhase(status)).toBe(phase);
   });
@@ -37,12 +33,15 @@ describe("warmupPool", () => {
     expect(warmupPool("starting")).toContain("Putting the kettle on.");
   });
 
-  it("should fall back to the messages that fit any phase when the phase has none of its own", () => {
-    expect(warmupPool("any")).toBe(WARMUP_ANY);
+  it.each(["starting", "cloning"] satisfies WarmupPhase[])("should end with the lines that carry a long wait in the %s phase", (phase) => {
+    const pool = warmupPool(phase);
+
+    expect(pool.slice(-WARMUP_GENERAL.length)).toEqual(WARMUP_GENERAL);
+    expect(pool[0]).not.toBe(WARMUP_GENERAL[0]);
   });
 
-  it.each(["starting", "cloning", "any"] satisfies WarmupPhase[])("should have something to say in the %s phase", (phase) => {
-    expect(warmupPool(phase).length).toBeGreaterThan(0);
+  it.each(["starting", "cloning"] satisfies WarmupPhase[])("should say something of its own first in the %s phase", (phase) => {
+    expect(warmupPool(phase).length).toBeGreaterThan(WARMUP_GENERAL.length);
   });
 });
 
@@ -95,7 +94,8 @@ describe("nextWarmupMessage", () => {
     expect(next).not.toBe(first);
   });
 
-  it("should fall back to the lines that fit any phase when the assistant is doing something with none", () => {
-    expect(WARMUP_ANY).toContain(nextWarmupMessage("any", firstWarmupMessage("any"), 0.9));
+  it("should reach the lines that carry a long wait when the rotation runs to the end of a pool", () => {
+    expect(nextWarmupMessage("starting", firstWarmupMessage("starting"), 1)).toBe(WARMUP_GENERAL.at(-1));
+    expect(nextWarmupMessage("cloning", firstWarmupMessage("cloning"), 1)).toBe(WARMUP_GENERAL.at(-1));
   });
 });

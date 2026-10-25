@@ -9,7 +9,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readiness } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
 import { WAITING_COOKIE, waitingCookie, waitingDismissed } from "@/assistant/waiting";
-import { firstWarmupMessage, WARMUP_PATIENCE_MS, WARMUP_ROTATE_MS, WARMUP_SIGNPOST, WARMUP_SLOW, warmupPhase, warmupPool } from "@/assistant/warmup";
+import {
+  firstWarmupMessage,
+  WARMUP_GENERAL,
+  WARMUP_PATIENCE_MS,
+  WARMUP_ROTATE_MS,
+  WARMUP_SIGNPOST,
+  WARMUP_SLOW,
+  warmupPhase,
+  warmupPool
+} from "@/assistant/warmup";
+import { AssistantVisit } from "@/components/assistant/AssistantVisit";
 import { OnboardingGate, WarmingUp } from "@/components/assistant/GettingReady";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
@@ -25,6 +35,8 @@ vi.mock("@/components/live/HubStream", () => ({
 
 afterEach(() => {
   cleanup();
+  // The hydration tests mount their own container, which an assertion failing would otherwise leave for the next test.
+  document.body.replaceChildren();
   // biome-ignore lint/suspicious/noDocumentCookie: the component writes the cookie the same way, so the test clears it the same way
   document.cookie = waitingCookie(null);
   vi.useRealTimers();
@@ -32,12 +44,12 @@ afterEach(() => {
 });
 
 /** What the page reads of the cookie the screen writes, which is all that carries the choice across a navigation. */
-function dismissedByCookie(assistantId: string): boolean {
+function dismissedByCookie(summary: AssistantSummary): boolean {
   const value = document.cookie
     .split("; ")
     .find((entry) => entry.startsWith(`${WAITING_COOKIE}=`))
     ?.slice(WAITING_COOKIE.length + 1);
-  return waitingDismissed(value, assistantId);
+  return waitingDismissed(value, summary.id, summary.startedAt);
 }
 
 function assistant(status: VirtualAgentStatus = "stopped", overrides: Partial<AssistantSummary> = {}): AssistantSummary {
@@ -48,6 +60,7 @@ function assistant(status: VirtualAgentStatus = "stopped", overrides: Partial<As
     status,
     statusDetail: null,
     statusChangedAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
     readiness: readiness(status),
     needed: ["github", "azure", "claude"],
     optional: ["jenkins", "atlassian"],
@@ -122,10 +135,25 @@ describe("WarmingUp", () => {
     expect(warmupPool("cloning")).toContain(rotating());
   });
 
-  it("should fall back to the lines that fit any phase when the phase has none of its own", () => {
-    render(warming("running"));
+  it("should change the line with the step when the pod moves on to the next one", () => {
+    vi.useFakeTimers();
+    const { rerender } = render(warming("provisioning"));
 
-    expect(warmupPool("any")).toContain(rotating());
+    expect(rotating()).toBe(firstWarmupMessage("starting"));
+    rerender(warming("cloning"));
+
+    expect(screen.getByText("Preparing your workspace…")).toBeTruthy();
+    expect(rotating()).toBe(firstWarmupMessage("cloning"));
+  });
+
+  it("should reach the lines that carry a long wait when the rotation runs to the end of the pool", () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    render(warming("stopped"));
+
+    tick();
+
+    expect(WARMUP_GENERAL).toContain(rotating());
   });
 
   it("should change the line every six seconds, in no fixed order", () => {
@@ -140,7 +168,7 @@ describe("WarmingUp", () => {
       seen.push(rotating());
     }
 
-    expect(seen).toEqual([pool[0], pool[5], pool[0], pool[3]]);
+    expect(seen).toEqual([pool[0], pool[9], pool[0], pool[5]]);
   });
 
   it("should never show the same line twice running", () => {
@@ -233,6 +261,31 @@ describe("WarmingUp hydration", () => {
     expect(errors).not.toHaveBeenCalled();
     expect(rotating(container)).toBe(served);
     expect(served).toBe(firstWarmupMessage(warmupPhase("cloning")));
+
+    act(() => root?.unmount());
+    container.remove();
+  });
+
+  it("should hydrate without a mismatch when the wait crosses three minutes between the server and the browser", () => {
+    vi.useFakeTimers();
+    // Rendered a second short of the patience the screen allows, and picked up by the browser a moment after it.
+    const element = warming("stopped", { statusChangedAt: new Date(Date.now() - WARMUP_PATIENCE_MS + 1_000).toISOString() });
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(element);
+    document.body.append(container);
+    const served = rotating(container);
+    vi.advanceTimersByTime(2_000);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    act(() => {
+      root = hydrateRoot(container, element);
+    });
+
+    expect(served).toBe(firstWarmupMessage("starting"));
+    expect(errors).not.toHaveBeenCalled();
+    // And then the browser's own clock has its say.
+    expect(container.textContent).toContain(WARMUP_SLOW);
 
     act(() => root?.unmount());
     container.remove();
@@ -363,7 +416,7 @@ describe("OnboardingGate while the assistant starts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Carry on while it starts" }));
     // Going to a conversation remounts the page's whole subtree, so only the cookie carries the choice.
     unmount();
-    render(gate(summary, [], dismissedByCookie(summary.id)));
+    render(gate(summary, [], dismissedByCookie(summary)));
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("Starting your assistant again…");
@@ -376,7 +429,34 @@ describe("OnboardingGate while the assistant starts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Carry on while it starts" }));
     fireEvent.click(screen.getByRole("button", { name: "Show progress" }));
     unmount();
-    render(gate(summary, [], dismissedByCookie(summary.id)));
+    render(gate(summary, [], dismissedByCookie(summary)));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+  });
+
+  it("should leave nothing behind across a navigation when the assistant came up while they waited", () => {
+    const starting = assistant("stopped");
+    const { unmount } = render(gate(starting));
+
+    fireEvent.click(screen.getByRole("button", { name: "Carry on while it starts" }));
+    unmount();
+    // The same wait, now over: the cookie still names it, so only `waiting` tells the two arrivals apart.
+    const up = assistant("running", { startedAt: starting.startedAt });
+    render(gate(up, [], dismissedByCookie(up)));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("should wait on the screen again when the assistant is started afresh after one wait was sent away", () => {
+    const morning = assistant("stopped");
+    const { unmount } = render(gate(morning));
+
+    fireEvent.click(screen.getByRole("button", { name: "Carry on while it starts" }));
+    unmount();
+    // The idle sweep stopped it and opening the page asked for it again, which moves `startedAt`.
+    const evening = assistant("requested", { startedAt: new Date(Date.now() + 12 * 60 * 60_000).toISOString() });
+    render(gate(evening, [], dismissedByCookie(evening)));
 
     expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
   });
@@ -401,6 +481,26 @@ describe("OnboardingGate while the assistant starts", () => {
 
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should stay away when the assistant stops again after a navigation within the same visit", () => {
+    // The layout holds the visit and stays mounted while the page under it is replaced, which is the only part of
+    // this a browser does and jsdom cannot: here the page subtree is keyed so React remounts it the same way.
+    function Area({ page, summary }: { page: string; summary: AssistantSummary }) {
+      return (
+        <AssistantVisit>
+          <div key={page}>{gate(summary)}</div>
+        </AssistantVisit>
+      );
+    }
+    const { rerender } = render(<Area page="/assistant" summary={assistant("running")} />);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // They read for long enough that the idle sweep stopped it, then opened a conversation.
+    rerender(<Area page="/assistant/one" summary={assistant("stopped")} />);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("should never paint the screen saying the assistant is ready when it reaches running", () => {

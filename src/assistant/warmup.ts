@@ -2,29 +2,36 @@ import type { VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
 
 /**
  * The lines the getting-ready screen rotates while someone waits for their assistant's pod. They are keyed by what
- * the pod is doing, so the joke matches the step shown beside it, and a phase with nothing of its own falls back to
- * the lines that fit any of them.
+ * the pod is doing, so the joke matches the step shown beside it: the two steps the screen waits through are the
+ * start and the clone, and each pool is that step's own lines followed by the ones that fit either.
  */
 
-export type WarmupPhase = "starting" | "cloning" | "any";
+export type WarmupPhase = "starting" | "cloning";
 
-/** Lines that fit any phase, and the pool for a phase with none of its own. */
-export const WARMUP_ANY: readonly string[] = ["Still going. Nothing's broken.", "Not stuck, just thorough.", "Nearly there. Biscuit?", "Won't be long now."];
+/** Lines that fit whatever the pod is doing, and carry a wait that is dragging on; every pool ends with them. */
+export const WARMUP_GENERAL: readonly string[] = [
+  "Still going. Nothing's broken.",
+  "Not stuck, just thorough.",
+  "Nearly there. Biscuit?",
+  "Won't be long now."
+];
 
-const WARMUP_MESSAGES: Readonly<Partial<Record<WarmupPhase, readonly string[]>>> = {
+const WARMUP_MESSAGES: Readonly<Record<WarmupPhase, readonly string[]>> = {
   starting: [
     "Warming up. Go and grab a cuppa.",
     "Putting the kettle on.",
     "Rummaging about in the cloud for a spare machine.",
     "Finding your assistant a desk.",
     "Waking your assistant. It isn't a morning person.",
-    "Queueing, politely."
+    "Queueing, politely.",
+    ...WARMUP_GENERAL
   ],
   cloning: [
     "Cloning the workspace — all of it, I'm afraid.",
     "Reading rather a lot of CLAUDE.md files.",
     "Memorising the acronyms. There are a great many.",
-    "Working out what SSCS stands for."
+    "Working out what SSCS stands for.",
+    ...WARMUP_GENERAL
   ]
 };
 
@@ -38,18 +45,13 @@ export const WARMUP_SIGNPOST = "This usually takes a couple of minutes.";
 
 export const WARMUP_SLOW = "This is taking longer than usual. It's still trying.";
 
+/**
+ * Which pool fits what the pod is doing. Cloning the workspace is the one step long enough to deserve its own lines;
+ * everything else the screen waits through is the assistant starting. A status the screen shows no line for at all —
+ * it failed, or it is asking the person to sign in — never reaches a pool.
+ */
 export function warmupPhase(status: VirtualAgentStatus): WarmupPhase {
-  switch (status) {
-    case "requested":
-    case "provisioning":
-    case "stopping":
-    case "stopped":
-      return "starting";
-    case "cloning":
-      return "cloning";
-    default:
-      return "any";
-  }
+  return status === "cloning" ? "cloning" : "starting";
 }
 
 /**
@@ -65,10 +67,10 @@ export function waitingForPerson(status: VirtualAgentStatus): boolean {
 }
 
 export function warmupPool(phase: WarmupPhase): readonly string[] {
-  return WARMUP_MESSAGES[phase] ?? WARMUP_ANY;
+  return WARMUP_MESSAGES[phase];
 }
 
-/** What the server renders, so the first line is the same on both sides of hydration. */
+/** The step's own first line, which the server renders, so both sides of hydration agree and the line fits the step. */
 export function firstWarmupMessage(phase: WarmupPhase): string {
   return warmupPool(phase)[0] as string;
 }
