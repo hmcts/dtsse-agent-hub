@@ -165,8 +165,9 @@ describe("sharing a conversation", () => {
     }
   });
 
-  it("should say nothing when the owner shares with someone the hub does not know, since nothing was written", async () => {
+  it("should say nothing when a share changes nothing", async () => {
     const { id } = await chat();
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
     const heard: string[] = [];
     const stop = realtime().hub.subscribe((event) => {
       if (event.type === "assistant_conversation" && event.conversation_id === id) {
@@ -177,8 +178,10 @@ describe("sharing a conversation", () => {
       await settle();
       heard.length = 0;
 
+      // Each of the three writes that leaves the list as it was: a person the hub does not know, a person already
+      // named, and a revocation of a share nobody held.
       await shareActions.shareChat({ conversationId: id, recipientOid: "dev-nobody" });
-      // Unsharing someone who was never named is the other write that changes nothing.
+      await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
       await shareActions.unshareChat({ conversationId: id, recipientOid: CAROL.oid });
       await settle();
 
@@ -223,6 +226,34 @@ describe("reading a shared conversation", () => {
     expect(await sharedChats(viewerOf(ALICE))).toMatchObject({ given: [{ id, withWhom: "1 person" }], received: [] });
     expect(await sharedChats(viewerOf(BOB))).toMatchObject({ given: [], received: [{ id, withWhom: ALICE.name }] });
     expect(await sharedChats(viewerOf(CAROL))).toEqual({ given: [], received: [] });
+  });
+
+  // The thread is read with the owner's own transcript access, so everything their session recorded is in reach of
+  // this read: the commands it ran, the files it opened and what came back. `threadItems` keeps only what the
+  // assistant said, which is what makes that safe.
+  it("should show nothing the session did, only what it said", async () => {
+    const { id, agentId } = await chat();
+    await prisma.transcriptEntry.createMany({
+      data: [
+        {
+          agentId,
+          sessionId: "s",
+          entryKey: "tool",
+          role: "tool_use",
+          content: { name: "Bash", input: { command: "cat /workspace/private-notes.md" } },
+          occurredAt: new Date()
+        },
+        { agentId, sessionId: "s", entryKey: "result", role: "tool_result", content: { text: "the contents of the private notes" }, occurredAt: new Date() },
+        { agentId, sessionId: "s", entryKey: "said", role: "assistant", content: { text: "I have read the notes." }, occurredAt: new Date() }
+      ]
+    });
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+
+    const shown = JSON.stringify(await sharedChat(viewerOf(BOB), id));
+
+    expect(shown).toContain("I have read the notes.");
+    expect(shown).not.toContain("private-notes.md");
+    expect(shown).not.toContain("the contents of the private notes");
   });
 
   it("should name no attachment of a shared message, only how many there were", async () => {

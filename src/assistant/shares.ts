@@ -119,12 +119,16 @@ export async function shareConversation(prisma: PrismaClient, actorOid: string, 
     );
   }
   await prisma.$transaction(async (tx) => {
-    await tx.assistantConversationShare.upsert({
-      where: { conversationId_recipientOid: { conversationId: id, recipientOid } },
-      create: { conversationId: id, recipientOid, sharedByOid: actorOid },
-      update: {}
+    // Skipping the duplicate rather than updating it keeps the share's own `created_at`, and leaves a second share
+    // with the same person as a write that changed nothing — so, like a revocation of a share nobody held, it is
+    // not announced.
+    const { count } = await tx.assistantConversationShare.createMany({
+      data: [{ conversationId: id, recipientOid, sharedByOid: actorOid }],
+      skipDuplicates: true
     });
-    await announceShares(tx, conversation);
+    if (count > 0) {
+      await announceShares(tx, conversation);
+    }
   });
   return await shareRecipients(prisma, id);
 }

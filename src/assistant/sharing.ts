@@ -58,14 +58,6 @@ export interface SharedConversationView {
   access: ConversationAccess;
 }
 
-interface Row {
-  title: string | null;
-  product: string;
-  productHistory: unknown;
-  agentId: string | null;
-  owner: { name: string };
-}
-
 function marks(value: unknown): ProductMark[] {
   return Array.isArray(value)
     ? value.filter((mark): mark is ProductMark => typeof mark === "object" && mark !== null && typeof mark.product === "string" && typeof mark.at === "string")
@@ -85,10 +77,10 @@ export async function sharedConversation(
   conversation: SharedConversationRow,
   access: ConversationAccess
 ): Promise<SharedConversationView | undefined> {
-  const row = (await db.assistantConversation.findUnique({
+  const row = await db.assistantConversation.findUnique({
     where: { id: conversation.id },
     select: { title: true, product: true, productHistory: true, agentId: true, owner: { select: { name: true } } }
-  })) as Row | null;
+  });
   if (row === null) {
     return undefined;
   }
