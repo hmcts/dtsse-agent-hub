@@ -81,6 +81,19 @@ describe("POST /api/agent/register", () => {
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills).toEqual([]);
   });
 
+  it("should register the session and keep the stored skills when the skills field is not a list", async () => {
+    const skills = [{ name: "cft-explain", description: "Explain a CFT topic" }];
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, skills } }));
+    const stored = async () => (await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills;
+    expect(await stored()).toEqual(skills);
+
+    // A hand-rolled client sending the field as `null`. Refusing it would take the whole session off the hub, which
+    // is worse than the one field the shape costs: a non-list reads as the field not being sent, so the list stands.
+    const asNull = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, skills: null } });
+    expect(asNull.status).toBe(200);
+    expect(await stored()).toEqual(skills);
+  });
+
   it("should store no skills when a new agent registers without any", async () => {
     const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: REGISTRATION }));
 
@@ -131,6 +144,7 @@ describe("POST /api/agent/register", () => {
     const reported = { ...REGISTRATION, client_features: ["attachments"] };
     const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: reported }));
     const stored = async () => (await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures;
+    expect(await stored()).toEqual(["attachments"]);
 
     // A hand-rolled client sending the field as `null`, which its neighbour `conversation_id` has always allowed. The
     // field exists to leave a session one field short, so it must not be the thing that keeps a client off the hub.
@@ -139,6 +153,7 @@ describe("POST /api/agent/register", () => {
     expect(await stored()).toBeNull();
 
     await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: reported });
+    expect(await stored()).toEqual(["attachments"]);
     const asText = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, client_features: "attachments" } });
     expect(asText.status).toBe(200);
     expect(await stored()).toBeNull();

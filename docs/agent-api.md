@@ -188,6 +188,7 @@ The web UI's credentials list shows only whether each kind is stored, when and h
 - At most 200 entries. `name` is at most 100 characters matching `^[a-z0-9][a-z0-9:_-]*$`, a plugin's skills being namespaced `plugin:skill`. Any entry that breaks this, or more than 200, refuses the whole request with `400` naming `skills`, so the client drops such entries before sending.
 - `description` is optional, trimmed, and cut to 300 characters rather than refused. The list is stored sorted by name, keeping the first of a repeated name.
 - `[]` clears the list. Leaving `skills` out changes nothing.
+- `null`, and any other value that is not a list, reads the same way as leaving `skills` out rather than refusing the request. The shape of the field is not worth a `400`, which would keep the client off the hub entirely; this is the same rule as `client_features` below.
 - The web UI shows the list only to people who may message the agent: its owner and holders of a write grant from them.
 - A register of an existing session or a heartbeat whose `skills` differ from the stored list updates an open page for the agent without a reload. Sending the stored list again, in any order, changes nothing.
 - A message picked from the list starts `/<name> `, followed by whatever the person typed. The client delivers it as a request to run that skill with the rest of the message as its arguments; the hub does not treat it differently from any other direct message.
