@@ -1,14 +1,30 @@
 "use client";
 
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
+import type { Skill } from "@/agents/skills";
 import type { Template } from "@/assistant/starters";
 import type { MessageAttachment } from "@/assistant/upload-store";
 import { admitFiles, discardUpload, fileSizeLabel, pastedName, UploadAborted, uploadFile } from "@/components/assistant/uploadClient";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
+import { type SkillMenuTheme, useSkillMenu } from "@/components/SkillMenu";
 import { useDraft } from "@/components/useDraft";
 
 /** Above this the box scrolls rather than grows. */
 const MAX_HEIGHT = 200;
+
+/**
+ * The "/" list, as a popover above the box rather than in the flow: the box here grows with what is typed, and a list
+ * taking space inside it would move the line the person is on while they are still typing the skill's name. It stacks
+ * with the + menu, which sits in the same place.
+ */
+const SKILL_MENU: SkillMenuTheme = {
+  list: "absolute bottom-[calc(100%+10px)] left-0 z-30 max-h-60 w-full overflow-y-auto rounded-xl border border-asst-strong bg-asst-hover p-1.5 text-[13px] shadow-2xl",
+  option: "cursor-pointer rounded-lg px-2.5 py-1.5",
+  active: "bg-asst-active text-asst-text",
+  idle: "text-asst-body hover:bg-asst-field",
+  name: "font-plex-mono font-semibold text-asst-accent-soft",
+  description: (active) => `block truncate ${active ? "text-asst-body" : "text-asst-muted"}`
+};
 
 type Attaching = { stage: "uploading"; sent: number } | { stage: "ready" } | { stage: "failed"; reason: string };
 
@@ -61,6 +77,10 @@ function chipsFor(attached: readonly MessageAttachment[] = []): Attachment[] {
  *
  * A file needs a conversation to belong to, so the attach controls appear only with one in prospect: either
  * `conversationId`, or `openConversation` for the new-chat screen, where attaching is what creates one.
+ *
+ * Typing "/" offers the conversation's session its skills, the same list and the same keys as the hub's own box, and
+ * nothing at all when the session has reported none — which is every new chat, since a skill list comes from a
+ * running session and a new chat has no conversation to have one.
  */
 export function Composer({
   templates,
@@ -72,6 +92,7 @@ export function Composer({
   conversationId,
   openConversation,
   attached,
+  skills = [],
   dropZone
 }: {
   templates: readonly Template[];
@@ -88,6 +109,8 @@ export function Composer({
   openConversation?: () => Promise<string>;
   /** Files the hub is already holding for the next message, shown as chips again on a remount of the screen. */
   attached?: readonly MessageAttachment[];
+  /** The conversation's session's skills, offered when the message starts with "/". */
+  skills?: readonly Skill[];
   dropZone?: RefObject<HTMLElement | null>;
 }) {
   const { body: text, setBody: setText, discard } = useDraft({ kind: "assistant-draft", viewerOid, draftId });
@@ -105,6 +128,7 @@ export function Composer({
   const menuId = useId();
   const errorId = useId();
   const files = useAnnouncer("files");
+  const skillMenu = useSkillMenu({ skills, body: text, setBody: setText, field: box, theme: SKILL_MENU });
 
   // The attachments are held here as well as in state: a progress event or a Remove reads the list it was started
   // from, not the one a later render closed over. Starts as the same array the state did.
@@ -386,6 +410,7 @@ export function Composer({
             ))}
           </ul>
         )}
+        {skillMenu.list}
         <div className="flex items-end gap-2">
           <div ref={menuRef} className="relative shrink-0">
             <button
@@ -476,9 +501,14 @@ export function Composer({
           ) : null}
           <textarea
             ref={box}
+            {...skillMenu.fieldProps}
             rows={1}
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => {
+              skillMenu.onChange(event.target.value);
+              skillMenu.track(event);
+            }}
+            onSelect={skillMenu.track}
             onFocus={onFocus}
             onPaste={(event) => {
               if (!attachable) {
@@ -491,6 +521,9 @@ export function Composer({
               }
             }}
             onKeyDown={(event) => {
+              if (skillMenu.onKeyDown(event)) {
+                return;
+              }
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 void send();

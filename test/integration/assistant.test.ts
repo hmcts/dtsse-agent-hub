@@ -77,11 +77,12 @@ async function startedAssistant(): Promise<{ id: string; token: string; claimed:
   return { id: assistant.id, token: claimed.launch_token!, claimed };
 }
 
-function register(token: string, sessionId: string, conversationId?: string): Promise<Response> {
+function register(token: string, sessionId: string, conversationId?: string, skills?: { name: string; description: string }[]): Promise<Response> {
   return pod(registerRoute.POST, token, "/api/agent/register", {}, "POST", {
     session_id: sessionId,
     name: "session",
-    ...(conversationId === undefined ? {} : { conversation_id: conversationId })
+    ...(conversationId === undefined ? {} : { conversation_id: conversationId }),
+    ...(skills === undefined ? {} : { skills })
   });
 }
 
@@ -334,6 +335,23 @@ describe("conversations", () => {
     expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "bedrock" }, id)).toBeUndefined();
     actAs("bob");
     expect(await actions.sendAssistantMessage({ conversationId: id, body: "hi" })).toEqual({ ok: false, error: "that conversation no longer exists" });
+  });
+
+  it("should carry the session's skills to the conversation page, and none before a session registers", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+
+    expect((await assistantConversation(VIEWER, id))?.skills).toEqual([]);
+    await register(token, sessionId, id, [
+      { name: "cft-how-to", description: "Find a how-to recipe" },
+      { name: "cft-explain", description: "Answer a what is X question" }
+    ]);
+
+    expect((await assistantConversation(VIEWER, id))?.skills).toEqual([
+      { name: "cft-explain", description: "Answer a what is X question" },
+      { name: "cft-how-to", description: "Find a how-to recipe" }
+    ]);
   });
 
   it("should record each change of product, and leave it alone when it is the same", async () => {

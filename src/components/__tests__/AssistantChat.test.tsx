@@ -3,6 +3,7 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Skill } from "@/agents/skills";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import type { ConversationView } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
@@ -91,6 +92,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     productHistory: [],
     agentId: AGENT,
     agentStatus: "idle",
+    skills: [],
     sessionState: null,
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
@@ -386,6 +388,33 @@ describe("ChatView sending", () => {
   });
 });
 
+describe("ChatView skills", () => {
+  it("should offer the conversation's skills in the composer when its session reported some", () => {
+    const skills = [{ name: "cft-explain", description: "Answer a what is X question" }];
+    render(<ChatView viewerOid={VIEWER} view={conversation({ skills })} templates={TEMPLATES} actions={actions()} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Message" }), { target: { value: "/cft" } });
+
+    expect(screen.getByRole("option", { name: /cft-explain/ })).toBeTruthy();
+  });
+
+  it("should re-read the page when the conversation's agent reports a changed skill list", () => {
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
+    emit("agent_skills", { agent_id: AGENT });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("should ignore a skill list reported by another agent", () => {
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
+    emit("agent_skills", { agent_id: "44444444-4444-4444-4444-444444444444" });
+
+    expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
 describe("ChatView document", () => {
   it("should open the document panel when the person chooses Add document", () => {
     render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
@@ -622,6 +651,125 @@ describe("Composer", () => {
     expect(alert.textContent).toBe("a message is at most 10 characters");
     expect(box.getAttribute("aria-describedby")).toBe(alert.id);
     expect(box.value).toBe("too long a message");
+  });
+});
+
+describe("Composer skills", () => {
+  const SKILLS: Skill[] = [
+    { name: "cft-explain", description: "Answer a what is X question" },
+    { name: "cft-how-to", description: "Find a how-to recipe" },
+    { name: "pcs:start-env", description: "Start an environment out of hours" }
+  ];
+
+  function composer(skills: Skill[] = SKILLS, onSend: (text: string) => Promise<string | null> = vi.fn(async () => null)) {
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId={CONVERSATION} onSend={onSend} skills={skills} />);
+  }
+
+  function field(): HTMLTextAreaElement {
+    return screen.getByRole("combobox", { name: "Message" }) as HTMLTextAreaElement;
+  }
+
+  function write(value: string): void {
+    fireEvent.change(field(), { target: { value } });
+  }
+
+  function options(): string[] {
+    return screen.queryAllByRole("option").map((option) => option.firstElementChild?.textContent ?? "");
+  }
+
+  function activeOption(): string | null {
+    const id = field().getAttribute("aria-activedescendant");
+    return id === null ? null : (document.getElementById(id)?.firstElementChild?.textContent ?? null);
+  }
+
+  it("should list every skill with its description when the message is a bare slash", () => {
+    composer();
+
+    write("/");
+
+    expect(field().getAttribute("aria-expanded")).toBe("true");
+    expect(options()).toEqual(["/cft-explain", "/cft-how-to", "/pcs:start-env"]);
+    expect(activeOption()).toBe("/cft-explain");
+    expect(within(screen.getByRole("listbox", { name: "Skills" })).getByText("Find a how-to recipe")).toBeTruthy();
+  });
+
+  it("should narrow the list to the names that match when a query is typed", () => {
+    composer();
+
+    write("/cft");
+
+    expect(options()).toEqual(["/cft-explain", "/cft-how-to"]);
+  });
+
+  it("should move the active option with the arrow keys, wrapping at either end", () => {
+    composer();
+    write("/cft");
+
+    fireEvent.keyDown(field(), { key: "ArrowDown" });
+    expect(activeOption()).toBe("/cft-how-to");
+    fireEvent.keyDown(field(), { key: "ArrowDown" });
+    expect(activeOption()).toBe("/cft-explain");
+    fireEvent.keyDown(field(), { key: "ArrowUp" });
+    expect(activeOption()).toBe("/cft-how-to");
+  });
+
+  it("should pick the active skill and not send when Enter is pressed while the list is open", async () => {
+    const onSend = vi.fn(async () => null);
+    composer(SKILLS, onSend);
+    write("/cft");
+
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(field().value).toBe("/cft-explain ");
+    expect(field().selectionStart).toBe("/cft-explain ".length);
+    expect(field().getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("should pick the skill that is clicked", () => {
+    composer();
+    write("/");
+
+    fireEvent.click(screen.getByRole("option", { name: /pcs:start-env/ }));
+
+    expect(field().value).toBe("/pcs:start-env ");
+    expect(document.activeElement).toBe(field());
+  });
+
+  it("should close the list on Escape and keep it closed until the message changes", () => {
+    composer();
+    write("/cft");
+
+    fireEvent.keyDown(field(), { key: "Escape" });
+    expect(field().getAttribute("aria-expanded")).toBe("false");
+    expect(field().hasAttribute("aria-activedescendant")).toBe(false);
+
+    write("/cft-");
+    expect(field().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("should send the skill line on Enter when the list is closed", async () => {
+    const onSend = vi.fn(async () => null);
+    composer(SKILLS, onSend);
+    write("/cft-explain what is CDAM?");
+
+    await act(async () => {
+      fireEvent.keyDown(field(), { key: "Enter" });
+    });
+
+    expect(onSend).toHaveBeenCalledWith("/cft-explain what is CDAM?", []);
+  });
+
+  it("should be a plain box with no list when the session reported no skills", () => {
+    composer([]);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "/" } });
+
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.queryAllByRole("option")).toEqual([]);
   });
 });
 
@@ -867,6 +1015,18 @@ describe("EmptyChat", () => {
 
     expect(start).toHaveBeenCalledWith({ product: "pcs", body: starter?.prompt });
     expect(push).toHaveBeenCalledWith("/assistant/abc");
+  });
+
+  it("should offer no skill list when the person types a slash, because a new chat has no session yet", () => {
+    render(
+      <EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn(async () => ({ ok: true as const, id: "abc" })))} />
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "/" } });
+
+    // The only listbox a skill list would add; the product select's own options are its, and stay.
+    expect(screen.queryByRole("listbox", { name: "Skills" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Message" })).toBeNull();
   });
 
   it("should start with the default product when the person has not chosen one", async () => {

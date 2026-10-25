@@ -75,6 +75,11 @@ function rememberProduct(viewerOid: string, product: string): void {
  * person's file in it for the sweep to take. So the conversation and its files come back from the hub through
  * `unsent` — authoritative, because the bytes are already there — and the product comes back with them, from the
  * conversation's own row when there is one and from `sessionStorage` when there is not.
+ *
+ * The composer here offers no "/" list. A skill list is a session's report of what it can run, and this screen has no
+ * session: the ordinary new chat has no conversation at all, and the one attaching a file opened has an agent no pod
+ * has started yet. So the box is a plain one, as the hub's is for an agent that has reported nothing, and the list
+ * appears on the conversation's own page once its session says what it has.
  */
 export function EmptyChat({
   starters,
