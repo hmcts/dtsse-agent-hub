@@ -92,6 +92,21 @@ describe("AssistantShell", () => {
     expect(screen.getByText("AS")).toBeTruthy();
   });
 
+  it("should offer settings beside the viewer's name, and the appearance only from there", () => {
+    render(shell({ theme: "dark" }));
+
+    expect(screen.queryByRole("radiogroup", { name: "Appearance" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(screen.getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("should warn on the cog when a sign-in the viewer has to act on is missing", () => {
+    render(shell({ connections: { kinds: ["github"], statuses: [], logins: [], unavailable: null } }));
+
+    expect(screen.getByRole("button", { name: "Settings. GitHub needs your attention" })).toBeTruthy();
+  });
+
   it("should link to the hub only when the viewer also uses it", () => {
     const { rerender } = render(shell());
     expect(screen.queryByRole("link", { name: "Agent Hub" })).toBeNull();

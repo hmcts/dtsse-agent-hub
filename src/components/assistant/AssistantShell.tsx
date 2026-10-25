@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import type { ConnectionsData } from "@/assistant/connections";
 import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
-import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
+import { type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 
 interface ShellContextValue {
   sidebarOpen: boolean;
@@ -70,6 +71,8 @@ export function AssistantShell({
   activeId,
   hubLink,
   theme = "system",
+  connections,
+  plugins,
   children
 }: {
   viewerName: string;
@@ -77,8 +80,12 @@ export function AssistantShell({
   activeId: string | null;
   /** Shown to people who also use the hub's own pages. */
   hubLink: boolean;
-  /** The appearance the person chose, which the switch in the footer starts from. */
+  /** The appearance the person chose, which the switch in the footer's settings starts from. */
   theme?: Theme;
+  /** The person's sign-ins, which the footer's settings lists and warns about. */
+  connections?: ConnectionsData;
+  /** The workspace plugins the footer's settings lets the person tick. */
+  plugins?: AssistantPlugins;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(true);
@@ -193,9 +200,9 @@ export function AssistantShell({
                 {initials(viewerName)}
               </span>
               <span className="min-w-0 truncate text-sm font-medium">{viewerName}</span>
+              <AssistantSettings theme={theme} connections={connections} plugins={plugins} />
             </div>
             <div className="flex items-center gap-2">
-              <ThemeSwitch initial={theme} />
               {hubLink ? (
                 <Link href="/" className="ml-auto shrink-0 rounded px-2 py-1 text-xs text-asst-muted hover:bg-asst-hover hover:text-asst-text">
                   Agent Hub

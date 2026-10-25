@@ -31,6 +31,7 @@ import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
+import { availablePlugins, PluginConfigurationError, type PluginOption } from "../virtual-agents/plugins.ts";
 import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
 import {
   type VirtualAgentCard,
@@ -252,10 +253,28 @@ export interface AssistantHome {
   assistant: AssistantSummary;
   credentials: CredentialSettings;
   conversations: { label: DateGroup; items: ConversationLink[] }[];
+  /** The workspace plugins this hub offers, and the ones the viewer's assistant loads. */
+  plugins: { available: PluginOption[]; checked: string[] };
 }
 
 function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
   return new Set(credentials.available ? credentials.statuses.filter((status) => status.stored).map((status) => status.kind) : []);
+}
+
+/**
+ * What the Assistant may offer, which is nothing when `VIRTUAL_AGENT_PLUGINS` is unset. A malformed list offers
+ * nothing rather than failing the page: the Assistant is someone's whole chat, and the hub's own virtual-agent pages
+ * still report the configuration error to whoever has to fix it.
+ */
+function offeredPlugins(): PluginOption[] {
+  try {
+    return availablePlugins();
+  } catch (error) {
+    if (error instanceof PluginConfigurationError) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 /**
@@ -265,7 +284,12 @@ function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const assistant = await ensureAssistant(prisma, viewer);
   const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
-  return { assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)), credentials, conversations };
+  return {
+    assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)),
+    credentials,
+    conversations,
+    plugins: { available: offeredPlugins(), checked: assistant.plugins }
+  };
 }
 
 /** The sidebar and the assistant's state alone, for pages that must not start or create it. */
@@ -275,7 +299,12 @@ export async function assistantSidebar(viewer: Viewer): Promise<AssistantHome | 
     return undefined;
   }
   const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
-  return { assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)), credentials, conversations };
+  return {
+    assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)),
+    credentials,
+    conversations,
+    plugins: { available: offeredPlugins(), checked: assistant.plugins }
+  };
 }
 
 /** One of the viewer's conversations, or `undefined` for the not-found the page answers. */

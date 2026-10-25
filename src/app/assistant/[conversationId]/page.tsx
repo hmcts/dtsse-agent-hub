@@ -2,7 +2,9 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { deleteConversation, renameConversation, saveArtefact, sendAssistantMessage, setConversationProduct, warmConversation } from "@/app/_actions/assistant";
 import { saveCredential } from "@/app/_actions/credentials";
-import { pasteLoginCode } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { connectionsData } from "@/assistant/connections";
+import { assistantPluginsData } from "@/assistant/settings";
 import { TEMPLATES } from "@/assistant/starters";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
 import { AssistantShell } from "@/components/assistant/AssistantShell";
@@ -32,7 +34,15 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
     notFound();
   }
   return (
-    <AssistantShell viewerName={viewer.name} groups={home.conversations} activeId={view.id} hubLink theme={theme}>
+    <AssistantShell
+      viewerName={viewer.name}
+      groups={home.conversations}
+      activeId={view.id}
+      hubLink
+      theme={theme}
+      connections={connectionsData(home.assistant, home.credentials)}
+      plugins={{ ...assistantPluginsData(home.assistant, home.plugins), save: setVirtualAgentPlugins }}
+    >
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
       <ChatView key={view.agentId} view={view} templates={TEMPLATES} actions={ACTIONS} />
       <OnboardingGate
