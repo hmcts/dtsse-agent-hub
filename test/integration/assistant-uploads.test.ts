@@ -1126,6 +1126,44 @@ describe("a file from the browser to the session's envelope", () => {
     expect(await prisma.assistantUploadPart.count()).toBe(0);
   });
 
+  it("should name the real path above the skill line when the message is both a slash command and a file", async () => {
+    // The two features meet here. Skills and attachments both reach the envelope through its options, and the order
+    // is a decision: the skill line says "the rest of the message as its arguments", so it sits against the body
+    // and the paths go above it. This checks that against a frame the route really built and a file really on disk,
+    // rather than against hand-written outcomes.
+    // Arrange
+    const { token } = await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const uploadId = await upload(conversation.id, "letter.pdf", filled(16, 5));
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "/cft-explain what does this say?", uploadIds: [uploadId] });
+    const { agentId, sessionId } = await sessionOf(conversation.id);
+    await register(token, sessionId, conversation.id);
+
+    // Act: exactly what the bridge does, with a session that has the skill.
+    const frame = await frameFor(token, agentId);
+    const assistant = parseAssistantFrame(frame.assistant);
+    const outcomes = await fetchAttachments({
+      api: podApi(token),
+      agentId,
+      conversationId: conversation.id,
+      attachments: parseAttachments(assistant?.attachments),
+      root
+    });
+    const content = assistantEnvelope(frame.message, assistant ?? {}, null, { skills: new Set(["cft-explain"]), attachments: outcomes });
+
+    // Assert: both instructions present, the skill line last, the real path above it.
+    const lines = content.split("\n");
+    const sep = lines.indexOf("---");
+    expect(lines[sep - 1]).toBe(
+      "It starts with /cft-explain: run the cft-explain skill with the rest of the message as its arguments, as if your user had typed it."
+    );
+    const written = path.join(root, conversation.id, `${uploadId}-letter.pdf`);
+    expect(lines.indexOf(`- ${written} (application/pdf, 1 KB)`)).toBeLessThan(sep - 1);
+    expect(content.endsWith("\n---\n/cft-explain what does this say?")).toBe(true);
+    // And the file really is on disk at the path the session is told to read.
+    expect((await fs.readFile(written)).byteLength).toBe(16);
+  });
+
   it("should name the file to the session when the message carried no words at all", async () => {
     // Arrange: a message of files and nothing typed, which `checkBody` allows and the envelope has to stand up to.
     const { token } = await startedAssistant();
