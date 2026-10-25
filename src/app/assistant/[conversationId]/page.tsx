@@ -44,6 +44,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
       activeId={view.id}
       hubLink
       theme={theme}
+      actions={ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
       plugins={pluginSettings}
     >

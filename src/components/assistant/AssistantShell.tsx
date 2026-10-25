@@ -1,14 +1,23 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ConnectionsData } from "@/assistant/connections";
 import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
+import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
+import type { ActionResult } from "@/web/action";
+
+/** What a sidebar row's options menu does. The pages pass the same server actions the chat's own header uses. */
+export interface ConversationActions {
+  rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
+  remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
+}
 
 interface ShellContextValue {
   sidebarOpen: boolean;
@@ -83,6 +92,7 @@ export function AssistantShell({
   theme = "system",
   connections,
   plugins,
+  actions,
   children
 }: {
   viewerName: string;
@@ -96,10 +106,14 @@ export function AssistantShell({
   connections?: ConnectionsData;
   /** The workspace plugins the footer's settings lets the person tick. */
   plugins?: AssistantPlugins;
+  /** Given, every row offers an options menu; left out, the rows are links alone. */
+  actions?: ConversationActions;
   children: React.ReactNode;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(true);
   const [narrow, setNarrow] = useState(false);
+  const [failed, setFailed] = useState<{ id: string; error: string } | null>(null);
   const sidebar = useRef<HTMLElement>(null);
   const resize = useResizableWidth({
     storageKey: "hmcts-assistant-sidebar-width",
@@ -155,6 +169,11 @@ export function AssistantShell({
     }
   }, [activeId]);
 
+  // A refusal is about one attempt on one chat. The shell outlives moving between conversations, so it is dropped on
+  // the way rather than left pinned under a row.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dropping it on navigation is the point, so the effect keys on the active id it does not read
+  useEffect(() => setFailed(null), [activeId]);
+
   return (
     <ShellContext.Provider value={{ sidebarOpen: open, openSidebar: () => setOpen(true), sidebarWidth: narrow || !open ? 0 : width }}>
       <div className="relative flex min-h-0 flex-1 overflow-hidden bg-asst-bg font-plex text-[15px] leading-normal text-asst-text">
@@ -202,16 +221,57 @@ export function AssistantShell({
                 <h2 className="px-2.5 pb-1.5 pt-1 text-xs font-medium text-asst-faint">{group.label}</h2>
                 <ul className="flex flex-col gap-0.5">
                   {group.items.map((item) => (
-                    <li key={item.id}>
+                    <li key={item.id} className="group relative">
                       <Link
                         href={`/assistant/${item.id}`}
                         aria-current={item.id === activeId ? "page" : undefined}
-                        className={`block truncate rounded-lg px-2.5 py-2 text-sm ${
+                        className={`block truncate rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
                           item.id === activeId ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
                         }`}
                       >
                         {item.title}
                       </Link>
+                      {actions === undefined ? null : (
+                        // A sibling of the link, not a child: an anchor may not hold a button.
+                        <div className="absolute right-1 top-1 flex">
+                          <ChatMenu
+                            title={item.title}
+                            label={`Options for ${item.title}`}
+                            // The trigger appears when the row is hovered, but a keyboard or touch user never
+                            // hovers, so it is shown as well while the focus is anywhere inside the row, at every
+                            // drawer-width screen, and always on the chat that is open.
+                            triggerClassName={`flex h-7 w-7 items-center justify-center rounded-md text-base leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${
+                              item.id === activeId ? "" : "opacity-0"
+                            }`}
+                            onOpen={() => setFailed(null)}
+                            onRename={async (title) => {
+                              const result = await actions.rename({ conversationId: item.id, title });
+                              setFailed(result.ok ? null : { id: item.id, error: result.error });
+                              router.refresh();
+                            }}
+                            onDelete={async () => {
+                              const result = await actions.remove({ conversationId: item.id });
+                              if (!result.ok) {
+                                setFailed({ id: item.id, error: result.error });
+                                return;
+                              }
+                              setFailed(null);
+                              // The open chat's page now has nothing to show, so it has to be left; deleting any
+                              // other only takes a row out of the list.
+                              if (item.id === activeId) {
+                                router.push("/assistant");
+                              } else {
+                                router.refresh();
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
+                      {failed?.id === item.id ? (
+                        <p role="alert" className="px-2.5 pb-1 text-xs text-asst-error">
+                          {failed.error}
+                        </p>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

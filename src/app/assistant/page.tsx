@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { startConversation } from "@/app/_actions/assistant";
+import { deleteConversation, renameConversation, startConversation } from "@/app/_actions/assistant";
 import { saveCredential } from "@/app/_actions/credentials";
 import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
@@ -7,13 +7,15 @@ import { assistantPluginsData } from "@/assistant/settings";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
 import { WAITING_COOKIE, waitingDismissed } from "@/assistant/waiting";
-import { AssistantShell } from "@/components/assistant/AssistantShell";
+import { AssistantShell, type ConversationActions } from "@/components/assistant/AssistantShell";
 import { EmptyChat } from "@/components/assistant/EmptyChat";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { requireViewer } from "@/viewer/current";
 import { openAssistant } from "@/web/data";
 
 export const dynamic = "force-dynamic";
+
+const ACTIONS: ConversationActions = { rename: renameConversation, remove: deleteConversation };
 
 /** A new chat. Opening it creates the viewer's assistant on their first visit, and starts it whenever it is stopped. */
 export default async function AssistantPage() {
@@ -30,6 +32,7 @@ export default async function AssistantPage() {
       activeId={null}
       hubLink
       theme={theme}
+      actions={ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
       plugins={pluginSettings}
     >
