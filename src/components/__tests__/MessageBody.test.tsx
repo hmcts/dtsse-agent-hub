@@ -155,7 +155,7 @@ describe("MessageBody", () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     try {
-      expect(() => render(<Unguarded body="anything" />)).toThrow("MessageBody has no case for the footnote block");
+      expect(() => render(<Unguarded body="anything" />)).toThrow("Markup has no case for the footnote block");
     } finally {
       logged.mockRestore();
       window.removeEventListener("error", swallow);
