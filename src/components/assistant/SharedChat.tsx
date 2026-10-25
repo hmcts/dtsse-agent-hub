@@ -64,6 +64,9 @@ export function SharedChat({ view }: { view: SharedConversationView }) {
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[760px] flex-col gap-[26px] px-5 pb-10 pt-7">
+          {view.earlierHidden ? (
+            <p className="text-center text-[13px] text-asst-muted">This is the most recent part of the chat. What came before it is not shown here.</p>
+          ) : null}
           {view.thread.length === 0 ? (
             <p className="text-center text-[13px] text-asst-muted">Nothing has been said in this chat yet.</p>
           ) : (

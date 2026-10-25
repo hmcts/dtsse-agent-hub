@@ -48,6 +48,7 @@ export function ShareDialog({
   const ids = useId();
   const listId = `${ids}-people`;
   const [people, setPeople] = useState<readonly SharePerson[]>(initial);
+  const [fromPage, setFromPage] = useState(initial);
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<Candidate[]>([]);
   const [active, setActive] = useState(0);
@@ -60,6 +61,14 @@ export function ShareDialog({
   // The whole address, once there is a browser to ask for the origin: the server has no origin to render, and a first
   // render that disagreed with the server's would be a hydration mismatch on the box's value.
   const [link, setLink] = useState(path);
+
+  // The list is held here as well as read from the page, because sharing answers with the new one and the dialog shows
+  // it at once rather than waiting for the page to be read again. A page that has been read again wins: the server's
+  // list is the real one, and without this the dialog would keep its first answer for as long as it stayed open.
+  if (fromPage !== initial) {
+    setFromPage(initial);
+    setPeople(initial);
+  }
 
   useEffect(() => box.current?.focus(), []);
 
@@ -174,8 +183,9 @@ export function ShareDialog({
         </h2>
         <p className="text-pretty text-[13px] text-asst-body">
           The people you name can <strong className="font-semibold text-asst-text">read</strong> this chat and its document. They cannot reply, rename or delete
-          it, change the document, or open the files you attached — a message you attached files to says only how many. They see the chat as it was when they
-          opened it, not as you carry on.
+          it, change the document, or open the files you attached — a message you attached files to says only how many, although a message you sent with a file
+          and no words of your own may name it, and so may the chat's own name. They see the most recent part of the chat as it stood when they opened it, not
+          as you carry on.
         </p>
 
         <form

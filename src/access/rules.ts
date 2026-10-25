@@ -336,7 +336,7 @@ export function canShareConversationWith(actorOid: string, conversation: SharedC
 /** A name typed into the share dialog has to be this specific before the hub will match anyone against it. */
 export const MIN_PEOPLE_QUERY = 2;
 
-/** How many people one lookup answers with. Enough to choose from, too few to read the hub's user list out of. */
+/** How many people one lookup answers with. Enough to choose from, and short enough that one ask is not a list. */
 export const MAX_PEOPLE_SUGGESTIONS = 8;
 
 export type PeopleLookup = { ok: true; query: string; limit: number } | { ok: false };
@@ -344,8 +344,12 @@ export type PeopleLookup = { ok: true; query: string; limit: number } | { ok: fa
 /**
  * What `GET /api/ui/people` may answer. The endpoint is an access surface of its own: it says who has used the hub,
  * which is why it answers a search and never a list. A query shorter than `MIN_PEOPLE_QUERY`, once trimmed, is
- * refused rather than answered broadly, and no answer is longer than `MAX_PEOPLE_SUGGESTIONS`, so the way to read
- * every name out of it is to guess every name first.
+ * refused rather than answered broadly, and no answer is longer than `MAX_PEOPLE_SUGGESTIONS`.
+ *
+ * What those two prevent is one request that hands over everyone. What they do not prevent is many: the answer is
+ * ordered and never offset, so walking the prefixes and going deeper wherever a full eight come back recovers the
+ * list. Nothing in this application is rate limited, so that is true of its other reads as well, and closing it here
+ * alone would be a false comfort. Treat the set of people who use the hub as known to anyone signed in.
  *
  * Anyone signed in may ask. The people it matches are colleagues in the same Entra tenant whose names and work
  * addresses that tenant's own directory already gives them; what this adds is only that they have used the hub.

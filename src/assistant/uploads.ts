@@ -141,13 +141,18 @@ export type UploadRefusal =
  *
  * So the hub writes the obvious sentence instead. It is true, it is what attaching a file means, and it is what the
  * thread then shows above the chips.
+ *
+ * It counts the files rather than naming them, because this is the one body in the hub that the person did not write
+ * and may never read closely, and a body outlives the file: the chips beside it are the names, and they are the
+ * owner's to see, while a read-only share of the conversation shows the words and not the files. Naming them here
+ * would put a file name in a message that a share then carries. The session is not short of them either — the
+ * envelope lists every attachment with its name and its path.
  */
 export function attachedBody(names: readonly string[]): string {
   if (names.length === 0) {
     return "";
   }
-  const listed = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-  return `I have attached ${listed}. Please take a look.`;
+  return `I have attached ${names.length === 1 ? "a file" : `${names.length} files`}. Please take a look.`;
 }
 
 /** `25 MB`, `4 MiB`: for a refusal a person reads, not a log line. */

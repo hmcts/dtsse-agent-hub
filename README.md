@@ -137,11 +137,12 @@ section of [`docs/agent-api.md`](docs/agent-api.md).
   own, and the session's registration with `conversation_id` adopts the agent and clears the wake.
 - **Owner only.** No grant reaches a conversation's agent, and it is left out of the roster, the sidebar and
   `GET /api/agent/agents`. Deleting a conversation deletes its agents, transcripts and direct messages.
-- **A conversation can be shared read-only** with people its owner names one at a time, in the dialog at
-  `/assistant/[id]?share=1`. The named people are the whole of the access: the link resolves for them and 404s for
-  everyone else, and removing someone revokes it. A share carries the words of the thread and the document, never a
-  file's bytes, names or sizes, and nothing live. It does not reach the conversation's agent, so none of the owner-only
-  rules above move.
+- **A conversation can be shared read-only** with people its owner names one at a time, in the dialog the chat's
+  options menu opens at `/assistant/[id]?share=1`. The named people are the whole of the access: the link resolves for
+  them and 404s for everyone else, and removing someone revokes it. A share carries the words of the thread and the
+  document, never a file's bytes, names or sizes, and nothing live; it shows one page of the transcript and says so
+  when the chat began before it. It does not reach the conversation's agent, so none of the owner-only rules above
+  move.
 - **The document** (`assistant_conversation.artefact_*`) is versioned: the person's autosave and the session's
   `scripts/agent-hub artefact put` both write against the version they read, and a stale one is refused with the
   current document, which the panel offers as "Use theirs" or "Keep mine".

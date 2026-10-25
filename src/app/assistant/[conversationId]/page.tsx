@@ -39,17 +39,19 @@ export default async function ConversationPage({
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const { conversationId } = await params;
-  const [home, view, claudeMd, query] = await Promise.all([
+  const query = await searchParams;
+  // Who the chat is shared with is read only when the dialog is being shown, and then beside the rest: it is two
+  // queries to fill a dialog, and this is the page that loads most often.
+  const sharing = query.share === "1";
+  const [home, view, claudeMd, shares] = await Promise.all([
     openAssistant(viewer),
     assistantConversation(viewer, conversationId),
     claudeMdSettings(viewer),
-    searchParams
+    sharing ? chatShares(viewer, conversationId) : undefined
   ]);
   if (view === undefined) {
     notFound();
   }
-  // Who the chat is already shared with, so the dialog opens with its list rather than filling it in afterwards.
-  const shares = (await chatShares(viewer, conversationId)) ?? [];
   const plugins = assistantPluginsData(home.assistant, home.plugins);
   const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
   return (
@@ -74,7 +76,7 @@ export default async function ConversationPage({
         dismissed={waitingDismissed(jar.get(WAITING_COOKIE)?.value, home.assistant.id, home.assistant.startedAt)}
         theme={theme}
       />
-      <ShareGate conversationId={view.id} open={query.share === "1"} people={shares} share={shareChat} unshare={unshareChat} />
+      <ShareGate conversationId={view.id} open={sharing} people={shares ?? []} share={shareChat} unshare={unshareChat} />
     </AssistantShell>
   );
 }

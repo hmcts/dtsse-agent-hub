@@ -46,8 +46,8 @@ export default async function SharedChatsPage() {
         <div className="flex flex-col gap-2">
           <h1 className="text-[22px] font-semibold tracking-tight">Shared chats</h1>
           <p className="text-pretty text-[13px] text-asst-body">
-            A shared chat can be read by the people its owner named, and by nobody else. A reader sees the messages and the document as they stood when they
-            opened it; they cannot reply, change anything, or open the files that were sent.
+            A shared chat can be read by the people its owner named, and by nobody else. A reader sees the most recent part of the chat and its document as they
+            stood when the page was opened; they cannot reply, change anything, or open the files that were sent.
           </p>
         </div>
         <Chats label="Chats you have shared" chats={given} manage />

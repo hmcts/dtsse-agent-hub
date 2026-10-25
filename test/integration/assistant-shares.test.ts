@@ -384,6 +384,20 @@ describe("revoking a share", () => {
     expect(await prisma.assistantConversationShare.count()).toBe(0);
     expect(await sharedChat(viewerOf(BOB), id)).toBeUndefined();
   });
+
+  // The share row names two people as well as the conversation, so either of them going takes it with them. Without
+  // the cascade on the recipient, a row would be left pointing at an oid nobody holds, and the share list would read
+  // it as a person.
+  it("should take the share with the recipient when that person's row goes", async () => {
+    const { id } = await chat();
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+
+    await prisma.user.delete({ where: { oid: BOB.oid } });
+
+    expect(await prisma.assistantConversationShare.count()).toBe(0);
+    expect(await shareRecipients(prisma, id)).toEqual([]);
+    expect(await prisma.assistantConversation.count({ where: { id } })).toBe(1);
+  });
 });
 
 describe("the owner's own chat", () => {

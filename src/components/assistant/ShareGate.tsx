@@ -1,20 +1,26 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 import type { SharePerson } from "@/assistant/shares";
 import { type ShareAction, ShareDialog } from "@/components/assistant/ShareDialog";
 
 /**
- * Opens the share dialog over the chat, from `?share=1` on the chat's own address.
+ * Shows the share dialog over the chat while `?share=1` is on the chat's own address.
  *
- * An address rather than a button, so the dialog can be reached from anywhere — the shared-chats page, a link in a
- * message, the browser's history — and so the entry point in the chat's own header is one `href` whenever it is
- * added. Closing it takes the parameter off, which leaves the chat exactly as it was.
+ * An address rather than a button, so the dialog can be reached from anywhere — the chat's options menu, a row of the
+ * sidebar, the shared-chats page, the browser's history — and closing it takes the parameter off, which leaves the
+ * chat exactly as it was.
+ *
+ * Whether it is showing is read from the prop on every render and held nowhere else. That is the whole of the
+ * component, and it has to be: opening the dialog from the chat you are already looking at is a query-only
+ * navigation, which Next answers by re-rendering this page rather than by remounting its subtree, so anything
+ * remembered here from the first mount would survive the navigation and the dialog would never appear. The same
+ * single source is what lets the back button close it, and what hands the dialog the list of people as it is now
+ * rather than as it was when the chat was opened.
  */
 export function ShareGate({
   conversationId,
-  open: initiallyOpen,
+  open,
   people,
   share,
   unshare
@@ -26,7 +32,6 @@ export function ShareGate({
   unshare: ShareAction;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(initiallyOpen);
 
   if (!open) {
     return null;
@@ -37,10 +42,7 @@ export function ShareGate({
       people={people}
       share={share}
       unshare={unshare}
-      onClose={() => {
-        setOpen(false);
-        router.replace(`/assistant/${conversationId}`);
-      }}
+      onClose={() => router.replace(`/assistant/${conversationId}`)}
     />
   );
 }

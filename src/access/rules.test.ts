@@ -675,8 +675,12 @@ describe("the people lookup rules", () => {
       expect(peopleLookup(raw)).toEqual({ ok: false });
     });
 
-    it("should hold the shortest query to two characters, so the hub cannot be listed a letter at a time", () => {
+    it("should hold the shortest query to two characters, so one letter does not answer with the hub", () => {
       expect(MIN_PEOPLE_QUERY).toBe(2);
+    });
+
+    it("should keep one answer short enough not to be a list", () => {
+      expect(MAX_PEOPLE_SUGGESTIONS).toBe(8);
     });
   });
 

@@ -59,6 +59,13 @@ export interface SharedConversationView {
   /** Whose chat it is, so a recipient knows whose words they are reading. */
   ownerName: string;
   thread: SharedThreadItem[];
+  /**
+   * Whether the chat began before the part shown here. A share reads one page of the transcript, the latest
+   * `CONVERSATION_PAGE_SIZE` entries, and has nothing to ask for the page before it with, so a long chat opens
+   * part-way through. The page says so rather than letting a recipient read a thread that starts mid-answer and
+   * take it for the whole of it.
+   */
+  earlierHidden: boolean;
   /** The conversation's document, or `null` when it has none. Read-only here: there is no version to write against. */
   document: { title: string; markdown: string } | null;
   /** `owner` when the owner is looking at their own share, which is how they see what a recipient sees. */
@@ -103,6 +110,9 @@ export async function sharedConversation(
     productLabel: productLabel(row.product),
     ownerName: row.owner.name,
     thread: sharedThreadItems(threadItems(items, marks(row.productHistory))),
+    // `olderBefore` is the entry the owner's own page would ask for the previous page before; here it only says that
+    // there is one.
+    earlierHidden: page?.olderBefore !== null && page?.olderBefore !== undefined,
     document: artefact.version === 0 ? null : { title: artefact.title ?? "Untitled document", markdown: artefact.markdown },
     access
   };
