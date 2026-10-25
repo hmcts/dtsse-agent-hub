@@ -5,8 +5,10 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionsData } from "@/assistant/connections";
 import { MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } from "@/assistant/templates";
+import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
+import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { LoginState, LoginView } from "@/virtual-agents/logins";
@@ -63,12 +65,18 @@ function themed(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, th
 }
 
 /**
- * The dialog's own focusable controls, in tab order: its close button, the appearance choices, then any others. Asked
- * for with the dialog's own `FOCUSABLE`, so a section adding a kind of control the focus trap does not know about
- * fails here rather than passing against a second copy of the list.
+ * The dialog's own focusable controls, in tab order: its close button, the appearance choices, then any others. It
+ * asks the dialog which they are, so a control the trap has been left out of is a control missing here too.
  */
 function stops(): HTMLElement[] {
   return [...screen.getByRole("dialog").querySelectorAll<HTMLElement>(FOCUSABLE)];
+}
+
+/** Submits the named form and waits for the action it posts to. Shared by every section that has one. */
+async function submit(name: string): Promise<void> {
+  await act(async () => {
+    fireEvent.submit(screen.getByRole("form", { name }));
+  });
 }
 
 describe("the Assistant's settings cog", () => {
@@ -478,7 +486,7 @@ describe("the Assistant's team tools", () => {
   });
 });
 
-function saved(name: string, text = `${name} prompt`): SavedTemplate {
+function row(name: string, text = `${name} prompt`): SavedTemplate {
   return { id: `t-${name.toLowerCase()}`, name, text };
 }
 
@@ -491,12 +499,6 @@ function templates(overrides: Partial<AssistantTemplates> = {}): AssistantTempla
 }
 
 const ADD = "Save a new template";
-
-function submit(form: string): Promise<void> {
-  return act(async () => {
-    fireEvent.submit(screen.getByRole("form", { name: form }));
-  });
-}
 
 describe("the Assistant's own templates", () => {
   it("should show nothing at all when the page passes no templates", () => {
@@ -521,7 +523,7 @@ describe("the Assistant's own templates", () => {
   });
 
   it("should list each saved template with its prompt when it opens", () => {
-    open({ templates: templates({ mine: [saved("Stand-up"), saved("Retro")] }) });
+    open({ templates: templates({ mine: [row("Stand-up"), row("Retro")] }) });
     const rows = within(screen.getByRole("list", { name: "Your templates" })).getAllByRole("listitem");
 
     expect(rows.map((row) => row.textContent)).toEqual(["Stand-upStand-up promptEditDelete", "RetroRetro promptEditDelete"]);
@@ -542,7 +544,7 @@ describe("the Assistant's own templates", () => {
 
   it("should open the form on a template, and send its id, when the person edits one", async () => {
     const save = saveOk();
-    open({ templates: templates({ mine: [saved("Stand-up")], save }) });
+    open({ templates: templates({ mine: [row("Stand-up")], save }) });
 
     fireEvent.click(screen.getByRole("button", { name: "Edit Stand-up" }));
     expect((screen.getByLabelText("Template name") as HTMLInputElement).value).toBe("Stand-up");
@@ -555,7 +557,7 @@ describe("the Assistant's own templates", () => {
   });
 
   it("should go back to adding, with the fields empty, when the person cancels an edit", () => {
-    open({ templates: templates({ mine: [saved("Stand-up")] }) });
+    open({ templates: templates({ mine: [row("Stand-up")] }) });
 
     fireEvent.click(screen.getByRole("button", { name: "Edit Stand-up" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -575,7 +577,7 @@ describe("the Assistant's own templates", () => {
 
   it("should send the template's id to the delete action when the person deletes one", async () => {
     const remove = vi.fn(async () => ({ ok: true as const, confirmation: "Your template is deleted" }));
-    open({ templates: templates({ mine: [saved("Stand-up"), saved("Retro")], remove }) });
+    open({ templates: templates({ mine: [row("Stand-up"), row("Retro")], remove }) });
 
     await submit("Delete Retro");
 
@@ -593,14 +595,14 @@ describe("the Assistant's own templates", () => {
   });
 
   it("should count what the person has against the cap when it opens", () => {
-    open({ templates: templates({ mine: [saved("Stand-up")] }) });
+    open({ templates: templates({ mine: [row("Stand-up")] }) });
 
     expect(screen.getByText(`1 of ${MAX_TEMPLATES} templates`)).toBeTruthy();
   });
 
   // The cap is refused in the store's own sentence, so what is read here is what a POST skipping this screen is told.
   it("should refuse another in the store's own words, and offer no form, when the person is at the cap", () => {
-    const mine = Array.from({ length: MAX_TEMPLATES }, (_, index) => saved(`Template ${index}`));
+    const mine = Array.from({ length: MAX_TEMPLATES }, (_, index) => row(`Template ${index}`));
     open({ templates: templates({ mine }) });
 
     expect(screen.getByText(TEMPLATES_FULL)).toBeTruthy();
@@ -608,7 +610,7 @@ describe("the Assistant's own templates", () => {
   });
 
   it("should still let the person change one of the ones they have when they are at the cap", () => {
-    const mine = Array.from({ length: MAX_TEMPLATES }, (_, index) => saved(`Template ${index}`));
+    const mine = Array.from({ length: MAX_TEMPLATES }, (_, index) => row(`Template ${index}`));
     open({ templates: templates({ mine }) });
 
     fireEvent.click(screen.getByRole("button", { name: "Edit Template 3" }));
@@ -633,7 +635,7 @@ describe("the Assistant's own templates", () => {
   });
 
   it("should keep its own fields in the dialog's focus trap when it is open", () => {
-    open({ templates: templates({ mine: [saved("Stand-up")] }) });
+    open({ templates: templates({ mine: [row("Stand-up")] }) });
     const items = stops();
 
     expect(items).toContain(screen.getByLabelText("What it fills the message box with"));
@@ -642,7 +644,7 @@ describe("the Assistant's own templates", () => {
 
   // Two rows of Edit and Delete say which template they belong to, so a screen reader is not read four of one name.
   it("should name the Edit and Delete of each row after its own template when it opens", () => {
-    open({ templates: templates({ mine: [saved("Stand-up"), saved("Retro")] }) });
+    open({ templates: templates({ mine: [row("Stand-up"), row("Retro")] }) });
     const section = screen.getByRole("list", { name: "Your templates" });
 
     expect(
@@ -650,5 +652,177 @@ describe("the Assistant's own templates", () => {
         .getAllByRole("button")
         .map((control) => control.getAttribute("aria-label"))
     ).toEqual(["Edit Stand-up", "Delete Stand-up", "Edit Retro", "Delete Retro"]);
+  });
+
+  // The sections are each other's neighbours in one dialog, so the one that was added last must not be the only one
+  // left working: every form a page can pass is still here, and the trap still ends on the last of them.
+  it("should keep every other section working, in one focus trap, when the page passes them all", () => {
+    open({ plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }) });
+    const items = stops();
+
+    for (const name of ["Appearance"]) {
+      expect(screen.getByRole("radiogroup", { name })).toBeTruthy();
+    }
+    for (const name of ["Change your assistant's team tools", "Save your CLAUDE.md", "Save a new template"]) {
+      expect(items).toContain(screen.getByRole("form", { name }).querySelector("button[type='submit']"));
+    }
+    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+    expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Save template" }));
+  });
+});
+
+const SAVED = "Your CLAUDE.md is saved. Each agent uses it from its next Claude start";
+const RESET = "Your CLAUDE.md is back to the default";
+const SAVE_FORM = "Save your CLAUDE.md";
+const RESET_FORM = "Reset your CLAUDE.md to the default";
+
+function saved(confirmation: string) {
+  return vi.fn(async () => ({ ok: true as const, confirmation }));
+}
+
+function claudeMd(overrides: Partial<AssistantClaudeMd> = {}): AssistantClaudeMd {
+  return {
+    settings: { available: true, stored: false, text: DEFAULT_CLAUDE_MD, updatedAt: null },
+    save: saved(SAVED),
+    reset: saved(RESET),
+    ...overrides
+  };
+}
+
+function notes(): HTMLTextAreaElement {
+  return screen.getByLabelText("CLAUDE.md") as HTMLTextAreaElement;
+}
+
+describe("the Assistant's CLAUDE.md", () => {
+  it("should show nothing at all when the page passes no CLAUDE.md", () => {
+    open({ claudeMd: undefined });
+
+    expect(screen.queryByRole("heading", { name: "Your CLAUDE.md" })).toBeNull();
+    expect(screen.queryByRole("form", { name: SAVE_FORM })).toBeNull();
+  });
+
+  it("should still offer the appearance, the connections and the team tools beside it when it is shown", () => {
+    open({ claudeMd: claudeMd(), plugins: plugins() });
+
+    expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+    expect(screen.getByRole("form", { name: FORM })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Your CLAUDE.md" })).toBeTruthy();
+  });
+
+  // Every pod writes the file before each start of Claude, so a chat that is already running keeps what it started
+  // with. People read a settings dialog as being about the chat they opened it from, which is the misunderstanding
+  // this wording is here to stop.
+  it("should say the notes are used by all of their chats, and when a change reaches one, whenever it is shown", () => {
+    open({ claudeMd: claudeMd() });
+
+    const section = screen.getByRole("region", { name: "Your CLAUDE.md" });
+    expect(section.textContent).toContain("They apply to all of your chats, not only this one.");
+    expect(section.textContent).toContain("A chat picks up a change when its session next starts, so a chat already running keeps the notes it started with.");
+  });
+
+  it("should fill the editor with the default and say none of theirs is stored when the person has saved none", () => {
+    open({ claudeMd: claudeMd() });
+
+    expect(notes().value).toBe(DEFAULT_CLAUDE_MD);
+    expect(screen.getByText("This is the default. Nothing of yours is stored yet.")).toBeTruthy();
+    expect(screen.queryByRole("form", { name: RESET_FORM })).toBeNull();
+  });
+
+  it("should fill the editor with their own text, and say when it was saved, when one is stored", () => {
+    open({ claudeMd: claudeMd({ settings: { available: true, stored: true, text: "# Me\n\nI work on PCS.", updatedAt: "2026-10-05T09:00:00.000Z" } }) });
+
+    expect(notes().value).toBe("# Me\n\nI work on PCS.");
+    expect(screen.queryByText("This is the default. Nothing of yours is stored yet.")).toBeNull();
+    expect(screen.getByRole("form", { name: RESET_FORM })).toBeTruthy();
+  });
+
+  it("should send the edited text to the save action, and confirm it, when the person saves", async () => {
+    const save = saved(SAVED);
+    open({ claudeMd: claudeMd({ save }) });
+
+    fireEvent.change(notes(), { target: { value: "# Me\n\nAlways British English." } });
+    await submit(SAVE_FORM);
+
+    expect((save.mock.calls[0] as unknown as [FormData])[0].get("value")).toBe("# Me\n\nAlways British English.");
+    expect(screen.getByRole("status").textContent).toBe(SAVED);
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  // The store owns what is acceptable, so the reason has to be its words: a generic "that could not be saved" would
+  // leave someone with no idea which character or how much text to take out.
+  it("should word the store's own reason when the save is refused", async () => {
+    const refused = "your CLAUDE.md can only hold printable text, tabs and new lines";
+    const save = vi.fn(async () => ({ ok: false as const, error: refused }));
+    open({ claudeMd: claudeMd({ save }) });
+
+    await submit(SAVE_FORM);
+
+    expect(screen.getByRole("alert").textContent).toBe(refused);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("should put the default back in the editor, and confirm it, when the person resets a stored one", async () => {
+    const reset = saved(RESET);
+    open({ claudeMd: claudeMd({ settings: { available: true, stored: true, text: "# Me\n\nI work on PCS.", updatedAt: null }, reset }) });
+
+    await submit(RESET_FORM);
+
+    expect(reset).toHaveBeenCalled();
+    expect(notes().value).toBe(DEFAULT_CLAUDE_MD);
+    expect(screen.getByRole("status").textContent).toBe(RESET);
+  });
+
+  it("should count the text against the store's own limit, and mark the field invalid, when there is too much of it", () => {
+    open({ claudeMd: claudeMd() });
+
+    fireEvent.change(notes(), { target: { value: "a".repeat(MAX_CLAUDE_MD_CHARACTERS + 5) } });
+
+    expect(screen.getByText("20,005 of 20,000 characters: 5 too many")).toBeTruthy();
+    expect(notes().getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("should count what the person has written, and not mark it invalid, while it is within the limit", () => {
+    open({ claudeMd: claudeMd() });
+
+    fireEvent.change(notes(), { target: { value: "🚀🚀" } });
+
+    expect(screen.getByText("2 of 20,000 characters")).toBeTruthy();
+    expect(notes().getAttribute("aria-invalid")).toBe("false");
+  });
+
+  it("should say why, rather than show an editor, when the hub cannot read the person's CLAUDE.md", () => {
+    open({ claudeMd: claudeMd({ settings: { available: false, reason: "the credentials Key Vault is not configured" } }) });
+
+    expect(screen.getByText(/the credentials Key Vault is not configured/)).toBeTruthy();
+    expect(screen.queryByRole("form", { name: SAVE_FORM })).toBeNull();
+  });
+
+  it("should describe the editor to a screen reader by its label, how it stands and its count, when it is shown", () => {
+    open({ claudeMd: claudeMd() });
+    const described = (notes().getAttribute("aria-describedby") ?? "").split(" ").map((id) => document.getElementById(id)?.textContent);
+
+    expect(described).toEqual(["This is the default. Nothing of yours is stored yet.", `${DEFAULT_CLAUDE_MD.length} of 20,000 characters`]);
+  });
+
+  // A markdown editor is a textarea, which the trap's list of tab stops has to name: one left out of it is a control
+  // Tab can reach and the wrap cannot account for, and the dialog is modal.
+  it("should keep its editor and its buttons among the dialog's own tab stops when it is open", () => {
+    open({ claudeMd: claudeMd({ settings: { available: true, stored: true, text: "# Me", updatedAt: null } }) });
+    const items = stops();
+
+    expect(items).toContain(notes());
+    expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Reset to the default" }));
+  });
+
+  it("should wrap focus from its last control back to the start of the dialog when the person tabs off the end", () => {
+    open({ claudeMd: claudeMd() });
+    const items = stops();
+    items.at(-1)?.focus();
+
+    fireEvent.keyDown(document, { key: "Tab" });
+
+    expect(items.at(-1)).toBe(screen.getByRole("button", { name: SAVE_FORM }));
+    expect(document.activeElement).toBe(items[0]);
   });
 });

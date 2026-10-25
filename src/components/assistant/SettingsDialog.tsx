@@ -6,6 +6,7 @@ import { type Connection, type ConnectionsData, connections, connectionsWarning 
 import type { AssistantPluginsData } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
@@ -20,6 +21,7 @@ interface SettingsView {
   unavailable: string | null;
   warning: string | null;
   plugins: AssistantPlugins | undefined;
+  claudeMd: AssistantClaudeMd | undefined;
   templates: AssistantTemplates | undefined;
 }
 
@@ -117,7 +119,7 @@ function Plugins({ plugins }: { plugins: AssistantPlugins }) {
   );
 }
 
-function Sections({ theme, list, unavailable, warning, plugins, templates }: SettingsView) {
+function Sections({ theme, list, unavailable, warning, plugins, claudeMd, templates }: SettingsView) {
   return (
     <>
       <section aria-labelledby="assistant-settings-appearance" className="flex flex-col gap-2.5">
@@ -151,14 +153,16 @@ function Sections({ theme, list, unavailable, warning, plugins, templates }: Set
         )}
       </section>
       {plugins === undefined ? null : <Plugins plugins={plugins} />}
+      {claudeMd === undefined ? null : <ClaudeMd claudeMd={claudeMd} />}
       {templates === undefined ? null : <Templates templates={templates} />}
     </>
   );
 }
 
 /**
- * The settings themselves, over the page: the appearance, the person's sign-ins, their team tools and their own saved
- * templates. Focus moves into it as it opens and stays in it while it is open; closing it, by Escape, the close
+ * The settings themselves, over the page: the appearance, the person's sign-ins, their team tools, their own CLAUDE.md
+ * and their own saved templates. Focus moves into it as it opens and stays in it while it is open; closing it, by
+ * Escape, the close
  * button or the page behind it, puts focus back on the cog, which is what `onClose` is for.
  */
 function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) {
@@ -233,11 +237,13 @@ export function AssistantSettings({
   theme = "system",
   connections: data,
   plugins,
+  claudeMd,
   templates
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
   plugins?: AssistantPlugins;
+  claudeMd?: AssistantClaudeMd;
   templates?: AssistantTemplates;
 }) {
   const cog = useRef<HTMLButtonElement>(null);
@@ -302,7 +308,7 @@ export function AssistantSettings({
       </button>
       {open
         ? createPortal(
-            <Dialog view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, templates }} onClose={close} />,
+            <Dialog view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, claudeMd, templates }} onClose={close} />,
             themeRoot()
           )
         : null}

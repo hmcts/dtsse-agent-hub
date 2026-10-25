@@ -4,9 +4,13 @@ import type { Identity } from "./identity.ts";
 /**
  * Records a person, or refreshes what we know of them.
  *
- * Called on every web sign-in and every authenticated agent request. The update is skipped unless something
- * changed or the row is more than five minutes stale, so a heartbeat every 30 seconds is not a write every 30
- * seconds.
+ * Called on every web sign-in, on every web read that resolves the viewer, when an agent registers, and on an agent
+ * request made with a person's own delegated token. Not on a pod's: `agentRoute` calls this only when the caller is
+ * not a launch token, because a launch token was looked up through its owner's existing `user` row and nothing the
+ * pod sends should rewrite that row. Keep that guard — pod traffic is the bulk of a virtual agent's requests.
+ *
+ * The update is skipped unless something changed or the row is more than five minutes stale, so a heartbeat every 30
+ * seconds is not a write every 30 seconds.
  */
 export async function upsertUser(db: Database, identity: Identity): Promise<void> {
   const email = identity.email ?? null;

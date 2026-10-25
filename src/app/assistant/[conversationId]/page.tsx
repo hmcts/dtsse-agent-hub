@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { deleteConversation, renameConversation, saveArtefact, sendAssistantMessage, setConversationProduct, warmConversation } from "@/app/_actions/assistant";
-import { saveCredential } from "@/app/_actions/credentials";
+import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
 import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
@@ -13,7 +13,7 @@ import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { requireViewer } from "@/viewer/current";
-import { assistantConversation, assistantTemplates, openAssistant } from "@/web/data";
+import { assistantConversation, assistantTemplates, claudeMdSettings, openAssistant } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +32,12 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
   const { conversationId } = await params;
-  const [home, view, mine] = await Promise.all([openAssistant(viewer), assistantConversation(viewer, conversationId), assistantTemplates(viewer)]);
+  const [home, view, claudeMd, mine] = await Promise.all([
+    openAssistant(viewer),
+    assistantConversation(viewer, conversationId),
+    claudeMdSettings(viewer),
+    assistantTemplates(viewer)
+  ]);
   if (view === undefined) {
     notFound();
   }
@@ -47,6 +52,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ c
       actions={ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
       plugins={pluginSettings}
+      claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
     >
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
