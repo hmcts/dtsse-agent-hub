@@ -191,11 +191,16 @@ const NO_PORTS = { exposedPorts: [], localOnlyPorts: [] } as const;
 const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1 } } as const;
 
 /**
- * The memory report belongs to the pod that made it, so asking for a new or replacement one drops it.
+ * The memory report belongs to the pod that made it, so every path that asks for a new or replacement pod drops it:
+ * starting, resizing, changing plugins, restarting, re-applying after a failure, and a takeover onto another cluster.
  *
  * Without this the next pod shows the last one's figures as what it is holding right now, and can inherit its
- * low-memory warning, until its own first report lands. **Not applied when stopping**: there the figures are the last
- * thing anyone measured and the Size section says as much, which is the whole reason they are kept.
+ * low-memory warning, until its own first report lands — the pod reports phase `running` before it starts its
+ * supervisor, so there is a window where the row is running and the figures are the dead pod's.
+ *
+ * **Not applied when stopping**: there the figures are the last thing anyone measured and the Size section says as
+ * much, which is the whole reason they are kept. Clearing is not enough on its own either — the outgoing pod has to
+ * lose its launch token in the same breath, or it reports again and undoes this; see `NO_TOKEN`'s use below.
  */
 const NO_MEMORY_REPORT = {
   memoryLimitBytes: null,
@@ -303,6 +308,13 @@ export async function renameVirtualAgent(prisma: PrismaClient, actorOid: string,
  * resources: a running pod is replaced, which ends the sessions on it, and a stopped one comes back at the new size.
  * Refused only while the agent is being deleted, per `sizeChangeRefusal`; someone other than the owner is told there
  * is no such agent.
+ *
+ * **The launch token goes too**, as it does on a stop and a restart. Nothing is lost by shutting the outgoing pod out
+ * early, because replacing it ends every session on it anyway and the person has already been told so. Keeping the
+ * token had two costs: the old pod and its replacement would both hold a *valid* one over the handover, since nothing
+ * mints a replacement while the agent is `running` with a token it still has; and the old supervisor would go on
+ * reporting, putting the figures this just cleared back — with the **old size's limit** beside them, which is a
+ * ceiling the warning would then measure against.
  */
 export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string, id: string, size: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
   const checked = checkSize(size);
@@ -322,7 +334,11 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
       return row;
     }
     const updated = toRow(
-      await tx.virtualAgent.update({ where: { id }, data: { size: checked.size, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now }, select: SELECT })
+      await tx.virtualAgent.update({
+        where: { id },
+        data: { size: checked.size, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now },
+        select: SELECT
+      })
     );
     await announce(tx, id, row.ownerOid);
     return updated;
@@ -335,6 +351,8 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
  * `pod_generation`, as a resize does, so the orchestrator applies the StatefulSet with the new `AGENT_HUB_PLUGINS`:
  * a running pod is replaced, and the conversation continues on its disk; a stopped one picks the change up when it
  * next starts. Refused while the agent is being deleted; someone other than the owner is told there is no such agent.
+ *
+ * The launch token and the memory report go with it, for the reasons under `setVirtualAgentSize`.
  */
 export async function setVirtualAgentPlugins(
   prisma: PrismaClient,
@@ -359,7 +377,11 @@ export async function setVirtualAgentPlugins(
       return row;
     }
     const updated = toRow(
-      await tx.virtualAgent.update({ where: { id }, data: { plugins: checked.plugins, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now }, select: SELECT })
+      await tx.virtualAgent.update({
+        where: { id },
+        data: { plugins: checked.plugins, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now },
+        select: SELECT
+      })
     );
     await announce(tx, id, row.ownerOid);
     return updated;
@@ -427,6 +449,7 @@ export async function restartVirtualAgent(
         data: {
           ...NO_TOKEN,
           ...POD_CHANGE,
+          ...NO_MEMORY_REPORT,
           status: "provisioning",
           statusDetail: detail,
           ...(row.status === "provisioning" ? {} : { statusChangedAt: now }),
@@ -626,6 +649,8 @@ async function takeOver(db: Database, cluster: string, now: Date): Promise<void>
        SET cluster = ${cluster}, generation = v.generation + 1, pod_generation = v.pod_generation + 1, status = 'provisioning',
            status_detail = 'moved from ' || moving.from_cluster || ' to ' || ${cluster} || '; starting on a fresh disk',
            status_changed_at = ${now}, launch_token_hash = NULL, launch_token_issued_at = NULL, claimed_by = NULL, claimed_at = NULL,
+           memory_limit_bytes = NULL, memory_current_bytes = NULL, memory_peak_bytes = NULL, memory_anon_bytes = NULL,
+           memory_reported_at = NULL,
            updated_at = ${now}
       FROM moving
      WHERE v.id = moving.id

@@ -8,7 +8,7 @@ import * as memoryRoute from "../../src/app/api/virtual/[virtualAgentId]/memory/
 import { assistantMemory, reportMemoryUse } from "../../src/assistant/memory.ts";
 import { CONVERSATION_MEMORY_BYTES, memoryPressure } from "../../src/assistant/memory-report.ts";
 import { createConversation, reportSessions } from "../../src/assistant/store.ts";
-import { claimVirtualAgents, observeVirtualAgent } from "../../src/virtual-agents/store.ts";
+import { claimVirtualAgents, observeVirtualAgent, restartVirtualAgent, setDesired, setVirtualAgentPlugins } from "../../src/virtual-agents/store.ts";
 import { assistantSize } from "../../src/web/data.ts";
 import { ALICE, BOB, form, podFixture, viewer } from "./assistant-pod.ts";
 import { type Person, prisma, resetDatabase } from "./database.ts";
@@ -216,6 +216,80 @@ describe("the memory route a pod reports on", () => {
     const token = await launchToken(assistant);
 
     expect((await put(assistant, token, { limit_bytes: LIMIT, current_bytes: 2048, peak_bytes: 1024, anon_bytes: 1024 })).status).toBe(204);
+  });
+});
+
+describe("the memory report of a pod the hub replaces", () => {
+  const MEMORY_COLUMNS = {
+    memoryLimitBytes: true,
+    memoryCurrentBytes: true,
+    memoryPeakBytes: true,
+    memoryAnonBytes: true,
+    memoryReportedAt: true,
+    launchTokenHash: true
+  } as const;
+
+  const CLEARED = {
+    memoryLimitBytes: null,
+    memoryCurrentBytes: null,
+    memoryPeakBytes: null,
+    memoryAnonBytes: null,
+    memoryReportedAt: null,
+    launchTokenHash: null
+  };
+
+  /** An assistant whose pod has reported itself at its ceiling, so an inherited report would raise the warning. */
+  async function reportedAtItsCeiling(): Promise<string> {
+    const assistant = await assistantOf(ALICE);
+    await launchToken(assistant);
+    await reportMemoryUse(prisma, assistant, report(0));
+    return assistant;
+  }
+
+  const stored = (id: string) => prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: MEMORY_COLUMNS });
+
+  // The figures belong to the pod that measured them. Clearing them alone is not enough: the outgoing pod keeps
+  // reporting until its token goes, and SIGTERM ending its sessions is itself a session-count change, which fires a
+  // report — so it would put them straight back, with the old size's limit beside them.
+  it("should drop the report and the launch token together when the size changes", async () => {
+    const assistant = await reportedAtItsCeiling();
+    actAs("alice");
+
+    expect(await actions.resizeVirtualAgent(form({ id: assistant, size: "medium" }))).toMatchObject({ ok: true });
+
+    expect(await stored(assistant)).toEqual(CLEARED);
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toEqual({ reported: false, reason: "waiting" });
+  });
+
+  it("should drop the report and the launch token together when the plugins change", async () => {
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "pcs=PCS team workflows");
+    const assistant = await reportedAtItsCeiling();
+
+    await setVirtualAgentPlugins(prisma, ALICE.oid, assistant, ["pcs"]);
+
+    expect(await stored(assistant)).toEqual(CLEARED);
+  });
+
+  // Reached whenever an owner signs in to something again, which is the routine action a lapsed sign-in sends them to.
+  it("should drop the report when the agent is restarted to sign in again", async () => {
+    const assistant = await reportedAtItsCeiling();
+
+    await restartVirtualAgent(prisma, ALICE.oid, assistant, "restarting to sign in to GitHub again");
+
+    expect(await stored(assistant)).toEqual(CLEARED);
+  });
+
+  // A stopped pod keeps its figures: they are the last thing anyone measured, the section says so, and nothing is
+  // going to raise a warning from them. This is the one path that must *not* clear.
+  it("should keep the report when the agent is only stopped", async () => {
+    const assistant = await reportedAtItsCeiling();
+
+    await setDesired(prisma, ALICE.oid, assistant, "stopped");
+    const row = await stored(assistant);
+
+    expect(row.memoryAnonBytes).not.toBeNull();
+    expect(row.memoryReportedAt).not.toBeNull();
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toMatchObject({ reported: true, stopped: true });
   });
 });
 
