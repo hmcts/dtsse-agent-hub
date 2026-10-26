@@ -69,12 +69,15 @@ export const CONNECTORS = {
   git_identity: null
 } as const satisfies Record<CredentialKind, Connector | null>;
 
+/** The kinds `CONNECTORS` words, so reading one of those needs no cast and no fallback for a kind it does not. */
+export type ConnectionKind = { [K in CredentialKind]: (typeof CONNECTORS)[K] extends null ? never : K }[CredentialKind];
+
 /**
  * A kind is a connection when it is something the person signs in to. Their CLAUDE.md and their git identity are
  * kept beside the sign-ins but are neither, so settings never shows them as one.
  */
-export function isConnection(kind: CredentialKind): boolean {
-  return CONNECTORS[kind] !== null;
+export function isConnection(kind: CredentialKind): kind is ConnectionKind {
+  return Object.hasOwn(CONNECTORS, kind) && CONNECTORS[kind] !== null;
 }
 
 /**
@@ -144,16 +147,12 @@ export function connections(data: ConnectionsData | undefined, checklist: (store
   if (data === undefined || data.unavailable !== null) {
     return [];
   }
-  return data.kinds.flatMap((kind) => {
-    const connector = CONNECTORS[kind];
-    if (connector === null) {
-      return [];
-    }
+  return data.kinds.filter(isConnection).map((kind) => {
     const status = data.statuses.find((candidate) => candidate.kind === kind);
     const login = data.logins.find((candidate) => candidate.kind === kind);
     const stored = status?.stored === true;
     const state = connectionState(checklist(stored, login), login, stored);
-    return [{ kind, ...connector, state, detail: DETAILS[state], accountLabel: status?.accountLabel ?? null }];
+    return { kind, ...CONNECTORS[kind], state, detail: DETAILS[state], accountLabel: status?.accountLabel ?? null };
   });
 }
 
@@ -165,18 +164,20 @@ export const OFFERED_OPTIONAL: readonly CredentialKind[] = ["atlassian"];
 
 /** One row of the getting-ready screen: the kind, and the Assistant's words for it. */
 export interface OfferedConnection {
-  kind: CredentialKind;
+  kind: ConnectionKind;
   connector: Connector;
 }
 
 /**
- * The connections the getting-ready screen lists: every one the assistant needs, the optional one it offers, and any
- * other optional one its pod has stopped to ask the person for.
+ * The connections the getting-ready screen lists: every one the assistant needs, every one its pod has stopped to ask
+ * the person for, and the optional one it offers unasked. Needed first, so the ask reads in the order the banner
+ * names it in, and each kind once however many of the three it is.
  *
- * That last part is why the offer cannot be a fixed list. A pod relays a sign-in for whatever kind it likes, and the
- * hub puts the assistant in `awaiting_login` for it whichever kind that is — so a sign-in missing from this screen is
- * an ask with nothing on the screen to act on: the bar sits at 55% under "Waiting for you to connect your
- * accounts…", every row shown reads as connected, and the person has no way to clear it.
+ * Every pending sign-in is here whatever kind it is for, and not only the ones some list expected. A pod relays a
+ * sign-in through `startLogin`, which takes any `CredentialKind` and puts the assistant in `awaiting_login` for it —
+ * so a sign-in this screen left out would be an ask with nothing on the screen to act on: the bar sitting at 55%
+ * under "Waiting for you to connect your accounts…", every row shown reading as connected, and no way to clear it.
+ * Which kinds a pod relays today is decided in another repo, and this must not depend on that answer.
  *
  * A pending sign-in whose code has run out is asked about too, and no clock is needed to decide it: the assistant
  * stays `awaiting_login` until its pod reports its next step, so the row is still the only thing to act on.
@@ -187,11 +188,14 @@ export function offeredConnections(assistant: {
   logins: readonly LoginView[];
 }): OfferedConnection[] {
   const asked = assistant.logins.filter((login) => login.state === "pending").map((login) => login.kind);
-  const offered = assistant.optional.filter((kind) => OFFERED_OPTIONAL.includes(kind) || asked.includes(kind));
-  return [...assistant.needed, ...offered].flatMap((kind) => {
-    const connector = CONNECTORS[kind];
-    return connector === null ? [] : [{ kind, connector }];
-  });
+  const unasked = assistant.optional.filter((kind) => OFFERED_OPTIONAL.includes(kind));
+  const rows: OfferedConnection[] = [];
+  for (const kind of [...assistant.needed, ...asked, ...unasked]) {
+    if (isConnection(kind) && !rows.some((row) => row.kind === kind)) {
+      rows.push({ kind, connector: CONNECTORS[kind] });
+    }
+  }
+  return rows;
 }
 
 /** "A", "A and B", "A, B and C". */

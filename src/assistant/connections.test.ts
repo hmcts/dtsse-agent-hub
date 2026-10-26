@@ -341,14 +341,29 @@ describe("offeredConnections", () => {
     expect(offer(["github", "azure", "bedrock"])).toEqual(["github", "azure", "bedrock", "atlassian"]);
   });
 
-  it("should offer no connection that is neither needed nor optional", () => {
+  it("should offer no connection that is neither needed, nor asked for, nor the optional one it offers", () => {
     const offered = offer(["github", "azure", "claude"]);
 
-    expect(offered.filter((kind) => !["github", "azure", "claude", ...OPTIONAL_CREDENTIALS].includes(kind))).toEqual([]);
+    expect(offered.filter((kind) => !["github", "azure", "claude", ...OFFERED_OPTIONAL].includes(kind))).toEqual([]);
   });
 
   it("should offer a row for an optional sign-in the pod has stopped to ask for", () => {
     expect(offer(["github", "azure", "bedrock"], [login("jenkins", "pending")])).toEqual(["github", "azure", "bedrock", "jenkins", "atlassian"]);
+  });
+
+  // Which kinds a pod relays is decided in another repo, so this holds whatever that answer becomes rather than only
+  // for the kinds the hub's own `needed` and `optional` happen to name.
+  it("should offer a row for a sign-in the pod asks for that is neither needed nor optional", () => {
+    expect(offer(["github", "azure", "bedrock"], [login("claude", "pending")])).toEqual(["github", "azure", "bedrock", "claude", "atlassian"]);
+  });
+
+  it("should offer each asked-for connection once when it is needed as well", () => {
+    expect(offer(["github", "azure", "bedrock"], [login("azure", "pending"), login("atlassian", "pending")])).toEqual([
+      "github",
+      "azure",
+      "bedrock",
+      "atlassian"
+    ]);
   });
 
   // The status does not move back when a code runs out, so the ask outlasts the code and the row has to as well.

@@ -183,6 +183,27 @@ function ConnectionRow({
       </button>
     );
   }
+  // One thing to do at a time, chosen here rather than by three conditions that have to agree: a relayed sign-in and
+  // a field for the same credential, side by side, is two password boxes posting to different places, and a token
+  // typed into the code box reaches the pod and comes back only as a sign-in that did not work.
+  let below: React.ReactNode = null;
+  if (state === "login" && login !== undefined) {
+    // The live sign-in wins over anything the person clicked before it arrived, which on the Claude row is the usual
+    // order: they ask to connect, and the pod relays its code a moment later.
+    below = <SignIn assistantId={assistantId} login={login} name={connector.name} paste={paste} />;
+  } else if (state !== "stored" && connecting && pasted !== null) {
+    below = (
+      <ActionForm action={save} label={`Save your ${pasted}`} className="flex flex-wrap items-center gap-2">
+        <input type="hidden" name="kind" value={kind} />
+        <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label={pasted} className={INPUT} />
+        <button type="submit" className={PRIMARY}>
+          Save
+        </button>
+      </ActionForm>
+    );
+  } else if (state !== "stored" && connecting) {
+    below = <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>;
+  }
   return (
     <li className={`flex flex-col gap-2.5 bg-asst-bg px-4 py-3.5 ${first ? "" : "border-t border-asst-line"}`}>
       <div className="flex items-center gap-3.5">
@@ -195,19 +216,7 @@ function ConnectionRow({
         </div>
         {right}
       </div>
-      {state === "login" && login !== undefined ? <SignIn assistantId={assistantId} login={login} name={connector.name} paste={paste} /> : null}
-      {state !== "stored" && pasted !== null && connecting ? (
-        <ActionForm action={save} label={`Save your ${pasted}`} className="flex flex-wrap items-center gap-2">
-          <input type="hidden" name="kind" value={kind} />
-          <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label={pasted} className={INPUT} />
-          <button type="submit" className={PRIMARY}>
-            Save
-          </button>
-        </ActionForm>
-      ) : null}
-      {state !== "stored" && !pasted && connecting && state !== "login" ? (
-        <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>
-      ) : null}
+      {below}
       {state !== "login" && login?.state === "failed" ? (
         <p role="alert" className="text-xs text-asst-error">
           That sign-in did not work. Your assistant will ask again.

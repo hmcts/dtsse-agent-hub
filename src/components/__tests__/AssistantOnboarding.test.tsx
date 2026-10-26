@@ -82,6 +82,13 @@ function connector(name: string): HTMLElement {
   return item;
 }
 
+/** What a row offers the person, named, so a row offering two things to do at once is one assertion. */
+function formsIn(name: string): (string | null)[] {
+  return within(connector(name))
+    .getAllByRole("form")
+    .map((form) => form.getAttribute("aria-label"));
+}
+
 describe("GettingReady progress", () => {
   it("should show how far the assistant has got when it is starting", () => {
     render(ready());
@@ -224,6 +231,26 @@ describe("GettingReady asks the person can act on", () => {
     expect((form.querySelector('input[name="kind"]') as HTMLInputElement).value).toBe("claude");
   });
 
+  // Asking to connect and then having the pod relay its code is the usual order on the Claude row, and two password
+  // boxes posting to different places is worse than either alone: a token typed into the code box reaches the pod and
+  // comes back only as a sign-in that did not work.
+  it("should offer the relayed sign-in alone when one arrives after the person asked to connect", () => {
+    const summary = assistant("awaiting_credentials", { needed: ["github", "azure", "claude"] });
+    const { rerender } = render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
+    fireEvent.click(within(connector("Claude")).getByRole("button", { name: "Connect" }));
+
+    expect(formsIn("Claude")).toEqual(["Save your Claude token"]);
+
+    const relayed = assistant("awaiting_login", {
+      needed: ["github", "azure", "claude"],
+      logins: [login("claude", { prompt: "paste_code", userCode: null })]
+    });
+    rerender(ready({ assistant: relayed, statuses: statuses("github", "azure") }));
+
+    expect(formsIn("Claude")).toEqual(["Paste the Claude code"]);
+    expect(connector("Claude").querySelectorAll('input[type="password"]')).toHaveLength(1);
+  });
+
   it("should offer a row for a sign-in the assistant is waiting on that it would not offer unasked", () => {
     const summary = assistant("awaiting_login", { needed: ["github", "azure", "bedrock"], logins: [login("jenkins")] });
     render(ready({ assistant: summary, statuses: statuses("github", "azure", "bedrock", "atlassian") }));
@@ -238,7 +265,7 @@ describe("GettingReady asks the person can act on", () => {
     const summary = assistant("awaiting_login", { needed: ["github", "azure", "bedrock"], logins: waitingOn.map((kind) => login(kind)) });
     render(ready({ assistant: summary, statuses: statuses("github", "bedrock", "atlassian") }));
 
-    const shown = offeredConnections(summary).map((row) => row.kind);
+    const shown = offeredConnections(summary).map((row) => String(row.kind));
     expect(waitingOn.filter((kind) => !shown.includes(kind))).toEqual([]);
     for (const kind of waitingOn) {
       expect(within(connector(CONNECTORS[kind]?.name ?? kind)).getByText("Waiting for you")).toBeTruthy();
