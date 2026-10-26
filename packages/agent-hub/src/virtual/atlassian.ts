@@ -16,16 +16,26 @@ import { say, virtualStateDir } from "./phases.ts";
 import { type Respond, relayDeviceLogin, run, stripAnsi } from "./sign-in.ts";
 
 export const ATLASSIAN_AUTH_MAX_CHARS = 24000;
-// `twg login` (1.3.3) gives up on its device code after 300 seconds.
-export const TWG_DEVICE_CODE_EXPIRES_S = 300;
 /**
- * How many codes one call offers the owner. Five minutes is long enough to type a code already in front of you and
- * short enough to miss if you have to go and find the Atlassian sign-in page on another screen, so the first code
- * running out is not read as the owner declining. Two is where it stops: ten minutes of codes fits inside the
- * fifteen a Jira export waits, and a pod re-offering for ever would hold an agent in `awaiting_login` on behalf of
- * somebody who has walked away. Only a code that ran out unused earns another; a sign-in that broke is reported.
+ * How long a pod's `twg login` holds its device code: 120 seconds, not the 300 the server's `expires_in` says.
+ * twg 1.3.3 waits `min(expires_in, 120s in agent mode, 300s otherwise)`, and reads any environment variable whose
+ * name has `AGENT` as a word in it as a sign it is being run by an agent. `AGENT_HUB_LAUNCH_TOKEN` is always in a
+ * pod's environment, so every pod sign-in is agent mode and every code dies at two minutes.
+ *
+ * Overstating it is the one thing that must not happen: the wall-clock check below would then never call a
+ * genuine expiry an expiry, and the second code would never be offered.
  */
-export const ATLASSIAN_SIGN_IN_CODES = 2;
+export const TWG_DEVICE_CODE_EXPIRES_S = 120;
+/**
+ * How many codes one call offers the owner. Two minutes is enough to type a code already in front of you and easy to
+ * miss if you have to go and find the Atlassian sign-in page on another screen, so the first code running out is not
+ * read as the owner declining. Three is where it stops, for about six minutes of codes: that is the time budget this
+ * bound exists to spend, and it leaves the fifteen minutes a Jira export waits with room for the restore attempts
+ * before the first code and for the session to report the outcome after the last. A pod re-offering for ever would
+ * instead hold an agent in `awaiting_login` on behalf of somebody who has walked away. Only a code that ran out
+ * unused earns another; a sign-in that broke is reported at once.
+ */
+export const ATLASSIAN_SIGN_IN_CODES = 3;
 // What `twg auth refresh` (1.3.3) exits with when Atlassian rejects the refresh token.
 const TWG_EXIT_AUTH_INVALID = 77;
 
@@ -75,6 +85,15 @@ export function parseTwgDeviceCode(raw: string): { verification_uri: string; use
 }
 
 export const twgPromptsForBrowser = (raw: string): boolean => /Open in browser\?/.test(stripAnsi(raw));
+
+/**
+ * Whether `twg login` gave up waiting rather than failing some other way. twg 1.3.3 carries one of two error codes
+ * for it, `login_timeout` when its own timer runs out and `expired_token` when Atlassian retires the code first,
+ * and prints the code in brackets after the message. The sentences are matched as well, in case a later twg prints
+ * one without the other; the wall clock behind this is the backstop for a twg that prints neither.
+ */
+export const twgLoginExpired = (raw: string): boolean =>
+  /\[(?:login_timeout|expired_token)\]|Login timed out after|device code has expired/i.test(stripAnsi(raw));
 
 export function readAtlassianAuth(env: Env = process.env): string | null {
   try {
@@ -223,57 +242,71 @@ export async function atlassianLogin({
     }
   }
   let last: { code: number; expired: boolean } | null = null;
-  for (let attempt = 1; attempt <= codes; attempt++) {
-    // Each attempt starts from no sign-in on disk, so the auth.conf read after it can only be this attempt's.
-    for (const f of ["auth.conf", "auth_oauth.conf"]) {
-      fs.rmSync(path.join(twgDir(env), f), { force: true });
-    }
-    let answered = false;
-    // twg asks whether to open a browser; "n" makes it wait for the device code to be entered elsewhere.
-    const respond: Respond = (output, stdin) => {
-      if (answered || !twgPromptsForBrowser(output)) {
-        return;
+  let thrown: unknown;
+  // `relayDeviceLogin` throws when the relay itself fails or twg prints no code at all. Caught here rather than let
+  // out, because the hub has been promised one of `complete` or `failed` for every sign-in shown to the owner, and
+  // an attempt that throws has usually already shown them one.
+  try {
+    for (let attempt = 1; attempt <= codes; attempt++) {
+      // Each attempt starts from no sign-in on disk, so the auth.conf read after it can only be this attempt's.
+      for (const f of ["auth.conf", "auth_oauth.conf"]) {
+        fs.rmSync(path.join(twgDir(env), f), { force: true });
       }
-      answered = true;
-      stdin?.write("n\r");
-    };
-    last = await relayDeviceLogin({
-      api,
-      id,
-      kind: "atlassian",
-      cmd: "script",
-      args: ["-q", "-e", "-c", "stty cols 1000 rows 50 2>/dev/null; exec twg login --site hmcts", "/dev/null"],
-      env: { ...env, BROWSER: "true", TERM: "xterm-256color" },
-      parse: parseTwgDeviceCode,
-      respond,
-      expiresIn,
-      label: "atlassian"
-    });
-    const text = readAtlassianAuth(env);
-    if (last.code === 0 && text) {
-      const { user } = packAtlassianAuth(text);
-      await withRetry(() => api.loginComplete(id, "atlassian", user ? { account_label: user } : {}));
-      await syncAtlassianAuth({ api, id, env, force: true });
-      say(`atlassian: signed in${user ? ` as ${user}` : ""}`);
-      return "signed-in";
+      let answered = false;
+      // twg asks whether to open a browser; "n" makes it wait for the device code to be entered elsewhere.
+      const respond: Respond = (output, stdin) => {
+        if (answered || !twgPromptsForBrowser(output)) {
+          return;
+        }
+        answered = true;
+        stdin?.write("n\r");
+      };
+      last = await relayDeviceLogin({
+        api,
+        id,
+        kind: "atlassian",
+        cmd: "script",
+        args: ["-q", "-e", "-c", "stty cols 1000 rows 50 2>/dev/null; exec twg login --site hmcts", "/dev/null"],
+        env: { ...env, BROWSER: "true", TERM: "xterm-256color" },
+        parse: parseTwgDeviceCode,
+        respond,
+        expiresIn,
+        isExpiry: twgLoginExpired,
+        label: "atlassian"
+      });
+      const text = readAtlassianAuth(env);
+      if (last.code === 0 && text) {
+        const { user } = packAtlassianAuth(text);
+        await withRetry(() => api.loginComplete(id, "atlassian", user ? { account_label: user } : {}));
+        await syncAtlassianAuth({ api, id, env, force: true });
+        say(`atlassian: signed in${user ? ` as ${user}` : ""}`);
+        return "signed-in";
+      }
+      if (!last.expired) {
+        break;
+      }
+      if (attempt < codes) {
+        say("atlassian: the sign-in code ran out before it was used; relaying a fresh one, which replaces it");
+      }
     }
-    if (!last.expired) {
-      break;
-    }
-    if (attempt < codes) {
-      say("atlassian: the sign-in code ran out before it was used; relaying a fresh one, which replaces it");
-    }
+  } catch (e) {
+    thrown = e;
   }
 
-  const expired = last?.expired === true;
+  const expired = thrown === undefined && last?.expired === true;
   const detail = expired
     ? "atlassian: the sign-in code ran out before it was used; Jira and Confluence stay signed out"
-    : `atlassian: the sign-in was not completed (twg login exited ${last?.code}); Jira and Confluence stay signed out`;
+    : thrown !== undefined
+      ? `atlassian: the sign-in could not be relayed (${(thrown as Error).message}); Jira and Confluence stay signed out`
+      : `atlassian: the sign-in was not completed (twg login exited ${last?.code}); Jira and Confluence stay signed out`;
   say(detail);
   // The owner is otherwise left holding a code that no longer works, with nothing but this pod's stderr saying so.
   // Few attempts: nothing here is fatal, and a hub that cannot be told is not worth half a minute of the pod.
   await withRetry(() => api.loginFailed(id, "atlassian", { state: expired ? "expired" : "failed", detail }), { attempts: 3 }).catch((e: unknown) => {
     say(`atlassian: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`);
   });
+  if (thrown !== undefined) {
+    throw thrown;
+  }
   return "not-signed-in";
 }

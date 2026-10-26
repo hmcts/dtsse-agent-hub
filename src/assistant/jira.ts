@@ -48,10 +48,13 @@ export const JIRA_SELECT = {
   jiraRequestedAt: true
 } as const;
 
-/** What the document panel shows of the conversation's export. */
+/**
+ * What the document panel shows of the conversation's export. A pending one carries when it was asked for, so the
+ * panel can tell a sign-in this export is waiting on from one an earlier export already gave up on.
+ */
 export type JiraExportView =
   | { status: "none" }
-  | { status: "pending"; project: string }
+  | { status: "pending"; project: string; requestedAt: string }
   | { status: "done"; project: string; key: string; url: string }
   | { status: "failed"; project: string | null; error: string };
 
@@ -67,9 +70,10 @@ export function jiraExportView(row: JiraExportRow, now: Date = new Date()): Jira
     return { status: "done", project, key: row.jiraKey, url: jiraIssueUrl(row.jiraKey) };
   }
   if (row.jiraStatus === "pending" && row.jiraProject !== null) {
+    // `expired` covers a null `jiraRequestedAt`, so a pending export always has one to report.
     return expired(row.jiraRequestedAt, now)
       ? { status: "failed", project: row.jiraProject, error: TIMED_OUT }
-      : { status: "pending", project: row.jiraProject };
+      : { status: "pending", project: row.jiraProject, requestedAt: (row.jiraRequestedAt as Date).toISOString() };
   }
   if (row.jiraStatus === "failed") {
     return { status: "failed", project: row.jiraProject, error: row.jiraError ?? "The ticket could not be created." };

@@ -1367,6 +1367,17 @@ describe("logins", () => {
     expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("failed");
   });
 
+  it("should leave a completed sign-in alone when a second report says its code expired", async () => {
+    // Two of a pod's sessions can relay the same kind at once and share one twg config, so the loser's report
+    // must not take the winner's working sign-in away.
+    const { id, token } = await started(ALICE, "pcs-api");
+    await relayAtlassian(id, token);
+    await complete(id, token, "atlassian", { account_label: "alice@justice.gov.uk" });
+
+    expect((await failed(id, token, "atlassian", { state: "expired", detail: null })).status).toBe(204);
+    expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("completed");
+  });
+
   it("should answer 404 when there is no sign-in of that kind to report on", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
 

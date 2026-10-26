@@ -49,11 +49,16 @@ export type SignInStage = "live" | "renewing" | "given-up" | "none";
  *
  * The clock decides as much as the state does, because neither the pod's report that it has run out of codes nor the
  * hub's sweep lands the instant a code's time is up. A `pending` login past its expiry is therefore `renewing`: the
- * pod relays a second code, so one more is usually on its way, and the half-minute when it is the last code rather
+ * pod relays another code, so one more is usually on its way, and the half-minute when it was the last code rather
  * than the next reads as the `given-up` it is about to become.
+ *
+ * `since` is when the export now running was asked for. There is one sign-in row per kind, so the row a finished
+ * export left behind is still the row this one reads: without it, clicking Export again announces that the sign-in
+ * expired and no ticket was made while the new export is in flight and nothing of the sort has happened yet. A code
+ * that was already dead when this export was asked for belongs to the last one and is `none` here.
  */
-export function signInStage(login: LoginView | null | undefined, now: number): SignInStage {
-  if (login === null || login === undefined || login.kind !== "atlassian") {
+export function signInStage(login: LoginView | null | undefined, now: number, since: number): SignInStage {
+  if (login === null || login === undefined || login.kind !== "atlassian" || new Date(login.expiresAt).getTime() <= since) {
     return "none";
   }
   if (login.state === "expired" || login.state === "failed") {
@@ -200,10 +205,13 @@ export function JiraFooter({
   // is pending, so the button does not come back in the moment before the page catches up.
   const shownExport = exported.status === "failed" ? `failed:${exported.error}` : exported.status;
   const [clickedAt, setClickedAt] = useState<string | null>(null);
+  // When they clicked, which stands in for the export's `requested_at` until the page has read it back.
+  const [clickedMs, setClickedMs] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function start(): Promise<void> {
     setClickedAt(shownExport);
+    setClickedMs(Date.now());
     setError(null);
     const result = await exportTo({ conversationId, project });
     if (!result.ok) {
@@ -214,16 +222,21 @@ export function JiraFooter({
 
   // Ticking rather than read once, because the code's time running out is the moment this footer has to stop
   // offering it, and nothing else on the page changes then. Null until the browser has a clock, so the first
-  // render matches the server's.
+  // render matches the server's, and only while there is a sign-in whose time can run out.
+  const watching = access.login?.kind === "atlassian";
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
+    if (!watching) {
+      return;
+    }
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [watching]);
 
   const pending = clickedAt === shownExport || exported.status === "pending";
-  const stage = signInStage(access.login, now ?? 0);
+  const since = exported.status === "pending" ? new Date(exported.requestedAt).getTime() : (clickedMs ?? now ?? 0);
+  const stage = signInStage(access.login, now ?? 0, since);
   const note = pending ? signInNote(stage) : null;
   const blocked = blockedBy(written, saved);
   const failure = exported.status === "failed" && !pending ? exported.error : null;

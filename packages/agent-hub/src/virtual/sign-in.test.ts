@@ -24,11 +24,13 @@ import { FatalError } from "./phases.ts";
 import {
   azureLogin,
   claudeLogin,
+  EXPIRY_TOLERANCE_S,
   findClaudeToken,
   githubLogin,
   parseAzDeviceCode,
   parseClaudeAuthorizeUrl,
   parseGhDeviceCode,
+  type RelayDeviceLoginResult,
   relayDeviceLogin,
   run,
   stripAnsi
@@ -220,40 +222,55 @@ describe("relayDeviceLogin", () => {
     expect(stderr).toBe("");
   });
 
-  it("should call the code expired when it was on the owner's screen for the whole of its life", async () => {
-    // Act
-    const result = await relayDeviceLogin({
+  function relay(script: string, options: Partial<Parameters<typeof relayDeviceLogin>[0]> = {}): Promise<RelayDeviceLoginResult> {
+    return relayDeviceLogin({
       api: api(),
       id: VID,
       kind: "github",
       cmd: "bash",
-      args: ["-c", `printf '%s' ${JSON.stringify(GH_OUTPUT)}; sleep 1.2; exit 1`],
+      args: ["-c", `printf '%s' ${JSON.stringify(GH_OUTPUT)}; ${script}`],
       env: pod.env(),
       parse: parseGhDeviceCode,
-      expiresIn: 1,
-      label: "github"
+      label: "github",
+      ...options
     });
+  }
+
+  it("should call the code expired when it was on the owner's screen until its time ran out", async () => {
+    // Act
+    const result = await relay("sleep 1.2; exit 1", { expiresIn: 1 });
 
     // Assert
     expect(result).toMatchObject({ code: 1, expired: true });
   });
 
-  it("should not call it expired when the command gave up while the code still had time left", async () => {
+  it("should allow the tolerance, because the code was already running when we first saw it", async () => {
+    // Arrange: a command that gives up this far short of `expiresIn` did so because the code ran out, not because
+    // the sign-in broke; our clock starts when the code is parsed, which is after the command started its own.
     // Act
-    const result = await relayDeviceLogin({
-      api: api(),
-      id: VID,
-      kind: "github",
-      cmd: "bash",
-      args: ["-c", `printf '%s' ${JSON.stringify(GH_OUTPUT)}; exit 1`],
-      env: pod.env(),
-      parse: parseGhDeviceCode,
-      expiresIn: 30,
-      label: "github"
-    });
+    const result = await relay("exit 1", { expiresIn: EXPIRY_TOLERANCE_S });
+
+    // Assert
+    expect(result).toMatchObject({ code: 1, expired: true });
+  });
+
+  it("should not call it expired when the command gave up well inside the code's life", async () => {
+    // Act
+    const result = await relay("exit 1", { expiresIn: EXPIRY_TOLERANCE_S + 30 });
 
     // Assert
     expect(result).toMatchObject({ code: 1, expired: false });
+  });
+
+  it("should take the command's own word for it when it says the code ran out", async () => {
+    // Act: nothing has waited, so only `isExpiry` can be the reason
+    const result = await relay("echo 'gave up [login_timeout]'; exit 1", {
+      expiresIn: 900,
+      isExpiry: (output) => /\[login_timeout\]/.test(output)
+    });
+
+    // Assert
+    expect(result).toMatchObject({ code: 1, expired: true });
   });
 });
 

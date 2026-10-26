@@ -46,16 +46,28 @@ export type RelayDeviceLoginOptions = {
   parse: (output: string) => DeviceCodePrompt | null;
   respond?: Respond;
   expiresIn?: number;
+  /**
+   * Whether the command's own output says it gave up waiting, for a command that says so in words. Read first,
+   * because it is the command's own answer rather than an inference about it; the clock is the fallback.
+   */
+  isExpiry?: (output: string) => boolean;
   label: string;
 };
+
+/**
+ * How much of `expiresIn` may be left on our clock and the code still count as expired. `relayedAt` is when the code
+ * was parsed off the command's output, which is strictly after the command started its own timer, so our elapsed is
+ * always short of its. A pty flush or a busy pod widens the gap; a command that gave up seconds early did so
+ * because the code ran out, not because the sign-in broke.
+ */
+export const EXPIRY_TOLERANCE_S = 15;
 
 export type RelayDeviceLoginResult = {
   code: number;
   output: string;
   /**
-   * Whether the code was still on the owner's screen for its whole `expiresIn` before the command gave up, which is
-   * what tells "nobody used it in time" apart from "the sign-in broke": the two are the same exit code, and only one
-   * of them is worth offering the owner another code for.
+   * Whether the code was on the owner's screen until it ran out, rather than the sign-in breaking under them: the
+   * two are the same exit code, and only one of them is worth offering the owner another code for.
    */
   expired: boolean;
 };
@@ -178,6 +190,7 @@ export function relayDeviceLogin({
   parse,
   respond,
   expiresIn = DEVICE_CODE_EXPIRES_S,
+  isExpiry,
   label
 }: RelayDeviceLoginOptions): Promise<RelayDeviceLoginResult> {
   return new Promise((resolve, reject) => {
@@ -228,7 +241,8 @@ export function relayDeviceLogin({
         reject(new Error(`${cmd} printed no sign-in code (exit ${code})`));
         return;
       }
-      resolve({ code: code ?? 1, output, expired: Date.now() - relayedAt >= expiresIn * 1000 });
+      const ranOut = Date.now() - relayedAt >= Math.max(0, expiresIn - EXPIRY_TOLERANCE_S) * 1000;
+      resolve({ code: code ?? 1, output, expired: isExpiry?.(output) === true || ranOut });
     });
   });
 }

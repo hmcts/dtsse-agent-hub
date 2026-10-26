@@ -187,6 +187,10 @@ async function leaveAwaitingLogin(tx: Database, virtualAgent: VirtualAgentRow, d
  * The pod's word that a sign-in it relayed is over and the owner did not finish it: `expired` when the code reached
  * its expiry unused, `failed` for anything else. The counterpart of `completeLogin`, and the only thing that turns a
  * dead code on the owner's screen into something that says so.
+ *
+ * A sign-in already completed is left alone and answered `204`. Two of a pod's sessions can relay a sign-in of the
+ * same kind at once — the HMCTS Assistant runs one session per conversation and they share one `twg` config — and
+ * the loser reporting its own code expired must not un-complete the winner's working sign-in.
  */
 export async function failLogin(
   prisma: PrismaClient,
@@ -201,6 +205,9 @@ export async function failLogin(
   });
   if (existing === null) {
     throw new HttpError(404, `there is no ${kind} sign-in to report on`);
+  }
+  if (existing.state === "completed") {
+    return;
   }
   await prisma.$transaction(async (tx) => {
     await tx.virtualAgentLogin.update({

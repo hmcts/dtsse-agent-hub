@@ -30,8 +30,6 @@ export const CLAUDE_OUTPUT =
   `\x1b[?25l\x1b[1mWelcome to Claude Code v2.1.287\x1b[22m\r\n Browser didn't open? Use the url below to sign in (c to copy)\r\n\r\n` +
   `\x1b]8;id=1om6vol;${AUTHORIZE_URL}\x1b\\${AUTHORIZE_URL}\x1b]8;;\x1b\\\r\n\r\n Paste code here if prompted > `;
 
-// `FAKE_TWG_LOGIN=expire` gives up as twg does when nobody uses its code. `FAKE_TWG_EXPIRE_AFTER` is how long it
-// holds the code first, so a test can outlast a short `expiresIn` and have the relay count as expired.
 // What `twg login --site hmcts` 1.3.3 draws on a pty, with a colour reset between the URL's characters.
 export const TWG_LOGIN_OUTPUT =
   `\r\n\x1b[1m\x1b[38;5;253m  TWG Login (OAuth)\x1b[39m\x1b[22m\r\n\x1b[38;5;253m  ${"─".repeat(17)}\x1b[39m\r\n\r\n` +
@@ -40,7 +38,19 @@ export const TWG_LOGIN_OUTPUT =
   `  ⚠️  Only approve this request if you initiated it from your terminal.\r\n` +
   `\x1b[?25l\x1b[90m│\x1b[39m\r\n\x1b[36m◆\x1b[39m  Open in browser?\r\n` +
   `\x1b[36m│\x1b[39m  \x1b[32m●\x1b[39m Y \x1b[2m/\x1b[22m \x1b[2m○\x1b[22m \x1b[2mn\x1b[22m\r\n\x1b[36m└\x1b[39m\r\n\x1b[1A\r\n`;
-export const TWG_WAIT_OUTPUT = `\x1b[35m◒\x1b[39m    Waiting for authentication in browser... (300s remaining)\x1b[1G\x1b[J`;
+export const TWG_WAIT_OUTPUT = `\x1b[35m◒\x1b[39m    Waiting for authentication in browser... (120s remaining)\x1b[1G\x1b[J`;
+
+/**
+ * How `twg login` 1.3.3 gives up when nobody uses its code: its own timer, which is two minutes whenever twg reads
+ * the environment as an agent's. The bracketed error code is what tells this apart from any other failure.
+ */
+export const TWG_LOGIN_TIMEOUT_OUTPUT =
+  `\r\n\x1b[31m✖\x1b[39m  OAuth authentication failed: Login timed out after 2 minutes: browser authentication was not ` +
+  `completed. This looks like a non-interactive/agent environment — run \`twg login\` yourself in an interactive ` +
+  `terminal to finish authenticating.\r\n  Code:        [login_timeout]\r\n`;
+
+/** A sign-in that broke rather than ran out: the owner said no. Shaped as above, with a different code. */
+export const TWG_LOGIN_DENIED_OUTPUT = `\r\n\x1b[31m✖\x1b[39m  OAuth authentication failed: The user denied the request.\r\n  Code:        [access_denied]\r\n`;
 
 export type MsalCacheOptions = {
   refresh?: string;
@@ -147,6 +157,8 @@ sleep 30`
   fs.writeFileSync(path.join(stateDir, "claude.out"), CLAUDE_OUTPUT);
   fs.writeFileSync(path.join(stateDir, "twg-login.out"), TWG_LOGIN_OUTPUT);
   fs.writeFileSync(path.join(stateDir, "twg-wait.out"), TWG_WAIT_OUTPUT);
+  fs.writeFileSync(path.join(stateDir, "twg-timeout.out"), TWG_LOGIN_TIMEOUT_OUTPUT);
+  fs.writeFileSync(path.join(stateDir, "twg-denied.out"), TWG_LOGIN_DENIED_OUTPUT);
 
   shim(
     "az",
@@ -171,6 +183,8 @@ esac`
   );
   scriptShim();
   // Stands in for twg 1.3.3: each refresh rotates both tokens, and only the newest refresh token works.
+  // `FAKE_TWG_LOGIN`: `expire` gives up on the code as twg's own timer does, after `FAKE_TWG_EXPIRE_AFTER` seconds;
+  // `deny` fails for another reason after printing a code; `crash` fails before printing one.
   shim(
     "twg",
     `auth="$TWG_CONFIG_DIR/auth.conf"
@@ -196,7 +210,8 @@ case "$1 $2" in
       IFS= read -r -d $'\\r' answer
       [ "$answer" = n ] || { echo "opened a browser"; exit 5; }
       for i in 1 2 3; do cat "$SHIM_STATE/twg-wait.out"; sleep 0.1; done
-      [ "$FAKE_TWG_LOGIN" = expire ] && { sleep "\${FAKE_TWG_EXPIRE_AFTER:-0}"; printf '\\r\\n  Device code expired.\\r\\n'; exit 1; }
+      [ "$FAKE_TWG_LOGIN" = expire ] && { sleep "\${FAKE_TWG_EXPIRE_AFTER:-0}"; cat "$SHIM_STATE/twg-timeout.out"; exit 1; }
+      [ "$FAKE_TWG_LOGIN" = deny ] && { cat "$SHIM_STATE/twg-denied.out"; exit 1; }
       rotate; printf '\\r\\n\\x1b[32m✓\\x1b[39m  Authentication successful!\\r\\n' ;;
   *) echo "unexpected twg $*" >&2; exit 2 ;;
 esac`
