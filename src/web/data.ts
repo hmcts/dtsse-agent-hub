@@ -4,6 +4,8 @@ import { canManageConversationShares, canOwnerReadCredential, canReadMessage } f
 import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
+import { readExportDefaults } from "../assistant/export-default-store.ts";
+import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
 import {
   accessToConversation,
@@ -362,6 +364,11 @@ export async function assistantFiles(viewer: Viewer): Promise<UploadsOnDisk | un
  */
 export async function assistantTemplates(viewer: Identity): Promise<SavedTemplate[]> {
   return await listTemplates(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
+}
+
+/** Where the viewer's documents go by default, for the settings to edit and the document panel to start from. */
+export async function assistantExportDefaults(viewer: Identity): Promise<ExportDefaults> {
+  return await readExportDefaults(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
 }
 
 /** One of the viewer's conversations, or `undefined` for the not-found the page answers. */

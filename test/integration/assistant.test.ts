@@ -16,6 +16,7 @@ import * as lookupsRoute from "../../src/app/api/ui/assistant/lookups/route.ts";
 import * as lookupAnswerRoute from "../../src/app/api/virtual/[virtualAgentId]/lookups/[lookupId]/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
+import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
 import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
@@ -1115,5 +1116,32 @@ describe("atlassian lookups", () => {
     await insertUser(BOB);
 
     expect((await ask({ kind: "jira_project", query: "vibe" }, "bob")).status).toBe(404);
+  });
+});
+
+describe("export defaults", () => {
+  const PAGE = { id: "100", title: "Team space", space_id: "200", space_key: "CCD", space_name: "Core Case Data", ancestors: ["Core Case Data"] };
+
+  it("should keep each person's own defaults, either of which may be none", async () => {
+    await insertUser(ALICE);
+    await insertUser(BOB);
+    const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
+
+    expect(await readExportDefaults(prisma, alice)).toEqual({ jira: null, confluence: null });
+    await saveExportDefaults(prisma, alice, { jira: { key: "CCD", name: "Core Case Data" }, confluence: PAGE });
+    expect(await readExportDefaults(prisma, alice)).toEqual({ jira: { key: "CCD", name: "Core Case Data" }, confluence: PAGE });
+    await saveExportDefaults(prisma, alice, { jira: null, confluence: PAGE });
+
+    expect((await readExportDefaults(prisma, alice)).jira).toBeNull();
+    expect(await readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: BOB.oid })).toEqual({ jira: null, confluence: null });
+    await expect(readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: ALICE.oid })).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("should refuse a project or a page that is not one", async () => {
+    await insertUser(ALICE);
+    const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
+
+    await expect(saveExportDefaults(prisma, alice, { jira: { key: "ccd", name: "x" }, confluence: null })).rejects.toMatchObject({ status: 400 });
+    await expect(saveExportDefaults(prisma, alice, { jira: null, confluence: { ...PAGE, space_id: "x" } })).rejects.toMatchObject({ status: 400 });
   });
 });

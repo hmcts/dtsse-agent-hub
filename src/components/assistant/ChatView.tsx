@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { clientSupports } from "@/agents/client-features";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
+import { type ExportDefaults, NO_DEFAULTS } from "@/assistant/export-defaults";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
 import { type Progress, progress, progressAnnouncement, progressLabel, type ThreadItem, threadItems } from "@/assistant/thread";
@@ -197,7 +198,8 @@ export function ChatView({
   templates,
   viewerOid,
   actions,
-  jira
+  jira,
+  defaults = NO_DEFAULTS
 }: {
   view: ConversationView;
   templates: readonly Template[];
@@ -206,6 +208,8 @@ export function ChatView({
   actions: ChatActions;
   /** Whether the person has connected Jira, for the document's export. */
   jira: JiraAccess;
+  /** Where the person's documents go by default, which the exports start from. */
+  defaults?: ExportDefaults;
 }) {
   const router = useRouter();
   const arrivals = useAnnouncer("replies");
@@ -431,11 +435,11 @@ export function ChatView({
           productLabel={view.productLabel}
           save={actions.saveArtefact}
           onClose={() => setPanel(false)}
-          jira={{ exported: view.jira, access: jira, exportTo: actions.exportToJira }}
+          jira={{ exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira }}
           confluence={
             actions.exportToConfluence === undefined
               ? undefined
-              : { exported: view.confluence, access: jira, exportTo: actions.exportToConfluence }
+              : { exported: view.confluence, access: jira, exportTo: actions.exportToConfluence, defaultPage: defaults.confluence }
           }
           narrow={narrow}
         />
