@@ -391,5 +391,16 @@ describe("the published tarball", () => {
 
   it("should declare no runtime dependencies, because the gate must not pay module-load cost", () => {
     expect(MANIFEST.dependencies).toBeUndefined();
+    expect(MANIFEST.optionalDependencies).toBeUndefined();
+    expect(MANIFEST.peerDependencies).toBeUndefined();
+  });
+
+  // Every install of this package passes --ignore-scripts, on the grounds that it declares none and
+  // has no dependency that could. A dependency with a postinstall would otherwise be installed
+  // unbuilt, in a pod and in an image, and fail at runtime with nothing said at build time.
+  it("should declare no install lifecycle script, because every install of it skips scripts", () => {
+    for (const name of ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack"]) {
+      expect(Object.keys((MANIFEST.scripts ?? {}) as Record<string, string>)).not.toContain(name);
+    }
   });
 });

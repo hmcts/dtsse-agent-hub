@@ -46,7 +46,9 @@ if [ "${1:-}" = "hook" ]; then
     [ -n "${AGENT_HUB_CHILD:-}" ] && exit 0
     [ -t 0 ] && exit 0
     input=$(cat)
-    hub="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agent-hub"
+    # HOME is defaulted for the same reason it is below: `set -u` aborts on an unset one, and this
+    # block must never fail a hook.
+    hub="${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/agent-hub"
     sid=""
     re='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]+)"'
     if [[ "$input" =~ $re ]]; then
@@ -101,7 +103,9 @@ load_node() {
     # nvm.sh reads variables it has not set, which `set -u` would abort on.
     set +u
     # shellcheck disable=SC1091
-    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1
+    # Only stdout is dropped. A half-installed nvm complains on stderr, and that complaint is the
+    # one thing that tells an operator node is installed and nvm is what is broken.
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null
     set -u
     command -v node >/dev/null 2>&1
 }
