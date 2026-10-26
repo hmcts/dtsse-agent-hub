@@ -39,6 +39,18 @@ export const MEMORY_REPORT_INTERVAL_MINUTES = 10;
 export const CONVERSATION_MEMORY_BYTES = Math.round(0.65 * 1024 * 1024 * 1024);
 
 /**
+ * What an awake pod holds in `anon` before any conversation: its own session, the three agent-hub daemons and the
+ * entrypoint. The mean of 15 samples across two pods on two images, spread 0.91–0.99Gi, which makes it the firmest
+ * figure here — the per-conversation marginal above is one transition of one pod.
+ *
+ * Here as a constant rather than a number in prose because `baseline + cap × conversation` is the whole model of a
+ * pod's memory, and it is restated wherever anyone reasons about capacity. Written out, those restatements go stale
+ * the moment a cap moves, on a different line, with nothing to catch it. `memory-report.test.ts` turns the one
+ * conclusion that matters into an assertion instead.
+ */
+export const POD_BASELINE_MEMORY_BYTES = Math.round(0.95 * 1024 * 1024 * 1024);
+
+/**
  * That cost as a sentence says it: `0.65 GB`. Two decimal places at most, and in the gigabytes the rest of the Size
  * section is already in, so a sentence about a chat does not change unit from the sentence above it.
  *
@@ -106,11 +118,15 @@ export interface MemoryReportRow {
  * "running an older version" would be a guess about it. Once it *is* running, an older client has to come first or
  * it reads as a pod that is merely slow to answer, and the person waits for a report that cannot come.
  *
- * **Nothing here can tell whose pod a report came from**, so nothing here tries: a report is only ever this pod's
- * because the store drops it whenever the hub asks for a new or replacement one (`NO_MEMORY_REPORT` in
- * `virtual-agents/store.ts`), and the pod sends its first report as it boots rather than a tick later. A pod the
- * kubelet restarted underneath the hub — after the OOM kill this warning is about — is the one case neither covers,
- * and it is closed by that first report rather than by anything in this function.
+ * **Nothing here can tell whose pod a report came from**, so nothing here tries. What keeps a report this pod's is in
+ * `virtual-agents/store.ts`: every path that bumps `pod_generation` drops the report and the outgoing pod's launch
+ * token together (`NO_MEMORY_REPORT` beside `NO_TOKEN`), so the old figures go and nothing can put them back. A pod
+ * reports phase `running` before its supervisor starts, so what is left is a gap with no report rather than one with
+ * the wrong report.
+ *
+ * The case none of that covers is a pod the kubelet restarted underneath the hub — after the OOM kill this warning is
+ * about — where no `pod_generation` moved and the hub was never told it was replaced. The pod's report as it boots
+ * bounds that to the new supervisor's start rather than closing it, and nothing in this function can.
  */
 export function memoryUse(row: MemoryReportRow): MemoryUse {
   if (
@@ -192,19 +208,17 @@ export interface MemoryPressure {
  * the first place, so it is the figure a headroom question can be asked of at all. `memory.peak` is still reported and
  * still leads the section as the fuller account of what the pod has had to hold; it informs, it does not decide.
  *
- * **What this detects is a pod approaching an OOM kill, not a pod full of chats.** The structural reason holds at any
- * cap: `CONVERSATION_SESSIONS` is chosen to keep a pod's chats inside its memory *request*, and this threshold is a
- * conversation short of its *limit*, which is double the request. So a pod holding its full complement cannot reach
- * it, and raising a cap does not change that — it would take a cap of about 10 on `small` before the two met.
+ * **What this detects is a pod approaching an OOM kill, not a pod full of chats.** A pod's chats hold
+ * `POD_BASELINE_MEMORY_BYTES + cap × CONVERSATION_MEMORY_BYTES`, and this threshold is `limit − one conversation`. So
+ * the two meet only at a cap above `(limit − 2 × CONVERSATION_MEMORY_BYTES) / CONVERSATION_MEMORY_BYTES`, which is
+ * around ten chats on `small` and far more on the larger sizes — several times any cap `CONVERSATION_SESSIONS` holds,
+ * because the caps are chosen to keep chats inside a size's memory *request* and this sits a conversation under its
+ * *limit*, which is double the request.
  *
- * The figures, **at the caps in `CONVERSATION_SESSIONS` as this comment is written**, which are the `cap` column: the
- * `anon` column is `0.95 + 0.65 × cap`, so it moves whenever a cap does, and the threshold column never does.
- *
- * | size | cap | `anon` at that cap | must exceed | short by | cap it would take |
- * | --- | --- | --- | --- | --- | --- |
- * | `small` | 3 | 2.90Gi | 7.35Gi | 4.45Gi | 9.8 |
- * | `medium` | 4 | 3.55Gi | 15.35Gi | 11.80Gi | 22.2 |
- * | `large` | 7 | 5.50Gi | 31.35Gi | 25.85Gi | 46.8 |
+ * The formula rather than a table of results, deliberately: that bound depends only on the limit and the two
+ * constants, so it never moves, where the figures either side of it move with every cap and go stale on a line
+ * nothing conflicts with. `memory-report.test.ts` asserts the conclusion for every size at its actual cap, which is
+ * the only form of this that a cap change cannot quietly invalidate.
  *
  * **What crosses it is the work inside a chat, not the number of them.** `CONVERSATION_MEMORY_BYTES` is what a
  * session *settles* at, not a ceiling it cannot pass: a build, a dependency tree, a language server or a leak can put
@@ -257,11 +271,10 @@ export function memoryWarning(pressure: MemoryPressure | undefined): string | nu
  *
  * **It does not say the person's chats did this, and it does not offer closing one as the cure.** A pod's whole
  * complement of chats cannot reach this threshold at any size or cap — `memoryPressure` has the arithmetic — so when
- * this fires the chats are a fraction of what is being held and closing one would not change the answer. At a `small`
- * cap of 3 they are 1.95Gi of the 7.4Gi a firing pod holds, a quarter of it; a bigger cap raises that share without
- * ever making it the cause. A bigger size is the remedy, because it doubles the limit the pod is running into. The
- * per-chat figure is still worth giving someone deciding what to do, so it is stated as a quantity rather than as
- * the thing to do, and left out when no chat is open to close, where it would be a fact about nothing.
+ * this fires, `cap × CONVERSATION_MEMORY_BYTES` is a fraction of what is being held and closing one chat would not
+ * change the answer. A bigger size is the remedy, because it doubles the limit the pod is running into. The per-chat
+ * figure is still worth giving someone deciding what to do, so it is stated as a quantity rather than as the thing
+ * to do, and left out when no chat is open to close, where it would be a fact about nothing.
  *
  * **"holding", not "reached".** The section's first line already says what the pod reached at its busiest, which is a
  * bigger number than this one; two sentences using the same verb for two different figures, the second smaller, reads

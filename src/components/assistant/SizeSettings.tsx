@@ -49,9 +49,10 @@ const NO_REPORT: Record<Exclude<MemoryUse, { reported: true }>["reason"], string
  * the part that cannot be reclaimed, rather than `memory.current`: it is what the warning is computed from and what
  * a chat adds to, so it is the one the per-chat cost belongs against — `memoryPressure` has why.
  *
- * "right now" is as close to current as this gets, and it is earned rather than assumed: the report is this pod's,
- * because the store drops the last one whenever a new or replacement pod is asked for and the pod reports as it
- * boots. The date underneath is always shown, because the hub cannot see a pod's memory between reports, and a
+ * "right now" is as close to current as this gets, and it is mostly earned: every path that replaces a pod drops the
+ * last one's report and its launch token together, so the figures are this pod's rather than its predecessor's. The
+ * exception is a pod the kubelet restarted without the hub being told, which its report at boot bounds rather than
+ * removes. The date underneath is always shown, because the hub cannot see a pod's memory between reports, and a
  * stopped pod's line says "when it stopped" instead — there is no "now" for a container that is gone.
  */
 function Use({ use }: Readonly<{ use: MemoryUse }>) {

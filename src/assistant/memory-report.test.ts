@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CONVERSATION_SESSIONS } from "../orchestrator/manifests.ts";
-import { SIZE_RESOURCES } from "../virtual-agents/size.ts";
+import { SIZE_RESOURCES, VIRTUAL_AGENT_SIZES } from "../virtual-agents/size.ts";
 import {
   CONVERSATION_MEMORY_BYTES,
   type MemoryReportRow,
@@ -10,6 +10,7 @@ import {
   memoryUse,
   memoryWarning,
   nextSizeUp,
+  POD_BASELINE_MEMORY_BYTES,
   sizeChangeQuestion,
   sizeOffer,
   sizeOffers
@@ -112,6 +113,33 @@ describe("memoryPressure", () => {
 
     expect(memoryPressure(reported(measured), 2, "small")).toBeUndefined();
     expect(memoryPressure(reported(measured - 1), 2, "small")).toMatchObject({ limitBytes: LIMIT });
+  });
+
+  /**
+   * **The warning must not be reachable by opening chats, at any size, at whatever cap that size currently holds.**
+   *
+   * This is computed from `CONVERSATION_SESSIONS` and `SIZE_RESOURCES` rather than from figures written out here, so
+   * that raising a cap past the point where a pod's own chats would trip the warning fails *this* instead of quietly
+   * invalidating a number in a comment. Prose saying "2.90Gi at a cap of 3" has gone stale three times, twice on a
+   * line git did not conflict on; an assertion cannot.
+   *
+   * A pod at its cap holds `POD_BASELINE_MEMORY_BYTES + cap × CONVERSATION_MEMORY_BYTES`, with both cache-bearing
+   * figures pinned at the limit so neither of them can be what decides.
+   */
+  it.each(VIRTUAL_AGENT_SIZES)("should stay quiet for a %s pod holding its whole complement of chats", (size) => {
+    const chats = CONVERSATION_SESSIONS[size];
+    const limit = Number(SIZE_RESOURCES[size].limits.memory.replace("Gi", "")) * 1024 ** 3;
+    const full: MemoryUse = {
+      reported: true,
+      limitBytes: limit,
+      currentBytes: limit,
+      peakBytes: limit,
+      anonBytes: POD_BASELINE_MEMORY_BYTES + chats * CONVERSATION_MEMORY_BYTES,
+      at: AT.toISOString(),
+      stopped: false
+    };
+
+    expect(memoryPressure(full, chats, size)).toBeUndefined();
   });
 
   // Page cache is reclaimed at the limit rather than given back, so a pod that has read its 6.8GiB workspace clone

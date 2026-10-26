@@ -292,19 +292,15 @@ every call between the two is pod to hub. The pod reports, as it does for its di
 conversation's worth of headroom under the limit — `anon_bytes + 0.65Gi > limit_bytes`. What it detects is a pod
 heading for an OOM kill, and the remedy it offers is a bigger size.
 
-**It is not about how many chats are open, and it does not say it is.** The reason holds at any cap: the caps under
-Capacity keep a pod's chats inside its memory *request*, and this threshold is a conversation short of its *limit*,
-which is double the request. So a pod holding its full complement cannot reach it, and raising a cap does not change
-that — on `small` the two would not meet below a cap of about 10.
+**It is not about how many chats are open, and it does not say it is.** A pod's chats hold `0.95Gi + cap × 0.65Gi` of
+`anon`; this threshold is `limit − 0.65Gi`. The two meet only above a cap of `(limit − 1.6Gi) / 0.65Gi` — about ten
+chats on `small`, and several times any cap under Capacity on every size, because the caps are chosen to keep chats
+inside a size's memory *request* and this sits a conversation under its *limit*, which is double the request.
 
-The figures, **at the caps under Capacity**, which are the `cap` column here. The `anon` column is `0.95 + 0.65 × cap`
-and moves whenever a cap does; the threshold column never does.
-
-| size | cap | `anon` at that cap | must exceed | short by | cap it would take |
-| --- | --- | --- | --- | --- | --- |
-| `small` | 3 | 2.90Gi | 7.35Gi | 4.45Gi | 9.8 |
-| `medium` | 4 | 3.55Gi | 15.35Gi | 11.80Gi | 22.2 |
-| `large` | 7 | 5.50Gi | 31.35Gi | 25.85Gi | 46.8 |
+The formula rather than a table of worked figures, deliberately: that bound depends only on the limit and the two
+constants, so it never moves, where the figures either side of it move with every cap and go stale on a line nothing
+conflicts with — which has happened three times. `src/assistant/memory-report.test.ts` asserts the conclusion for
+every size at whatever cap it currently holds, which is the only form of this a cap change cannot quietly invalidate.
 
 **What crosses it is the work inside a chat, not the number of them.** The 0.65Gi is what a session *settles* at, not
 a ceiling: a build, a dependency tree, a language server or a leak can put one session gigabytes above it, and the
@@ -330,12 +326,21 @@ carrying a rule it cannot support.
 last thing anyone measured, and the section says so — but they describe a container that no longer exists, so no
 warning is raised from them. A pod stopped mid-build must not tell its owner the next day that it is low on memory.
 
-**A replacement pod never shows the last one's figures.** Starting, resizing or re-applying an agent drops its memory
-report in the same transaction that bumps `pod_generation`, because `running` goes true again and the figures would
-otherwise read as the new pod's — "Holding 7.9 GB right now" about a container that is gone. A stop does not drop
-them, for the reason above. The pod also sends its first report as it boots rather than a tick later, which is what
-closes the same window for a pod the kubelet restarted underneath the hub: no `pod_generation` moved, so the hub was
-never told, and that first report is the only thing that moves the figures off the ones the kill happened at.
+**A replacement pod does not show the last one's figures.** Every path that bumps `pod_generation` drops the memory
+report in the same transaction — starting, resizing, changing plugins, restarting, and a takeover onto another
+cluster — because `running` goes true again and the figures would otherwise read as the new pod's: "Holding 7.9 GB
+right now" about a container that is gone. A stop does not drop them, for the reason above.
+
+Dropping them is not enough on its own, because the outgoing pod can report again and put them back. Every one of
+those paths also drops the **launch token**, so it cannot: a resize and a plugins change do it for that reason, having
+nothing to drain since replacing the pod ends every session on it anyway, and it also stops the old pod and its
+replacement both holding a valid token over the handover.
+
+**The window this leaves.** A pod reports phase `running` before it starts its supervisor, so between those two the
+row is running with no report at all, which the Size section says plainly. What is not closed is a pod the kubelet
+restarted underneath the hub — after the OOM kill this warning is about — where no `pod_generation` moved and the hub
+was never told. The pod sends its first report as it boots rather than a tick later, so that window is the new
+supervisor's boot rather than ten minutes, but it is a window.
 
 **Who sees it.** The owner alone, through `canSeeAssistantMemory`. No grant reaches it: a figure about someone's pod
 is not a session they chose to share.

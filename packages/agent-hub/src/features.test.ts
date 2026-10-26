@@ -21,7 +21,12 @@ describe("CLIENT_FEATURES", () => {
   // Named here as well as in the list, unlike most features, because this one is only ever added to the same single
   // line of the same two tables that every other feature is added to: a merge that resolves that line in favour of
   // one side drops whichever name the other side added, and without this the result is a build whose reports the hub
-  // refuses while its Size section calls every pod an older version. Nothing else would fail.
+  // refuses while its Size section calls every pod an older version. Nothing else would fail — dropping a name
+  // leaves a shorter array of the same type, so it still typechecks.
+  //
+  // **Every name added in another branch wants a line here too**, and the hazard is symmetric: a resolution taking
+  // this branch's side drops the other's just as silently. `lookups` has no assertion only because it does not exist
+  // in this tree yet; it needs one in whichever change brings it in.
   it("should claim memory-anon, since the hub requires anon_bytes in the memory report", () => {
     expect(CLIENT_FEATURES).toContain("memory-anon");
   });
