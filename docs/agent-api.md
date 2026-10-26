@@ -293,7 +293,7 @@ conversation's worth of headroom under the limit — `anon_bytes + 0.65Gi > limi
 heading for an OOM kill, and the remedy it offers is a bigger size.
 
 **It is not about how many chats are open, and it does not say it is.** A pod's chats hold `0.95Gi + cap × 0.65Gi` of
-`anon`; this threshold is `limit − 0.65Gi`. The two meet only above a cap of `(limit − 1.6Gi) / 0.65Gi` — about ten
+`anon`; this threshold is `limit − 0.65Gi`. The two meet only above a cap of `(limit − 0.95Gi − 0.65Gi) / 0.65Gi` — about ten
 chats on `small`, and several times any cap under Capacity on every size, because the caps are chosen to keep chats
 inside a size's memory *request* and this sits a conversation under its *limit*, which is double the request.
 
