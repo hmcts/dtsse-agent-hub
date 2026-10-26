@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEventHub } from "../realtime/hub.ts";
-import { closeFrame, interruptFrame, sessionStream, wakeFrame } from "./session-stream.ts";
+import { closeFrame, deleteUploadsFrame, interruptFrame, sessionStream, wakeFrame } from "./session-stream.ts";
 import type { Wake } from "./store.ts";
 
 const ASSISTANT = "va-1";
@@ -23,6 +23,9 @@ async function settle(): Promise<void> {
 
 const ready = async () => undefined;
 
+/** No file deletions outstanding, which is every test but the ones about them. */
+const none = async () => [];
+
 function noFail(error: unknown): void {
   throw new Error(`the stream failed: ${String(error)}`);
 }
@@ -40,7 +43,7 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const one = vi.fn(async (id: string) => wake(id));
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [wake("c1"), wake("c2")], wake: one })((frame) => frames.push(frame), noFail);
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [wake("c1"), wake("c2")], wake: one })((frame) => frames.push(frame), noFail);
     await settle();
 
     hub.publish(changed("c3"));
@@ -53,7 +56,10 @@ describe("sessionStream", () => {
   it("should send a wake once per connection when it is both replayed and notified", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [wake("c1")], wake: async (id) => wake(id) })((frame) => frames.push(frame), noFail);
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [wake("c1")], wake: async (id) => wake(id) })(
+      (frame) => frames.push(frame),
+      noFail
+    );
     hub.publish(changed("c1"));
     await settle();
 
@@ -63,7 +69,7 @@ describe("sessionStream", () => {
   it("should send a wake again when a /clear gave the conversation a new session id", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [wake("c1", "old")], wake: async (id) => wake(id, "new") })(
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [wake("c1", "old")], wake: async (id) => wake(id, "new") })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -77,7 +83,7 @@ describe("sessionStream", () => {
   it("should send a close when the conversation has gone", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => null })((frame) => frames.push(frame), noFail);
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [], wake: async () => null })((frame) => frames.push(frame), noFail);
     hub.publish(changed("c9"));
     await settle();
 
@@ -87,7 +93,7 @@ describe("sessionStream", () => {
   it("should send nothing when a change leaves the conversation without a pending wake", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined })((frame) => frames.push(frame), noFail);
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [], wake: async () => undefined })((frame) => frames.push(frame), noFail);
     hub.publish(changed("c1"));
     await settle();
 
@@ -98,7 +104,7 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const one = vi.fn(async (id: string) => wake(id));
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: one })((frame) => frames.push(frame), noFail);
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [], wake: one })((frame) => frames.push(frame), noFail);
     await settle();
     hub.publish(stopped("c1"));
     await settle();
@@ -110,7 +116,7 @@ describe("sessionStream", () => {
   it("should ignore an interrupt for another assistant's conversation", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined })((frame) => frames.push(frame), noFail);
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [], wake: async () => undefined })((frame) => frames.push(frame), noFail);
     await settle();
     hub.publish(stopped("c1", "va-other"));
     await settle();
@@ -122,7 +128,10 @@ describe("sessionStream", () => {
   it("should not replay an interrupt on a resync or send one after the stream is closed", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    const close = await sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined })((frame) => frames.push(frame), noFail);
+    const close = await sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [], wake: async () => undefined })(
+      (frame) => frames.push(frame),
+      noFail
+    );
     hub.publish(stopped("c1"));
     await settle();
     hub.publish({ type: "resync" });
@@ -138,7 +147,7 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const one = vi.fn(async (id: string) => wake(id));
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: one })((frame) => frames.push(frame), noFail);
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [], wake: one })((frame) => frames.push(frame), noFail);
     hub.publish(changed("c1", "va-other"));
     hub.publish({ type: "post", message_id: "1" });
     await settle();
@@ -151,7 +160,10 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const pending = [wake("c1")];
-    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [...pending], wake: async () => undefined })((frame) => frames.push(frame), noFail);
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [...pending], wake: async () => undefined })(
+      (frame) => frames.push(frame),
+      noFail
+    );
     await settle();
     pending.push(wake("c2"));
     hub.publish({ type: "resync" });
@@ -163,7 +175,10 @@ describe("sessionStream", () => {
   it("should stop listening and sending once closed", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    const close = await sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => null })((frame) => frames.push(frame), noFail);
+    const close = await sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: async () => [], wake: async () => null })(
+      (frame) => frames.push(frame),
+      noFail
+    );
     close();
     hub.publish(changed("c1"));
     await settle();
@@ -176,7 +191,7 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const fail = vi.fn();
-    sessionStream(ASSISTANT, { hub, ready, wakes: () => Promise.reject(new Error("connection reset")), wake: async (id) => wake(id) })(
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, wakes: () => Promise.reject(new Error("connection reset")), wake: async (id) => wake(id) })(
       (frame) => frames.push(frame),
       fail
     );
@@ -186,6 +201,129 @@ describe("sessionStream", () => {
 
     expect(fail).toHaveBeenCalledOnce();
     expect(fail).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("connection reset") }));
+    expect(frames).toEqual([]);
+  });
+});
+
+const DELETION = { conversation_id: "c1", upload_ids: ["u1", "u2"] };
+
+function uploadsChanged(virtualAgent = ASSISTANT) {
+  return { type: "assistant_uploads" as const, virtual_agent_id: virtualAgent, owner_oid: "o" };
+}
+
+describe("sessionStream deletions", () => {
+  it("should frame a deletion as the contract's event when written", () => {
+    expect(deleteUploadsFrame(DELETION)).toBe(`event: delete_uploads\ndata: ${JSON.stringify(DELETION)}\n\n`);
+  });
+
+  // Replayed on connect, unlike an interrupt: a file somebody asked to delete while the pod was restarting still has
+  // to go, and deleting a file that is already gone is a deletion that has already happened.
+  it("should send every outstanding deletion on connect, after the wakes, when a pod connects", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      wakes: async () => [wake("c1")],
+      wake: async (id) => wake(id),
+      deletions: async () => [DELETION]
+    })((frame) => frames.push(frame), noFail);
+    await settle();
+
+    expect(frames).toEqual([wakeFrame(wake("c1")), deleteUploadsFrame(DELETION)]);
+  });
+
+  it("should send the outstanding deletions again when the person asks for another", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    const deletions = vi.fn(async () => [DELETION]);
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions })((frame) => frames.push(frame), noFail);
+    await settle();
+
+    hub.publish(uploadsChanged());
+    await settle();
+
+    expect(frames).toEqual([deleteUploadsFrame(DELETION), deleteUploadsFrame(DELETION)]);
+    expect(deletions).toHaveBeenCalledTimes(2);
+  });
+
+  // The request is a row, so nothing is lost by replaying it, and a NOTIFY sent while the listener was down would
+  // otherwise leave the pod holding files somebody asked it to delete until its next reconnect.
+  it("should read the deletions again on a resync, when NOTIFYs may have been missed", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions: async () => [DELETION] })(
+      (frame) => frames.push(frame),
+      noFail
+    );
+    await settle();
+
+    hub.publish({ type: "resync" });
+    await settle();
+
+    expect(frames).toEqual([deleteUploadsFrame(DELETION), deleteUploadsFrame(DELETION)]);
+  });
+
+  it("should ignore another assistant's deletion request when it is notified", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    const deletions = vi.fn(async () => [DELETION]);
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions })((frame) => frames.push(frame), noFail);
+    await settle();
+    frames.length = 0;
+
+    hub.publish(uploadsChanged("va-2"));
+    await settle();
+
+    expect(frames).toEqual([]);
+    expect(deletions).toHaveBeenCalledTimes(1);
+  });
+
+  it("should send nothing when no deletion is outstanding", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions: none })((frame) => frames.push(frame), noFail);
+    await settle();
+
+    expect(frames).toEqual([]);
+  });
+
+  it("should end the stream, rather than go on silently, when the deletions cannot be read", async () => {
+    const hub = createEventHub();
+    let failure: unknown;
+    sessionStream(ASSISTANT, {
+      hub,
+      ready,
+      wakes: async () => [],
+      wake: async () => undefined,
+      deletions: async () => {
+        throw new Error("no database");
+      }
+    })(
+      () => {},
+      (error) => {
+        failure = error;
+      }
+    );
+    await settle();
+
+    expect((failure as Error).message).toContain("no database");
+  });
+
+  it("should send no deletion once the stream has been closed", async () => {
+    const hub = createEventHub();
+    const frames: string[] = [];
+    const close = await sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions: async () => [DELETION] })(
+      (frame) => frames.push(frame),
+      noFail
+    );
+    await settle();
+    frames.length = 0;
+    close();
+
+    hub.publish(uploadsChanged());
+    await settle();
+
     expect(frames).toEqual([]);
   });
 });

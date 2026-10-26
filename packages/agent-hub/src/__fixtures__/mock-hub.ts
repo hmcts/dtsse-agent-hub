@@ -63,6 +63,8 @@ export type VirtualRecord = {
   ports: Record<string, unknown>[];
   wakes: Wake[];
   sessionReports: SessionsReport[];
+  /** What the pod said its volume holds, newest last; see `PUT /api/virtual/{id}/uploads`. */
+  uploadsReports: Record<string, unknown>[];
 };
 
 export type RecordedCall = {
@@ -193,7 +195,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       completes: [],
       ports: [],
       wakes: [],
-      sessionReports: []
+      sessionReports: [],
+      uploadsReports: []
     });
   }
   let nextId = 1000;
@@ -319,6 +322,22 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     if (req.method === "GET" && area === "conversations" && !kind) {
       const ids = new Set([...agents.values()].filter((a) => a.conversation_id).map((a) => a.conversation_id as string));
       return send(res, 200, { conversations: [...ids].map((conversationId) => ({ id: conversationId })) });
+    }
+    if (req.method === "PUT" && area === "uploads" && !kind) {
+      const whole = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 0;
+      // The hub requires both lists to be present, since a missing one would read as an authoritative empty list.
+      if (
+        !whole(body.uploads_bytes) ||
+        !whole(body.volume_used_bytes) ||
+        !whole(body.volume_total_bytes) ||
+        !whole(body.files_total) ||
+        !Array.isArray(body.files) ||
+        !Array.isArray(body.deleted)
+      ) {
+        return send(res, 400, { error: "bad uploads report" });
+      }
+      v.uploadsReports.push(body);
+      return send(res, 204);
     }
     if (area === "sessions" && !kind) {
       if (req.method === "PUT") {
@@ -832,6 +851,11 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     // Stopping an answer. Unlike a wake it is not kept: the hub sends one once and never replays it.
     sendInterrupt(virtualId: string, data: { conversation_id: string }) {
       sessionStreams.get(virtualId)?.write(`event: interrupt\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+    // The person asking for files on the pod's own volume to go. Replayed by the hub until a report stops naming
+    // them, so unlike an interrupt a test may send it more than once.
+    sendDeleteUploads(virtualId: string, data: { conversation_id: string; upload_ids: string[] }) {
+      sessionStreams.get(virtualId)?.write(`event: delete_uploads\ndata: ${JSON.stringify(data)}\n\n`);
     },
     sendClose(virtualId: string, data: { conversation_id: string }) {
       const v = virtuals.get(virtualId) as VirtualRecord;

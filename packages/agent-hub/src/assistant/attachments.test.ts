@@ -9,9 +9,11 @@ import {
   type Attachment,
   attachmentPath,
   conversationDir,
+  deleteUploads,
   fetchAttachments,
   parseAttachments,
   readAttachments,
+  readDeleteUploads,
   reconcileUploads,
   removeConversationUploads,
   safeName,
@@ -567,5 +569,121 @@ describe("reconcileUploads", () => {
 
     // Assert
     expect(removed).toBe(1);
+  });
+});
+
+const OTHER_UPLOAD = "11112222-3333-4444-5555-666677778888";
+
+describe("readDeleteUploads", () => {
+  it("should read the conversation and its upload ids when the hub names them", () => {
+    expect(readDeleteUploads({ conversation_id: CONVERSATION, upload_ids: [UPLOAD, OTHER_UPLOAD] })).toEqual({
+      conversationId: CONVERSATION,
+      uploadIds: [UPLOAD, OTHER_UPLOAD]
+    });
+  });
+
+  it("should lower-case the ids so they match what was written when the hub sends them in capitals", () => {
+    expect(readDeleteUploads({ conversation_id: CONVERSATION.toUpperCase(), upload_ids: [UPLOAD.toUpperCase()] })).toEqual({
+      conversationId: CONVERSATION,
+      uploadIds: [UPLOAD]
+    });
+  });
+
+  // A path is the one thing a pod must not take from the network on trust, so anything that is not an id is dropped
+  // before it reaches a path at all.
+  it.each([
+    ["a conversation that is not an id", { conversation_id: "../etc", upload_ids: [UPLOAD] }],
+    ["no conversation", { upload_ids: [UPLOAD] }],
+    ["no ids", { conversation_id: CONVERSATION, upload_ids: [] }],
+    ["ids that are not ids", { conversation_id: CONVERSATION, upload_ids: ["../../passwd", 7] }],
+    ["nothing at all", null]
+  ])("should act on nothing when the frame carries %s", (_what, frame) => {
+    expect(readDeleteUploads(frame)).toBeUndefined();
+  });
+
+  it("should keep the ids it can read and drop the rest when a frame carries both", () => {
+    expect(readDeleteUploads({ conversation_id: CONVERSATION, upload_ids: ["nope", UPLOAD] })?.uploadIds).toEqual([UPLOAD]);
+  });
+});
+
+describe("deleteUploads", () => {
+  function written(root: string, uploadId: string, name = "letter.pdf"): string {
+    const file = attachmentPath(root, CONVERSATION, uploadId, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "x");
+    return file;
+  }
+
+  it("should delete the person's file, and leave the others, when the hub names one", () => {
+    const root = tempRoot();
+    const going = written(root, UPLOAD);
+    const staying = written(root, OTHER_UPLOAD);
+
+    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD] })).toEqual({ deleted: [UPLOAD], failed: [] });
+    expect(fs.existsSync(going)).toBe(false);
+    expect(fs.existsSync(staying)).toBe(true);
+  });
+
+  // The conversation still exists, so emptying its directory is not this function's business; `close` is what does
+  // that, when the chat itself goes.
+  it("should leave the conversation's directory in place when it has deleted the last file in it", () => {
+    const root = tempRoot();
+    written(root, UPLOAD);
+
+    deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD] });
+
+    expect(fs.existsSync(conversationDir(root, CONVERSATION))).toBe(true);
+  });
+
+  // Acknowledged all the same: the request is replayed until a report names it, so acting on one twice has to be as
+  // good as acting on it once, and a file that is not there is a deletion that has already happened.
+  it("should acknowledge a file that is already gone, and raise nothing", () => {
+    const root = tempRoot();
+    fs.mkdirSync(conversationDir(root, CONVERSATION), { recursive: true });
+
+    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD] })).toEqual({ deleted: [UPLOAD], failed: [] });
+  });
+
+  // Otherwise the hub would ask for ever: nothing on this disk will ever name the file, so nothing would answer.
+  it("should acknowledge every id when the conversation has no directory at all", () => {
+    expect(deleteUploads({ root: tempRoot(), conversationId: CONVERSATION, uploadIds: [UPLOAD, OTHER_UPLOAD] })).toEqual({
+      deleted: [UPLOAD, OTHER_UPLOAD],
+      failed: []
+    });
+  });
+
+  // Matched on the id prefix rather than by rebuilding the name, because the name came from a frame sent when the
+  // file was uploaded and the hub's own sanitiser may have changed since.
+  it("should delete a copy whatever it was named, as long as it carries the upload's id", () => {
+    const root = tempRoot();
+    const odd = written(root, UPLOAD, "a_quite_different_name.txt");
+
+    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD] })).toEqual({ deleted: [UPLOAD], failed: [] });
+    expect(fs.existsSync(odd)).toBe(false);
+  });
+
+  // The one id it must not acknowledge: the copy the person asked about is still on the volume, so the hub has to
+  // keep the request and ask again rather than tell them it was deleted.
+  it("should leave a file it could not delete unacknowledged, and carry on with the rest", () => {
+    const root = tempRoot();
+    written(root, UPLOAD);
+    const second = written(root, OTHER_UPLOAD);
+    const said: string[] = [];
+    const broken = {
+      ...fs,
+      rmSync: (target: fs.PathLike, options?: fs.RmOptions) => {
+        if (String(target).includes(UPLOAD)) {
+          throw new Error("read-only volume");
+        }
+        fs.rmSync(target, options);
+      }
+    };
+
+    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD, OTHER_UPLOAD], fs: broken, say: (m) => said.push(m) })).toEqual({
+      deleted: [OTHER_UPLOAD],
+      failed: [UPLOAD]
+    });
+    expect(fs.existsSync(second)).toBe(false);
+    expect(said.join("\n")).toContain("read-only volume");
   });
 });

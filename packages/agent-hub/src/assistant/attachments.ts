@@ -304,6 +304,83 @@ async function writeParts({
   }
 }
 
+/** `<upload_id>-<anything>` inside a conversation's directory: what one attachment was written as. */
+function isCopyOf(name: string, uploadId: string): boolean {
+  return name.toLowerCase().startsWith(`${uploadId.toLowerCase()}-`);
+}
+
+/**
+ * The upload ids a `delete_uploads` frame names, as this client will act on them. Pure, so the decision is testable
+ * without a filesystem. Anything that is not a conversation id or an upload id is dropped: a path is the one thing a
+ * pod must not take from the network on trust, and `attachmentPath` would refuse it a second time anyway.
+ */
+export function readDeleteUploads(value: unknown): { conversationId: string; uploadIds: string[] } | undefined {
+  const raw = asRecord(value);
+  if (raw === null || typeof raw.conversation_id !== "string" || !UUID.test(raw.conversation_id)) {
+    return undefined;
+  }
+  const ids = Array.isArray(raw.upload_ids) ? raw.upload_ids : [];
+  const uploadIds = ids.filter((id): id is string => typeof id === "string" && UUID.test(id)).map((id) => id.toLowerCase());
+  return uploadIds.length === 0 ? undefined : { conversationId: raw.conversation_id.toLowerCase(), uploadIds };
+}
+
+export type DeleteUploadsOptions = {
+  conversationId: string;
+  uploadIds: readonly string[];
+  root?: string;
+  fs?: AttachmentFs;
+  env?: Env;
+  say?: (message: string) => void;
+};
+
+/** What a deletion came to, per upload the hub named. The hub clears a request on `deleted` and nothing else. */
+export type DeletedUploads = {
+  /** Ids whose copies are gone from this disk: the ones removed, and the ones that were not there to remove. */
+  deleted: string[];
+  /** Ids with a copy this pod could not remove. Left out of the report, so the hub asks again on the next connect. */
+  failed: string[];
+};
+
+/**
+ * Deletes this pod's copies of the uploads the hub named, because the person asked for them. Answers which ids are
+ * gone and which it could not clear.
+ *
+ * **A file that is not there counts as deleted**, and so does every id in a conversation this pod has no directory
+ * for. That is what makes the request idempotent: it is replayed until a report acknowledges it, so acting on one
+ * twice has to be as good as acting on it once, and a report that failed to send must not leave a request that can
+ * never be answered. An id whose `rmSync` throws is the one case that is *not* acknowledged, because the copy the
+ * person asked about is still on the volume.
+ *
+ * The directory itself is left alone — the conversation still exists, and `close` is what empties it.
+ *
+ * It matches on the `<upload_id>-` prefix rather than rebuilding the name from the frame, because the name the file
+ * was written with came from a frame sent at upload time and `storedNameOf` may since have been changed.
+ */
+export function deleteUploads({ conversationId, uploadIds, root, fs = nodeFs, env = process.env, say = () => {} }: DeleteUploadsOptions): DeletedUploads {
+  const dir = conversationDir(root ?? uploadsRoot(env), conversationId);
+  if (!fs.existsSync(dir)) {
+    return { deleted: [...uploadIds], failed: [] };
+  }
+  const outcome: DeletedUploads = { deleted: [], failed: [] };
+  let removed = 0;
+  const present = fs.readdirSync(dir) as string[];
+  for (const uploadId of uploadIds) {
+    let failed = false;
+    for (const name of present.filter((file) => isCopyOf(file, uploadId))) {
+      try {
+        fs.rmSync(path.join(dir, name), { force: true });
+        removed += 1;
+      } catch (e) {
+        failed = true;
+        say(`could not delete ${name} of conversation ${conversationId}: ${(e as Error).message}`);
+      }
+    }
+    (failed ? outcome.failed : outcome.deleted).push(uploadId);
+  }
+  say(`conversation ${conversationId}: deleted ${removed} file(s) the person asked to remove`);
+  return outcome;
+}
+
 /** Removes a conversation's attachments, for a conversation that has been deleted. Missing is success. */
 export function removeConversationUploads(root: string, conversationId: string, fs: Pick<AttachmentFs, "rmSync"> = nodeFs): void {
   fs.rmSync(conversationDir(root, conversationId), { recursive: true, force: true });

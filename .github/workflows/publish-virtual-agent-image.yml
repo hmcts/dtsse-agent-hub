@@ -1,0 +1,169 @@
+name: Publish the virtual-agent image
+
+# The image a virtual agent's pod runs: the cft-workspace devcontainer image plus the published
+# @hmcts-cft/agent-hub client. Nothing consumes it yet — the orchestrator's `VIRTUAL_AGENT_IMAGE` is
+# pinned by digest in cnp-flux-config and still points at the devcontainer image; moving it is a
+# separate change.
+on:
+  # After the client is published, not alongside it. release.yml publishes on a push to master, so a
+  # build triggered by that same push would race the publish and bake the previous version — and the
+  # whole point of this image is to carry the newest one.
+  workflow_run:
+    workflows: ['Release the client']
+    types: [completed]
+  # A change to the image's own files does not wait for a client release.
+  push:
+    branches: [master]
+    paths:
+      - 'docker/virtual-agent/**'
+      - '.github/scripts/assert-virtual-agent-image.sh'
+      - '.github/workflows/publish-virtual-agent-image.yml'
+  # The same paths on a pull request, built and asserted but never pushed, so that a change to the
+  # image is not first exercised by the master run that moves `latest`.
+  pull_request:
+    paths:
+      - 'docker/virtual-agent/**'
+      - '.github/scripts/assert-virtual-agent-image.sh'
+      - '.github/workflows/publish-virtual-agent-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: hmctsprod
+  # The same dtsse/ prefix as the app's own image, hmctsprod.azurecr.io/dtsse/agent-hub, and named
+  # for what the image is rather than for this repository: it is what a virtual agent runs, not the
+  # hub.
+  IMAGE_NAME: dtsse/virtual-agent
+
+jobs:
+  # The pull-request build: the same image, asserted the same way, never pushed. The `pull_request`
+  # federated subject is already trusted and the base image comes from ACR either way, so this needs
+  # the same login a publish does. container-build-push-openid cannot stand in for it: with
+  # `push: false` buildx leaves the image in the build cache, the action does not expose
+  # docker/build-push-action's `load`, and `docker run` would have nothing to run.
+  verify:
+    if: github.event_name == 'pull_request'
+    # Superseded by the next push to the branch, unlike a publish.
+    concurrency:
+      group: verify-virtual-agent-image-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    # Only the jobs that federate to Azure ask for the token, rather than every job the workflow
+    # ever grows.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE: virtual-agent:${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Az CLI login
+        # Pinned by commit: a tag can be moved, and this one federates to Azure.
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: ACR login
+        run: az acr login --name "$REGISTRY"
+
+      # Plain `docker build`, so the default builder loads the result into the daemon where the
+      # assertion can run it. No cache, for the reason the publish step gives below.
+      - name: Build
+        run: docker build --no-cache --tag "$IMAGE" --file docker/virtual-agent/Dockerfile docker/virtual-agent
+
+      - name: Assert a pod could start this image
+        run: .github/scripts/assert-virtual-agent-image.sh "$IMAGE"
+
+  publish:
+    # Master, on every path. The federated identity in azure-github-federation-config trusts two
+    # subjects for this repository, `ref:refs/heads/master` and `pull_request`, so a run on any other
+    # branch dies inside the composite action's azure/login with AADSTS70021 and no hint that the
+    # branch is the cause. Adding a branch subject is not enough to loosen this: `latest` is the tag
+    # pods and engineers pull, and it must not come from unreviewed code.
+    #
+    # A workflow_run is master-only by its own head_branch rather than by github.ref, which for that
+    # event describes the default branch the workflow file was read from and not where the release
+    # ran. A release that failed must not publish either.
+    if: >-
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'master') ||
+      (github.event_name != 'workflow_run' && github.ref == 'refs/heads/master')
+    # Never two publishes at once: both push `latest`, and the one that finishes second would win
+    # whichever client it happens to carry.
+    concurrency:
+      group: publish-virtual-agent-image
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute the tags
+        id: tags
+        run: |
+          set -euo pipefail
+          echo "sha=$(echo "${GITHUB_SHA}" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          echo "stamp=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      # No build cache, deliberately, and nothing here may add one. The action defaults both cache
+      # inputs to type=gha, so they are set empty rather than left out.
+      #
+      # Caching is what broke the arrangement this image replaces: a RUN layer's cache key is its
+      # instruction text plus its parent layer, neither of which changes between builds, so
+      # cft-workspace's `npm install -g @hmcts-cft/agent-hub@latest` layer was reused for every
+      # build after the first and the baked client froze at one version. The build here is one RUN
+      # on a pulled base, so a cache would save seconds and cost the only thing the image is for.
+      #
+      # `image-tags` goes to docker/metadata-action, which splits on newlines and not on commas
+      # (a tag pattern's own attributes are comma-separated), despite the input's description.
+      # `prod-<sha7>-<UTC timestamp>` is the one Flux image automation follows, and the format is not
+      # free: cnp-flux-config's ImagePolicy for this image declares no ordering of its own, and gets
+      # `^prod-[a-f0-9]+-(?P<ts>[0-9]+)` with `alphabetical: asc` from the automation overlay's
+      # patch. So the timestamp is extracted and compared on its own — as a whole string the tag
+      # would sort by sha first and pick an arbitrary build. A tag that stops matching that pattern,
+      # or a sha7 that is not lowercase hex, silently stops being selected.
+      # The sha7 is this repository's commit; which client version an image carries is in its build
+      # log, from the `npm ls` at the end of the Dockerfile's RUN, or read back out of the image
+      # with `docker run --rm <image> bash -lc 'npm ls -g --depth=0 @hmcts-cft/agent-hub'`.
+      #
+      # linux/amd64 only. This image only ever runs as a pod in AKS; cft-workspace builds arm64 as
+      # well because engineers run that image on Apple silicon, and nobody runs this one locally. One
+      # architecture needs no per-arch job and no `docker buildx imagetools create` merge.
+      - name: Build and push
+        uses: hmcts/cnp-githubactions-library/container-build-push-openid@main
+        with:
+          registry-name: ${{ env.REGISTRY }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          image-name: ${{ env.IMAGE_NAME }}
+          dockerfile: docker/virtual-agent/Dockerfile
+          # The Dockerfile copies nothing in, so the context is its own directory and not the repository.
+          context: docker/virtual-agent
+          image-tags: |
+            latest
+            ${{ steps.tags.outputs.sha }}
+            prod-${{ steps.tags.outputs.sha }}-${{ steps.tags.outputs.stamp }}
+          platforms: linux/amd64
+          cache-from: ''
+          cache-to: ''
+
+      # The pull-request build asserted the same thing, but a workflow_run publishes a client this
+      # commit was never built against, so the image that was actually pushed is checked again. The
+      # timestamped tag rather than `latest`, because it names this build and only this build. The
+      # runner is already logged in to the registry, from the step above.
+      - name: Assert a pod could start the pushed image
+        env:
+          IMAGE: ${{ env.REGISTRY }}.azurecr.io/${{ env.IMAGE_NAME }}:prod-${{ steps.tags.outputs.sha }}-${{ steps.tags.outputs.stamp }}
+        run: |
+          docker pull "$IMAGE"
+          .github/scripts/assert-virtual-agent-image.sh "$IMAGE"

@@ -16,8 +16,9 @@ import { sessionEnded } from "./session.ts";
  * `grant` and `credential` are not frames: they arrive as `resync`, because what changed is what the viewer may see
  * rather than anything the page can be handed. `assistant_stop` is not one either, and for a different reason: it is
  * an instruction to a conversation's pod, and the thread redraws from the `assistant_conversation` beside it.
+ * `assistant_uploads` is the same: an instruction to the pod, with the page revalidated by the action that caused it.
  */
-export type HubEventType = Exclude<HubEvent["type"], "grant" | "credential" | "assistant_stop">;
+export type HubEventType = Exclude<HubEvent["type"], "grant" | "credential" | "assistant_stop" | "assistant_uploads">;
 
 /**
  * Subscribed one at a time below, because `EventSource` dispatches by `event:` name and has no wildcard. A type
