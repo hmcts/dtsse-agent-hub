@@ -125,15 +125,19 @@ export type InactivityRule = (typeof INACTIVITY_RULES)[number];
  * `cloning` and `running` get the ordinary idle period. The two in which the pod is blocked on its owner get the
  * shorter one, since a sign-in or a credential someone means to give arrives in minutes.
  *
- * `failed` gets the idle period, which reclaims the pod of a failure that has gone quiet: one whose pod gave up and
- * stopped reporting, and one the orchestrator observed as `ImagePullBackOff`, `OOMKilled` or `Unschedulable`, whose
- * `status_changed_at` holds still because an observation never writes `last_active_at`. The longer deadline is the
- * one to give these, because an owner coming back to a failure should have time to read it.
+ * `failed` gets the idle period, which reclaims the pod of a failure that has gone quiet. Two kinds do: the pod that
+ * `entrypoint.sh`'s `fatal` leaves reporting `failed` and then sleeping for ever, on purpose, so the StatefulSet does
+ * not restart into the same failure; and the container that never started at all, which the orchestrator observed as
+ * `ImagePullBackOff` or `Unschedulable`. Neither says anything more, and an observation never writes
+ * `last_active_at`, so their clocks hold still and the deadline accrues. The longer one is right for them, because an
+ * owner coming back to a failure should have time to read it.
  *
- * It does not reach a pod that keeps restarting: `virtual-agent-boot` reports `provisioning` seconds into every
- * container start, which refreshes `last_active_at` and takes the status out of `failed`, so a crash loop past that
- * line looks continuously active and only the evening stop bounds it. Telling that apart from the restart of a pod
- * whose owner has just fixed what was wrong needs a count of restarts, which the orchestrator does not report.
+ * It does not reach a pod that keeps restarting, and the kubelet restarts one by default: nothing sets a
+ * `restartPolicy`. `virtual-agent-boot` reports `provisioning` seconds into every container start, which refreshes
+ * `last_active_at` and takes the status out of `failed`, so such a pod looks continuously active and only the evening
+ * stop bounds it. That covers `CrashLoopBackOff` and `OOMKilled`, which are observed as failures but go on reporting.
+ * Telling them apart from the restart of a pod whose owner has just fixed what was wrong needs a count of restarts,
+ * which the orchestrator does not report.
  *
  * The rest have no deadline: `requested` and `stopped` hold no pod of this generation to reclaim, `provisioning`
  * answers to `PROVISIONING_TIMEOUT_MS` instead, and `stopping` is already on its way down.

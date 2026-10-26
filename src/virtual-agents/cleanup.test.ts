@@ -115,12 +115,12 @@ describe("isIdle", () => {
 
 describe("inactivityRule", () => {
   it.each([
-    ["awaiting_login", "awaiting_owner"],
-    ["awaiting_credentials", "awaiting_owner"],
-    ["running", "idle"],
-    ["cloning", "idle"],
+    ["awaiting_owner", "awaiting_login"],
+    ["awaiting_owner", "awaiting_credentials"],
+    ["idle", "running"],
+    ["idle", "cloning"],
     ["failed", "failed"]
-  ] as const)("should hold an agent to the %2$s deadline when its status is %1$s", (status, rule) => {
+  ] as const)("should hold an agent to the %s deadline when its status is %s", (rule, status) => {
     expect(inactivityRule(status)).toBe(rule);
   });
 
