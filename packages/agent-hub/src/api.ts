@@ -146,6 +146,12 @@ export type LoginCompleteBody = {
   account_label?: string;
 };
 
+/** A sign-in the pod relayed and gave up on: `expired` when its code ran out unused, `failed` for anything else. */
+export type LoginFailedBody = {
+  state: "expired" | "failed";
+  detail?: string;
+};
+
 /** What a conversation's session runs, as `PUT /api/virtual/{id}/sessions` takes it. */
 export type SessionReport = {
   conversation_id: string;
@@ -340,6 +346,8 @@ export type Api = {
   loginPrompt: (id: string, kind: CredentialKind, body: LoginPromptBody) => Promise<null>;
   loginCode: (id: string, kind: CredentialKind) => Promise<string | null>;
   loginComplete: (id: string, kind: CredentialKind, body?: LoginCompleteBody) => Promise<null>;
+  /** The other half of `loginComplete`: the pod owes the hub one of the two for every sign-in it relays. */
+  loginFailed: (id: string, kind: CredentialKind, body: LoginFailedBody) => Promise<null>;
   sessionsStream: (id: string, opts?: StreamOptions) => Promise<Response>;
   putSessions: (id: string, body: SessionsBody) => Promise<null>;
   conversations: (virtualId: string) => Promise<ConversationsResponse>;
@@ -502,6 +510,7 @@ export function createApi({
     loginPrompt: (id, kind, body) => request<null>("POST", v(id, `login/${k(kind)}`), body),
     loginCode: async (id, kind) => (await request<LoginCodeResponse | null>("GET", v(id, `login/${k(kind)}/code`)))?.code ?? null,
     loginComplete: (id, kind, body = {}) => request<null>("POST", v(id, `login/${k(kind)}/complete`), body),
+    loginFailed: (id, kind, body) => request<null>("POST", v(id, `login/${k(kind)}/failed`), body),
     // A virtual agent's HMCTS Assistant conversations: wakes and closes on the sessions stream, and what its
     // supervisor runs.
     sessionsStream: (id, opts) => openStream(v(id, "sessions"), opts),
