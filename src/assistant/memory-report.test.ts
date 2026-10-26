@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CONVERSATION_MEMORY_BYTES,
-  chatsAfterRestart,
+  chatCapacity,
   type MemoryReportRow,
   type MemoryUse,
   memoryAdvice,
@@ -10,10 +10,10 @@ import {
   memoryWarning,
   nextSizeUp,
   offerMemory,
-  podChats,
   sizeChangeQuestion,
   sizeOffer,
-  sizeOffers
+  sizeOffers,
+  sizeSentence
 } from "./memory-report.ts";
 
 const AT = new Date("2026-10-30T09:00:00.000Z");
@@ -237,33 +237,46 @@ describe("offerMemory", () => {
   });
 });
 
-describe("podChats", () => {
+describe("chatCapacity", () => {
   // The pod's own figure, because a cap is in the pod template: raising the constant reaches a running pod only when
-  // it next rolls, and at its cap the pod stops an idle session to make room rather than queueing. Offering a chat
-  // the pod has no slot for would end one the person did not close.
-  it("should take what the pod reported over the size's cap when the two disagree", () => {
-    expect(podChats(3, "small")).toBe(3);
-    expect(podChats(8, "small")).toBe(8);
+  // it next rolls, and at its cap the pod stops an idle session to make room rather than queueing. A chat offered
+  // beyond what the pod has a slot for would end one the person did not close.
+  it("should take what the pod reported, and name the cap a restart would give it, when the two disagree", () => {
+    expect(chatCapacity(3, "small")).toEqual({ now: 3, fromRestart: 4 });
   });
 
-  it("should fall back to the size's cap when the pod has reported nothing", () => {
-    expect([podChats(null, "small"), podChats(null, "medium"), podChats(null, "large")]).toEqual([4, 6, 8]);
+  it("should name no restart when the pod already reports its size's cap", () => {
+    expect(chatCapacity(4, "small")).toEqual({ now: 4, fromRestart: undefined });
+  });
+
+  // **No `now` at all** rather than the cap as a fallback: the hub cannot see a pod's supervisor, so the cap is what
+  // the pod will be given and not what it was given, and stating it as current is the same one-too-high figure the
+  // reported case exists to avoid.
+  it.each([
+    ["small", 4],
+    ["medium", 6],
+    ["large", 8]
+  ] as const)("should claim nothing about %s's current chats, and name its cap, when the pod has reported nothing", (size, cap) => {
+    expect(chatCapacity(null, size)).toEqual({ now: undefined, fromRestart: cap });
   });
 });
 
-describe("chatsAfterRestart", () => {
-  it("should say what a restart would change the figure to when the pod is behind the cap", () => {
-    expect(chatsAfterRestart(3, "small")).toBe(4);
+describe("sizeSentence", () => {
+  it("should say the chats and memory when the pod reports its size's cap", () => {
+    expect(sizeSentence("small", chatCapacity(4, "small"))).toBe("You are on small: 4 chats at once, 4Gi–8Gi of memory.");
   });
 
-  it("should say nothing when the pod already holds its size's cap", () => {
-    expect(chatsAfterRestart(4, "small")).toBeUndefined();
+  it("should say both figures when the pod is behind its size's cap", () => {
+    expect(sizeSentence("small", chatCapacity(3, "small"))).toBe(
+      "You are on small: 3 chats at once, 4Gi–8Gi of memory. It holds 4 chats at once from its next restart."
+    );
   });
 
-  // Nothing is promised about a pod that has not reported: the fallback already shows the cap, so there is no second
-  // figure to reconcile.
-  it("should say nothing when the pod has reported nothing", () => {
-    expect(chatsAfterRestart(null, "small")).toBeUndefined();
+  // The sentence has to be sayable without a current figure, which is the whole reason it lives here.
+  it("should name no current figure when the pod has reported nothing", () => {
+    expect(sizeSentence("medium", chatCapacity(null, "medium"))).toBe(
+      "You are on medium, with 8Gi–16Gi of memory. It holds 6 chats at once from its next restart."
+    );
   });
 });
 

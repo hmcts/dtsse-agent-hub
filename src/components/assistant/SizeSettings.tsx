@@ -12,7 +12,8 @@ import {
   memoryWarning,
   offerMemory,
   sizeChangeQuestion,
-  sizeOffers
+  sizeOffers,
+  sizeSentence
 } from "@/assistant/memory-report";
 import { describeSize } from "@/assistant/upload-report";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
@@ -212,7 +213,6 @@ function Change({
 export function Size({ size }: Readonly<{ size: AssistantSize }>) {
   const { view, assistantId, save } = size;
   const pressure = memoryPressure(view.use, view.openChats, view.size);
-  const current = sizeOffers().find((offer) => offer.size === view.size);
   return (
     <section aria-labelledby="assistant-settings-size" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-size" className="text-sm font-semibold">
@@ -220,11 +220,7 @@ export function Size({ size }: Readonly<{ size: AssistantSize }>) {
       </h3>
       <p className="text-pretty text-[13px] text-asst-muted">
         How much your assistant has to work with. A bigger assistant holds more chats at once and has more memory for each of them; it costs more to run, so
-        take the size you need.
-        {/* `view.chats` rather than the size's cap: a running pod holds the number it started with, and opening a
-            chat beyond that stops one the person did not close. */}
-        {current === undefined ? null : ` You are on ${current.size}: ${view.chats} chats at once, ${offerMemory(current)} of memory.`}
-        {view.chatsAfterRestart === undefined ? null : ` It holds ${view.chatsAfterRestart} the next time it restarts.`}
+        take the size you need. {sizeSentence(view.size, view.capacity)}
       </p>
       <Use use={view.use} />
       {pressure === undefined ? null : <Warning pressure={pressure} />}

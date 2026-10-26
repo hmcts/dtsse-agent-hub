@@ -1496,8 +1496,7 @@ function size(overrides: Partial<AssistantMemory> = {}, save: FormAction = vi.fn
       use: use(4 * CONVERSATION_MEMORY_BYTES),
       size: "small",
       // A pod reporting the cap of the size it is on, which is the ordinary case; the tests that care pass their own.
-      chats: 4,
-      chatsAfterRestart: undefined,
+      capacity: { now: 4, fromRestart: undefined },
       openChats: 1,
       rollsPod: true,
       refusal: undefined,
@@ -1531,17 +1530,25 @@ describe("the Assistant's size", () => {
     open({ size: size() }, "Size");
 
     expect(panel().textContent).toContain("You are on small: 4 chats at once, 4Gi–8Gi of memory.");
-    expect(panel().textContent).not.toContain("the next time it restarts");
+    expect(panel().textContent).not.toContain("from its next restart");
   });
 
   // The figure the pod enforces, not the size's cap. A cap is in the pod template, so a deploy that raises it leaves
   // every running pod on the old one, and at its cap the pod stops an idle session to make room rather than queueing
   // — so offering the higher figure here would invite someone to end a chat they never closed.
   it("should say what the pod runs now, and what a restart would change it to, when it is behind its size's cap", () => {
-    open({ size: size({ chats: 3, chatsAfterRestart: 4 }) }, "Size");
+    open({ size: size({ capacity: { now: 3, fromRestart: 4 } }) }, "Size");
 
-    expect(panel().textContent).toContain("You are on small: 3 chats at once, 4Gi–8Gi of memory.");
-    expect(panel().textContent).toContain("It holds 4 the next time it restarts.");
+    expect(panel().textContent).toContain("You are on small: 3 chats at once, 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
+  });
+
+  // A pod that has not reported gets no current figure at all: the cap is what it will be given, not what it has.
+  it("should claim no current figure, and name the cap a restart gives, when the pod has reported nothing", () => {
+    open({ size: size({ capacity: { now: undefined, fromRestart: 4 } }) }, "Size");
+
+    expect(panel().textContent).toContain("You are on small, with 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
+    // The dropdown still describes each size's cap, which is what a change would give; nothing says the pod's own.
+    expect(panel().textContent).not.toContain("You are on small:");
   });
 
   // The peak leads because it is the fuller account of what the pod has had to hold; the live figure beside it is

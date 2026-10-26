@@ -2,7 +2,7 @@ import { canSeeAssistantMemory } from "../access/rules.ts";
 import { clientSupports } from "../agents/client-features.ts";
 import type { PrismaClient } from "../store/prisma.ts";
 import { DEFAULT_SIZE, isVirtualAgentSize, sizeChangeRefusal, sizeChangeRollsPod, type VirtualAgentSize } from "../virtual-agents/size.ts";
-import { chatsAfterRestart, type MemoryReport, type MemoryUse, memoryUse, podChats } from "./memory-report.ts";
+import { type ChatCapacity, chatCapacity, type MemoryReport, type MemoryUse, memoryUse } from "./memory-report.ts";
 
 /**
  * The memory of a person's assistant's pod: what the pod reported, and the two other facts the Size section needs to
@@ -17,10 +17,8 @@ import { chatsAfterRestart, type MemoryReport, type MemoryUse, memoryUse, podCha
 export interface AssistantMemory {
   use: MemoryUse;
   size: VirtualAgentSize;
-  /** How many chats at once the pod in front of the person enforces, which is `podChats`'s answer and not the cap. */
-  chats: number;
-  /** What it will hold once it next restarts, or `undefined` when that is what it holds now. */
-  chatsAfterRestart: number | undefined;
+  /** How many chats the pod runs now and what a restart would change that to; `chatCapacity`'s answer, not the cap. */
+  capacity: ChatCapacity;
   /** Chats whose session the pod says is starting or live, which a change of size would end. */
   openChats: number;
   /** A change of size would replace a pod that is already up, so the section says what that ends. */
@@ -88,8 +86,7 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
       reports: clientSupports(agent.agent?.clientFeatures, "memory")
     }),
     size,
-    chats: podChats(agent.sessionsMax, size),
-    chatsAfterRestart: chatsAfterRestart(agent.sessionsMax, size),
+    capacity: chatCapacity(agent.sessionsMax, size),
     openChats: await prisma.assistantConversation.count({
       where: { virtualAgentId, ownerOid: viewerOid, sessionState: { in: ["starting", "live"] } }
     }),

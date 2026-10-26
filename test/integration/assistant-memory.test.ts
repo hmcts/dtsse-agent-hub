@@ -211,10 +211,8 @@ describe("how many chats an assistant says it runs", () => {
     const assistant = await assistantOf(ALICE);
 
     await reportSessions(prisma, assistant, { sessions: [], max: 3 });
-    const view = await assistantMemory(prisma, ALICE.oid, assistant);
 
-    expect(view?.chats).toBe(3);
-    expect(view?.chatsAfterRestart).toBe(4);
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.capacity).toEqual({ now: 3, fromRestart: 4 });
   });
 
   it("should offer nothing about a restart once the pod reports its size's cap", async () => {
@@ -222,14 +220,15 @@ describe("how many chats an assistant says it runs", () => {
 
     await reportSessions(prisma, assistant, { sessions: [], max: 4 });
 
-    expect(await assistantMemory(prisma, ALICE.oid, assistant)).toMatchObject({ chats: 4, chatsAfterRestart: undefined });
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.capacity).toEqual({ now: 4, fromRestart: undefined });
   });
 
-  // Before the first report there is no second figure to reconcile, and the pod sends one within a minute.
-  it("should fall back to the size's cap before the pod has reported", async () => {
+  // No current figure before the first report: the hub cannot see a pod's supervisor, so the cap is what the pod
+  // will be given rather than what it has, and the pod sends its own within a minute.
+  it("should claim no current figure before the pod has reported", async () => {
     const assistant = await assistantOf(ALICE);
 
-    expect(await assistantMemory(prisma, ALICE.oid, assistant)).toMatchObject({ chats: 4, chatsAfterRestart: undefined });
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.capacity).toEqual({ now: undefined, fromRestart: 4 });
   });
 
   it("should keep the newest figure when a pod rolls onto a different cap", async () => {
@@ -238,7 +237,7 @@ describe("how many chats an assistant says it runs", () => {
     await reportSessions(prisma, assistant, { sessions: [], max: 3 });
     await reportSessions(prisma, assistant, { sessions: [], max: 4 });
 
-    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.chats).toBe(4);
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.capacity).toEqual({ now: 4, fromRestart: undefined });
   });
 });
 
