@@ -60,6 +60,19 @@ test.describe("routes @regression", () => {
     });
   }
 
+  // The half of `docs/agent-api.md`'s missing-route rule that can change under us. Clients tell a route that
+  // refused them from a path this service has no route for by the body: a route sends `{ error }`, and an
+  // unmatched path gets the app's own not-found document, which starts with `<`. `isMissingRoute` in the client
+  // rests on that, and a Next upgrade serving a plain-text 404 instead would quietly turn every client-newer-
+  // than-hub skew back into a reported fault. No API route answers this path, now or planned.
+  test("should answer an unmatched API path with the not-found document, not JSON @regression", async ({ request }) => {
+    const response = await request.get("/api/agent/nonsense");
+
+    expect(response.status()).toBe(404);
+    expect(response.headers()["content-type"]).toContain("text/html");
+    expect((await response.text()).trimStart().startsWith("<")).toBe(true);
+  });
+
   // A secret pasted into one of the bare addresses must not reach the 308's `Location`: Traefik's access log keeps
   // it. `src/proxy.ts` strips it first, which is why these are not config `redirects()`.
   for (const bare of ["/settings/credentials", "/agents/va-1", "/virtual/va-1"]) {

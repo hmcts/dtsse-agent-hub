@@ -16,8 +16,17 @@ The HTTP interface between Claude Code sessions (the `scripts/agent-hub` client 
   than `{"error"}`. That is how a client tells a route that refused it from a route the service has never heard of: a
   client published ahead of the deploy carrying its routes calls them against hubs still on the older image, and the two
   cases want different words. `isMissingRoute` in the client is that test, and it holds for every call including the
-  streams. So a route of this service must never answer `404` with a non-JSON body, and the not-found document must stay
-  HTML — serving a plain-text `404` instead would silently turn every version skew back into a reported fault.
+  streams.
+- **What that test needs, exactly**, because it is narrower than "the body is JSON" and both sides have to hold up their
+  end. The client reads a refusal's body as the service's JSON when it parses as a JSON object, and otherwise puts the
+  first 200 characters of the text under `error`; it then calls a `404` a missing route when that `error` string begins
+  with `<`. So two things must stay true. The not-found document must keep starting with `<` — serving a plain-text
+  `404` instead would turn every version skew back into a reported fault. And **no route of this service may answer
+  `404` with an `error` message whose first non-space character is `<`**, which is stricter than the JSON rule above: a
+  perfectly valid `{"error": "<unknown> is not a topic"}` would be read as a hub that predates its caller, and the
+  caller would then say so instead of reporting the refusal. Today every `404` here is a static literal through
+  `HttpError`/`errorResponse`, none of them starting with `<` and none interpolating caller data, which is what keeps
+  this safe; a message built from a request value is the way it would stop being.
 - Every `/api/agent/{agent_id}/…` route requires the caller's `oid` to be the agent's owner. An unknown agent id, or one that is not a UUID, gives `404 {error}`, and the client re-registers on it; an agent owned by someone else gives `403`, and so does an agent of the same owner that the caller's launch token's virtual agent did not register.
 - A missing or invalid token gives `401` with `WWW-Authenticate: Bearer`. A malformed body, message id, `limit` or topic gives `400`.
 - When the tenant's signing keys cannot be fetched (the JWKS endpoint times out, fails or returns something unusable), the token cannot be judged, so the service answers `503` with `Retry-After` rather than `401`. The client should retry after that delay and not treat it as a sign-in problem. A misconfigured deployment also answers `503`, without `Retry-After`.

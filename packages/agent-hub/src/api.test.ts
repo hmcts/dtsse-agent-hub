@@ -93,6 +93,14 @@ describe("ApiError", () => {
     expect(new ApiError(503, null, "GET", "/api/agent/agents").message).toBe("GET /api/agent/agents failed: 503");
   });
 
+  it("should bound what the service's own message adds, however long it is", () => {
+    // Act
+    const error = new ApiError(500, { error: "x".repeat(300) }, "PUT", "/api/agent/x/artefact");
+
+    // Assert
+    expect(error.message).toBe(`PUT /api/agent/x/artefact failed: 500 ${"x".repeat(200)}`);
+  });
+
   it("should keep an error page out of the message when the service answers with one rather than JSON", () => {
     // Act
     const error = new ApiError(404, { error: ERROR_PAGE }, "POST", "/api/virtual/x/login/atlassian/failed");
@@ -478,6 +486,31 @@ describe("createApi requests", () => {
     // Assert
     expect(error.status).toBe(504);
     expect(error.body).toEqual({ error: "<html>gateway timeout</html>" });
+  });
+
+  it("should read a JSON body that is not an object as text, rather than call it the contract's error", async () => {
+    // Arrange: `502` parses as JSON, and handing a caller a number typed as `{ error }` would be a lie
+    const { fetchImpl } = recordingFetch(() => new Response("502", { status: 502 }));
+    const stubbed = createApi({ env: {}, baseUrl: "https://hub.example.net", devUser: DEV_USER, fetchImpl });
+
+    // Act
+    const error = await stubbed.agents().catch((e) => e);
+
+    // Assert
+    expect(error.body).toEqual({ error: "502" });
+    expect(error.message).toBe("GET /api/agent/agents failed: 502 502");
+  });
+
+  it("should bound a body that is not JSON at all, whatever the service sent", async () => {
+    // Arrange
+    const { fetchImpl } = recordingFetch(() => new Response("y".repeat(5000), { status: 500 }));
+    const stubbed = createApi({ env: {}, baseUrl: "https://hub.example.net", devUser: DEV_USER, fetchImpl });
+
+    // Act
+    const error = await stubbed.agents().catch((e) => e);
+
+    // Assert
+    expect(error.body).toEqual({ error: "y".repeat(200) });
   });
 
   it("should give back null when a 204 answers with no body", async () => {
