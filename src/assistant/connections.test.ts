@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import { CREDENTIAL_KINDS, type CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
-import type { LoginState, LoginView } from "../virtual-agents/logins.ts";
+import { isSignInKind, type LoginState, type LoginView } from "../virtual-agents/logins.ts";
+import { neededCredentials, OPTIONAL_CREDENTIALS } from "../virtual-agents/views.ts";
 import {
   type ChecklistAnswer,
   CONNECTORS,
@@ -16,6 +17,8 @@ import {
   inWords,
   isConnection,
   isUsable,
+  OFFERED_OPTIONAL,
+  offeredConnections,
   PROMPTED_CONNECTIONS,
   PROMPTED_WHEN_LAPSED
 } from "./connections.ts";
@@ -36,6 +39,28 @@ const checklist = (stored: boolean, pending: LoginView | undefined): ChecklistAn
 function list(kinds: CredentialKind[], statuses: CredentialStatus[], logins: LoginView[] = []): Connection[] {
   return connections({ kinds, statuses, logins, unavailable: null }, checklist);
 }
+
+/**
+ * The exhaustiveness itself is the compiler's: `CONNECTORS` is declared `satisfies Record<CredentialKind, …>`, so a
+ * new kind without an entry does not build. These pin what the entries have to say, which the type cannot.
+ */
+describe("CONNECTORS", () => {
+  it("should word every kind of credential the hub keeps when asked", () => {
+    expect(new Set(Object.keys(CONNECTORS))).toEqual(new Set(CREDENTIAL_KINDS));
+  });
+
+  it("should ask the person to paste exactly the connections their assistant cannot sign in to itself", () => {
+    const pasted = CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && CONNECTORS[kind]?.paste !== null);
+
+    expect(pasted).toEqual(CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && !isSignInKind(kind)));
+  });
+
+  it("should word every connection the Assistant can ask for, on either model route", () => {
+    for (const kind of [...neededCredentials("own-licence"), ...neededCredentials("bedrock"), ...OPTIONAL_CREDENTIALS]) {
+      expect(CONNECTORS[kind]).not.toBeNull();
+    }
+  });
+});
 
 describe("isConnection", () => {
   it.each(["github", "azure", "atlassian", "jenkins", "claude", "bedrock"] as const)("should count %s as a sign-in when asked", (kind) => {
@@ -293,6 +318,63 @@ describe("connectionsData", () => {
 
     expect(data.statuses).toEqual([]);
     expect(data.unavailable).toBe("the credentials Key Vault is not configured");
+  });
+});
+
+/**
+ * What the getting-ready screen is allowed to leave out. Anything the person is being asked for and cannot see is
+ * the one failure that has no way out from their side: the assistant sits in `awaiting_login` and every row they can
+ * see reads as connected.
+ */
+describe("offeredConnections", () => {
+  function offer(needed: CredentialKind[], logins: LoginView[] = []) {
+    return offeredConnections({ needed, optional: OPTIONAL_CREDENTIALS, logins }).map((row) => row.kind);
+  }
+
+  it.each(["own-licence", "bedrock"] as const)("should offer a row for every credential the %s route needs", (route) => {
+    const needed = neededCredentials(route);
+
+    expect(offer(needed)).toEqual(expect.arrayContaining(needed));
+  });
+
+  it("should offer the needed connections before the optional one it offers unasked", () => {
+    expect(offer(["github", "azure", "bedrock"])).toEqual(["github", "azure", "bedrock", "atlassian"]);
+  });
+
+  it("should offer no connection that is neither needed nor optional", () => {
+    const offered = offer(["github", "azure", "claude"]);
+
+    expect(offered.filter((kind) => !["github", "azure", "claude", ...OPTIONAL_CREDENTIALS].includes(kind))).toEqual([]);
+  });
+
+  it("should offer a row for an optional sign-in the pod has stopped to ask for", () => {
+    expect(offer(["github", "azure", "bedrock"], [login("jenkins", "pending")])).toEqual(["github", "azure", "bedrock", "jenkins", "atlassian"]);
+  });
+
+  // The status does not move back when a code runs out, so the ask outlasts the code and the row has to as well.
+  it("should offer a row for an asked-for sign-in whose code has run out", () => {
+    const stale = login("jenkins", "pending", new Date(NOW - 600_000).toISOString());
+
+    expect(offer(["github", "azure", "bedrock"], [stale])).toContain("jenkins");
+  });
+
+  it("should offer no row for an optional sign-in that is over and done with", () => {
+    expect(offer(["github", "azure", "bedrock"], [login("jenkins", "completed")])).not.toContain("jenkins");
+  });
+
+  it("should offer no row for a credential that is not a connection", () => {
+    expect(offer(["github", "claude_md", "git_identity"])).toEqual(["github", "atlassian"]);
+  });
+
+  it("should word every row it offers", () => {
+    for (const row of offeredConnections({ needed: ["github", "azure", "claude"], optional: OPTIONAL_CREDENTIALS, logins: [login("jenkins", "pending")] })) {
+      expect(row.connector.name).not.toBe("");
+      expect(row.connector.initial).not.toBe("");
+    }
+  });
+
+  it("should offer Atlassian, and only Atlassian, of the optional connections unasked", () => {
+    expect([...OFFERED_OPTIONAL]).toEqual(["atlassian"]);
   });
 });
 
