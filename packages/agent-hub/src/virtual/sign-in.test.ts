@@ -330,6 +330,31 @@ describe("relayDeviceLogin", () => {
     expect((error as Error).message).toMatch(/definitely-not-a-command could not start: .*ENOENT/);
   });
 
+  it("should reject rather than hang when building the answer throws", async () => {
+    // Arrange: `isExpiry` is the caller's function and runs while the answer is being built, after the promise
+    // has been marked settled. A throw from there used to leave it pending for ever — the same hang the kill
+    // escalation exists to prevent, reached from the other end — and nothing above it has a timeout.
+    const boom = new Error("isExpiry looked at the output and threw");
+
+    // Act
+    const error = await relayDeviceLogin({
+      api: api(),
+      id: VID,
+      kind: "github",
+      cmd: "gh",
+      args: ["auth", "login", "--web"],
+      env: pod.env({ FAKE_GH_TOKEN: GH_TOKEN, BROWSER: "true" }),
+      parse: parseGhDeviceCode,
+      isExpiry: () => {
+        throw boom;
+      },
+      label: "github"
+    }).catch((e: unknown) => e);
+
+    // Assert
+    expect(error).toBe(boom);
+  }, 20_000);
+
   it("should let go of a command that ignores the signal, rather than wait on it for ever", async () => {
     // Arrange: `trap '' TERM` is ignored across `exec`, and the subshell this backgrounds inherits it and
     // outlives every signal sent to its parent, holding the pipes open so that `close` can never arrive. That

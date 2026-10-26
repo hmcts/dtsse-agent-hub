@@ -232,7 +232,7 @@ export const REDACTED = "[redacted]";
  */
 const CREDENTIAL_SHAPES: readonly RegExp[] = [
   /gh[pousr]_[A-Za-z0-9]{20,}/g,
-  /github_pat_[A-Za-z0-9_]{20,}/g,
+  /github_pat_\w{20,}/g,
   /\b[0-9a-f]{40}\b/g,
   /sk-ant-[A-Za-z0-9_-]{20,}/g,
   // A lookbehind rather than a group, so every shape here replaces whole and the key is left to read. The value
@@ -339,8 +339,21 @@ export function relayDeviceLogin({
       if (abandon) {
         clearTimeout(abandon);
       }
-      fn();
+      // Settling is the one thing that has to happen. `fn` builds the answer, which reads the command's output
+      // and calls `isExpiry` — the caller's function, not this one's — and a throw from it would otherwise leave
+      // the promise pending for ever with `settled` already true: the hang the teardown above exists to prevent,
+      // reached from the other end.
+      try {
+        fn();
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
     };
+    // `finish` is async, so both places that call it mark its promise discarded rather than leaving it floating:
+    // an unhandled rejection inside a timer callback takes the process down, and this is the teardown whose
+    // whole purpose is to stop the process hanging. Discarding it is safe because it cannot reject — the only
+    // thing it awaits is `relayed`, a `then(ok, err)` chain that handles both of its own arms, and the `settle`
+    // above turns a throw from building the answer into a rejection of this promise instead.
     // SIGTERM asks, SIGKILL insists, and the third step is to stop waiting. A child can ignore the first —
     // `trap '' TERM` survives `exec` — and surviving the second is impossible, so a `close` that still has not
     // come means a descendant it forked holds these pipes. Nothing above this has a timeout of its own, so
@@ -359,7 +372,7 @@ export function relayDeviceLogin({
         abandon ??= setTimeout(() => {
           child.stdout?.destroy();
           child.stderr?.destroy();
-          finish(null);
+          void finish(null);
         }, SIGKILL_AFTER_MS);
       }, SIGKILL_AFTER_MS);
     };
@@ -417,7 +430,9 @@ export function relayDeviceLogin({
     child.on("error", (e) => {
       settle(() => reject(new DeviceLoginError(`${cmd} could not start: ${e.message}`, shown)));
     });
-    child.on("close", finish);
+    child.on("close", (code) => {
+      void finish(code);
+    });
   });
 }
 
@@ -542,6 +557,21 @@ export type GithubLoginOptions = LoginOptions & {
 export type GithubLoginResult = "signed-in" | "not-signed-in";
 
 /**
+ * What the owner is told when none of their codes was completed. The three cases are the three things that can
+ * have happened to the last one: it ran out while they were away, something stopped the pod finishing it, or
+ * GitHub ended it. Each says what to do next, because this is the agent's `status_detail` and the only thing
+ * they see — the pod's log carries what `gh` said, which is for whoever is reading logs.
+ */
+function githubNotSignedInDetail(expired: boolean, broke: boolean): string {
+  if (expired) {
+    return "github: the sign-in code ran out before it was used; start the agent again to be sent another";
+  }
+  return broke
+    ? "github: the sign-in could not be finished; start the agent again to be sent another code"
+    : "github: GitHub stopped the sign-in before it could be completed, so the code is no longer any use";
+}
+
+/**
  * The token gh holds, or `""` for none. Tolerates a `gh auth token` that fails, because having no sign-in yet is
  * one of the ways it does: only safe where no sign-in has been run, which is the reuse check below.
  */
@@ -585,7 +615,20 @@ async function grantedGhToken(env: NodeJS.ProcessEnv): Promise<string> {
  * spend a code and both earn the next one, and once any code has been shown the call ends in 'not-signed-in'
  * however it got there, because a caller that retried would put a fresh code on that screen on every pass.
  * `expired` only words what the hub is told.
+ *
+ * Its cognitive complexity is over Sonar's limit and the marker below says so rather than hiding it. What is
+ * here is one decision taken in sequence: reuse a token gh already holds, else relay up to `codes` codes with a
+ * wait between them, reading each attempt's exit, token and `expired` flag; then read the token a sign-in that
+ * exited 0 was granted; then store it; then, if any code was shown, report and return, else throw. Six of those
+ * seven steps can end the call, and each ends it differently — which is the behaviour, not accidental
+ * branching, and every branch is covered in `sign-in.test.ts`.
+ *
+ * The seam for splitting it is the axis the behaviour already turns on: relaying codes and classifying what
+ * came back (the loop, producing `{token, granted, shown, last, thrown}`) against turning that classification
+ * into a report and a return value. That is a mechanical extraction rather than a redesign, and it is left for
+ * its own change so that the diff of it is readable on its own.
  */
+// NOSONAR typescript:S3776 — split deliberately deferred; the seam is in the doc comment above.
 export async function githubLogin({
   api = createApi(),
   env = process.env,
@@ -688,7 +731,7 @@ export async function githubLogin({
     try {
       token = await grantedGhToken(ghEnv);
     } catch (e) {
-      await reportNotSignedIn("github: the sign-in could not be finished; start the agent again to be sent another code", false);
+      await reportNotSignedIn(githubNotSignedInDetail(false, true), false);
       throw e;
     }
   }
@@ -706,11 +749,7 @@ export async function githubLogin({
 
   if (shown) {
     const expired = thrown === undefined && last?.expired === true;
-    const detail = expired
-      ? "github: the sign-in code ran out before it was used; start the agent again to be sent another"
-      : thrown !== undefined
-        ? "github: the sign-in could not be finished; start the agent again to be sent another code"
-        : "github: GitHub stopped the sign-in before it could be completed, so the code is no longer any use";
+    const detail = githubNotSignedInDetail(expired, thrown !== undefined);
     // gh's own words, redacted, are the only thing that says why it stopped polling: a sign-in that fails in a
     // pod is diagnosed from this line and nothing else.
     const said = thrown === undefined ? `gh auth login exited ${last?.code}; gh said: ${outputTail(last?.output ?? "")}` : (thrown as Error).message;
