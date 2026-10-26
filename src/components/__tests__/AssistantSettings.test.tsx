@@ -1476,9 +1476,16 @@ describe("the Assistant's files", () => {
 const GIB = 1024 ** 3;
 const LIMIT = 8 * GIB;
 
-/** A memory report whose peak leaves `headroom` under the limit, which is what the warning's threshold is about. */
+/**
+ * A memory report whose live figure leaves `headroom` under the limit, which is what the warning's threshold is
+ * about.
+ *
+ * Its peak is pinned at the limit, which a peak may always be and which the warning must not react to on its own:
+ * `memory.peak` never falls while the pod lives, so every expectation below that no warning is shown is also a check
+ * that a pod which once touched its ceiling is not warned about for ever.
+ */
 function use(headroom: number, overrides: Partial<Extract<MemoryUse, { reported: true }>> = {}): MemoryUse {
-  return { reported: true, limitBytes: LIMIT, currentBytes: 3 * GIB, peakBytes: LIMIT - headroom, at: REPORTED_AT, stopped: false, ...overrides };
+  return { reported: true, limitBytes: LIMIT, currentBytes: LIMIT - headroom, peakBytes: LIMIT, at: REPORTED_AT, stopped: false, ...overrides };
 }
 
 const CHANGE_FORM = "Change the size of your assistant";
@@ -1537,22 +1544,23 @@ describe("the Assistant's size", () => {
     expect(panel().textContent).toContain("It holds 4 the next time it restarts.");
   });
 
-  // The peak leads, because that is what the warning is about: the live figure dips between turns, so a pod that has
-  // twice nearly been killed reads as idle whenever nothing is mid-answer.
+  // The peak leads because it is the fuller account of what the pod has had to hold; the live figure beside it is
+  // what the warning is computed from, because it is the one that can come back down.
   it("should give the peak against the limit, the live figure and when the pod last looked", () => {
     open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
 
-    expect(panel().textContent).toContain("5.4 GB of 8 GB at its busiest");
-    expect(panel().textContent).toContain("Using 3 GB right now");
+    expect(panel().textContent).toContain("8 GB of 8 GB at its busiest");
+    expect(panel().textContent).toContain("Using 5.4 GB right now");
     expect(panel().textContent).toContain("Last reported");
   });
 
-  // In the figure a person reads rather than through the constant: the sentence used to carry its own number, which
-  // left it telling someone a chat costs one thing while the warning was computed from another.
-  it("should say what a chat costs from the same figure the warning is computed from", () => {
+  // The sentence used to carry its own number, which left it telling someone a chat costs one thing while the
+  // warning was computed from another. In gigabytes to two places, not `describeSize`'s tenth of a megabyte, which
+  // would claim a precision the one measurement behind the figure cannot support.
+  it("should say what a chat costs from the same figure the warning uses when the pod has reported", () => {
     open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
 
-    expect(panel().textContent).toContain("Each chat you have open takes about 665.6 MB of it.");
+    expect(panel().textContent).toContain("Each chat you have open takes about 0.65 GB of it.");
   });
 
   it("should say the figures will not move while the assistant is stopped", () => {
@@ -1581,17 +1589,19 @@ describe("the Assistant's size", () => {
   });
 
   // The threshold: exactly one conversation's worth of headroom still has room for the chat about to be opened.
-  it("should raise no warning when the peak leaves room for exactly one more chat", () => {
+  it("should raise no warning when the live figure leaves room for exactly one more chat", () => {
     open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES) }) }, "Size");
 
     expect(panel().textContent).not.toContain("low on memory");
   });
 
-  it("should warn, and name both ways out, when the peak leaves a byte less than one more chat", () => {
+  it("should warn, and name both ways out, when the live figure leaves a byte less than one more chat", () => {
     open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES - 1), openChats: 3 }) }, "Size");
 
     expect(panel().textContent).toContain("Your assistant is low on memory");
-    expect(panel().textContent).toContain("Move up to medium below for 6 chats at once and 8Gi–16Gi of memory, or close a chat you have finished with.");
+    expect(panel().textContent).toContain(
+      "Move up to medium below for 6 chats at once and 8Gi–16Gi of memory, or close a chat you have finished with to free about 0.65 GB."
+    );
   });
 
   // Telling someone with one chat open to close some chats is telling them to stop working.

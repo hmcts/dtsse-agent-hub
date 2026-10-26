@@ -28,10 +28,26 @@ export const MEMORY_REPORT_INTERVAL_MINUTES = 10;
  * ΣRSS counts those pages once per process and puts the same marginal at 1.25Gi, nearly double. The MCP servers'
  * heaps are their own, so what sharing there is buys less than it looks like it should.
  *
+ * **It rests on one transition of one `small` pod.** The three routes above are that single subtraction read three
+ * ways, not three measurements, so their agreement says the arithmetic is sound and nothing about variance between
+ * pods or over time. Only the 0.95Gi baseline it sits on top of has a sample behind it — 15, across two pods and two
+ * images, spread 0.91–0.99Gi. Widening a cap on this figure wants a pod with several conversations measured first.
+ *
  * It is the unit the warning below is in, because it is the unit the person acts in: they open and close chats, and
  * they choose a size that holds a number of them. A share of the limit would be a round number nobody could check.
  */
 export const CONVERSATION_MEMORY_BYTES = Math.round(0.65 * 1024 * 1024 * 1024);
+
+/**
+ * That cost as a sentence says it: `0.65 GB`. Two decimal places at most, and in the gigabytes the rest of the Size
+ * section is already in, so a sentence about a chat does not change unit from the sentence above it.
+ *
+ * Not `describeSize`, which is the formatter for a file on a disk and would say `665.6 MB` — a tenth of a megabyte,
+ * claimed for a figure rounded off one measurement. The precision a figure is shown to is a claim about it.
+ */
+export function describeChatCost(): string {
+  return `${Number((CONVERSATION_MEMORY_BYTES / 1024 ** 3).toFixed(2))} GB`;
+}
 
 /** A pod's whole report. Every figure is of the container's own cgroup, in bytes. */
 export interface MemoryReport {
@@ -163,7 +179,8 @@ export function nextSizeUp(size: VirtualAgentSize): VirtualAgentSize | undefined
 
 /** Why memory is worth telling the person about, and what they can do: the two facts the wording needs. */
 export interface MemoryPressure {
-  peakBytes: number;
+  /** The figure the threshold was crossed on, which is the live one rather than the peak. */
+  currentBytes: number;
   limitBytes: number;
   /** Chats with a session running on the pod now, so closing some is offered only when there are some to close. */
   openChats: number;
@@ -175,33 +192,38 @@ export interface MemoryPressure {
  * Whether the pod's memory leaves room for another conversation, and the facts for saying so, or `undefined` when it
  * does.
  *
- * **The rule is `peak + one conversation > limit`**, and the boundary is deliberate: a pod with exactly one
+ * **The rule is `current + one conversation > limit`**, and the boundary is deliberate: a pod with exactly one
  * conversation's worth of headroom still has room for the chat the person is about to open, so it is not warned
  * about. One byte less and it does not.
  *
- * `peak` rather than `current`, because `memory.current` dips between turns: a pod that has twice been within a
- * hundred megabytes of being killed reads as comfortable whenever nothing is mid-answer, which is most of the time
- * anyone looks. The peak is monotonic since the pod booted, so a report that is minutes old is a lower bound on it —
- * this understates the pressure and cannot invent it.
+ * **`current` rather than `peak`, because the warning has to be able to clear.** `memory.peak` is monotonic for the
+ * life of the pod — the pod reads it and nothing resets it — so a threshold crossed once is crossed again by every
+ * later report, and closing a chat, the first thing the advice offers, could never undo it. Only replacing the pod
+ * could, which made one of the two remedies work by side effect and the other not at all. `memory.current` falls by
+ * about one conversation when a session ends, so the action the person is asked to take is the action that clears
+ * the warning. The cost is that `current` dips between turns and a report is up to ten minutes old, so a stale one
+ * can overstate as well as understate, where a stale peak could only understate — and a figure that cannot come down
+ * at all is the worse of the two. `memory.peak` is still reported and still shown, as what the pod reached at its
+ * busiest: it informs, it does not decide.
  *
- * `peak` counts the container's page cache as well as its heaps, and on the pods `CONVERSATION_MEMORY_BYTES` was
- * measured on that cache was 2.1–2.4Gi of the workspace clone, so the peak sits well above the part of the pod the
- * kernel cannot reclaim. The constant is still the right one to compare against it: a conversation moved
- * `memory.current` by 0.69Gi and the page cache within it by 0.03Gi, so one more chat costs about the same 0.65Gi
- * whichever of the two the comparison is in. What the cache costs is sensitivity — a pod that has merely read a lot
- * of files reaches the threshold earlier than its heaps alone would — and closing that gap needs a figure for the
- * non-reclaimable part, which the pod's three cgroup reads do not include.
+ * **This threshold is not reachable by opening chats, at any size.** `current` counts the container's page cache,
+ * which was 2.1–2.4Gi of the workspace clone on the pods the constant was measured on, and the caps sit far below
+ * what the limits allow: a `small` pod at its cap of 4 settles near 6.2Gi of its 8Gi against a threshold of 7.35Gi,
+ * and the gap is wider on every larger size. So what trips this is page cache or the pod's own work rather than a
+ * person's chats, which is why `memoryAdvice` says what was measured and what each remedy frees instead of naming
+ * chats as the cause. Closing the gap needs a figure for the part the kernel cannot reclaim, which the pod's three
+ * cgroup reads do not include.
  *
  * Nothing is said for a pod with no report: there is no ceiling to measure against, and the three sentences the
  * section shows instead are what honesty about that looks like.
  */
 export function memoryPressure(use: MemoryUse, openChats: number, size: VirtualAgentSize): MemoryPressure | undefined {
-  if (!use.reported || use.peakBytes + CONVERSATION_MEMORY_BYTES <= use.limitBytes) {
+  if (!use.reported || use.currentBytes + CONVERSATION_MEMORY_BYTES <= use.limitBytes) {
     return undefined;
   }
   const next = nextSizeUp(size);
   return {
-    peakBytes: use.peakBytes,
+    currentBytes: use.currentBytes,
     limitBytes: use.limitBytes,
     openChats,
     nextSize: next === undefined ? undefined : sizeOffer(next)
@@ -220,20 +242,25 @@ export function memoryWarning(pressure: MemoryPressure | undefined): string | nu
 }
 
 /**
- * The warning in full: where the pod got to, and what to do about it.
+ * The warning in full: what the pod reached, and what each thing the person can do would free.
  *
- * Both answers are offered when there is a bigger size and more than one chat open. On the largest size there is no
+ * **It does not say their chats filled the pod.** This threshold is not reachable by opening chats at any size — see
+ * `memoryPressure` — so what is behind it is page cache or the pod's own work, and naming chats as the cause would
+ * be a diagnosis the figures contradict. What each remedy frees is a fact, and it still leaves the person somewhere
+ * to go, which is what this section exists to do.
+ *
+ * Both remedies are offered when there is a bigger size and more than one chat open. On the largest size there is no
  * bigger one, and with a single chat open "close a chat" would be an instruction to stop working — so neither is
- * offered where it would be no use. Telling someone memory is low and leaving them nowhere to go is the thing this
- * section exists not to do, which is why the advice is part of the same sentence rather than a separate kindness.
+ * offered where it would be no use.
  */
 export function memoryAdvice(pressure: MemoryPressure): string {
-  const reached = `It has reached ${describeSize(pressure.peakBytes)} of its ${describeSize(pressure.limitBytes)}, which leaves no room for another chat.`;
+  const reached = `It has reached ${describeSize(pressure.currentBytes)} of its ${describeSize(pressure.limitBytes)}, which leaves less than another chat's worth free.`;
+  const closing = `close a chat you have finished with to free about ${describeChatCost()}`;
   const bigger = pressure.nextSize;
   if (bigger === undefined) {
-    return `${reached} This is the largest size there is, so close a chat you have finished with before you start another.`;
+    return `${reached} This is the largest size there is, so ${closing}.`;
   }
-  const orClose = pressure.openChats > 1 ? ", or close a chat you have finished with" : "";
+  const orClose = pressure.openChats > 1 ? `, or ${closing}` : "";
   return `${reached} Move up to ${bigger.size} below for ${bigger.chats} chats at once and ${offerMemory(bigger)} of memory${orClose}.`;
 }
 

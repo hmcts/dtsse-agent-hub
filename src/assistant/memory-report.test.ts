@@ -31,9 +31,14 @@ function row(overrides: Partial<MemoryReportRow> = {}): MemoryReportRow {
   };
 }
 
-/** A report whose peak leaves `headroom` bytes under the limit, which is what the threshold is about. */
+/**
+ * A report whose live figure leaves `headroom` bytes under the limit, which is what the threshold is about.
+ *
+ * Its peak is pinned at the limit throughout, so every expectation below that the warning stays quiet is also a
+ * check that the peak is not what decides — a pod whose peak touched the ceiling once is not warned about for ever.
+ */
 function reported(headroom: number, limit = LIMIT): MemoryUse {
-  return { reported: true, limitBytes: limit, currentBytes: 1024, peakBytes: limit - headroom, at: AT.toISOString(), stopped: false };
+  return { reported: true, limitBytes: limit, currentBytes: limit - headroom, peakBytes: limit, at: AT.toISOString(), stopped: false };
 }
 
 describe("memoryUse", () => {
@@ -89,30 +94,38 @@ describe("memoryUse", () => {
 describe("memoryPressure", () => {
   // In bytes rather than through the constant, because the threshold is a measured cost: a test that reads it back
   // from `CONVERSATION_MEMORY_BYTES` holds either side of the boundary wherever the constant happens to sit.
-  it("should put the threshold a measured 0.65Gi under the limit", () => {
+  it("should put the threshold a measured 0.65Gi under the limit when the pod has reported", () => {
     const measured = Math.round(0.65 * 1024 ** 3);
 
     expect(memoryPressure(reported(measured), 2, "small")).toBeUndefined();
     expect(memoryPressure(reported(measured - 1), 2, "small")).toMatchObject({ limitBytes: LIMIT });
   });
 
+  // `memory.peak` never falls while the pod lives, so a warning computed from it could not be cleared by closing a
+  // chat — the one thing the advice asks for. The live figure is what comes back down, so it is what decides.
+  it("should say nothing when the peak is at the limit but the live figure has room", () => {
+    const peaked: MemoryUse = { reported: true, limitBytes: LIMIT, currentBytes: 1024, peakBytes: LIMIT, at: AT.toISOString(), stopped: false };
+
+    expect(memoryPressure(peaked, 2, "small")).toBeUndefined();
+  });
+
   // The boundary: exactly one conversation's worth of headroom still has room for the chat the person is about to
   // open, so it is not warned about. One byte less and it has not.
-  it("should say nothing when the peak leaves room for exactly one more chat", () => {
+  it("should say nothing when the live figure leaves room for exactly one more chat", () => {
     expect(memoryPressure(reported(CONVERSATION_MEMORY_BYTES), 2, "small")).toBeUndefined();
   });
 
-  it("should warn when the peak leaves a byte less than one more chat", () => {
+  it("should warn when the live figure leaves a byte less than one more chat", () => {
     expect(memoryPressure(reported(CONVERSATION_MEMORY_BYTES - 1), 2, "small")).toMatchObject({ openChats: 2, limitBytes: LIMIT });
   });
 
-  it("should warn when the peak is at the limit", () => {
-    expect(memoryPressure(reported(0), 3, "small")).toMatchObject({ peakBytes: LIMIT, openChats: 3 });
+  it("should warn when the live figure is at the limit", () => {
+    expect(memoryPressure(reported(0), 3, "small")).toMatchObject({ currentBytes: LIMIT, openChats: 3 });
   });
 
   // A pod using memory normally within its size must not nag: the warning is about running out of room, not about
   // using what the size is for.
-  it("should say nothing when the peak leaves room for several more chats", () => {
+  it("should say nothing when the live figure leaves room for several more chats", () => {
     expect(memoryPressure(reported(4 * CONVERSATION_MEMORY_BYTES), 1, "small")).toBeUndefined();
   });
 
@@ -144,8 +157,17 @@ describe("memoryAdvice", () => {
     const pressure = memoryPressure(reported(0), 3, "small");
 
     expect(memoryAdvice(pressure!)).toBe(
-      "It has reached 8 GB of its 8 GB, which leaves no room for another chat. Move up to medium below for 6 chats at once and 8Gi–16Gi of memory, or close a chat you have finished with."
+      "It has reached 8 GB of its 8 GB, which leaves less than another chat's worth free. Move up to medium below for 6 chats at once and 8Gi–16Gi of memory, or close a chat you have finished with to free about 0.65 GB."
     );
+  });
+
+  // This threshold is not reachable by opening chats at any size, so the cause is page cache or the pod's own work.
+  // Saying the chats filled it would be a diagnosis the figures contradict; what closing one frees is a fact.
+  it("should not blame the person's chats when it says memory is tight", () => {
+    const advice = memoryAdvice(memoryPressure(reported(0), 3, "small")!);
+
+    expect(advice).not.toContain("no room for another chat");
+    expect(advice).toContain("to free about 0.65 GB");
   });
 
   // Telling someone with one chat open to close a chat is telling them to stop working.
@@ -156,7 +178,7 @@ describe("memoryAdvice", () => {
   it("should offer only closing a chat on the largest size there is", () => {
     const advice = memoryAdvice(memoryPressure(reported(0), 3, "large")!);
 
-    expect(advice).toContain("This is the largest size there is, so close a chat you have finished with before you start another.");
+    expect(advice).toContain("This is the largest size there is, so close a chat you have finished with to free about 0.65 GB.");
     expect(advice).not.toContain("Move up to");
   });
 });

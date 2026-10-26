@@ -28,9 +28,13 @@ beforeEach(async () => {
 
 const LIMIT = 8 * 1024 ** 3;
 
-/** A report whose peak leaves `headroom` bytes under the limit, which is what the warning's threshold is about. */
+/**
+ * A report whose live figure leaves `headroom` bytes under the limit, which is what the warning's threshold is about.
+ * Its peak is pinned at the limit, which the warning must not react to on its own: nothing resets `memory.peak` while
+ * the pod lives, so a threshold computed from it could never be cleared.
+ */
 function report(headroom: number) {
-  return { limit_bytes: LIMIT, current_bytes: 3 * 1024 ** 3, peak_bytes: LIMIT - headroom };
+  return { limit_bytes: LIMIT, current_bytes: LIMIT - headroom, peak_bytes: LIMIT };
 }
 
 /** The shared fixture, bound to the claim this suite is about: the pod's own session reports its memory. */
@@ -70,7 +74,13 @@ describe("the memory an assistant reports", () => {
     await reportMemoryUse(prisma, assistant, report(4 * CONVERSATION_MEMORY_BYTES));
     const view = await assistantMemory(prisma, ALICE.oid, assistant);
 
-    expect(view?.use).toMatchObject({ reported: true, limitBytes: LIMIT, currentBytes: 3 * 1024 ** 3, stopped: false });
+    expect(view?.use).toMatchObject({
+      reported: true,
+      limitBytes: LIMIT,
+      currentBytes: LIMIT - 4 * CONVERSATION_MEMORY_BYTES,
+      peakBytes: LIMIT,
+      stopped: false
+    });
     expect(view?.use.reported && typeof view.use.at).toBe("string");
   });
 
@@ -108,7 +118,7 @@ describe("the memory an assistant reports", () => {
     await reportMemoryUse(prisma, assistant, report(4 * CONVERSATION_MEMORY_BYTES));
     const view = await assistantMemory(prisma, ALICE.oid, assistant);
 
-    expect(view?.use.reported && view.use.peakBytes).toBe(LIMIT - 4 * CONVERSATION_MEMORY_BYTES);
+    expect(view?.use.reported && view.use.currentBytes).toBe(LIMIT - 4 * CONVERSATION_MEMORY_BYTES);
     expect(memoryPressure(view!.use, view!.openChats, view!.size)).toBeUndefined();
   });
 
@@ -122,7 +132,7 @@ describe("the memory an assistant reports", () => {
     expect((await assistantMemory(prisma, ALICE.oid, assistant))?.openChats).toBe(2);
   });
 
-  it("should warn once the peak leaves no room for another chat, and name the size to move to", async () => {
+  it("should warn once the live figure leaves no room for another chat, and name the size to move to", async () => {
     const assistant = await assistantOf(ALICE);
     await openChat(ALICE, "Possession claim");
 
