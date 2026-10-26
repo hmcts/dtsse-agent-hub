@@ -183,14 +183,14 @@ load_node() {
 # A pod's client is the one the devcontainer image baked in, so without this a client release would reach pods
 # only after an image rebuild and a Flux digest bump; cft-workspace's post-start.sh gives a laptop the same
 # refresh on every container start. Called as late as the handover allows, because this script is one of the
-# package's own bins: the install replaces the file bash is reading, which is safe only once all that is left
-# is the temp-directory removal, the trap clearing and the `exec`, which bash has already parsed.
+# package's own bins and the install replaces the file bash is reading: it is the first line of the compound
+# command that ends in the `exec`, so bash has parsed the whole of the rest of this script before npm runs.
 #
-# It is called above that trap clearing, not below it, so the TERM handler covers the install: the fetch bound
-# is per request and an install makes several, so this runs for minutes, and an agent stopped from the UI
-# meanwhile should log "terminated during boot" and exit 0 rather than let the kubelet's TERM kill bash at its
-# default disposition — a 143 with no log line and npm orphaned mid-reify. $TMP is therefore still present
-# while npm runs, and nothing here uses it: the output goes to a local, so the call stays free to move.
+# It is called above that command's trap clearing, not below it, so the TERM handler covers the install: the
+# fetch bound is per request and an install makes several, so this runs for minutes, and an agent stopped from
+# the UI meanwhile should log "terminated during boot" and exit 0 rather than let the kubelet's TERM kill bash
+# at its default disposition — a 143 with no log line and npm orphaned mid-reify. $TMP is therefore still
+# present while npm runs, and nothing here uses it: the output goes to a local.
 #
 # The registry is set for the @hmcts-cft scope alone. The hmcts-lib feed holds nothing else, so a bare
 # --registry would send the first public package there and 404. The feed allows anonymous reads, which is what
@@ -286,19 +286,27 @@ fi
 checkout_workspace
 [[ -n "$sync_detail" ]] && { log "$sync_detail"; report provisioning "$sync_detail"; }
 
-# Stage 1 is this package's own, so a pod gets the runtime it was published with rather than whatever the
-# checkout happens to carry. The checkout's copy is the fallback for a pod whose client predates the move, and
-# goes once every pod image floor carries a client that ships one.
-entrypoint="$PACKAGE/virtual-agent/entrypoint.sh"
-if [[ ! -x "$entrypoint" ]]; then
-    entrypoint="$WORKSPACE/.devcontainer/virtual-agent/entrypoint.sh"
-fi
-if [[ ! -x "$entrypoint" ]]; then
-    report failed "neither this agent-hub client nor the cft-workspace checkout has an executable virtual-agent/entrypoint.sh"
-    exit 1
-fi
-log "handing over to $entrypoint"
-upgrade_client
-rm -rf "$TMP"
-trap - EXIT TERM INT
-exec "$entrypoint"
+# The handover, as one compound command so that bash has parsed every line of it before the install inside it
+# replaces the file it is reading.
+{
+    upgrade_client
+
+    # Stage 1 is this package's own, so a pod gets the runtime it was published with rather than whatever the
+    # checkout happens to carry. Resolved after the upgrade, not before: the global prefix is in the container
+    # filesystem rather than on the volume, so a pod whose image client predates the runtime installs one here
+    # on every boot, and resolving first would send every one of those boots to the checkout until the pod
+    # image itself was rebuilt. The checkout's copy is the fallback for the boot that has neither, and goes
+    # once every pod image floor carries a client that ships one.
+    entrypoint="$PACKAGE/virtual-agent/entrypoint.sh"
+    if [[ ! -x "$entrypoint" ]]; then
+        entrypoint="$WORKSPACE/.devcontainer/virtual-agent/entrypoint.sh"
+    fi
+    if [[ ! -x "$entrypoint" ]]; then
+        report failed "neither this agent-hub client nor the cft-workspace checkout has an executable virtual-agent/entrypoint.sh"
+        exit 1
+    fi
+    log "handing over to $entrypoint"
+    rm -rf "$TMP"
+    trap - EXIT TERM INT
+    exec "$entrypoint"
+}

@@ -342,6 +342,14 @@ read_repos_state() {
     [[ "$repos_total" =~ ^[0-9]+$ ]] || repos_total=0
 }
 
+# Writes the clone step's state as this file knows it. Never a note= line: the sentence a session is given
+# belongs to whatever did the cloning, and the client has a generic one of its own for a state that carries
+# none, which is better than a stale sentence from a step that is no longer running.
+write_repos_state() {
+    printf 'state=%s\ndone=%s\ntotal=%s\nupdated=%s\n' "$repos_state" "$repos_done" "$repos_total" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$REPOS_STATE.tmp" && mv "$REPOS_STATE.tmp" "$REPOS_STATE"
+}
+
 # What the clone step is doing, as a verb for a sentence about it: "arrive" until it has said which of the two
 # it is, because only state= ever says so.
 repos_verb() {
@@ -354,19 +362,14 @@ repos_verb() {
 
 # --- The fallback, which goes once every checkout carries prepare-workspace.sh. ---
 # A checkout from before the workspace declared the step: the two scripts boot has always run, the same log,
-# and state=, done= and total= written here with no note=, so a session still gets the client's generic
-# sentence about the repositories rather than nothing at all. The apps/, libs/ and platops/ wording is the
-# workspace's and arrives with the hook.
+# and the counts taken from that log rather than from a state file, so a session still gets the client's
+# generic sentence about the repositories rather than nothing at all. The apps/, libs/ and platops/ wording is
+# the workspace's and arrives with the hook.
 fallback_count() {
     read -r repos_done repos_total < <(awk '
         /^(Cloning into|Syncing) [0-9]+ / { total = $(/^Syncing/ ? 2 : 3) }
         /^(OK|ERR|SKIP|MISS) / || / skip \(/ { done++ }
         END { print done + 0, total + 0 }' "$REPOS_LOG" 2>/dev/null)
-}
-
-fallback_write() {
-    printf 'state=%s\ndone=%s\ntotal=%s\nupdated=%s\n' "$repos_state" "$repos_done" "$repos_total" \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$REPOS_STATE.tmp" && mv "$REPOS_STATE.tmp" "$REPOS_STATE"
 }
 
 fallback_start() {
@@ -380,7 +383,7 @@ fallback_start() {
     fi
     repos_state=$repos_kind
     start_in_background "${cmd[@]}"
-    fallback_write
+    write_repos_state
     log "$repos_kind the workspace repos in the background; log in $REPOS_LOG"
 }
 
@@ -394,7 +397,7 @@ fallback_finished() {
         repos_state=failed
         log "the background $(repos_verb) reported failures; see $REPOS_LOG (the next boot runs it again)"
     fi
-    fallback_write
+    write_repos_state
 }
 # --- End of the fallback. ---
 
@@ -402,6 +405,10 @@ fallback_finished() {
 start_repos() {
     if [[ -x "$PREPARE" ]]; then
         repos_hook=1
+        # The state dir is on the volume, so the file still holds the last boot's result until the step writes
+        # its own. Left there, a step that dies before its first write would be read as that boot's success,
+        # and until then this boot's progress would be whatever that one ended on.
+        rm -f "$REPOS_STATE"
         start_in_background "$PREPARE"
         log "running the workspace's clone step ($PREPARE) in the background; log in $REPOS_LOG"
     elif [[ -x "$WS/scripts/bootstrap" ]]; then
@@ -416,7 +423,7 @@ repos_progress() {
         read_repos_state
     else
         fallback_count
-        fallback_write
+        write_repos_state
     fi
 }
 
@@ -430,11 +437,16 @@ repos_finished() {
     case "$repos_state" in
         done) log "the workspace repositories are ready" ;;
         failed) log "the workspace's clone step reported failures; see $REPOS_LOG (the next boot runs it again)" ;;
-        # The step is what says how it ended, so one that stops without saying is taken as failed: left as it
-        # is, every session for the rest of the pod's life would be told the repositories are still on their way.
+        # The step is what says how it ended, so one that stops without saying — killed for memory, or dead on
+        # an error it does not handle — is taken as failed, and that is written rather than only reported: the
+        # client's SessionStart hook reads the file, so a state left at cloning tells every session for the
+        # rest of the pod's life that the repositories are still on their way and that nothing should fetch
+        # them. The step's note= goes with it, as write_repos_state writes none: a sentence about a clone that
+        # is no longer running is worse than the generic one the client uses without one.
         *)
             repos_state=failed
             log "the workspace's clone step exited (status $1) without finishing $REPOS_STATE; taking it as failed"
+            write_repos_state
             ;;
     esac
 }

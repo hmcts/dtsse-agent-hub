@@ -118,7 +118,7 @@ export type CreateAssistantSupervisorOptions = {
   now?: () => number;
   say?: (message: string) => void;
   /** Where each conversation's session runs, and so what a relative path in its command resolves against: the
-   * workspace checkout root, because `claudeCommand` names the prompt file through a path relative to it. */
+   * workspace checkout root, which is where a session is expected to work. */
   cwd?: string;
   /** Where conversations' attachments live; a deleted conversation's directory goes with its session. */
   uploadsDir?: string;

@@ -23,7 +23,8 @@ CASES=(first-boot bedrock-route legacy-gateway-route unknown-route hai-install-b
     hai-installed-off-path hai-install-retries hai-install-keeps-failing hai-install-leaves-no-binary
     continues-a-conversation git-identity-fails later-boot-fails sigterm-mid-clone claude-md-stored
     claude-md-missing claude-md-error claude-md-restart atlassian-fails atlassian-not-signed-in atlassian-sigterm
-    atlassian-no-twg conversations prepare-workspace prepare-workspace-fails prepare-workspace-sigterm
+    atlassian-no-twg conversations prepare-workspace prepare-workspace-fails prepare-workspace-dies
+    prepare-workspace-dies-silently prepare-workspace-sigterm
     no-clone-step client-on-path broken-workspace-shim)
 
 if [ "${1:-}" = "--list" ]; then
@@ -239,9 +240,13 @@ state() {
         "$1" "$2" "$1" >"$VIRTUAL_AGENT_STATE/repos-state.tmp"
     mv "$VIRTUAL_AGENT_STATE/repos-state.tmp" "$VIRTUAL_AGENT_STATE/repos-state"
 }
+# A step that is killed for memory or dies on an error it does not handle: it says nothing about how it ended,
+# and FAKE_PREPARE_SILENT is one that dies before it has said anything at all.
+[ -n "${FAKE_PREPARE_SILENT:-}" ] && exit 1
 # First, before anything that forks: the entrypoint's first report is what reads it.
 state cloning 0
 echo "prepare-workspace $(awk '{print $19}' /proc/$$/stat)" >>"$FAKE_DIR/repos.runs"
+[ -n "${FAKE_PREPARE_DIES:-}" ] && exit 1
 "$REAL_SLEEP" 1000 &
 echo $! >"$FAKE_DIR/repos.child"
 for i in 1 2 3 4 5; do
@@ -687,6 +692,38 @@ case_prepare_workspace_fails() {
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
+# A clone step that stops without saying how it ended. The state it leaves is what every session for the rest
+# of the pod's life is told, so correcting the hub's detail is not enough: the file has to say failed too, and
+# without the step's note=, which was written for a clone that was still running.
+case_prepare_workspace_dies() {
+    setup prepare-workspace-dies
+    prepare_hook
+    start FAKE_PREPARE_DIES=1
+    wait_for 15 state_is failed && ok "should write failed when the clone step stops without saying how it ended" || no "repos-state: $(cat "$STATE/repos-state" 2>/dev/null | tr '\n' ' ')"
+    grep -q '^note=' "$STATE/repos-state" && no "kept the clone step's note for a step that is no longer running" ||
+        ok "should drop the clone step's note when it takes the step as failed, so the client words it instead"
+    grep -q "without finishing" "$T/out" && ok "should log that the clone step said nothing about how it ended" || no "did not log the unfinished state: $(grep -o "clone step.*" "$T/out" | tail -1)"
+    wait_for 10 hub_has 'running Claude is ready; some repositories failed to clone' &&
+        ok "should report the failure in the detail when the clone step stops without saying how it ended" || no "hub: $(grep '^running' "$F/hub.log" 2>/dev/null | tail -1)"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+# The same, for a step that dies before its first write, on a volume the last boot left state=done on: that
+# state is a lie about this boot, and a session reading it is told nothing at all.
+case_prepare_workspace_dies_silently() {
+    setup prepare-workspace-dies-silently
+    prepare_hook
+    mkdir -p "$STATE"
+    printf 'state=done\ndone=5\ntotal=5\nupdated=yesterday\nnote=the last boot cloned them all\n' >"$STATE/repos-state"
+    start FAKE_PREPARE_SILENT=1
+    wait_for 15 state_is failed && ok "should write failed when the clone step dies before it writes anything" || no "repos-state: $(cat "$STATE/repos-state" 2>/dev/null | tr '\n' ' ')"
+    grep -q '^note=' "$STATE/repos-state" && no "kept the last boot's note" || ok "should drop the last boot's note when this boot's clone step dies"
+    wait_for 10 hub_has 'running Claude is ready; some repositories failed to arrive' &&
+        ok "should report the failure as neither a clone nor a sync when the step never said which it was doing" || no "hub: $(grep '^running' "$F/hub.log" 2>/dev/null | tail -1)"
+    hub_has 'repositories ready' && no "reported the last boot's success as this boot's" || ok "should not report the last boot's success when this boot's clone step dies"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
 case_prepare_workspace_sigterm() {
     setup prepare-workspace-sigterm
     prepare_hook
@@ -761,6 +798,8 @@ run_case() {
         conversations) case_conversations ;;
         prepare-workspace) case_prepare_workspace ;;
         prepare-workspace-fails) case_prepare_workspace_fails ;;
+        prepare-workspace-dies) case_prepare_workspace_dies ;;
+        prepare-workspace-dies-silently) case_prepare_workspace_dies_silently ;;
         prepare-workspace-sigterm) case_prepare_workspace_sigterm ;;
         no-clone-step) case_no_clone_step ;;
         client-on-path) case_client_on_path ;;

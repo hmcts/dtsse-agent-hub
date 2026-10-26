@@ -34,11 +34,16 @@ export function tmuxName(conversationId: string): string {
 // of its own are `--settings` and a `--plugin-dir` per plugin — never a permission flag. So
 // `--dangerously-skip-permissions` has to be here. Nobody can answer a prompt in a pod, and the first one would
 // hang the session. The prompt file is appended on a resume too: Claude Code keeps no system prompt in the transcript.
+//
+// tmux runs this line through `/bin/sh -c`, so the prompt file is quoted: it is an install-derived absolute path
+// now rather than a fixed name, and a package root holding a space would otherwise split into two arguments and
+// start the session with no system prompt. Single quotes, because a path may hold a `$` or a backslash; one
+// holding a single quote is the only shape left, and no npm prefix has one.
 export function claudeCommand(sessionId: string, resume: boolean): string {
-  return `hai --dangerously-skip-permissions ${resume ? "--resume" : "--session-id"} ${sessionId} --append-system-prompt-file ${PROMPT_FILE}`;
+  return `hai --dangerously-skip-permissions ${resume ? "--resume" : "--session-id"} ${sessionId} --append-system-prompt-file '${PROMPT_FILE}'`;
 }
 
-/** The program a command line runs: its first word. The supervisor builds the command, so there is nothing quoted to split. */
+/** The program a command line runs: its first word, which is always a bare `hai` and never quoted. */
 export function commandProgram(command: string): string {
   return command.trim().split(/\s+/)[0] ?? "";
 }

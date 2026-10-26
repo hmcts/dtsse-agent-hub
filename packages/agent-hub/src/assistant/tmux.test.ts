@@ -2,6 +2,7 @@
 //
 // The workspace suite tested none of this — `assistant.test.mjs` only ever used a fake tmux — so these are new,
 // and the fake tmux below is the one the supervisor's own tests drive through `createAssistantSupervisor`.
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -64,11 +65,29 @@ describe("PROMPT_FILE", () => {
   });
 });
 
+// What `/bin/sh -c` — the shell tmux hands a command line to — would pass as arguments.
+function shellWords(command: string): string[] {
+  const result = spawnSync("/bin/sh", ["-c", `for a in ${command}; do printf '%s\\n' "$a"; done`], { encoding: "utf8", timeout: 20000 });
+  return result.stdout.split("\n").filter(Boolean);
+}
+
 describe("claudeCommand", () => {
   it("should append the prompt file and choose --resume or --session-id when told whether to resume", () => {
     // Act & Assert
-    expect(claudeCommand("sess-1", false)).toBe(`hai --dangerously-skip-permissions --session-id sess-1 --append-system-prompt-file ${PROMPT_FILE}`);
-    expect(claudeCommand("sess-1", true)).toBe(`hai --dangerously-skip-permissions --resume sess-1 --append-system-prompt-file ${PROMPT_FILE}`);
+    expect(claudeCommand("sess-1", false)).toBe(`hai --dangerously-skip-permissions --session-id sess-1 --append-system-prompt-file '${PROMPT_FILE}'`);
+    expect(claudeCommand("sess-1", true)).toBe(`hai --dangerously-skip-permissions --resume sess-1 --append-system-prompt-file '${PROMPT_FILE}'`);
+  });
+
+  // The path is wherever npm installed the package, so it is no longer a name that cannot hold a space. A split
+  // one leaves hai reading a prompt file that is not there, or starting with none at all.
+  it("should keep the prompt file one argument when the package was installed under a path with a space", () => {
+    // Arrange: the same command with a spaced path in the quotes this builds.
+    const spaced = "/opt/node modules/@hmcts-cft/agent-hub/virtual-agent/assistant-prompt.md";
+    const command = claudeCommand("sess-1", false).replace(PROMPT_FILE, spaced);
+
+    // Act & Assert
+    expect(shellWords(command)).toEqual(["hai", "--dangerously-skip-permissions", "--session-id", "sess-1", "--append-system-prompt-file", spaced]);
+    expect(shellWords(claudeCommand("sess-1", false)).at(-1)).toBe(PROMPT_FILE);
   });
 });
 

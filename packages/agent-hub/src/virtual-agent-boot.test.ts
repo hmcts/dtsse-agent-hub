@@ -37,6 +37,7 @@ const CASES = [
   "client-upgrade-no-npm",
   "client-upgrade-pinned",
   "package-entrypoint",
+  "client-upgrade-ships-entrypoint",
   "checkout-entrypoint"
 ];
 

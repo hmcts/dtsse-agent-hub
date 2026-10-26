@@ -44,6 +44,8 @@ const CASES = [
   "conversations",
   "prepare-workspace",
   "prepare-workspace-fails",
+  "prepare-workspace-dies",
+  "prepare-workspace-dies-silently",
   "prepare-workspace-sigterm",
   "no-clone-step",
   "client-on-path",

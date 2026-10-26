@@ -19,7 +19,7 @@
 set -u
 
 CASES=(no-token refused-token stored-token-no-access checkout-client broken-checkout-client no-client trailing-slash
-    client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint
+    client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint client-upgrade-ships-entrypoint
     checkout-entrypoint)
 
 if [ "${1:-}" = "--list" ]; then
@@ -138,6 +138,13 @@ case "$1" in
         if [ -n "${FAKE_NPM_FAIL:-}" ]; then
             printf 'npm error code E404\nnpm error 404 Not Found - GET https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/@hmcts-cft%%2fagent-hub\n' >&2
             exit 1
+        fi
+        # A release that ships stage 1 to a pod whose installed client has none: the install is what puts it in
+        # the package directory, so only a boot that resolves after the install can find it.
+        if [ -n "${FAKE_NPM_SHIPS_ENTRYPOINT:-}" ]; then
+            mkdir -p "$FAKE_DIR/pkg/virtual-agent"
+            printf '#!/bin/sh\necho package-entrypoint >>"$FAKE_DIR/order.log"\n' >"$FAKE_DIR/pkg/virtual-agent/entrypoint.sh"
+            chmod +x "$FAKE_DIR/pkg/virtual-agent/entrypoint.sh"
         fi
         echo "changed 1 package in 2s" ;;
     ls) echo "/home/hmcts/.nvm/versions/node/v22.0.0/lib/node_modules/@hmcts-cft/agent-hub:@hmcts-cft/agent-hub@9.9.9" ;;
@@ -355,6 +362,20 @@ case_package_entrypoint() {
         ok "logs which stage 1 it ran, resolved through the symlink it was invoked by" || no "handover not logged: $(grep 'handing over' "$C/out")"
 }
 
+# The upgrade is what brings stage 1 to a pod whose image client predates it, and npm's global prefix is in the
+# container filesystem rather than on the volume, so that install happens again on every boot of that pod.
+# Resolving stage 1 before the upgrade sent every one of those boots to the checkout instead, for the pod's whole
+# life — which is the image rebuild and digest bump the upgrade exists to avoid.
+case_client_upgrade_ships_entrypoint() {
+    setup client-upgrade-ships-entrypoint
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_NPM_SHIPS_ENTRYPOINT=1
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install package-entrypoint " &&
+        ok "upgrades the client before it resolves stage 1" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    grep -q "handing over to $C/pkg/virtual-agent/entrypoint.sh" "$C/out" &&
+        ok "hands over to the stage 1 the upgrade installed, not the checkout's" || no "handover: $(grep 'handing over' "$C/out")"
+}
+
 # A pod whose client predates the move has stage 1 only in the checkout. The fallback goes once every pod image
 # floor carries a client that ships one.
 case_checkout_entrypoint() {
@@ -381,6 +402,7 @@ run_case() {
         client-upgrade-no-npm) case_client_upgrade_no_npm ;;
         client-upgrade-pinned) case_client_upgrade_pinned ;;
         package-entrypoint) case_package_entrypoint ;;
+        client-upgrade-ships-entrypoint) case_client_upgrade_ships_entrypoint ;;
         checkout-entrypoint) case_checkout_entrypoint ;;
         *) printf 'unknown case %s (try --list)\n' "$1" >&2; exit 2 ;;
     esac
