@@ -1405,6 +1405,58 @@ describe("artefact, in an assistant conversation", () => {
       expect((await cli(args, { sid, input: "x" })).code, args.join(" ")).toBe(2);
     }
   });
+
+  const EXPORT = "5b0e7c1a-1111-4222-8333-444455556666";
+  const reported = (agentId: string) => hub.jiraReports.filter((r) => r.agent_id === agentId);
+
+  it("should report the ticket's key, or why there is none, when jira report runs in a conversation", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+
+    // Act
+    const created = await cli(["jira", "report", EXPORT, "--key", "VIBE-701"], { sid });
+    const failed = await cli(["jira", "report", EXPORT, "--error", "  Story is not an issue type of VIBE  "], { sid });
+
+    // Assert
+    expect(created.code, created.errors.join("\n")).toBe(0);
+    expect(created.text()).toMatch(/reported VIBE-701 for export/);
+    expect(failed.code).toBe(0);
+    expect(reported(agentId)).toEqual([
+      { agent_id: agentId, export_id: EXPORT, key: "VIBE-701" },
+      { agent_id: agentId, export_id: EXPORT, error: "Story is not an issue type of VIBE" }
+    ]);
+  });
+
+  it("should refuse a report that is not one key or one reason for an export id", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+
+    // Act & Assert
+    for (const args of [
+      ["jira"],
+      ["jira", "report", "not-an-id", "--key", "VIBE-1"],
+      ["jira", "report", EXPORT],
+      ["jira", "report", EXPORT, "--key", "VIBE-1", "--error", "both"],
+      ["jira", "report", EXPORT, "--key", "vibe one"],
+      ["jira", "report", EXPORT, "--error", " "]
+    ]) {
+      const r = await cli(args, { sid });
+      expect(r.code, args.join(" ")).toBe(2);
+    }
+    expect(reported(agentId)).toHaveLength(0);
+  });
+
+  it("should say the session has no Jira export when jira report runs outside a conversation", async () => {
+    // Arrange
+    const { sid } = await session({ conversation: false });
+
+    // Act
+    const r = await cli(["jira", "report", EXPORT, "--key", "VIBE-1"], { sid });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.errors.join("\n")).toMatch(/not an HMCTS Assistant conversation, so it has no Jira export/);
+  });
 });
 
 describe("the CLI as a child process, through bin/agent-hub", () => {

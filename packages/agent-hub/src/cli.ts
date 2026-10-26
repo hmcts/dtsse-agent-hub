@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bridgePid, loadAgent, normaliseTopics, type StoredAgent, stopBridge } from "./agent.ts";
-import { type Api, ApiError, type ArtefactBody, CREDENTIAL_KINDS, createApi, type Message, type PostBody } from "./api.ts";
+import { type Api, ApiError, type ArtefactBody, CREDENTIAL_KINDS, createApi, type JiraExportReport, type Message, type PostBody } from "./api.ts";
 import { runBridge } from "./bridge.ts";
 import { type DirectEntry, type DirectPeer, peerOf, peerOfReply, readDirects, recordDirect } from "./directs.ts";
 import { clearOptOut, type EnableSessionResult, enableSession, markOptedOut, runAutoEnable } from "./enable.ts";
@@ -57,6 +57,9 @@ export const USAGE = `usage: ${CLI} <command> [args]
   artefact put [--title T] [--base N]
                               replace the document with markdown read from stdin; --base is the version
                               it was edited from (read first when omitted), and a newer one is refused
+  jira report <export-id> --key K | --error E
+                              in an HMCTS Assistant conversation: report the Jira ticket made for an export
+                              the user asked for, or why it could not be made
   credentials get <kind>      print your stored credential and nothing else (exit ${EXIT_NO_CREDENTIAL} if there is
                               none); agent-hub returns only bedrock and claude_md to people, any kind to a pod
   credentials set <kind> [--from-gh]
@@ -626,6 +629,47 @@ const artefact: Command = async (cli, argv) => {
   return 0;
 };
 
+const EXPORT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/;
+const MAX_JIRA_ERROR = 300;
+
+const jira: Command = async (cli, argv) => {
+  const { flags, rest } = parseFlags(argv, ["key", "error"]);
+  const [action, exportId, ...extra] = rest;
+  if (action !== "report") {
+    throw new UsageError("jira takes report");
+  }
+  if (!exportId || !EXPORT_ID_RE.test(exportId)) {
+    throw new UsageError("jira report needs the export id it was asked under");
+  }
+  if (extra.length) {
+    throw new UsageError(`unexpected argument: ${extra[0]}`);
+  }
+  if ((flags.key === undefined) === (flags.error === undefined)) {
+    throw new UsageError("jira report takes one of --key or --error");
+  }
+  if (flags.key !== undefined && !JIRA_KEY_RE.test(flags.key)) {
+    throw new UsageError(`--key must be an issue key such as VIBE-123, not ${flags.key}`);
+  }
+  const error = flags.error?.trim();
+  if (error === "") {
+    throw new UsageError("--error needs a reason");
+  }
+  const agent = requireAgent(requireSessionId(cli.env));
+  const body: JiraExportReport =
+    flags.key !== undefined ? { export_id: exportId, key: flags.key } : { export_id: exportId, error: (error ?? "").slice(0, MAX_JIRA_ERROR) };
+  try {
+    await cli.api().putJiraExport(agent.agent_id, body);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      throw new Error("this session is not an HMCTS Assistant conversation, so it has no Jira export");
+    }
+    throw e;
+  }
+  cli.print(flags.key !== undefined ? `agent-hub: reported ${flags.key} for export ${exportId}` : `agent-hub: reported export ${exportId} as failed`);
+  return 0;
+};
+
 const agents: Command = async (cli) => {
   const res = await cli.api().agents();
   if (!res.agents.length) {
@@ -780,6 +824,7 @@ export const COMMANDS: Record<string, Command> = {
   directory,
   agents,
   artefact,
+  jira,
   hook,
   bridge,
   "auto-enable": autoEnable,

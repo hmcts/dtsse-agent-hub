@@ -174,7 +174,7 @@ describe("Composer attaching", () => {
   });
 
   it("should attach a file dropped on the message pane when the pane is the drop zone", async () => {
-    render(<ChatView view={conversation()} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} />);
+    render(<ChatView jira={NO_JIRA} view={conversation()} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} />);
 
     await act(async () => {
       fireEvent.drop(screen.getByRole("list", { name: "Conversation" }), { dataTransfer: { files: [file("notes.pdf", 100)], types: ["Files"] } });
@@ -323,6 +323,7 @@ describe("Composer with nowhere to attach to", () => {
   it("should still show the chips of a message that was sent while it was on, since the file did reach the assistant", () => {
     render(
       <ChatView
+        jira={NO_JIRA}
         viewerOid={VIEWER}
         view={conversation({ page: page({ messages: [withAttachments([{ name: "letter.pdf", bytes: 2048 }])] }) })}
         templates={TEMPLATES}
@@ -546,6 +547,8 @@ function withAttachments(
   };
 }
 
+const NO_JIRA = { connected: false, login: null };
+
 function conversation(overrides: Partial<ConversationView> = {}): ConversationView {
   return {
     id: CONVERSATION,
@@ -561,6 +564,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     sessionState: null,
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
+    jira: { status: "none" },
     page: page(),
     ...overrides
   };
@@ -574,7 +578,8 @@ function actions(): ChatActions {
     setProduct: vi.fn(async () => ({ ok: true as const })),
     rename: vi.fn(async () => ({ ok: true as const })),
     remove: vi.fn(async () => ({ ok: true as const })),
-    saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 }))
+    saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 })),
+    exportToJira: vi.fn(async () => ({ ok: true as const }))
   };
 }
 
@@ -590,7 +595,7 @@ describe("ChatView attachments in the thread", () => {
         ]
       })
     });
-    render(<ChatView view={view} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} />);
+    render(<ChatView jira={NO_JIRA} view={view} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} />);
 
     const sent = screen.getByRole("list", { name: "Files sent with this message" });
     const shown = within(sent).getAllByRole("listitem");
@@ -603,7 +608,13 @@ describe("ChatView attachments in the thread", () => {
   /** The one chip of a thread whose message carried `files`. */
   function chipFor(files: { name: string; bytes: number; available_until?: string | null }[]): HTMLElement {
     render(
-      <ChatView viewerOid={VIEWER} view={conversation({ page: page({ messages: [withAttachments(files)] }) })} templates={TEMPLATES} actions={actions()} />
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ page: page({ messages: [withAttachments(files)] }) })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
     );
     return within(screen.getByRole("list", { name: "Files sent with this message" })).getAllByRole("listitem")[0]!;
   }
@@ -656,6 +667,7 @@ describe("ChatView attachments in the thread", () => {
   it("should show the chips without an empty bubble when the message was only files", () => {
     render(
       <ChatView
+        jira={NO_JIRA}
         viewerOid={VIEWER}
         view={conversation({ page: page({ messages: [withAttachments([{ name: "letter.pdf", bytes: 10 }], { body: "" })] }) })}
         templates={TEMPLATES}
@@ -668,7 +680,9 @@ describe("ChatView attachments in the thread", () => {
   });
 
   it("should show no attachment list when the message carried no files", () => {
-    render(<ChatView view={conversation({ page: page({ messages: [message()] }) })} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} />);
+    render(
+      <ChatView jira={NO_JIRA} view={conversation({ page: page({ messages: [message()] }) })} templates={TEMPLATES} viewerOid={VIEWER} actions={actions()} />
+    );
 
     expect(screen.queryByRole("list", { name: "Files sent with this message" })).toBeNull();
   });

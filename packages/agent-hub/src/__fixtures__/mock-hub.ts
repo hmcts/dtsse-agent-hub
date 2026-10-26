@@ -178,6 +178,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const sessionStreams = new Map<string, ServerResponse>();
   // agent id → the conversation's document, for conversations' agents
   const artefacts = new Map<string, Artefact>();
+  const jiraReports: Record<string, unknown>[] = [];
   // upload id → the parts the pod may still fetch, and whether it has reported having the whole file
   const attachments = new Map<string, { parts: Uint8Array[]; fetched: boolean }>();
   // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
@@ -769,6 +770,18 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return send(res, 200, { version: next.version });
       }
     }
+    if (action === "jira" && req.method === "PUT") {
+      if (!agent.conversation_id) {
+        return send(res, 404, { error: "not a conversation" });
+      }
+      const keyed = typeof body.key === "string" && /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/.test(body.key);
+      const failed = typeof body.error === "string" && body.error.trim() !== "" && body.error.length <= 300;
+      if (typeof body.export_id !== "string" || keyed === failed) {
+        return send(res, 400, { error: "bad jira report" });
+      }
+      jiraReports.push({ agent_id: agent.id, ...body });
+      return send(res, 204);
+    }
     // The pod-facing half of an Assistant attachment: one part's raw bytes, and the report that deletes them.
     if (action === "attachments") {
       const upload = attachments.get(parts[4] as string);
@@ -825,6 +838,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     virtuals,
     personCredentials,
     artefacts,
+    jiraReports,
     attachments,
     sessionStreams,
     // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session

@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import {
   deleteConversation,
+  exportArtefactToJira,
   renameConversation,
   saveArtefact,
   sendAssistantMessage,
@@ -35,7 +36,8 @@ const ACTIONS: ChatActions = {
   setProduct: setConversationProduct,
   rename: renameConversation,
   remove: deleteConversation,
-  saveArtefact
+  saveArtefact,
+  exportToJira: exportArtefactToJira
 };
 
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */
@@ -65,6 +67,10 @@ export default async function ConversationPage({
   if (view === undefined) {
     notFound();
   }
+  const jira = {
+    connected: home.credentials.available && home.credentials.statuses.some((status) => status.kind === "atlassian" && status.stored),
+    login: home.assistant.logins.find((login) => login.kind === "atlassian") ?? null
+  };
   const plugins = assistantPluginsData(home.assistant, home.plugins);
   const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
   return (
@@ -81,7 +87,7 @@ export default async function ConversationPage({
       files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}
     >
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
-      <ChatView key={view.agentId} view={view} templates={offeredTemplates(mine)} viewerOid={viewer.oid} actions={ACTIONS} />
+      <ChatView key={view.agentId} view={view} templates={offeredTemplates(mine)} viewerOid={viewer.oid} actions={ACTIONS} jira={jira} />
       <OnboardingGate
         assistant={home.assistant}
         statuses={home.credentials.available ? home.credentials.statuses : []}

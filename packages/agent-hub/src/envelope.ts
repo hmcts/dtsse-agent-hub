@@ -103,8 +103,9 @@ const ownerSkillLine = (name: string) =>
 
 /**
  * The `assistant` object on a `direct` frame to one of a virtual agent's HMCTS Assistant conversations: the
- * product area the person chose, its display name, and the version of the conversation's document and who last
- * wrote it. Structural and every field optional, for the same reason `EnvelopeMessage` is.
+ * product area the person chose, its display name, the version of the conversation's document and who last wrote
+ * it, any export of that document to Jira still waiting on this session, and the files attached to this message.
+ * Structural and every field optional, for the same reason `EnvelopeMessage` is.
  */
 export type AssistantFrame = {
   conversation_id?: string;
@@ -112,9 +113,44 @@ export type AssistantFrame = {
   product_label?: string | null;
   artefact_version?: number | null;
   artefact_updated_by?: string | null;
+  jira_export?: JiraExportFrame | null;
   /** The files attached to this message. Absent from a hub with uploads off, or one older than them. */
   attachments?: unknown;
 };
+
+/** An export of the conversation's document to Jira the person has asked for and nobody has reported yet. */
+export type JiraExportFrame = {
+  export_id: string;
+  project: string;
+  issue_type: string;
+  labels: string[];
+};
+
+/**
+ * How to carry out a pending Jira export, step by step, so every session runs the same `twg` command with the
+ * person's own sign-in. The title and the document reach twg through files, never through the command line the
+ * session writes, so nothing in them can change the command. Sent with every message while the export is pending,
+ * so the session is told to report a ticket it already made rather than make another.
+ *
+ * These are the last lines before the skill line, which keeps its place against the `---`. They go after the
+ * attachment lines rather than before: a numbered procedure read straight through is harder to misfollow than one
+ * with a block of absolute paths in the middle of it, and the attachment lines are facts that stand on their own
+ * wherever they sit.
+ */
+export function jiraExportLines(jira: JiraExportFrame): string[] {
+  const dir = `/tmp/jira-export-${jira.export_id}`;
+  const labels = jira.labels.length ? ` --labels=${jira.labels.join(",")}` : "";
+  return [
+    `The user has asked you to export the conversation's document to the ${jira.project} backlog in Jira (export ${jira.export_id}).`,
+    `If you have already created a ticket for export ${jira.export_id}, do not create another: report its key with step 4 and say so.`,
+    "Otherwise, run exactly these steps. twg is signed in as the user, so they are the ticket's reporter:",
+    `1. If \`twg whoami\` fails, run \`${CLI} virtual atlassian-login\`; the user is shown a code to sign in with. Then carry on.`,
+    `2. mkdir -p ${dir} && ${CLI} artefact get --json | jq -r .title > ${dir}/title && ${CLI} artefact get > ${dir}/document.md`,
+    `3. twg jira workitem create --space=${jira.project} --type=${jira.issue_type} --summary="$(cat ${dir}/title)" --description="$(cat ${dir}/document.md)" --description-format=markdown${labels} --output=json --output-summary=none`,
+    `4. Report the key from its output with \`${CLI} jira report ${jira.export_id} --key <KEY>\`, or if it failed, why in one plain sentence with \`${CLI} jira report ${jira.export_id} --error "<why>"\`.`,
+    "Then tell the user in one short sentence which ticket it became, or why it could not be made."
+  ];
+}
 
 /**
  * What became of one attachment: the absolute path it was written to, or why it could not be fetched. Structural for
@@ -210,12 +246,14 @@ export function assistantEnvelope(
     `Product area: ${label}.`,
     ...switched,
     ...edited,
-    // Files before the skill line, and the skill line last, for one reason: it says "the rest of the message as its
-    // arguments", so it has to sit against the `---` and the body it is talking about. A block of absolute paths
-    // between the two reads as though the paths were part of those arguments. The attachment lines carry no such
-    // dependency — they are self-contained facts about where the bytes already are — so they lose nothing by going
-    // above. A message that is both `/skill` and a file therefore reads as: here is the file, now run the skill.
+    // Files and Jira steps before the skill line, and the skill line last, for one reason: it says "the rest of the
+    // message as its arguments", so it has to sit against the `---` and the body it is talking about. A block of
+    // absolute paths or of numbered steps between the two reads as though it were part of those arguments. Neither of
+    // the other two carries that dependency — one is self-contained facts about where the bytes already are, the other
+    // a procedure — so they lose nothing by going above. A message that is both `/skill` and a file therefore reads
+    // as: here is the file, now run the skill.
     ...attachmentLines(attachments),
+    ...(assistant.jira_export ? jiraExportLines(assistant.jira_export) : []),
     ...skillLine(message.body, skills, ownerSkillLine),
     "---",
     message.body

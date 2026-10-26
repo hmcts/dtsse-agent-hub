@@ -133,6 +133,7 @@ export {
   parseAssistantFrame,
   parseAssistantProduct,
   parseDirectEventMessage,
+  parseJiraExportFrame,
   RAPID_CLOSE_MS,
   RAPID_CLOSES_BEFORE_BACKOFF,
   readStatus,
@@ -165,7 +166,15 @@ export {
 } from "./enable.ts";
 export type { Env, EnvKey } from "./env.ts";
 export { ENV_KEYS } from "./env.ts";
-export type { AssistantFrame, AssistantProduct, AttachmentOutcome, EnvelopeAuthor, EnvelopeMessage, EnvelopeOptions } from "./envelope.ts";
+export type {
+  AssistantFrame,
+  AssistantProduct,
+  AttachmentOutcome,
+  EnvelopeAuthor,
+  EnvelopeMessage,
+  EnvelopeOptions,
+  JiraExportFrame
+} from "./envelope.ts";
 export {
   assistantEnvelope,
   attachmentLines,
@@ -174,6 +183,7 @@ export {
   describeAuthor,
   directEnvelope,
   formatMessage,
+  jiraExportLines,
   leadingSkill,
   ownerDirectEnvelope,
   ownerEnvelope

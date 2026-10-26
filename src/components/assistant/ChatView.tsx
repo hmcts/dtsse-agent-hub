@@ -14,6 +14,7 @@ import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
+import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/JiraExport";
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { MessageAttachments } from "@/components/assistant/MessageAttachments";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
@@ -32,6 +33,7 @@ export interface ChatActions {
   rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
   saveArtefact: SaveArtefactAction;
+  exportToJira: ExportToJiraAction;
 }
 
 /**
@@ -192,13 +194,16 @@ export function ChatView({
   view,
   templates,
   viewerOid,
-  actions
+  actions,
+  jira
 }: {
   view: ConversationView;
   templates: readonly Template[];
   /** Who is reading, which the composer keys its draft on. */
   viewerOid: string;
   actions: ChatActions;
+  /** Whether the person has connected Jira, for the document's export. */
+  jira: JiraAccess;
 }) {
   const router = useRouter();
   const arrivals = useAnnouncer("replies");
@@ -424,6 +429,7 @@ export function ChatView({
           productLabel={view.productLabel}
           save={actions.saveArtefact}
           onClose={() => setPanel(false)}
+          jira={{ exported: view.jira, access: jira, exportTo: actions.exportToJira }}
           narrow={narrow}
         />
       ) : null}

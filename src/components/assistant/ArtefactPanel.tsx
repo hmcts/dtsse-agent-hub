@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { ArtefactSnapshot, SaveArtefactResult } from "@/app/_actions/assistant";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
+import { JiraBanner, type JiraExportProps, JiraFooter } from "@/components/assistant/JiraExport";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { ScrollPane } from "@/components/Markup";
@@ -200,7 +201,8 @@ export function ArtefactPanel({
   productLabel,
   save,
   onClose,
-  narrow
+  narrow,
+  jira
 }: {
   conversationId: string;
   artefact: ArtefactSnapshot;
@@ -208,6 +210,8 @@ export function ArtefactPanel({
   save: SaveArtefactAction;
   onClose: () => void;
   narrow: boolean;
+  /** The export to Jira, below the document; left out, the panel has none. */
+  jira?: JiraExportProps;
 }) {
   const [title, setTitle] = useState(artefact.title ?? "Untitled document");
   const [markdown, setMarkdown] = useState(artefact.version === 0 ? starterDocument(productLabel) : artefact.markdown);
@@ -480,6 +484,7 @@ export function ArtefactPanel({
           </button>
         </div>
       )}
+      {jira === undefined ? null : <JiraBanner exported={jira.exported} />}
       {mode === "edit" ? (
         // The textarea fills the scroller and scrolls itself, so the tab stop a keyboard user needs is the box.
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -499,6 +504,16 @@ export function ArtefactPanel({
         <ScrollPane as="section" label="Document preview" className="min-h-0 flex-1 overflow-y-auto px-[26px] pb-10 pt-5 text-asst-body">
           {markdown.trim() === "" ? <p className="text-asst-faint">This document is empty.</p> : <AssistantMarkdown source={markdown} document />}
         </ScrollPane>
+      )}
+      {jira === undefined ? null : (
+        <JiraFooter
+          conversationId={conversationId}
+          exported={jira.exported}
+          access={jira.access}
+          exportTo={jira.exportTo}
+          saved={state === "saved" && conflict === null}
+          written={base > 0}
+        />
       )}
       {printing ? <PrintSheet title={title} markdown={markdown} /> : null}
     </section>

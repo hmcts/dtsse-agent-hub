@@ -4,6 +4,7 @@ import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
+import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
 import { DEFAULT_PRODUCT, isProduct, productLabel, storedProduct } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
 import { SEARCH_LIMIT, SNIPPET_MAX_WORDS, SNIPPET_MIN_WORDS, searchTerms, visibleMatches } from "./search.ts";
@@ -127,7 +128,7 @@ function toRow(row: {
   };
 }
 
-async function announce(db: Database, conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">): Promise<void> {
+export async function announce(db: Database, conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">): Promise<void> {
   await notify(db, {
     type: "assistant_conversation",
     conversation_id: conversation.id,
@@ -656,11 +657,10 @@ export async function writeArtefact(
  *
  * A field only some clients read belongs behind a claim, left out of the frame for a client that did not claim it, so
  * the hub does not send where it cannot be read; `client_features` on register (`src/agents/client-features.ts`) is
- * what says which client claimed what. No field here is gated on a claim: every field but `attachments` is one every
- * published client reads, and `attachments` goes to every session, so a client older than attachments drops that
- * message's files in silence.
+ * what says which client claimed what. No field here is gated on a claim, and two of them are not read by every
+ * published client: `attachments` and `jira_export`. Both go to every session.
  *
- * Gating `attachments` is two lines:
+ * A client older than attachments drops that message's files in silence. Gating `attachments` is two lines:
  *   1. `clientFeatures: true` in the `select` below. It is free: a column of the `agent` row this read already
  *      fetches, so it widens the projection and adds no statement;
  *   2. `...(clientSupports(row.clientFeatures, "attachments") ? { attachments } : {})` in the returned frame.
@@ -674,6 +674,12 @@ export async function writeArtefact(
  * answers true for a session on a current build. A session registered by a build published before that claim claims
  * nothing and loses the field until it restarts: a pod takes the current client on boot and every session reports its
  * claim on register, so the window is the life of the sessions already running, not anything to migrate.
+ *
+ * `jira_export` is the same silence and a different gate. A client older than the export reads no steps off the frame,
+ * so the session is handed the person's request in words and left to improvise, and the export fails on its 15-minute
+ * timeout; leaving the field out of the frame changes none of that. The claim belongs one step earlier, where the
+ * person can be told: `exportArtefactToJira` refusing an export the conversation's session could not carry out, as
+ * `canStopAssistantAnswer` refuses a stop. That is not built, and the published client claims no `jira_export`.
  */
 export interface AssistantFrame {
   conversation_id: string;
@@ -681,6 +687,8 @@ export interface AssistantFrame {
   product_label: string;
   artefact_version: number;
   artefact_updated_by: "user" | "agent" | null;
+  /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
+  jira_export?: JiraExportFrame;
   /**
    * The files the person attached to this message, for the pod to fetch to its disk before it delivers the message.
    * Absent from a frame built without a message — a wake rather than a delivery — and an empty array for a message
@@ -695,13 +703,14 @@ export interface AssistantFrame {
 export async function assistantFrame(db: Database, agentId: string, messageId?: bigint): Promise<AssistantFrame | undefined> {
   const row = await db.agent.findUnique({
     where: { id: agentId },
-    select: { assistantConversation: { select: { id: true, product: true, ...ARTEFACT_SELECT } } }
+    select: { assistantConversation: { select: { id: true, product: true, ...ARTEFACT_SELECT, ...JIRA_SELECT } } }
   });
   const conversation = row?.assistantConversation;
   if (conversation === null || conversation === undefined) {
     return undefined;
   }
   const artefact = toArtefact(conversation);
+  const jira = pendingJiraExport(conversation);
   return {
     conversation_id: conversation.id,
     // What the conversation is stored as, not what the picker can show: this is the subject the session has been
@@ -710,6 +719,7 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     product_label: productLabel(conversation.product),
     artefact_version: artefact.version,
     artefact_updated_by: artefact.updatedBy,
+    ...(jira === undefined ? {} : { jira_export: jira }),
     ...(messageId === undefined ? {} : { attachments: await frameAttachments(db, messageId) })
   };
 }

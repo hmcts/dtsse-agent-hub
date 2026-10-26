@@ -16,6 +16,7 @@ import {
   parseAssistantFrame,
   parseAssistantProduct,
   parseDirectEventMessage,
+  parseJiraExportFrame,
   RAPID_CLOSE_MS,
   RAPID_CLOSES_BEFORE_BACKOFF,
   type RunBridgeOptions,
@@ -236,19 +237,41 @@ describe("parseDirectEventMessage", () => {
   });
 });
 
+describe("parseJiraExportFrame", () => {
+  const pending = { export_id: "5b0e7c1a-1111-4222-8333-444455556666", project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] };
+
+  it("should keep a pending export when every value is one the hub would send", () => {
+    // Act & Assert
+    expect(parseJiraExportFrame(pending)).toEqual(pending);
+    expect(parseAssistantFrame({ conversation_id: "c1", jira_export: pending })?.jira_export).toEqual(pending);
+  });
+
+  it.each([
+    [{ export_id: "e1" }],
+    [{ project: "VIBE; rm -rf /" }],
+    [{ issue_type: "Story --yes" }],
+    [{ labels: ["a,b"] }],
+    [{ labels: "hmcts-assistant" }]
+  ])("should drop the export when it has %j, since its values go into a command", (change) => {
+    // Act & Assert
+    expect(parseJiraExportFrame({ ...pending, ...change })).toBeNull();
+  });
+});
+
 describe("parseAssistantFrame", () => {
   it("should keep every field the envelope and the recorded product read when the frame is an assistant one", () => {
     // Arrange
     const sent = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 2, artefact_updated_by: "user" };
 
     // Act & Assert
-    expect(parseAssistantFrame(sent)).toEqual(sent);
+    expect(parseAssistantFrame(sent)).toEqual({ ...sent, jira_export: null });
     expect(parseAssistantFrame({ conversation_id: "c1", product: null, product_label: null, artefact_version: 0, artefact_updated_by: null })).toEqual({
       conversation_id: "c1",
       product: null,
       product_label: null,
       artefact_version: 0,
-      artefact_updated_by: null
+      artefact_updated_by: null,
+      jira_export: null
     });
   });
 
@@ -262,7 +285,7 @@ describe("parseAssistantFrame", () => {
 
   it("should drop a field that is not what it should be when the frame is malformed", () => {
     // Act
-    const frame = parseAssistantFrame({ conversation_id: 1, product: 2, product_label: 3, artefact_version: "4", artefact_updated_by: 5 });
+    const frame = parseAssistantFrame({ conversation_id: 1, product: 2, product_label: 3, artefact_version: "4", artefact_updated_by: 5, jira_export: "VIBE" });
 
     // Assert
     expect(frame).toEqual({
@@ -270,7 +293,8 @@ describe("parseAssistantFrame", () => {
       product: undefined,
       product_label: undefined,
       artefact_version: null,
-      artefact_updated_by: undefined
+      artefact_updated_by: undefined,
+      jira_export: null
     });
   });
 });

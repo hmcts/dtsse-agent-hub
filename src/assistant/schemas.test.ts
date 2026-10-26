@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { artefactPutBody, MAX_ARTEFACT_MARKDOWN, sessionsReportBody, uploadsReportBody } from "./schemas.ts";
+import { artefactPutBody, jiraExportReportBody, MAX_ARTEFACT_MARKDOWN, MAX_JIRA_ERROR, sessionsReportBody, uploadsReportBody } from "./schemas.ts";
 import { MAX_REPORTED_FILES } from "./upload-report.ts";
 
 describe("artefactPutBody", () => {
@@ -43,6 +43,28 @@ describe("sessionsReportBody", () => {
 
     expect(result.error?.issues).toHaveLength(1);
     expect(result.error?.issues[0]?.code).toBe("too_big");
+  });
+});
+
+describe("jiraExportReportBody", () => {
+  const EXPORT = "33333333-3333-4333-8333-333333333333";
+
+  it.each([
+    [{ export_id: EXPORT, key: "VIBE-123" }],
+    [{ export_id: EXPORT, error: "Story is not an issue type of VIBE" }]
+  ])("should accept %j when it is a key or a reason", (body) => {
+    expect(jiraExportReportBody.parse(body)).toEqual(body);
+  });
+
+  it.each([
+    [{ export_id: EXPORT, key: "vibe-123" }],
+    [{ export_id: EXPORT, key: "VIBE-123", error: "both" }],
+    [{ export_id: EXPORT, error: " " }],
+    [{ export_id: EXPORT, error: "x".repeat(MAX_JIRA_ERROR + 1) }],
+    [{ export_id: "not-a-uuid", key: "VIBE-1" }],
+    [{ key: "VIBE-1" }]
+  ])("should refuse %j when it breaks the contract", (body) => {
+    expect(jiraExportReportBody.safeParse(body).success).toBe(false);
   });
 });
 
