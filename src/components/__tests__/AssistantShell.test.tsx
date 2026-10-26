@@ -34,7 +34,14 @@ beforeEach(() => {
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     writable: true,
-    value: () => ({ matches: narrow, addEventListener: () => undefined, removeEventListener: () => undefined })
+    // The sidebar asks a `max-width` question and the settings dialog a `min-width` one, so `narrow` answers both
+    // only once the polarity is read off the query. A stub that answered the same for every query would put the
+    // dialog in its narrow interface on a 1024px screen.
+    value: (query: string) => ({
+      matches: query.includes("min-width") ? !narrow : narrow,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    })
   });
 });
 

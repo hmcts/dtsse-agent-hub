@@ -1,13 +1,13 @@
 "use client";
 
-import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { type Connection, type ConnectionsData, connections, connectionsWarning } from "@/assistant/connections";
 import type { AssistantPluginsData } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
-import { SETTINGS_ONE_PANE_MAX_WIDTH } from "@/components/assistant/layout";
+import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
@@ -31,19 +31,24 @@ interface SettingsView {
  * asks the dialog which its own tab stops are rather than keeping a second copy of this list, which would pass while
  * a control the trap has been left out of still takes focus off the end of it.
  *
- * `tabindex="-1"` is excluded from every clause, not only the last: the navigation is a roving tabindex, so all but
- * one of its buttons are deliberately not tab stops, and a selector that counted them would put the wrap at a button
- * Tab can never land on.
+ * `tabindex="-1"` is excluded from every clause, not only the last, so that what this matches is what Tab can reach:
+ * the navigation is a roving tabindex, and all but one of its buttons are deliberately not tab stops. The trap below
+ * reads only the two ends of the list and those are the close button and the open section's last control either way,
+ * with the navigation between them — so this is about the constant meaning what it says, not about fixing the wrap.
  */
 export const FOCUSABLE = ["a[href]", "button:not([disabled])", "input:not([disabled])", "select:not([disabled])", "textarea:not([disabled])", "[tabindex]"]
   .map((selector) => `${selector}:not([tabindex="-1"])`)
   .join(", ");
 
 /**
- * Where the dialog runs out of room for its navigation beside a section. Asked as a `max-width`, as the sidebar's and
- * the document panel's own queries are, so `matches` means the narrow interface throughout the Assistant.
+ * Where the dialog has room for its navigation beside a section: the Tailwind `sm` breakpoint, which is where the
+ * dialog's own `sm:` classes switch.
+ *
+ * Asked as the `min-width` Tailwind itself asks, rather than as a `max-width` one pixel below it like the sidebar's
+ * and the document panel's queries: a fractional viewport in between — a zoomed page, a scaled display — would
+ * otherwise lay out one pane inside a box the CSS had already widened for two.
  */
-export const SETTINGS_ONE_PANE = `(max-width: ${SETTINGS_ONE_PANE_MAX_WIDTH}px)`;
+export const SETTINGS_TWO_PANE = `(min-width: ${SETTINGS_TWO_PANE_MIN_WIDTH}px)`;
 
 const STATE_CLASS: Record<Connection["state"], string> = {
   connected: "text-asst-ok",
@@ -246,14 +251,14 @@ const SECTIONS: readonly SettingsSection[] = [
  * interface says so by defining one.
  */
 function useTwoPane(): boolean {
-  const [wide, setWide] = useState(() => typeof window.matchMedia !== "function" || !window.matchMedia(SETTINGS_ONE_PANE).matches);
+  const [wide, setWide] = useState(() => typeof window.matchMedia !== "function" || window.matchMedia(SETTINGS_TWO_PANE).matches);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") {
       return;
     }
-    const query = window.matchMedia(SETTINGS_ONE_PANE);
-    const onChange = () => setWide(!query.matches);
+    const query = window.matchMedia(SETTINGS_TWO_PANE);
+    const onChange = () => setWide(query.matches);
     onChange();
     query.addEventListener("change", onChange);
     return () => query.removeEventListener("change", onChange);
@@ -371,67 +376,57 @@ function Nav({
  * with a way back to the list. A real list rather than a tablist, because that is what it behaves like — nothing is
  * selected while the list is showing, and opening a section replaces it.
  */
-function Drilldown({
-  items,
-  view,
-  section,
-  onSelect,
-  onBack
-}: {
-  items: readonly SettingsSection[];
-  view: SettingsView;
-  section: string | null;
-  onSelect: (id: string) => void;
-  onBack: () => void;
-}) {
-  const pane = useRef<HTMLDivElement>(null);
-  const opened = useRef(section);
-  const open = items.find((item) => item.id === section);
-
-  // Opening a section takes the button that was clicked off the screen, and going back takes the pane with it, so
-  // focus is moved deliberately: it would otherwise fall to the body, outside the trap and with nothing to read.
-  useEffect(() => {
-    if (opened.current !== section) {
-      opened.current = section;
-      pane.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
-    }
-  }, [section]);
-
+function SectionList({ items, onSelect }: { items: readonly SettingsSection[]; onSelect: (id: string) => void }) {
   return (
-    <div ref={pane} className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto">
-      {open === undefined ? (
-        <ul aria-label="Settings sections" className="flex flex-col gap-0.5">
-          {items.map((item, index) => (
-            <Fragment key={item.id}>
-              {item.group !== null && item.group !== items[index - 1]?.group ? (
-                <li aria-hidden="true" className={GROUP_LABEL}>
-                  {item.group}
-                </li>
-              ) : null}
-              <li>
-                <button type="button" onClick={() => onSelect(item.id)} className={`${NAV_ITEM} text-asst-body hover:bg-asst-hover hover:text-asst-text`}>
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  <Chevron />
-                </button>
-              </li>
-            </Fragment>
-          ))}
-        </ul>
-      ) : (
-        <>
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center gap-1 self-start rounded-lg py-1 pr-2 text-[13px] text-asst-muted hover:text-asst-text"
-          >
-            <BackIcon />
-            Back to settings
-          </button>
-          {open.panel(view)}
-        </>
-      )}
-    </div>
+    <ul aria-label="Settings sections" className="flex shrink-0 flex-col gap-0.5 overflow-y-auto">
+      {items.map((item, index) => (
+        <Fragment key={item.id}>
+          {item.group !== null && item.group !== items[index - 1]?.group ? (
+            <li aria-hidden="true" className={GROUP_LABEL}>
+              {item.group}
+            </li>
+          ) : null}
+          <li>
+            <button
+              type="button"
+              data-settings-nav=""
+              onClick={() => onSelect(item.id)}
+              className={`${NAV_ITEM} text-asst-body hover:bg-asst-hover hover:text-asst-text`}
+            >
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              <Chevron />
+            </button>
+          </li>
+        </Fragment>
+      ))}
+    </ul>
   );
+}
+
+function BackToList({ onBack }: { onBack: () => void }) {
+  return (
+    <button
+      type="button"
+      data-settings-nav=""
+      onClick={onBack}
+      className="flex shrink-0 items-center gap-1 self-start rounded-lg py-1 pr-2 text-[13px] text-asst-muted hover:text-asst-text"
+    >
+      <BackIcon />
+      Back to settings
+    </button>
+  );
+}
+
+/**
+ * Where focus belongs when the dialog opens, and whenever something takes it away: the open section's own tab, the
+ * head of the list a narrow screen shows, or the way back out of a section. One selector for all three, so the
+ * entry point is a property of whichever interface is showing rather than something each caller works out.
+ */
+const NAV_ENTRY = '[role="tab"][aria-selected="true"], [data-settings-nav]';
+
+/** Puts focus there, or on the first thing in the dialog that will take it when no interface is showing one. */
+function focusNavigation(dialog: HTMLElement | null): void {
+  (dialog?.querySelector<HTMLElement>(NAV_ENTRY) ?? dialog?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
 }
 
 /**
@@ -443,7 +438,7 @@ function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) 
   const panel = useRef<HTMLDivElement>(null);
   const prefix = useId();
   const wide = useTwoPane();
-  const items = useMemo(() => SECTIONS.filter((item) => item.shown(view)), [view]);
+  const items = SECTIONS.filter((item) => item.shown(view));
   // Nothing open is the narrow interface showing its list. Wide has no such state: it always has a section beside the
   // navigation, so a chosen section that the page has stopped passing anything for falls back to the first offered one.
   const [chosen, setChosen] = useState<string | null>(wide ? (items[0]?.id ?? null) : null);
@@ -451,11 +446,28 @@ function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) 
   const tabId = (id: string) => `${prefix}-tab-${id}`;
   const panelId = `${prefix}-panel`;
   const open = items.find((item) => item.id === section);
+  const showing = useRef({ wide, section });
 
   useEffect(() => {
     // The navigation, so what has focus says where in the settings the person is rather than only how to leave.
-    panel.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"], ul[aria-label="Settings sections"] button')?.focus();
+    focusNavigation(panel.current);
   }, []);
+
+  useEffect(() => {
+    const moved = showing.current.wide !== wide || showing.current.section !== section;
+    showing.current = { wide, section };
+    if (!moved) {
+      return;
+    }
+    // The narrow interface replaces its whole pane as a section is opened or left, and a change of width replaces
+    // whichever navigation was showing — either way the element focus was on can leave the document, and focus falls
+    // to the body, outside the trap and with nothing to read. On the wide interface a click leaves focus on the tab
+    // it was given to, which is where a tablist keeps it, so that case is left alone.
+    if (wide && panel.current?.contains(document.activeElement)) {
+      return;
+    }
+    focusNavigation(panel.current);
+  }, [wide, section]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -509,23 +521,30 @@ function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) 
             </span>
           </button>
         </div>
-        <div className="flex min-h-0 flex-1 gap-4">
+        {/*
+         * One row of two slots at both widths — the navigation, then the open section — rather than two layouts with
+         * a panel each. The section's own component then survives a change of width: a phone turned on its side
+         * crosses the breakpoint, and remounting the panel there would throw away a half-typed CLAUDE.md.
+         */}
+        <div className={`flex min-h-0 flex-1 ${wide ? "gap-4" : "flex-col gap-3.5"}`}>
           {wide ? (
-            <>
-              <Nav items={items} section={section ?? ""} onSelect={setChosen} tabId={tabId} panelId={panelId} />
-              <div
-                role="tabpanel"
-                id={panelId}
-                aria-labelledby={section === null ? undefined : tabId(section)}
-                // biome-ignore lint/a11y/noNoninteractiveTabindex: a tab panel holding nothing focusable, as Connections is, has to be focusable itself or a keyboard cannot reach or scroll it
-                tabIndex={0}
-                className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-0.5 outline-none focus-visible:outline-1 focus-visible:outline-asst-accent-line"
-              >
-                {open?.panel(view) ?? null}
-              </div>
-            </>
+            <Nav items={items} section={section ?? ""} onSelect={setChosen} tabId={tabId} panelId={panelId} />
+          ) : section === null ? (
+            <SectionList items={items} onSelect={setChosen} />
           ) : (
-            <Drilldown items={items} view={view} section={section} onSelect={setChosen} onBack={() => setChosen(null)} />
+            <BackToList onBack={() => setChosen(null)} />
+          )}
+          {section === null && !wide ? null : (
+            <div
+              // A tab panel only beside a tablist. The narrow interface is a list the person drills into, where the
+              // same element is the scrolling pane of one section and nothing is selected for it to be the panel of.
+              {...(wide ? { role: "tabpanel", id: panelId, "aria-labelledby": section === null ? undefined : tabId(section) } : {})}
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: a section holding nothing focusable, as Connections is, has to be focusable itself or a keyboard cannot reach or scroll it
+              tabIndex={0}
+              className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-0.5 outline-none focus-visible:outline-1 focus-visible:outline-asst-accent-line"
+            >
+              {open?.panel(view) ?? null}
+            </div>
           )}
         </div>
       </div>
