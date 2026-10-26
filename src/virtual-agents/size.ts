@@ -44,15 +44,25 @@ export function sizeLabel(size: VirtualAgentSize): string {
 }
 
 /**
- * Why the size cannot be changed now, or `undefined` when it can: only before the orchestrator has made the pod, or
- * once it has stopped, so a change never restarts a pod someone is working in.
+ * Why the size cannot be changed now, or `undefined` when it can: only while it is being deleted, which is the same
+ * rule a change of plugins has.
+ *
+ * It does **not** ask whether a pod is running. Size is in the pod template, so a change replaces a running pod — the
+ * same mechanism, and the same cost, as a change of plugins, which has always been allowed while running. A rule that
+ * required stopping first would make the setting unreachable exactly where it is needed: the Assistant starts its own
+ * pod whenever someone opens it, so its owner could never reach a moment at which this answered `undefined`. What
+ * keeps that honest is the UI, which says what a change ends before the person commits, not a refusal that leaves
+ * them nowhere to go.
  */
 export function sizeChangeRefusal(agent: { desired: VirtualAgentDesired; status: VirtualAgentStatus }): string | undefined {
-  if (agent.desired === "deleted") {
-    return "that virtual agent is being deleted";
-  }
-  if (agent.status === "requested" || agent.status === "stopped") {
-    return undefined;
-  }
-  return "stop the virtual agent before changing its size";
+  return agent.desired === "deleted" ? "that virtual agent is being deleted" : undefined;
+}
+
+/**
+ * Whether changing the size now replaces a pod that is already up, which is what ends the sessions running on it. A
+ * pod exists from the moment the orchestrator has acted on a `running` agent, which is every status but `requested` —
+ * the same rule `assistantPluginsData` uses for the same question.
+ */
+export function sizeChangeRollsPod(agent: { desired: VirtualAgentDesired; status: VirtualAgentStatus }): boolean {
+  return agent.desired === "running" && agent.status !== "requested";
 }

@@ -50,6 +50,7 @@ export type {
   HeartbeatBody,
   LoginCompleteBody,
   LoginPromptBody,
+  MemoryReportBody,
   Message,
   MessageAuthor,
   MessageResponse,

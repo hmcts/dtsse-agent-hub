@@ -5,18 +5,24 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionsData } from "@/assistant/connections";
+import type { AssistantMemory } from "@/assistant/memory";
+import { CONVERSATION_MEMORY_BYTES, type MemoryUse } from "@/assistant/memory-report";
 import { MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } from "@/assistant/templates";
 import type { UploadsOnDisk } from "@/assistant/upload-disk";
 import { MAX_REPORTED_FILES, type PodFile, type UploadsDisk } from "@/assistant/upload-report";
+import type { FormAction } from "@/components/ActionForm";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
+import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
+import { CONVERSATION_SESSIONS } from "@/orchestrator/manifests";
 import type { LoginState, LoginView } from "@/virtual-agents/logins";
+import { SIZE_RESOURCES } from "@/virtual-agents/size";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
@@ -884,7 +890,7 @@ describe("the Assistant's CLAUDE.md", () => {
 
 /** The whole dialog, which is what a person has when they open it: the navigation and every section it offers. */
 function everything(): Partial<Parameters<typeof AssistantSettings>[0]> {
-  return { plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }), files: files() };
+  return { plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }), files: files(), size: size() };
 }
 
 function tabs(): HTMLElement[] {
@@ -950,8 +956,8 @@ describe("the Assistant's settings navigation", () => {
   it("should gather the sections under the headings they belong to when it opens", () => {
     open(everything());
 
-    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates", "Files"]);
-    expect(nav().textContent).toBe("GeneralAppearanceAgentClaude.mdToolsConnectionsTemplatesFiles");
+    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
+    expect(nav().textContent).toBe("GeneralAppearanceAgentClaude.mdToolsSizeConnectionsTemplatesFiles");
   });
 
   // A tablist owns tabs and nothing else, so the two group headings are shown rather than announced, and the panel's
@@ -959,7 +965,7 @@ describe("the Assistant's settings navigation", () => {
   it("should keep its group headings out of what a screen reader is read when it opens", () => {
     open(everything());
 
-    expect(within(nav()).getAllByRole("tab")).toHaveLength(6);
+    expect(within(nav()).getAllByRole("tab")).toHaveLength(7);
     for (const group of ["General", "Agent"]) {
       expect(within(nav()).getByText(group).getAttribute("aria-hidden")).toBe("true");
     }
@@ -1009,9 +1015,10 @@ describe("the Assistant's settings navigation", () => {
 
   it("should wrap from the last section to the first when the person arrows off the end", () => {
     open(everything());
-    tabs()[5]?.focus();
+    const last = tabs().length - 1;
+    tabs()[last]?.focus();
 
-    fireEvent.keyDown(tabs()[5]!, { key: "ArrowDown" });
+    fireEvent.keyDown(tabs()[last]!, { key: "ArrowDown" });
 
     expect(document.activeElement?.textContent).toBe("Appearance");
   });
@@ -1081,7 +1088,7 @@ describe("the Assistant's settings on a narrow screen", () => {
       within(screen.getByRole("list", { name: "Settings sections" }))
         .getAllByRole("button")
         .map((item) => item.textContent)
-    ).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates", "Files"]);
+    ).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
     expect(screen.queryByRole("radiogroup", { name: "Appearance" })).toBeNull();
   });
 
@@ -1295,7 +1302,7 @@ describe("the Assistant's files", () => {
   it("should offer Files as its own section, after the templates, when the page passes it", () => {
     open({ ...everything(), files: files() });
 
-    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates", "Files"]);
+    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
   });
 
   // Two figures, never one: the uploads are a share of a volume the repository clones are on too, and the second
@@ -1465,5 +1472,245 @@ describe("the Assistant's files", () => {
 
   it("should raise no WCAG A or AA violations with Files open", async () => {
     await auditOpenDialog("Files");
+  }, 20_000);
+});
+
+const GIB = 1024 ** 3;
+const LIMIT = 8 * GIB;
+
+/** A memory report whose peak leaves `headroom` under the limit, which is what the warning's threshold is about. */
+function use(headroom: number, overrides: Partial<Extract<MemoryUse, { reported: true }>> = {}): MemoryUse {
+  return { reported: true, limitBytes: LIMIT, currentBytes: 3 * GIB, peakBytes: LIMIT - headroom, at: REPORTED_AT, stopped: false, ...overrides };
+}
+
+const CHANGE_FORM = "Change the size of your assistant";
+
+function size(overrides: Partial<AssistantMemory> = {}, save: FormAction = vi.fn(async () => ({ ok: true as const, confirmation: "done" }))): AssistantSize {
+  return {
+    view: { use: use(4 * CONVERSATION_MEMORY_BYTES), size: "small", openChats: 1, rollsPod: true, refusal: undefined, ...overrides },
+    assistantId: "0f8a6a1e-0000-4000-8000-0000000000aa",
+    save
+  };
+}
+
+function panel(): HTMLElement {
+  return screen.getByRole("region", { name: "Size" });
+}
+
+describe("the Assistant's size", () => {
+  it("should show nothing at all when the page passes no size", () => {
+    open({ files: files(), size: undefined });
+
+    expect(sections()).not.toContain("Size");
+    expect(screen.queryByRole("heading", { name: "Size" })).toBeNull();
+  });
+
+  it("should offer Size under Agent, after the tools, when the page passes it", () => {
+    open(everything());
+
+    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
+  });
+
+  it("should say the size it is on with what that size gives, from the orchestrator's own constants", () => {
+    open({ size: size() }, "Size");
+
+    expect(panel().textContent).toContain(`You are on small: ${CONVERSATION_SESSIONS.small} chats at once, ${SIZE_RESOURCES.small.limits.memory} of memory.`);
+  });
+
+  // The peak leads, because that is what the warning is about: the live figure dips between turns, so a pod that has
+  // twice nearly been killed reads as idle whenever nothing is mid-answer.
+  it("should give the peak against the limit, the live figure and when the pod last looked", () => {
+    open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
+
+    expect(panel().textContent).toContain("3.2 GB of 8 GB at its busiest");
+    expect(panel().textContent).toContain("Using 3 GB right now");
+    expect(panel().textContent).toContain("Last reported");
+  });
+
+  it("should say the figures will not move while the assistant is stopped", () => {
+    open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES, { stopped: true }) }) }, "Size");
+
+    expect(panel().textContent).toContain("Your assistant is stopped. Last reported");
+  });
+
+  // Zero would read as an idle pod, which is the one thing the section must never say when it cannot tell.
+  it.each([
+    ["older_client", "running an older version that cannot tell us how much memory it is using"],
+    ["not_running", "stopped, so there is nothing using memory and nothing to report"],
+    ["waiting", "has not reported its memory yet"]
+  ] as const)("should say it cannot tell, rather than show a figure, when the reason is %s", (reason, said) => {
+    open({ size: size({ use: { reported: false, reason } }) }, "Size");
+
+    expect(panel().textContent).toContain(said);
+    expect(panel().textContent).not.toContain("at its busiest");
+  });
+
+  it.each(["older_client", "not_running", "waiting"] as const)("should raise no warning when it cannot tell (%s)", (reason) => {
+    open({ size: size({ use: { reported: false, reason } }) }, "Size");
+
+    expect(panel().textContent).not.toContain("low on memory");
+    expect(cog().getAttribute("aria-label")).toBe("Settings");
+  });
+
+  // The threshold: exactly one conversation's worth of headroom still has room for the chat about to be opened.
+  it("should raise no warning when the peak leaves room for exactly one more chat", () => {
+    open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES) }) }, "Size");
+
+    expect(panel().textContent).not.toContain("low on memory");
+  });
+
+  it("should warn, and name both ways out, when the peak leaves a byte less than one more chat", () => {
+    open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES - 1), openChats: 3 }) }, "Size");
+
+    expect(panel().textContent).toContain("Your assistant is low on memory");
+    expect(panel().textContent).toContain(
+      `Move up to medium below for ${CONVERSATION_SESSIONS.medium} chats at once and ${SIZE_RESOURCES.medium.limits.memory} of memory, or close a chat you have finished with.`
+    );
+  });
+
+  // Telling someone with one chat open to close some chats is telling them to stop working.
+  it("should offer only the bigger size when there is one chat open", () => {
+    open({ size: size({ use: use(0), openChats: 1 }) }, "Size");
+
+    expect(panel().textContent).toContain("Move up to medium below");
+    expect(panel().textContent).not.toContain("or close a chat");
+  });
+
+  it("should say to close a chat, and offer no bigger size, on the largest size there is", () => {
+    open({ size: size({ use: use(0), size: "large" }) }, "Size");
+
+    expect(panel().textContent).toContain("This is the largest size there is, so close a chat you have finished with");
+    expect(panel().textContent).not.toContain("Move up to");
+  });
+
+  // One mark on the cog, however many reasons: a second badge beside the sign-ins one would be two things competing
+  // to be noticed and neither read.
+  it("should carry its warning on the one settings cog, naming both reasons when a sign-in needs attention too", () => {
+    render(<AssistantSettings connections={data(["azure", "bedrock", "atlassian"])} size={size({ use: use(0) })} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Your assistant is low on memory. GitHub needs your attention");
+    expect(cog().textContent).toBe("!");
+  });
+
+  it("should carry its warning alone when every sign-in is connected", () => {
+    render(<AssistantSettings connections={data(ALL_SIGNED_IN)} size={size({ use: use(0) })} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Your assistant is low on memory");
+  });
+
+  it("should offer every size with its chats and memory, and start on the one it is", () => {
+    open({ size: size() }, "Size");
+    const select = screen.getByLabelText("Choose a size") as HTMLSelectElement;
+
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      `small — ${CONVERSATION_SESSIONS.small} chats at once, ${SIZE_RESOURCES.small.limits.memory} of memory`,
+      `medium — ${CONVERSATION_SESSIONS.medium} chats at once, ${SIZE_RESOURCES.medium.limits.memory} of memory`,
+      `large — ${CONVERSATION_SESSIONS.large} chats at once, ${SIZE_RESOURCES.large.limits.memory} of memory`
+    ]);
+    expect(select.value).toBe("small");
+    expect(panel().textContent).toContain("This is the size you are on.");
+  });
+
+  // A change restarts the pod, so what it ends is said before the person commits, not after.
+  it("should post nothing, and say what a change ends, until the person confirms", () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "done" }));
+    open({ size: size({ openChats: 3 }, save) }, "Size");
+
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByText("Change to medium? Your assistant restarts, which stops all 3 chats you have open.")).toBeTruthy();
+    expect(panel().textContent).toContain("Only what one of them was working on at the moment you change is lost");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Change size and restart" }));
+  });
+
+  it.each([
+    [1, "the one chat you have open"],
+    [0, "whatever it is working on"]
+  ])("should count the chats a change ends when %i are open", (openChats, said) => {
+    open({ size: size({ openChats }) }, "Size");
+
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "large" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change to large" }));
+
+    expect(screen.getByText(`Change to large? Your assistant restarts, which stops ${said}.`)).toBeTruthy();
+  });
+
+  it("should promise the new size at the next start, and not a restart, when no pod is up", () => {
+    open({ size: size({ rollsPod: false }) }, "Size");
+
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+
+    expect(screen.getByText("Change to medium? Your assistant starts at the new size the next time you use it.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Change size" })).toBeTruthy();
+  });
+
+  it("should send the assistant's id and the size chosen when the person confirms", async () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Restarting at medium." }));
+    open({ size: size({}, save) }, "Size");
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+
+    await submit(CHANGE_FORM);
+
+    const sent = (save.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("size")]).toEqual(["0f8a6a1e-0000-4000-8000-0000000000aa", "medium"]);
+    expect(screen.getByRole("status").textContent).toBe("Restarting at medium.");
+  });
+
+  it("should put the question away, having posted nothing, when the person cancels", () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "done" }));
+    open({ size: size({}, save) }, "Size");
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("button", { name: "Change to medium" })).toBeTruthy();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  // A different size is a different question, so an answer already on the screen stops being the one asked.
+  it("should take the question back when the person changes the size they are asking about", () => {
+    open({ size: size() }, "Size");
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "large" } });
+
+    expect(screen.queryByRole("button", { name: "Change size and restart" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Change to large" })).toBeTruthy();
+  });
+
+  it("should show the action's own refusal, rather than deciding for itself, when a change is refused", async () => {
+    const save = vi.fn(async () => ({ ok: false as const, error: "that virtual agent is being deleted" }));
+    open({ size: size({}, save) }, "Size");
+    fireEvent.change(screen.getByLabelText("Choose a size"), { target: { value: "medium" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change to medium" }));
+
+    await submit(CHANGE_FORM);
+
+    expect(screen.getByRole("alert").textContent).toBe("that virtual agent is being deleted");
+  });
+
+  it("should say why, and offer no form, when the size cannot be changed at all", () => {
+    open({ size: size({ refusal: "that virtual agent is being deleted" }) }, "Size");
+
+    expect(panel().textContent).toContain("The size cannot be changed just now: that virtual agent is being deleted.");
+    expect(screen.queryByRole("form", { name: CHANGE_FORM })).toBeNull();
+  });
+
+  it("should keep its own controls in the dialog's focus trap when it is open", () => {
+    open({ size: size() }, "Size");
+    const items = stops();
+
+    expect(items).toContain(screen.getByLabelText("Choose a size"));
+    expect(items.at(-1)).toBe(screen.getByLabelText("Choose a size"));
+  });
+
+  it("should raise no WCAG A or AA violations with Size open", async () => {
+    await auditOpenDialog("Size");
   }, 20_000);
 });

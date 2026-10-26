@@ -5,6 +5,7 @@ import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
+import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
 import {
   accessToConversation,
   conversationRef,
@@ -352,6 +353,19 @@ export async function unsentNewChat(viewer: Viewer): Promise<UnsentChat | undefi
 export async function assistantFiles(viewer: Viewer): Promise<UploadsOnDisk | undefined> {
   const assistant = await findAssistant(prisma, viewer.oid);
   return assistant === undefined ? undefined : await uploadsOnDisk(prisma, viewer.oid, assistant.id);
+}
+
+/**
+ * How much the viewer's assistant has to work with, for the settings dialog's Size section: its size, what its pod
+ * reports about its memory, and how many chats have a session on it. `undefined` when they have no assistant at all,
+ * which is the one case the section is not offered.
+ *
+ * Its own read rather than part of `openAssistant`, as the files are: only the settings dialog uses it, and it costs a
+ * second query over the viewer's conversations. The owner check is the store's, through `canSeeAssistantMemory`.
+ */
+export async function assistantSize(viewer: Viewer): Promise<AssistantMemory | undefined> {
+  const assistant = await findAssistant(prisma, viewer.oid);
+  return assistant === undefined ? undefined : await assistantMemory(prisma, viewer.oid, assistant.id);
 }
 
 /**

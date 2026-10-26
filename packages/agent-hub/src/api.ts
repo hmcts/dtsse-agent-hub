@@ -199,6 +199,18 @@ export type UploadsReportBody = {
   deleted: string[];
 };
 
+/**
+ * What this container's memory cgroup says: `memory.max`, `memory.current` and `memory.peak`.
+ *
+ * All three or none. Every sentence the hub writes about memory is relative to the limit, and the peak is what it
+ * warns on, so a partial report would be a figure it had to guess rather than a weaker one.
+ */
+export type MemoryReportBody = {
+  limit_bytes: number;
+  current_bytes: number;
+  peak_bytes: number;
+};
+
 export type RegisterResponse = { agent_id: string; name: string };
 export type MessageResponse = { message: Message };
 export type MessagesResponse = { messages: Message[] };
@@ -333,6 +345,8 @@ export type Api = {
   conversations: (virtualId: string) => Promise<ConversationsResponse>;
   /** What the uploads directory and the volume under it come to, which the hub has no way to see for itself. */
   putUploads: (virtualId: string, body: UploadsReportBody) => Promise<null>;
+  /** What this container's memory cgroup says, which the hub has no way to see for itself either. */
+  putMemory: (virtualId: string, body: MemoryReportBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
   putJiraExport: (agentId: string, body: JiraExportReport) => Promise<null>;
@@ -494,6 +508,7 @@ export function createApi({
     putSessions: (id, body) => request<null>("PUT", v(id, "sessions"), body),
     conversations: (virtualId) => request<ConversationsResponse>("GET", v(virtualId, "conversations")),
     putUploads: (virtualId, body) => request<null>("PUT", v(virtualId, "uploads"), body),
+    putMemory: (virtualId, body) => request<null>("PUT", v(virtualId, "memory"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),

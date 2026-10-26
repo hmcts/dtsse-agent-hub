@@ -14,7 +14,7 @@ import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/ass
 import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
 import { offeredTemplates } from "@/assistant/templates";
@@ -25,7 +25,7 @@ import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { ShareGate } from "@/components/assistant/ShareGate";
 import { requireViewer } from "@/viewer/current";
-import { assistantConversation, assistantFiles, assistantTemplates, chatShares, claudeMdSettings, openAssistant } from "@/web/data";
+import { assistantConversation, assistantFiles, assistantSize, assistantTemplates, chatShares, claudeMdSettings, openAssistant } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -56,13 +56,14 @@ export default async function ConversationPage({
   // Who the chat is shared with is read only when the dialog is being shown, and then beside the rest: it is two
   // queries to fill a dialog, and this is the page that loads most often.
   const sharing = query.share === "1";
-  const [home, view, claudeMd, mine, shares, files] = await Promise.all([
+  const [home, view, claudeMd, mine, shares, files, size] = await Promise.all([
     openAssistant(viewer),
     assistantConversation(viewer, conversationId),
     claudeMdSettings(viewer),
     assistantTemplates(viewer),
     sharing ? chatShares(viewer, conversationId) : undefined,
-    assistantFiles(viewer)
+    assistantFiles(viewer),
+    assistantSize(viewer)
   ]);
   if (view === undefined) {
     notFound();
@@ -85,6 +86,7 @@ export default async function ConversationPage({
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
       files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}
+      size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
     >
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
       <ChatView key={view.agentId} view={view} templates={offeredTemplates(mine)} viewerOid={viewer.oid} actions={ACTIONS} jira={jira} />

@@ -183,8 +183,12 @@ otherwise their GitHub noreply address. The owner can override either in the "Gi
 section of `/hub/virtual` (`git_identity`, JSON `{name, email}`); a pod reads it but cannot change it, and "Clear" deletes it.
 
 **Sizes.** An agent is `small` (1–4 CPU, 4–8Gi), `medium` (2–4 CPU, 8–16Gi) or `large` (4–8 CPU, 16–32Gi), chosen when
-it is created. Its owner can change the size on its page while it is `requested` or `stopped`; the next apply gives the
-StatefulSet the new resources.
+it is created. Its owner can change the size at any time — on its page, or, for their assistant, in the Assistant's
+settings — and the change bumps `generation` and `pod_generation`, so a running pod is replaced with one at the new
+resources and a stopped agent comes back at them. Replacing the pod ends every session on it, which both surfaces say
+before the change is made; the disk is kept. The size also sets how many HMCTS Assistant conversations the pod runs at
+once (`CONVERSATION_SESSIONS`), and the Assistant's settings show each size's cap and memory beside the figures its pod
+reports for itself.
 
 **Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, when creating an
 agent or later on its page. The orchestrator passes the names to the pod as `AGENT_HUB_PLUGINS`, comma-separated, and
