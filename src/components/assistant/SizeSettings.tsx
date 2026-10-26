@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { AssistantMemory } from "@/assistant/memory";
 import {
-  CONVERSATION_MEMORY_BYTES,
+  describeChatCost,
   MEMORY_REPORT_INTERVAL_MINUTES,
   type MemoryPressure,
   type MemoryUse,
@@ -45,9 +45,10 @@ const NO_REPORT: Record<Exclude<MemoryUse, { reported: true }>["reason"], string
 /**
  * The peak against the limit, with the live figure beside it, and when the pod last looked.
  *
- * The peak leads because it is what the warning is about: the live figure falls away between turns, so a pod that has
- * twice come within a hair of being killed reads as idle whenever nobody is mid-answer. It is never presented as
- * current — the hub cannot see a pod's memory between reports.
+ * The peak leads because it is the fuller account of what the pod has had to hold: the live figure falls away between
+ * turns, so a pod that has twice come within a hair of being killed reads as idle whenever nobody is mid-answer. It
+ * is the live figure the warning is computed from all the same, because that is the one that can come back down —
+ * `memoryPressure` has why. Neither is presented as current: the hub cannot see a pod's memory between reports.
  */
 function Use({ use }: Readonly<{ use: MemoryUse }>) {
   if (!use.reported) {
@@ -58,10 +59,11 @@ function Use({ use }: Readonly<{ use: MemoryUse }>) {
       <p className="text-sm font-semibold">
         {describeSize(use.peakBytes)} of {describeSize(use.limitBytes)} at its busiest
       </p>
-      {/* The per-chat figure is the constant the warning is computed from, so the sentence cannot say one cost while
-          the threshold uses another. */}
+      {/* The per-chat figure comes from the constant the warning is computed from, so the sentence cannot say one
+          cost while the threshold uses another, and through `describeChatCost` rather than `describeSize` so it is
+          not shown to a precision one measurement cannot support. */}
       <p className="text-[13px] text-asst-body">
-        Using {describeSize(use.currentBytes)} right now. Each chat you have open takes about {describeSize(CONVERSATION_MEMORY_BYTES)} of it.
+        Using {describeSize(use.currentBytes)} right now. Each chat you have open takes about {describeChatCost()} of it.
       </p>
       <p className="text-xs text-asst-muted">
         {use.stopped ? "Your assistant is stopped. Last reported " : "Last reported "}

@@ -229,7 +229,7 @@ Metadata rows cascade from the message and from the conversation, so deleting ei
 
 **Capacity.** The supervisor runs at most `AGENT_HUB_MAX_SESSIONS` conversation sessions at once, beside the pod's own session: 3 on `small`, 4 on `medium` and 7 on `large`. Each is a Claude process with its own MCP servers, hai wrapper and bridge, and costs about **0.65Gi** of anonymous memory, 25–30m of CPU idle and 139–186m while working.
 
-The figures are **proportional set size (PSS)**, read per process from `/proc/<pid>/smaps_rollup`, with the container's own `memory.stat`, `memory.current` and `cpu.stat` as the totals. **PSS, never RSS**: a session is twenty-odd node processes sharing one node binary and their `node_modules` pages, and ΣRSS counts those pages once per process — it puts the same marginal at 1.25Gi, nearly double, which is where the older 1.2Gi figure came from. The marginal is a subtraction across one preview pod sampled four minutes apart as it went from two sessions to one: `anon` fell 0.64Gi, Σ PSS 0.68Gi and `memory.current` 0.69Gi. `anon` is the figure the caps are reasoned about, because it is the part the kernel cannot reclaim; page cache was 2.1–2.4Gi on the pods measured, which is the workspace clone rather than the sessions, and it is evicted under pressure rather than killing the container. MCP servers share less between sessions than they appear to — about 14% of a session is pages genuinely shared with another, because each session spawns MCP servers with heaps of their own and only their binary and library pages are common.
+The figures are **proportional set size (PSS)**, read per process from `/proc/<pid>/smaps_rollup`, with the container's own `memory.stat`, `memory.current` and `cpu.stat` as the totals. **PSS, never RSS**: a session is twenty-odd node processes sharing one node binary and their `node_modules` pages, and ΣRSS counts those pages once per process — it puts the same marginal at 1.25Gi, nearly double, which is where the older 1.2Gi figure came from. The marginal is a subtraction across one `small` preview pod sampled four minutes apart as it went from two sessions to one: `anon` fell 0.64Gi, Σ PSS 0.68Gi and `memory.current` 0.69Gi — one transition read three ways rather than three measurements, where the 0.95Gi baseline below has 15 samples behind it. Every pod in preview is `small`, so nothing here is measured on the sizes it is applied to. `anon` is the figure the caps are reasoned about, because it is the part the kernel cannot reclaim; page cache was 2.1–2.4Gi on the pods measured, which is the workspace clone rather than the sessions, and it is evicted under pressure rather than killing the container. MCP servers share less between sessions than they appear to — about 14% of a session is pages genuinely shared with another, because each session spawns MCP servers with heaps of their own and only their binary and library pages are common.
 
 An awake pod with no conversations holds about 0.95Gi of `anon` — its own session, the three agent-hub daemons and the entrypoint — over 15 samples of two pods on two images, which ranged 0.91–0.99Gi. So a cap of N costs 0.95 + 0.65N. **Every cap is inside its size's memory request**, let alone its limit: `small` at 3 is 2.90Gi of the 4Gi it requests, so a pod holding its full complement of chats is not an eviction candidate for doing so, and `small` keeps that 4Gi deliberately so that someone needing more conversations at once moves up a size rather than every small pod costing more.
 
@@ -269,25 +269,33 @@ every call between the two is pod to hub. The pod reports, as it does for its di
   `memory.peak` is resettable on newer kernels, and refusing the report over it would lose the live figure too.
   Anything that is not a whole number is `400`.
 - Sent every 10 minutes, on the pod's uploads reconcile, so the hub's figures are always *as of* `memory_reported_at`
-  and the UI says when rather than presenting them as current. `peak_bytes` is what the warning below is computed
-  from, and a stale peak is a **lower bound** on the true one, so a late report understates the pressure and never
-  invents it. `current_bytes` dips between turns and is shown beside the peak rather than warned on.
+  and the UI says when rather than presenting them as current. `current_bytes` is what the warning below is computed
+  from, because it is the figure that can come back down; a stale one can overstate as well as understate, which is
+  the price of that. `peak_bytes` leads the Size section as what the pod reached at its busiest, and nothing is
+  warned on it — nothing resets it while the pod lives, so a threshold crossed once would stay crossed for ever.
 - A report **notifies nobody**, for the reasons a disk report does not: it is read by the owner's own settings, and
   nothing streams it.
 
-**The warning.** The hub warns when the peak leaves less than **one more conversation's worth** of headroom under the
-limit — `peak_bytes + 0.65Gi > limit_bytes`. The threshold is derived rather than chosen: it is the measured cost of
-a conversation against the ceiling the pod itself reported, so what it says is the thing the person can act on ("there
-is no room for another chat at this size"), and a pod merely using memory within its size never raises it. The two
-things it names are the two things that change the answer: move up a size, or close some chats.
+**The warning.** The hub warns when the live figure leaves less than **one more conversation's worth** of headroom
+under the limit — `current_bytes + 0.65Gi > limit_bytes`. The threshold is derived rather than chosen: it is the
+measured cost of a conversation against the ceiling the pod itself reported, and a pod merely using memory within its
+size never raises it. The two things it names are the two things that change the answer: move up a size, or close some
+chats.
 
-`peak_bytes` counts the container's page cache as well as its heaps, and that was 2.1–2.4Gi of the workspace clone on
-the pods the 0.65Gi was measured on, so the peak sits well above the part of the pod the kernel cannot reclaim. The
-constant is still the right one to compare against it, because a conversation moves `memory.current` by 0.69Gi and
-the cache within it by only 0.03Gi: one more chat costs about the same whichever of the two the comparison is in.
-What the cache costs is sensitivity — a pod that has merely read a lot of files reaches the threshold earlier than
-its heaps alone would — and closing that gap needs a figure for the non-reclaimable part, which the three cgroup
-reads above do not include.
+**Not `peak_bytes`, because the warning has to be able to clear.** Nothing resets `memory.peak` while the pod lives,
+so a threshold crossed once is crossed again by every later report — closing a chat drops `current_bytes` by about one
+conversation and leaves `peak_bytes` exactly where it was, which made one of the two remedies the warning offers work
+only by replacing the pod and the other not at all. `current_bytes` dips between turns and a report is up to ten
+minutes old, so a stale one can overstate where a stale peak could only understate; a figure that cannot come down at
+all is the worse of the two.
+
+**What it cannot tell you.** `current_bytes` counts the container's page cache, which was 2.1–2.4Gi of the workspace
+clone on the pods the 0.65Gi was measured on, and the per-size caps sit far below what the limits allow. So the
+threshold is **not reachable by opening chats at any size**: a pod at its cap settles near 5.5Gi of `small`'s 8Gi
+against a threshold of 7.35Gi, and the gap is wider on `medium` and `large`. What trips it in practice is page cache
+or the pod's own non-session work, which is why the warning's advice states what was measured and what each remedy
+frees rather than naming a person's chats as the cause. Making it mean what it says needs a figure for the part the
+kernel cannot reclaim, which the three cgroup reads above do not include.
 
 **Who sees it.** The owner alone, through `canSeeAssistantMemory`. No grant reaches it: a figure about someone's pod
 is not a session they chose to share.

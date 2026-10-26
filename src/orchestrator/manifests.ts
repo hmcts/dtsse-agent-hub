@@ -98,6 +98,11 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
  * `/proc/<pid>/smaps_rollup`. Each session is a `claude` process with its own MCP servers, hai wrapper and bridge;
  * the MCP servers and their wrappers are about half of it.
  *
+ * **That marginal is one transition of one `small` pod, n=1**, and the two routes agreeing are the same subtraction
+ * read two ways rather than two measurements. The 0.95Gi baseline below is the part with a sample behind it: 15,
+ * across two pods and two images, spread 0.91–0.99Gi. Every pod in preview is `small`, so nothing here is measured
+ * on the sizes it is applied to.
+ *
  * **Measure this in PSS, never RSS.** A session is twenty-odd node processes sharing one node binary and their
  * `node_modules` pages, so ΣRSS counts those pages once per process and puts the same marginal at 1.25Gi, nearly
  * double. What the processes share is those binary and library pages and not their heaps, which is why a session's
