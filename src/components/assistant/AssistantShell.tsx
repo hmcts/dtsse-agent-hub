@@ -96,6 +96,7 @@ export function AssistantShell({
   activeId,
   theme = "system",
   connections,
+  now,
   plugins,
   claudeMd,
   templates,
@@ -112,6 +113,8 @@ export function AssistantShell({
   theme?: Theme;
   /** The person's sign-ins, which the footer's settings lists and warns about. */
   connections?: ConnectionsData;
+  /** The page's own clock, which the footer's settings reads its sign-ins against. */
+  now: number;
   /** The workspace plugins the footer's settings lets the person tick. */
   plugins?: AssistantPlugins;
   /** The person's own CLAUDE.md, which the footer's settings shows and edits. */
@@ -306,6 +309,7 @@ export function AssistantShell({
             <AssistantSettings
               theme={theme}
               connections={connections}
+              now={now}
               plugins={plugins}
               claudeMd={claudeMd}
               templates={templates}

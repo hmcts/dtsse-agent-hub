@@ -59,8 +59,11 @@ export const SETTINGS_TWO_PANE = `(min-width: ${SETTINGS_TWO_PANE_MIN_WIDTH}px)`
 
 const STATE_CLASS: Record<Connection["state"], string> = {
   connected: "text-asst-ok",
-  // A sign-in being renewed behind a working one is news, not a problem, so it is not coloured like one.
-  refreshing: "text-asst-muted",
+  // The person has sent the code back and the pod has yet to collect it, so there is nothing for them to do.
+  finishing: "text-asst-muted",
+  // A relayed sign-in is a wait on the person whether or not a credential sits behind it: a pod relays a code
+  // because it cannot finish without them, so it is coloured as something to do rather than as a quiet renewal.
+  refreshing: "text-asst-accent-soft",
   "signing-in": "text-asst-accent-soft",
   expired: "text-asst-warn",
   failed: "text-asst-error",
@@ -128,8 +131,15 @@ function Connections({ list, unavailable, warning }: Pick<SettingsView, "list" |
       {warning === null ? null : (
         <div className="flex flex-col gap-1 rounded-[10px] border border-asst-warn bg-asst-raised px-3.5 py-3">
           <p className="text-[13px] font-semibold text-asst-text">{warning}</p>
+          {/*
+           * This section lists where each sign-in stands and nothing more, so it says where to go and not what will
+           * be there. What is above the chats is whichever ask applies — the accounts to connect on a first visit, a
+           * code to type, or a lapsed sign-in to ask for again — and promising one of the three would be wrong for
+           * the other two.
+           */}
           <p className="text-pretty text-[13px] text-asst-body">
-            You are not signed in to these, so your assistant cannot use them. You can carry on chatting, and it asks you to sign in when it next needs one.
+            Your assistant cannot use these until you have signed in. Close this and the message above your chats takes you to them. You can carry on chatting
+            either way.
           </p>
         </div>
       )}
@@ -595,6 +605,7 @@ function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) 
 export function AssistantSettings({
   theme = "system",
   connections: data,
+  now: from,
   plugins,
   claudeMd,
   templates,
@@ -604,6 +615,8 @@ export function AssistantSettings({
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
+  /** The page's own clock, so the cog's name and badge are the same in the HTML as in the first render. */
+  now: number;
   plugins?: AssistantPlugins;
   claudeMd?: AssistantClaudeMd;
   templates?: AssistantTemplates;
@@ -613,15 +626,20 @@ export function AssistantSettings({
 }) {
   const cog = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  // Read once, and again whenever the dialog opens: a sign-in's deadline moves slowly and a timer on every page to
-  // watch it would cost more than it is worth.
-  const [now, setNow] = useState(() => Date.now());
+  // The page's own clock to begin with, then the browser's as it takes over and again whenever the dialog opens. A
+  // sign-in's deadline moves slowly and a timer on every page to watch it would cost more than it is worth, but the
+  // first read has to be the page's: `Date.now()` here would be the server's clock in the HTML and the browser's in
+  // the first render, and a deadline falling between the two is a badge and an accessible name that disagree.
+  const [now, setNow] = useState(from);
+  useEffect(() => {
+    setNow(Date.now());
+  }, []);
   // The appearance the switch starts from. `ThemeSwitch` writes the person's choice to the cookie and to the theme
   // root, not to the server tree, so `theme` keeps the value the page was rendered with and the dialog, which
   // unmounts when it closes, would otherwise reopen showing a choice the page has moved on from.
   const [shownTheme, setShownTheme] = useState<Theme>(theme);
 
-  const list = connections(data, (stored, login) => checklistState(stored, login, now));
+  const list = connections(data, checklistState, now);
   const warning = connectionsWarning(list);
   const memory = size === undefined ? null : memoryWarning(memoryPressure(size.view.use, size.view.openChats, size.view.size));
   // In the order the dialog's sections come, so the name reads as a route through it. Empty is no mark at all.

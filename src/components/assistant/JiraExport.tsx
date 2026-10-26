@@ -253,7 +253,7 @@ export function JiraFooter({
       <JiraAction
         exported={exported}
         pending={pending}
-        signingIn={stage === "live" || stage === "renewing"}
+        signingIn={stage === "live"}
         connected={access.connected}
         blocked={blocked !== null}
         describedBy={hint === null ? undefined : hintId}

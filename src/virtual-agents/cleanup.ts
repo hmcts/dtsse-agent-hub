@@ -1,4 +1,6 @@
+import { awaitsOwner } from "./lifecycle.ts";
 import type { WallClock } from "./settings.ts";
+import type { StopReason } from "./stop.ts";
 
 /**
  * When the sweep acts on a virtual agent, as pure functions of the clock so they are tested without waiting.
@@ -82,7 +84,12 @@ export function latestEveningStop(now: Date, stop: WallClock): Date {
   }
 }
 
-/** Whether an agent started at `startedAt` is due its evening stop at `now`. */
+/**
+ * Whether an agent started at `startedAt` is due its evening stop at `now`. An agent started at the weekend is not
+ * due one until the Monday, which is right because the evening stop is a working-day convenience rather than a
+ * backstop: it would otherwise cut off someone working on a Saturday with no warning. What bounds an agent nobody is
+ * using is `inactivityRule`, which covers every status that holds a pod, weekend or not.
+ */
 export function dueEveningStop(startedAt: Date, now: Date, stop: WallClock): boolean {
   return startedAt.getTime() < latestEveningStop(now, stop).getTime();
 }
@@ -99,11 +106,50 @@ export function lastActivity(...times: (Date | null | undefined)[]): Date | unde
 }
 
 /**
- * Whether a running agent has been idle long enough to stop. A busy linked agent is working whatever the clock says;
- * otherwise the latest sign of activity has to be older than the idle period.
+ * Whether an agent has been inactive long enough to stop. A busy linked agent is working whatever the clock says;
+ * otherwise the latest sign of activity has to be older than the deadline its status is on.
  */
 export function isIdle(linkedStatus: string | null, lastActiveAt: Date, now: Date, idleMinutes: number): boolean {
   return linkedStatus !== "busy" && now.getTime() - lastActiveAt.getTime() >= idleMinutes * 60_000;
+}
+
+/** Which deadline a status is on; the name is also the reason the sweep stops it for. */
+export const INACTIVITY_RULES = ["idle", "awaiting_owner", "failed"] as const satisfies readonly StopReason[];
+
+export type InactivityRule = (typeof INACTIVITY_RULES)[number];
+
+/**
+ * The inactivity rule an agent meant to be running is held to, or `undefined` when there is none. `desired` is what
+ * decides the StatefulSet's replicas, and it is `running` for every status here, so each of these holds a pod.
+ *
+ * `cloning` and `running` get the ordinary idle period. The two in which the pod is blocked on its owner get the
+ * shorter one, since a sign-in or a credential someone means to give arrives in minutes.
+ *
+ * `failed` gets the idle period, which reclaims the pod of a failure that has gone quiet. Two kinds do: the pod that
+ * `entrypoint.sh`'s `fatal` leaves reporting `failed` and then sleeping for ever, on purpose, so the StatefulSet does
+ * not restart into the same failure; and the container that never started at all, which the orchestrator observed as
+ * `ImagePullBackOff` or `Unschedulable`. Neither says anything more, and an observation never writes
+ * `last_active_at`, so their clocks hold still and the deadline accrues. The longer one is right for them, because an
+ * owner coming back to a failure should have time to read it.
+ *
+ * It does not reach a pod that keeps restarting, and the kubelet restarts one by default: nothing sets a
+ * `restartPolicy`. `virtual-agent-boot` reports `provisioning` seconds into every container start, which refreshes
+ * `last_active_at` and takes the status out of `failed`, so such a pod looks continuously active and only the evening
+ * stop bounds it. That covers `CrashLoopBackOff` and `OOMKilled`, which are observed as failures but go on reporting.
+ * Telling them apart from the restart of a pod whose owner has just fixed what was wrong needs a count of restarts,
+ * which the orchestrator does not report.
+ *
+ * The rest have no deadline: `requested` and `stopped` hold no pod of this generation to reclaim, `provisioning`
+ * answers to `PROVISIONING_TIMEOUT_MS` instead, and `stopping` is already on its way down.
+ */
+export function inactivityRule(status: string): InactivityRule | undefined {
+  if (awaitsOwner(status)) {
+    return "awaiting_owner";
+  }
+  if (status === "failed") {
+    return "failed";
+  }
+  return status === "cloning" || status === "running" ? "idle" : undefined;
 }
 
 export function diskExpiresAt(stoppedAt: Date, ttlDays: number): Date {

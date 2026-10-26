@@ -119,6 +119,7 @@ enum VirtualAgentStopReason {
   quota
   expired
   failed
+  awaiting_owner
 
   @@map("virtual_agent_stop_reason")
 }
@@ -424,6 +425,8 @@ model VirtualAgent {
   lastActiveAt        DateTime?               @map("last_active_at") @db.Timestamptz(6)
   stoppedAt           DateTime?               @map("stopped_at") @db.Timestamptz(6)
   stopReason          VirtualAgentStopReason? @map("stop_reason")
+  /// Why a failed agent failed, kept past the stop that clears status_detail; see src/virtual-agents/stop.ts.
+  stopDetail          String?                 @map("stop_detail")
   diskExpiresAt       DateTime?               @map("disk_expires_at") @db.Timestamptz(6)
   diskDeletedAt       DateTime?               @map("disk_deleted_at") @db.Timestamptz(6)
   createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)

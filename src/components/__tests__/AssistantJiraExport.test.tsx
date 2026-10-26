@@ -74,7 +74,8 @@ function atlassianLogin(overrides: Partial<LoginView> = {}): LoginView {
     verificationUri: "https://auth.atlassian.com/oauth/activate?user_code=4BFC-CC3A",
     expiresAt: new Date(Date.now() + 120_000).toISOString(),
     state: "pending",
-    codeWaiting: false,
+    updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    codeWaitingUntil: null,
     ...overrides
   };
 }
@@ -149,9 +150,12 @@ describe("Jira export in the document panel", () => {
       vi.advanceTimersByTime(3000);
     });
 
+    // The pod offers one code, so nothing follows this one: the clock alone is enough to say so, without waiting for
+    // the report that would otherwise leave the owner reading that a replacement is on its way
     expect(screen.queryByText("4BFC-CC3A")).toBeNull();
-    expect(screen.getByRole("alert").textContent).toContain("Your assistant is relaying a fresh one");
-    expect(screen.getByText("Signing in to Atlassian…")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("expired before it was used, so no ticket was created");
+    expect(screen.getByRole("alert").textContent).not.toContain("relaying a fresh one");
+    expect(screen.queryByText("Signing in to Atlassian…")).toBeNull();
   });
 
   it("should not announce the last export's expired sign-in while a new export is in flight", () => {
