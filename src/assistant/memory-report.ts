@@ -168,6 +168,70 @@ export function sizeOffer(size: VirtualAgentSize): SizeOffer {
   return { size, chats: CONVERSATION_SESSIONS[size], requests: resources.requests.memory, limit: resources.limits.memory };
 }
 
+/**
+ * The memory a size offers, as the person reads it: the request it is guaranteed through to the limit the kernel
+ * kills it at. Both, because each answers a different question — the cap below comes from the request, and the
+ * warning above measures the pod's peak against the limit, so naming only one leaves the other figure unexplained
+ * where it appears.
+ */
+export function offerMemory(offer: SizeOffer): string {
+  return `${offer.requests}–${offer.limit}`;
+}
+
+/** How many chats a pod runs at once: what it is running now, and what a restart would change that to. */
+export interface ChatCapacity {
+  /** What it is running now, or `undefined` when there is no answer the hub can honestly give. */
+  now: number | undefined;
+  /** What its size's cap will give it from its next restart, or `undefined` when that is what it runs already. */
+  fromRestart: number | undefined;
+}
+
+/**
+ * What may be said about how many chats a pod runs, from the `max` it reports, whether it is running, and its size's
+ * cap. Both facts come back together so that no surface has to invent the one it is missing.
+ *
+ * **The cap alone would be a figure with a cost behind it.** A cap is baked into the pod template as
+ * `AGENT_HUB_MAX_SESSIONS`, and nothing claims an agent whose generation has not moved, so raising
+ * `CONVERSATION_SESSIONS` reaches a running pod when it next rolls and not before. A pod already at its cap does not
+ * queue the next wake: its supervisor stops the least recently active idle session to make room. So a cap shown as
+ * what a pod runs now invites someone to open a chat that silently ends one they never closed.
+ *
+ * **There is no `now` for a pod that has not reported one.** The hub cannot see a pod's supervisor, so there is
+ * nothing to fall back *to*: the cap is what the pod will be given, not what it was given, and the two differ for
+ * exactly as long as the mismatch above lasts. The pod sends `max` with every sessions report, at least once a
+ * minute, so this is the first minute of a pod's life and pods on a client too old to report sessions at all.
+ *
+ * **Nor for a pod that is not running**, whatever it last reported. A stopped pod runs no chats at all, so any figure
+ * in the present tense is false — and its last `max` is never cleared, so it outlives both the pod that sent it and
+ * any size change made while it was stopped. That last one is the trap: a `small` pod stopped at `max: 4` and then
+ * resized to `medium` would have its dead cap read back as `medium`'s. This is the same care `memoryUse` takes with
+ * `stopped` and `memoryPressure` with refusing to warn, for the same reason — the figures describe a container that
+ * no longer exists. `fromRestart` is what such a pod can honestly be said to hold, and is what it will hold.
+ */
+export function chatCapacity(reportedMax: number | null, size: VirtualAgentSize, running: boolean): ChatCapacity {
+  const cap = CONVERSATION_SESSIONS[size];
+  if (reportedMax === null || !running) {
+    return { now: undefined, fromRestart: cap };
+  }
+  return { now: reportedMax, fromRestart: reportedMax === cap ? undefined : cap };
+}
+
+/**
+ * The sentence the Size section says about the size the person is on.
+ *
+ * Worded here beside `chatCapacity`, as `memoryAdvice` is beside its threshold, because which sentence is said *is*
+ * the rule: a pod with no honest answer for what it runs now — it has not reported, or it is not running — has to be
+ * described without that number, and a sentence assembled in the component could not help naming it. That the pod is
+ * stopped is said by the figures below rather than repeated here.
+ */
+export function sizeSentence(size: VirtualAgentSize, capacity: ChatCapacity): string {
+  const offer = sizeOffer(size);
+  const memory = `${offerMemory(offer)} of memory`;
+  const chats = capacity.now === undefined ? `You are on ${size}, with ${memory}.` : `You are on ${size}: ${capacity.now} chats at once, ${memory}.`;
+  const restart = capacity.fromRestart === undefined ? "" : ` It holds ${capacity.fromRestart} chats at once from its next restart.`;
+  return `${chats}${restart}`;
+}
+
 /** Every size, smallest first, as the setting offers them. */
 export function sizeOffers(): SizeOffer[] {
   return VIRTUAL_AGENT_SIZES.map(sizeOffer);
@@ -287,7 +351,7 @@ export function memoryAdvice(pressure: MemoryPressure): string {
     `It is holding ${describeSize(pressure.anonBytes)} of its ${describeSize(pressure.limitBytes)} in memory that cannot be freed up, which leaves less than another chat's worth spare.`,
     pressure.nextSize === undefined
       ? "This is the largest size there is."
-      : `Move up to ${pressure.nextSize.size} below for ${pressure.nextSize.limit} of memory and ${pressure.nextSize.chats} chats at once.`
+      : `Move up to ${pressure.nextSize.size} below for ${offerMemory(pressure.nextSize)} of memory and ${pressure.nextSize.chats} chats at once.`
   ];
   if (pressure.openChats > 0) {
     said.push(`Closing a chat frees about ${describeChatCost()} of it.`);

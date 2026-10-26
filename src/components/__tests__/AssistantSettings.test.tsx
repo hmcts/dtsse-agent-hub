@@ -23,9 +23,7 @@ import type { AssistantTemplates } from "@/components/assistant/TemplateSettings
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
-import { CONVERSATION_SESSIONS } from "@/orchestrator/manifests";
 import type { LoginState, LoginView } from "@/virtual-agents/logins";
-import { SIZE_RESOURCES } from "@/virtual-agents/size";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
@@ -1693,7 +1691,16 @@ const CHANGE_FORM = "Change the size of your assistant";
 
 function size(overrides: Partial<AssistantMemory> = {}, save: FormAction = vi.fn(async () => ({ ok: true as const, confirmation: "done" }))): AssistantSize {
   return {
-    view: { use: use(4 * CONVERSATION_MEMORY_BYTES), size: "small", openChats: 1, rollsPod: true, refusal: undefined, ...overrides },
+    view: {
+      use: use(4 * CONVERSATION_MEMORY_BYTES),
+      size: "small",
+      // A pod reporting the cap of the size it is on, which is the ordinary case; the tests that care pass their own.
+      capacity: { now: 4, fromRestart: undefined },
+      openChats: 1,
+      rollsPod: true,
+      refusal: undefined,
+      ...overrides
+    },
     assistantId: "0f8a6a1e-0000-4000-8000-0000000000aa",
     save
   };
@@ -1717,10 +1724,30 @@ describe("the Assistant's size", () => {
     expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
   });
 
-  it("should say the size it is on with what that size gives, from the orchestrator's own constants", () => {
+  // The figures a person reads, not a read-back of the constants they come from.
+  it("should say the size it is on with what that size gives", () => {
     open({ size: size() }, "Size");
 
-    expect(panel().textContent).toContain(`You are on small: ${CONVERSATION_SESSIONS.small} chats at once, ${SIZE_RESOURCES.small.limits.memory} of memory.`);
+    expect(panel().textContent).toContain("You are on small: 4 chats at once, 4Gi–8Gi of memory.");
+    expect(panel().textContent).not.toContain("from its next restart");
+  });
+
+  // The figure the pod enforces, not the size's cap. A cap is in the pod template, so a deploy that raises it leaves
+  // every running pod on the old one, and at its cap the pod stops an idle session to make room rather than queueing
+  // — so offering the higher figure here would invite someone to end a chat they never closed.
+  it("should say what the pod runs now, and what a restart would change it to, when it is behind its size's cap", () => {
+    open({ size: size({ capacity: { now: 3, fromRestart: 4 } }) }, "Size");
+
+    expect(panel().textContent).toContain("You are on small: 3 chats at once, 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
+  });
+
+  // A pod that has not reported gets no current figure at all: the cap is what it will be given, not what it has.
+  it("should claim no current figure, and name the cap a restart gives, when the pod has reported nothing", () => {
+    open({ size: size({ capacity: { now: undefined, fromRestart: 4 } }) }, "Size");
+
+    expect(panel().textContent).toContain("You are on small, with 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
+    // The dropdown still describes each size's cap, which is what a change would give; nothing says the pod's own.
+    expect(panel().textContent).not.toContain("You are on small:");
   });
 
   // The peak leads because it is the fuller account of what the pod has had to hold; the figure beside it is the part
@@ -1746,6 +1773,17 @@ describe("the Assistant's size", () => {
     open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES, { stopped: true }) }) }, "Size");
 
     expect(panel().textContent).toContain("Your assistant is stopped. Last reported");
+  });
+
+  // The section must not say "4 chats at once" in the same breath as "Your assistant is stopped", which is what
+  // `chatCapacity` giving a stopped pod no `now` is for.
+  it("should claim no current chats beside the sentence saying the assistant is stopped", () => {
+    const stopped = { use: use(4 * CONVERSATION_MEMORY_BYTES, { stopped: true }), capacity: { now: undefined, fromRestart: 4 } };
+    open({ size: size(stopped) }, "Size");
+
+    expect(panel().textContent).toContain("Your assistant is stopped. Last reported");
+    expect(panel().textContent).toContain("You are on small, with 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
+    expect(panel().textContent).not.toContain("You are on small:");
   });
 
   // Zero would read as an idle pod, which is the one thing the section must never say when it cannot tell.
@@ -1778,9 +1816,7 @@ describe("the Assistant's size", () => {
     open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES - 1), openChats: 3 }) }, "Size");
 
     expect(panel().textContent).toContain("Your assistant is low on memory");
-    expect(panel().textContent).toContain(
-      `Move up to medium below for ${SIZE_RESOURCES.medium.limits.memory} of memory and ${CONVERSATION_SESSIONS.medium} chats at once. Closing a chat frees about 0.65 GB of it.`
-    );
+    expect(panel().textContent).toContain("Move up to medium below for 8Gi–16Gi of memory and 6 chats at once. Closing a chat frees about 0.65 GB of it.");
   });
 
   // A pod's chats cannot reach this threshold, so closing one is given as a quantity and never as the remedy.
@@ -1827,9 +1863,9 @@ describe("the Assistant's size", () => {
     const select = screen.getByLabelText("Choose a size") as HTMLSelectElement;
 
     expect([...select.options].map((option) => option.textContent)).toEqual([
-      `small — ${CONVERSATION_SESSIONS.small} chats at once, ${SIZE_RESOURCES.small.limits.memory} of memory`,
-      `medium — ${CONVERSATION_SESSIONS.medium} chats at once, ${SIZE_RESOURCES.medium.limits.memory} of memory`,
-      `large — ${CONVERSATION_SESSIONS.large} chats at once, ${SIZE_RESOURCES.large.limits.memory} of memory`
+      "small — 4 chats at once, 4Gi–8Gi of memory",
+      "medium — 6 chats at once, 8Gi–16Gi of memory",
+      "large — 8 chats at once, 16Gi–32Gi of memory"
     ]);
     expect(select.value).toBe("small");
     expect(panel().textContent).toContain("This is the size you are on.");

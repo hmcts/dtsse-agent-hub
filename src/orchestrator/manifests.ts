@@ -112,22 +112,32 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
  * on the pods measured — the 6.8GiB workspace clone rather than the sessions — and is evicted under pressure rather
  * than killing the container.
  *
- * An awake pod with no conversations holds about 0.95Gi of `anon`: its own session, the three agent-hub daemons and
- * the entrypoint. So a cap of N costs 0.95 + 0.65N, and every cap below is inside its size's memory **request**, let
- * alone its limit — `small` at 3 is 2.90Gi of the 4Gi it requests, so a pod holding its full complement of chats is
- * not an eviction candidate for doing so. `small` is the size that binds: it stays inside its request up to a cap of
- * 4, where `medium` holds to 10 and `large` to 23, so that is the number to re-check before raising this.
+ * **Both constraints are read against the size's requests, not its limits.** An awake pod with no conversations holds
+ * about 0.95Gi of `anon` — its own session, the three agent-hub daemons and the entrypoint — so a cap of N costs
+ * 0.95 + 0.65N Gi, and a pod over its memory request is an eviction candidate when the node comes under pressure,
+ * whatever headroom its limit leaves. **Memory is the only hard constraint.** CPU has no limit at all
+ * (`SIZE_RESOURCES` says why), so a pod over its CPU request is not in breach of anything — the request is a floor
+ * its bursts borrow above, not a ceiling — and keeping a cap's sustained draw inside it, (N + 1) × 186m on the
+ * 139–186m working mean with the pod's own session counted, is a convention this chooses rather than a rule the
+ * cluster imposes. It is worth keeping as a sanity check on whether a pod would be contending with its own
+ * guarantee while merely working.
  *
- * **CPU is what binds, and at the limit rather than the request.** A single session was throttled against `small`'s
- * four-CPU limit, 26 periods of a 30s window at 568m mean, so a session's bursts already want more than four CPUs
- * and further sessions buy contention rather than throughput. `small` and `medium` share that four-CPU limit, so
- * neither has room above where it is; `medium`'s larger request guarantees it two CPUs rather than one, which is a
- * better floor under node pressure and not a higher ceiling. `large`'s limit is eight, so at 7 it runs eight
- * sessions on eight CPUs — the same CPU per session as the `small` 3 that production already accepts.
+ * `small` is bound at 4 by its **memory** request: 4 chats is 3.55Gi of the 4Gi it requests and a fifth would be
+ * 4.20Gi, outside it. Those two are the argument for the figure, so they are stated. The CPU convention happens to
+ * land on the same cap at this one size, but that agreement is a coincidence of the two formulas and is not what
+ * fixes it, so its arithmetic is left as the formula above rather than worked out here.
  *
- * More conversations than this wants higher CPU limits, not a bigger memory size.
+ * `medium` and `large` are bound by neither: their memory requests would hold 10 and 23 chats, the CPU convention 9
+ * and 20 — ceilings on what each request allows, so they do not move when a cap does. What binds those two is the
+ * evidence instead. No pod has been measured above two concurrent sessions,
+ * and the one burst figure there is, 568m mean over a session's busiest 30s window with 26 throttled periods in it,
+ * is of a single session alone. So they sit deliberately well inside both: `(cap + 1) × 186m` against the CPU
+ * request, and `POD_BASELINE_MEMORY_BYTES + cap × CONVERSATION_MEMORY_BYTES` against the memory one, both well
+ * under at either size. As formulas rather than percentages, because a percentage is right only at the cap it was
+ * worked out at and goes stale on a line nothing conflicts with. Raising them wants a pod driven deliberately with
+ * its full complement busy at once, which is the measurement nobody has.
  */
-export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 3, medium: 4, large: 7 };
+export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 4, medium: 6, large: 8 };
 
 /**
  * The pod is given its public domain rather than its URLs, so that a server starting or stopping changes the Service
@@ -166,6 +176,8 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
 /**
  * The CPU and memory of the agent's size, and the same scratch space for every size. Built afresh on every apply, so
  * a StatefulSet made before a size change gets the new resources the next time it is applied.
+ *
+ * The container gets no CPU limit, so `limits` carries memory and scratch space alone.
  */
 export function resources(agent: Pick<ClaimedAgent, "size">) {
   const size = SIZE_RESOURCES[isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE];

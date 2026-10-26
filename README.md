@@ -130,7 +130,7 @@ section of [`docs/agent-api.md`](docs/agent-api.md).
 
 - **It runs on the person's first virtual agent**, the oldest not being deleted, created as `assistant` when they
   have none; it counts towards the limit of 3 like any other. Every virtual agent can hold conversations: its pod
-  runs a supervisor beside its own session, with up to `AGENT_HUB_MAX_SESSIONS` conversation sessions (3, 4 or 7
+  runs a supervisor beside its own session, with up to `AGENT_HUB_MAX_SESSIONS` conversation sessions (4, 6 or 8
   by size; `docs/agent-api.md` under Capacity has why). The agent's page in the hub lists its chats.
 - **A conversation's agent is created with it**, offline, under a session id the hub chose, so the person's messages
   queue as ordinary deliveries before any session runs. A message to an offline conversation sets a wake; the pod
@@ -226,8 +226,10 @@ A virtual agent commits as its owner's GitHub profile name and their HMCTS email
 otherwise their GitHub noreply address. The owner can override either in the "Git identity" card of the credentials
 section of `/hub/virtual` (`git_identity`, JSON `{name, email}`); a pod reads it but cannot change it, and "Clear" deletes it.
 
-**Sizes.** An agent is `small` (1–4 CPU, 4–8Gi), `medium` (2–4 CPU, 8–16Gi) or `large` (4–8 CPU, 16–32Gi), chosen when
-it is created. Its owner can change the size at any time — on its page, or, for their assistant, in the Assistant's
+**Sizes.** An agent is `small` (from 1 CPU, 4–8Gi), `medium` (from 2 CPU, 8–16Gi) or `large` (from 4 CPU, 16–32Gi),
+chosen when it is created. No size caps CPU: a pod is guaranteed its request and bursts above it, because a session's
+bursts want more CPU than the measurements can justify a quota at, and throttling buys latency rather than safety.
+Memory keeps its limit, which is the one the kernel enforces by killing. Its owner can change the size at any time — on its page, or, for their assistant, in the Assistant's
 settings — and the change bumps `generation` and `pod_generation`, so a running pod is replaced with one at the new
 resources and a stopped agent comes back at them. Replacing the pod ends every session on it, which both surfaces say
 before the change is made; the disk is kept. The size also sets how many HMCTS Assistant conversations the pod runs at
@@ -313,7 +315,8 @@ server or the environment cannot forge a line. Launch tokens and StatefulSet spe
 `app.kubernetes.io/name: virtual-agent`, `app.kubernetes.io/managed-by: agent-hub-orchestrator` and
 `agent-hub.hmcts.net/virtual-agent-id`. The pod runs `virtual-agent-boot` from `VIRTUAL_AGENT_IMAGE` as uid 1000 under
 the namespace's `default` ServiceAccount, with no ServiceAccount token mounted and no workload identity, every
-capability dropped, the CPU and memory of its size and 2–10Gi of ephemeral storage. `VIRTUAL_AGENT_HOST_ALIASES` become
+capability dropped, the CPU request and memory of its size — no CPU limit — and 2–10Gi of ephemeral storage.
+`VIRTUAL_AGENT_HOST_ALIASES` become
 the pod's `hostAliases`.
 
 **The image.** `docker/virtual-agent/Dockerfile` is the image a pod is meant to run:

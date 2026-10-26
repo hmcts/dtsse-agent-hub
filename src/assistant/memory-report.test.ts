@@ -3,6 +3,7 @@ import { CONVERSATION_SESSIONS } from "../orchestrator/manifests.ts";
 import { SIZE_RESOURCES, VIRTUAL_AGENT_SIZES } from "../virtual-agents/size.ts";
 import {
   CONVERSATION_MEMORY_BYTES,
+  chatCapacity,
   type MemoryReportRow,
   type MemoryUse,
   memoryAdvice,
@@ -10,14 +11,19 @@ import {
   memoryUse,
   memoryWarning,
   nextSizeUp,
+  offerMemory,
   POD_BASELINE_MEMORY_BYTES,
   sizeChangeQuestion,
   sizeOffer,
-  sizeOffers
+  sizeOffers,
+  sizeSentence
 } from "./memory-report.ts";
 
 const AT = new Date("2026-10-30T09:00:00.000Z");
 const LIMIT = 8 * 1024 ** 3;
+
+/** A `SizeResources` memory figure as bytes, so the checks below compare it against the constants in their own unit. */
+const giBytes = (gi: string) => Number(gi.replace("Gi", "")) * 1024 ** 3;
 
 function row(overrides: Partial<MemoryReportRow> = {}): MemoryReportRow {
   return {
@@ -107,7 +113,7 @@ describe("memoryUse", () => {
 
 /** A size's memory limit in bytes, out of the table the orchestrator applies rather than written out here. */
 function limitOf(size: (typeof VIRTUAL_AGENT_SIZES)[number]): number {
-  return Number(SIZE_RESOURCES[size].limits.memory.replace("Gi", "")) * 1024 ** 3;
+  return giBytes(SIZE_RESOURCES[size].limits.memory);
 }
 
 /**
@@ -245,7 +251,7 @@ describe("memoryAdvice", () => {
     const pressure = memoryPressure(reported(0), 3, "small");
 
     expect(memoryAdvice(pressure!)).toBe(
-      `It is holding 8 GB of its 8 GB in memory that cannot be freed up, which leaves less than another chat's worth spare. Move up to medium below for ${SIZE_RESOURCES.medium.limits.memory} of memory and ${CONVERSATION_SESSIONS.medium} chats at once. Closing a chat frees about 0.65 GB of it.`
+      "It is holding 8 GB of its 8 GB in memory that cannot be freed up, which leaves less than another chat's worth spare. Move up to medium below for 8Gi–16Gi of memory and 6 chats at once. Closing a chat frees about 0.65 GB of it."
     );
   });
 
@@ -303,12 +309,106 @@ describe("sizeChangeQuestion", () => {
 });
 
 describe("sizeOffers", () => {
-  it("should describe every size from the constants the orchestrator applies, smallest first", () => {
+  // The caps and memory as figures rather than read back from the constants: a cap is a measured ceiling on what a
+  // pod of that size holds, and reading it back would pass whatever the constant happened to say.
+  it("should offer every size's cap and memory, smallest first", () => {
     expect(sizeOffers()).toEqual([
-      { size: "small", chats: CONVERSATION_SESSIONS.small, requests: SIZE_RESOURCES.small.requests.memory, limit: SIZE_RESOURCES.small.limits.memory },
-      { size: "medium", chats: CONVERSATION_SESSIONS.medium, requests: SIZE_RESOURCES.medium.requests.memory, limit: SIZE_RESOURCES.medium.limits.memory },
-      { size: "large", chats: CONVERSATION_SESSIONS.large, requests: SIZE_RESOURCES.large.requests.memory, limit: SIZE_RESOURCES.large.limits.memory }
+      { size: "small", chats: 4, requests: "4Gi", limit: "8Gi" },
+      { size: "medium", chats: 6, requests: "8Gi", limit: "16Gi" },
+      { size: "large", chats: 8, requests: "16Gi", limit: "32Gi" }
     ]);
+  });
+
+  // The binding constraint on every cap, and the tighter of the two: a pod over its memory **request** is an
+  // eviction candidate under node pressure however much its limit leaves spare, where the warning only measures
+  // against the limit. So this is the check that fixes `small` at 4 rather than 5, and it derives from the two
+  // constants rather than restating them — a figure written in here passes at whatever they are later re-measured
+  // to, which is the failure the worked tables elsewhere already had.
+  it.each(sizeOffers())("should keep $size's full complement of chats inside the memory it requests", ({ chats, requests }) => {
+    expect(POD_BASELINE_MEMORY_BYTES + chats * CONVERSATION_MEMORY_BYTES).toBeLessThanOrEqual(giBytes(requests));
+  });
+
+  // The other side of it for `small` alone, which is what makes 4 a ceiling there and not a bound that happens to
+  // hold: a fifth chat does not fit inside its 4Gi. Not asserted for the other two, because their requests are not
+  // what binds them — `medium` would hold ten and `large` twenty-three, and what stops them short of that is the
+  // absence of any measurement above two concurrent sessions.
+  it("should have no room inside small's request for a chat beyond its cap", () => {
+    const { chats, requests } = sizeOffer("small");
+
+    expect(POD_BASELINE_MEMORY_BYTES + (chats + 1) * CONVERSATION_MEMORY_BYTES).toBeGreaterThan(giBytes(requests));
+  });
+});
+
+describe("offerMemory", () => {
+  // Both figures: the cap comes from the request and the warning measures the peak against the limit, so naming one
+  // leaves the other unexplained where it appears in the same panel.
+  it.each([
+    ["small", "4Gi–8Gi"],
+    ["medium", "8Gi–16Gi"],
+    ["large", "16Gi–32Gi"]
+  ] as const)("should give %s the memory it is guaranteed through to the memory it is killed at", (size, said) => {
+    expect(offerMemory(sizeOffer(size))).toBe(said);
+  });
+});
+
+describe("chatCapacity", () => {
+  // The pod's own figure, because a cap is in the pod template: raising the constant reaches a running pod only when
+  // it next rolls, and at its cap the pod stops an idle session to make room rather than queueing. A chat offered
+  // beyond what the pod has a slot for would end one the person did not close.
+  it("should take what the pod reported, and name the cap a restart would give it, when the two disagree", () => {
+    expect(chatCapacity(3, "small", true)).toEqual({ now: 3, fromRestart: 4 });
+  });
+
+  it("should name no restart when the pod already reports its size's cap", () => {
+    expect(chatCapacity(4, "small", true)).toEqual({ now: 4, fromRestart: undefined });
+  });
+
+  // **No `now` at all** rather than the cap as a fallback: the hub cannot see a pod's supervisor, so the cap is what
+  // the pod will be given and not what it was given, and stating it as current is the same one-too-high figure the
+  // reported case exists to avoid.
+  it.each([
+    ["small", 4],
+    ["medium", 6],
+    ["large", 8]
+  ] as const)("should claim nothing about %s's current chats, and name its cap, when the pod has reported nothing", (size, cap) => {
+    expect(chatCapacity(null, size, true)).toEqual({ now: undefined, fromRestart: cap });
+  });
+
+  // A stopped pod runs no chats, so a figure in the present tense is false whatever it last reported. Nothing clears
+  // `sessions_max`, so that last figure outlives the pod that sent it.
+  it("should claim nothing about a stopped pod's current chats, however recently it reported", () => {
+    expect(chatCapacity(4, "small", false)).toEqual({ now: undefined, fromRestart: 4 });
+  });
+
+  // The trap the stopped case exists for: the dead `small` pod's 4 would otherwise be read back as `medium`'s.
+  it("should not attribute a stopped pod's cap to a size it was resized to while stopped", () => {
+    expect(chatCapacity(4, "medium", false)).toEqual({ now: undefined, fromRestart: 6 });
+  });
+});
+
+describe("sizeSentence", () => {
+  it("should say the chats and memory when the pod reports its size's cap", () => {
+    expect(sizeSentence("small", chatCapacity(4, "small", true))).toBe("You are on small: 4 chats at once, 4Gi–8Gi of memory.");
+  });
+
+  it("should say both figures when the pod is behind its size's cap", () => {
+    expect(sizeSentence("small", chatCapacity(3, "small", true))).toBe(
+      "You are on small: 3 chats at once, 4Gi–8Gi of memory. It holds 4 chats at once from its next restart."
+    );
+  });
+
+  // The sentence has to be sayable without a current figure, which is the whole reason it lives here.
+  it("should name no current figure when the pod has reported nothing", () => {
+    expect(sizeSentence("medium", chatCapacity(null, "medium", true))).toBe(
+      "You are on medium, with 8Gi–16Gi of memory. It holds 6 chats at once from its next restart."
+    );
+  });
+
+  // It would otherwise read "You are on small: 4 chats at once" directly above "Your assistant is stopped."
+  it("should name no current figure for a stopped pod, whatever it last reported", () => {
+    expect(sizeSentence("small", chatCapacity(4, "small", false))).toBe(
+      "You are on small, with 4Gi–8Gi of memory. It holds 4 chats at once from its next restart."
+    );
   });
 });
 

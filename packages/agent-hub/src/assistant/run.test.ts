@@ -317,6 +317,60 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
+  // The guard on `sendMemory`, which the tick and the reconcile both reach. Two overlapping PUTs can be stored in
+  // either order and the later-stored one wins, so an in-flight report must not be joined by a second: the hub would
+  // be left showing whichever measurement happened to land last rather than the newest one. Skipped rather than
+  // queued, because every caller only ever wants the latest reading.
+  it("should send no second memory report while one is still in flight", async () => {
+    // Arrange: a report that never settles, and a tick and reconcile fast enough to ask for several more.
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const stop = new AbortController();
+    const attempts: unknown[] = [];
+    let release: () => void = () => {};
+    const held = new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    });
+    const api = {
+      putSessions: async () => null,
+      conversations: async () => ({ conversations: [] }),
+      putUploads: async () => null,
+      putLookup: async () => null,
+      putMemory: async (_id: string, body: unknown) => {
+        attempts.push(body);
+        return await held;
+      },
+      sessionsStream: async () => new Response("", { status: 200 })
+    };
+    const memoryFs = {
+      readFileSync: (file: string) => (String(file).endsWith("memory.stat") ? "anon 1717986918\n" : "4096\n")
+    } as unknown as MemoryFs;
+    const running = runAssistantSupervisor({
+      api,
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 10,
+      reconcileMs: 10,
+      memoryFs
+    });
+
+    try {
+      // Act: the report sent before the loop takes the guard; every tick and reconcile after it asks for another.
+      await waitUntil(() => attempts.length === 1, "the first memory report to be in flight");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      // Assert
+      expect(attempts).toHaveLength(1);
+    } finally {
+      release();
+      stop.abort();
+      await running;
+    }
+  });
+
   it("should say so and fall back to a backoff when sessions streams keep ending as they open, without a reconnect event", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });

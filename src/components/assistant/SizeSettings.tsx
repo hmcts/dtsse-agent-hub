@@ -10,8 +10,10 @@ import {
   memoryAdvice,
   memoryPressure,
   memoryWarning,
+  offerMemory,
   sizeChangeQuestion,
-  sizeOffers
+  sizeOffers,
+  sizeSentence
 } from "@/assistant/memory-report";
 import { describeSize } from "@/assistant/upload-report";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
@@ -197,9 +199,11 @@ function Change({
         }}
         className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-2 text-[13px] text-asst-text outline-none focus:border-asst-accent-line"
       >
+        {/* Each size as it would be after the change, so these are the constants rather than what the pod in front
+            of the person enforces now; the sentence above the section says that where the two differ. */}
         {sizeOffers().map((offer) => (
           <option key={offer.size} value={offer.size}>
-            {offer.size} — {offer.chats} chats at once, {offer.limit} of memory
+            {offer.size} — {offer.chats} chats at once, {offerMemory(offer)} of memory
           </option>
         ))}
       </select>
@@ -217,7 +221,6 @@ function Change({
 export function Size({ size }: Readonly<{ size: AssistantSize }>) {
   const { view, assistantId, save } = size;
   const pressure = memoryPressure(view.use, view.openChats, view.size);
-  const current = sizeOffers().find((offer) => offer.size === view.size);
   return (
     <section aria-labelledby="assistant-settings-size" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-size" className="text-sm font-semibold">
@@ -225,8 +228,7 @@ export function Size({ size }: Readonly<{ size: AssistantSize }>) {
       </h3>
       <p className="text-pretty text-[13px] text-asst-muted">
         How much your assistant has to work with. A bigger assistant holds more chats at once and has more memory for each of them; it costs more to run, so
-        take the size you need.
-        {current === undefined ? null : ` You are on ${current.size}: ${current.chats} chats at once, ${current.limit} of memory.`}
+        take the size you need. {sizeSentence(view.size, view.capacity)}
       </p>
       <Use use={view.use} />
       {pressure === undefined ? null : <Warning pressure={pressure} />}

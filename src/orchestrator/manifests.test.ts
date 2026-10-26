@@ -103,7 +103,7 @@ describe("statefulSet", () => {
       securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
       resources: {
         requests: { cpu: "1", memory: "4Gi", "ephemeral-storage": "2Gi" },
-        limits: { cpu: "4", memory: "8Gi", "ephemeral-storage": "10Gi" }
+        limits: { memory: "8Gi", "ephemeral-storage": "10Gi" }
       },
       volumeMounts: [
         { name: "work", mountPath: "/workspace", subPath: "workspace" },
@@ -127,7 +127,7 @@ describe("statefulSet", () => {
       { name: "AGENT_HUB_VIRTUAL_AGENT_ID", value: ID },
       { name: "AGENT_HUB_MODEL_ROUTE", value: "own_licence" },
       { name: "AGENT_HUB_PLUGINS", value: "" },
-      { name: "AGENT_HUB_MAX_SESSIONS", value: "3" },
+      { name: "AGENT_HUB_MAX_SESSIONS", value: "4" },
       { name: "AZURE_TENANT_ID", value: "tenant" },
       { name: "DISABLE_AUTOUPDATER", value: "1" },
       { name: "HAI_IN_CONTAINER", value: "1" },
@@ -155,9 +155,9 @@ describe("statefulSet", () => {
   // The figures, not the constant, because a cap is a measured limit on what a pod of that size can hold: reading it
   // back from `CONVERSATION_SESSIONS` would pass whatever it said.
   it.each([
-    ["small", "3"],
-    ["medium", "4"],
-    ["large", "7"]
+    ["small", "4"],
+    ["medium", "6"],
+    ["large", "8"]
   ] as const)("should let a %s pod run %s conversation sessions beside its own when it is applied", (size, sessions) => {
     const [container] = podSpec(statefulSet({ ...AGENT, size }, SPEC, TOKEN)).containers;
 
@@ -223,14 +223,20 @@ describe("carriedOver", () => {
 
 describe("resources", () => {
   it.each([
-    ["small", { cpu: "1", memory: "4Gi" }, { cpu: "4", memory: "8Gi" }],
-    ["medium", { cpu: "2", memory: "8Gi" }, { cpu: "4", memory: "16Gi" }],
-    ["large", { cpu: "4", memory: "16Gi" }, { cpu: "8", memory: "32Gi" }]
+    ["small", { cpu: "1", memory: "4Gi" }, { memory: "8Gi" }],
+    ["medium", { cpu: "2", memory: "8Gi" }, { memory: "16Gi" }],
+    ["large", { cpu: "4", memory: "16Gi" }, { memory: "32Gi" }]
   ] as const)("should give a %s agent its CPU and memory with the same scratch space as every size", (size, requests, limits) => {
     expect(resources({ size })).toEqual({
       requests: { ...requests, "ephemeral-storage": "2Gi" },
       limits: { ...limits, "ephemeral-storage": "10Gi" }
     });
+  });
+
+  // A quota would throttle a session's bursts, which cost latency and nothing else, while the request is what the
+  // pod is guaranteed under contention — so no size applies one.
+  it.each(["small", "medium", "large"] as const)("should apply no CPU quota to a %s pod", (size) => {
+    expect(resources({ size }).limits).not.toHaveProperty("cpu");
   });
 
   it.each([

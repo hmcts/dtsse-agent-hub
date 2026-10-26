@@ -504,10 +504,18 @@ export async function linkSession(
  * resumed conversations take each other's slots in turn for ever and no one of them keeps a session long enough to
  * answer. Nothing is stranded by clearing it: a pod that loses its sessions leaves their agents silent, and the
  * offline sweep is what the person's next message and the warm on opening a conversation ask for a wake on.
+ *
+ * The report's `max` is kept as well, because it is the only account of what the pod in front of the person actually
+ * enforces: the cap is in the pod template, so raising the constant reaches a running pod when it next rolls and the
+ * two disagree until then. `chatCapacity` is what reads it, and gives no current figure at all when it is null or
+ * the pod has stopped. Written on every report rather than only when it changes — it is one integer on a row this
+ * already touches, and a pod that rolled onto a new cap says so with its first report rather than waiting for a
+ * session to start or stop.
  */
 export async function reportSessions(prisma: PrismaClient, virtualAgentId: string, report: SessionsReport, now: Date = new Date()): Promise<void> {
   const reported = new Map(report.sessions.map((session) => [session.conversation_id, session]));
   await prisma.$transaction(async (tx) => {
+    await tx.virtualAgent.updateMany({ where: { id: virtualAgentId }, data: { sessionsMax: report.max, updatedAt: now } });
     const rows = await tx.assistantConversation.findMany({
       where: { virtualAgentId },
       select: { id: true, ownerOid: true, virtualAgentId: true, sessionState: true, sessionDetail: true, wakeRequestedAt: true }
