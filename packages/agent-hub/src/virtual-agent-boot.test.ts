@@ -27,6 +27,8 @@ const CASE_TIMEOUT = 120_000;
 const CASES = [
   "no-token",
   "refused-token",
+  "sign-in-not-completed",
+  "sign-in-transient-failure",
   "stored-token-no-access",
   "checkout-client",
   "broken-checkout-client",
@@ -100,7 +102,13 @@ async function runCase(name: string): Promise<Run> {
   const dump = () => {
     fs.writeFileSync(
       `${state}.tmp`,
-      JSON.stringify({ status: v.status, prompts: v.prompts, completes: v.completes, github: v.credentials.get("github") ?? null })
+      JSON.stringify({
+        status: v.status,
+        prompts: v.prompts,
+        completes: v.completes,
+        loginFailures: v.loginFailures,
+        github: v.credentials.get("github") ?? null
+      })
     );
     fs.renameSync(`${state}.tmp`, state);
   };
