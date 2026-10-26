@@ -24,11 +24,13 @@ import { FatalError } from "./phases.ts";
 import {
   azureLogin,
   claudeLogin,
+  EXPIRY_TOLERANCE_S,
   findClaudeToken,
   githubLogin,
   parseAzDeviceCode,
   parseClaudeAuthorizeUrl,
   parseGhDeviceCode,
+  type RelayDeviceLoginResult,
   relayDeviceLogin,
   run,
   stripAnsi
@@ -219,6 +221,57 @@ describe("relayDeviceLogin", () => {
     expect((error as Error).message).toMatch(/^could not relay the github sign-in code: POST .*400 hub down$/);
     expect(stderr).toBe("");
   });
+
+  function relay(script: string, options: Partial<Parameters<typeof relayDeviceLogin>[0]> = {}): Promise<RelayDeviceLoginResult> {
+    return relayDeviceLogin({
+      api: api(),
+      id: VID,
+      kind: "github",
+      cmd: "bash",
+      args: ["-c", `printf '%s' ${JSON.stringify(GH_OUTPUT)}; ${script}`],
+      env: pod.env(),
+      parse: parseGhDeviceCode,
+      label: "github",
+      ...options
+    });
+  }
+
+  it("should call the code expired when it was on the owner's screen until its time ran out", async () => {
+    // Act
+    const result = await relay("sleep 1.2; exit 1", { expiresIn: 1 });
+
+    // Assert
+    expect(result).toMatchObject({ code: 1, expired: true });
+  });
+
+  it("should allow the tolerance, because the code was already running when we first saw it", async () => {
+    // Arrange: a command that gives up this far short of `expiresIn` did so because the code ran out, not because
+    // the sign-in broke; our clock starts when the code is parsed, which is after the command started its own.
+    // Act
+    const result = await relay("exit 1", { expiresIn: EXPIRY_TOLERANCE_S });
+
+    // Assert
+    expect(result).toMatchObject({ code: 1, expired: true });
+  });
+
+  it("should not call it expired when the command gave up well inside the code's life", async () => {
+    // Act
+    const result = await relay("exit 1", { expiresIn: EXPIRY_TOLERANCE_S + 30 });
+
+    // Assert
+    expect(result).toMatchObject({ code: 1, expired: false });
+  });
+
+  it("should take the command's own word for it when it says the code ran out", async () => {
+    // Act: nothing has waited, so only `isExpiry` can be the reason
+    const result = await relay("echo 'gave up [login_timeout]'; exit 1", {
+      expiresIn: 900,
+      isExpiry: (output) => /\[login_timeout\]/.test(output)
+    });
+
+    // Assert
+    expect(result).toMatchObject({ code: 1, expired: true });
+  });
 });
 
 describe("azureLogin", () => {
@@ -318,6 +371,18 @@ describe("githubLogin", () => {
     // Assert
     expect((error as Error).message).toMatch(/gh auth login exited 0 without a token/);
     expect(virtual().credentials.has("github")).toBe(false);
+  });
+
+  it("should relay a fresh code on every call, which is what keeps a dead one off the owner's screen", async () => {
+    // Arrange: a failed GitHub sign-in throws, and `virtual-agent-boot` calls this again until it works. The
+    // relay is what Atlassian's lacks: a new code replaces the old one, so no code outlives its own time by long.
+    await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env() }));
+
+    // Act
+    await captureStderr(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_TOKEN: GH_TOKEN }) }));
+
+    // Assert
+    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(2);
   });
 });
 

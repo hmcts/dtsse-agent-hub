@@ -54,6 +54,11 @@ function panel({
   );
 }
 
+/** An export asked for a moment ago, so the sign-ins below are ones it is waiting on rather than an earlier one's. */
+function pendingExport(requestedAt = new Date(Date.now() - 5000).toISOString()): JiraExportView {
+  return { status: "pending", project: "VIBE", requestedAt };
+}
+
 function exportButton(): HTMLButtonElement {
   return screen.getByRole("button", { name: /export/i }) as HTMLButtonElement;
 }
@@ -111,11 +116,64 @@ describe("Jira export in the document panel", () => {
   });
 
   it("should show the Atlassian code to enter when the export is waiting on a sign-in", () => {
-    render(panel({ exported: { status: "pending", project: "VIBE" }, access: { connected: false, login: atlassianLogin() } }));
+    render(panel({ exported: pendingExport(), access: { connected: false, login: atlassianLogin() } }));
 
     expect(screen.getByText("Signing in to Atlassian…")).toBeTruthy();
     expect(screen.getByText("4BFC-CC3A")).toBeTruthy();
     expect(screen.getByRole("link", { name: "the Atlassian sign-in page" }).getAttribute("href")).toContain("auth.atlassian.com");
+  });
+
+  it.each(["expired", "failed"] as const)("should say the code expired, rather than show it, once the pod has %s the sign-in", (state) => {
+    render(panel({ exported: pendingExport(), access: { connected: false, login: atlassianLogin({ state }) } }));
+
+    expect(screen.getByRole("alert").textContent).toContain("expired before it was used, so no ticket was created");
+    expect(screen.getByRole("alert").textContent).toContain("Export again for a fresh code");
+    expect(screen.queryByText("4BFC-CC3A")).toBeNull();
+    expect(screen.queryByText("Signing in to Atlassian…")).toBeNull();
+  });
+
+  it("should stop offering a code the moment its own time runs out, before the pod has said anything", () => {
+    vi.useFakeTimers();
+    render(
+      panel({
+        exported: pendingExport(),
+        access: { connected: false, login: atlassianLogin({ expiresAt: new Date(Date.now() + 2000).toISOString() }) }
+      })
+    );
+    expect(screen.getByText("4BFC-CC3A")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(screen.queryByText("4BFC-CC3A")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("Your assistant is relaying a fresh one");
+    expect(screen.getByText("Signing in to Atlassian…")).toBeTruthy();
+  });
+
+  it("should not announce the last export's expired sign-in while a new export is in flight", () => {
+    // Arrange: the row the finished export left behind is the same row this one reads, so the one thing that tells
+    // them apart is that its code was already dead when this export was asked for.
+    const stale = atlassianLogin({ state: "expired", expiresAt: new Date(Date.now() - 600_000).toISOString() });
+
+    render(panel({ exported: pendingExport(new Date(Date.now() - 5000).toISOString()), access: { connected: false, login: stale } }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("Creating ticket…")).toBeTruthy();
+  });
+
+  it("should announce an expired sign-in that this export is the one waiting on", () => {
+    const own = atlassianLogin({ state: "expired", expiresAt: new Date(Date.now() - 1000).toISOString() });
+
+    render(panel({ exported: pendingExport(new Date(Date.now() - 130_000).toISOString()), access: { connected: false, login: own } }));
+
+    expect(screen.getByRole("alert").textContent).toContain("expired before it was used");
+  });
+
+  it("should say nothing about a sign-in when no export is waiting on one", () => {
+    render(panel({ access: { connected: false, login: atlassianLogin({ state: "expired" }) } }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("should show the ticket with links to it, and no way to export again, when the export is done", () => {

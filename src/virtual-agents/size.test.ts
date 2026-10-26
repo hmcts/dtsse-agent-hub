@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkSize, isVirtualAgentSize, SIZE_RESOURCES, sizeChangeRefusal, sizeLabel, VIRTUAL_AGENT_SIZES } from "./size.ts";
+import { checkSize, isVirtualAgentSize, SIZE_RESOURCES, sizeChangeRefusal, sizeChangeRollsPod, sizeLabel, VIRTUAL_AGENT_SIZES } from "./size.ts";
 
 describe("checkSize", () => {
   it.each([undefined, null, "", "  "])("should give the default size when the form sends %j", (raw) => {
@@ -48,11 +48,28 @@ describe("sizeChangeRefusal", () => {
     expect(sizeChangeRefusal({ status, desired })).toBeUndefined();
   });
 
-  it.each(["provisioning", "awaiting_login", "running", "stopping", "failed"] as const)("should refuse a change while the agent is %s", (status) => {
-    expect(sizeChangeRefusal({ status, desired: "running" })).toBe("stop the virtual agent before changing its size");
+  // A running pod is replaced by the change, as a change of plugins replaces it, and what makes that honest is the UI
+  // saying so. Refusing here would put the setting out of reach of the Assistant, whose pod starts whenever its owner
+  // opens it.
+  it.each(["provisioning", "awaiting_login", "running", "stopping", "failed"] as const)("should allow a change while the agent is %s", (status) => {
+    expect(sizeChangeRefusal({ status, desired: "running" })).toBeUndefined();
   });
 
   it("should refuse a change when the agent is being deleted", () => {
     expect(sizeChangeRefusal({ status: "stopped", desired: "deleted" })).toBe("that virtual agent is being deleted");
+  });
+});
+
+describe("sizeChangeRollsPod", () => {
+  it.each(["provisioning", "awaiting_login", "running", "stopping", "failed"] as const)("should replace the pod when the agent is %s", (status) => {
+    expect(sizeChangeRollsPod({ status, desired: "running" })).toBe(true);
+  });
+
+  it("should replace no pod before the orchestrator has made one", () => {
+    expect(sizeChangeRollsPod({ status: "requested", desired: "running" })).toBe(false);
+  });
+
+  it.each(["stopped", "deleted"] as const)("should replace no pod when the agent is meant to be %s", (desired) => {
+    expect(sizeChangeRollsPod({ status: "stopped", desired })).toBe(false);
   });
 });

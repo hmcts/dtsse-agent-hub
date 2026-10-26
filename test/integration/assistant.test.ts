@@ -811,7 +811,7 @@ describe("jira export", () => {
       message: { body: "Please export this document to the VIBE backlog in Jira." },
       assistant: { conversation_id: id, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] } }
     });
-    expect((await assistantConversation(VIEWER, id))?.jira).toEqual({ status: "pending", project: "VIBE" });
+    expect((await assistantConversation(VIEWER, id))?.jira).toMatchObject({ status: "pending", project: "VIBE", requestedAt: expect.any(String) });
 
     expect((await report(token, agentId, { export_id: exportId, key: "VIBE-701" })).status).toBe(204);
     expect((await assistantConversation(VIEWER, id))?.jira).toEqual({
@@ -863,7 +863,7 @@ describe("jira export", () => {
     expect(await currentExport(id)).not.toBe(first);
 
     expect((await report(token, agentId, { export_id: first, key: "VIBE-1" })).status).toBe(204);
-    expect((await assistantConversation(VIEWER, id))?.jira).toEqual({ status: "pending", project: "VIBE" });
+    expect((await assistantConversation(VIEWER, id))?.jira).toMatchObject({ status: "pending", project: "VIBE", requestedAt: expect.any(String) });
   });
 
   it("should allow a new export once the session has not answered in time", async () => {
@@ -939,7 +939,12 @@ describe("confluence export", () => {
       message: { body: 'Please publish this document to Confluence, under "Guides" in Core Case Data.' },
       assistant: { conversation_id: id, confluence_export: { export_id: exportId, space_id: PARENT.space_id, parent_id: PARENT.id } }
     });
-    expect((await assistantConversation(VIEWER, id))?.confluence).toEqual({ status: "pending", parentTitle: "Guides", spaceName: "Core Case Data" });
+    expect((await assistantConversation(VIEWER, id))?.confluence).toMatchObject({
+      status: "pending",
+      parentTitle: "Guides",
+      spaceName: "Core Case Data",
+      requestedAt: expect.any(String)
+    });
 
     expect((await report(token, agentId, { export_id: exportId, page_id: "300000001", title: "Case flags guide" })).status).toBe(204);
     expect((await assistantConversation(VIEWER, id))?.confluence).toEqual({

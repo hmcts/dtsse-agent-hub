@@ -13,6 +13,7 @@ import { virtualAgent } from "./virtual-agent.ts";
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const BIN = path.join(PACKAGE_ROOT, "bin", "agent-hub");
 const BOOT = path.join(PACKAGE_ROOT, "bin", "virtual-agent-boot");
+const ENTRYPOINT = path.join(PACKAGE_ROOT, "virtual-agent", "entrypoint.sh");
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
 
 // `bin` is an object here, but `yarn install` rewrites it to a bare string whenever a package is left with one
@@ -204,6 +205,18 @@ describe("bin/virtual-agent-boot", () => {
     { name: "AGENT_HUB_LAUNCH_TOKEN", env: { AGENT_HUB_URL: "https://hub.example", AGENT_HUB_VIRTUAL_AGENT_ID: "va-1" } }
   ];
 
+  // Boot execs this and nothing else does, so an entrypoint that lost its execute bit fails the agent at the
+  // handover with no stage 1 at all.
+  it("should exec a runtime that is executable and parses as bash", () => {
+    // Act
+    const result = spawnSync("bash", ["-n", ENTRYPOINT], { encoding: "utf8", timeout: 20000 });
+
+    // Assert
+    expect(fs.statSync(ENTRYPOINT).mode & 0o100).toBe(0o100);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  });
+
   it.each(missing)("should say $name is not set when it is the first one missing", ({ name, env }) => {
     // Act
     const result = spawnSync("bash", [BOOT], { encoding: "utf8", timeout: 20000, env: { PATH: process.env.PATH ?? "", ...env } });
@@ -249,6 +262,14 @@ describe("the published tarball", () => {
   it("should ship the secret patterns the scanner reads at runtime", () => {
     expect(MANIFEST.files).toContain("secret-patterns");
     expect(fs.existsSync(path.join(PACKAGE_ROOT, "secret-patterns"))).toBe(true);
+  });
+
+  // A pod execs the runtime out of the installed package and the supervisor hands hai the prompt beside it, so a
+  // tarball without them boots nothing.
+  it("should ship the pod runtime and the prompt the supervisor appends", () => {
+    expect(MANIFEST.files).toContain("virtual-agent");
+    expect(fs.existsSync(ENTRYPOINT)).toBe(true);
+    expect(fs.existsSync(path.join(PACKAGE_ROOT, "virtual-agent", "assistant-prompt.md"))).toBe(true);
   });
 
   it("should ship whatever its exports point at", () => {

@@ -15,9 +15,11 @@ describe("jiraExportView", () => {
   it("should be pending when the pod has not reported within the timeout", () => {
     const requested = new Date(NOW.getTime() - JIRA_EXPORT_TIMEOUT_MS + 1000);
 
+    // It carries when it was asked for, so the panel can tell a sign-in it is waiting on from an earlier one's.
     expect(jiraExportView(row({ jiraStatus: "pending", jiraProject: "VIBE", jiraRequestedAt: requested }), NOW)).toEqual({
       status: "pending",
-      project: "VIBE"
+      project: "VIBE",
+      requestedAt: requested.toISOString()
     });
   });
 

@@ -42,6 +42,8 @@ export {
   searchWords,
   twgSignedOut
 } from "./lookups.ts";
+export type { MemoryFs, MemoryOptions, ReportMemoryOptions } from "./memory.ts";
+export { CGROUP_ROOT, measureMemory, reportMemory } from "./memory.ts";
 export type { RunAssistantSupervisorOptions } from "./run.ts";
 export { runAssistantSupervisor } from "./run.ts";
 export type {

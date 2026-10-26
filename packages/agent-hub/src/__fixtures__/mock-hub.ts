@@ -60,6 +60,8 @@ export type VirtualRecord = {
   prompts: Record<string, unknown>[];
   codes: Map<string, string>;
   completes: Record<string, unknown>[];
+  /** Sign-ins the pod relayed and gave up on; see `POST /api/virtual/{id}/login/{kind}/failed`. */
+  loginFailures: Record<string, unknown>[];
   ports: Record<string, unknown>[];
   wakes: Wake[];
   sessionReports: SessionsReport[];
@@ -196,6 +198,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       prompts: [],
       codes: new Map(),
       completes: [],
+      loginFailures: [],
       ports: [],
       wakes: [],
       sessionReports: [],
@@ -445,6 +448,13 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         const code = v.codes.get(kind);
         v.codes.delete(kind);
         return send(res, 200, { code });
+      }
+      if (req.method === "POST" && sub === "failed") {
+        if (!v.prompts.some((prompt) => prompt.kind === kind)) {
+          return send(res, 404, { error: `there is no ${kind} sign-in to report on` });
+        }
+        v.loginFailures.push({ kind, ...body });
+        return send(res, 204);
       }
       if (req.method === "POST" && sub === "complete") {
         v.completes.push({ kind, ...body });

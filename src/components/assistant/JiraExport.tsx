@@ -1,13 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DEFAULT_JIRA_PROJECT, JIRA_BOARDS, type JiraExportView, type JiraProjectChoice } from "@/assistant/jira";
 import type { JiraProjectResult } from "@/assistant/lookups";
 import { AtlassianSearch } from "@/components/assistant/AtlassianSearch";
-import { SignInPrompt } from "@/components/assistant/AtlassianSignIn";
+import { SignInPrompt, signInNote, signInStage } from "@/components/assistant/AtlassianSignIn";
 import type { LookUp } from "@/components/assistant/lookupClient";
 import type { LoginView } from "@/virtual-agents/logins";
 import type { ActionResult } from "@/web/action";
+
+// Kept importable from here, where the Jira export first had them; they live with the prompt so the Confluence export
+// and the search can read a sign-in the same way without importing this file.
+export { type SignInStage, signInNote, signInStage } from "@/components/assistant/AtlassianSignIn";
 
 export type ExportToJiraAction = (input: { conversationId: unknown; project: unknown }) => Promise<ActionResult>;
 
@@ -198,10 +202,13 @@ export function JiraFooter({
   // is pending, so the button does not come back in the moment before the page catches up.
   const shownExport = exported.status === "failed" ? `failed:${exported.error}` : exported.status;
   const [clickedAt, setClickedAt] = useState<string | null>(null);
+  // When they clicked, which stands in for the export's `requested_at` until the page has read it back.
+  const [clickedMs, setClickedMs] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function start(): Promise<void> {
     setClickedAt(shownExport);
+    setClickedMs(Date.now());
     setError(null);
     const result = await exportTo({ conversationId, project });
     if (!result.ok) {
@@ -210,8 +217,24 @@ export function JiraFooter({
     }
   }
 
+  // Ticking rather than read once, because the code's time running out is the moment this footer has to stop
+  // offering it, and nothing else on the page changes then. Null until the browser has a clock, so the first
+  // render matches the server's, and only while there is a sign-in whose time can run out.
+  const watching = access.login?.kind === "atlassian";
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    if (!watching) {
+      return;
+    }
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [watching]);
+
   const pending = clickedAt === shownExport || exported.status === "pending";
-  const login = access.login?.kind === "atlassian" && access.login.state === "pending" ? access.login : null;
+  const since = exported.status === "pending" ? new Date(exported.requestedAt).getTime() : (clickedMs ?? now ?? 0);
+  const stage = signInStage(access.login, now ?? 0, since);
+  const note = pending ? signInNote(stage) : null;
   const blocked = blockedBy(written, saved);
   const failure = exported.status === "failed" && !pending ? exported.error : null;
   const shown = error ?? failure;
@@ -224,7 +247,7 @@ export function JiraFooter({
       <JiraAction
         exported={exported}
         pending={pending}
-        signingIn={login !== null}
+        signingIn={stage === "live" || stage === "renewing"}
         connected={access.connected}
         blocked={blocked !== null}
         describedBy={hint === null ? undefined : hintId}
@@ -235,7 +258,12 @@ export function JiraFooter({
           {hint}
         </p>
       )}
-      {pending && login !== null ? <SignInPrompt login={login} /> : null}
+      {pending && stage === "live" && access.login ? <SignInPrompt login={access.login} /> : null}
+      {note === null ? null : (
+        <p role="alert" className="basis-full text-[13px] text-asst-error">
+          {note}
+        </p>
+      )}
       {shown === null ? null : (
         <p role="alert" className="basis-full text-xs text-asst-error">
           {shown}

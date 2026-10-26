@@ -4,7 +4,7 @@ import { useState } from "react";
 import { type ConfluenceExportView, type ConfluencePageChoice, DEFAULT_CONFLUENCE_PARENT } from "@/assistant/confluence";
 import { breadcrumb, type ConfluencePageResult } from "@/assistant/lookups";
 import { AtlassianSearch, shortCrumb } from "@/components/assistant/AtlassianSearch";
-import { SignInPrompt } from "@/components/assistant/AtlassianSignIn";
+import { SignInPrompt, signInNote, signInStage, useSignInClock } from "@/components/assistant/AtlassianSignIn";
 import type { JiraAccess } from "@/components/assistant/JiraExport";
 import type { LookUp } from "@/components/assistant/lookupClient";
 import type { ActionResult } from "@/web/action";
@@ -140,13 +140,17 @@ export function ConfluenceFooter({
   const [parent, setParent] = useState<Chosen | null>(DEFAULT_CONFLUENCE_PARENT);
   const shownExport = exported.status === "failed" ? `failed:${exported.error}` : exported.status;
   const [clickedAt, setClickedAt] = useState<string | null>(null);
+  // When they clicked, standing in for the export's `requested_at` until the page has read it back, as in Jira's.
+  const [clickedMs, setClickedMs] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const now = useSignInClock(access.login);
 
   async function start(): Promise<void> {
     if (parent === null) {
       return;
     }
     setClickedAt(shownExport);
+    setClickedMs(Date.now());
     setError(null);
     const { ancestors: _, ...chosen } = parent;
     const result = await exportTo({ conversationId, parent: chosen });
@@ -158,7 +162,10 @@ export function ConfluenceFooter({
 
   const pending = clickedAt === shownExport || exported.status === "pending";
   const done = exported.status === "done" ? exported : null;
-  const login = access.login?.kind === "atlassian" && access.login.state === "pending" ? access.login : null;
+  // The sign-in's stage as the Jira footer reads it, so a code that has run out is never offered as live.
+  const since = exported.status === "pending" ? new Date(exported.requestedAt).getTime() : (clickedMs ?? now ?? 0);
+  const stage = signInStage(access.login, now ?? 0, since);
+  const note = pending ? signInNote(stage, "page", "Publish again") : null;
   const blocked = blockedBy(written, saved, parent);
   const failure = exported.status === "failed" && !pending ? exported.error : null;
   const shown = error ?? failure;
@@ -180,7 +187,7 @@ export function ConfluenceFooter({
       )}
       {done !== null ? null : pending ? (
         <span role="status" className="flex h-[34px] shrink-0 items-center text-[13px] text-asst-accent-soft">
-          {login !== null ? "Signing in to Atlassian…" : "Creating page…"}
+          {stage === "live" || stage === "renewing" ? "Signing in to Atlassian…" : "Creating page…"}
         </span>
       ) : (
         <button
@@ -199,7 +206,12 @@ export function ConfluenceFooter({
           {hint}
         </p>
       )}
-      {pending && login !== null ? <SignInPrompt login={login} /> : null}
+      {pending && stage === "live" && access.login ? <SignInPrompt login={access.login} /> : null}
+      {note === null ? null : (
+        <p role="alert" className="basis-full text-[13px] text-asst-error">
+          {note}
+        </p>
+      )}
       {shown === null ? null : (
         <p role="alert" className="basis-full text-xs text-asst-error">
           {shown}

@@ -173,6 +173,14 @@ and Confluence on hmcts.atlassian.net. It is not pasted: the pod relays a device
 `auth.conf` without the access token, and saves it again whenever `twg` replaces its refresh token. Any Atlassian
 account is accepted, and labels the credential; the owner can have the agent sign in again from its page.
 
+Each code lasts two minutes, and the pod offers three of them. Two minutes is `twg login`'s own limit, not the
+server's: twg waits five minutes for a person at a terminal and two when it reads its environment as an agent's,
+which a pod's always is, because `AGENT_HUB_LAUNCH_TOKEN` is enough to tell it so. Two minutes is easy to miss when
+the sign-in page is on another screen, so each code that runs out unused is replaced. After the last the pod reports
+the sign-in expired, so the owner's screens say so instead of showing a code that no longer works, and the agent
+stops reading as waiting for them. Jira and Confluence are then unconfigured until the agent signs in again. A
+sign-in that breaks rather than running out — the owner refusing it, say — is reported at once, with no second code.
+
 Each person also has a CLAUDE.md (`claude_md`), edited in the "Your CLAUDE.md" section of `/hub/virtual`, which every one of
 their virtual agents writes to `~/.claude/CLAUDE.md` before each start of Claude. It is kept in the credentials store
 because it may hold private context, and its owner can read it back. With nothing stored a pod gets the default,
@@ -183,8 +191,12 @@ otherwise their GitHub noreply address. The owner can override either in the "Gi
 section of `/hub/virtual` (`git_identity`, JSON `{name, email}`); a pod reads it but cannot change it, and "Clear" deletes it.
 
 **Sizes.** An agent is `small` (1–4 CPU, 4–8Gi), `medium` (2–4 CPU, 8–16Gi) or `large` (4–8 CPU, 16–32Gi), chosen when
-it is created. Its owner can change the size on its page while it is `requested` or `stopped`; the next apply gives the
-StatefulSet the new resources.
+it is created. Its owner can change the size at any time — on its page, or, for their assistant, in the Assistant's
+settings — and the change bumps `generation` and `pod_generation`, so a running pod is replaced with one at the new
+resources and a stopped agent comes back at them. Replacing the pod ends every session on it, which both surfaces say
+before the change is made; the disk is kept. The size also sets how many HMCTS Assistant conversations the pod runs at
+once (`CONVERSATION_SESSIONS`), and the Assistant's settings show each size's cap and memory beside the figures its pod
+reports for itself.
 
 **Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, when creating an
 agent or later on its page. The orchestrator passes the names to the pod as `AGENT_HUB_PLUGINS`, comma-separated, and
@@ -286,8 +298,9 @@ cnp-flux-config and still points at the devcontainer image, which carries the sa
 change.
 
 **The client the pod boots on.** `virtual-agent-boot` installs `@hmcts-cft/agent-hub@latest` over the one its image
-carries before handing over to the checkout's entrypoint, so a client release reaches a pod without an image rebuild
-and a digest bump. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
+carries before handing over to stage 1, `virtual-agent/entrypoint.sh` in that same package, so a client release
+reaches both the client and the pod runtime without an image rebuild and a digest bump. Stage 1 is taken from the
+checkout instead when the installed client ships none, which is a pod whose client predates the runtime moving here. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
 it ended up on either way. To hold a pod on that copy deliberately, set `VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE=true` on its
 StatefulSet with `kubectl set env` — the pod's environment is a fixed list with no pass-through, and the next apply of
 the StatefulSet drops it again.

@@ -9,6 +9,7 @@ import { run } from "../virtual/sign-in.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps } from "./lookups.ts";
+import { type MemoryFs, reportMemory } from "./memory.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
 
 const TICK_MS = 2000;
@@ -22,10 +23,13 @@ const STREAM_IDLE_MS = 45000;
 const RECONCILE_MS = 10 * 60 * 1000;
 
 export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOptions, "api" | "id"> & {
-  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations" | "putUploads" | "putLookup">;
+  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations" | "putUploads" | "putLookup" | "putMemory">;
   id: string;
   /** The filesystem the uploads report and the deletions use; a test passes its own. */
   uploadsFs?: DiskFs;
+  /** Where the memory cgroup is read from, and with what; a test passes its own rather than a real cgroup. */
+  cgroupRoot?: string;
+  memoryFs?: MemoryFs;
   /** How lookups run twg and sign it in; a test passes its own rather than a twg on PATH. */
   lookups?: Partial<LookupDeps>;
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
@@ -50,6 +54,8 @@ export async function runAssistantSupervisor({
   reconcileMs = Number(env.AGENT_HUB_UPLOAD_RECONCILE_MS) || RECONCILE_MS,
   uploadsFs,
   lookups: lookupDeps = {},
+  cgroupRoot,
+  memoryFs,
   ...options
 }: RunAssistantSupervisorOptions): Promise<void> {
   const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, ...options });
@@ -70,6 +76,13 @@ export async function runAssistantSupervisor({
     say,
     ...(options.uploadsDir === undefined ? {} : { root: options.uploadsDir }),
     ...(uploadsFs === undefined ? {} : { fs: uploadsFs })
+  };
+  const memory = {
+    api,
+    id,
+    say,
+    ...(cgroupRoot === undefined ? {} : { root: cgroupRoot }),
+    ...(memoryFs === undefined ? {} : { fs: memoryFs })
   };
 
   /**
@@ -177,6 +190,10 @@ export async function runAssistantSupervisor({
       // are dated with the report rather than presented as current.
       .then(() => reportUploads(uploads))
       .catch((e) => say(`reconciling uploads failed: ${(e as Error).message}`));
+    // On the same timer and not chained onto it: the memory report is three reads of this container's own cgroup, so
+    // a volume this pod cannot measure must not cost it the memory figures, and a cgroup it cannot read must not cost
+    // it the disk figures. `memory.peak` is monotonic while the pod is up, so a late one understates and never lies.
+    reportMemory(memory).catch((e) => say(`reporting memory failed: ${(e as Error).message}`));
   }, reconcileMs);
   try {
     await supervisor.adopt();

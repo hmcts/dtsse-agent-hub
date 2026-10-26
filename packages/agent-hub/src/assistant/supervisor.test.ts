@@ -163,7 +163,7 @@ describe("createAssistantSupervisor wake", () => {
     expect(start?.name).toMatch(/^c-[0-9a-f]{8}$/);
     expect(start?.cwd).toBe(CWD);
     expect(start?.vars).toEqual({ AGENT_HUB_CONVERSATION_ID: c.conversation_id });
-    expect(start?.command).toBe(`hai --dangerously-skip-permissions --session-id ${c.session_id} --append-system-prompt-file ${PROMPT_FILE}`);
+    expect(start?.command).toBe(`hai --dangerously-skip-permissions --session-id ${c.session_id} --append-system-prompt-file '${PROMPT_FILE}'`);
   });
 
   it("should ask for the command's program against the session's working directory when a conversation is woken", async () => {

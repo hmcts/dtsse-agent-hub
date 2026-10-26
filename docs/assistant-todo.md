@@ -32,7 +32,8 @@ Delete this file once everything below is done or has moved to Jira.
 - [ ] **Merge the cft-workspace PR first.** Pods clone workspace `master` when they boot, so from then on every pod runs the supervisor. Until the hub has the sessions route, the supervisor gets 404s and keeps retrying, which is harmless.
 - [ ] **Then merge the hub PR.** The Assistant has no flag of its own. It appears wherever `VIRTUAL_AGENTS_ENABLED` is on, including AAT, as soon as the hub deploys, so the pod side must already be live.
 - [ ] Decide who gets the Assistant. Today anyone signed in can open it. Should it be the default home for some people, chosen by role?
-- [ ] Move what the hub's virtual-agent pages do into the Assistant (start and stop, size, plugins, ports, sign-ins, CLAUDE.md, git identity), then remove those pages from the hub.
+- [ ] Move what the hub's virtual-agent pages do into the Assistant (start and stop, ports, git identity), then remove those pages from the hub. Size is done: the Assistant's settings has a Size section, which posts to the same `resizeVirtualAgent` the agent page does, and says what replacing the pod ends before the person commits. Plugins, sign-ins and CLAUDE.md were already there.
+- [x] **Tell people when their assistant is low on memory.** The pod reports its own cgroup (`PUT /api/virtual/{id}/memory`, gated on the `memory` client feature) and the Size section warns once the peak leaves less than one conversation's worth of headroom under the limit — the warning names the two things that answer it, move up a size or close a chat, and rides on the settings cog's existing mark rather than a second badge. Still to do: `medium` and `large` have no measurement of their own, so `CONVERSATION_MEMORY_BYTES` is the `small` figure applied to every size.
 
 ## Gaps in v1
 

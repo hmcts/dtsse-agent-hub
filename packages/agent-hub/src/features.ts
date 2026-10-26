@@ -13,7 +13,7 @@
  * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
  * from here; keep the two in step, so a name only one side knows is a type error on that side.
  */
-export type ClientFeature = "attachments" | "files" | "lookups" | "stop";
+export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "stop";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
@@ -34,5 +34,9 @@ export type ClientFeature = "attachments" | "files" | "lookups" | "stop";
  *
  * `lookups` is claimed because the assistant supervisor answers the sessions stream's `lookup` frame, searching the
  * owner's Jira or Confluence with twg. The hub gates on it, answering `unsupported` to a pod that did not claim it.
+ *
+ * `memory` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it. The
+ * hub sends nothing back for it; what the claim buys is the settings being able to say that an older pod cannot
+ * report its memory yet, rather than showing it as using none.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "stop"];
+export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory", "stop"];

@@ -128,6 +128,13 @@ export type JiraExportFrame = {
 };
 
 /**
+ * How long the session is told to let `jira export` run. The command has to report the export's outcome inside this,
+ * so it bounds how long it may spend relaying Atlassian codes to the person: `jiraExportSignInBudget` in
+ * `virtual/atlassian.ts` is the sum that has to fit, and the test beside it is what fails if either side moves.
+ */
+export const JIRA_EXPORT_BASH_TIMEOUT_MS = 600000;
+
+/**
  * How to carry out a pending Jira export: one command, `jira export`, that checks twg's sign-in, reads the
  * document, creates the ticket with the person's own sign-in and reports it. One command because every tool call is
  * another round trip to the model, and a step per call made exporting slow. The title and the document never appear
@@ -136,7 +143,8 @@ export type JiraExportFrame = {
  *
  * The session is told not to check anything around it, because looking at the document, twg or the new ticket is
  * exactly the extra round trips the one command is there to save. The Bash timeout is raised because the command
- * waits for the person when twg has to be signed in, and twg gives them five minutes for that.
+ * waits for the person when twg has to be signed in: twg gives them two minutes a code, and the command offers
+ * more than one.
  *
  * These are the last lines before the skill line, which keeps its place against the `---`. They go after the
  * attachment lines, which are facts that stand on their own wherever they sit.
@@ -145,7 +153,7 @@ export function jiraExportLines(jira: JiraExportFrame): string[] {
   const labels = jira.labels.length ? ` --labels ${jira.labels.join(",")}` : "";
   return [
     `The user has asked you to export the conversation's document to the ${jira.project} backlog in Jira (export ${jira.export_id}).`,
-    `Run exactly this one command, with a Bash timeout of 600000 ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} jira export ${jira.export_id} --project ${jira.project} --type ${jira.issue_type}${labels}\``,
+    `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} jira export ${jira.export_id} --project ${jira.project} --type ${jira.issue_type}${labels}\``,
     "It does every step itself: it checks twg is signed in as the user, reads the document, creates the ticket and reports it to the Assistant. Run again for the same export, it reports the ticket it already made rather than making another.",
     "Do not read the document, check twg, or look at the ticket yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which ticket it became, or why it could not be made, in the words the command printed."
@@ -166,12 +174,14 @@ export type ConfluenceExportFrame = {
  * in what the session types; the command reads them from the hub itself. Sent with every message while the export is
  * pending; the command remembers the page it made for an export id, so running it again cannot make a second one.
  *
- * Placed as the Jira lines are, before the skill line, for the reason given there.
+ * The Bash timeout is the Jira export's, because the command signs in through the same `atlassianLogin` and so has
+ * the same `jiraExportSignInBudget` to fit inside it. Placed as the Jira lines are, before the skill line, for the
+ * reason given there.
  */
 export function confluenceExportLines(confluence: ConfluenceExportFrame): string[] {
   return [
     `The user has asked you to publish the conversation's document to Confluence as a new page (export ${confluence.export_id}).`,
-    `Run exactly this one command, with a Bash timeout of 600000 ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} confluence export ${confluence.export_id} --space-id ${confluence.space_id} --parent-id ${confluence.parent_id}\``,
+    `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} confluence export ${confluence.export_id} --space-id ${confluence.space_id} --parent-id ${confluence.parent_id}\``,
     "It does every step itself: it checks twg is signed in as the user, reads the document, creates the page and reports it to the Assistant. Run again for the same export, it reports the page it already made rather than making another.",
     "Do not read the document, check twg, or look at the page yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which page it became, or why it could not be made, in the words the command printed."

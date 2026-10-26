@@ -335,7 +335,12 @@ describe("shortCrumb and openingDestination", () => {
   it("should open on an export in progress, else the one not yet done", () => {
     const none = { status: "none" } as const;
     expect(openingDestination(none, none)).toBe("jira");
-    expect(openingDestination(none, { status: "pending", parentTitle: "P", spaceName: "S" })).toBe("confluence");
-    expect(openingDestination({ status: "pending", project: "VIBE" }, { status: "pending", parentTitle: "P", spaceName: "S" })).toBe("jira");
+    expect(openingDestination(none, { status: "pending", parentTitle: "P", spaceName: "S", requestedAt: "2026-10-26T12:00:00.000Z" })).toBe("confluence");
+    expect(
+      openingDestination(
+        { status: "pending", project: "VIBE", requestedAt: "2026-10-26T12:00:00.000Z" },
+        { status: "pending", parentTitle: "P", spaceName: "S", requestedAt: "2026-10-26T12:00:00.000Z" }
+      )
+    ).toBe("jira");
   });
 });

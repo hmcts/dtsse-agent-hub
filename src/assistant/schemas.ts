@@ -68,3 +68,19 @@ export const uploadsReportBody = z.object({
   files: z.array(z.unknown()).max(MAX_REPORTED_FILES),
   deleted: z.array(z.unknown()).max(MAX_DELETED_PER_FRAME)
 });
+
+/**
+ * What the pod's container cgroup says about its own memory: `memory.max`, `memory.current` and `memory.peak`.
+ *
+ * All three are required, because every sentence the hub writes about memory is relative to the limit and the peak
+ * is what the warning is computed from — a report missing one of them is not a weaker report, it is a figure that
+ * would have to be guessed. The pod sends nothing at all rather than a partial one.
+ *
+ * `peak_bytes` is not required to be at least `current_bytes`: `memory.peak` is resettable on newer kernels, and
+ * refusing a report over that would lose the live figure with it.
+ */
+export const memoryReportBody = z.object({
+  limit_bytes: wholeCount,
+  current_bytes: wholeCount,
+  peak_bytes: wholeCount
+});

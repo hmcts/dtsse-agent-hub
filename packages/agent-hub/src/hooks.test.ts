@@ -607,7 +607,7 @@ describe("virtualAgentStateDir", () => {
   });
 });
 
-describe("the bash bins under bash 3.2", () => {
+describe("the bash scripts under bash 3.2", () => {
   // Pull first: on a cold cache `docker run` writes its download progress to stderr, which would
   // otherwise read as bash objecting to the script.
   beforeAll(() => {
@@ -617,16 +617,20 @@ describe("the bash bins under bash 3.2", () => {
   }, 130000);
 
   // macOS still ships bash 3.2, and `bin/agent-hub` runs on every prompt there. Local bash is 5.x, so only a
-  // container can prove they parse; `bin.test.ts` covers the local-bash half.
-  it.skipIf(!dockerAvailable).each(["bin/agent-hub", "bin/virtual-agent-boot"])("should parse %s, so it runs on macOS", (bin) => {
-    // Act
-    const result = spawnSync("docker", ["run", "--rm", "-v", `${PACKAGE_ROOT}:/w`, "-w", "/w", "bash:3.2", "bash", "-n", bin], {
-      encoding: "utf8",
-      timeout: 120000
-    });
+  // container can prove they parse; `bin.test.ts` covers the local-bash half. The pod runtime is here too
+  // because its own suite is run under this image, so a construct bash 3.2 refuses must fail here as well.
+  it.skipIf(!dockerAvailable).each(["bin/agent-hub", "bin/virtual-agent-boot", "virtual-agent/entrypoint.sh"])(
+    "should parse %s, so it runs on macOS",
+    (bin) => {
+      // Act
+      const result = spawnSync("docker", ["run", "--rm", "-v", `${PACKAGE_ROOT}:/w`, "-w", "/w", "bash:3.2", "bash", "-n", bin], {
+        encoding: "utf8",
+        timeout: 120000
+      });
 
-    // Assert
-    expect(result.stderr).toBe("");
-    expect(result.status).toBe(0);
-  });
+      // Assert
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+    }
+  );
 });
