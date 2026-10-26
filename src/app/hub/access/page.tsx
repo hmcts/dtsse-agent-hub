@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { GrantRow } from "@/access/views";
 import { grantAccess, revokeAccess } from "@/app/_actions/grants";
 import { ActionForm } from "@/components/ActionForm";
@@ -32,6 +33,13 @@ export default async function AccessPage() {
         <p className="max-w-3xl text-[15px] text-hub-muted">
           A grant covers every agent you have, now and later. Read access shows an agent, its status and its direct messages; write access also lets them
           message it, and lets their agents message yours.
+        </p>
+        <p className="max-w-3xl text-[15px] text-hub-muted">
+          No grant reaches your HMCTS Assistant chats, which are shared one at a time with people you name:{" "}
+          <Link href="/assistant/shared" className="text-hub-link hover:underline">
+            shared chats
+          </Link>
+          .
         </p>
 
         <Section heading="Grant access to your agents">

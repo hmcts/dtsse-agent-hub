@@ -19,6 +19,10 @@
  *   attached to one of its messages: only the person who uploaded it may add parts to it, discard it or download it
  *   back, and only the session of the conversation it was attached to may fetch its bytes. Nor to the person's saved
  *   Assistant templates, which only they read or change.
+ * - A conversation its owner may nonetheless share, read-only, with people they name one at a time. A recipient
+ *   reads the thread and the document on the share's own page and can do nothing else: not send, stop an answer,
+ *   rename, delete, edit the document, download an attachment, search for the chat, or watch it live. The share does
+ *   not reach the conversation's agent, so every rule above still answers `none` for a recipient.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
  */
@@ -316,6 +320,94 @@ export function canActAsVirtualAgent(tokenVirtualAgentId: string | undefined, vi
  */
 export function canUseCredentialRoutes(caller: { virtualAgentId?: string }): boolean {
   return caller.virtualAgentId === undefined;
+}
+
+/**
+ * A conversation as the share rules read it: `ConversationRef`, which is what every rule about a chat takes, and its
+ * id as well, because a share is of one conversation rather than of a person's chats.
+ */
+export interface SharedConversationRef extends ConversationRef {
+  id: string;
+}
+
+/** One read-only share of one conversation with one named person. The rows are the whole of the access. */
+export interface ConversationShare {
+  conversationId: string;
+  recipientOid: string;
+}
+
+export type ConversationAccess = "owner" | "reader" | "none";
+
+/**
+ * What the viewer may do with an HMCTS Assistant conversation: own it, read the share of it they were named in, or
+ * nothing. The owner-or-grant-holder shape of `canViewVirtualAgent`, with the conversation's own share rows in place
+ * of the owner's agent grants, because a share is of one chat rather than of everything its owner has.
+ *
+ * A link to a shared conversation is a convenience for reaching one of these, never what grants it: someone handed
+ * the link who is not named in a row gets `none`, exactly as if the conversation did not exist.
+ */
+export function conversationAccess(viewerOid: string, conversation: SharedConversationRef, shares: readonly ConversationShare[]): ConversationAccess {
+  if (viewerOid === conversation.ownerOid) {
+    return "owner";
+  }
+  return shares.some((share) => share.conversationId === conversation.id && share.recipientOid === viewerOid) ? "reader" : "none";
+}
+
+/**
+ * Whether `viewerOid` may read a conversation's share page: its owner, or someone they named. What that page shows is
+ * narrower than the conversation — the words of the thread and the document, never a file's bytes and never a live
+ * update — and `sharedConversation` in `src/assistant/sharing.ts` is what holds it to that.
+ *
+ * Nothing else widens with it. The conversation's agent stays `ownerOnly`, so `canViewAgent`, `canViewTranscript`,
+ * `canPersonMessageAgent` and `canSeeAgentSkills` still answer for a recipient as they do for a stranger, and with
+ * them `/api/ui/stream`, every `/api/agent/{agent_id}/…` route and the hub's rosters.
+ */
+export function canViewSharedConversation(viewerOid: string, conversation: SharedConversationRef, shares: readonly ConversationShare[]): boolean {
+  return conversationAccess(viewerOid, conversation, shares) !== "none";
+}
+
+/** Only the owner sees who a conversation is shared with, adds someone, or takes them off the list. */
+export function canManageConversationShares(actorOid: string, conversation: SharedConversationRef): boolean {
+  return actorOid === conversation.ownerOid;
+}
+
+/**
+ * Whether `actorOid` may share their conversation with `recipientOid`. `recipientKnown` means a `user` row exists, as
+ * `canGrant` requires of a grantee: the hub shares with a person it has seen, not with an address.
+ */
+export function canShareConversationWith(actorOid: string, conversation: SharedConversationRef, recipientOid: string, recipientKnown: boolean): boolean {
+  return canManageConversationShares(actorOid, conversation) && recipientKnown && recipientOid !== conversation.ownerOid;
+}
+
+/** A name typed into the share dialog has to be this specific before the hub will match anyone against it. */
+export const MIN_PEOPLE_QUERY = 2;
+
+/** How many people one lookup answers with. Enough to choose from, and short enough that one ask is not a list. */
+export const MAX_PEOPLE_SUGGESTIONS = 8;
+
+export type PeopleLookup = { ok: true; query: string; limit: number } | { ok: false };
+
+/**
+ * What `GET /api/ui/people` may answer. The endpoint is an access surface of its own: it says who has used the hub,
+ * which is why it answers a search and never a list. A query shorter than `MIN_PEOPLE_QUERY`, once trimmed, is
+ * refused rather than answered broadly, and no answer is longer than `MAX_PEOPLE_SUGGESTIONS`.
+ *
+ * What those two prevent is one request that hands over everyone. What they do not prevent is many: the answer is
+ * ordered and never offset, so walking the prefixes and going deeper wherever a full eight come back recovers the
+ * list. Nothing in this application is rate limited, so that is true of its other reads as well, and closing it here
+ * alone would be a false comfort. Treat the set of people who use the hub as known to anyone signed in.
+ *
+ * Anyone signed in may ask. The people it matches are colleagues in the same Entra tenant whose names and work
+ * addresses that tenant's own directory already gives them; what this adds is only that they have used the hub.
+ */
+export function peopleLookup(raw: string): PeopleLookup {
+  const query = raw.trim();
+  return query.length < MIN_PEOPLE_QUERY ? { ok: false } : { ok: true, query, limit: MAX_PEOPLE_SUGGESTIONS };
+}
+
+/** Whether a matched person may be offered to `viewerOid` as someone to share with: anyone but themselves. */
+export function canSuggestPerson(viewerOid: string, person: { oid: string }): boolean {
+  return person.oid !== viewerOid;
 }
 
 /**

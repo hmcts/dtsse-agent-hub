@@ -82,6 +82,16 @@ async function deleteFrom(title: string): Promise<void> {
 }
 
 describe("AssistantShell conversation menu", () => {
+  // The share dialog is at the chat's own address, so the menu item is a link rather than a pane of its own, and it
+  // is the row's chat that is shared rather than whichever one happens to be open.
+  it("should offer each row's own chat for sharing when the rows have actions", () => {
+    render(shell({ actions: actions() }));
+
+    openMenu("Event help");
+
+    expect(screen.getByRole("menuitem", { name: "Share" }).getAttribute("href")).toBe("/assistant/a?share=1");
+  });
+
   it("should offer no options menu when the sidebar is given no actions", () => {
     render(shell());
 
