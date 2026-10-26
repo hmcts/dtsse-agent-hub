@@ -1479,7 +1479,10 @@ describe("a file from the browser to the session's envelope", () => {
     expect(sent).toMatchObject({ ok: true });
     expect(content).toContain(path.join(root, conversation.id, `${uploadId}-letter.pdf`));
     expect(content).toContain("already saved on this machine");
-    expect(content).toContain("I have attached letter.pdf. Please take a look.");
+    expect(content).toContain("I have attached a file. Please take a look.");
+    // The body counts the files; the names reach the session through the envelope above, never through a message
+    // body that a read-only share of the conversation would carry.
+    expect(content.slice(content.indexOf("I have attached"))).not.toContain("letter.pdf");
     // And the chat is named after the file, since there are no words to name it after.
     expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversation.id } })).toMatchObject({ title: "letter.pdf" });
   });
@@ -1525,7 +1528,7 @@ describe("a message of files and no words", () => {
     const result = await actions.sendAssistantMessage({ conversationId: conversation.id, body: "   ", uploadIds: [first, second] });
 
     // Assert
-    expect(result).toMatchObject({ ok: true, message: { body: "I have attached scanned letter.pdf and notes.txt. Please take a look." } });
+    expect(result).toMatchObject({ ok: true, message: { body: "I have attached 2 files. Please take a look." } });
     // The chat is named after the file the person chose, not the sentence written for them.
     expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversation.id } })).toMatchObject({ title: "scanned letter.pdf" });
   });
