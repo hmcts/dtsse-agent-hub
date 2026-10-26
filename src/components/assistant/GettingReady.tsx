@@ -45,10 +45,13 @@ const FOOTER = "h-[42px] rounded-[10px] px-5 text-sm";
 const FOOTER_PRIMARY = `${FOOTER} bg-asst-accent font-semibold text-asst-ink disabled:opacity-40`;
 const FOOTER_QUIET = `${FOOTER} border border-asst-strong font-medium text-asst-body hover:bg-asst-active`;
 
+/** How often the warming-up screen re-reads the clock, which only decides whether a wait has become a long one. */
+const WARMUP_CLOCK_MS = 5000;
+
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), SIGN_IN_CLOCK_MS);
+    const timer = setInterval(() => setNow(Date.now()), WARMUP_CLOCK_MS);
     return () => clearInterval(timer);
   }, []);
   return now;
@@ -73,13 +76,15 @@ function useTicked(): boolean {
  * dead code as live would be sending somebody off to use it for as long as the bundle took to arrive, and for ever
  * where hydration fails or scripts do not run.
  *
- * Then the browser's own, so a code dying while the page sits there stops being offered without waiting for the next
- * render. Without that the page would hold a countdown at zero until the pod reported — and a pod that stops before
- * reporting never does.
+ * Then the browser's own, read as the browser takes over and on a tick from there — the first of those is the point:
+ * an HTML payload that sat for a minute before hydrating was built a minute ago, so without reading the clock on
+ * mount the page would go on offering a code that died in between until the first tick came round.
+ * `LoginCountdown` does the same two things in the same order.
  */
 function useSignInClock(from: number): number {
   const [now, setNow] = useState(from);
   useEffect(() => {
+    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), SIGN_IN_CLOCK_MS);
     return () => clearInterval(timer);
   }, []);
@@ -811,6 +816,10 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
   // region is not announced for what it already contains, so an ask that was there when the page loaded would reach
   // a screen-reader user only if they happened on the banner; going from empty to the sentence is a change, and is
   // read. Keyed on the sentence, so a `router.refresh()` that leaves the ask alone says nothing.
+  //
+  // Each of the Assistant's pages mounts this afresh, so moving between them reads an outstanding ask again. That is
+  // the intended side of the trade: a sign-in still waiting is worth hearing about on the page they have arrived at,
+  // and the alternative is carrying "already said" in a cookie for something the person has yet to do.
   const [announced, setAnnounced] = useState("");
   const message = relayed?.message ?? "";
   useEffect(() => {

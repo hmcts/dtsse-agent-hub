@@ -945,6 +945,32 @@ describe("the HTML the server sends", () => {
     expect(html).toContain("Sign in again");
   });
 
+  /**
+   * An HTML payload can sit for a while before the browser takes it over, so the number it was built with is stale
+   * by then. The clock is re-read as the browser arrives rather than only at the first tick, or the page would go on
+   * offering a code that died between the two.
+   */
+  it("should drop a code that died between the page being built and the browser taking it over", () => {
+    const built = Date.now() - 60_000;
+    const died = login("atlassian", { expiresAt: new Date(Date.now() - 30_000).toISOString(), updatedAt: new Date(built).toISOString() });
+    const summary = assistant("awaiting_login", { onboarded: true, logins: [died] });
+
+    render(
+      <OnboardingGate
+        assistant={summary}
+        statuses={statuses("github", "azure", "claude", "atlassian")}
+        unavailable={null}
+        paste={ok()}
+        save={ok()}
+        reconnect={ok()}
+        now={built}
+      />
+    );
+
+    expect(screen.queryByText("ABCD-1234")).toBeNull();
+    expect(screen.getByText("Sign-in expired")).toBeTruthy();
+  });
+
   it("should offer the code for a device sign-in whose code is still live when the page is built", () => {
     const summary = assistant("awaiting_login", { onboarded: true, logins: [login("atlassian")] });
     const html = serverHtml(gate(summary, statuses("github", "azure", "claude", "atlassian")));

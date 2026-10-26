@@ -82,6 +82,7 @@ export default async function ConversationPage({
       theme={theme}
       actions={ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
+      now={Date.now()}
       plugins={pluginSettings}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}

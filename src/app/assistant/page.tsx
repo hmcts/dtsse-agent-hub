@@ -59,6 +59,7 @@ export default async function AssistantPage() {
       theme={theme}
       actions={ROW_ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
+      now={Date.now()}
       plugins={pluginSettings}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}

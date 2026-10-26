@@ -213,7 +213,17 @@ describe("lapsedSinceStored", () => {
 describe("canSignInAgain", () => {
   const NOTHING: CredentialKind[] = [];
 
-  it("should offer every sign-in the assistant makes for itself, whatever the assistant uses", () => {
+  it.each([
+    ["it uses nothing else", NOTHING],
+    ["it uses its own route's credentials", neededCredentials("bedrock")],
+    ["it uses every credential there is", [...CREDENTIAL_KINDS]]
+  ])("should offer every sign-in the assistant makes for itself when %s", (_what, uses) => {
+    const offered = CREDENTIAL_KINDS.filter((kind) => canSignInAgain(kind, uses));
+
+    expect(CREDENTIAL_KINDS.filter(isSignInKind).filter((kind) => !offered.includes(kind))).toEqual([]);
+  });
+
+  it("should offer no more than those when the assistant uses nothing the person pastes", () => {
     expect(CREDENTIAL_KINDS.filter((kind) => canSignInAgain(kind, NOTHING))).toEqual(CREDENTIAL_KINDS.filter(isSignInKind));
   });
 

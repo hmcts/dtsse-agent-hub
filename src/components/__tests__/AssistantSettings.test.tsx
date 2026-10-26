@@ -3,6 +3,7 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
+import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionsData } from "@/assistant/connections";
 import type { AssistantMemory } from "@/assistant/memory";
@@ -93,7 +94,7 @@ function go(label: string): void {
  * a test of any other one says which it is about.
  */
 function open(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, section?: string): void {
-  render(<AssistantSettings connections={data(ALL_SIGNED_IN)} {...props} />);
+  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} {...props} />);
   fireEvent.click(cog());
   if (section !== undefined) {
     go(section);
@@ -109,7 +110,7 @@ function themed(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, th
   root.className = "asst-theme";
   root.dataset.theme = theme;
   document.body.append(root);
-  render(<AssistantSettings connections={data(ALL_SIGNED_IN)} {...props} />, { container: root });
+  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} {...props} />, { container: root });
   return root;
 }
 
@@ -130,7 +131,7 @@ async function submit(name: string): Promise<void> {
 
 describe("the Assistant's settings cog", () => {
   it("should offer settings and no warning when every sign-in it prompts about is connected", () => {
-    render(<AssistantSettings connections={data(ALL_SIGNED_IN)} />);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings");
     expect(cog().textContent).toBe("");
@@ -140,26 +141,26 @@ describe("the Assistant's settings cog", () => {
     ["github", "GitHub needs your attention"],
     ["azure", "Azure needs your attention"]
   ] as const)("should warn that %s needs attention when it alone is not connected", (missing, warning) => {
-    render(<AssistantSettings connections={data(ALL_SIGNED_IN.filter((kind) => kind !== missing))} />);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN.filter((kind) => kind !== missing))} />);
 
     expect(cog().getAttribute("aria-label")).toBe(`Settings. ${warning}`);
   });
 
   it("should name all three when the needed sign-ins are missing and the optional one has lapsed", () => {
-    render(<AssistantSettings connections={data(["bedrock"], [login("atlassian", "expired")])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["bedrock"], [login("atlassian", "expired")])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub, Azure and Atlassian need your attention");
   });
 
   it("should not nag about Atlassian when the person has simply never set it up", () => {
-    render(<AssistantSettings connections={data(["github", "azure", "bedrock"])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["github", "azure", "bedrock"])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings");
     expect(cog().textContent).toBe("");
   });
 
   it.each(["expired", "failed"] as const)("should warn about Atlassian once its sign-in has %s", (state) => {
-    render(<AssistantSettings connections={data(["github", "azure", "bedrock"], [login("atlassian", state)])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["github", "azure", "bedrock"], [login("atlassian", state)])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs your attention");
   });
@@ -167,7 +168,7 @@ describe("the Assistant's settings cog", () => {
   // A relayed code is a wait on the person whatever is stored behind it: only they can enter it, and the badge is
   // the one thing that says so to somebody who has sent the getting-ready screen away.
   it("should say a sign-in needs attention while a code is waiting behind a working one", () => {
-    render(<AssistantSettings connections={data(ALL_SIGNED_IN, [login("github", "pending")])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN, [login("github", "pending")])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention");
     expect(cog().textContent).toBe("!");
@@ -177,7 +178,7 @@ describe("the Assistant's settings cog", () => {
   // as connected: a credential outlives the sign-in that failed to replace it, so storage alone would clear the mark.
   it("should say Atlassian needs attention when a stored sign-in is the one a later sign-in lapsed over", () => {
     const stale = login("atlassian", "expired", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
-    render(<AssistantSettings connections={data(ALL_SIGNED_IN, [stale])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN, [stale])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs your attention");
     expect(cog().textContent).toBe("!");
@@ -192,7 +193,7 @@ describe("the Assistant's settings cog", () => {
     ["bedrock", "AI model access"]
   ] as const)("should say %s needs attention when a stored value is what a later sign-in lapsed over", (kind, name) => {
     const stale = login(kind, "expired", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
-    render(<AssistantSettings connections={data([...ALL_SIGNED_IN, kind], [stale])} />);
+    render(<AssistantSettings now={Date.now()} connections={data([...ALL_SIGNED_IN, kind], [stale])} />);
 
     expect(cog().getAttribute("aria-label")).toBe(`Settings. ${name} needs your attention`);
   });
@@ -206,52 +207,88 @@ describe("the Assistant's settings cog", () => {
       userCode: null,
       codeWaitingUntil: new Date(Date.now() + 60_000).toISOString()
     };
-    render(<AssistantSettings connections={data(ALL_SIGNED_IN, [sent])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN, [sent])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings");
     expect(cog().textContent).toBe("");
   });
 
+  /**
+   * The cog's name and badge are in the HTML, so they have to be read against the clock the page was built with:
+   * `Date.now()` here would be the server's in the document and the browser's in the first render, and a deadline
+   * falling between the two is a mark that appears or disappears as the page hydrates.
+   *
+   * Told apart by a relay that began before the credential was saved, which is the one state the two answers differ
+   * on: live, it is a code waiting for the person; run out, the save is the newer fact and the sign-in reads as
+   * connected. So a cog reading its own clock would be silent where the page it was built for had something to say.
+   */
+  it("should read the sign-ins against the clock the page was built with", () => {
+    const built = Date.now() - 4 * 60_000;
+    const relayed = login("github", "pending", new Date(built + 1000).toISOString(), new Date(built - 60_000).toISOString());
+    const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString(), updatedVia: "pod" };
+    const connections = { kinds: KINDS, statuses: [stored, ...ALL_SIGNED_IN.map((kind) => status(kind))], logins: [relayed], unavailable: null };
+
+    const html = renderToString(<AssistantSettings now={built} connections={connections} />);
+
+    expect(html).toContain('aria-label="Settings. GitHub needs your attention"');
+  });
+
+  // And the browser's own as it takes over, so a mark the page was built with does not outlast what it was about.
+  it("should read the sign-ins again once the browser has taken the page over", () => {
+    const built = Date.now() - 4 * 60_000;
+    const relayed = login("github", "pending", new Date(built + 1000).toISOString(), new Date(built - 60_000).toISOString());
+    const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString(), updatedVia: "pod" };
+
+    render(
+      <AssistantSettings
+        now={built}
+        connections={{ kinds: KINDS, statuses: [stored, ...ALL_SIGNED_IN.map((kind) => status(kind))], logins: [relayed], unavailable: null }}
+      />
+    );
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings");
+  });
+
   it("should not say Atlassian needs attention when a sign-in failed before their credential was stored", () => {
-    render(<AssistantSettings connections={data(ALL_SIGNED_IN, [login("atlassian", "failed", undefined, BEFORE_STORED)])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN, [login("atlassian", "failed", undefined, BEFORE_STORED)])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings");
     expect(cog().textContent).toBe("");
   });
 
   it("should mark the cog with a visible exclamation, not colour alone, when a sign-in needs attention", () => {
-    render(<AssistantSettings connections={data(["azure", "bedrock", "atlassian"])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["azure", "bedrock", "atlassian"])} />);
 
     expect(cog().textContent).toBe("!");
   });
 
   it("should warn when a sign-in is still waiting for the person", () => {
-    render(<AssistantSettings connections={data(["azure", "bedrock", "atlassian"], [login("github", "pending")])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["azure", "bedrock", "atlassian"], [login("github", "pending")])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention");
   });
 
   it("should not warn when only model access and a Jenkins token are missing", () => {
-    render(<AssistantSettings connections={data(["github", "azure", "atlassian"])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["github", "azure", "atlassian"])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings");
   });
 
   it("should not warn when it has no sign-ins to report on", () => {
-    render(<AssistantSettings />);
+    render(<AssistantSettings now={Date.now()} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings");
   });
 
   it("should not warn when the hub cannot read the person's credentials, since nobody could act on it", () => {
-    render(<AssistantSettings connections={data([], [], "the credentials Key Vault is not configured")} />);
+    render(<AssistantSettings now={Date.now()} connections={data([], [], "the credentials Key Vault is not configured")} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings");
     expect(cog().textContent).toBe("");
   });
 
   it("should show no dialog until the person opens it", () => {
-    render(<AssistantSettings connections={data(ALL_SIGNED_IN)} />);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} />);
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(cog().getAttribute("aria-expanded")).toBe("false");
@@ -415,6 +452,7 @@ describe("the Assistant's settings dialog", () => {
   it("should list each sign-in and where it stands when it opens", () => {
     render(
       <AssistantSettings
+        now={Date.now()}
         connections={{
           kinds: KINDS,
           statuses: [status("github", "alice@hmcts.net"), status("bedrock")],
@@ -437,7 +475,9 @@ describe("the Assistant's settings dialog", () => {
   });
 
   it("should never list a CLAUDE.md or a git identity as a connection when they are among the kinds", () => {
-    render(<AssistantSettings connections={{ kinds: [...KINDS, "claude_md", "git_identity"], statuses: [], logins: [], unavailable: null }} />);
+    render(
+      <AssistantSettings now={Date.now()} connections={{ kinds: [...KINDS, "claude_md", "git_identity"], statuses: [], logins: [], unavailable: null }} />
+    );
     fireEvent.click(cog());
     go("Connections");
     const rows = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("listitem");
@@ -447,7 +487,12 @@ describe("the Assistant's settings dialog", () => {
   });
 
   it("should say why it cannot list the sign-ins, rather than show none, when the hub cannot read them", () => {
-    render(<AssistantSettings connections={{ kinds: KINDS, statuses: [], logins: [], unavailable: "the credentials Key Vault is not configured" }} />);
+    render(
+      <AssistantSettings
+        now={Date.now()}
+        connections={{ kinds: KINDS, statuses: [], logins: [], unavailable: "the credentials Key Vault is not configured" }}
+      />
+    );
 
     fireEvent.click(cog());
     go("Connections");
@@ -1287,7 +1332,7 @@ async function auditOpenDialog(section?: string): Promise<void> {
   root.className = "asst-theme";
   root.dataset.theme = "dark";
   document.body.append(root);
-  render(<AssistantSettings connections={data(ALL_SIGNED_IN)} {...everything()} />, { container: root });
+  render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} {...everything()} />, { container: root });
   fireEvent.click(cog());
   if (section !== undefined) {
     go(section);
@@ -1648,14 +1693,14 @@ describe("the Assistant's size", () => {
   // One mark on the cog, however many reasons: a second badge beside the sign-ins one would be two things competing
   // to be noticed and neither read.
   it("should carry its warning on the one settings cog, naming both reasons when a sign-in needs attention too", () => {
-    render(<AssistantSettings connections={data(["azure", "bedrock", "atlassian"])} size={size({ use: use(0) })} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["azure", "bedrock", "atlassian"])} size={size({ use: use(0) })} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. Your assistant is low on memory. GitHub needs your attention");
     expect(cog().textContent).toBe("!");
   });
 
   it("should carry its warning alone when every sign-in is connected", () => {
-    render(<AssistantSettings connections={data(ALL_SIGNED_IN)} size={size({ use: use(0) })} />);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} size={size({ use: use(0) })} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. Your assistant is low on memory");
   });
