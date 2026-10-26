@@ -227,15 +227,17 @@ export type UploadsReportBody = {
 };
 
 /**
- * What this container's memory cgroup says: `memory.max`, `memory.current` and `memory.peak`.
+ * What this container's memory cgroup says: `memory.max`, `memory.current`, `memory.peak` and `memory.stat`'s `anon`.
  *
- * All three or none. Every sentence the hub writes about memory is relative to the limit, and the peak is what it
- * warns on, so a partial report would be a figure it had to guess rather than a weaker one.
+ * All four or none. Every sentence the hub writes about memory is relative to the limit, and `anon_bytes` is what it
+ * warns on, so a partial report would be a figure it had to guess rather than a weaker one — the hub refuses one.
  */
 export type MemoryReportBody = {
   limit_bytes: number;
   current_bytes: number;
   peak_bytes: number;
+  /** `memory.stat`'s `anon`: the part the kernel cannot reclaim, and the only one the warning can be true of. */
+  anon_bytes: number;
 };
 
 export type RegisterResponse = { agent_id: string; name: string };

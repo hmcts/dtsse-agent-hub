@@ -39,6 +39,7 @@ export async function reportMemoryUse(prisma: PrismaClient, virtualAgentId: stri
       memoryLimitBytes: BigInt(report.limit_bytes),
       memoryCurrentBytes: BigInt(report.current_bytes),
       memoryPeakBytes: BigInt(report.peak_bytes),
+      memoryAnonBytes: BigInt(report.anon_bytes),
       memoryReportedAt: now,
       updatedAt: now
     }
@@ -65,6 +66,7 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
       memoryLimitBytes: true,
       memoryCurrentBytes: true,
       memoryPeakBytes: true,
+      memoryAnonBytes: true,
       memoryReportedAt: true,
       agent: { select: { clientFeatures: true } }
     }
@@ -77,9 +79,10 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
       memoryLimitBytes: agent.memoryLimitBytes,
       memoryCurrentBytes: agent.memoryCurrentBytes,
       memoryPeakBytes: agent.memoryPeakBytes,
+      memoryAnonBytes: agent.memoryAnonBytes,
       memoryReportedAt: agent.memoryReportedAt,
       running: agent.status === "running",
-      reports: clientSupports(agent.agent?.clientFeatures, "memory")
+      reports: clientSupports(agent.agent?.clientFeatures, "memory-anon")
     }),
     size: isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE,
     openChats: await prisma.assistantConversation.count({

@@ -193,6 +193,31 @@ const NO_PORTS = { exposedPorts: [], localOnlyPorts: [] } as const;
 /** A change the pod template carries, so the orchestrator applies the StatefulSet again. */
 const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1 } } as const;
 
+/**
+ * The memory report belongs to the pod that made it, so every path that asks for a new or replacement pod drops it:
+ * starting, resizing, changing plugins and restarting, a takeover onto another cluster, and minting a launch token in
+ * `claimVirtualAgents`, which is the one that catches a pod being re-applied after a failure.
+ *
+ * Without this the next pod shows the last one's figures as what it is holding right now, and can inherit its
+ * low-memory warning, until its own first report lands — the pod reports phase `running` before it starts its
+ * supervisor, so there is a window where the row is running and the figures are the dead pod's.
+ *
+ * **Not applied when stopping, deleting, or on the sweep's auto-stop**, though all three bump `pod_generation`: there
+ * the figures are the last thing anyone measured and the Size section says as much, which is the whole reason they
+ * are kept. So the rule is not "whatever bumps `pod_generation`" — it is whatever asks for a pod to come up.
+ *
+ * Clearing is not enough on its own where the pod being replaced is still running, because it can report again and
+ * undo it. Those paths drop the launch token in the same breath; see `NO_TOKEN`'s use below. The starting path needs
+ * no token drop, having none to drop.
+ */
+const NO_MEMORY_REPORT = {
+  memoryLimitBytes: null,
+  memoryCurrentBytes: null,
+  memoryPeakBytes: null,
+  memoryAnonBytes: null,
+  memoryReportedAt: null
+} as const;
+
 function statusChange(status: VirtualAgentStatus, now: Date) {
   return { status, statusDetail: null, statusChangedAt: now };
 }
@@ -236,6 +261,7 @@ export async function setDesired(
         stopDetail: null,
         diskExpiresAt: null,
         diskDeletedAt: null,
+        ...NO_MEMORY_REPORT,
         ...statusChange("requested", now)
       };
     } else {
@@ -294,6 +320,17 @@ export async function renameVirtualAgent(prisma: PrismaClient, actorOid: string,
  * resources: a running pod is replaced, which ends the sessions on it, and a stopped one comes back at the new size.
  * Refused only while the agent is being deleted, per `sizeChangeRefusal`; someone other than the owner is told there
  * is no such agent.
+ *
+ * **The launch token goes too**, as it does on a stop, a restart, a takeover and the sweep's auto-stop. Keeping it had
+ * two costs: the outgoing pod and its replacement would both hold a *valid* one over the handover, since nothing
+ * mints a replacement while the agent is `running` with a token it still has; and the old supervisor would go on
+ * reporting, putting the figures this just cleared back — with the **old size's limit** beside them, which is a
+ * ceiling the warning would then measure against.
+ *
+ * It is not free. The pod's last Atlassian cache sync runs on SIGTERM through this token, so a sign-in refreshed in
+ * the minutes before a resize is lost and the owner signs in to Jira again. What makes that acceptable is that it was
+ * already lost on every other replacement the hub initiates — all four of those paths drop the token — so this makes
+ * resize and plugins consistent with them rather than inventing a new loss. Narrowing it is its own change.
  */
 export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string, id: string, size: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
   const checked = checkSize(size);
@@ -312,7 +349,13 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
     if (row.size === checked.size) {
       return row;
     }
-    const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { size: checked.size, ...POD_CHANGE, updatedAt: now }, select: SELECT }));
+    const updated = toRow(
+      await tx.virtualAgent.update({
+        where: { id },
+        data: { size: checked.size, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now },
+        select: SELECT
+      })
+    );
     await announce(tx, id, row.ownerOid);
     return updated;
   });
@@ -324,6 +367,8 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
  * `pod_generation`, as a resize does, so the orchestrator applies the StatefulSet with the new `AGENT_HUB_PLUGINS`:
  * a running pod is replaced, and the conversation continues on its disk; a stopped one picks the change up when it
  * next starts. Refused while the agent is being deleted; someone other than the owner is told there is no such agent.
+ *
+ * The launch token and the memory report go with it, for the reasons under `setVirtualAgentSize`.
  */
 export async function setVirtualAgentPlugins(
   prisma: PrismaClient,
@@ -347,7 +392,13 @@ export async function setVirtualAgentPlugins(
     if (samePlugins(row.plugins, checked.plugins)) {
       return row;
     }
-    const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { plugins: checked.plugins, ...POD_CHANGE, updatedAt: now }, select: SELECT }));
+    const updated = toRow(
+      await tx.virtualAgent.update({
+        where: { id },
+        data: { plugins: checked.plugins, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now },
+        select: SELECT
+      })
+    );
     await announce(tx, id, row.ownerOid);
     return updated;
   });
@@ -414,6 +465,7 @@ export async function restartVirtualAgent(
         data: {
           ...NO_TOKEN,
           ...POD_CHANGE,
+          ...NO_MEMORY_REPORT,
           status: "provisioning",
           statusDetail: detail,
           ...(row.status === "provisioning" ? {} : { statusChangedAt: now }),
@@ -619,6 +671,8 @@ async function takeOver(db: Database, cluster: string, now: Date): Promise<void>
        SET cluster = ${cluster}, generation = v.generation + 1, pod_generation = v.pod_generation + 1, status = 'provisioning',
            status_detail = 'moved from ' || moving.from_cluster || ' to ' || ${cluster} || '; starting on a fresh disk',
            status_changed_at = ${now}, launch_token_hash = NULL, launch_token_issued_at = NULL, claimed_by = NULL, claimed_at = NULL,
+           memory_limit_bytes = NULL, memory_current_bytes = NULL, memory_peak_bytes = NULL, memory_anon_bytes = NULL,
+           memory_reported_at = NULL,
            updated_at = ${now}
       FROM moving
      WHERE v.id = moving.id
@@ -676,7 +730,21 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
       let launchToken: string | undefined;
       if (row.desired === "running" && (!row.has_token || STARTING_FROM.includes(row.status) || failedToApply(row))) {
         const minted = mintLaunchToken();
-        await tx.virtualAgent.update({ where: { id: row.id }, data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now } });
+        // The memory report goes with the token, so that "a token this pod minted" and "figures this pod reported"
+        // are the same thing. A pod can only boot with a token, so nothing brings one up without passing here, which
+        // is what makes that invariant hold rather than depending on every owner-facing path remembering to clear.
+        //
+        // Not every mint is a replacement, and this clears either way. `failedToApply` is reached by an apply that
+        // failed before it touched the pod at all — `expose` runs first, so a `403` listing services fails the apply
+        // with the pod still running — and five of those make the next claim mint for a pod nobody is replacing. The
+        // clear is near enough inert there: the mint itself, which predates this, has already cut that pod off from
+        // the hub, since there is one `launchTokenHash` and no grace for the value before it. So "we have not heard"
+        // is exactly what the hub will accept from it from now on, where keeping the figures would freeze the last
+        // ones and any warning computed from them.
+        await tx.virtualAgent.update({
+          where: { id: row.id },
+          data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now, ...NO_MEMORY_REPORT }
+        });
         launchToken = minted.token;
       }
       claimed.push({

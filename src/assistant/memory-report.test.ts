@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CONVERSATION_SESSIONS } from "../orchestrator/manifests.ts";
-import { SIZE_RESOURCES } from "../virtual-agents/size.ts";
+import { SIZE_RESOURCES, VIRTUAL_AGENT_SIZES } from "../virtual-agents/size.ts";
 import {
   CONVERSATION_MEMORY_BYTES,
   type MemoryReportRow,
@@ -10,6 +10,7 @@ import {
   memoryUse,
   memoryWarning,
   nextSizeUp,
+  POD_BASELINE_MEMORY_BYTES,
   sizeChangeQuestion,
   sizeOffer,
   sizeOffers
@@ -23,6 +24,7 @@ function row(overrides: Partial<MemoryReportRow> = {}): MemoryReportRow {
     memoryLimitBytes: BigInt(LIMIT),
     memoryCurrentBytes: BigInt(3 * 1024 ** 3),
     memoryPeakBytes: BigInt(5 * 1024 ** 3),
+    memoryAnonBytes: BigInt(2 * 1024 ** 3),
     memoryReportedAt: AT,
     running: true,
     reports: true,
@@ -30,18 +32,26 @@ function row(overrides: Partial<MemoryReportRow> = {}): MemoryReportRow {
   };
 }
 
-/** A report whose peak leaves `headroom` bytes under the limit, which is what the threshold is about. */
+/**
+ * A report whose non-reclaimable figure leaves `headroom` bytes under the limit, which is what the threshold is
+ * about.
+ *
+ * Both of the figures that count page cache are pinned at the limit throughout, so every expectation below that the
+ * warning stays quiet is also a check that neither decides: a pod that has merely read its workspace clone sits at
+ * its ceiling on both of them and must not be warned about for it.
+ */
 function reported(headroom: number, limit = LIMIT): MemoryUse {
-  return { reported: true, limitBytes: limit, currentBytes: 1024, peakBytes: limit - headroom, at: AT.toISOString(), stopped: false };
+  return { reported: true, limitBytes: limit, currentBytes: limit, peakBytes: limit, anonBytes: limit - headroom, at: AT.toISOString(), stopped: false };
 }
 
 describe("memoryUse", () => {
-  it("should give the three figures, dated, when the pod has reported", () => {
+  it("should give the four figures, dated, when the pod has reported", () => {
     expect(memoryUse(row())).toEqual({
       reported: true,
       limitBytes: LIMIT,
       currentBytes: 3 * 1024 ** 3,
       peakBytes: 5 * 1024 ** 3,
+      anonBytes: 2 * 1024 ** 3,
       at: "2026-10-30T09:00:00.000Z",
       stopped: false
     });
@@ -79,30 +89,131 @@ describe("memoryUse", () => {
     "memoryLimitBytes",
     "memoryCurrentBytes",
     "memoryPeakBytes",
+    "memoryAnonBytes",
     "memoryReportedAt"
   ] as const)("should report nothing when %s alone is missing", (missing) => {
     expect(memoryUse(row({ [missing]: null }))).toEqual({ reported: false, reason: "waiting" });
   });
+
+  // What every row written before `memory_anon_bytes` existed looks like: three figures and a date, and no `anon`.
+  // The warning cannot be computed from it, so it is not a report — and the pod that wrote it is on a client that
+  // does not claim `memory-anon`, which is what makes "an older version" the right thing to say rather than a guess.
+  it("should treat a row from before the anon figure as no report at all, naming the client", () => {
+    const beforeAnon = row({ memoryAnonBytes: null, reports: false });
+
+    expect(memoryUse(beforeAnon)).toEqual({ reported: false, reason: "older_client" });
+  });
 });
 
+/** A size's memory limit in bytes, out of the table the orchestrator applies rather than written out here. */
+function limitOf(size: (typeof VIRTUAL_AGENT_SIZES)[number]): number {
+  return Number(SIZE_RESOURCES[size].limits.memory.replace("Gi", "")) * 1024 ** 3;
+}
+
+/**
+ * A report from a pod of `size` holding `chats` conversations and nothing unusual, with both figures that count page
+ * cache pinned at the limit so neither of them can be what decides.
+ */
+function holdingChats(size: (typeof VIRTUAL_AGENT_SIZES)[number], chats: number): MemoryUse {
+  const limit = limitOf(size);
+  return {
+    reported: true,
+    limitBytes: limit,
+    currentBytes: limit,
+    peakBytes: limit,
+    anonBytes: POD_BASELINE_MEMORY_BYTES + chats * CONVERSATION_MEMORY_BYTES,
+    at: AT.toISOString(),
+    stopped: false
+  };
+}
+
 describe("memoryPressure", () => {
+  // In bytes rather than through the constant, because the threshold is a measured cost: a test that reads it back
+  // from `CONVERSATION_MEMORY_BYTES` holds either side of the boundary wherever the constant happens to sit.
+  it("should put the threshold a measured 0.65Gi under the limit when the pod has reported", () => {
+    const measured = Math.round(0.65 * 1024 ** 3);
+
+    expect(memoryPressure(reported(measured), 2, "small")).toBeUndefined();
+    expect(memoryPressure(reported(measured - 1), 2, "small")).toMatchObject({ limitBytes: LIMIT });
+  });
+
+  /**
+   * **The warning must not be reachable by opening chats, at any size, at whatever cap that size currently holds.**
+   *
+   * This is computed from `CONVERSATION_SESSIONS` and `SIZE_RESOURCES` rather than from figures written out here, so
+   * that raising a cap past the point where a pod's own chats would trip the warning fails *this* instead of quietly
+   * invalidating a number in a comment. Prose saying "2.90Gi at a cap of 3" has gone stale three times, twice on a
+   * line git did not conflict on; an assertion cannot.
+   *
+   * A pod at its cap holds `POD_BASELINE_MEMORY_BYTES + cap × CONVERSATION_MEMORY_BYTES`, with both cache-bearing
+   * figures pinned at the limit so neither of them can be what decides.
+   */
+  it.each(VIRTUAL_AGENT_SIZES)("should stay quiet for a %s pod holding its whole complement of chats", (size) => {
+    const chats = CONVERSATION_SESSIONS[size];
+
+    expect(memoryPressure(holdingChats(size, chats), chats, size)).toBeUndefined();
+  });
+
+  /**
+   * **Where the two actually meet**, which is what `memoryPressure`'s comment states as a formula.
+   *
+   * The comment above only pins today's caps, and a wrong formula sat beside it for a round because of that: it had
+   * `limit − 2 × CONVERSATION_MEMORY_BYTES` where the algebra gives `limit − POD_BASELINE_MEMORY_BYTES −
+   * CONVERSATION_MEMORY_BYTES`, which overstates at every size, and no cap is anywhere near the bound so nothing
+   * failed. This computes the bound the same way the comment claims it and checks both sides of it, so the formula is
+   * pinned rather than the caps — a cap rise cannot invalidate it, and a wrong formula cannot survive it.
+   *
+   * **Every size, not one worked example.** Putting that wrong form back fails `small` and `large` and *passes*
+   * `medium`, because 22.62 and 22.15 both floor to 22. Simplified down to a single size this would have had a
+   * one-in-three chance of missing the exact error it exists to catch.
+   */
+  it.each(VIRTUAL_AGENT_SIZES)("should start warning a %s pod one chat past the bound in memoryPressure", (size) => {
+    const bound = Math.floor((limitOf(size) - POD_BASELINE_MEMORY_BYTES - CONVERSATION_MEMORY_BYTES) / CONVERSATION_MEMORY_BYTES);
+
+    expect(memoryPressure(holdingChats(size, bound), bound, size)).toBeUndefined();
+    expect(memoryPressure(holdingChats(size, bound + 1), bound + 1, size)).toBeDefined();
+  });
+
+  // Page cache is reclaimed at the limit rather than given back, so a pod that has read its 6.8GiB workspace clone
+  // sits at its ceiling on both `current` and `peak` while holding almost nothing it cannot give up. Warning on
+  // either would fire for reading files, when there is in fact room for another chat.
+  it("should say nothing when current and peak are at the limit but little of it cannot be reclaimed", () => {
+    const cached: MemoryUse = {
+      reported: true,
+      limitBytes: LIMIT,
+      currentBytes: LIMIT,
+      peakBytes: LIMIT,
+      anonBytes: 1024,
+      at: AT.toISOString(),
+      stopped: false
+    };
+
+    expect(memoryPressure(cached, 2, "small")).toBeUndefined();
+  });
+
+  // The figures are the last thing anyone measured, so the section still shows them, but they describe a container
+  // that no longer exists: a pod stopped mid-build must not tell its owner the next day that it is low on memory.
+  it("should say nothing when the pod that reported it has stopped", () => {
+    expect(memoryPressure({ ...reported(0), stopped: true } as MemoryUse, 3, "small")).toBeUndefined();
+  });
+
   // The boundary: exactly one conversation's worth of headroom still has room for the chat the person is about to
   // open, so it is not warned about. One byte less and it has not.
-  it("should say nothing when the peak leaves room for exactly one more chat", () => {
+  it("should say nothing when what it cannot reclaim leaves room for exactly one more chat", () => {
     expect(memoryPressure(reported(CONVERSATION_MEMORY_BYTES), 2, "small")).toBeUndefined();
   });
 
-  it("should warn when the peak leaves a byte less than one more chat", () => {
+  it("should warn when what it cannot reclaim leaves a byte less than one more chat", () => {
     expect(memoryPressure(reported(CONVERSATION_MEMORY_BYTES - 1), 2, "small")).toMatchObject({ openChats: 2, limitBytes: LIMIT });
   });
 
-  it("should warn when the peak is at the limit", () => {
-    expect(memoryPressure(reported(0), 3, "small")).toMatchObject({ peakBytes: LIMIT, openChats: 3 });
+  it("should warn when none of what it holds can be reclaimed", () => {
+    expect(memoryPressure(reported(0), 3, "small")).toMatchObject({ anonBytes: LIMIT, openChats: 3 });
   });
 
   // A pod using memory normally within its size must not nag: the warning is about running out of room, not about
   // using what the size is for.
-  it("should say nothing when the peak leaves room for several more chats", () => {
+  it("should say nothing when what it cannot reclaim leaves room for several more chats", () => {
     expect(memoryPressure(reported(4 * CONVERSATION_MEMORY_BYTES), 1, "small")).toBeUndefined();
   });
 
@@ -130,24 +241,48 @@ describe("memoryWarning", () => {
 });
 
 describe("memoryAdvice", () => {
-  it("should say where the pod got to and offer both answers when a chat could be closed and a bigger size exists", () => {
+  it("should say what cannot be freed up and offer a bigger size when there is one and a chat is open", () => {
     const pressure = memoryPressure(reported(0), 3, "small");
 
     expect(memoryAdvice(pressure!)).toBe(
-      `It has reached 8 GB of its 8 GB, which leaves no room for another chat. Move up to medium below for ${CONVERSATION_SESSIONS.medium} chats at once and ${SIZE_RESOURCES.medium.limits.memory} of memory, or close a chat you have finished with.`
+      `It is holding 8 GB of its 8 GB in memory that cannot be freed up, which leaves less than another chat's worth spare. Move up to medium below for ${SIZE_RESOURCES.medium.limits.memory} of memory and ${CONVERSATION_SESSIONS.medium} chats at once. Closing a chat frees about 0.65 GB of it.`
     );
   });
 
-  // Telling someone with one chat open to close a chat is telling them to stop working.
-  it("should offer only the bigger size when a single chat is open", () => {
-    expect(memoryAdvice(memoryPressure(reported(0), 1, "small")!)).not.toContain("or close a chat");
+  // A pod's whole complement of chats cannot reach this threshold at any size, so when it fires the chats are a
+  // quarter of what is held and closing one would not change the answer. The size is the remedy; the per-chat figure
+  // is a quantity someone deciding what to do should have, not the thing to do.
+  it("should not offer closing a chat as the remedy when memory is tight", () => {
+    const advice = memoryAdvice(memoryPressure(reported(0), 3, "small")!);
+
+    expect(advice).toContain("Move up to medium below");
+    expect(advice).toContain("Closing a chat frees about 0.65 GB of it.");
+    expect(advice).not.toContain("close a chat you have finished with");
   });
 
-  it("should offer only closing a chat on the largest size there is", () => {
+  // The section's first line says what the pod reached at its busiest, a bigger number than this one. Two sentences
+  // using "reached" for two different figures, the second smaller, reads as one of them being wrong.
+  it("should name what it is counting rather than say the pod reached it when memory is tight", () => {
+    const advice = memoryAdvice(memoryPressure(reported(0), 3, "small")!);
+
+    expect(advice).toContain("It is holding");
+    expect(advice).not.toContain("It has reached");
+  });
+
+  it("should offer no bigger size on the largest there is when a chat is open", () => {
     const advice = memoryAdvice(memoryPressure(reported(0), 3, "large")!);
 
-    expect(advice).toContain("This is the largest size there is, so close a chat you have finished with before you start another.");
+    expect(advice).toContain("This is the largest size there is. Closing a chat frees about 0.65 GB of it.");
     expect(advice).not.toContain("Move up to");
+  });
+
+  // With nothing open, what closing a chat would free is a fact about nothing.
+  it("should leave the per-chat figure out when no chat is open", () => {
+    const advice = memoryAdvice(memoryPressure(reported(0), 0, "large")!);
+
+    expect(advice).toBe(
+      "It is holding 8 GB of its 8 GB in memory that cannot be freed up, which leaves less than another chat's worth spare. This is the largest size there is."
+    );
   });
 });
 

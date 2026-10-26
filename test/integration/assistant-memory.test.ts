@@ -8,7 +8,7 @@ import * as memoryRoute from "../../src/app/api/virtual/[virtualAgentId]/memory/
 import { assistantMemory, reportMemoryUse } from "../../src/assistant/memory.ts";
 import { CONVERSATION_MEMORY_BYTES, memoryPressure } from "../../src/assistant/memory-report.ts";
 import { createConversation } from "../../src/assistant/store.ts";
-import { claimVirtualAgents, observeVirtualAgent } from "../../src/virtual-agents/store.ts";
+import { claimVirtualAgents, observeVirtualAgent, restartVirtualAgent, setDesired, setVirtualAgentPlugins } from "../../src/virtual-agents/store.ts";
 import { assistantSize } from "../../src/web/data.ts";
 import { ALICE, BOB, form, podFixture, viewer } from "./assistant-pod.ts";
 import { type Person, prisma, resetDatabase } from "./database.ts";
@@ -28,13 +28,22 @@ beforeEach(async () => {
 
 const LIMIT = 8 * 1024 ** 3;
 
-/** A report whose peak leaves `headroom` bytes under the limit, which is what the warning's threshold is about. */
+/**
+ * A report whose non-reclaimable figure leaves `headroom` bytes under the limit, which is what the threshold is about.
+ *
+ * **Both figures that count page cache are pinned at the limit** — `current_bytes` and `peak_bytes` — and neither may
+ * raise the warning on its own: a pod that has merely read its workspace clone sits at its ceiling on both, and
+ * nothing resets `memory.peak` while the pod lives, so a threshold computed from it could never be cleared.
+ */
 function report(headroom: number) {
-  return { limit_bytes: LIMIT, current_bytes: 3 * 1024 ** 3, peak_bytes: LIMIT - headroom };
+  return { limit_bytes: LIMIT, current_bytes: LIMIT, peak_bytes: LIMIT, anon_bytes: LIMIT - headroom };
 }
 
-/** The shared fixture, bound to the claim this suite is about: the pod's own session reports its memory. */
-const assistantOf = podFixture(["memory"]);
+/**
+ * The shared fixture, bound to the claims this suite is about: the pod's own session reports its memory, including
+ * the `anon` figure the warning is computed from. Both names, because that is what a current client claims.
+ */
+const assistantOf = podFixture(["memory", "memory-anon"]);
 
 /** A chat with a session the pod says is running, which is what a change of size would end. */
 async function openChat(who: Person, title: string, sessionState: string | null = "live"): Promise<string> {
@@ -64,13 +73,20 @@ async function put(id: string, token: string, body: unknown): Promise<Response> 
 }
 
 describe("the memory an assistant reports", () => {
-  it("should show the three figures, dated, when the pod has reported", async () => {
+  it("should show the four figures, dated, when the pod has reported", async () => {
     const assistant = await assistantOf(ALICE);
 
     await reportMemoryUse(prisma, assistant, report(4 * CONVERSATION_MEMORY_BYTES));
     const view = await assistantMemory(prisma, ALICE.oid, assistant);
 
-    expect(view?.use).toMatchObject({ reported: true, limitBytes: LIMIT, currentBytes: 3 * 1024 ** 3, stopped: false });
+    expect(view?.use).toMatchObject({
+      reported: true,
+      limitBytes: LIMIT,
+      currentBytes: LIMIT,
+      peakBytes: LIMIT,
+      anonBytes: LIMIT - 4 * CONVERSATION_MEMORY_BYTES,
+      stopped: false
+    });
     expect(view?.use.reported && typeof view.use.at).toBe("string");
   });
 
@@ -83,6 +99,14 @@ describe("the memory an assistant reports", () => {
 
   it("should say the client is too old when the pod's own session never claimed the feature", async () => {
     const assistant = await assistantOf(ALICE, null);
+
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toEqual({ reported: false, reason: "older_client" });
+  });
+
+  // A client from before `anon_bytes` claims `memory` and sends three figures, which the route refuses. Shown as an
+  // older version rather than a pod that has gone quiet: it is, and its next boot fixes it.
+  it("should say the client is too old when its own session claims memory but not the anon figure", async () => {
+    const assistant = await podFixture(["memory"])(ALICE);
 
     expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toEqual({ reported: false, reason: "older_client" });
   });
@@ -108,7 +132,7 @@ describe("the memory an assistant reports", () => {
     await reportMemoryUse(prisma, assistant, report(4 * CONVERSATION_MEMORY_BYTES));
     const view = await assistantMemory(prisma, ALICE.oid, assistant);
 
-    expect(view?.use.reported && view.use.peakBytes).toBe(LIMIT - 4 * CONVERSATION_MEMORY_BYTES);
+    expect(view?.use.reported && view.use.anonBytes).toBe(LIMIT - 4 * CONVERSATION_MEMORY_BYTES);
     expect(memoryPressure(view!.use, view!.openChats, view!.size)).toBeUndefined();
   });
 
@@ -122,7 +146,7 @@ describe("the memory an assistant reports", () => {
     expect((await assistantMemory(prisma, ALICE.oid, assistant))?.openChats).toBe(2);
   });
 
-  it("should warn once the peak leaves no room for another chat, and name the size to move to", async () => {
+  it("should warn once what it cannot reclaim leaves no room for another chat, and name the size to move to", async () => {
     const assistant = await assistantOf(ALICE);
     await openChat(ALICE, "Possession claim");
 
@@ -172,8 +196,11 @@ describe("the memory route a pod reports on", () => {
 
   it.each([
     ["a missing figure", { limit_bytes: LIMIT, current_bytes: 1 }],
-    ["a figure that is not whole", { limit_bytes: LIMIT, current_bytes: 1.5, peak_bytes: 2 }],
-    ["a negative figure", { limit_bytes: LIMIT, current_bytes: 1, peak_bytes: -1 }]
+    ["a figure that is not whole", { limit_bytes: LIMIT, current_bytes: 1.5, peak_bytes: 2, anon_bytes: 1 }],
+    ["a negative figure", { limit_bytes: LIMIT, current_bytes: 1, peak_bytes: -1, anon_bytes: 1 }],
+    // What a client from before `anon_bytes` sends. Refused rather than stored without it, because the warning is
+    // computed from it and a report the warning cannot be computed from is not a weaker report.
+    ["the three figures an older client sends", { limit_bytes: LIMIT, current_bytes: 1, peak_bytes: 2 }]
   ])("should refuse %s rather than store half a report", async (_what, body) => {
     const assistant = await assistantOf(ALICE);
     const token = await launchToken(assistant);
@@ -188,7 +215,101 @@ describe("the memory route a pod reports on", () => {
     const assistant = await assistantOf(ALICE);
     const token = await launchToken(assistant);
 
-    expect((await put(assistant, token, { limit_bytes: LIMIT, current_bytes: 2048, peak_bytes: 1024 })).status).toBe(204);
+    expect((await put(assistant, token, { limit_bytes: LIMIT, current_bytes: 2048, peak_bytes: 1024, anon_bytes: 1024 })).status).toBe(204);
+  });
+});
+
+describe("the memory report of a pod the hub replaces", () => {
+  const MEMORY_COLUMNS = {
+    memoryLimitBytes: true,
+    memoryCurrentBytes: true,
+    memoryPeakBytes: true,
+    memoryAnonBytes: true,
+    memoryReportedAt: true,
+    launchTokenHash: true
+  } as const;
+
+  const CLEARED = {
+    memoryLimitBytes: null,
+    memoryCurrentBytes: null,
+    memoryPeakBytes: null,
+    memoryAnonBytes: null,
+    memoryReportedAt: null,
+    launchTokenHash: null
+  };
+
+  /** An assistant whose pod has reported itself at its ceiling, so an inherited report would raise the warning. */
+  async function reportedAtItsCeiling(): Promise<string> {
+    const assistant = await assistantOf(ALICE);
+    await launchToken(assistant);
+    await reportMemoryUse(prisma, assistant, report(0));
+    return assistant;
+  }
+
+  const stored = (id: string) => prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: MEMORY_COLUMNS });
+
+  // The figures belong to the pod that measured them. Clearing them alone is not enough: the outgoing pod keeps
+  // reporting until its token goes, and SIGTERM ending its sessions is itself a session-count change, which fires a
+  // report — so it would put them straight back, with the old size's limit beside them.
+  it("should drop the report and the launch token together when the size changes", async () => {
+    const assistant = await reportedAtItsCeiling();
+    actAs("alice");
+
+    expect(await actions.resizeVirtualAgent(form({ id: assistant, size: "medium" }))).toMatchObject({ ok: true });
+
+    expect(await stored(assistant)).toEqual(CLEARED);
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toEqual({ reported: false, reason: "waiting" });
+  });
+
+  it("should drop the report and the launch token together when the plugins change", async () => {
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "pcs=PCS team workflows");
+    const assistant = await reportedAtItsCeiling();
+
+    await setVirtualAgentPlugins(prisma, ALICE.oid, assistant, ["pcs"]);
+
+    expect(await stored(assistant)).toEqual(CLEARED);
+  });
+
+  // Reached whenever an owner signs in to something again, which is the routine action a lapsed sign-in sends them to.
+  it("should drop the report when the agent is restarted to sign in again", async () => {
+    const assistant = await reportedAtItsCeiling();
+
+    await restartVirtualAgent(prisma, ALICE.oid, assistant, "restarting to sign in to GitHub again");
+
+    expect(await stored(assistant)).toEqual(CLEARED);
+  });
+
+  // An apply that failed may have left the minted token in no StatefulSet, so the next claim mints another and the
+  // reconcile applies afresh rather than keeping the pod it has — a replacement with no owner request behind it to
+  // have cleared the figures. Minting is where that is caught, which is why the clear rides on the mint and not only
+  // on the paths an owner takes.
+  it("should drop the report when a failed apply makes the orchestrator mint a new token", async () => {
+    const assistant = await reportedAtItsCeiling();
+    // What a failed apply leaves: a spec the orchestrator never got applied, so `generation > observed_generation`
+    // makes the agent due again, and `failedToApply` makes that claim mint a token rather than reuse the last one.
+    await prisma.virtualAgent.update({
+      where: { id: assistant },
+      data: { status: "failed", applyFailures: 1, generation: { increment: 1 } }
+    });
+
+    await claimVirtualAgents(prisma, "preview-01", { limit: 20 });
+
+    const row = await stored(assistant);
+    expect(row.memoryAnonBytes).toBeNull();
+    expect(row.memoryReportedAt).toBeNull();
+  });
+
+  // A stopped pod keeps its figures: they are the last thing anyone measured, the section says so, and nothing is
+  // going to raise a warning from them. This is the one path that must *not* clear.
+  it("should keep the report when the agent is only stopped", async () => {
+    const assistant = await reportedAtItsCeiling();
+
+    await setDesired(prisma, ALICE.oid, assistant, "stopped");
+    const row = await stored(assistant);
+
+    expect(row.memoryAnonBytes).not.toBeNull();
+    expect(row.memoryReportedAt).not.toBeNull();
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toMatchObject({ reported: true, stopped: true });
   });
 });
 

@@ -13,13 +13,18 @@
  * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
  * from here; keep the two in step, so a name only one side knows is a type error on that side.
  */
-export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "stop";
+export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "memory-anon" | "stop";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
  * that makes it read it: claiming a field it ignores is exactly the silence this list exists to prevent, and claiming
  * nothing while reading a field is the trap the other way round, since a hub that then gates on it drops a field this
  * build would have acted on.
+ *
+ * **Adding a name here means changing `features.test.ts` too**, and it will tell you which part. This line and the
+ * `ClientFeature` union above are what every such change edits, so two branches adding a feature conflict on them,
+ * and a resolution taking either side drops the other's name with nothing to notice: a shorter array of the same type
+ * still typechecks. That test is what turns a lost name into a failure.
  *
  * `attachments` is claimed because `parseAssistantFrame` carries `raw.attachments` and the bridge fetches each file to
  * disk before it delivers the message.
@@ -35,8 +40,15 @@ export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "st
  * `lookups` is claimed because the assistant supervisor answers the sessions stream's `lookup` frame, searching the
  * owner's Jira or Confluence with twg. The hub gates on it, answering `unsupported` to a pod that did not claim it.
  *
- * `memory` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it. The
- * hub sends nothing back for it; what the claim buys is the settings being able to say that an older pod cannot
- * report its memory yet, rather than showing it as using none.
+ * `memory-anon` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it,
+ * including `anon_bytes` from `memory.stat`, which the hub's memory route requires and computes its low-memory
+ * warning from. This is the name the current hub gates the Size section on, so that it can tell a pod that cannot
+ * report apart from one that has not reported yet rather than showing either as using none.
+ *
+ * `memory` is claimed **for hubs older than `memory-anon`**, and for nothing else. No gate in the current hub reads
+ * it. It is here because this list travels in the other direction too: the client is published on merge and a pod
+ * installs the current one when it boots, so a build can be talking to a hub that has not deployed yet, and that
+ * hub's Size section gates on `memory`. Dropping it would make such a pod read as an older client to the one hub
+ * that still cares. It can go once no hub predating `anon_bytes` is running anywhere.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory", "stop"];
+export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory", "memory-anon", "stop"];

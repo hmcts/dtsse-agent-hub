@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { AssistantMemory } from "@/assistant/memory";
 import {
+  describeChatCost,
   MEMORY_REPORT_INTERVAL_MINUTES,
   type MemoryPressure,
   type MemoryUse,
@@ -42,11 +43,17 @@ const NO_REPORT: Record<Exclude<MemoryUse, { reported: true }>["reason"], string
 };
 
 /**
- * The peak against the limit, with the live figure beside it, and when the pod last looked.
+ * The peak against the limit, what the pod is holding of that now, and when it last looked.
  *
- * The peak leads because it is what the warning is about: the live figure falls away between turns, so a pod that has
- * twice come within a hair of being killed reads as idle whenever nobody is mid-answer. It is never presented as
- * current — the hub cannot see a pod's memory between reports.
+ * The peak leads because it is the fuller account of what the pod has had to hold. The figure beside it is `anon`,
+ * the part that cannot be reclaimed, rather than `memory.current`: it is what the warning is computed from and what
+ * a chat adds to, so it is the one the per-chat cost belongs against — `memoryPressure` has why.
+ *
+ * "right now" is as close to current as this gets, and it is mostly earned: every path that replaces a pod drops the
+ * last one's report and its launch token together, so the figures are this pod's rather than its predecessor's. The
+ * exception is a pod the kubelet restarted without the hub being told, which its report at boot bounds rather than
+ * removes. The date underneath is always shown, because the hub cannot see a pod's memory between reports, and a
+ * stopped pod's line says "when it stopped" instead — there is no "now" for a container that is gone.
  */
 function Use({ use }: Readonly<{ use: MemoryUse }>) {
   if (!use.reported) {
@@ -57,7 +64,15 @@ function Use({ use }: Readonly<{ use: MemoryUse }>) {
       <p className="text-sm font-semibold">
         {describeSize(use.peakBytes)} of {describeSize(use.limitBytes)} at its busiest
       </p>
-      <p className="text-[13px] text-asst-body">Using {describeSize(use.currentBytes)} right now. Each chat you have open takes about 1.2 GB of it.</p>
+      {/* "was holding" for a stopped pod: there is no "right now" for a container that no longer exists, and the
+          line above it says the assistant is stopped. The per-chat figure comes from the constant the warning is
+          computed from, so the sentence cannot say one cost while the threshold uses another, and through
+          `describeChatCost` rather than `describeSize` so it is not shown to a precision one measurement cannot
+          support. */}
+      <p className="text-[13px] text-asst-body">
+        {use.stopped ? "Was holding " : "Holding "}
+        {describeSize(use.anonBytes)} {use.stopped ? "when it stopped" : "right now"}, about {describeChatCost()} of it for each chat open.
+      </p>
       <p className="text-xs text-asst-muted">
         {use.stopped ? "Your assistant is stopped. Last reported " : "Last reported "}
         <Timestamp iso={use.at} />.

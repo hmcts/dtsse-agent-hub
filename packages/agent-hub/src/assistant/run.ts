@@ -181,7 +181,41 @@ export async function runAssistantSupervisor({
     return { reconnect };
   }
 
-  const timer = setInterval(() => supervisor.tick().catch((e) => say(`tick failed: ${(e as Error).message}`)), tickMs);
+  // One report at a time, however many things ask for one. Two overlapping `PUT`s can be stored in either order, and
+  // the later-stored one wins, so an older measurement could end up as the hub's current figure. Skipping rather than
+  // queueing, because every caller here only ever wants the latest reading and the next trigger is seconds away.
+  let reportingMemory = false;
+  const sendMemory = async () => {
+    if (reportingMemory) {
+      return;
+    }
+    reportingMemory = true;
+    try {
+      await reportMemory(memory);
+    } finally {
+      reportingMemory = false;
+    }
+  };
+
+  // A session starting or ending steps the container's `anon` by about one conversation, and nothing else steps it,
+  // so the hub is told on the step rather than left to find out on the next reconcile. It is the figure the hub's
+  // low-memory warning is computed from, and a warning that lags a chat being closed by up to ten minutes is one the
+  // person has already acted on and been ignored for. Work inside a session moves `anon` too, without any step to
+  // trigger on, which is what the reconcile below is for. The most this can send is one report per tick, so a couple
+  // a minute at the default and never more than the guard above allows at once.
+  let reportedSessions = supervisor.sessions.size;
+  const timer = setInterval(() => {
+    supervisor
+      .tick()
+      .then(() => {
+        if (supervisor.sessions.size !== reportedSessions) {
+          reportedSessions = supervisor.sessions.size;
+          return sendMemory();
+        }
+        return undefined;
+      })
+      .catch((e) => say(`tick failed: ${(e as Error).message}`));
+  }, tickMs);
   // A conversation deleted while this pod was stopped left its attachments on the volume and sent no `close` anybody
   // was there to hear, so the directories are swept against the hub's list from time to time.
   const reconciler = setInterval(() => {
@@ -190,13 +224,19 @@ export async function runAssistantSupervisor({
       // are dated with the report rather than presented as current.
       .then(() => reportUploads(uploads))
       .catch((e) => say(`reconciling uploads failed: ${(e as Error).message}`));
-    // On the same timer and not chained onto it: the memory report is three reads of this container's own cgroup, so
+    // On the same timer and not chained onto it: the memory report is four reads of this container's own cgroup, so
     // a volume this pod cannot measure must not cost it the memory figures, and a cgroup it cannot read must not cost
-    // it the disk figures. `memory.peak` is monotonic while the pod is up, so a late one understates and never lies.
-    reportMemory(memory).catch((e) => say(`reporting memory failed: ${(e as Error).message}`));
+    // it the disk figures. The longest this pod will leave the hub without a fresh figure, rather than the cadence —
+    // the tick above reports whenever the number of sessions changes, which is what moves the figure it warns on.
+    sendMemory().catch((e) => say(`reporting memory failed: ${(e as Error).message}`));
   }, reconcileMs);
   try {
     await supervisor.adopt();
+    // Before the loop, because the hub drops the last pod's report when it asks for this one: until the first report
+    // of this boot lands there is nothing to show, and both timers above fire a tick or ten minutes from now. A pod
+    // the kubelet restarted after an OOM kill is the case that matters — the hub was never told it was replaced, so
+    // this is the only thing that moves the figures off the ones that got it killed.
+    await sendMemory().catch((e) => say(`reporting memory failed: ${(e as Error).message}`));
     say(`assistant supervisor started: at most ${supervisor.max} sessions at once, each stopped after ${idleMinutes(env)} idle minutes`);
     let retry: ReconnectDecision = { delay: 0, backoff: 0, rapidCloses: 0 };
     while (!stopping) {

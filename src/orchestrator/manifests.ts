@@ -92,24 +92,42 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
 /**
  * How many HMCTS Assistant conversation sessions a pod runs at once beside its own, by size.
  *
- * **A session costs about 1.2Gi and about 100m of CPU while it sits idle**, measured on a running `small` pod: three
- * sessions, the pod's own included, held 4.1Gi of its 8Gi cgroup limit at 314m. Each is a Claude process of its own,
- * with its own MCP servers, hai wrapper and bridge beside it, and the MCP servers are the larger half of that.
+ * **A session costs about 0.65Gi of anonymous memory, and bursts past four CPUs on its own.** The memory figure is
+ * the drop in the container cgroup's `memory.stat` `anon` when a preview pod went from two sessions to one — 0.64Gi,
+ * against 0.68Gi for the same subtraction of every process's proportional set size from
+ * `/proc/<pid>/smaps_rollup`. Each session is a `claude` process with its own MCP servers, hai wrapper and bridge;
+ * the MCP servers and their wrappers are about half of it.
  *
- * `small` at 3 puts four sessions and the supervisors at roughly 5.3Gi of the 8Gi limit `SIZE_RESOURCES` gives it,
- * which leaves a third of it free for the sessions that are actually working. It is over the 4Gi a small pod
- * requests, as two sessions already were, so a small pod is a candidate for eviction under node pressure either way.
- * `small` keeps that 4Gi deliberately: someone who needs more conversations at once moves up a size rather than
- * every small pod costing more.
+ * **That marginal is one transition of one `small` pod, n=1**, and the two routes agreeing are the same subtraction
+ * read two ways rather than two measurements. The 0.95Gi baseline below is the part with a sample behind it: 15,
+ * across two pods and two images, spread 0.91–0.99Gi. Every pod in preview is `small`, so nothing here is measured
+ * on the sizes it is applied to.
  *
- * `medium` and `large` are left where they are, because the measurement above is of a `small` pod and nobody has
- * asked for more sessions on the others. Memory alone would allow more — a third free of `medium`'s 16Gi is about
- * eight sessions, of `large`'s 32Gi about seventeen — but memory is not what binds: `medium` has the same 4-CPU
- * limit as `small`, so it buys guaranteed memory rather than more parallelism, and seventeen Claude processes would
- * saturate `large`'s 8 CPUs long before its memory. Raising either wants a measurement taken on that size, with the
- * sessions busy rather than idle, and rolls every pod of it.
+ * **Measure this in PSS, never RSS.** A session is twenty-odd node processes sharing one node binary and their
+ * `node_modules` pages, so ΣRSS counts those pages once per process and puts the same marginal at 1.25Gi, nearly
+ * double. What the processes share is those binary and library pages and not their heaps, which is why a session's
+ * PSS sits only a sixth above the pages that are wholly its own.
+ *
+ * The cap is reasoned about in `anon`, because that is the part the kernel cannot reclaim. Page cache was 2.1–2.4Gi
+ * on the pods measured — the 6.8GiB workspace clone rather than the sessions — and is evicted under pressure rather
+ * than killing the container.
+ *
+ * An awake pod with no conversations holds about 0.95Gi of `anon`: its own session, the three agent-hub daemons and
+ * the entrypoint. So a cap of N costs 0.95 + 0.65N, and every cap below is inside its size's memory **request**, let
+ * alone its limit — `small` at 3 is 2.90Gi of the 4Gi it requests, so a pod holding its full complement of chats is
+ * not an eviction candidate for doing so. `small` is the size that binds: it stays inside its request up to a cap of
+ * 4, where `medium` holds to 10 and `large` to 23, so that is the number to re-check before raising this.
+ *
+ * **CPU is what binds, and at the limit rather than the request.** A single session was throttled against `small`'s
+ * four-CPU limit, 26 periods of a 30s window at 568m mean, so a session's bursts already want more than four CPUs
+ * and further sessions buy contention rather than throughput. `small` and `medium` share that four-CPU limit, so
+ * neither has room above where it is; `medium`'s larger request guarantees it two CPUs rather than one, which is a
+ * better floor under node pressure and not a higher ceiling. `large`'s limit is eight, so at 7 it runs eight
+ * sessions on eight CPUs — the same CPU per session as the `small` 3 that production already accepts.
+ *
+ * More conversations than this wants higher CPU limits, not a bigger memory size.
  */
-export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 3, medium: 4, large: 6 };
+export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 3, medium: 4, large: 7 };
 
 /**
  * The pod is given its public domain rather than its URLs, so that a server starting or stopping changes the Service

@@ -152,10 +152,12 @@ describe("statefulSet", () => {
     expect(container!.env.map((entry) => entry.name)).not.toContain("HAI_ENV_READY");
   });
 
+  // The figures, not the constant, because a cap is a measured limit on what a pod of that size can hold: reading it
+  // back from `CONVERSATION_SESSIONS` would pass whatever it said.
   it.each([
     ["small", "3"],
     ["medium", "4"],
-    ["large", "6"]
+    ["large", "7"]
   ] as const)("should let a %s pod run %s conversation sessions beside its own when it is applied", (size, sessions) => {
     const [container] = podSpec(statefulSet({ ...AGENT, size }, SPEC, TOKEN)).containers;
 
