@@ -855,6 +855,19 @@ describe("Composer", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("should replace what was typed and select the first placeholder when the person picks a template from the menu", () => {
+    const box = composer();
+    fireEvent.change(box, { target: { value: "half a thought" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Templates" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Bug" }));
+
+    expect(box.value.startsWith("Bug: [title]")).toBe(true);
+    expect(document.activeElement).toBe(box);
+    expect(box.value.slice(box.selectionStart, box.selectionEnd)).toBe("[title]");
+  });
+
   it("should close the menu when the person presses Escape", () => {
     composer();
 
@@ -1046,6 +1059,18 @@ describe("Composer skills", () => {
     expect(screen.queryAllByRole("option")).toEqual([]);
   });
 });
+
+function newChatBox(): HTMLTextAreaElement {
+  return screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+}
+
+function starterCard(title: string): HTMLElement {
+  return within(screen.getByRole("list", { name: "Starters" })).getByRole("button", { name: new RegExp(title) });
+}
+
+function starterText(title: string): string {
+  return STARTERS.find((starter) => starter.title === title)?.text ?? "";
+}
 
 function emptyActions(start: EmptyChatActions["start"]): EmptyChatActions {
   return {
@@ -1321,17 +1346,48 @@ describe("Composer draft", () => {
 });
 
 describe("EmptyChat", () => {
-  it("should start a conversation with the starter's prompt and the chosen product and go to it when the person picks a starter card", async () => {
+  it("should fill the box with the card's template and send nothing when the person picks a starter card", () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
 
+    fireEvent.click(starterCard("Create user story"));
+
+    expect(newChatBox().value).toBe(starterText("Create user story"));
+    expect(start).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("should focus the box with the first gap selected when the person picks a starter card", () => {
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn())} />);
+
+    fireEvent.click(starterCard("Create user story"));
+
+    const box = newChatBox();
+    expect(document.activeElement).toBe(box);
+    expect(box.selectionStart).toBe(starterText("Create user story").indexOf("…"));
+    expect(box.value.slice(box.selectionStart, box.selectionEnd)).toBe("…");
+  });
+
+  it("should swap one card's template for another's when the first was left untouched", () => {
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(vi.fn())} />);
+
+    fireEvent.click(starterCard("Create user story"));
+    fireEvent.click(starterCard("Research"));
+
+    expect(newChatBox().value).toBe(starterText("Research"));
+  });
+
+  it("should start a conversation with the filled template and the chosen product when the person sends it", async () => {
+    const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
     fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: "pcs" } });
-    const starter = STARTERS[0];
+    fireEvent.click(starterCard("Analysis"));
+
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: new RegExp(starter?.title ?? "") }));
+      fireEvent.keyDown(newChatBox(), { key: "Enter" });
     });
 
-    expect(start).toHaveBeenCalledWith({ product: "pcs", body: starter?.prompt });
+    expect(start).toHaveBeenCalledWith({ product: "pcs", body: starterText("Analysis") });
     expect(push).toHaveBeenCalledWith("/assistant/abc");
   });
 
@@ -1356,26 +1412,6 @@ describe("EmptyChat", () => {
 
     expect(start).toHaveBeenCalledWith({ product: "general", body: "my own words" });
     expect(push).toHaveBeenCalledWith("/assistant/abc");
-  });
-
-  it("should show the error and let the person try again when a starter cannot start", async () => {
-    render(
-      <EmptyChat
-        viewerOid={VIEWER}
-        starters={STARTERS}
-        templates={TEMPLATES}
-        actions={emptyActions(vi.fn(async () => ({ ok: false as const, error: "not available" })))}
-      />
-    );
-
-    const card = screen.getByRole("button", { name: /Research/ }) as HTMLButtonElement;
-    await act(async () => {
-      fireEvent.click(card);
-    });
-
-    expect(screen.getByRole("alert").textContent).toBe("not available");
-    expect(card.disabled).toBe(false);
-    expect(push).not.toHaveBeenCalled();
   });
 
   it("should keep what was typed in the new chat when the person goes away and comes back", () => {
@@ -1418,21 +1454,20 @@ describe("EmptyChat", () => {
     expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).value).toBe(" and a second thought");
   });
 
-  it("should keep what is in the box when a starter card starts a conversation instead", async () => {
-    // The card sends its own words, so what the person typed is still unsent and is still theirs to come back to.
+  it("should keep what the person typed above the template, as the draft, when they pick a starter card", () => {
+    // A click on a card is too easy to make by accident to cost the person their words.
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    const box = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    const filled = `a thought I have not finished\n\n${starterText("Research")}`;
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
-    fireEvent.change(box(), { target: { value: "a thought I have not finished" } });
+    fireEvent.change(newChatBox(), { target: { value: "a thought I have not finished" } });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: new RegExp(STARTERS[0]?.title ?? "") }));
-    });
+    fireEvent.click(starterCard("Research"));
 
-    expect(start).toHaveBeenCalledWith({ product: "general", body: STARTERS[0]?.prompt });
-    expect(box().value).toBe("a thought I have not finished");
+    expect(newChatBox().value).toBe(filled);
+    expect(newChatBox().selectionStart).toBe(filled.indexOf("…"));
+    expect(start).not.toHaveBeenCalled();
     cleanup();
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
-    expect(box().value).toBe("a thought I have not finished");
+    expect(newChatBox().value).toBe(filled);
   });
 });
