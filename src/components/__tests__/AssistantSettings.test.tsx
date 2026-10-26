@@ -1487,7 +1487,16 @@ const LIMIT = 8 * GIB;
  * that a pod which once touched its ceiling is not warned about for ever.
  */
 function use(headroom: number, overrides: Partial<Extract<MemoryUse, { reported: true }>> = {}): MemoryUse {
-  return { reported: true, limitBytes: LIMIT, currentBytes: LIMIT - headroom, peakBytes: LIMIT, at: REPORTED_AT, stopped: false, ...overrides };
+  return {
+    reported: true,
+    limitBytes: LIMIT,
+    currentBytes: LIMIT,
+    peakBytes: LIMIT,
+    anonBytes: LIMIT - headroom,
+    at: REPORTED_AT,
+    stopped: false,
+    ...overrides
+  };
 }
 
 const CHANGE_FORM = "Change the size of your assistant";
@@ -1526,11 +1535,11 @@ describe("the Assistant's size", () => {
 
   // The peak leads because it is the fuller account of what the pod has had to hold; the live figure beside it is
   // what the warning is computed from, because it is the one that can come back down.
-  it("should give the peak against the limit, the live figure and when the pod last looked", () => {
+  it("should give the peak against the limit, what it is holding of that, and when the pod last looked", () => {
     open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
 
     expect(panel().textContent).toContain("8 GB of 8 GB at its busiest");
-    expect(panel().textContent).toContain("Using 5.4 GB right now");
+    expect(panel().textContent).toContain("Holding 5.4 GB right now");
     expect(panel().textContent).toContain("Last reported");
   });
 
@@ -1540,7 +1549,7 @@ describe("the Assistant's size", () => {
   it("should say what a chat costs from the same figure the warning uses when the pod has reported", () => {
     open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
 
-    expect(panel().textContent).toContain("Each chat you have open takes about 0.65 GB of it.");
+    expect(panel().textContent).toContain("about 0.65 GB of it for each chat open.");
   });
 
   it("should say the figures will not move while the assistant is stopped", () => {
@@ -1592,10 +1601,20 @@ describe("the Assistant's size", () => {
     expect(panel().textContent).not.toContain("or close a chat");
   });
 
-  it("should say to close a chat, and offer no bigger size, on the largest size there is", () => {
-    open({ size: size({ use: use(0), size: "large" }) }, "Size");
+  it("should say to close a chat, and offer no bigger size, on the largest size there is when several are open", () => {
+    open({ size: size({ use: use(0), size: "large", openChats: 3 }) }, "Size");
 
     expect(panel().textContent).toContain("This is the largest size there is, so close a chat you have finished with");
+    expect(panel().textContent).not.toContain("Move up to");
+  });
+
+  // Nothing to move up to and nothing to close but the chat in use, so the warning is the measurement alone rather
+  // than an instruction to stop working.
+  it("should offer nothing beyond the measurement on the largest size when one chat is open", () => {
+    open({ size: size({ use: use(0), size: "large", openChats: 1 }) }, "Size");
+
+    expect(panel().textContent).toContain("Your assistant is low on memory");
+    expect(panel().textContent).not.toContain("close a chat");
     expect(panel().textContent).not.toContain("Move up to");
   });
 

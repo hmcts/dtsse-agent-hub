@@ -13,7 +13,7 @@
  * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
  * from here; keep the two in step, so a name only one side knows is a type error on that side.
  */
-export type ClientFeature = "attachments" | "files" | "memory" | "stop";
+export type ClientFeature = "attachments" | "files" | "memory" | "memory-anon" | "stop";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
@@ -35,5 +35,10 @@ export type ClientFeature = "attachments" | "files" | "memory" | "stop";
  * `memory` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it. The
  * hub sends nothing back for it; what the claim buys is the settings being able to say that an older pod cannot
  * report its memory yet, rather than showing it as using none.
+ *
+ * `memory-anon` is claimed because that report carries `anon_bytes`, `memory.stat`'s `anon` line, which the hub's
+ * memory route requires and computes its low-memory warning from. A second name rather than widening `memory`,
+ * because the hub has to be able to word a build claiming only `memory` as an older version whose reports it is
+ * refusing, rather than as a pod that has gone quiet.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "memory", "stop"];
+export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "memory", "memory-anon", "stop"];

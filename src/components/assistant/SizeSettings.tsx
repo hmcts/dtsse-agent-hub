@@ -43,12 +43,13 @@ const NO_REPORT: Record<Exclude<MemoryUse, { reported: true }>["reason"], string
 };
 
 /**
- * The peak against the limit, with the live figure beside it, and when the pod last looked.
+ * The peak against the limit, what the pod is holding of that now, and when it last looked.
  *
- * The peak leads because it is the fuller account of what the pod has had to hold: the live figure falls away between
- * turns, so a pod that has twice come within a hair of being killed reads as idle whenever nobody is mid-answer. It
- * is the live figure the warning is computed from all the same, because that is the one that can come back down —
- * `memoryPressure` has why. Neither is presented as current: the hub cannot see a pod's memory between reports.
+ * The peak leads because it is the fuller account of what the pod has had to hold. The figure beside it is `anon`,
+ * the part that cannot be reclaimed, rather than `memory.current`: it is what the warning is computed from and what
+ * a chat adds to, so it is the one the per-chat cost belongs against — `memoryPressure` has why. Nothing here is
+ * presented as current; a stopped pod's line says so in its own words, because the hub cannot see a pod's memory
+ * between reports and sees nothing at all once it is gone.
  */
 function Use({ use }: Readonly<{ use: MemoryUse }>) {
   if (!use.reported) {
@@ -59,11 +60,14 @@ function Use({ use }: Readonly<{ use: MemoryUse }>) {
       <p className="text-sm font-semibold">
         {describeSize(use.peakBytes)} of {describeSize(use.limitBytes)} at its busiest
       </p>
-      {/* The per-chat figure comes from the constant the warning is computed from, so the sentence cannot say one
-          cost while the threshold uses another, and through `describeChatCost` rather than `describeSize` so it is
-          not shown to a precision one measurement cannot support. */}
+      {/* "was holding" for a stopped pod: there is no "right now" for a container that no longer exists, and the
+          line above it says the assistant is stopped. The per-chat figure comes from the constant the warning is
+          computed from, so the sentence cannot say one cost while the threshold uses another, and through
+          `describeChatCost` rather than `describeSize` so it is not shown to a precision one measurement cannot
+          support. */}
       <p className="text-[13px] text-asst-body">
-        Using {describeSize(use.currentBytes)} right now. Each chat you have open takes about {describeChatCost()} of it.
+        {use.stopped ? "Was holding " : "Holding "}
+        {describeSize(use.anonBytes)} {use.stopped ? "when it stopped" : "right now"}, about {describeChatCost()} of it for each chat open.
       </p>
       <p className="text-xs text-asst-muted">
         {use.stopped ? "Your assistant is stopped. Last reported " : "Last reported "}
