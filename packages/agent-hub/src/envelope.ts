@@ -103,8 +103,9 @@ const ownerSkillLine = (name: string) =>
 
 /**
  * The `assistant` object on a `direct` frame to one of a virtual agent's HMCTS Assistant conversations: the
- * product area the person chose, its display name, and the version of the conversation's document and who last
- * wrote it. Structural and every field optional, for the same reason `EnvelopeMessage` is.
+ * product area the person chose, its display name, the version of the conversation's document and who last wrote
+ * it, any export of that document to Jira still waiting on this session, and the files attached to this message.
+ * Structural and every field optional, for the same reason `EnvelopeMessage` is.
  */
 export type AssistantFrame = {
   conversation_id?: string;
