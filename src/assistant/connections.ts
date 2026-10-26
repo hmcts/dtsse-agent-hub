@@ -82,32 +82,109 @@ export function isConnection(kind: CredentialKind): kind is ConnectionKind {
 
 /**
  * Where one sign-in stands. `checklistState` answers "login" for any sign-in a pod has relayed, whether or not one is
- * already stored, so that answer splits in two here: `refreshing` keeps a working credential reading as working,
- * since `startLogin` does not delete one. Its "waiting" splits by what became of the last sign-in, so a lapsed one
- * reads as lapsed rather than as never set up.
+ * already stored, so that answer splits in three here: `finishing` is a code the person has already sent back and the
+ * pod has yet to collect, `refreshing` a relayed sign-in with a credential behind it that the pod has not failed to
+ * use, since `startLogin` deletes nothing, and `signing-in` one with nothing behind it. Its "waiting" splits by what
+ * became of the last sign-in, so a lapsed one reads as lapsed rather than as never set up.
  */
-export type ConnectionState = "connected" | "refreshing" | "signing-in" | "expired" | "failed" | "waiting";
+export type ConnectionState = "connected" | "finishing" | "refreshing" | "signing-in" | "expired" | "failed" | "waiting";
 
 /** What `checklistState` answers, named here so this module does not import the checklist that owns those states. */
 export type ChecklistAnswer = "stored" | "login" | "waiting";
 
-const DETAILS: Record<ConnectionState, string> = {
+/**
+ * Each state in the Assistant's words, for its connection rows and its settings dialog. The hub's own agent page
+ * words the same states differently, in `SIGN_IN_DETAIL`, because its cards are the owner's view of one agent's
+ * credentials rather than a person's view of their sign-ins: there "waiting" means waiting for the agent to ask.
+ */
+export const CONNECTION_DETAILS: Record<ConnectionState, string> = {
   connected: "Connected",
-  refreshing: "Signing in again",
+  finishing: "Finishing signing in",
+  refreshing: "Waiting for you to sign in again",
   "signing-in": "Waiting for you",
   expired: "Sign-in expired",
   failed: "Last sign-in failed",
   waiting: "Not connected"
 };
 
-/** A sign-in the person can use right now, whatever the pod is doing about it in the background. */
-export function isUsable(state: ConnectionState): boolean {
-  return state === "connected" || state === "refreshing";
+/**
+ * What each state means for the two questions every surface asks of it, as a table over the whole union rather than a
+ * chain of comparisons: a state added without an answer here does not build, which is the same guarantee the wording
+ * tables give. A predicate that fell through to `false` would answer "nothing to do" on every surface for a state
+ * nobody had thought about, and no test over login shapes would see it.
+ *
+ * `lapsed` is a sign-in that worked once and has stopped, as against one nobody ever set up.
+ *
+ * `needsPerson` is a sign-in that is nobody's to finish but theirs: a relayed code only they can enter or paste, or
+ * one that lapsed before they did. A relayed sign-in counts whether or not a credential sits behind it — a pod relays
+ * a code precisely because it cannot get past this without the person, so `refreshing` is a wait on them and not a
+ * renewal going on by itself. `finishing` is the one relayed sign-in that is not: they have sent the code back and
+ * the pod has yet to collect it, so asking again would be asking for what they have done.
+ *
+ * Every surface that prompts is built on `needsPerson`, and a prompt for a state with nothing to press is the fault
+ * this exists to remove rather than report. `offeredConnections` is what keeps that true: it gives the screen a row
+ * for each of these, and leaves out the one lapsed sign-in with no way back.
+ */
+const MEANING: Record<ConnectionState, { lapsed: boolean; needsPerson: boolean }> = {
+  connected: { lapsed: false, needsPerson: false },
+  finishing: { lapsed: false, needsPerson: false },
+  refreshing: { lapsed: false, needsPerson: true },
+  "signing-in": { lapsed: false, needsPerson: true },
+  expired: { lapsed: true, needsPerson: true },
+  failed: { lapsed: true, needsPerson: true },
+  waiting: { lapsed: false, needsPerson: false }
+};
+
+/** Every state a sign-in can be in, so a list of them is the compiler's rather than a second copy of the union. */
+export const CONNECTION_STATES = Object.keys(MEANING) as ConnectionState[];
+
+export function hasLapsed(state: ConnectionState): boolean {
+  return MEANING[state].lapsed;
 }
 
-/** A sign-in that worked once and has stopped working, as opposed to one nobody ever set up. */
-export function hasLapsed(state: ConnectionState): boolean {
-  return state === "expired" || state === "failed";
+export function needsPerson(state: ConnectionState): boolean {
+  return MEANING[state].needsPerson;
+}
+
+/**
+ * Whether the code the person pasted is still there for the pod to collect. The column being set is not that:
+ * `takePastedCode` hands over nothing once the deadline has passed and leaves the column alone.
+ */
+export function codeCollectable(login: LoginView | undefined, now: number): boolean {
+  return login?.codeWaitingUntil != null && Date.parse(login.codeWaitingUntil) > now;
+}
+
+/** What ordering a sign-in against its credential takes: when the credential was saved, and whether one was. */
+export type StoredCredential = Pick<CredentialStatus, "stored" | "updatedAt"> | undefined;
+
+/**
+ * Whether the last sign-in for a kind is over without having replaced the credential it was for, which is how the hub
+ * tells a credential that works from one a pod has just failed to use.
+ *
+ * A sign-in is over and unsuccessful in two ways, and both count. A pod reports `expired` or `failed`. Or its code
+ * simply runs out: `failLogin` and `failForAzureAccount` are the only writers of those two states and both need a
+ * pod's report, and no sweep touches `virtual_agent_login` — so a pod that stops before reporting leaves a `pending`
+ * row with its expiry in the past for ever, and reading that as a sign-in still in flight reads the fault as fine.
+ *
+ * The credential outlives either: `startLogin` and `failLogin` leave it alone, and a pod overwrites it only once a
+ * new sign-in succeeds — the one exception being an Azure sign-in as somebody else's account, which `completeLogin`
+ * deletes outright. So the two timestamps are the whole of the evidence, and the rule is that the later write is the
+ * newer fact: a sign-in that ended after the credential was last saved is a pod that could not use what is stored,
+ * and one that ended before the save is the failure the save is the answer to.
+ *
+ * It is the later *write*, not the later attempt, and the two part company in one narrow case: a pod relays a code,
+ * the person pastes their own value instead, and the pod then reports that first code expired. The report is newer
+ * than the save but is about an attempt older than it, so the row reads as lapsed and offers its box again. Nothing
+ * better is available — the login row carries when its state was written, and `createdAt` is the first relay for
+ * that kind rather than the current one — and the state recovers as soon as the pod signs in or the person pastes
+ * again, so the cost is one row asking for something it already has.
+ */
+export function lapsedSinceStored(login: LoginView | undefined, stored: StoredCredential, now: number): boolean {
+  if (login === undefined || login.state === "completed" || (login.state === "pending" && Date.parse(login.expiresAt) > now)) {
+    return false;
+  }
+  const storedAt = stored?.stored === true ? stored.updatedAt : null;
+  return storedAt === null || Date.parse(login.updatedAt) > Date.parse(storedAt);
 }
 
 export interface Connection extends Connector {
@@ -119,20 +196,31 @@ export interface Connection extends Connector {
   accountLabel: string | null;
 }
 
-/** A stored credential is connected whatever its last sign-in did, so a stale failure never contradicts the tick. */
-export function connectionState(checklist: ChecklistAnswer, login: LoginView | undefined, stored: boolean): ConnectionState {
-  if (checklist === "stored") {
-    return "connected";
-  }
+/**
+ * A stored credential is connected only while nothing newer says otherwise. `lapsedSinceStored` is that newer thing,
+ * and without it a sign-in the pod has reported dead reads as a tick on every surface — which is the state the
+ * person cannot act on, because nothing they can see says anything is wrong.
+ */
+export function connectionState(checklist: ChecklistAnswer, login: LoginView | undefined, stored: StoredCredential, now: number): ConnectionState {
   if (checklist === "login") {
+    if (codeCollectable(login, now)) {
+      // Their part is done: the code they pasted is sealed for the pod to collect, and nothing is waiting on them.
+      return "finishing";
+    }
     // A pod relays a fresh sign-in without deleting the credential it already has, so one already stored still works
-    // while the person completes it. Only a sign-in with nothing behind it is waiting on them.
-    return stored ? "refreshing" : "signing-in";
+    // while the person completes it. Only a sign-in with nothing behind it is waiting on them. Either way it is a
+    // wait on them: `needsPerson` is what asks that, and it answers yes to both.
+    return stored?.stored === true ? "refreshing" : "signing-in";
+  }
+  // `startLogin` overwrites the row it relays over, so the one row is the last word on this kind, and a credential a
+  // sign-in lapsed over is the one the pod could not use.
+  if (stored?.stored === true && !lapsedSinceStored(login, stored, now)) {
+    return "connected";
   }
   if (login === undefined || login.state === "completed") {
     return "waiting";
   }
-  // A `pending` login that `checklistState` did not call a login is one whose code ran out while nobody used it.
+  // A `pending` row here is one whose code ran out: `checklistState` answers "login" for as long as it is live.
   return login.state === "failed" ? "failed" : "expired";
 }
 
@@ -140,19 +228,25 @@ export function connectionState(checklist: ChecklistAnswer, login: LoginView | u
  * One row per sign-in `data.kinds` asks for, in that order, leaving out anything that is not a sign-in. `checklist`
  * is `checklistState` from the onboarding checklist, passed in so the two views cannot drift apart.
  *
+ * `now` is given to both halves of the answer from here rather than closed over by the caller, so there is one clock
+ * behind them. Two would be a row saying a code is waiting beside one saying the credential still works.
+ *
  * Credentials the hub cannot read tell us nothing about any of them, so there are no rows: listing every sign-in as
  * not connected would be a row of wrong answers, and would raise a warning nobody can act on.
  */
-export function connections(data: ConnectionsData | undefined, checklist: (stored: boolean, login: LoginView | undefined) => ChecklistAnswer): Connection[] {
+export function connections(
+  data: ConnectionsData | undefined,
+  checklist: (stored: boolean, login: LoginView | undefined, now: number) => ChecklistAnswer,
+  now: number
+): Connection[] {
   if (data === undefined || data.unavailable !== null) {
     return [];
   }
   return data.kinds.filter(isConnection).map((kind) => {
     const status = data.statuses.find((candidate) => candidate.kind === kind);
     const login = data.logins.find((candidate) => candidate.kind === kind);
-    const stored = status?.stored === true;
-    const state = connectionState(checklist(stored, login), login, stored);
-    return { kind, ...CONNECTORS[kind], state, detail: DETAILS[state], accountLabel: status?.accountLabel ?? null };
+    const state = connectionState(checklist(status?.stored === true, login, now), login, status, now);
+    return { kind, ...CONNECTORS[kind], state, detail: CONNECTION_DETAILS[state], accountLabel: status?.accountLabel ?? null };
   });
 }
 
@@ -169,25 +263,54 @@ export interface OfferedConnection {
 }
 
 /**
- * The connections the getting-ready screen lists: every one the assistant needs, every one its pod has stopped to ask
- * the person for, and the optional one it offers unasked. Needed first, so the ask reads in the order the banner
- * names it in, and each kind once however many of the three it is.
+ * Whether a sign-in of this kind that is over and unsuccessful has a way back the hub will take.
  *
- * Every pending sign-in is here whatever kind it is for, and not only the ones some list expected. A pod relays a
- * sign-in through `startLogin`, which takes any `CredentialKind` and puts the assistant in `awaiting_login` for it —
- * so a sign-in this screen left out would be an ask with nothing on the screen to act on: the bar sitting at 55%
- * under "Waiting for you to connect your accounts…", every row shown reading as connected, and no way to clear it.
- * Which kinds a pod relays today is decided in another repo, and this must not depend on that answer.
+ * One the assistant makes for itself always has: `reconnectSignIn` accepts a `SignInKind`, and the kinds with no
+ * `paste` are exactly those — which is `CONNECTORS`'s own test, "should ask the person to paste exactly the
+ * connections their assistant cannot sign in to itself", and the reason this can read `paste` rather than importing
+ * the server module that owns `SIGN_IN_KINDS`. It restarts the pod so it relays a fresh code. Anything the person
+ * pastes has a way back only for a credential their
+ * assistant uses, because `saveCredential` is route-aware — it refuses a Claude token from somebody whose agents run
+ * on Amazon Bedrock. So a lapsed Claude sign-in relayed to a Bedrock-route person has no way back at all: the only
+ * control for it is a box whose save is refused, and nothing ever clears the login row, since `startLogin` overwrites
+ * only on a new relay and the two states that end one need a pod's report.
  *
- * A pending sign-in whose code has run out is asked about too, and no clock is needed to decide it: the assistant
- * stays `awaiting_login` until its pod reports its next step, so the row is still the only thing to act on.
+ * That is the one state an ask must never name — an ask it cannot satisfy and cannot dismiss — so it is left off the
+ * screen as well, and the two cannot drift because this is the only place the question is asked.
  */
-export function offeredConnections(assistant: {
-  needed: readonly CredentialKind[];
-  optional: readonly CredentialKind[];
-  logins: readonly LoginView[];
-}): OfferedConnection[] {
-  const asked = assistant.logins.filter((login) => login.state === "pending").map((login) => login.kind);
+export function canSignInAgain(kind: CredentialKind, uses: readonly CredentialKind[]): boolean {
+  return isConnection(kind) && (CONNECTORS[kind].paste === null || uses.includes(kind));
+}
+
+/**
+ * The connections the getting-ready screen lists, and the set the banner that opens it names from: every one the
+ * assistant needs, every one its pod has asked the person for and not finished, and the optional one it offers
+ * unasked. Needed first, so the ask reads in the order the banner names it in, and each kind once however many of the
+ * three it is.
+ *
+ * Every live sign-in is here whatever kind it is for, and not only the ones some list expected. A pod relays a
+ * sign-in through `startLogin`, which takes any `CredentialKind` — `claude` is reachable today and is in neither
+ * `neededCredentials` nor `OPTIONAL_CREDENTIALS` — so a live sign-in this left out would be an ask with nothing to
+ * act on: the bar sitting at 55% under "Waiting for you to connect your accounts…", every row shown reading as
+ * connected, and no way to clear it. Which kinds a pod relays today is decided in another repo, and this must not
+ * depend on that answer. Completing one never goes through a credential the hub has to accept on their behalf — the
+ * code goes back to the pod — so there is always something to do about it.
+ *
+ * One that is over is here only while `canSignInAgain`, which is the other half of the same rule: the row is what the
+ * ask points at, so a kind with no way back belongs on neither. Over is `now`'s to decide and not only the pod's,
+ * because a code that ran out is over whether or not its pod lived long enough to say so.
+ */
+export function offeredConnections(
+  assistant: {
+    needed: readonly CredentialKind[];
+    optional: readonly CredentialKind[];
+    logins: readonly LoginView[];
+  },
+  now: number
+): OfferedConnection[] {
+  const uses = [...assistant.needed, ...assistant.optional];
+  const live = (login: LoginView) => login.state === "pending" && Date.parse(login.expiresAt) > now;
+  const asked = assistant.logins.filter((login) => live(login) || (login.state !== "completed" && canSignInAgain(login.kind, uses))).map((login) => login.kind);
   const unasked = assistant.optional.filter((kind) => OFFERED_OPTIONAL.includes(kind));
   const rows: OfferedConnection[] = [];
   for (const kind of [...assistant.needed, ...asked, ...unasked]) {
@@ -246,22 +369,26 @@ export function connectionsPrompt(ask: ConnectionsAsk, needed: readonly Credenti
 }
 
 /**
- * The sign-ins the cog prompts about, and when. Model access is left out of both on purpose: nobody can use the
- * Assistant at all without it, and the connections banner asks for it until it is there.
- *
- * A needed sign-in is prompted about whenever it is not usable, because the person has to have it. An optional one is
- * prompted about only once it has lapsed: never setting Atlassian up is a choice, and a badge nobody can ever clear
- * teaches people to ignore the one that matters. A lapsed sign-in is exactly what nothing tells anyone about today.
+ * The sign-ins the cog prompts about when the person has never set one up. Model access is left out: the connections
+ * banner asks for it for as long as it is missing, which is as long as this would. A Jenkins token is nobody's
+ * requirement, and never setting Atlassian up is a choice — a badge nobody can ever clear teaches people to ignore
+ * the one that matters.
  */
-export const PROMPTED_CONNECTIONS: readonly CredentialKind[] = ["github", "azure"];
-export const PROMPTED_WHEN_LAPSED: readonly CredentialKind[] = ["atlassian"];
+export const PROMPTED_WHEN_MISSING: readonly CredentialKind[] = ["github", "azure"];
 
-/** Whether a row is worth the person's attention, by the rule its kind is prompted under. */
+/**
+ * Whether a row is worth the person's attention.
+ *
+ * Anything their assistant has asked them for and they have not finished, whatever kind it is. Being stored is what
+ * silences the connections banner, so a stored credential whose sign-in has since lapsed is a state no other surface
+ * says anything about — which is exactly the one the badge is for, and leaving a kind out of it by name is how
+ * Claude, Bedrock and Jenkins came to have no badge at all once their value was stored.
+ *
+ * `needsPerson` and nothing wider, so the badge cannot point at a prompt that is not raised: the cog says to close
+ * the dialog and look above the chats, and `signInPrompt` is what is there. A `finishing` sign-in raises neither.
+ */
 function needsAttention(row: Connection): boolean {
-  if (PROMPTED_CONNECTIONS.includes(row.kind)) {
-    return !isUsable(row.state);
-  }
-  return PROMPTED_WHEN_LAPSED.includes(row.kind) && hasLapsed(row.state);
+  return needsPerson(row.state) || (PROMPTED_WHEN_MISSING.includes(row.kind) && row.state === "waiting");
 }
 
 /**
@@ -274,4 +401,35 @@ export function connectionsWarning(list: readonly Connection[]): string | null {
     return null;
   }
   return `${inWords(names)} ${names.length === 1 ? "needs" : "need"} your attention`;
+}
+
+/**
+ * What the Assistant says about a sign-in its pod is holding for the person, or `null` when it is holding none.
+ *
+ * Read from the sign-ins rather than from how far the assistant has got, because the assistant does not stay stopped
+ * for this: `failLogin` takes it out of `awaiting_login` as the last code dies, so by the time the codes have run out
+ * the only record of the ask is the login row. A surface keyed to the status has nothing left to show.
+ *
+ * Every kind on the list is named, needed or optional, because what the person has to do is the same for all of them
+ * and the banner is the one thing that says a code is waiting. `offeredConnections` is what the list comes from, and
+ * so is what keeps a sign-in with no way back off it. `connectionsPrompt`'s `connect` covers a needed credential
+ * never stored at all, so this is only consulted once that has nothing to ask.
+ *
+ * A live code and a lapsed sign-in are worded apart, because they are different things to do — type this, or ask for
+ * another — and because a message that read the same for both would be read out once and then not again when the
+ * thing to do changed.
+ */
+export function signInPrompt(list: readonly Connection[]): ConnectionsPrompt | null {
+  const asking = list.filter((row) => needsPerson(row.state));
+  if (asking.length === 0) {
+    return null;
+  }
+  const names = inWords(asking.map((row) => row.name));
+  return {
+    label: "Sign in",
+    message: asking.some((row) => !hasLapsed(row.state))
+      ? `Your assistant is waiting for you to sign in to ${names}.`
+      : `Your assistant could not sign in to ${names}, and is not asking again by itself.`,
+    action: "Show the sign-in"
+  };
 }

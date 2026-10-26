@@ -71,7 +71,8 @@ function atlassianLogin(overrides: Partial<LoginView> = {}): LoginView {
     verificationUri: "https://auth.atlassian.com/oauth/activate?user_code=4BFC-CC3A",
     expiresAt: new Date(Date.now() + 120_000).toISOString(),
     state: "pending",
-    codeWaiting: false,
+    updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    codeWaitingUntil: null,
     ...overrides
   };
 }

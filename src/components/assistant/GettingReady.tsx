@@ -1,7 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { type ConnectionsPrompt, type Connector, connectionsPrompt, offeredConnections } from "@/assistant/connections";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  CONNECTION_DETAILS,
+  type ConnectionsPrompt,
+  type Connector,
+  codeCollectable,
+  connectionState,
+  connections,
+  connectionsPrompt,
+  hasLapsed,
+  offeredConnections,
+  signInPrompt
+} from "@/assistant/connections";
 import { type ConnectionsAsk, connectionsAsk } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
@@ -34,10 +45,13 @@ const FOOTER = "h-[42px] rounded-[10px] px-5 text-sm";
 const FOOTER_PRIMARY = `${FOOTER} bg-asst-accent font-semibold text-asst-ink disabled:opacity-40`;
 const FOOTER_QUIET = `${FOOTER} border border-asst-strong font-medium text-asst-body hover:bg-asst-active`;
 
+/** How often the warming-up screen re-reads the clock, which only decides whether a wait has become a long one. */
+const WARMUP_CLOCK_MS = 5000;
+
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 5000);
+    const timer = setInterval(() => setNow(Date.now()), WARMUP_CLOCK_MS);
     return () => clearInterval(timer);
   }, []);
   return now;
@@ -51,6 +65,33 @@ function useTicked(): boolean {
   }, []);
   return ticked;
 }
+
+/**
+ * The clock every sign-in on this screen is read against: the page's own, and the browser's from then on.
+ *
+ * `from` is the server component's `Date.now()`, which React serialises, so the HTML and the browser's first render
+ * are made from the identical number and there is nothing for hydration to disagree about — the hub's own agent page
+ * reads its sign-ins the same way. It has to be a real clock and not a stand-in: these rows carry a device code as
+ * plain text and the provider's page as a plain link, both of which work before any script does, so HTML that read a
+ * dead code as live would be sending somebody off to use it for as long as the bundle took to arrive, and for ever
+ * where hydration fails or scripts do not run.
+ *
+ * Then the browser's own, read as the browser takes over and on a tick from there — the first of those is the point:
+ * an HTML payload that sat for a minute before hydrating was built a minute ago, so without reading the clock on
+ * mount the page would go on offering a code that died in between until the first tick came round.
+ * `LoginCountdown` does the same two things in the same order.
+ */
+function useSignInClock(from: number): number {
+  const [now, setNow] = useState(from);
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), SIGN_IN_CLOCK_MS);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
+}
+
+const SIGN_IN_CLOCK_MS = 5000;
 
 /**
  * The line that rotates while the assistant starts. The first one is the phase's first message, not a random one,
@@ -89,8 +130,26 @@ function useWarmupMessage(phase: WarmupPhase, rotating: boolean, since: number):
   return { message, slow };
 }
 
-/** What to do for a sign-in the assistant is waiting on: a code to enter on a page, or a code to paste back. */
-function SignIn({ assistantId, login, name, paste }: { assistantId: string; login: LoginView; name: string; paste: FormAction }) {
+/**
+ * What to do for a sign-in the assistant is waiting on: a code to enter on a page, or a code to paste back.
+ *
+ * `collectable` is whether a code they have already pasted is still there for the pod, rather than whether they ever
+ * pasted one: a code the pod never came for stops being any use after `PASTED_CODE_TTL_MS` while the sign-in itself
+ * can run for the rest of the hour, and `storePastedCode` will take another — so the box comes back.
+ */
+function SignIn({
+  assistantId,
+  login,
+  name,
+  collectable,
+  paste
+}: {
+  assistantId: string;
+  login: LoginView;
+  name: string;
+  collectable: boolean;
+  paste: FormAction;
+}) {
   if (login.prompt === "device_code") {
     return (
       <div className="flex flex-col gap-1.5 text-[13px] text-asst-body">
@@ -111,7 +170,7 @@ function SignIn({ assistantId, login, name, paste }: { assistantId: string; logi
       </div>
     );
   }
-  if (login.codeWaiting) {
+  if (collectable) {
     return (
       <p role="status" className="text-[13px] text-asst-ok">
         Got it. Your assistant is finishing signing in.
@@ -139,39 +198,148 @@ function SignIn({ assistantId, login, name, paste }: { assistantId: string; logi
   );
 }
 
+/** What the confirmation asks and what the button that answers it is called, by what the action will actually do. */
+function againWords(name: string, stored: boolean, running: boolean): { question: string; confirm: string } {
+  if (!stored) {
+    return {
+      // Nothing to delete: the value went with the sign-in, or there never was one. All this does is restart.
+      question: running
+        ? `Restart your assistant so it asks you to sign in to ${name} again? Your chats are kept.`
+        : `Have your assistant sign in to ${name} again? It is stopped, so it asks you when it next starts.`,
+      confirm: `Sign in to ${name} again`
+    };
+  }
+  return {
+    question: running
+      ? `Delete your saved ${name} sign-in, which all your virtual agents use, and restart your assistant so it asks you to sign in again? Your chats are kept.`
+      : `Delete your saved ${name} sign-in, which all your virtual agents use? Your assistant is stopped, so it asks you to sign in when it next starts.`,
+    confirm: running ? `Sign in to ${name} again` : `Delete ${name} sign-in`
+  };
+}
+
+/**
+ * The way back from a sign-in the assistant makes for itself and cannot finish: whatever is stored goes and the
+ * assistant restarts, so its pod finds none and relays a fresh code. The only thing a person can do about one of
+ * these, stored or not — nothing else on the row can mend a stored value, and nothing re-relays by itself, because
+ * `failLogin` has already taken the assistant out of `awaiting_login` and the pod asks again only when it next
+ * starts.
+ *
+ * Behind a confirmation because of what it can take with it: a `credential` row is one per owner and kind, so with a
+ * value stored `reconnectSignIn` deletes the one every virtual agent they own uses, and what marks this row lapsed is
+ * one agent's login row — the others may be using that value perfectly well. So the question names that, and is
+ * asked in the destructive style, only when there is a value to lose; with none, the same control restarts and says
+ * so. The hub's own card asks the same two questions the same way.
+ */
+function SignInAgain({
+  assistantId,
+  kind,
+  name,
+  stored,
+  running,
+  reconnect
+}: {
+  assistantId: string;
+  kind: CredentialKind;
+  name: string;
+  stored: boolean;
+  running: boolean;
+  reconnect: FormAction;
+}) {
+  const [asking, setAsking] = useState(false);
+  const confirm = useRef<HTMLButtonElement>(null);
+  const words = againWords(name, stored, running);
+
+  useEffect(() => {
+    if (asking) {
+      confirm.current?.focus();
+    }
+  }, [asking]);
+
+  return (
+    <div className="flex flex-col gap-2 text-[13px] text-asst-body">
+      <p className="text-pretty">
+        {stored ? `Your assistant could not use your saved ${name} sign-in.` : `Your assistant is not signed in to ${name} and is not asking you to.`}
+      </p>
+      {asking ? (
+        <ActionForm action={reconnect} label={`Sign in to ${name} again`} className="flex flex-col gap-2">
+          <input type="hidden" name="id" value={assistantId} />
+          <input type="hidden" name="kind" value={kind} />
+          <p className="text-pretty font-semibold text-asst-text">{words.question}</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              ref={confirm}
+              type="submit"
+              className={`shrink-0 rounded-[10px] px-3.5 py-2 text-[13px] font-semibold ${stored ? "bg-asst-error text-asst-ink" : PRIMARY}`}
+            >
+              {words.confirm}
+            </button>
+            <button type="button" onClick={() => setAsking(false)} className="shrink-0 text-[13px] font-medium text-asst-muted hover:text-asst-text">
+              Cancel
+            </button>
+          </div>
+        </ActionForm>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAsking(true)}
+          className={`self-start rounded-[10px] px-3.5 py-1.5 text-[13px] font-semibold ${stored ? "border border-asst-error text-asst-error hover:bg-asst-active" : "border border-asst-accent-line text-asst-accent-soft hover:bg-asst-active"}`}
+        >
+          Sign in again
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ConnectionRow({
   kind,
   connector,
-  stored,
+  status,
   login,
   assistantId,
   starting,
+  running,
   paste,
   save,
+  reconnect,
   now,
   first
 }: {
   kind: CredentialKind;
   connector: Connector;
-  stored: boolean;
+  status: CredentialStatus | undefined;
   login: LoginView | undefined;
   assistantId: string;
   starting: boolean;
+  running: boolean;
   paste: FormAction;
   save: FormAction;
+  reconnect: FormAction;
   now: number;
   first: boolean;
 }) {
   const [connecting, setConnecting] = useState(false);
-  const state = checklistState(stored, login, now);
+  const answer = checklistState(status?.stored === true, login, now);
+  const state = connectionState(answer, login, status, now);
   // What the person pastes to connect this one, or `null` when their assistant signs in and relays a code. The
   // connector's own answer, so a kind with no sign-in behind it is never offered a note about one never coming.
   const pasted = connector.paste;
+  // A lapsed sign-in the assistant makes for itself, which is the one case the row has an action of its own for:
+  // nothing on it can mend a stored value, nothing re-relays by itself, and a credential may not even be there to
+  // replace. Whether one is only changes what the action takes with it, which `SignInAgain` is what says. Anything
+  // the person pastes keeps offering its box instead, because they can simply paste a new value.
+  const again = hasLapsed(state) && pasted === null;
   let right: React.ReactNode;
-  if (state === "stored") {
+  if (state === "connected") {
     right = <span className="shrink-0 text-[13px] font-medium text-asst-ok">✓ Connected</span>;
-  } else if (state === "login" || (!pasted && (connecting || starting))) {
-    right = <span className="shrink-0 text-[13px] text-asst-accent-soft">{state === "login" ? "Waiting for you" : "Connecting…"}</span>;
+  } else if (again) {
+    right = <span className="shrink-0 text-[13px] text-asst-warn">{CONNECTION_DETAILS[state]}</span>;
+  } else if (answer === "login" || (!pasted && (connecting || starting))) {
+    right = (
+      <span className="shrink-0 text-[13px] text-asst-accent-soft">
+        {answer === "login" ? (state === "finishing" ? CONNECTION_DETAILS[state] : "Waiting for you") : "Connecting…"}
+      </span>
+    );
   } else {
     right = (
       <button
@@ -187,11 +355,15 @@ function ConnectionRow({
   // a field for the same credential, side by side, is two password boxes posting to different places, and a token
   // typed into the code box reaches the pod and comes back only as a sign-in that did not work.
   let below: React.ReactNode = null;
-  if (state === "login" && login !== undefined) {
+  if (answer === "login" && login !== undefined) {
     // The live sign-in wins over anything the person clicked before it arrived, which on the Claude row is the usual
     // order: they ask to connect, and the pod relays its code a moment later.
-    below = <SignIn assistantId={assistantId} login={login} name={connector.name} paste={paste} />;
-  } else if (state !== "stored" && connecting && pasted !== null) {
+    below = <SignIn assistantId={assistantId} login={login} name={connector.name} collectable={codeCollectable(login, now)} paste={paste} />;
+  } else if (again) {
+    below = (
+      <SignInAgain assistantId={assistantId} kind={kind} name={connector.name} stored={status?.stored === true} running={running} reconnect={reconnect} />
+    );
+  } else if (state !== "connected" && connecting && pasted !== null) {
     below = (
       <ActionForm action={save} label={`Save your ${pasted}`} className="flex flex-wrap items-center gap-2">
         <input type="hidden" name="kind" value={kind} />
@@ -201,7 +373,7 @@ function ConnectionRow({
         </button>
       </ActionForm>
     );
-  } else if (state !== "stored" && connecting) {
+  } else if (state !== "connected" && connecting) {
     below = <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>;
   }
   return (
@@ -217,9 +389,15 @@ function ConnectionRow({
         {right}
       </div>
       {below}
-      {state !== "login" && login?.state === "failed" ? (
+      {/*
+       * Only a lapsed key the person pastes reaches here — `again` has the rest — so the way out is the Connect this
+       * row is already offering, and saying so is the whole of it. Promising that the assistant will ask again would
+       * be false: nothing re-relays until its pod next starts.
+       */}
+      {hasLapsed(state) && !again && pasted !== null ? (
         <p role="alert" className="text-xs text-asst-error">
-          That sign-in did not work. Your assistant will ask again.
+          {state === "failed" ? `That ${connector.name} sign-in did not work.` : `That ${connector.name} sign-in ran out before anyone used it.`} Connect it
+          again to paste a new {pasted}.
         </p>
       ) : null}
     </li>
@@ -318,6 +496,10 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
  *
  * `onLeave` is how the screen is closed while a connection is still missing, and it is why the screen may cover the
  * page at all: it is a thing the person opened from the banner and can close again, not a gate across the Assistant.
+ *
+ * A row whose stored credential a pod has failed to use reads as lapsed rather than connected, and offers `reconnect`:
+ * nothing else on this screen can mend a stored value, so without it the one row that needs the person is the one
+ * with nothing on it to press.
  */
 export function GettingReady({
   assistant,
@@ -325,22 +507,25 @@ export function GettingReady({
   unavailable,
   paste,
   save,
+  reconnect,
   onDone,
   onLeave,
   returning = false,
-  theme = "system"
+  theme = "system",
+  now
 }: ScreenProps & {
   statuses: CredentialStatus[];
   paste: FormAction;
   save: FormAction;
+  reconnect: FormAction;
   onDone: () => void;
   onLeave?: () => void;
   returning?: boolean;
+  /** The clock the gate is reading, so the banner and the screen it opens are never a few seconds apart. */
+  now: number;
 }) {
-  const now = useNow();
   const ask = connectionsAsk(assistant.onboarded, unavailable);
-  const stored = (kind: CredentialKind) => statuses.some((status) => status.kind === kind && status.stored);
-  const offered = offeredConnections(assistant);
+  const offered = offeredConnections(assistant, now);
   const starting = !assistant.readiness.failed && assistant.status !== "running";
   return (
     <ReadyShell assistant={assistant} unavailable={unavailable} theme={theme} subtitle={subtitleFor(ask, returning)}>
@@ -356,12 +541,14 @@ export function GettingReady({
               key={kind}
               kind={kind}
               connector={connector}
-              stored={stored(kind)}
+              status={statuses.find((status) => status.kind === kind)}
               login={assistant.logins.find((login) => login.kind === kind)}
               assistantId={assistant.id}
               starting={starting}
+              running={assistant.desired === "running"}
               paste={paste}
               save={save}
+              reconnect={reconnect}
               now={now}
               first={index === 0}
             />
@@ -555,14 +742,32 @@ function storedKinds(statuses: CredentialStatus[]): Set<CredentialKind> {
  * connect it again, and a screen on it would be satisfied only by the credentials the hub is failing to read. They
  * are told why once instead, on a banner they can send away, and that is remembered in the same cookie a wait's is,
  * so moving between pages does not bring it back.
+ *
+ * A sign-in the pod is holding for the person is the one ask none of those latches may hide. It is read live from the
+ * sign-ins rather than from how far the assistant has got, for two reasons: a relay arriving after the page loaded
+ * finds `waiting` and `ranOnce` already settled for the visit, and the assistant does not stay in `awaiting_login`
+ * anyway — the last code dying takes it back to `running`, so a surface keyed to the status has nothing to show by
+ * the time the codes have run out. It is a banner, like every other ask here, and the screen behind it opens only
+ * when the person presses it: a code waiting is not worth taking away the conversation they are in the middle of.
+ *
+ * It is read out by a region holding the ask and nothing else, so it is announced as it changes. The screen it opens
+ * is not a live region and the banner is not inside one: a region around the page would read the ask again on every
+ * `router.refresh()` the stream causes, of which a relay is only one. The sentence says which sign-in and what kind
+ * of thing to do, so a count of asks would name neither, and a fresh code arriving over a lapsed one is a change.
  */
 export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean }) {
   const { assistant } = props;
   const visit = useVisit();
+  // One clock for the banner and for the screen it opens, started from the page's own and handed down rather than
+  // read again there: two readings of the same hook are two intervals mounted at different moments, so they would
+  // differ by up to `SIGN_IN_CLOCK_MS` and the banner could point at a screen that disagreed with it about whether a
+  // code was still live.
+  const now = useSignInClock(props.now);
   const ask = connectionsAsk(assistant.onboarded, props.unavailable);
   const [needed] = useState(ask === "connect");
   const [waiting] = useState(ask === "done" && assistant.status !== "running");
   const [done, setDone] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [view, setView] = useState<"screen" | "notice" | "gone">(() => initialView(ask, dismissed));
   const running = assistant.status === "running";
   // Latched while rendering rather than in an effect, which runs after paint: the frame the person would see at the
@@ -592,31 +797,86 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
     setView("gone");
     rememberDismissal(assistant, true);
   }, [assistant]);
+  const stopAsking = useCallback(() => setAsking(false), []);
+  // The same kinds the screen lists, from the same function, so the banner can never name a sign-in the screen has no
+  // row for nor stay quiet about one it does. Empty while the credentials cannot be read, which is the one case
+  // nothing here is allowed to make a claim about.
+  const rows = connections(
+    {
+      kinds: offeredConnections(assistant, now).map((row) => row.kind),
+      statuses: props.statuses,
+      logins: assistant.logins,
+      unavailable: props.unavailable
+    },
+    checklistState,
+    now
+  );
+  const relayed = signInPrompt(rows);
+  // What the live region holds, put there after the browser takes over rather than rendered into the HTML. A live
+  // region is not announced for what it already contains, so an ask that was there when the page loaded would reach
+  // a screen-reader user only if they happened on the banner; going from empty to the sentence is a change, and is
+  // read. Keyed on the sentence, so a `router.refresh()` that leaves the ask alone says nothing.
+  //
+  // Each of the Assistant's pages mounts this afresh, so moving between them reads an outstanding ask again. That is
+  // the intended side of the trade: a sign-in still waiting is worth hearing about on the page they have arrived at,
+  // and the alternative is carrying "already said" in a cookie for something the person has yet to do.
+  const [announced, setAnnounced] = useState("");
+  const message = relayed?.message ?? "";
+  useEffect(() => {
+    setAnnounced(message);
+  }, [message]);
   const onboarding = (ask === "connect" || (needed && !done)) && view === "screen";
   const unknown = ask === "unknown" && view === "screen";
   const screen = waiting && !started && !onboarding && !unknown && view === "screen";
-  useEscape(onboarding || unknown || screen, unknown ? hide : dismiss);
-  if (onboarding) {
-    return <GettingReady {...props} onDone={() => setDone(true)} onLeave={dismiss} />;
+  const signIn = relayed !== null && asking && !onboarding && !unknown && !screen;
+  useEscape(onboarding || unknown || screen || signIn, unknown ? hide : signIn ? stopAsking : dismiss);
+
+  /** Whichever surface is showing, if any, in the order they take precedence. */
+  function surface(): React.ReactNode {
+    if (onboarding) {
+      return <GettingReady {...props} now={now} onDone={() => setDone(true)} onLeave={dismiss} />;
+    }
+    if (unknown) {
+      return <GettingReady {...props} now={now} onDone={hide} />;
+    }
+    if (screen) {
+      return waitingForPerson(assistant.status) ? (
+        <GettingReady {...props} now={now} returning onDone={dismiss} />
+      ) : (
+        <WarmingUp assistant={assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} />
+      );
+    }
+    if (signIn) {
+      return <GettingReady {...props} now={now} returning onDone={stopAsking} />;
+    }
+    // Sent away for good, which only an `unknown` is ever allowed to be: an ask with something still to connect
+    // outlasts anything the person closes, because it is the only thing telling them why nothing works.
+    const silenced = view === "gone" && ask === "unknown";
+    const prompt = silenced ? null : connectionsPrompt(ask, assistant.needed, storedKinds(props.statuses));
+    if (prompt !== null) {
+      return <ConnectionsBanner prompt={prompt} onShow={show} onHide={ask === "unknown" ? hide : undefined} />;
+    }
+    // Not hideable, for the same reason the ask to connect is not: it is the only thing telling the person their
+    // assistant is holding a code for them, and it clears itself the moment they have used it.
+    if (relayed !== null) {
+      return <ConnectionsBanner prompt={relayed} onShow={() => setAsking(true)} />;
+    }
+    // Only for a wait this visit began on: someone who arrives to an assistant already up is not shown the end of a
+    // wait they never saw, however recently they sent one away.
+    return waiting && view === "notice" ? <WaitingNotice assistant={assistant} onShow={show} onHide={() => setView("gone")} /> : null;
   }
-  if (unknown) {
-    return <GettingReady {...props} onDone={hide} />;
-  }
-  if (screen) {
-    return waitingForPerson(assistant.status) ? (
-      <GettingReady {...props} returning onDone={dismiss} />
-    ) : (
-      <WarmingUp assistant={assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} />
-    );
-  }
-  // Sent away for good, which only an `unknown` is ever allowed to be: an ask with something still to connect
-  // outlasts anything the person closes, because it is the only thing telling them why nothing works.
-  const silenced = view === "gone" && ask === "unknown";
-  const prompt = silenced ? null : connectionsPrompt(ask, assistant.needed, storedKinds(props.statuses));
-  if (prompt !== null) {
-    return <ConnectionsBanner prompt={prompt} onShow={show} onHide={ask === "unknown" ? hide : undefined} />;
-  }
-  // Only for a wait this visit began on: someone who arrives to an assistant already up is not shown the end of a
-  // wait they never saw, however recently they sent one away.
-  return waiting && view === "notice" ? <WaitingNotice assistant={assistant} onShow={show} onHide={() => setView("gone")} /> : null;
+
+  return (
+    <>
+      {surface()}
+      {/*
+       * The ask and nothing else, so what is read out is the sentence that says which sign-in and what to do about
+       * it. `aria-atomic` reads the whole of it, and a change — a code arriving over a lapsed sign-in, a second
+       * sign-in joining the first — is read as the new sentence rather than as a count of asks.
+       */}
+      <div aria-live="polite" aria-atomic="true" className="sr-only" data-testid="sign-in-ask">
+        {announced}
+      </div>
+    </>
+  );
 }

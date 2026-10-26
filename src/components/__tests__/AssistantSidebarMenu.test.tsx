@@ -47,7 +47,13 @@ function actions(overrides: Partial<ConversationActions> = {}): ConversationActi
 /** The sidebar with two chats, the second of which, "Story draft", is the one open. */
 function shell(props: { actions?: ConversationActions; activeId?: string | null } = {}) {
   return (
-    <AssistantShell viewerName="Alice Smith" groups={[{ label: "Today", items: [link("a", "Event help"), link("b", "Story draft")] }]} activeId="b" {...props}>
+    <AssistantShell
+      now={Date.now()}
+      viewerName="Alice Smith"
+      groups={[{ label: "Today", items: [link("a", "Event help"), link("b", "Story draft")] }]}
+      activeId="b"
+      {...props}
+    >
       <SidebarToggle />
       <p>page</p>
     </AssistantShell>

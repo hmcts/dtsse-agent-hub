@@ -59,6 +59,7 @@ function link(id: string, title: string): ConversationLink {
 function shell(props: Partial<Parameters<typeof AssistantShell>[0]> = {}) {
   return (
     <AssistantShell
+      now={Date.now()}
       viewerName="Alice Smith"
       groups={[
         { label: "Today", items: [link("a", "Event help"), link("b", "Story draft")] },
@@ -447,7 +448,7 @@ describe("AssistantShell sidebar width", () => {
   it("should hold the document panel back from the chat's room as the sidebar is widened", () => {
     viewport(1600);
     render(
-      <AssistantShell viewerName="Alice Smith" groups={[]} activeId={null}>
+      <AssistantShell now={Date.now()} viewerName="Alice Smith" groups={[]} activeId={null}>
         <ArtefactPanel
           conversationId="22222222-2222-2222-2222-222222222222"
           artefact={{ title: "Story", markdown: "# Original", version: 2, updatedBy: "user" }}
