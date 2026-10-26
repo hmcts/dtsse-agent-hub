@@ -207,6 +207,25 @@ describe("createTmux", () => {
     ]);
   });
 
+  // The supervisor logs a refused `send-keys`, and that log is only honest if this throws: keys are how a session is
+  // told to exit or to end a turn, so `send-keys` reporting success for keys that never arrived would have the
+  // supervisor say it interrupted a turn that is still running.
+  it("should throw with the exit code and stderr when send-keys fails", async () => {
+    // Arrange
+    const { exec } = recorder({ code: 1, stderr: "  can't find pane: c-1\n" });
+
+    // Act & Assert
+    await expect(createTmux({ exec }).sendKeys("c-1", "Escape")).rejects.toThrow("tmux send-keys exited 1: can't find pane: c-1");
+  });
+
+  it("should report the exit code and stderr of the real tmux when send-keys fails", async () => {
+    // Arrange
+    const tmux = createTmux({ env: { PATH: binDir } });
+
+    // Act & Assert
+    await expect(tmux.sendKeys("fail", "Escape")).rejects.toThrow("tmux send-keys exited 7: no server running");
+  });
+
   it("should list the trimmed session names and say a session exists when tmux answers 0", async () => {
     // Arrange
     const tmux = createTmux({ env: { PATH: binDir } });

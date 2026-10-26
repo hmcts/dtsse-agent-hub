@@ -17,7 +17,8 @@
  * - An HMCTS Assistant conversation, and the agent its sessions run as, are its owner's alone: no grant extends to
  *   either, since the conversation is a private chat rather than a session they chose to share. Nor to a file
  *   attached to one of its messages: only the person who uploaded it may add parts to it, discard it or download it
- *   back, and only the session of the conversation it was attached to may fetch its bytes.
+ *   back, and only the session of the conversation it was attached to may fetch its bytes. Nor to the person's saved
+ *   Assistant templates, which only they read or change.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
  */
@@ -180,6 +181,16 @@ export function canVirtualAgentStoreCredential(kind: string): boolean {
   return kind !== "claude_md" && kind !== "git_identity";
 }
 
+/**
+ * Whether `actorOid` may read, save, rename or delete `ownerOid`'s saved Assistant templates. Their own alone, and
+ * reading is the same decision as writing: a template is a prompt somebody wrote for themselves, so there is nothing
+ * about it a reader is entitled to that an editor is not. No grant extends to them, for the same reason none extends
+ * to an Assistant conversation — a grant is over sessions a person chose to share, and these are not part of one.
+ */
+export function canManageTemplate(actorOid: string, ownerOid: string): boolean {
+  return actorOid === ownerOid;
+}
+
 export type UploadState = "pending" | "stored" | "fetched" | "expired";
 
 /** The columns every upload rule reads. */
@@ -334,4 +345,14 @@ export interface ConversationRef {
  */
 export function canViewConversation(viewerOid: string, conversation: ConversationRef): boolean {
   return viewerOid === conversation.ownerOid;
+}
+
+/**
+ * Only its owner stops an answer their conversation is working on. The same single answer as
+ * `canViewConversation`'s, and its own rule for the same reason: interrupting a turn is an act on the session rather
+ * than a read of the chat, so it is worth saying separately that no grant reaches it — not even a `write` one, which
+ * elsewhere lets a grantee message an agent.
+ */
+export function canStopAssistantAnswer(actorOid: string, conversation: ConversationRef): boolean {
+  return actorOid === conversation.ownerOid;
 }

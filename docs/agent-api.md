@@ -102,13 +102,29 @@ Every virtual agent can hold **conversations**: the chats of the HMCTS Assistant
 
 | Method and path | Body | Response |
 |---|---|---|
-| `GET /api/virtual/{id}/sessions` | — | SSE, framed as the agent stream: `: connected`, `retry: 1000`, `: ping` every 15 seconds, and `event: reconnect` at the stream lifetime. On connect it sends a `wake` for every conversation with a wake pending, oldest first; after that, a `wake` for each new one and a `close` for each conversation deleted. `wake` data is `{conversation_id, session_id, resume, product}`, where `resume` is `true` once the session has sent a transcript entry, so the pod runs `claude --resume <session_id>` rather than `claude --session-id <session_id>` (the pod also checks for the session's JSONL itself). `close` data is `{conversation_id}`; the pod stops whatever session it runs for that conversation. A deleted conversation takes its agents, their transcripts and its messages with it. A wake is sent again on every connection until a session registers for the conversation. |
+| `GET /api/virtual/{id}/sessions` | — | SSE, framed as the agent stream: `: connected`, `retry: 1000`, `: ping` every 15 seconds, and `event: reconnect` at the stream lifetime. On connect it sends a `wake` for every conversation with a wake pending, oldest first; after that, a `wake` for each new one, an `interrupt` for each answer the person stopped, and a `close` for each conversation deleted. `wake` data is `{conversation_id, session_id, resume, product}`, where `resume` is `true` once the session has sent a transcript entry, so the pod runs `claude --resume <session_id>` rather than `claude --session-id <session_id>` (the pod also checks for the session's JSONL itself). `interrupt` data is `{conversation_id}` and is described under Stopping an answer below. `close` data is `{conversation_id}`; the pod stops whatever session it runs for that conversation. A deleted conversation takes its agents, their transcripts and its messages with it. A wake is sent again on every connection until a session registers for the conversation. |
 | `PUT /api/virtual/{id}/sessions` | `{sessions: [{conversation_id, state, detail?}], max}` | `204`. What the supervisor runs, replacing its last report: `state` is `starting`, `live` or `queued` (waiting for a free slot), `detail` at most 200 characters, and `max` how many sessions it runs at once, 1–20; at most 50 entries. A conversation left out has no session. Unknown conversation ids are ignored. Notifies the owner's UI. |
 | `GET /api/virtual/{id}/conversations` | — | `200 {conversations: [{id}]}`, every conversation of that virtual agent. The pod reconciles its `/workspace/uploads/<conversation-id>/` directories against this list (see Attachments below), so a conversation deleted while it was stopped — which sends no `close` it was there to hear — still has its files removed. |
 
 **Registering.** The supervisor starts each session with the conversation's `session_id` and with `AGENT_HUB_CONVERSATION_ID` in its environment, and the session registers with `conversation_id` set, using the launch token. That registration adopts the agent the hub created, makes it the conversation's current agent and clears the wake, and does **not** make it the virtual agent's current agent. A later registration with the same `conversation_id` and a new `session_id` (after `/clear`) becomes the conversation's current agent instead. A `conversation_id` that is not one of the launch token's virtual agent's conversations, or sent without a launch token, gives `409`. A conversation's session subscribes to no topics.
 
 **Direct frames.** A `direct` frame to a conversation's agent carries `assistant: {conversation_id, product, product_label, artefact_version, artefact_updated_by, attachments}`: the product area the person chose for the conversation — a CFT product slug of 1–32 lowercase letters, digits and hyphens (`ccd`, `nfdiv`, `pcs`, …), or `general` when none in particular, which is the default — and its display name, which is the slug itself for a product the hub no longer offers, since the frame carries what the conversation is stored as rather than what its picker can show; and the version of the conversation's artefact and who last wrote it (`user`, `agent`, or `null` before anyone has); and the files the person attached to this message (see Attachments below; an empty array for a message with none). The client frames the message for a non-technical reader, and tells the session when the product has changed since the last message it delivered.
+
+**Stopping an answer.** While a conversation's session is answering, its owner can stop it from the web UI. The hub
+records the stop on the conversation and sends the pod an `interrupt` frame, `{conversation_id}`, on its sessions
+stream. The pod sends `Escape` to that conversation's tmux pane, which is Claude Code's own `chat:cancel` binding:
+it ends the turn in progress and leaves the session running, with its conversation and its place in the transcript
+intact. An `interrupt` for a conversation the pod runs no session for, or whose session it is already stopping, is
+ignored.
+
+Unlike a wake, an `interrupt` is sent once and never replayed: a pod that was not connected to hear it has no turn
+left to end by the time it reconnects, and a stop that fired late would interrupt whatever the session had moved on
+to. So the hub only sends one when it can see a turn to stop — the conversation's current agent is `busy`. Asked to
+stop a conversation with no busy agent it does nothing at all: no frame, no record, and no message, since the web UI
+offers the control only while that agent reads `busy` and the status it reads is at most a few seconds stale, so the
+only way to get here is an answer that landed between the press and the read. Stopping is gated on the `stop` client
+feature, and that one *is* refused in words: the hub will not record a stop for a session whose client never claimed
+it, because waiting will not make that session stoppable.
 
 **Artefacts.** Each conversation has one markdown document, its artefact, which the person and the session can both edit.
 
@@ -239,10 +255,15 @@ field out and the UI can say that the feature is not available on that session y
 - It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
   been upgraded re-registers.
 
-`attachments` is the one name in use. The clients published from this repo claim it, because they read the
-`attachments` on an Assistant `direct` frame and fetch each file to the pod's disk. No hub field is gated on it yet —
-the frame carries `attachments` to every session — so a client too old to claim it still gets the frame, and drops
-that message's files.
+Two names are in use, and the clients published from this repo claim both.
+
+- `attachments`, because they read the `attachments` on an Assistant `direct` frame and fetch each file to the pod's
+  disk. No hub field is gated on it — the frame carries `attachments` to every session — so a client too old to claim
+  it still gets the frame, and drops that message's files.
+- `stop`, because their supervisor reads the sessions stream's `interrupt` frame and sends `Escape` to the pane. This
+  one **is** gated, on both sides: the hub refuses to stop an answer on a session that did not claim it, and the web
+  UI offers no stop control for such a conversation. A pod takes the current client when it boots, so a conversation
+  on a session started by an older build has no stop until that session is next started.
 
 ## Replies
 

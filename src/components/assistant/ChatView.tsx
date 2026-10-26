@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { clientSupports } from "@/agents/client-features";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
@@ -25,6 +26,8 @@ import type { ActionResult } from "@/web/action";
 export interface ChatActions {
   send: (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult<{ message: ThreadMessage }>>;
   warm: (input: { conversationId: unknown }) => Promise<ActionResult>;
+  /** `stopped` is false for a press the answer beat, which ends no turn and is told to nobody. */
+  stop: (input: { conversationId: unknown }) => Promise<ActionResult<{ stopped: boolean }>>;
   setProduct: (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
   rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
@@ -49,7 +52,42 @@ function Dots({ doing }: { doing: Progress }) {
   );
 }
 
+/**
+ * Stops the answer being written. Rendered only where `doing.state` is `working` — the session itself reads `busy` —
+ * so the only stop that can find nothing to end is one pressed in the seconds that status is stale. A session still
+ * starting, or a message still being sent, has no turn to interrupt and is offered no button.
+ *
+ * `pressed` is what stands in for the control going away: the thread takes a moment to come back with the stop
+ * recorded, and a button that stayed live through it invites a second press at a turn already ending.
+ */
+function StopButton({ onStop }: { onStop: () => Promise<void> }) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={pressed}
+      onClick={() => {
+        setPressed(true);
+        void onStop().finally(() => setPressed(false));
+      }}
+      className="flex items-center gap-1.5 rounded-full border border-asst-strong px-2.5 py-1 text-xs text-asst-muted hover:bg-asst-field disabled:opacity-60"
+    >
+      <span aria-hidden="true" className="h-2 w-2 rounded-[2px] bg-current" />
+      Stop
+    </button>
+  );
+}
+
 function Item({ item }: { item: ThreadItem }) {
+  if (item.type === "stopped") {
+    return (
+      <li className="flex items-center gap-3 text-xs text-asst-faint">
+        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+        You stopped this answer
+        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+      </li>
+    );
+  }
   if (item.type === "product") {
     return (
       <li className="flex items-center gap-3 text-xs text-asst-faint">
@@ -191,8 +229,21 @@ export function ChatView({
 
   // The picker can only show a product it offers, so it and the dialog it opens read the stored one through this.
   const product = storedProduct(view.product);
-  const thread = threadItems(live.items, view.productHistory);
+  const thread = threadItems(live.items, view.productHistory, view.stopHistory);
   const doing: Progress = progress(live.items, thread, status, view.sessionState);
+  /**
+   * Both halves of "there is something to stop, and stopping it will work".
+   *
+   * `working` and not merely "not idle": the waking states are a session still starting or a message still on its
+   * way, where there is no turn to interrupt. It also stands in for the staleness of `clientFeatures`, which is
+   * written at registration and never cleared — a conversation whose session was idle-reaped still claims `stop`,
+   * and only the status says it is not running.
+   *
+   * The claim itself is the other half. A pod takes the current client when it boots, so a conversation on an older
+   * session has no stop until that session is next started; a button there would do nothing, which is worse than
+   * the plain wait.
+   */
+  const stoppable = doing.state === "working" && clientSupports(view.clientFeatures, "stop");
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
@@ -208,6 +259,18 @@ export function ChatView({
     }
     live.addMessage(result.message);
     return null;
+  }
+
+  async function stop(): Promise<void> {
+    const result = await actions.stop({ conversationId: view.id });
+    setError(result.ok ? null : result.error);
+    // Only for a stop that ended a turn. Said rather than left to the thread's redraw, because the stop is the one
+    // thing here a person does and gets no reply to, and the line that records it is a quiet separator a reader is
+    // not sent to. A press the answer beat records nothing, so there is nothing to announce either.
+    if (result.ok && result.stopped) {
+      arrivals.announce("Stopped");
+    }
+    router.refresh();
   }
 
   async function changeProduct(product: string): Promise<void> {
@@ -309,7 +372,12 @@ export function ChatView({
                 <Item key={item.key} item={item} />
               ))}
             </ol>
-            {doing.state === "idle" ? null : <Dots doing={doing} />}
+            {doing.state === "idle" ? null : (
+              <div className="flex items-center gap-3">
+                <Dots doing={doing} />
+                {stoppable ? <StopButton onStop={stop} /> : null}
+              </div>
+            )}
             {/*
               Always in the page, even with nothing to say: a live region added to the document at the same moment as
               its first text is not reliably announced. Emptying it as the answer settles is deliberate too, so the

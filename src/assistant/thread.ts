@@ -19,10 +19,16 @@ export type ThreadItem =
    */
   | { type: "user"; key: string; at: string; text: string; delivery: DeliveryView | null; attachments: MessageAttachment[] }
   | { type: "assistant"; key: string; at: string; text: string }
-  | { type: "product"; key: string; at: string; label: string };
+  | { type: "product"; key: string; at: string; label: string }
+  /** Where the person stopped an answer. Whatever the assistant had said by then stays above it. */
+  | { type: "stopped"; key: string; at: string };
 
 export interface ProductMark {
   product: string;
+  at: string;
+}
+
+export interface StopMark {
   at: string;
 }
 
@@ -34,13 +40,16 @@ function textOf(content: unknown): string | undefined {
   return undefined;
 }
 
-/** By time, then by kind so a product change at the same instant as a message sits before it. */
+/**
+ * By time, then by kind so a product change at the same instant as a message sits before it and a stop sits after
+ * it: a stop is always something the person did to what was already on the screen.
+ */
 function byTime(left: ThreadItem, right: ThreadItem): number {
-  const rank = (item: ThreadItem) => (item.type === "product" ? 0 : 1);
+  const rank = (item: ThreadItem) => (item.type === "product" ? 0 : item.type === "stopped" ? 2 : 1);
   return byCodePoint(left.at, right.at) || rank(left) - rank(right);
 }
 
-export function threadItems(items: readonly ConversationItem[], products: readonly ProductMark[] = []): ThreadItem[] {
+export function threadItems(items: readonly ConversationItem[], products: readonly ProductMark[] = [], stops: readonly StopMark[] = []): ThreadItem[] {
   const thread: ThreadItem[] = [];
   for (const item of items) {
     if (item.type === "message") {
@@ -58,7 +67,8 @@ export function threadItems(items: readonly ConversationItem[], products: readon
     }
   }
   const marks = products.map((mark): ThreadItem => ({ type: "product", key: `p${mark.at}`, at: mark.at, label: productLabel(mark.product) }));
-  return [...thread, ...marks].sort(byTime);
+  const stopped = stops.map((mark): ThreadItem => ({ type: "stopped", key: `s${mark.at}`, at: mark.at }));
+  return [...thread, ...marks, ...stopped].sort(byTime);
 }
 
 /** What Claude Code's tools do, in words for someone who has never seen one. */
@@ -147,14 +157,22 @@ export function runningHelpers(items: readonly ConversationItem[], since: string
 /**
  * Whether the assistant is working on the person's last message, and what to tell them.
  *
- * The session's own `busy` is what says it is working: its hooks set it as a turn starts and clear it as the turn
- * ends, however it ended, so an answer that failed or was stopped leaves this line rather than spinning forever.
- * Before that, a message still queued on the hub is on its way, and an offline agent is one the pod is starting.
- * Nothing is said in any other case: a line claiming work nobody is doing is worse than no line.
+ * The session's own `busy` is what says it is working: its `UserPromptSubmit` hook sets it as a turn starts and its
+ * `Stop` hook clears it as the turn ends. A turn the person interrupted runs no `Stop` hook at all, so the pod's
+ * interrupt writes `idle` itself; without that, this line would spin for ever on a stopped answer. Before `busy`, a
+ * message still queued on the hub is on its way, and an offline agent is one the pod is starting. Nothing is said in
+ * any other case: a line claiming work nobody is doing is worse than no line.
  */
 export function progress(items: readonly ConversationItem[], thread: readonly ThreadItem[], agentStatus: AgentStatus, session: SessionState): Progress {
   const spoken = thread.filter((item) => item.type !== "product");
   const last = spoken.at(-1);
+  // Before `busy` is read, because the status is a few seconds behind the stop and until it catches up "Thinking…"
+  // would sit directly under the line saying they stopped it. Only a mask over that window: what actually ends the
+  // work is the pod's interrupt, which writes `idle` itself. Anything the session says after the stop is a later
+  // item, so this stops standing the moment there is something to show.
+  if (last?.type === "stopped") {
+    return { state: "idle" };
+  }
   const asked = last?.type === "user" ? last : undefined;
   if (asked !== undefined && asked.delivery !== "expired" && agentStatus === "offline") {
     return { state: "waking", label: session === "queued" ? "Waiting for a free assistant…" : "Starting your assistant…" };

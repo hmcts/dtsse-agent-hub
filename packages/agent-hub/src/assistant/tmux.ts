@@ -138,8 +138,13 @@ export function createTmux({ env = process.env, exec = runTmux }: CreateTmuxOpti
         throw new Error(`tmux new-session exited ${r.code}${r.stderr.trim() ? `: ${r.stderr.trim()}` : ""}`);
       }
     },
+    // Throws on a refusal, as `start` does: every caller logs what went wrong and the keys are how a session is
+    // told to exit or to end a turn, so keys that never arrived must not be reported as if they had.
     async sendKeys(name, ...keys) {
-      await tmux(["send-keys", "-t", name, ...keys]);
+      const r = await tmux(["send-keys", "-t", name, ...keys]);
+      if (r.code !== 0) {
+        throw new Error(`tmux send-keys exited ${r.code}${r.stderr.trim() ? `: ${r.stderr.trim()}` : ""}`);
+      }
     },
     async kill(name) {
       await tmux(["kill-session", "-t", name]);

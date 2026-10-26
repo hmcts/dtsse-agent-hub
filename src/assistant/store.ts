@@ -1,4 +1,5 @@
 import { HttpError } from "../agent-api/http.ts";
+import { clientSupports } from "../agents/client-features.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
@@ -23,6 +24,7 @@ export const ASSISTANT_NAME = "assistant";
 export const TITLE_FROM_MESSAGE = 60;
 
 const MAX_PRODUCT_HISTORY = 50;
+const MAX_STOP_HISTORY = 50;
 
 export class ConversationNotFound extends HttpError {
   constructor() {
@@ -38,6 +40,7 @@ export interface ConversationRow {
   title: string | null;
   product: string;
   productHistory: ProductChange[];
+  stopHistory: StopMark[];
   wakeRequestedAt: Date | null;
   sessionState: SessionState | null;
   sessionDetail: string | null;
@@ -49,6 +52,11 @@ export type SessionState = "starting" | "live" | "queued";
 
 export interface ProductChange {
   product: string;
+  at: string;
+}
+
+/** When the person stopped an answer, which is where the thread shows that they did. */
+export interface StopMark {
   at: string;
 }
 
@@ -68,6 +76,7 @@ const SELECT = {
   title: true,
   product: true,
   productHistory: true,
+  stopHistory: true,
   wakeRequestedAt: true,
   sessionState: true,
   sessionDetail: true,
@@ -84,6 +93,13 @@ function storedHistory(value: unknown): ProductChange[] {
   );
 }
 
+function storedStops(value: unknown): StopMark[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((mark): mark is StopMark => typeof mark === "object" && mark !== null && typeof mark.at === "string");
+}
+
 function toRow(row: {
   id: string;
   ownerOid: string;
@@ -92,6 +108,7 @@ function toRow(row: {
   title: string | null;
   product: string;
   productHistory: unknown;
+  stopHistory: unknown;
   wakeRequestedAt: Date | null;
   sessionState: string | null;
   sessionDetail: string | null;
@@ -105,6 +122,7 @@ function toRow(row: {
     // not go through here: `assistantFrame` and `pendingWakes` carry the slug as stored.
     product: storedProduct(row.product),
     productHistory: storedHistory(row.productHistory),
+    stopHistory: storedStops(row.stopHistory),
     sessionState: state === "starting" || state === "live" || state === "queued" ? state : null
   };
 }
@@ -382,6 +400,55 @@ export async function requestWake(prisma: PrismaClient, conversation: Conversati
   if (assistant?.desired === "stopped") {
     await setDesired(prisma, conversation.ownerOid, assistant.id, "running", now);
   }
+}
+
+/** Why a stop did nothing, or `stopped` when it did. Each one is something to tell the person, not an error. */
+export type StopOutcome = "stopped" | "nothing-running" | "unsupported-client";
+
+/**
+ * Stops the answer the conversation's session is working on: records it on the conversation, so the thread shows
+ * where the answer was cut off, and tells the pod to interrupt the session.
+ *
+ * Only while the hub can see a turn to stop. The `interrupt` is sent once and never replayed, so a stop asked for
+ * after the answer landed would reach a session that had moved on — and recording one that interrupted nothing would
+ * put a line in the thread saying the person stopped an answer that in fact finished. `busy` on the conversation's
+ * current agent is that check: the session's own hooks write it, and the bridge sends it on within seconds of a turn
+ * starting or ending.
+ *
+ * Refused outright for a session whose client never claimed `stop`, which would ignore the frame in silence. That
+ * claim is also what the UI gates its stop control on, so this is the second line of the same defence rather than
+ * the one the person normally meets.
+ */
+export async function stopAnswer(prisma: PrismaClient, conversation: ConversationRow, now: Date = new Date()): Promise<StopOutcome> {
+  if (conversation.agentId === null) {
+    return "nothing-running";
+  }
+  const agent = await prisma.agent.findUnique({ where: { id: conversation.agentId }, select: { status: true, clientFeatures: true } });
+  if (agent === null || agent.status !== "busy") {
+    return "nothing-running";
+  }
+  if (!clientSupports(agent.clientFeatures, "stop")) {
+    return "unsupported-client";
+  }
+  const history = [...conversation.stopHistory, { at: now.toISOString() }].slice(-MAX_STOP_HISTORY);
+  await prisma.$transaction(async (tx) => {
+    // Written as `setProduct` writes the product history, rather than through the typed client: Prisma's JSON input
+    // type takes no array of a named interface, and the two histories are better off written the same way.
+    await tx.$executeRaw`
+      UPDATE assistant_conversation
+         SET stop_history = ${JSON.stringify(history)}::jsonb, updated_at = ${now}
+       WHERE id = ${conversation.id}::uuid
+    `;
+    // The pod acts on `assistant_stop`; the announcement beside it is what redraws the thread for the person.
+    await announce(tx, conversation);
+    await notify(tx, {
+      type: "assistant_stop",
+      conversation_id: conversation.id,
+      virtual_agent_id: conversation.virtualAgentId,
+      owner_oid: conversation.ownerOid
+    });
+  });
+  return "stopped";
 }
 
 /** The conversation's agent, created again if it has none, so there is always somewhere for a message to queue. */
