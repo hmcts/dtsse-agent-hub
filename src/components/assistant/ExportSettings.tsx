@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DEFAULT_CONFLUENCE_PARENT } from "@/assistant/confluence";
 import type { DefaultConfluencePage, DefaultJiraProject, ExportDefaults } from "@/assistant/export-defaults";
+import { DEFAULT_JIRA_PROJECT } from "@/assistant/jira";
 import { breadcrumb, type ConfluencePageResult, type JiraProjectResult } from "@/assistant/lookups";
 import { AtlassianSearch, shortCrumb } from "@/components/assistant/AtlassianSearch";
 import type { JiraAccess } from "@/components/assistant/JiraExport";
@@ -20,13 +21,22 @@ export interface AssistantExportDefaults {
   lookUp?: LookUp;
 }
 
-/** One default: what it is now, and the search that changes it or the button that clears it. */
+/** "(built-in)" after a default the person has not chosen, so they can tell it from one of their own. */
+function BuiltIn() {
+  return <span className="shrink-0 text-xs text-asst-faint">(built-in)</span>;
+}
+
+/**
+ * One default: what it is now, and the search that changes it or the button that clears it. With none of their own,
+ * the built-in one shows in its place, as what their documents go to, so there is always something to change; there
+ * is nothing to clear until they pick their own.
+ */
 function Choice({
   id,
   label,
   hint,
   current,
-  empty,
+  builtIn,
   onSearch,
   onClear,
   searching,
@@ -36,7 +46,7 @@ function Choice({
   label: string;
   hint: string;
   current: React.ReactNode | null;
-  empty: string;
+  builtIn: React.ReactNode;
   onSearch: () => void;
   onClear: () => void;
   searching: boolean;
@@ -52,9 +62,9 @@ function Choice({
         children
       ) : (
         <div className="flex items-center gap-3 rounded-[10px] border border-asst-line px-3.5 py-2.5">
-          <div className="min-w-0 flex-1">{current ?? <span className="text-[13px] text-asst-faint">{empty}</span>}</div>
+          <div className="min-w-0 flex-1">{current ?? builtIn}</div>
           <button type="button" onClick={onSearch} className="shrink-0 text-xs text-asst-accent underline">
-            {current === null ? "Choose" : "Change"}
+            Change
           </button>
           {current === null ? null : (
             <button type="button" onClick={onClear} className="shrink-0 text-xs text-asst-muted underline hover:text-asst-text">
@@ -111,7 +121,12 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
         id="assistant-settings-jira-default"
         label="Jira backlog"
         hint="Any Jira project you can create tickets in."
-        empty="None: the panel offers VIBE"
+        builtIn={
+          <span className="flex min-w-0 items-baseline gap-2 text-[13px]">
+            <span className="font-plex-mono font-medium">{DEFAULT_JIRA_PROJECT}</span>
+            <BuiltIn />
+          </span>
+        }
         current={
           jira === null ? null : (
             <span className="flex min-w-0 items-baseline gap-2 text-[13px]">
@@ -142,7 +157,15 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
         id="assistant-settings-confluence-default"
         label="Confluence page"
         hint="New pages go under this one, and searches start in its space."
-        empty={`None: the panel offers ${DEFAULT_CONFLUENCE_PARENT.title}`}
+        builtIn={
+          <span className="flex min-w-0 flex-col leading-tight" title={breadcrumb(DEFAULT_CONFLUENCE_PARENT).join(" › ")}>
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate text-[13px] font-medium">{DEFAULT_CONFLUENCE_PARENT.title}</span>
+              <BuiltIn />
+            </span>
+            <span className="truncate text-xs text-asst-faint">{shortCrumb(breadcrumb(DEFAULT_CONFLUENCE_PARENT).slice(0, -1))}</span>
+          </span>
+        }
         current={
           confluence === null ? null : (
             <span className="flex min-w-0 flex-col leading-tight" title={breadcrumb(confluence).join(" › ")}>

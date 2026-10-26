@@ -1501,7 +1501,7 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     const exports = exportsSettings();
     open({ exports }, "Jira & Confluence");
 
-    fireEvent.click(within(screen.getByRole("group", { name: "Jira backlog" })).getByRole("button", { name: "Choose" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Jira backlog" })).getByRole("button", { name: "Change" }));
     fireEvent.change(screen.getByRole("combobox", { name: /default backlog/ }), { target: { value: "possess" } });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LOOKUP_AFTER_MS);
@@ -1528,8 +1528,14 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     });
 
     expect(exports.save).toHaveBeenCalledWith({ jira: null, confluence: null });
-    expect(screen.getByText("None: the panel offers VIBE")).toBeTruthy();
-    expect(screen.getByText("None: the panel offers AI Resources")).toBeTruthy();
+    const jira = within(screen.getByRole("group", { name: "Jira backlog" }));
+    const confluence = within(screen.getByRole("group", { name: "Confluence page" }));
+    expect(jira.getByText("VIBE")).toBeTruthy();
+    expect(jira.getByText("(built-in)")).toBeTruthy();
+    expect(jira.queryByRole("button", { name: "Clear" })).toBeNull();
+    expect(confluence.getByText("AI Resources")).toBeTruthy();
+    expect(confluence.getByText("(built-in)")).toBeTruthy();
+    expect(confluence.queryByRole("button", { name: "Clear" })).toBeNull();
   });
 
   it("should raise no WCAG A or AA violations with the section open", async () => {
@@ -1539,7 +1545,7 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     render(<AssistantSettings connections={data(ALL_SIGNED_IN)} exports={exportsSettings()} />, { container: root });
     fireEvent.click(cog());
     go("Jira & Confluence");
-    fireEvent.click(within(screen.getByRole("group", { name: "Confluence page" })).getByRole("button", { name: "Choose" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Confluence page" })).getByRole("button", { name: "Change" }));
 
     const results = await axe.run(root, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
