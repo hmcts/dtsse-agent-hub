@@ -21,6 +21,7 @@ import {
   canReadMessage,
   canRemoveUploadFromDisk,
   canSeeAgentSkills,
+  canSeeAssistantMemory,
   canSessionUseAttachment,
   canShareConversationWith,
   canStopAssistantAnswer,
@@ -630,6 +631,22 @@ describe("the upload rules", () => {
       ["stranger", STRANGER]
     ] as const)("should refuse a %s clearing the owner's file", (_role, oid) => {
       expect(canRemoveUploadFromDisk(oid, upload({ state: "fetched", messageId: "41" }))).toBe(false);
+    });
+  });
+
+  describe("canSeeAssistantMemory", () => {
+    it("should let a person see what their own assistant reports about its memory", () => {
+      expect(canSeeAssistantMemory(OWNER, OWNER)).toBe(true);
+    });
+
+    // As with the files on its disk, a grant is over sessions a person chose to share; how much memory their
+    // assistant is using is neither.
+    it.each([
+      ["writer", WRITER],
+      ["reader", READER],
+      ["stranger", STRANGER]
+    ] as const)("should refuse a %s, however much access they hold over that person's agents", (_role, oid) => {
+      expect(canSeeAssistantMemory(oid, OWNER)).toBe(false);
     });
   });
 

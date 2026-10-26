@@ -293,6 +293,18 @@ export function canRemoveUploadFromDisk(viewerOid: string, upload: UploadRef): b
   return viewerOid === upload.ownerOid && upload.messageId !== null;
 }
 
+/**
+ * Whether `viewerOid` may see what an assistant's pod reports about its own memory. Its owner alone.
+ *
+ * Its own rule rather than `canManageUploadsOnDisk`'s, which is named for the files it decides about: this is read
+ * beside a setting that changes the pod's size, and a rule borrowed from another feature is one that moves when that
+ * feature's reasoning does. No grant reaches it either way — a grant is over sessions a person chose to share, and
+ * how much memory their assistant is using is neither a session nor something they shared.
+ */
+export function canSeeAssistantMemory(viewerOid: string, ownerOid: string): boolean {
+  return viewerOid === ownerOid;
+}
+
 export type AgentAccess = "owner" | "write" | "read" | "none";
 
 /** What the viewer may do with an agent, for the UI to decide what to show: the same answers as the checks above. */

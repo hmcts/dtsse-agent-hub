@@ -112,6 +112,7 @@ A share exposes the words of the thread and the conversation's artefact, and not
 | `PUT /api/virtual/{id}/sessions` | `{sessions: [{conversation_id, state, detail?}], max}` | `204`. What the supervisor runs, replacing its last report: `state` is `starting`, `live` or `queued` (waiting for a free slot), `detail` at most 200 characters, and `max` how many sessions it runs at once, 1–20; at most 50 entries. A conversation left out has no session. Unknown conversation ids are ignored. Notifies the owner's UI. |
 | `GET /api/virtual/{id}/conversations` | — | `200 {conversations: [{id}]}`, every conversation of that virtual agent. The pod reconciles its `/workspace/uploads/<conversation-id>/` directories against this list (see Attachments below), so a conversation deleted while it was stopped — which sends no `close` it was there to hear — still has its files removed. |
 | `PUT /api/virtual/{id}/uploads` | `{uploads_bytes, volume_used_bytes, volume_total_bytes, files_total, files: [{upload_id, bytes}], deleted: [upload_id]}` | `204`. What the pod holds on its own volume, replacing its last report, and which deletions it has carried out; see Uploads on the pod's disk below. |
+| `PUT /api/virtual/{id}/memory` | `{limit_bytes, current_bytes, peak_bytes}` | `204`. What the pod's container cgroup says about its own memory, replacing its last report; see Memory in the pod below. |
 
 **Registering.** The supervisor starts each session with the conversation's `session_id` and with `AGENT_HUB_CONVERSATION_ID` in its environment, and the session registers with `conversation_id` set, using the launch token. That registration adopts the agent the hub created, makes it the conversation's current agent and clears the wake, and does **not** make it the virtual agent's current agent. A later registration with the same `conversation_id` and a new `session_id` (after `/clear`) becomes the conversation's current agent instead. A `conversation_id` that is not one of the launch token's virtual agent's conversations, or sent without a launch token, gives `409`. A conversation's session subscribes to no topics.
 
@@ -230,6 +231,60 @@ Metadata rows cascade from the message and from the conversation, so deleting ei
 
 **Which sessions count as busy.** The hooks' `busy` is believed only while the status file was written since the supervisor started — give or take five seconds, because the comparison is against a time taken a moment later and a filesystem that keeps mtimes to the whole second would otherwise put a turn that began as the pod came up on the wrong side of it — and while the session has shown progress, a write to the status file or the transcript, in the last two hours. `~/.claude` is a volume that outlives the pod, so a turn a pod went down in the middle of leaves `busy` on disk with nothing to rewrite it: Claude Code runs no `Stop` hook for an interrupted turn, and a session resumed under the same session id skips the enable that writes it afresh. Taken at face value, that frozen flag is a slot nothing can evict and the idle stop never reaches, and the slot it holds cannot be recovered by restarting the pod. A session's place in the eviction order comes from those two mtimes alone and never from the flag, which is what keeps a genuine turn — one appending to its transcript — at the recent end of the order and makes it safe to discount a `busy` claimed before the boot. Two hours rather than something tighter because evicting a session that is really working, on a long build or a slow wait, costs the person the answer it was in the middle of.
 
+## Memory in the pod
+
+A conversation session costs about **1.2Gi**, for the reasons under Capacity above, and the pod's own work is on top
+of that. So a pod reaches the ceiling of its size with nothing wrong with it — and the hub cannot see that either:
+every call between the two is pod to hub. The pod reports, as it does for its disk.
+
+**Reporting.** `PUT /api/virtual/{id}/memory` replaces the virtual agent's last report:
+
+```jsonc
+{
+  "limit_bytes": 8589934592,   // memory.max: where the kernel kills the container
+  "current_bytes": 3221225472, // memory.current
+  "peak_bytes": 5637144576     // memory.peak: the high-water mark since the pod booted
+}
+```
+
+- The figures are the container's **own cgroup** — `memory.max`, `memory.current` and `memory.peak` under
+  `/sys/fs/cgroup` — so this is three small reads rather than a walk of anything, unlike the uploads report. A pod on
+  cgroup v1, or one whose `memory.max` is `max` (no limit at all), reports **nothing**: a ceiling is what every
+  sentence the hub writes about this is relative to, and a limit guessed from the size would be a figure presented as
+  measured. There is no partial report.
+- **A report of its own, not part of the uploads report.** The two are one `PUT` each on the same reconcile, and
+  keeping them apart is what lets either fail alone: a cgroup the pod cannot read must not cost the person their disk
+  figures, and a volume it cannot `statfs` must not cost them the memory warning. It also keeps the three
+  cannot-tell sentences distinguishable — each report has its own client feature and its own `*_reported_at`, where
+  optional fields inside one body would make "an older client" and "a client that could not measure" the same silence.
+- Every figure is a whole number from 0 up, and `peak_bytes` is **not** required to be at least `current_bytes`:
+  `memory.peak` is resettable on newer kernels, and refusing the report over it would lose the live figure too.
+  Anything that is not a whole number is `400`.
+- Sent every 10 minutes, on the pod's uploads reconcile, so the hub's figures are always *as of* `memory_reported_at`
+  and the UI says when rather than presenting them as current. `peak_bytes` is what the warning below is computed
+  from, and a stale peak is a **lower bound** on the true one, so a late report understates the pressure and never
+  invents it. `current_bytes` dips between turns and is shown beside the peak rather than warned on.
+- A report **notifies nobody**, for the reasons a disk report does not: it is read by the owner's own settings, and
+  nothing streams it.
+
+**The warning.** The hub warns when the peak leaves less than **one more conversation's worth** of headroom under the
+limit — `peak_bytes + 1.2Gi > limit_bytes`. The threshold is derived rather than chosen: it is the measured cost of
+a conversation against the ceiling the pod itself reported, so what it says is the thing the person can act on ("there
+is no room for another chat at this size"), and a pod merely using memory within its size never raises it. The two
+things it names are the two things that change the answer: move up a size, or close some chats.
+
+**Who sees it.** The owner alone, through `canSeeAssistantMemory`. No grant reaches it: a figure about someone's pod
+is not a session they chose to share.
+
+**An older client.** Gated on the `memory` client feature below. A pod whose current session has not claimed it is one
+the Assistant's settings say cannot report yet, rather than one shown `0`, which would read as an idle pod.
+
+**Changing size.** `size` is in the pod template, so a change bumps `pod_generation` and the orchestrator replaces the
+pod — which ends every conversation session running on it. The Assistant's settings say that before the person
+commits, with the per-size session cap and memory from the same constants the orchestrator applies (see Capacity
+above), and count the chats that are running. A chat is not lost: its session resumes from the pod's disk on the next
+wake, with `resume` true. The turn in flight is.
+
 ## Credentials
 
 `PUT` and `DELETE /api/agent/credentials/{kind}` store and remove the credentials a person's virtual agents use on their behalf. They act on the caller's own credentials only; nothing in the path or body names an owner.
@@ -307,7 +362,7 @@ field out and the UI can say that the feature is not available on that session y
 - It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
   been upgraded re-registers.
 
-Three names are in use, and the clients published from this repo claim all three.
+Four names are in use, and the clients published from this repo claim all four.
 
 - `attachments`, because they read the `attachments` on an Assistant `direct` frame and fetch each file to the pod's
   disk. No hub field is gated on it — the frame carries `attachments` to every session — so a client too old to claim
@@ -321,6 +376,10 @@ Three names are in use, and the clients published from this repo claim all three
   agent's current agent, since the supervisor is what does both — not by a conversation's session. Gated on both
   sides: the hub refuses a deletion request for a pod that has not claimed it, and the settings' Files section says
   the figures cannot be reported yet rather than showing an empty disk.
+- `memory`, because their supervisor reads its own container cgroup and reports it (`PUT /api/virtual/{id}/memory`).
+  Claimed by the pod's **own** session, as `files` is, since the supervisor is what reports. Nothing is gated on it in
+  the other direction — the hub sends no field for it — but the settings' Size section reads it to tell a pod that
+  cannot report yet apart from one that has not reported yet, and says so rather than showing an unused pod.
 
 ## Replies
 

@@ -1768,7 +1768,10 @@ describe("a virtual agent's size", () => {
     const agent = await create(ALICE, "pcs-api");
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id: agent.id, size: "medium" }))).toEqual({ ok: true, confirmation: "pcs-api is now medium" });
+    expect(await actions.resizeVirtualAgent(form({ id: agent.id, size: "medium" }))).toEqual({
+      ok: true,
+      confirmation: "It starts at medium the next time it runs."
+    });
 
     expect((await row(agent.id)).generation).toBe(agent.generation + 1);
     expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ size: "medium", generation: agent.generation + 1 });
@@ -1787,13 +1790,18 @@ describe("a virtual agent's size", () => {
     expect((await claim()).find((entry) => entry.id === id)).toMatchObject({ size: "large", desired: "stopped", generation: stopping.generation + 1 });
   });
 
-  it("should refuse a change while the agent's pod may be running, and change nothing", async () => {
+  // A running pod is replaced by the change, as a change of plugins replaces it, so the pod generation moves and the
+  // confirmation says what that ends rather than only what the size is now.
+  it("should change the size of a running agent, replace its pod and say that it is restarting", async () => {
     const { id } = await started(ALICE, "pcs-api");
     const before = await row(id);
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id, size: "large" }))).toEqual({ ok: false, error: "stop the virtual agent before changing its size" });
-    expect(await row(id)).toMatchObject({ size: "small", generation: before.generation });
+    expect(await actions.resizeVirtualAgent(form({ id, size: "large" }))).toEqual({
+      ok: true,
+      confirmation: "Restarting at large. Your chats are kept, and anything one of them was working on has stopped."
+    });
+    expect(await row(id)).toMatchObject({ size: "large", generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
   });
 
   it("should refuse someone other than the owner as if there were no such agent", async () => {

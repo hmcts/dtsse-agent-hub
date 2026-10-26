@@ -277,7 +277,8 @@ export async function renameVirtualAgent(prisma: PrismaClient, actorOid: string,
 
 /**
  * A new size, bumping `generation` and `pod_generation` so the orchestrator applies the StatefulSet again with its
- * resources. Refused while a pod may be running, per `sizeChangeRefusal`; someone other than the owner is told there
+ * resources: a running pod is replaced, which ends the sessions on it, and a stopped one comes back at the new size.
+ * Refused only while the agent is being deleted, per `sizeChangeRefusal`; someone other than the owner is told there
  * is no such agent.
  */
 export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string, id: string, size: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
