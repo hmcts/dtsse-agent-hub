@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setGrant } from "../../src/access/load.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
+import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
 import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
 import * as jiraRoute from "../../src/app/api/agent/[agentId]/jira/route.ts";
 import * as streamRoute from "../../src/app/api/agent/[agentId]/stream/route.ts";
@@ -11,8 +12,13 @@ import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
 import * as uiTranscriptRoute from "../../src/app/api/ui/agents/[id]/transcript/route.ts";
+import * as lookupsRoute from "../../src/app/api/ui/assistant/lookups/route.ts";
+import * as lookupAnswerRoute from "../../src/app/api/virtual/[virtualAgentId]/lookups/[lookupId]/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
+import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
+import { askLookup } from "../../src/assistant/lookup-store.ts";
+import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
 import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { expireDeliveries } from "../../src/messages/store.ts";
@@ -868,12 +874,12 @@ describe("jira export", () => {
     expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({ ok: true });
   });
 
-  it("should refuse an export of a document nobody has written, or to a board not on offer", async () => {
+  it("should refuse an export of a document nobody has written, or to something that is not a project key", async () => {
     await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
 
     expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({ ok: false, error: "write the document before exporting it" });
-    expect(await actions.exportArtefactToJira({ conversationId: id, project: "CCD" })).toEqual({ ok: false, error: "pick a Jira board from the list" });
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "ccd" })).toEqual({ ok: false, error: "pick a Jira project to export to" });
   });
 
   it("should start a stopped assistant when the person exports", async () => {
@@ -895,5 +901,224 @@ describe("jira export", () => {
 
     expect((await report(token, plain, { export_id: exportId, key: "VIBE-1" })).status).toBe(404);
     expect((await report(token, agentId, { export_id: exportId, key: "not a key" })).status).toBe(400);
+  });
+});
+
+describe("confluence export", () => {
+  const PARENT = { id: "280959611", title: "Guides", space_id: "280952876", space_key: "CCD", space_name: "Core Case Data" };
+
+  async function written(): Promise<{ token: string; id: string; agentId: string }> {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "write a guide" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id);
+    await actions.saveArtefact({ conversationId: id, title: "Case flags guide", markdown: "# Case flags guide\n\nHow flags work.", baseVersion: 0 });
+    return { token, id, agentId };
+  }
+
+  function report(token: string, agentId: string, body: unknown): Promise<Response> {
+    return pod(confluenceRoute.PUT, token, `/api/agent/${agentId}/confluence`, { agentId }, "PUT", body);
+  }
+
+  async function currentExport(id: string): Promise<string> {
+    return (await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { confluenceExportId: true } })).confluenceExportId!;
+  }
+
+  it("should ask the session in the chat, with where to publish in the message's frame, and show the page once it reports its id", async () => {
+    const { token, id, agentId } = await written();
+
+    expect(await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT })).toEqual({ ok: true });
+    const exportId = await currentExport(id);
+    const abort = new AbortController();
+    const stream = frames(await pod(streamRoute.GET, token, `/api/agent/${agentId}/stream`, { agentId }, "GET", undefined, abort.signal));
+    const sent = await stream.named("direct", 2);
+    abort.abort();
+    await stream.cancel();
+
+    expect(JSON.parse(sent[1]!.data!)).toMatchObject({
+      message: { body: 'Please publish this document to Confluence, under "Guides" in Core Case Data.' },
+      assistant: { conversation_id: id, confluence_export: { export_id: exportId, space_id: PARENT.space_id, parent_id: PARENT.id } }
+    });
+    expect((await assistantConversation(VIEWER, id))?.confluence).toMatchObject({
+      status: "pending",
+      parentTitle: "Guides",
+      spaceName: "Core Case Data",
+      requestedAt: expect.any(String)
+    });
+
+    expect((await report(token, agentId, { export_id: exportId, page_id: "300000001", title: "Case flags guide" })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.confluence).toEqual({
+      status: "done",
+      pageId: "300000001",
+      pageTitle: "Case flags guide",
+      url: "https://hmcts.atlassian.net/wiki/spaces/CCD/pages/300000001",
+      parentTitle: "Guides",
+      spaceName: "Core Case Data"
+    });
+    expect((await assistantFrame(prisma, agentId))?.confluence_export).toBeUndefined();
+  });
+
+  it("should refuse a second export while one is pending, and any once the document is in Confluence", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT });
+
+    expect(await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT })).toEqual({
+      ok: false,
+      error: "this document is already being published"
+    });
+    await report(token, agentId, { export_id: await currentExport(id), page_id: "300000001" });
+
+    expect(await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT })).toEqual({
+      ok: false,
+      error: "this document is already in Confluence"
+    });
+  });
+
+  it("should let the person try again under a new export id, and ignore the old one's late report, once it failed or timed out", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT });
+    const first = await currentExport(id);
+    await report(token, agentId, { export_id: first, error: "A page with this title already exists" });
+    expect((await assistantConversation(VIEWER, id))?.confluence).toMatchObject({ status: "failed", error: "A page with this title already exists" });
+
+    expect(await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT })).toEqual({ ok: true });
+    await prisma.assistantConversation.update({ where: { id }, data: { confluenceRequestedAt: new Date(Date.now() - CONFLUENCE_EXPORT_TIMEOUT_MS - 1000) } });
+    expect((await assistantFrame(prisma, agentId))?.confluence_export).toBeUndefined();
+    expect(await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT })).toEqual({ ok: true });
+
+    await report(token, agentId, { export_id: first, page_id: "1" });
+    expect((await assistantConversation(VIEWER, id))?.confluence.status).toBe("pending");
+  });
+
+  it("should refuse a parent page that is not one, and a report that breaks the contract or is not a conversation's", async () => {
+    const { token, id, agentId } = await written();
+
+    expect(await actions.exportArtefactToConfluence({ conversationId: id, parent: { ...PARENT, id: "../1" } })).toEqual({
+      ok: false,
+      error: "pick a Confluence page to put the document under"
+    });
+    await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT });
+    const { agent_id: plain } = await jsonOf<{ agent_id: string }>(await register(token, "plain-session"));
+
+    expect((await report(token, plain, { export_id: await currentExport(id), page_id: "1" })).status).toBe(404);
+    expect((await report(token, agentId, { export_id: await currentExport(id), page_id: "not-a-page" })).status).toBe(400);
+  });
+});
+
+describe("atlassian lookups", () => {
+  const PAGE = { id: "280959611", title: "Guides", space_id: "280952876", space_key: "CCD", space_name: "Core Case Data", ancestors: ["Core Case Data"] };
+
+  /** The person's assistant running with its own session registered, as a pod whose supervisor answers lookups. */
+  async function answeringAssistant(features: string[] = ["lookups"]): Promise<{ id: string; token: string }> {
+    const { id, token } = await startedAssistant();
+    await register(token, "pod-session", undefined, { clientFeatures: features });
+    await prisma.virtualAgent.update({ where: { id }, data: { status: "running" } });
+    return { id, token };
+  }
+
+  function ask(body: unknown, persona = "alice"): Promise<Response> {
+    const request = new NextRequest("http://localhost:3000/api/ui/assistant/lookups", {
+      method: "POST",
+      headers: { cookie: `ah_dev_persona=${persona}`, "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    return lookupsRoute.POST(request);
+  }
+
+  function answer(id: string, token: string, lookupId: string, body: unknown): Promise<Response> {
+    return pod(lookupAnswerRoute.PUT, token, `/api/virtual/${id}/lookups/${lookupId}`, { virtualAgentId: id, lookupId }, "PUT", body);
+  }
+
+  it("should send the pod the lookup on its sessions stream and answer the browser with what the pod found", async () => {
+    const { id, token } = await answeringAssistant();
+    const abort = new AbortController();
+    const stream = frames(await pod(sessionsRoute.GET, token, `/api/virtual/${id}/sessions`, { virtualAgentId: id }, "GET", undefined, abort.signal));
+
+    const asked = ask({ kind: "confluence_page", query: "  case  guides ", space: "CCD" });
+    const [frame] = await stream.named("lookup", 1);
+    const lookup = JSON.parse(frame!.data!);
+    expect(lookup).toEqual({ lookup_id: expect.any(String), kind: "confluence_page", query: "case guides", space: "CCD", sign_in: false });
+    expect((await answer(id, token, lookup.lookup_id, { results: [PAGE] })).status).toBe(204);
+    const answered = await jsonOf<{ status: string; results: unknown[] }>(await asked);
+    abort.abort();
+    await stream.cancel();
+
+    expect(answered).toEqual({ status: "done", results: [{ ...PAGE, url: "https://hmcts.atlassian.net/wiki/spaces/CCD/pages/280959611" }] });
+  });
+
+  it("should start a stopped assistant and say it is waking, without recording a lookup", async () => {
+    const { id } = await answeringAssistant();
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+
+    expect(await jsonOf(await ask({ kind: "jira_project", query: "vibe" }))).toEqual({ status: "waking" });
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { desired: true } })).desired).toBe("running");
+    expect(await prisma.assistantLookup.count()).toBe(0);
+  });
+
+  it("should say the pod cannot answer when its client never claimed lookups", async () => {
+    await answeringAssistant(["files"]);
+
+    expect(await jsonOf(await ask({ kind: "jira_project", query: "vibe" }))).toEqual({ status: "unsupported" });
+  });
+
+  it("should answer a query too short to search, or a bad request, without asking the pod", async () => {
+    await answeringAssistant();
+
+    expect(await jsonOf(await ask({ kind: "jira_project", query: "v" }))).toEqual({ status: "done", results: [] });
+    expect((await ask({ kind: "people", query: "vibe" })).status).toBe(400);
+    expect((await ask({ kind: "confluence_page", query: "vibe", space: "CCD OR 1=1" })).status).toBe(400);
+    expect(await prisma.assistantLookup.count()).toBe(0);
+  });
+
+  it("should answer a sign-in at once, and tell the pod to sign in first", async () => {
+    const { id, token } = await answeringAssistant();
+    const abort = new AbortController();
+    const stream = frames(await pod(sessionsRoute.GET, token, `/api/virtual/${id}/sessions`, { virtualAgentId: id }, "GET", undefined, abort.signal));
+
+    const response = ask({ kind: "jira_project", query: "vibe", sign_in: true });
+    const [frame] = await stream.named("lookup", 1);
+    abort.abort();
+    await stream.cancel();
+
+    expect(await jsonOf(await response)).toEqual({ status: "signing_in" });
+    expect(JSON.parse(frame!.data!)).toMatchObject({ kind: "jira_project", sign_in: true });
+  });
+
+  it("should keep only its own pod's first answer, of the lookup's own kind", async () => {
+    const { id, token } = await answeringAssistant();
+    const asked = await askLookup(prisma, { viewerOid: ALICE.oid, kind: "jira_project", query: "vibe", space: null, signIn: false });
+    const lookupId = "lookupId" in asked ? asked.lookupId : "";
+
+    expect((await answer(id, token, lookupId, { results: [PAGE] })).status).toBe(400);
+    expect((await answer(id, token, lookupId, { error: "signed_out" })).status).toBe(204);
+    expect((await answer(id, token, lookupId, { results: [{ key: "VIBE", name: "Vibe" }] })).status).toBe(204);
+    expect(await prisma.assistantLookup.findUniqueOrThrow({ where: { id: lookupId }, select: { status: true, error: true, results: true } })).toEqual({
+      status: "failed",
+      error: "signed_out",
+      results: null
+    });
+  });
+
+  it("should refuse a person their own lookups past the rate limit, and sweep old ones as it records new ones", async () => {
+    const { id } = await answeringAssistant();
+    const old = new Date(Date.now() - LOOKUP_RETENTION_MS - 1000);
+    await prisma.assistantLookup.create({ data: { virtualAgentId: id, kind: "jira_project", query: "old", createdAt: old } });
+    await prisma.assistantLookup.createMany({
+      data: Array.from({ length: LOOKUP_RATE_LIMIT - 1 }, () => ({ virtualAgentId: id, kind: "jira_project", query: "recent" }))
+    });
+
+    await askLookup(prisma, { viewerOid: ALICE.oid, kind: "jira_project", query: "one more", space: null, signIn: false });
+    expect(await prisma.assistantLookup.count({ where: { query: "old" } })).toBe(0);
+
+    await expect(askLookup(prisma, { viewerOid: ALICE.oid, kind: "jira_project", query: "too many", space: null, signIn: false })).rejects.toMatchObject({
+      status: 429
+    });
+  });
+
+  it("should search only the asker's own assistant, and refuse someone with none", async () => {
+    await answeringAssistant();
+    await insertUser(BOB);
+
+    expect((await ask({ kind: "jira_project", query: "vibe" }, "bob")).status).toBe(404);
   });
 });

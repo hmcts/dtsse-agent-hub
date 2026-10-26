@@ -71,6 +71,16 @@ describe("matchesTopics", () => {
 });
 
 describe("selectFrame", () => {
+  // Each is an instruction to a pod, or its answer to the request that asked, so none is a browser's to read.
+  it.each([
+    [{ type: "assistant_stop" as const, conversation_id: "c", virtual_agent_id: "va", owner_oid: "dev-alice" }],
+    [{ type: "assistant_uploads" as const, virtual_agent_id: "va", owner_oid: "dev-alice" }],
+    [{ type: "assistant_lookup" as const, lookup_id: "l", virtual_agent_id: "va", owner_oid: "dev-alice" }],
+    [{ type: "assistant_lookup_answered" as const, lookup_id: "l", virtual_agent_id: "va", owner_oid: "dev-alice" }]
+  ])("should send no frame for %j when it is an instruction to the owner's pod", async (event) => {
+    expect(await selectFrame(event, TOPICS, sources([]))).toBeUndefined();
+  });
+
   it("should send a post on a watched topic when the page watches it", async () => {
     const frame = await selectFrame({ type: "post", message_id: "5" }, TOPICS, sources([], { posts: [post("5", ["pcs-api"])] }));
 

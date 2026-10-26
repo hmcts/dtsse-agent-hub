@@ -51,6 +51,14 @@ export type HubEvent =
    */
   | { type: "assistant_uploads"; virtual_agent_id: string; owner_oid: string }
   /**
+   * The owner searched their Jira or Confluence, so `virtual_agent_id`'s pod should run the lookup and answer it. An
+   * instruction like `assistant_stop`, sent once: a search lost while the listener was down is one nobody is still
+   * typing for, so a `resync` does not replay it.
+   */
+  | { type: "assistant_lookup"; lookup_id: string; virtual_agent_id: string; owner_oid: string }
+  /** The pod answered the lookup, so the request waiting for it can read the answer. */
+  | { type: "assistant_lookup_answered"; lookup_id: string; virtual_agent_id: string; owner_oid: string }
+  /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
    */
@@ -128,6 +136,11 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
     case "assistant_uploads":
       return isId(event.virtual_agent_id) && isId(event.owner_oid)
         ? { type: "assistant_uploads", virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
+        : undefined;
+    case "assistant_lookup":
+    case "assistant_lookup_answered":
+      return isId(event.lookup_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)
+        ? { type: event.type, lookup_id: event.lookup_id, virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
         : undefined;
     default:
       return undefined;

@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import {
   deleteConversation,
+  exportArtefactToConfluence,
   exportArtefactToJira,
   renameConversation,
   saveArtefact,
@@ -37,7 +38,8 @@ const ACTIONS: ChatActions = {
   rename: renameConversation,
   remove: deleteConversation,
   saveArtefact,
-  exportToJira: exportArtefactToJira
+  exportToJira: exportArtefactToJira,
+  exportToConfluence: exportArtefactToConfluence
 };
 
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */

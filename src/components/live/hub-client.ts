@@ -17,8 +17,12 @@ import { sessionEnded } from "./session.ts";
  * rather than anything the page can be handed. `assistant_stop` is not one either, and for a different reason: it is
  * an instruction to a conversation's pod, and the thread redraws from the `assistant_conversation` beside it.
  * `assistant_uploads` is the same: an instruction to the pod, with the page revalidated by the action that caused it.
+ * `assistant_lookup` and its answer are as well: the request that asked for one waits on its own response.
  */
-export type HubEventType = Exclude<HubEvent["type"], "grant" | "credential" | "assistant_stop" | "assistant_uploads">;
+export type HubEventType = Exclude<
+  HubEvent["type"],
+  "grant" | "credential" | "assistant_stop" | "assistant_uploads" | "assistant_lookup" | "assistant_lookup_answered"
+>;
 
 /**
  * Subscribed one at a time below, because `EventSource` dispatches by `event:` name and has no wildcard. A type

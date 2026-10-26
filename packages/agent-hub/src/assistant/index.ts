@@ -28,6 +28,20 @@ export {
 } from "./attachments.ts";
 export type { DiskFs, ReportUploadsOptions, UploadsDiskOptions } from "./disk.ts";
 export { MAX_REPORTED_FILES, measureUploads, reportUploads, uploadIdOf } from "./disk.ts";
+export type { LookupDeps, LookupFrame, LookupKind, LookupRunner, LookupRunnerOptions } from "./lookups.ts";
+export {
+  confluenceCql,
+  createLookupRunner,
+  lookupArgs,
+  MAX_RUNNING_LOOKUPS,
+  pageIdOf,
+  parseConfluencePages,
+  parseJiraProjects,
+  parseLookupFrame,
+  runLookup,
+  searchWords,
+  twgSignedOut
+} from "./lookups.ts";
 export type { MemoryFs, MemoryOptions, ReportMemoryOptions } from "./memory.ts";
 export { CGROUP_ROOT, measureMemory, reportMemory } from "./memory.ts";
 export type { RunAssistantSupervisorOptions } from "./run.ts";
