@@ -21,9 +21,9 @@ export interface AssistantExportDefaults {
   lookUp?: LookUp;
 }
 
-/** "(built-in)" after a default the person has not chosen, so they can tell it from one of their own. */
+/** "(default)" after what documents go to when the person has not chosen, so they can tell it from one of their own. */
 function BuiltIn() {
-  return <span className="shrink-0 text-xs text-asst-faint">(built-in)</span>;
+  return <span className="shrink-0 font-plex-mono text-[11px] text-asst-faint">(default)</span>;
 }
 
 /**
@@ -160,10 +160,10 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
         builtIn={
           <span className="flex min-w-0 flex-col leading-tight" title={breadcrumb(DEFAULT_CONFLUENCE_PARENT).join(" › ")}>
             <span className="flex min-w-0 items-baseline gap-2">
-              <span className="truncate text-[13px] font-medium">{DEFAULT_CONFLUENCE_PARENT.title}</span>
+              <span className="truncate text-[13px] font-medium">{DEFAULT_CONFLUENCE_PARENT.space_name}</span>
               <BuiltIn />
             </span>
-            <span className="truncate text-xs text-asst-faint">{shortCrumb(breadcrumb(DEFAULT_CONFLUENCE_PARENT).slice(0, -1))}</span>
+            <span className="truncate text-xs text-asst-faint">Under {DEFAULT_CONFLUENCE_PARENT.title}</span>
           </span>
         }
         current={

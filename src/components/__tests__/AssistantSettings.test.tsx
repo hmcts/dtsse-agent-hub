@@ -1531,10 +1531,11 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     const jira = within(screen.getByRole("group", { name: "Jira backlog" }));
     const confluence = within(screen.getByRole("group", { name: "Confluence page" }));
     expect(jira.getByText("VIBE")).toBeTruthy();
-    expect(jira.getByText("(built-in)")).toBeTruthy();
+    expect(jira.getByText("(default)")).toBeTruthy();
     expect(jira.queryByRole("button", { name: "Clear" })).toBeNull();
-    expect(confluence.getByText("AI Resources")).toBeTruthy();
-    expect(confluence.getByText("(built-in)")).toBeTruthy();
+    expect(confluence.getByText("Court and Tribunal Hearings (CaTH) AI Project")).toBeTruthy();
+    expect(confluence.getByText("Under AI Resources")).toBeTruthy();
+    expect(confluence.getByText("(default)")).toBeTruthy();
     expect(confluence.queryByRole("button", { name: "Clear" })).toBeNull();
   });
 
