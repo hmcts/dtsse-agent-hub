@@ -433,6 +433,7 @@ export type {
   CredentialCommandOptions,
   CredentialStore,
   DeviceCodePrompt,
+  GithubLoginOptions,
   LoginOptions,
   MsalCache,
   PackedAtlassianAuth,

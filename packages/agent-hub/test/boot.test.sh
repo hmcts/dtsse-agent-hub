@@ -36,6 +36,9 @@ CLI_JS="${AGENT_HUB_CLI_JS:-$ROOT/src/cli.ts}"
 HUB_URL="${HUB_URL:?HUB_URL is not set: src/virtual-agent-boot.test.ts starts the mock hub}"
 # An apostrophe in a ${var:?message} is a quote to bash, even inside double quotes, so there is none here.
 HUB_STATE="${HUB_STATE:?HUB_STATE is not set: src/virtual-agent-boot.test.ts writes the hub state there}"
+# Required rather than defaulted to github.com: the device-code sign-in is the client's own HTTP now, and a
+# run of this script must reach a fake one. Nobody is there to enter a code at the real one.
+GITHUB_OAUTH_HOST="${GITHUB_OAUTH_HOST:?GITHUB_OAUTH_HOST is not set: src/virtual-agent-boot.test.ts starts the fake github.com}"
 VID="${VID:-va-boot-1}"
 LAUNCH="${LAUNCH:-launch-boot-test}"
 REAL_GIT="$(command -v git)"
@@ -44,8 +47,9 @@ REAL_NODE="$(command -v node)"
 T="$(mktemp -d)"
 trap '[ -n "${KEEP:-}" ] || rm -rf "$T"' EXIT
 
-# Not a real credential: what the fake gh hands back, and what the hub should end up holding.
-GOOD_TOKEN="gh-boot-test-token"
+# Not a real credential: what the fake github.com hands over, what the fake gh accepts, and what the hub
+# should end up holding. The wrapper passes the same value to both sides.
+GOOD_TOKEN="${GOOD_TOKEN:-gh-boot-test-token}"
 STALE_TOKEN="gh-boot-test-stale"
 
 pass=0
@@ -72,19 +76,17 @@ setup() {
     chmod +x "$C/pkg/bin/virtual-agent-boot"
     ln -s "$C/pkg/bin/virtual-agent-boot" "$C/bin/virtual-agent-boot"
 
+    # The device flow is the client's own HTTP against $GITHUB_OAUTH_HOST, so gh only ever takes a token on
+    # stdin here: a token the owner stored, or the one that sign-in ended with.
     cat >"$C/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2" in
     "auth login")
-        if [[ " $* " == *" --with-token "* ]]; then
-            read -r token
-            [ "$token" = "$FAKE_GOOD_TOKEN" ] || { echo "error validating token: HTTP 401: Bad credentials" >&2; exit 1; }
-            echo "gh login-with-token" >>"$FAKE_DIR/order.log"
-        else
-            [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && { echo "GH_TOKEN reached gh auth login" >&2; exit 1; }
-            printf '\n! First copy your one-time code: 7B7F-C198\nOpen this URL to continue in your web browser: https://github.com/login/device\n' >&2
-            echo "gh device-login" >>"$FAKE_DIR/order.log"
-        fi
+        [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && { echo "GH_TOKEN reached gh auth login" >&2; exit 1; }
+        [[ " $* " == *" --with-token "* ]] || { echo "unexpected gh auth login $*" >&2; exit 2; }
+        read -r token
+        [ "$token" = "$FAKE_GOOD_TOKEN" ] || { echo "error validating token: HTTP 401: Bad credentials" >&2; exit 1; }
+        echo "gh login-with-token" >>"$FAKE_DIR/order.log"
         touch "$FAKE_DIR/gh.signed-in" ;;
     "auth setup-git") echo "gh setup-git" >>"$FAKE_DIR/order.log" ;;
     "auth token") [ -f "$FAKE_DIR/gh.signed-in" ] && printf '%s\n' "$FAKE_GOOD_TOKEN" ;;
@@ -170,7 +172,7 @@ seed_github() {
 # boot [VAR=value…]: runs the boot script to its end (the fake entrypoint exits), at most 30s.
 boot() {
     env -i PATH="$BOOT_PATH" HOME="$C/home" NVM_DIR=/nonexistent FAKE_DIR="$C" \
-        FAKE_GOOD_TOKEN="$GOOD_TOKEN" AGENT_HUB_URL="$HUB_URL" AGENT_HUB_VIRTUAL_AGENT_ID="$VID" \
+        FAKE_GOOD_TOKEN="$GOOD_TOKEN" GITHUB_OAUTH_HOST="$GITHUB_OAUTH_HOST" AGENT_HUB_URL="$HUB_URL" AGENT_HUB_VIRTUAL_AGENT_ID="$VID" \
         AGENT_HUB_LAUNCH_TOKEN="$LAUNCH" AGENT_HUB_CLI_JS="$CLI_JS" VIRTUAL_AGENT_WORKSPACE="$C/ws/cft-workspace" \
         "$@" bash "$C/bin/virtual-agent-boot" >"$C/out" 2>&1 &
     local pid=$! watchdog
@@ -195,7 +197,7 @@ case_no_token() {
     setup no-token
     boot
     [ "$BOOT_RC" -eq 0 ] && ok "boots through to the entrypoint" || no "boot exited $BOOT_RC"
-    order_is "gh device-login gh setup-git git clone npm install entrypoint " && ok "signs in to GitHub before the clone" || no "order: $(tr '\n' ' ' <"$C/order.log")"
+    order_is "gh login-with-token gh setup-git git clone npm install entrypoint " && ok "signs in to GitHub before the clone" || no "order: $(tr '\n' ' ' <"$C/order.log")"
     grep -q "signing in to GitHub with $C/bin/agent-hub" "$C/out" && ok "uses the installed client with no checkout" || no "did not use the installed client"
     [ "$(hub '.status[1].phase')" = awaiting_credentials ] && hub '.status[1].detail' | grep -q '^github: no GitHub token stored' &&
         ok "reports awaiting_credentials for the missing token" || no "status: $(hub -c '.status')"
@@ -209,7 +211,7 @@ case_refused_token() {
     setup refused-token
     seed_github "$STALE_TOKEN"
     boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh setup-git git clone npm install entrypoint " &&
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
         ok "a refused stored token falls back to the device-code sign-in" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     hub '.status[1].detail' | grep -q '^github: the stored GitHub token was refused' && ok "says the stored token was refused" || no "status: $(hub -c '.status')"
     [ "$(hub '.github')" = "$GOOD_TOKEN" ] && ok "replaces the token on the hub" || no "the token was not replaced"
@@ -238,7 +240,7 @@ case_checkout_client() {
     printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh setup-git git fetch git merge npm install entrypoint " &&
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
         ok "signs in, then fast-forwards the existing checkout" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     grep -q "signing in to GitHub with $C/ws/cft-workspace/scripts/agent-hub" "$C/out" && ok "prefers the checkout's client" || no "did not use the checkout's client"
 }
@@ -253,7 +255,7 @@ case_broken_checkout_client() {
     printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh setup-git git fetch git merge npm install entrypoint " &&
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
         ok "boots through with a shim that cannot run" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     grep -q "signing in to GitHub with $C/bin/agent-hub" "$C/out" && ok "falls through to the installed client" || no "did not fall through: $(grep 'signing in' "$C/out")"
 }
@@ -272,7 +274,7 @@ case_no_client() {
 case_trailing_slash() {
     setup trailing-slash
     boot AGENT_HUB_URL="$HUB_URL//"
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh setup-git git clone npm install entrypoint " &&
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
         ok "boots through with a hub URL ending in slashes" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     [ "$(hub '.github')" = "$GOOD_TOKEN" ] && ok "reached the hub with the slashes stripped" || no "the token was not stored"
 }

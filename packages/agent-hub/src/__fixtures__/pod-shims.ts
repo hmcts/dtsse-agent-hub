@@ -203,7 +203,6 @@ sleep 30`
 
   fs.writeFileSync(path.join(stateDir, "cache.json"), JSON.stringify(msalCache()));
   fs.writeFileSync(path.join(stateDir, "az.out"), AZ_OUTPUT);
-  fs.writeFileSync(path.join(stateDir, "gh.out"), GH_OUTPUT);
   fs.writeFileSync(path.join(stateDir, "claude.out"), CLAUDE_OUTPUT);
   fs.writeFileSync(path.join(stateDir, "twg-login.out"), TWG_LOGIN_OUTPUT);
   fs.writeFileSync(path.join(stateDir, "twg-wait.out"), TWG_WAIT_OUTPUT);
@@ -220,11 +219,18 @@ sleep 30`
   *) echo "unexpected az $*" >&2; exit 2 ;;
 esac`
   );
+  // `auth login` only takes a token on stdin, as the client gives it one: the device flow itself is no longer
+  // gh's, so there is nothing for this to print a code from. `FAKE_GH_REFUSES_TOKEN` is a token GitHub will
+  // not have, which is what gh validating it as it stores looks like from here.
   shim(
     "gh",
     `case "$1 $2" in
-  "auth login") [ -n "$GH_TOKEN$GITHUB_TOKEN" ] && exit 9; [ "$BROWSER" = true ] || exit 8; printf '%s\\n' "$*" > "$SHIM_STATE/gh-login-args"
-      cat "$SHIM_STATE/gh.out" >&2; sleep 0.3; printf '%s' "$FAKE_GH_TOKEN" > "$SHIM_STATE/gh-token"; echo "✓ Authentication complete." >&2 ;;
+  "auth login") [ -n "$GH_TOKEN$GITHUB_TOKEN" ] && exit 9; printf '%s\\n' "$*" > "$SHIM_STATE/gh-login-args"
+      case "$*" in *--with-token*) ;; *) echo "unexpected gh auth login $*" >&2; exit 2 ;; esac
+      IFS= read -r token || token=""
+      [ -n "$token" ] && [ "$token" != "\${FAKE_GH_REFUSES_TOKEN:-}" ] ||
+        { echo "error validating token: HTTP 401: Bad credentials" >&2; exit 1; }
+      printf '%s' "$token" > "$SHIM_STATE/gh-token" ;;
   "auth token") cat "$SHIM_STATE/gh-token" 2>/dev/null || exit 1 ;;
   "api user") [ -n "$FAKE_GH_USER" ] && { printf '%s\\n' "$FAKE_GH_USER"; exit 0; }; echo octocat ;;
   "api user/emails") [ -n "$FAKE_GH_EMAILS" ] && { printf '%s\\n' "$FAKE_GH_EMAILS"; exit 0; }; echo '{"message":"Not Found"}'; exit 1 ;;

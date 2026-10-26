@@ -42,6 +42,11 @@ export const ENV_KEYS = [
   "CLAUDE_CONFIG_DIR",
   "CLAUDE_PID",
   "CLAUDE_PROJECT_DIR",
+  // The GitHub host and OAuth app the device-code sign-in runs against. Both default to github.com and the
+  // "GitHub CLI" app, which is what a pod wants; they are settable so an HMCTS-owned app or a GitHub
+  // Enterprise host needs no code change, and so the boot suite can drive the flow without leaving the box.
+  "GITHUB_OAUTH_CLIENT_ID",
+  "GITHUB_OAUTH_HOST",
   "HOME",
   "NVM_DIR",
   "PATH",

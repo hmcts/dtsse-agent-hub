@@ -11,6 +11,7 @@ import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
 import { azureDir, restoreAzureCache, syncAzureCache } from "./azure-cache.ts";
+import { deviceFlowRetryable, pollDeviceToken, requestDeviceCode } from "./github-device-flow.ts";
 import { FatalError, say } from "./phases.ts";
 
 export const DEVICE_CODE_EXPIRES_S = 900;
@@ -300,20 +301,68 @@ export async function azureLogin({ api = createApi(), env = process.env }: Login
 
 const GH_CLEAN = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"];
 
-export async function githubLogin({ api = createApi(), env = process.env }: LoginOptions = {}): Promise<"signed-in"> {
+/** How much of a command's own complaint is worth repeating, as one line. */
+export function ghSaid(stderr: string): string {
+  const text = stderr.replace(/\s+/g, " ").trim();
+  return text === "" ? "it said nothing" : text.slice(0, 200);
+}
+
+export type GithubLoginOptions = LoginOptions & {
+  fetchImpl?: typeof fetch;
+  wait?: (ms: number) => Promise<void>;
+};
+
+/**
+ * Relays a GitHub device code to the owner and polls for the token itself, then hands the token to gh.
+ *
+ * The flow is not run through `gh auth login --web`, because gh ends a sign-in on the first poll answer that
+ * is not `authorization_pending` or a single `slow_down` — see `github-device-flow.ts`. gh still stores the
+ * token: `--with-token` validates it as it writes it, so a token GitHub will not accept is caught here rather
+ * than at the clone, and the pod's git credentials come from the same place they always did.
+ */
+export async function githubLogin({ api = createApi(), env = process.env, fetchImpl, wait }: GithubLoginOptions = {}): Promise<"signed-in"> {
   const { id } = requireVirtualAgent(env);
-  // gh opens the device page with $GH_BROWSER/$BROWSER; `true` makes that a no-op in a pod with no browser.
-  const ghEnv = { ...childEnv(env, GH_CLEAN), GH_BROWSER: "true", BROWSER: "true", GH_PROMPT_DISABLED: "1" };
-  // user:email lets git-identity check that the owner's HMCTS email is on their GitHub account.
-  const args = ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--scopes", "user:email", "--web"];
-  const { code } = await relayDeviceLogin({ api, id, kind: "github", cmd: "gh", args, env: ghEnv, parse: parseGhDeviceCode, label: "github" });
-  const token = (await run("gh", ["auth", "token", "--hostname", "github.com"], { env: ghEnv })).stdout.trim();
-  if (!token) {
-    throw new Error(`gh auth login exited ${code} without a token`);
+  const ghEnv = childEnv(env, GH_CLEAN);
+  const code = await withRetry(() => requestDeviceCode({ env, fetchImpl }), { retryable: deviceFlowRetryable, wait });
+  await withRetry(
+    async () => {
+      await api.loginPrompt(id, "github", {
+        prompt: "device_code",
+        verification_uri: code.verification_uri,
+        user_code: code.user_code,
+        expires_in: code.expires_in
+      });
+      await api.virtualStatus(id, "awaiting_login", `github: the owner must enter code ${code.user_code} at ${code.verification_uri}`);
+    },
+    { wait }
+  );
+  say("github: sign-in code relayed to the owner through agent-hub");
+  const polled = await pollDeviceToken({ code, env, fetchImpl, wait, onWait: (detail) => say(`github: ${detail}`) });
+  if (polled.outcome !== "token") {
+    const expired = polled.outcome === "expired";
+    const detail = expired ? "github: the sign-in code ran out before it was used" : `github: the sign-in was refused (${polled.detail})`;
+    say(detail);
+    // The owner is otherwise left holding a code that no longer works, with nothing but this pod's stderr
+    // saying so. Few attempts: the caller is about to be told this failed either way.
+    await withRetry(() => api.loginFailed(id, "github", { state: expired ? "expired" : "failed", detail }), { attempts: 3, wait }).catch((e: unknown) => {
+      say(`github: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`);
+    });
+    throw new Error(detail);
+  }
+  const token = polled.token;
+  const stored = await run("gh", ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--with-token"], {
+    env: ghEnv,
+    input: `${token}\n`
+  });
+  if (stored.code !== 0) {
+    // gh's own words, bounded: it validates the token against the API and says what GitHub answered, which is
+    // the difference between a scope the app no longer grants and a token GitHub has already revoked. gh writes
+    // no token to this stream — it is the one being handed to it — so quoting it is safe.
+    throw new Error(`gh would not store the GitHub token the owner signed in for (exit ${stored.code}): ${ghSaid(stored.stderr)}`);
   }
   const login = (await run("gh", ["api", "user", "--jq", ".login"], { env: ghEnv })).stdout.trim();
-  await withRetry(() => api.loginComplete(id, "github", login ? { account_label: login } : {}));
-  await withRetry(() => api.putCredential(id, "github", token));
+  await withRetry(() => api.loginComplete(id, "github", login ? { account_label: login } : {}), { wait });
+  await withRetry(() => api.putCredential(id, "github", token), { wait });
   say(`github: signed in${login ? ` as ${login}` : ""}`);
   return "signed-in";
 }

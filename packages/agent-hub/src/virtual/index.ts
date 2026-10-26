@@ -42,6 +42,7 @@ export type {
   ClaudeLoginOptions,
   ClaudeLoginResult,
   DeviceCodePrompt,
+  GithubLoginOptions,
   LoginOptions,
   RelayDeviceLoginOptions,
   RelayDeviceLoginResult,

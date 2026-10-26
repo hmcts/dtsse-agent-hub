@@ -26,6 +26,7 @@ import {
   claudeLogin,
   EXPIRY_TOLERANCE_S,
   findClaudeToken,
+  ghSaid,
   githubLogin,
   parseAzDeviceCode,
   parseClaudeAuthorizeUrl,
@@ -60,6 +61,7 @@ afterEach(() => {
   v.status.length = 0;
   v.prompts.length = 0;
   v.completes.length = 0;
+  v.loginFailures.length = 0;
   v.credentials.clear();
   v.codes.clear();
   pod.reset();
@@ -99,6 +101,19 @@ describe("run", () => {
 
     // Assert: killed by a signal, so there is no exit code of its own.
     expect(r.code).toBe(1);
+  });
+});
+
+describe("ghSaid", () => {
+  it("should give a command's complaint back as one bounded line", () => {
+    // Act & Assert
+    expect(ghSaid("  error validating token:\n  HTTP 401\n")).toBe("error validating token: HTTP 401");
+    expect(ghSaid("x".repeat(500))).toHaveLength(200);
+  });
+
+  it("should say so when the command complained about nothing", () => {
+    // Act & Assert
+    expect(ghSaid(" \n ")).toBe("it said nothing");
   });
 });
 
@@ -348,41 +363,137 @@ describe("azureLogin", () => {
 });
 
 describe("githubLogin", () => {
-  it("should relay the device code without a browser and store the token", async () => {
+  const deviceCode = (extra: Record<string, string> = {}) =>
+    new URLSearchParams({
+      device_code: "dev-code",
+      user_code: "7B7F-C198",
+      verification_uri: "https://github.com/login/device",
+      expires_in: "899",
+      interval: "1",
+      ...extra
+    }).toString();
+
+  /** GitHub, scripted: the device code first and then each poll's body in turn, the last one repeating. */
+  function githubAnswering(...polls: string[]): typeof fetch {
+    const bodies = [deviceCode(), ...polls];
+    let n = 0;
+    return (async () =>
+      new Response(bodies[Math.min(n++, bodies.length - 1)], {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      })) as unknown as typeof fetch;
+  }
+
+  const token = (value: string) => new URLSearchParams({ access_token: value, token_type: "bearer" }).toString();
+  const noWait = async () => {};
+
+  it("should relay the device code, poll for the token itself and hand it to gh", async () => {
+    // Arrange: GH_TOKEN is in the pod's environment and the shim exits 9 if it reaches gh.
+    const fetchImpl = githubAnswering(token(GH_TOKEN));
+
     // Act
-    const { result, stderr } = await captureStderr(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_TOKEN: GH_TOKEN, GH_TOKEN: "stale" }) }));
+    const { result, stderr } = await captureStderr(() => githubLogin({ api: api(), env: pod.env({ GH_TOKEN: "stale" }), fetchImpl, wait: noWait }));
 
     // Assert
     expect(result).toBe("signed-in");
     expect(virtual().prompts).toEqual([
-      { kind: "github", prompt: "device_code", verification_uri: "https://github.com/login/device", user_code: "7B7F-C198", expires_in: 900 }
+      { kind: "github", prompt: "device_code", verification_uri: "https://github.com/login/device", user_code: "7B7F-C198", expires_in: 899 }
     ]);
     expect(virtual().completes).toEqual([{ kind: "github", account_label: "octocat" }]);
-    expect(fs.readFileSync(path.join(pod.stateDir, "gh-login-args"), "utf8")).toMatch(/--scopes user:email --web/);
+    expect(fs.readFileSync(path.join(pod.stateDir, "gh-login-args"), "utf8")).toMatch(/--with-token/);
     expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
     expect(stderr).not.toContain(GH_TOKEN);
   });
 
-  it("should fail when gh completes the sign-in but holds no token", async () => {
-    // Arrange: FAKE_GH_TOKEN unset, so the shim writes an empty token file.
+  it("should tell the hub the code expired and withdraw it when nobody used it", async () => {
+    // Arrange: a code with a second to live, answered pending for as long as it has one.
+    const fetchImpl = ((): typeof fetch => {
+      let first = true;
+      return (async () => {
+        const body = first ? deviceCode({ expires_in: "1" }) : "error=authorization_pending";
+        first = false;
+        return new Response(body, { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+      }) as unknown as typeof fetch;
+    })();
+
     // Act
-    const { error } = await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env() }));
+    const { error } = await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env(), fetchImpl }));
 
     // Assert
-    expect((error as Error).message).toMatch(/gh auth login exited 0 without a token/);
+    expect((error as Error).message).toBe("github: the sign-in code ran out before it was used");
+    expect(virtual().loginFailures).toEqual([{ kind: "github", state: "expired", detail: "github: the sign-in code ran out before it was used" }]);
     expect(virtual().credentials.has("github")).toBe(false);
   });
 
-  it("should relay a fresh code on every call, which is what keeps a dead one off the owner's screen", async () => {
-    // Arrange: a failed GitHub sign-in throws, and `virtual-agent-boot` calls this again until it works. The
-    // relay is what Atlassian's lacks: a new code replaces the old one, so no code outlives its own time by long.
-    await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env() }));
+  it("should name what GitHub refused the sign-in with, rather than call it the owner's doing", async () => {
+    // Arrange
+    const fetchImpl = githubAnswering(new URLSearchParams({ error: "access_denied", error_description: "The user cancelled it." }).toString());
 
     // Act
-    await captureStderr(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_TOKEN: GH_TOKEN }) }));
+    const { error } = await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env(), fetchImpl, wait: noWait }));
 
     // Assert
-    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(2);
+    expect((error as Error).message).toBe("github: the sign-in was refused (GitHub answered access_denied: The user cancelled it.)");
+    expect(virtual().loginFailures).toEqual([{ kind: "github", state: "failed", detail: (error as Error).message }]);
+  });
+
+  it("should still report the failure to its caller when the hub will not take the report", async () => {
+    // Arrange: a hub with no row for this sign-in refuses the report, which may not become the failure said.
+    const fetchImpl = githubAnswering(new URLSearchParams({ error: "access_denied" }).toString());
+    const refusing: Api = {
+      ...api(),
+      loginFailed: () => Promise.reject(new ApiError(404, { error: "there is no github sign-in to report on" }, "POST", "login/github/failed"))
+    };
+
+    // Act
+    const { error, stderr } = await captureStderrOfFailure(() => githubLogin({ api: refusing, env: pod.env(), fetchImpl, wait: noWait }));
+
+    // Assert
+    expect((error as Error).message).toMatch(/^github: the sign-in was refused/);
+    expect(stderr).toMatch(/github: could not tell agent-hub the sign-in was not completed/);
+  });
+
+  it("should fail without storing anything when gh will not take the token GitHub gave", async () => {
+    // Arrange: gh validates a token as it stores it, so one GitHub will not accept is caught here.
+    const fetchImpl = githubAnswering(token(GH_TOKEN));
+
+    // Act
+    const { error } = await captureStderrOfFailure(() =>
+      githubLogin({ api: api(), env: pod.env({ FAKE_GH_REFUSES_TOKEN: GH_TOKEN }), fetchImpl, wait: noWait })
+    );
+
+    // Assert
+    expect((error as Error).message).toBe(
+      "gh would not store the GitHub token the owner signed in for (exit 1): error validating token: HTTP 401: Bad credentials"
+    );
+    expect(virtual().credentials.has("github")).toBe(false);
+    expect(virtual().completes).toEqual([]);
+  });
+
+  it("should keep the owner's code and poll on when GitHub answers a fault, which is what gh will not do", async () => {
+    // Arrange: a 429 and then a reset, both of which end the sign-in under `gh auth login --web`.
+    let n = 0;
+    const fetchImpl = (async () => {
+      switch (n++) {
+        case 0:
+          return new Response(deviceCode(), { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+        case 1:
+          return new Response("<html>too many requests</html>", { status: 429, headers: { "Retry-After": "0", "Content-Type": "text/html" } });
+        case 2:
+          throw new Error("socket hang up");
+        default:
+          return new Response(token(GH_TOKEN), { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+      }
+    }) as unknown as typeof fetch;
+
+    // Act
+    const { result, stderr } = await captureStderr(() => githubLogin({ api: api(), env: pod.env(), fetchImpl, wait: noWait }));
+
+    // Assert: one code relayed, never withdrawn, and the sign-in completed on the third poll.
+    expect(result).toBe("signed-in");
+    expect(virtual().prompts).toHaveLength(1);
+    expect(virtual().loginFailures).toEqual([]);
+    expect(stderr).toMatch(/github: GitHub answered HTTP 429; the code is still good/);
+    expect(stderr).toMatch(/github: the poll could not reach GitHub \(socket hang up\); the code is still good/);
   });
 });
 
