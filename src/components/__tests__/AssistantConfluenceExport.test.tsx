@@ -151,7 +151,7 @@ describe("Confluence export in the document panel", () => {
       })
     );
 
-    expect(screen.getByText("✓ Created Story")).toBeTruthy();
+    expect(screen.getByText("✓ Created page")).toBeTruthy();
     expect(screen.getByRole("link", { name: "View in Confluence" }).getAttribute("href")).toBe("https://hmcts.atlassian.net/wiki/spaces/CCD/pages/9");
     expect(screen.getByText("In Confluence")).toBeTruthy();
     expect(screen.getByText("Story · under Guides")).toBeTruthy();

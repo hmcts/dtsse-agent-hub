@@ -172,7 +172,7 @@ export function ConfluenceFooter({
         <ParentPicker parent={parent} onChange={setParent} disabled={pending} access={access} lookUp={lookUp} />
       ) : (
         <div role="status" className="flex min-h-[34px] min-w-0 flex-1 items-center gap-2.5 text-[13px]">
-          <span className="min-w-0 truncate font-medium text-asst-ok">✓ Created {done.pageTitle ?? "the page"}</span>
+          <span className="min-w-0 truncate font-medium text-asst-ok">✓ Created page</span>
           <a href={done.url} target="_blank" rel="noreferrer noopener" className="shrink-0 text-asst-accent underline">
             View in Confluence
           </a>
