@@ -156,11 +156,11 @@ function JiraAction({
 }) {
   if (exported.status === "done") {
     return (
-      <div role="status" className="flex h-[34px] shrink-0 items-center gap-2.5 text-[13px]">
-        <span className="font-medium text-asst-ok">
+      <div role="status" className="flex min-h-[34px] min-w-0 flex-1 items-center gap-2.5 text-[13px]">
+        <span className="min-w-0 truncate font-medium text-asst-ok">
           ✓ Created <span className="font-plex-mono">{exported.key}</span>
         </span>
-        <a href={exported.url} target="_blank" rel="noreferrer noopener" className="text-asst-accent underline">
+        <a href={exported.url} target="_blank" rel="noreferrer noopener" className="shrink-0 text-asst-accent underline">
           View in Jira
         </a>
       </div>
@@ -189,7 +189,7 @@ function JiraAction({
 
 /**
  * The Jira half of the export footer: the backlog to send it to and the button that does, then the ticket it became.
- * A document goes to Jira once; after that this shows the ticket instead. `saved` is false while the panel has
+ * A document goes to Jira once; after that the ticket takes the backlog's place. `saved` is false while the panel has
  * changes Jira would not get, so the button waits for them.
  */
 export function JiraFooter({
@@ -249,7 +249,7 @@ export function JiraFooter({
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2.5">
-      <ProjectPicker project={chosen} onChange={setChosen} disabled={pending || exported.status === "done"} access={access} lookUp={lookUp} />
+      {exported.status === "done" ? null : <ProjectPicker project={chosen} onChange={setChosen} disabled={pending} access={access} lookUp={lookUp} />}
       <JiraAction
         exported={exported}
         pending={pending}

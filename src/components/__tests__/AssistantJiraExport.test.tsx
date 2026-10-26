@@ -179,7 +179,7 @@ describe("Jira export in the document panel", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("should show the ticket with links to it, and no way to export again, when the export is done", () => {
+  it("should show the ticket in the backlog's place, and no way to export again, when the export is done", () => {
     render(panel({ exported: { status: "done", project: "VIBE", key: "VIBE-701", url: "https://hmcts.atlassian.net/browse/VIBE-701" } }));
 
     expect(screen.getByText(/Created/).textContent).toContain("VIBE-701");
@@ -188,6 +188,7 @@ describe("Jira export in the document panel", () => {
     expect(screen.getByText("In Jira")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /export/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Change the Jira project/ })).toBeNull();
+    expect(screen.queryByText("Backlog")).toBeNull();
   });
 
   it("should show why and offer the export again when it failed", () => {
