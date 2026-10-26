@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { DISK_WARNING_DAYS, diskExpiresAt, diskWarningDays, dueEveningStop, isIdle, lastActivity, latestEveningStop, londonInstant } from "./cleanup.ts";
+import {
+  DISK_WARNING_DAYS,
+  diskExpiresAt,
+  diskWarningDays,
+  dueEveningStop,
+  INACTIVITY_RULES,
+  inactivityRule,
+  isIdle,
+  lastActivity,
+  latestEveningStop,
+  londonInstant
+} from "./cleanup.ts";
+import { VIRTUAL_AGENT_STATUSES } from "./lifecycle.ts";
 
 const SEVEN_PM = { hour: 19, minute: 0 };
 
@@ -98,6 +110,43 @@ describe("isIdle", () => {
 
   it("should not be idle when the linked agent is busy, however long ago anything was recorded", () => {
     expect(isIdle("busy", at("2026-10-01T00:00:00.000Z"), now, 120)).toBe(false);
+  });
+});
+
+describe("inactivityRule", () => {
+  it.each([
+    ["awaiting_owner", "awaiting_login"],
+    ["awaiting_owner", "awaiting_credentials"],
+    ["idle", "running"],
+    ["idle", "cloning"],
+    ["failed", "failed"]
+  ] as const)("should hold an agent to the %s deadline when its status is %s", (rule, status) => {
+    expect(inactivityRule(status)).toBe(rule);
+  });
+
+  it.each(["requested", "provisioning", "stopping", "stopped"])("should leave a %s agent alone when the other rules cover it", (status) => {
+    expect(inactivityRule(status)).toBeUndefined();
+  });
+
+  it("should answer for every status when the whole list is read, so adding one without a decision fails here", () => {
+    // Every status appears, with "none" rather than a missing key, so a new status is an extra entry this fails on
+    // whether or not anyone gave it a rule.
+    const answers = Object.fromEntries(VIRTUAL_AGENT_STATUSES.map((status) => [status, inactivityRule(status) ?? "none"]));
+    expect(answers).toEqual({
+      requested: "none",
+      provisioning: "none",
+      awaiting_credentials: "awaiting_owner",
+      awaiting_login: "awaiting_owner",
+      cloning: "idle",
+      running: "idle",
+      stopping: "none",
+      stopped: "none",
+      failed: "failed"
+    });
+  });
+
+  it("should name only rules the stop can record as its reason, so each reads as what the sweep decided", () => {
+    expect(INACTIVITY_RULES).toEqual(["idle", "awaiting_owner", "failed"]);
   });
 });
 

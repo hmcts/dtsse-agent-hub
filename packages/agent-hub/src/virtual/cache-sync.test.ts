@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
 import { captureStderr, createPodShims, msalCache, type PodShims, podSecrets, twgAuthConf, usePodEnv } from "../__fixtures__/pod-shims.ts";
-import { createApi } from "../api.ts";
+import { type Api, createApi } from "../api.ts";
 import { syncAtlassianAuth } from "./atlassian.ts";
 import { unpackAzureCache } from "./azure-cache.ts";
 import { cacheSync } from "./cache-sync.ts";
@@ -91,6 +91,28 @@ describe("cacheSync --once", () => {
     expect(storedAtlassian()).toMatch(new RegExp(`^oauth-refresh-token=${TWG_REFRESH}-by-claude$`, "m"));
   });
 
+  it("should store the twg sign-in before the Azure cache, so the one that cannot be recovered goes first", async () => {
+    // Arrange: on SIGTERM the pass shares the pod's last 60 seconds, and only the twg sign-in is unrecoverable
+    // if it is lost — Atlassian takes only the newest refresh token, where a stale MSAL cache still refreshes.
+    const env = pod.env();
+    pod.seedTwg(env);
+    await syncAtlassianAuth({ api: api(), id: VID, env, force: true });
+    writeAzureCache(env, JSON.stringify(msalCache()));
+    fs.writeFileSync(path.join(env.TWG_CONFIG_DIR as string, "auth.conf"), twgAuthConf({ refresh: `${TWG_REFRESH}-by-claude` }));
+    const from = hub.calls.length;
+
+    // Act
+    const result = await cacheSync({ api: api(), env, once: true });
+
+    // Assert
+    expect(result).toEqual({ azure: "stored", atlassian: "stored" });
+    const stores = hub.calls
+      .slice(from)
+      .filter((c) => c.method === "PUT" && /\/credentials\/(atlassian|azure)$/.test(c.path))
+      .map((c) => c.path.split("/").pop());
+    expect(stores).toEqual(["atlassian", "azure"]);
+  });
+
   it("should report the twg sign-in as an error when auth.conf has lost its refresh token", async () => {
     // Arrange
     const env = pod.env();
@@ -127,6 +149,40 @@ describe("cacheSync", () => {
     expect(result).toEqual({ azure: "stored", atlassian: "not-signed-in" });
     expect(azureRefreshSecret()).toBe(`${REFRESH}-final`);
     expect(stderr).not.toContain(REFRESH);
+    expect(process.listenerCount("SIGTERM")).toBe(listenersBefore);
+  });
+
+  it("should finish the pass it is in and then store once more when SIGTERM lands mid-pass", async () => {
+    // Arrange: the signal only wakes the sleep, so a pass already running is not cut short — it refreshes and
+    // stores to the end, and only then does the final store-only pass begin. How much of the pod's 60 seconds
+    // that leaves the final pass is why a pass stores the twg sign-in before the Azure cache.
+    const env = pod.env({ AGENT_HUB_CACHE_SYNC_MS: "60000" });
+    pod.seedTwg(env);
+    await syncAtlassianAuth({ api: api(), id: VID, env, force: true });
+    fs.writeFileSync(path.join(pod.stateDir, "twg-due"), "");
+    writeAzureCache(env, JSON.stringify(msalCache()));
+    const hubApi = api();
+    let signalled = false;
+    const signalMidPass: Api = {
+      ...hubApi,
+      putCredential: (id, kind, value) => {
+        if (!signalled) {
+          signalled = true;
+          process.emit("SIGTERM");
+        }
+        return hubApi.putCredential(id, kind, value);
+      }
+    };
+    const listenersBefore = process.listenerCount("SIGTERM");
+
+    // Act
+    const { result } = await captureStderr(() => cacheSync({ api: signalMidPass, env }));
+
+    // Assert: the interrupted pass still rotated and stored, and the final pass stored rather than refreshing
+    expect(storedAtlassian()).toMatch(new RegExp(`^oauth-refresh-token=${TWG_REFRESH}-1$`, "m"));
+    expect(virtual().credentials.has("azure")).toBe(true);
+    expect(fs.readFileSync(path.join(pod.stateDir, "twg.log"), "utf8").match(/^auth refresh$/gm)).toHaveLength(1);
+    expect(result).toEqual({ azure: "unchanged", atlassian: "unchanged" });
     expect(process.listenerCount("SIGTERM")).toBe(listenersBefore);
   });
 

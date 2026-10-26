@@ -38,16 +38,17 @@ export const TWG_LOGIN_OUTPUT =
   `  ⚠️  Only approve this request if you initiated it from your terminal.\r\n` +
   `\x1b[?25l\x1b[90m│\x1b[39m\r\n\x1b[36m◆\x1b[39m  Open in browser?\r\n` +
   `\x1b[36m│\x1b[39m  \x1b[32m●\x1b[39m Y \x1b[2m/\x1b[22m \x1b[2m○\x1b[22m \x1b[2mn\x1b[22m\r\n\x1b[36m└\x1b[39m\r\n\x1b[1A\r\n`;
-export const TWG_WAIT_OUTPUT = `\x1b[35m◒\x1b[39m    Waiting for authentication in browser... (120s remaining)\x1b[1G\x1b[J`;
+// The countdown twg draws only outside agent mode, which is where the pod's login runs: 300 seconds, measured
+// against twg 1.3.3 with the agent-mode triggers taken out of its environment.
+export const TWG_WAIT_OUTPUT = `\x1b[35m◒\x1b[39m    Waiting for authentication in browser... (300s remaining)\x1b[1G\x1b[J`;
 
 /**
- * How `twg login` 1.3.3 gives up when nobody uses its code: its own timer, which is two minutes whenever twg reads
- * the environment as an agent's. The bracketed error code is what tells this apart from any other failure.
+ * How `twg login` 1.3.3 gives up when nobody uses its code: its own timer, five minutes outside agent mode, which
+ * is where the pod's login runs. The bracketed error code is what tells this apart from any other failure.
  */
 export const TWG_LOGIN_TIMEOUT_OUTPUT =
-  `\r\n\x1b[31m✖\x1b[39m  OAuth authentication failed: Login timed out after 2 minutes: browser authentication was not ` +
-  `completed. This looks like a non-interactive/agent environment — run \`twg login\` yourself in an interactive ` +
-  `terminal to finish authenticating.\r\n  Code:        [login_timeout]\r\n`;
+  `\r\n\x1b[31m✖\x1b[39m  OAuth authentication failed: Login timed out after 5 minutes: browser authentication was not ` +
+  `completed. Run \`twg login\` again to retry.\r\n  Code:        [login_timeout]\r\n`;
 
 /** A sign-in that broke rather than ran out: the owner said no. Shaped as above, with a different code. */
 export const TWG_LOGIN_DENIED_OUTPUT = `\r\n\x1b[31m✖\x1b[39m  OAuth authentication failed: The user denied the request.\r\n  Code:        [access_denied]\r\n`;
@@ -163,6 +164,8 @@ export type PodShims = {
   scriptShim: () => void;
   /** The sign-in a pod would have after `twg login`, as the fake twg accepts it. */
   seedTwg: (env: Record<string, string>, refresh?: string) => void;
+  /** The environment variable names the last `twg login` was given, which is what its code's lifetime turns on. */
+  loginEnvNames: () => string[];
   /** Forgets everything one test wrote: the sign-ins on disk, the shims' counters and the pod's state dir. */
   reset: () => void;
   cleanup: () => void;
@@ -234,6 +237,8 @@ esac`
   // schema requires, and reports a refused refresh token in its JSON with exit 1.
   // `FAKE_TWG_LOGIN`: `expire` gives up on the code as twg's own timer does, after `FAKE_TWG_EXPIRE_AFTER` seconds;
   // `deny` fails for another reason after printing a code; `crash` fails before printing one.
+  // `login` writes down the names in its environment, because what is missing from them is what decides whether the
+  // real twg holds its code for five minutes or two.
   shim(
     "twg",
     `v139() { [ "$FAKE_TWG_VERSION" = 1.3.9 ]; }
@@ -272,7 +277,8 @@ case "$1 $2" in
       { [ "$3" = --force ] || [ -f "$SHIM_STATE/twg-due" ]; } && rotate; exit 0 ;;
   "doctor -o") if [ -z "$FAKE_TWG_DOCTOR_FAILS" ] && valid && has_access; then ok=true; else ok=false; fi
       printf '{"apiVersion":"v2","data":{"connectivity":{"attempted":true,"ok":%s}}}\\n' "$ok"; [ "$ok" = true ] ;;
-  "login --site") [ "$FAKE_TWG_LOGIN" = crash ] && { echo "twg: internal error" >&2; exit 70; }
+  "login --site") env | cut -d= -f1 | LC_ALL=C sort >"$SHIM_STATE/twg-login-env"
+      [ "$FAKE_TWG_LOGIN" = crash ] && { echo "twg: internal error" >&2; exit 70; }
       cat "$SHIM_STATE/twg-login.out"
       IFS= read -r -d $'\\r' answer
       [ "$answer" = n ] || { echo "opened a browser"; exit 5; }
@@ -311,16 +317,21 @@ esac`
     fs.writeFileSync(path.join(stateDir, "twg-valid"), refresh);
   };
 
+  const loginEnvNames = (): string[] => {
+    const text = fs.readFileSync(path.join(stateDir, "twg-login-env"), "utf8");
+    return text.split("\n").filter((name) => name !== "");
+  };
+
   const reset = () => {
     fs.rmSync(path.join(home.root, ".azure"), { recursive: true, force: true });
     fs.rmSync(path.join(home.root, ".twg"), { recursive: true, force: true });
-    for (const f of ["az-ok", "gh-token", "twg-valid", "twg-n", "twg-due", "twg.log"]) {
+    for (const f of ["az-ok", "gh-token", "twg-valid", "twg-n", "twg-due", "twg.log", "twg-login-env"]) {
       fs.rmSync(path.join(stateDir, f), { force: true });
     }
     fs.rmSync(path.join(home.hub, "virtual"), { recursive: true, force: true });
   };
 
-  return { home, bin, stateDir, env, shim, scriptShim, seedTwg, reset, cleanup: home.cleanup };
+  return { home, bin, stateDir, env, shim, scriptShim, seedTwg, loginEnvNames, reset, cleanup: home.cleanup };
 }
 
 /** Points `hubHome()` at the fake pod's HOME for the whole file, and gives back the restore. */

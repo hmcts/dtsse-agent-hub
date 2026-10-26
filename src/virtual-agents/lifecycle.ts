@@ -28,6 +28,19 @@ export const POD_PHASES = ["provisioning", "awaiting_credentials", "awaiting_log
 export type PodPhase = (typeof POD_PHASES)[number];
 
 /**
+ * The names a status and a pod phase share for a pod that is up but blocked on its owner: it has no credential of
+ * some kind stored, or it is relaying a sign-in nobody has finished. The sweep holds these to a deadline of their
+ * own, and a report of one is not activity — a pod handing out a fresh device code every few minutes is waiting, not
+ * working, and nothing but the owner can move it on.
+ */
+export const AWAITING_OWNER = ["awaiting_credentials", "awaiting_login"] as const satisfies readonly (PodPhase & VirtualAgentStatus)[];
+
+/** Whether a pod phase, or the status it writes, is one in which the pod is blocked on its owner. */
+export function awaitsOwner(phaseOrStatus: string): boolean {
+  return (AWAITING_OWNER as readonly string[]).includes(phaseOrStatus);
+}
+
+/**
  * Which pod phases each status accepts, once the agent is meant to be running.
  *
  * Only the current pod holds a valid launch token, so a report is always about the pod the person asked for. A pod
