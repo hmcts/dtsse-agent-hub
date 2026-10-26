@@ -146,6 +146,12 @@ export type LoginCompleteBody = {
   account_label?: string;
 };
 
+/** A sign-in the pod relayed and gave up on: `expired` when its code ran out unused, `failed` for anything else. */
+export type LoginFailedBody = {
+  state: "expired" | "failed";
+  detail?: string;
+};
+
 /** What a conversation's session runs, as `PUT /api/virtual/{id}/sessions` takes it. */
 export type SessionReport = {
   conversation_id: string;
@@ -197,6 +203,18 @@ export type UploadsReportBody = {
   files_total: number;
   files: { upload_id: string; bytes: number }[];
   deleted: string[];
+};
+
+/**
+ * What this container's memory cgroup says: `memory.max`, `memory.current` and `memory.peak`.
+ *
+ * All three or none. Every sentence the hub writes about memory is relative to the limit, and the peak is what it
+ * warns on, so a partial report would be a figure it had to guess rather than a weaker one.
+ */
+export type MemoryReportBody = {
+  limit_bytes: number;
+  current_bytes: number;
+  peak_bytes: number;
 };
 
 export type RegisterResponse = { agent_id: string; name: string };
@@ -328,11 +346,15 @@ export type Api = {
   loginPrompt: (id: string, kind: CredentialKind, body: LoginPromptBody) => Promise<null>;
   loginCode: (id: string, kind: CredentialKind) => Promise<string | null>;
   loginComplete: (id: string, kind: CredentialKind, body?: LoginCompleteBody) => Promise<null>;
+  /** The other half of `loginComplete`: the pod owes the hub one of the two for every sign-in it relays. */
+  loginFailed: (id: string, kind: CredentialKind, body: LoginFailedBody) => Promise<null>;
   sessionsStream: (id: string, opts?: StreamOptions) => Promise<Response>;
   putSessions: (id: string, body: SessionsBody) => Promise<null>;
   conversations: (virtualId: string) => Promise<ConversationsResponse>;
   /** What the uploads directory and the volume under it come to, which the hub has no way to see for itself. */
   putUploads: (virtualId: string, body: UploadsReportBody) => Promise<null>;
+  /** What this container's memory cgroup says, which the hub has no way to see for itself either. */
+  putMemory: (virtualId: string, body: MemoryReportBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
   putJiraExport: (agentId: string, body: JiraExportReport) => Promise<null>;
@@ -488,12 +510,14 @@ export function createApi({
     loginPrompt: (id, kind, body) => request<null>("POST", v(id, `login/${k(kind)}`), body),
     loginCode: async (id, kind) => (await request<LoginCodeResponse | null>("GET", v(id, `login/${k(kind)}/code`)))?.code ?? null,
     loginComplete: (id, kind, body = {}) => request<null>("POST", v(id, `login/${k(kind)}/complete`), body),
+    loginFailed: (id, kind, body) => request<null>("POST", v(id, `login/${k(kind)}/failed`), body),
     // A virtual agent's HMCTS Assistant conversations: wakes and closes on the sessions stream, and what its
     // supervisor runs.
     sessionsStream: (id, opts) => openStream(v(id, "sessions"), opts),
     putSessions: (id, body) => request<null>("PUT", v(id, "sessions"), body),
     conversations: (virtualId) => request<ConversationsResponse>("GET", v(virtualId, "conversations")),
     putUploads: (virtualId, body) => request<null>("PUT", v(virtualId, "uploads"), body),
+    putMemory: (virtualId, body) => request<null>("PUT", v(virtualId, "memory"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),

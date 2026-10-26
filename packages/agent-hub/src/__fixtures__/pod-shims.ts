@@ -38,7 +38,19 @@ export const TWG_LOGIN_OUTPUT =
   `  ⚠️  Only approve this request if you initiated it from your terminal.\r\n` +
   `\x1b[?25l\x1b[90m│\x1b[39m\r\n\x1b[36m◆\x1b[39m  Open in browser?\r\n` +
   `\x1b[36m│\x1b[39m  \x1b[32m●\x1b[39m Y \x1b[2m/\x1b[22m \x1b[2m○\x1b[22m \x1b[2mn\x1b[22m\r\n\x1b[36m└\x1b[39m\r\n\x1b[1A\r\n`;
-export const TWG_WAIT_OUTPUT = `\x1b[35m◒\x1b[39m    Waiting for authentication in browser... (300s remaining)\x1b[1G\x1b[J`;
+export const TWG_WAIT_OUTPUT = `\x1b[35m◒\x1b[39m    Waiting for authentication in browser... (120s remaining)\x1b[1G\x1b[J`;
+
+/**
+ * How `twg login` 1.3.3 gives up when nobody uses its code: its own timer, which is two minutes whenever twg reads
+ * the environment as an agent's. The bracketed error code is what tells this apart from any other failure.
+ */
+export const TWG_LOGIN_TIMEOUT_OUTPUT =
+  `\r\n\x1b[31m✖\x1b[39m  OAuth authentication failed: Login timed out after 2 minutes: browser authentication was not ` +
+  `completed. This looks like a non-interactive/agent environment — run \`twg login\` yourself in an interactive ` +
+  `terminal to finish authenticating.\r\n  Code:        [login_timeout]\r\n`;
+
+/** A sign-in that broke rather than ran out: the owner said no. Shaped as above, with a different code. */
+export const TWG_LOGIN_DENIED_OUTPUT = `\r\n\x1b[31m✖\x1b[39m  OAuth authentication failed: The user denied the request.\r\n  Code:        [access_denied]\r\n`;
 
 export type MsalCacheOptions = {
   refresh?: string;
@@ -192,6 +204,8 @@ sleep 30`
   fs.writeFileSync(path.join(stateDir, "claude.out"), CLAUDE_OUTPUT);
   fs.writeFileSync(path.join(stateDir, "twg-login.out"), TWG_LOGIN_OUTPUT);
   fs.writeFileSync(path.join(stateDir, "twg-wait.out"), TWG_WAIT_OUTPUT);
+  fs.writeFileSync(path.join(stateDir, "twg-timeout.out"), TWG_LOGIN_TIMEOUT_OUTPUT);
+  fs.writeFileSync(path.join(stateDir, "twg-denied.out"), TWG_LOGIN_DENIED_OUTPUT);
 
   shim(
     "az",
@@ -218,6 +232,8 @@ esac`
   // Stands in for twg 1.3.3, or 1.3.9 with FAKE_TWG_VERSION=1.3.9: each refresh rotates both tokens, and only the
   // newest refresh token works. 1.3.9 keeps its sign-in in auth-profiles.json, refuses one missing a field its
   // schema requires, and reports a refused refresh token in its JSON with exit 1.
+  // `FAKE_TWG_LOGIN`: `expire` gives up on the code as twg's own timer does, after `FAKE_TWG_EXPIRE_AFTER` seconds;
+  // `deny` fails for another reason after printing a code; `crash` fails before printing one.
   shim(
     "twg",
     `v139() { [ "$FAKE_TWG_VERSION" = 1.3.9 ]; }
@@ -256,13 +272,13 @@ case "$1 $2" in
       { [ "$3" = --force ] || [ -f "$SHIM_STATE/twg-due" ]; } && rotate; exit 0 ;;
   "doctor -o") if [ -z "$FAKE_TWG_DOCTOR_FAILS" ] && valid && has_access; then ok=true; else ok=false; fi
       printf '{"apiVersion":"v2","data":{"connectivity":{"attempted":true,"ok":%s}}}\\n' "$ok"; [ "$ok" = true ] ;;
-  "login --site") [ -n "$CLAUDECODE$AI_AGENT" ] && echo "login saw an agent marker" >>"$SHIM_STATE/twg.log"
-      [ "$FAKE_TWG_LOGIN" = crash ] && { echo "twg: internal error" >&2; exit 70; }
+  "login --site") [ "$FAKE_TWG_LOGIN" = crash ] && { echo "twg: internal error" >&2; exit 70; }
       cat "$SHIM_STATE/twg-login.out"
       IFS= read -r -d $'\\r' answer
       [ "$answer" = n ] || { echo "opened a browser"; exit 5; }
       for i in 1 2 3; do cat "$SHIM_STATE/twg-wait.out"; sleep 0.1; done
-      [ "$FAKE_TWG_LOGIN" = expire ] && { printf '\\r\\n  Device code expired.\\r\\n'; exit 1; }
+      [ "$FAKE_TWG_LOGIN" = expire ] && { sleep "\${FAKE_TWG_EXPIRE_AFTER:-0}"; cat "$SHIM_STATE/twg-timeout.out"; exit 1; }
+      [ "$FAKE_TWG_LOGIN" = deny ] && { cat "$SHIM_STATE/twg-denied.out"; exit 1; }
       rotate; printf '\\r\\n\\x1b[32m✓\\x1b[39m  Authentication successful!\\r\\n' ;;
   *) echo "unexpected twg $*" >&2; exit 2 ;;
 esac`

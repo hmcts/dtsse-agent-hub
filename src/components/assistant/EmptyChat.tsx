@@ -3,10 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { DEFAULT_PRODUCT, isProduct } from "@/assistant/products";
-import type { Starter, Template } from "@/assistant/starters";
+import { fillWith, type Starter, type Template } from "@/assistant/starters";
 import type { UnsentChat } from "@/assistant/views";
 import { SidebarToggle } from "@/components/assistant/AssistantShell";
-import { Composer } from "@/components/assistant/Composer";
+import { Composer, type ComposerFiller } from "@/components/assistant/Composer";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
 import type { ActionResult } from "@/web/action";
 
@@ -100,7 +100,6 @@ export function EmptyChat({
   // The conversation's own product wins: it is what the file was attached under, and what the session will be told.
   const [product, setProduct] = useState(() => unsent?.product ?? rememberedProduct(viewerOid) ?? DEFAULT_PRODUCT);
   const [error, setError] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
 
   // The conversation attaching created, and the request that created it. The promise is held rather than the id so
   // that four files chosen at once share one conversation: each calls `openConversation`, and all but the first wait
@@ -158,14 +157,14 @@ export function EmptyChat({
     return null;
   }
 
-  async function starter(prompt: string): Promise<void> {
-    setStarting(true);
-    setError(null);
-    const failure = await begin(prompt);
-    if (failure !== null) {
-      setError(failure);
-      setStarting(false);
-    }
+  // A card fills the box rather than sending, so the person answers its few headings before anything goes. Every
+  // card's and template's text counts as untouched, so going from one card to another swaps them, and nothing typed
+  // is lost to a click.
+  const composer = useRef<ComposerFiller>(null);
+  const untouched = [...starters.map((card) => card.text), ...templates.map((template) => template.text)];
+
+  function starter(text: string): void {
+    composer.current?.fill((current) => fillWith(current, text, untouched));
   }
 
   return (
@@ -182,9 +181,8 @@ export function EmptyChat({
               <li key={card.title}>
                 <button
                   type="button"
-                  disabled={starting}
-                  onClick={() => void starter(card.prompt)}
-                  className="flex h-full w-full flex-col gap-0.5 rounded-xl border border-asst-line bg-asst-raised px-4 py-3.5 text-left hover:border-asst-accent-line hover:bg-asst-hover disabled:opacity-60"
+                  onClick={() => starter(card.text)}
+                  className="flex h-full w-full flex-col gap-0.5 rounded-xl border border-asst-line bg-asst-raised px-4 py-3.5 text-left hover:border-asst-accent-line hover:bg-asst-hover"
                 >
                   <span className="text-sm font-medium">{card.title}</span>
                   <span className="text-[13px] text-asst-muted">{card.sub}</span>
@@ -204,13 +202,13 @@ export function EmptyChat({
         <div className="mx-auto max-w-[760px]">
           {/* The draft is forgotten when the message typed here is sent, which is also when the page moves to the
               conversation — not when the conversation is created, because attaching a file creates one while the
-              person is still typing into this box. A starter card sends its own words and leaves the box alone. */}
+              person is still typing into this box. A starter card only fills this box, so it is a draft like anything typed. */}
           <Composer
             templates={templates}
             viewerOid={viewerOid}
             draftId={NEW_CHAT_DRAFT}
             onSend={begin}
-            disabled={starting}
+            filler={composer}
             openConversation={openConversation}
             attached={unsent?.attachments}
           />

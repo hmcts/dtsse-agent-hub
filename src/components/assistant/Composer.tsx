@@ -1,8 +1,8 @@
 "use client";
 
-import { type RefObject, useEffect, useId, useRef, useState } from "react";
+import { type Ref, type RefObject, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import type { Skill } from "@/agents/skills";
-import type { Template } from "@/assistant/starters";
+import { type Filled, fillWith, type Template } from "@/assistant/starters";
 import type { MessageAttachment } from "@/assistant/upload-store";
 import { admitFiles, discardUpload, fileSizeLabel, pastedName, UploadAborted, uploadFile } from "@/components/assistant/uploadClient";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
@@ -75,6 +75,14 @@ function chipsFor(attached: readonly MessageAttachment[] = []): Attachment[] {
 }
 
 /**
+ * What a page holding the box may do to it. `fill` is handed what the box holds and answers what it should hold and
+ * what to select, so the page decides what to put in without the box's draft having to be lifted out of it.
+ */
+export interface ComposerFiller {
+  fill: (build: (current: string) => Filled) => void;
+}
+
+/**
  * The message box: Enter sends and Shift+Enter starts a new line, as in any chat. The + menu attaches files or fills
  * the box from a saved template for the person to complete. Files can also be pasted into the box or dropped on it,
  * or on `dropZone` — the message pane — so the target is large. `onFocus` lets the page warm a session up before they
@@ -109,7 +117,8 @@ export function Composer({
   openConversation,
   attached,
   skills = [],
-  dropZone
+  dropZone,
+  filler
 }: {
   templates: readonly Template[];
   /** Resolves to an error to show, or `null` once sent, which clears the box and its attachments. */
@@ -128,6 +137,8 @@ export function Composer({
   /** The conversation's session's skills, offered when the message starts with "/". */
   skills?: readonly Skill[];
   dropZone?: RefObject<HTMLElement | null>;
+  /** Filled in with what lets the page put a template in the box, as the new-chat screen's starter cards do. */
+  filler?: Ref<ComposerFiller>;
 }) {
   const { body: text, setBody: setText, discard } = useDraft({ kind: "assistant-draft", viewerOid, draftId });
   const [sending, setSending] = useState(false);
@@ -138,6 +149,9 @@ export function Composer({
   const [attachments, setAttachments] = useState<readonly Attachment[]>(() => chipsFor(attached));
   const [dragging, setDragging] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
+  // What the last fill asked to have selected, until the render that puts its text in the box has happened.
+  const selecting = useRef<readonly [number, number] | null>(null);
+  const [fills, setFills] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -398,12 +412,35 @@ export function Composer({
     }
   }
 
-  function applyTemplate(template: Template): void {
+  function fill(build: (current: string) => Filled): void {
+    const filled = build(text);
     // Through the menu's own change, not `setText`: a template is a new message, so an earlier Escape stops holding
     // the "/" list shut.
-    skillMenu.onChange(template.text);
+    skillMenu.onChange(filled.text);
+    selecting.current = filled.select;
+    // A render even when the text is unchanged — the same card clicked twice — so the gap is selected again.
+    setFills((count) => count + 1);
+  }
+
+  useImperativeHandle(filler, () => ({ fill }));
+
+  // The selection can only be set once the box holds the new text, which is after the render that gives it it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs for each fill, which `fills` counts and it does not read
+  useLayoutEffect(() => {
+    const range = selecting.current;
+    const element = box.current;
+    if (range === null || element === null) {
+      return;
+    }
+    selecting.current = null;
+    element.focus();
+    element.setSelectionRange(range[0], range[1]);
+  }, [fills]);
+
+  function applyTemplate(template: Template): void {
+    // The menu replaces whatever is in the box, as it always has: picking a template from it is choosing a new message.
+    fill(() => fillWith("", template.text, []));
     setMenu("closed");
-    box.current?.focus();
   }
 
   const chip = "flex items-center gap-2 rounded-lg border border-asst-strong bg-asst-raised px-2.5 py-1.5 text-[13px]";

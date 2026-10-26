@@ -8,6 +8,7 @@ import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { isSignInKind, reconnectSignIn as reconnect, SIGN_IN_TITLES, storePastedCode } from "@/virtual-agents/logins";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
+import { sizeChangeRollsPod } from "@/virtual-agents/size";
 import {
   createVirtualAgent as create,
   findVirtualAgent,
@@ -100,6 +101,13 @@ export async function renameVirtualAgent(form: FormData): Promise<ActionResult<{
   });
 }
 
+/**
+ * The one path that changes a size, used by the hub's own agent page and by the Assistant's settings. It does not
+ * trust an owner from the form: the viewer is re-read and `setVirtualAgentSize` refuses an agent that is not theirs.
+ *
+ * The confirmation says what the change did rather than only what the size is now, because a running pod is replaced
+ * by it and the sessions on it end. It names no agent: both surfaces are already about one.
+ */
 export async function resizeVirtualAgent(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
   return await runAction<{ confirmation: string }>("resize virtual agent", async () => {
     if (!virtualAgentsEnabled()) {
@@ -112,7 +120,12 @@ export async function resizeVirtualAgent(form: FormData): Promise<ActionResult<{
     }
     const row = await setVirtualAgentSize(prisma, viewer.oid, id, form.get("size"));
     revalidate(id);
-    return { ok: true, confirmation: `${row.name} is now ${row.size}` };
+    return {
+      ok: true,
+      confirmation: sizeChangeRollsPod(row)
+        ? `Restarting at ${row.size}. Your chats are kept, and anything one of them was working on has stopped.`
+        : `It starts at ${row.size} the next time it runs.`
+    };
   });
 }
 

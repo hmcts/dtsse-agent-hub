@@ -1288,7 +1288,7 @@ describe("artefact, in an assistant conversation", () => {
     return { sid, agentId };
   }
 
-  async function cli(args: string[], { sid, input = "" }: { sid: string; input?: string }): Promise<Invocation> {
+  async function cli(args: string[], { sid, input = "", extraEnv = {} }: { sid: string; input?: string; extraEnv?: Env }): Promise<Invocation> {
     const out = sink();
     // The single predicate wants the agent id as well as the token, where the workspace's `hasLaunchToken` took the token alone.
     const env: Env = {
@@ -1296,7 +1296,8 @@ describe("artefact, in an assistant conversation", () => {
       AGENT_HUB_URL: url,
       AGENT_HUB_VIRTUAL_AGENT_ID: VID,
       AGENT_HUB_LAUNCH_TOKEN: LAUNCH,
-      CLAUDE_CODE_SESSION_ID: sid
+      CLAUDE_CODE_SESSION_ID: sid,
+      ...extraEnv
     };
     const code = await runCli(args, { ...out.options, env, readStdin: () => input, cwd: () => home.root });
     return { ...out, code };
@@ -1439,6 +1440,123 @@ describe("artefact, in an assistant conversation", () => {
       ["jira", "report", EXPORT, "--key", "VIBE-1", "--error", "both"],
       ["jira", "report", EXPORT, "--key", "vibe one"],
       ["jira", "report", EXPORT, "--error", " "]
+    ]) {
+      const r = await cli(args, { sid });
+      expect(r.code, args.join(" ")).toBe(2);
+    }
+    expect(reported(agentId)).toHaveLength(0);
+  });
+
+  // A twg that is signed in, on PATH ahead of any real one. It logs each call's argv as one JSON line, so the test
+  // sees exactly the arguments it was given, and answers a create as twg 1.3 does, numbering each ticket it makes.
+  function fakeTwg(): { env: Env; calls: () => string[][] } {
+    const bin = fs.mkdtempSync(path.join(home.root, "twg-bin-"));
+    const logFile = path.join(bin, "twg.log");
+    const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(args) + "\\n");
+if (args[0] === "whoami") { console.log("olive@hmcts.net"); process.exit(0); }
+if (args[0] === "jira") {
+  const n = fs.readFileSync(${JSON.stringify(logFile)}, "utf8").split("\\n").filter((l) => l.includes('"workitem"')).length;
+  console.log(JSON.stringify({ data: { key: "VIBE-" + (700 + n), id: "1000" + n } }));
+  process.exit(0);
+}
+console.error("unexpected twg " + args.join(" "));
+process.exit(2);
+`;
+    fs.writeFileSync(path.join(bin, "twg"), script, { mode: 0o755 });
+    return {
+      env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}` },
+      calls: () =>
+        fs
+          .readFileSync(logFile, "utf8")
+          .split("\n")
+          .filter((line) => line !== "")
+          .map((line) => JSON.parse(line) as string[])
+    };
+  }
+
+  it("should create the ticket with twg, report its key and print where it is when jira export runs in a conversation", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    hub.editArtefactAsUser(agentId, "# Stories\n\nAs a claimant, $(whoami)…", 'Fee "stories"');
+    const twg = fakeTwg();
+
+    // Act
+    const r = await cli(["jira", "export", EXPORT, "--project", "VIBE", "--type", "Story", "--labels", "hmcts-assistant"], { sid, extraEnv: twg.env });
+
+    // Assert
+    expect(r.code, r.errors.join("\n")).toBe(0);
+    expect(r.text()).toMatch(/created VIBE-701 for export .*https:\/\/hmcts\.atlassian\.net\/browse\/VIBE-701/);
+    expect(twg.calls()).toEqual([
+      ["whoami"],
+      [
+        "jira",
+        "workitem",
+        "create",
+        "--space=VIBE",
+        "--type=Story",
+        '--summary=Fee "stories"',
+        "--description=# Stories\n\nAs a claimant, $(whoami)…",
+        "--description-format=markdown",
+        "--labels=hmcts-assistant",
+        "--output=json",
+        "--output-summary=none"
+      ]
+    ]);
+    expect(reported(agentId)).toEqual([{ agent_id: agentId, export_id: EXPORT, key: "VIBE-701" }]);
+  });
+
+  it("should report the ticket it already made and create no second one when jira export runs again for the export", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    const exportId = "6c1f8d2b-2222-4333-8444-555566667777";
+    hub.editArtefactAsUser(agentId, "# Stories", "Fee stories");
+    const twg = fakeTwg();
+    const args = ["jira", "export", exportId, "--project", "VIBE", "--type", "Story"];
+    await cli(args, { sid, extraEnv: twg.env });
+
+    // Act
+    const r = await cli(args, { sid, extraEnv: twg.env });
+
+    // Assert
+    expect(r.code, r.errors.join("\n")).toBe(0);
+    expect(r.text()).toMatch(/already created VIBE-701/);
+    expect(twg.calls().filter((call) => call[0] === "jira")).toHaveLength(1);
+    expect(reported(agentId)).toEqual([
+      { agent_id: agentId, export_id: exportId, key: "VIBE-701" },
+      { agent_id: agentId, export_id: exportId, key: "VIBE-701" }
+    ]);
+  });
+
+  it("should exit 1 and say no ticket was made when the conversation's document is empty", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+    const exportId = "7d2a9e3c-3333-4444-8555-666677778888";
+    const twg = fakeTwg();
+
+    // Act
+    const r = await cli(["jira", "export", exportId, "--project", "VIBE", "--type", "Story"], { sid, extraEnv: twg.env });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.text()).toMatch(/no ticket was created for export .*document is empty/);
+    expect(reported(agentId)).toEqual([{ agent_id: agentId, export_id: exportId, error: "The document is empty, so there was nothing to export." }]);
+  });
+
+  it("should refuse a jira export without its project and type, or with the other action's flags", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+
+    // Act & Assert
+    for (const args of [
+      ["jira", "export", EXPORT],
+      ["jira", "export", EXPORT, "--project", "vibe", "--type", "Story"],
+      ["jira", "export", EXPORT, "--project", "VIBE", "--type", "User Story"],
+      ["jira", "export", EXPORT, "--project", "VIBE", "--type", "Story", "--labels", "a,b c"],
+      ["jira", "export", EXPORT, "--project", "VIBE", "--type", "Story", "--key", "VIBE-1"],
+      ["jira", "report", EXPORT, "--key", "VIBE-1", "--project", "VIBE"]
     ]) {
       const r = await cli(args, { sid });
       expect(r.code, args.join(" ")).toBe(2);

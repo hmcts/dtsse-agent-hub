@@ -13,6 +13,7 @@ import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[i
 import * as credentialRoute from "../../src/app/api/virtual/[virtualAgentId]/credentials/[kind]/route.ts";
 import * as codeRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/code/route.ts";
 import * as completeRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/complete/route.ts";
+import * as failedRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/failed/route.ts";
 import * as loginRoute from "../../src/app/api/virtual/[virtualAgentId]/login/[kind]/route.ts";
 import * as portsRoute from "../../src/app/api/virtual/[virtualAgentId]/ports/route.ts";
 import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
@@ -1096,6 +1097,19 @@ describe("logins", () => {
     return pod(completeRoute.POST, token, `/api/virtual/${id}/login/${kind}/complete`, { virtualAgentId: id, kind }, "POST", body);
   }
 
+  function failed(id: string, token: string, kind: string, body: unknown): Promise<Response> {
+    return pod(failedRoute.POST, token, `/api/virtual/${id}/login/${kind}/failed`, { virtualAgentId: id, kind }, "POST", body);
+  }
+
+  async function relayAtlassian(id: string, token: string): Promise<void> {
+    await startLogin(id, token, "atlassian", {
+      prompt: "device_code",
+      verification_uri: "https://auth.atlassian.com/oauth/activate",
+      user_code: "WXYZ-9876",
+      expires_in: 300
+    });
+  }
+
   it("should show a device-code login to its owner alone and mark the agent waiting on them", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
     const listener = await connect();
@@ -1222,7 +1236,7 @@ describe("logins", () => {
     expect(saved.status).toBe(204);
     expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBe(AZURE);
     expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("completed");
-    expect((await row(id)).status).toBe("awaiting_login");
+    expect((await row(id)).status).toBe("running");
   });
 
   it("should still refuse someone else's cache saved after a completed Azure login", async () => {
@@ -1309,6 +1323,91 @@ describe("logins", () => {
     const { id, token } = await started(ALICE, "pcs-api");
 
     expect((await complete(id, token, "github", {})).status).toBe(404);
+  });
+
+  it("should record an expired sign-in and stop the agent waiting on its owner when the pod reports one", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await relayAtlassian(id, token);
+    expect((await row(id)).status).toBe("awaiting_login");
+
+    const response = await failed(id, token, "atlassian", { state: "expired", detail: "atlassian: the sign-in code ran out before it was used" });
+
+    expect(response.status).toBe(204);
+    expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("expired");
+    expect(await row(id)).toMatchObject({ status: "running", statusDetail: "atlassian: the sign-in code ran out before it was used" });
+  });
+
+  it("should show the owner a sign-in that expired rather than the code it relayed", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await relayAtlassian(id, token);
+    await failed(id, token, "atlassian", { state: "expired", detail: "atlassian: the sign-in code ran out before it was used" });
+
+    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.logins).toEqual([expect.objectContaining({ kind: "atlassian", state: "expired" })]);
+  });
+
+  it("should tell the owner's UI about a sign-in the pod gave up on", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await relayAtlassian(id, token);
+    const listener = await connect();
+    try {
+      const payloads: string[] = [];
+      listener.on("notification", (message) => payloads.push(message.payload ?? ""));
+      await listener.query("LISTEN hub_events");
+
+      await failed(id, token, "atlassian", { state: "expired", detail: null });
+
+      await expect
+        .poll(() => payloads.map((payload) => JSON.parse(payload)))
+        .toContainEqual({ type: "virtual_agent", virtual_agent_id: id, owner_oid: ALICE.oid });
+    } finally {
+      await listener.end();
+    }
+  });
+
+  it("should keep the agent waiting on its owner when another sign-in of theirs is still pending", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await relayAtlassian(id, token);
+    await startLogin(id, token, "github", {
+      prompt: "device_code",
+      verification_uri: "https://github.com/login/device",
+      user_code: "ABCD-1234",
+      expires_in: 900
+    });
+
+    expect((await failed(id, token, "atlassian", { state: "expired", detail: null })).status).toBe(204);
+    expect((await row(id)).status).toBe("awaiting_login");
+  });
+
+  it("should record a sign-in that broke rather than ran out when the pod says so", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await relayAtlassian(id, token);
+
+    expect((await failed(id, token, "atlassian", { state: "failed", detail: null })).status).toBe(204);
+    expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("failed");
+  });
+
+  it("should leave a completed sign-in alone when a second report says its code expired", async () => {
+    // Two of a pod's sessions can relay the same kind at once and share one twg config, so the loser's report
+    // must not take the winner's working sign-in away.
+    const { id, token } = await started(ALICE, "pcs-api");
+    await relayAtlassian(id, token);
+    await complete(id, token, "atlassian", { account_label: "alice@justice.gov.uk" });
+
+    expect((await failed(id, token, "atlassian", { state: "expired", detail: null })).status).toBe(204);
+    expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("completed");
+  });
+
+  it("should answer 404 when there is no sign-in of that kind to report on", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+
+    expect((await failed(id, token, "atlassian", { state: "expired", detail: null })).status).toBe(404);
+  });
+
+  it("should refuse a reported sign-in outcome that is neither expired nor failed", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await relayAtlassian(id, token);
+
+    expect((await failed(id, token, "atlassian", { state: "completed" })).status).toBe(400);
   });
 
   it("should refuse a login whose URL is not https", async () => {
@@ -1787,7 +1886,10 @@ describe("a virtual agent's size", () => {
     const agent = await create(ALICE, "pcs-api");
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id: agent.id, size: "medium" }))).toEqual({ ok: true, confirmation: "pcs-api is now medium" });
+    expect(await actions.resizeVirtualAgent(form({ id: agent.id, size: "medium" }))).toEqual({
+      ok: true,
+      confirmation: "It starts at medium the next time it runs."
+    });
 
     expect((await row(agent.id)).generation).toBe(agent.generation + 1);
     expect((await claim()).find((entry) => entry.id === agent.id)).toMatchObject({ size: "medium", generation: agent.generation + 1 });
@@ -1806,13 +1908,18 @@ describe("a virtual agent's size", () => {
     expect((await claim()).find((entry) => entry.id === id)).toMatchObject({ size: "large", desired: "stopped", generation: stopping.generation + 1 });
   });
 
-  it("should refuse a change while the agent's pod may be running, and change nothing", async () => {
+  // A running pod is replaced by the change, as a change of plugins replaces it, so the pod generation moves and the
+  // confirmation says what that ends rather than only what the size is now.
+  it("should change the size of a running agent, replace its pod and say that it is restarting", async () => {
     const { id } = await started(ALICE, "pcs-api");
     const before = await row(id);
     actAs("alice");
 
-    expect(await actions.resizeVirtualAgent(form({ id, size: "large" }))).toEqual({ ok: false, error: "stop the virtual agent before changing its size" });
-    expect(await row(id)).toMatchObject({ size: "small", generation: before.generation });
+    expect(await actions.resizeVirtualAgent(form({ id, size: "large" }))).toEqual({
+      ok: true,
+      confirmation: "Restarting at large. Your chats are kept, and anything one of them was working on has stopped."
+    });
+    expect(await row(id)).toMatchObject({ size: "large", generation: before.generation + 1, podGeneration: before.podGeneration + 1 });
   });
 
   it("should refuse someone other than the owner as if there were no such agent", async () => {

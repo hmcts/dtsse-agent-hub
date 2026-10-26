@@ -4,7 +4,9 @@
 export type { AtlassianLoginOptions, AtlassianLoginResult, PackedAtlassianAuth, SyncAtlassianAuthOptions, SyncAtlassianAuthResult } from "./atlassian.ts";
 export {
   ATLASSIAN_AUTH_MAX_CHARS,
+  ATLASSIAN_SIGN_IN_CODES,
   atlassianLogin,
+  jiraExportSignInBudget,
   packAtlassianAuth,
   parseTwgDeviceCode,
   readAtlassianAuth,
@@ -12,6 +14,7 @@ export {
   syncAtlassianAuth,
   TWG_DEVICE_CODE_EXPIRES_S,
   twgDir,
+  twgLoginExpired,
   twgPromptsForBrowser,
   twgRefreshRejected
 } from "./atlassian.ts";
@@ -51,6 +54,7 @@ export {
   childEnv,
   claudeLogin,
   DEVICE_CODE_EXPIRES_S,
+  EXPIRY_TOLERANCE_S,
   findClaudeToken,
   githubLogin,
   PASTE_CODE_EXPIRES_S,

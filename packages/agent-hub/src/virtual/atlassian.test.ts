@@ -2,6 +2,7 @@
 // every refresh and accepts only the newest refresh token — which is what makes storing the rotated one
 // before anything else can fail the thing worth testing.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
@@ -12,24 +13,34 @@ import {
   type PodShims,
   podSecrets,
   TWG_CODE,
+  TWG_LOGIN_DENIED_OUTPUT,
   TWG_LOGIN_OUTPUT,
+  TWG_LOGIN_TIMEOUT_OUTPUT,
   TWG_URL,
+  TWG_WAIT_OUTPUT,
   twgAuthConf,
   twgProfiles,
   usePodEnv
 } from "../__fixtures__/pod-shims.ts";
-import { createApi } from "../api.ts";
+import { type Api, ApiError, type Artefact, type CredentialKind, createApi, type JiraExportReport, type LoginPromptBody } from "../api.ts";
+import { JIRA_EXPORT_BASH_TIMEOUT_MS } from "../envelope.ts";
+import { runJiraExport } from "../jira-export.ts";
 import {
+  ATLASSIAN_SIGN_IN_CODES,
   atlassianLogin,
+  jiraExportSignInBudget,
   packAtlassianAuth,
   parseTwgDeviceCode,
   readAtlassianAuth,
   restoreAtlassianAuth,
   syncAtlassianAuth,
+  TWG_DEVICE_CODE_EXPIRES_S,
   twgDir,
+  twgLoginExpired,
   twgPromptsForBrowser,
   twgRefreshRejected
 } from "./atlassian.ts";
+import { run } from "./sign-in.ts";
 
 const VID = "va-atlassian";
 const OWNER = { oid: "oid-owner", name: "Olive Owner", email: "olive@example.com" };
@@ -54,6 +65,7 @@ afterEach(() => {
   v.status.length = 0;
   v.prompts.length = 0;
   v.completes.length = 0;
+  v.loginFailures.length = 0;
   v.credentials.clear();
   pod.reset();
 });
@@ -107,6 +119,28 @@ describe("twgPromptsForBrowser", () => {
     // Act & Assert
     expect(twgPromptsForBrowser(TWG_LOGIN_OUTPUT)).toBe(true);
     expect(twgPromptsForBrowser(TWG_LOGIN_OUTPUT.slice(0, TWG_LOGIN_OUTPUT.indexOf("Open in")))).toBe(false);
+  });
+});
+
+describe("twgLoginExpired", () => {
+  it("should be true for the timeout twg reports when nobody uses the code", () => {
+    // Act & Assert
+    expect(twgLoginExpired(TWG_LOGIN_TIMEOUT_OUTPUT)).toBe(true);
+  });
+
+  it("should be true for a device code Atlassian retired before twg's own timer", () => {
+    // Act & Assert
+    expect(twgLoginExpired("  ✖  OAuth authentication failed: The device code has expired. Please try again.\n  Code:  [expired_token]\n")).toBe(true);
+  });
+
+  it.each([
+    ["the owner refusing it", TWG_LOGIN_DENIED_OUTPUT],
+    ["a code still being waited on", TWG_WAIT_OUTPUT],
+    ["twg falling over", "twg: internal error\n"],
+    ["nothing at all", ""]
+  ])("should be false for %s, so the owner is not offered another code for it", (_what, output) => {
+    // Act & Assert
+    expect(twgLoginExpired(output)).toBe(false);
   });
 });
 
@@ -359,10 +393,12 @@ describe("atlassianLogin", () => {
 
     // Assert
     expect(result).toBe("signed-in");
-    expect(virtual().prompts).toEqual([{ kind: "atlassian", prompt: "device_code", verification_uri: TWG_URL, user_code: TWG_CODE, expires_in: 300 }]);
+    // The hub is told twg's own limit, not the server's `expires_in`: the owner's countdown has to be the real one.
+    expect(virtual().prompts).toEqual([{ kind: "atlassian", prompt: "device_code", verification_uri: TWG_URL, user_code: TWG_CODE, expires_in: 120 }]);
     expect(virtual().status[0]?.phase).toBe("awaiting_login");
     expect(virtual().status[0]?.detail).toMatch(new RegExp(`atlassian: .*${TWG_CODE}`));
     expect(virtual().completes).toEqual([{ kind: "atlassian", account_label: "olive.owner@justice.gov.uk" }]);
+    expect(virtual().loginFailures).toEqual([]);
     expect(storedAtlassian()).toMatch(rotatedTo(1));
     expect(storedAtlassian()).not.toContain("oauth-access-token");
     expect(twgLog()).toMatch(/^login --site hmcts$/m);
@@ -422,14 +458,15 @@ describe("atlassianLogin", () => {
     expect(storedAtlassian()).toMatch(rotatedTo(1));
   });
 
-  it("should leave Jira and Confluence signed out when the device code expires", async () => {
+  it("should leave Jira and Confluence signed out, and tell the hub, when the sign-in breaks rather than runs out", async () => {
     // Act
-    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: api(), env: pod.env({ FAKE_TWG_LOGIN: "expire" }) }));
+    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: api(), env: pod.env({ FAKE_TWG_LOGIN: "deny" }) }));
 
-    // Assert
+    // Assert: a sign-in the owner refused is not one they missed, so no second code is offered
     expect(result).toBe("not-signed-in");
     expect(stderr).toMatch(/sign-in was not completed .*Jira and Confluence stay signed out/);
     expect(virtual().prompts).toHaveLength(1);
+    expect(virtual().loginFailures).toEqual([{ kind: "atlassian", state: "failed", detail: expect.stringContaining("was not completed") }]);
     expect(virtual().credentials.has("atlassian")).toBe(false);
     expect(virtual().completes).toEqual([]);
   });
@@ -477,13 +514,59 @@ describe("atlassianLogin", () => {
     expect(storedProfile()?.credentials.primary.oauthRefreshToken).toBe(`${TWG_REFRESH}-1`);
   });
 
-  it("should run twg login without the variables that shorten its device code when the pod has them", async () => {
+  it("should offer another code, and then report the sign-in expired, when twg says its code ran out", async () => {
+    // Arrange: twg's own timeout, which it reports in two seconds here and in two minutes in a pod. Nothing waits
+    // out a clock: the bracketed error code is what says the code ran out rather than the sign-in breaking.
+    const env = pod.env({ FAKE_TWG_LOGIN: "expire" });
+
     // Act
-    await captureStderr(() => atlassianLogin({ api: api(), env: pod.env({ CLAUDECODE: "1", AI_AGENT: "claude-code" }) }));
+    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: api(), env }));
 
     // Assert
-    expect(twgLog()).toMatch(/^login --site hmcts$/m);
-    expect(twgLog()).not.toMatch(/agent marker/);
+    expect(result).toBe("not-signed-in");
+    expect(virtual().prompts).toHaveLength(ATLASSIAN_SIGN_IN_CODES);
+    expect(stderr).toMatch(/ran out before it was used; relaying a fresh one/);
+    expect(virtual().loginFailures).toEqual([{ kind: "atlassian", state: "expired", detail: expect.stringContaining("ran out before it was used") }]);
+    expect(virtual().completes).toEqual([]);
+  });
+
+  it("should offer no code beyond the bound, however long the owner takes", async () => {
+    // Arrange
+    const env = pod.env({ FAKE_TWG_LOGIN: "expire" });
+
+    // Act
+    await captureStderr(() => atlassianLogin({ api: api(), env, codes: ATLASSIAN_SIGN_IN_CODES + 2 }));
+
+    // Assert: the bound is the only thing that stops it, so it is what the count follows
+    expect(virtual().prompts).toHaveLength(ATLASSIAN_SIGN_IN_CODES + 2);
+    expect(virtual().loginFailures).toHaveLength(1);
+  });
+
+  it("should report the owner's last code inside the time the session gives the export command", () => {
+    // Act & Assert: killed at the Bash timeout, the command reports nothing and the dead code stays on the owner's
+    // screen, which is the fault this whole path exists to prevent. The code count is bounded by this, not by taste.
+    expect(TWG_DEVICE_CODE_EXPIRES_S).toBe(120);
+    expect(jiraExportSignInBudget()).toBeLessThan(JIRA_EXPORT_BASH_TIMEOUT_MS);
+  });
+
+  it("should not fit another code into that time, which is why the bound is where it is", () => {
+    // Act & Assert
+    expect(jiraExportSignInBudget(ATLASSIAN_SIGN_IN_CODES + 1)).toBeGreaterThan(JIRA_EXPORT_BASH_TIMEOUT_MS);
+  });
+
+  it("should stay signed out, and say why, when the hub will not take the report", async () => {
+    // Arrange
+    const refusing: Api = {
+      ...api(),
+      loginFailed: () => Promise.reject(new ApiError(404, { error: "there is no atlassian sign-in to report on" }, "POST", "login/atlassian/failed"))
+    };
+
+    // Act
+    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: refusing, env: pod.env({ FAKE_TWG_LOGIN: "deny" }) }));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(stderr).toMatch(/could not tell agent-hub the sign-in was not completed/);
   });
 
   it("should fail without failing the agent when twg prints no code at all", async () => {
@@ -493,5 +576,69 @@ describe("atlassianLogin", () => {
     // Assert
     expect((error as Error).message).toMatch(/printed no sign-in code/);
     expect(virtual().status.some((s) => s.phase === "failed")).toBe(false);
+  });
+
+  it("should tell both the hub and the Jira export when the owner lets every code expire", async () => {
+    // Arrange: `agent-hub jira export` drives this sign-in, as `cli.ts` wires it, and is the only thing that puts
+    // the export back in front of the person. Both reports have to come out of the one run: the sign-in's, so their
+    // screens stop offering a dead code, and the export's, so the button comes back with a reason on it.
+    const reports: JiraExportReport[] = [];
+    const hubApi = api();
+    const deps = {
+      api: {
+        getArtefact: async (): Promise<Artefact> => ({
+          title: "Fee stories",
+          markdown: "# Stories\n\nAs a claimant…",
+          version: 3,
+          updated_by: "agent",
+          updated_at: null
+        }),
+        putJiraExport: async (_agentId: string, body: JiraExportReport) => {
+          reports.push(body);
+          return null;
+        }
+      },
+      agentId: "a-conversation",
+      env: pod.env({ FAKE_TWG_LOGIN: "expire" }),
+      run,
+      login: () => atlassianLogin({ api: hubApi, env: pod.env({ FAKE_TWG_LOGIN: "expire" }) }),
+      print: () => {},
+      dir: fs.mkdtempSync(path.join(os.tmpdir(), "atlassian-export-"))
+    };
+
+    // Act
+    const { result: outcome } = await captureStderr(() =>
+      runJiraExport(deps, { exportId: "5b0e7c1a-1111-4222-8333-444455556666", project: "VIBE", issueType: "Story", labels: [] })
+    );
+
+    // Assert
+    expect(virtual().prompts).toHaveLength(ATLASSIAN_SIGN_IN_CODES);
+    expect(virtual().loginFailures).toEqual([{ kind: "atlassian", state: "expired", detail: expect.stringContaining("ran out before it was used") }]);
+    expect(outcome).toEqual({ error: "The Atlassian sign-in was not completed, so the ticket could not be created." });
+    expect(reports).toEqual([
+      { export_id: "5b0e7c1a-1111-4222-8333-444455556666", error: "The Atlassian sign-in was not completed, so the ticket could not be created." }
+    ]);
+  });
+
+  it("should still report the sign-in when a later attempt throws, so no dead code is left with the hub", async () => {
+    // Arrange: the first code runs out and the second attempt finds no twg at all, which `relayDeviceLogin` throws on
+    const env = pod.env({ FAKE_TWG_LOGIN: "expire" });
+    const onSecond = {
+      ...api(),
+      loginPrompt: async (id: string, kind: CredentialKind, body: LoginPromptBody) => {
+        if (virtual().prompts.length > 0) {
+          throw new ApiError(400, { error: "hub down" }, "POST", `login/${kind}`);
+        }
+        return await api().loginPrompt(id, kind, body);
+      }
+    } satisfies Api;
+
+    // Act
+    const { error, stderr } = await captureStderrOfFailure(() => atlassianLogin({ api: onSecond, env }));
+
+    // Assert
+    expect((error as Error).message).toMatch(/could not relay the atlassian sign-in code/);
+    expect(virtual().loginFailures).toEqual([{ kind: "atlassian", state: "failed", detail: expect.stringContaining("could not be relayed") }]);
+    expect(stderr).toMatch(/the sign-in could not be relayed/);
   });
 });
