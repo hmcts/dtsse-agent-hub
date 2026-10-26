@@ -1680,6 +1680,72 @@ describe("sweepVirtualAgents", () => {
     expect((await row(agent.id)).desired).toBe("running");
   });
 
+  it("should stop a failed agent whose pod is still watching for a credential nobody has stored, and keep why it failed", async () => {
+    const agent = await create(ALICE, "token-watch");
+    const detail = "github: three sign-in codes went unused; paste a token on the credentials page, or stop and start this agent";
+    // The pod's budget runs out, it reports failed, and then watches for a stored token without reporting again.
+    await reportStatus(prisma, agent.id, "failed", detail, ago(OVERNIGHT));
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(OVERNIGHT) } });
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ afterFailure: [agent.id], idle: [], awaitingOwner: [], evening: [] });
+    const stopped = await row(agent.id);
+    expect(stopped).toMatchObject({ desired: "stopped", stopReason: "failed", stopDetail: detail });
+    // The stop clears status_detail and the orchestrator's observation of the stopped set would too, so the owner
+    // reads the failure off stop_detail from here on.
+    expect(stopped.statusDetail).toBeNull();
+    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.card).toMatchObject({ stopDetail: detail });
+  });
+
+  it("should leave a failed agent alone while its owner still has time to read the failure", async () => {
+    const agent = await create(ALICE, "just-failed");
+    await reportStatus(prisma, agent.id, "failed", "github: the sign-in budget ran out", ago(60));
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(70) } });
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ afterFailure: [], idle: [], awaitingOwner: [] });
+    expect(await row(agent.id)).toMatchObject({ desired: "running", status: "failed" });
+  });
+
+  it("should leave a failed agent alone once its owner stores the credential and its pod reports work again", async () => {
+    const agent = await create(ALICE, "recovered");
+    await reportStatus(prisma, agent.id, "failed", "github: the sign-in budget ran out", ago(OVERNIGHT));
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(OVERNIGHT) } });
+    // A failed agent is left only by a pod starting again, which is a report of work and so is activity.
+    await reportStatus(prisma, agent.id, "provisioning", "the owner stored a token", ago(2));
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ afterFailure: [], idle: [], awaitingOwner: [] });
+    expect(await row(agent.id)).toMatchObject({ desired: "running", status: "provisioning" });
+  });
+
+  it("should clear a kept failure when its owner starts the agent again", async () => {
+    const agent = await create(ALICE, "restarted");
+    await reportStatus(prisma, agent.id, "failed", "github: the sign-in budget ran out", ago(OVERNIGHT));
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(OVERNIGHT) } });
+    await sweepVirtualAgents(prisma, OPTIONS);
+    expect((await row(agent.id)).stopDetail).not.toBeNull();
+
+    await setDesired(prisma, ALICE.oid, agent.id, "running");
+
+    expect(await row(agent.id)).toMatchObject({ desired: "running", stopReason: null, stopDetail: null });
+  });
+
+  it("should shut a swept pod out, so it cannot report its way back out of the stop", async () => {
+    const { id, token } = await started(ALICE, "swept");
+    await reportStatus(prisma, id, "failed", "github: the sign-in budget ran out", ago(OVERNIGHT));
+    await prisma.virtualAgent.update({ where: { id }, data: { startedAt: ago(OVERNIGHT) } });
+    expect(await sweepVirtualAgents(prisma, OPTIONS)).toMatchObject({ afterFailure: [id] });
+
+    // POD_TRANSITIONS lets a pod leave `stopping`, so what keeps it out is the stop dropping its launch token: the
+    // pod is no longer anyone, hence 401 rather than the 403 another agent's valid token gets.
+    expect((await status(id, token, { phase: "provisioning" })).status).toBe(401);
+    expect(await row(id)).toMatchObject({ desired: "stopped", status: "stopping" });
+  });
+
   it("should stop every agent started before a weekday's evening stop, and not one started after it", async () => {
     const early = await create(ALICE, "early");
     const late = await create(BOB, "late");

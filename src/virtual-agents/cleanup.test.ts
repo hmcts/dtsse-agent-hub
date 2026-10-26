@@ -4,6 +4,7 @@ import {
   diskExpiresAt,
   diskWarningDays,
   dueEveningStop,
+  INACTIVITY_RULES,
   inactivityRule,
   isIdle,
   lastActivity,
@@ -117,22 +118,28 @@ describe("inactivityRule", () => {
     ["awaiting_login", "awaiting_owner"],
     ["awaiting_credentials", "awaiting_owner"],
     ["running", "idle"],
-    ["cloning", "idle"]
+    ["cloning", "idle"],
+    ["failed", "failed"]
   ] as const)("should hold a %s agent to the %s deadline", (status, rule) => {
     expect(inactivityRule(status)).toBe(rule);
   });
 
-  it.each(["requested", "provisioning", "stopping", "stopped", "failed"])("should leave a %s agent to the other rules", (status) => {
+  it.each(["requested", "provisioning", "stopping", "stopped"])("should leave a %s agent to the other rules", (status) => {
     expect(inactivityRule(status)).toBeUndefined();
   });
 
-  it("should have an answer for every status, so a new one is a decision rather than an omission", () => {
+  it("should give every status that still holds a pod a deadline, so a new one is a decision rather than an omission", () => {
     expect(VIRTUAL_AGENT_STATUSES.filter((status) => inactivityRule(status) !== undefined)).toEqual([
       "awaiting_credentials",
       "awaiting_login",
       "cloning",
-      "running"
+      "running",
+      "failed"
     ]);
+  });
+
+  it("should name a rule that the stop can record as its reason", () => {
+    expect(INACTIVITY_RULES).toEqual(["idle", "awaiting_owner", "failed"]);
   });
 });
 

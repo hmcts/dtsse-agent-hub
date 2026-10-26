@@ -1,5 +1,14 @@
 import type { PrismaClient } from "../store/prisma.ts";
-import { CLAIM_TIMEOUT_MS, dueEveningStop, type InactivityRule, inactivityRule, isIdle, lastActivity, PROVISIONING_TIMEOUT_MS } from "./cleanup.ts";
+import {
+  CLAIM_TIMEOUT_MS,
+  dueEveningStop,
+  INACTIVITY_RULES,
+  type InactivityRule,
+  inactivityRule,
+  isIdle,
+  lastActivity,
+  PROVISIONING_TIMEOUT_MS
+} from "./cleanup.ts";
 import { awaitingOwnerMinutes, eveningStop, idleMinutes, type WallClock } from "./settings.ts";
 import { announce, stopVirtualAgents } from "./stop.ts";
 
@@ -26,6 +35,8 @@ export interface VirtualAgentSweepResult {
   idle: string[];
   /** Agents stopped because their pod was still waiting for its owner to sign in or store a credential. */
   awaitingOwner: string[];
+  /** Agents stopped to reclaim the pod of a failure nobody has acted on. */
+  afterFailure: string[];
   /** Agents stopped at the end of the working day. */
   evening: string[];
 }
@@ -50,14 +61,16 @@ interface Candidate {
  * - claims older than `CLAIM_TIMEOUT_MS` are released, so another orchestrator may take them;
  * - on a weekday evening every agent still meant to be running, unless started after the stop time, is stopped;
  * - otherwise an agent whose linked agent is not busy and that has shown no activity, no transcript entry or pod
- *   report, for the deadline `inactivityRule` puts its status on is stopped: the idle period for one working, the
- *   shorter one for a pod blocked on its owner.
+ *   report, for the deadline `inactivityRule` puts its status on is stopped: the idle period for one working or
+ *   failed, the shorter one for a pod blocked on its owner.
  */
 export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualAgentSweepOptions = {}): Promise<VirtualAgentSweepResult | undefined> {
   const now = options.now ?? new Date();
+  const idle = options.idleMinutes ?? idleMinutes();
   const deadlines: Record<InactivityRule, number> = {
-    idle: options.idleMinutes ?? idleMinutes(),
-    awaiting_owner: options.awaitingOwnerMinutes ?? awaitingOwnerMinutes()
+    idle,
+    awaiting_owner: options.awaitingOwnerMinutes ?? awaitingOwnerMinutes(),
+    failed: idle
   };
   const stop = options.eveningStop ?? eveningStop();
   return await prisma.$transaction(async (tx) => {
@@ -124,15 +137,19 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
     const ids = (rule: InactivityRule): string[] => inactive.filter((entry) => entry.rule === rule).map((entry) => entry.id);
 
     const stoppedEvening = await stopVirtualAgents(tx, evening, "evening", now);
-    const stoppedIdle = await stopVirtualAgents(tx, ids("idle"), "idle", now);
-    const stoppedAwaiting = await stopVirtualAgents(tx, ids("awaiting_owner"), "awaiting_owner", now);
+    // Each rule's name is the reason it stops for, so a stop reads as what the sweep decided rather than as idleness.
+    const stopped = {} as Record<InactivityRule, string[]>;
+    for (const rule of INACTIVITY_RULES) {
+      stopped[rule] = (await stopVirtualAgents(tx, ids(rule), rule, now)).map((row) => row.id);
+    }
 
     return {
       failed: failed.map((row) => row.id),
       loginsExpired: expired.map((row) => row.id),
       claimsReleased,
-      idle: stoppedIdle.map((row) => row.id),
-      awaitingOwner: stoppedAwaiting.map((row) => row.id),
+      idle: stopped.idle,
+      awaitingOwner: stopped.awaiting_owner,
+      afterFailure: stopped.failed,
       evening: stoppedEvening.map((row) => row.id)
     };
   });
@@ -152,10 +169,15 @@ export function startVirtualAgentSweep(prisma: PrismaClient, intervalMs: number 
     running = true;
     sweepVirtualAgents(prisma)
       .then((result) => {
-        if (result !== undefined && result.failed.length + result.idle.length + result.awaitingOwner.length + result.evening.length > 0) {
+        const stops =
+          result === undefined
+            ? 0
+            : result.failed.length + result.idle.length + result.awaitingOwner.length + result.afterFailure.length + result.evening.length;
+        if (result !== undefined && stops > 0) {
           console.info(
             `virtual-agent sweep: ${result.failed.length} failed to start, ${result.idle.length} stopped as idle, ` +
-              `${result.awaitingOwner.length} stopped still waiting for their owner, ${result.evening.length} stopped for the evening`
+              `${result.awaitingOwner.length} stopped still waiting for their owner, ${result.afterFailure.length} stopped after failing, ` +
+              `${result.evening.length} stopped for the evening`
           );
         }
       })

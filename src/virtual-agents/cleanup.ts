@@ -1,5 +1,6 @@
 import { awaitsOwner } from "./lifecycle.ts";
 import type { WallClock } from "./settings.ts";
+import type { StopReason } from "./stop.ts";
 
 /**
  * When the sweep acts on a virtual agent, as pure functions of the clock so they are tested without waiting.
@@ -112,21 +113,30 @@ export function isIdle(linkedStatus: string | null, lastActiveAt: Date, now: Dat
   return linkedStatus !== "busy" && now.getTime() - lastActiveAt.getTime() >= idleMinutes * 60_000;
 }
 
-/** Which deadline a status is on, and the reason the sweep stops it for. */
-export type InactivityRule = "idle" | "awaiting_owner";
+/** Which deadline a status is on; the name is also the reason the sweep stops it for. */
+export const INACTIVITY_RULES = ["idle", "awaiting_owner", "failed"] as const satisfies readonly StopReason[];
+
+export type InactivityRule = (typeof INACTIVITY_RULES)[number];
 
 /**
  * The inactivity rule an agent meant to be running is held to, or `undefined` when there is none.
  *
- * Every status whose pod is up and could still get somewhere has one: `cloning` and `running` the ordinary idle
- * period, and the two in which the pod is blocked on its owner the shorter one. The rest are left alone — `requested`
- * and `stopped` have no pod of this generation to reclaim, `provisioning` answers to `PROVISIONING_TIMEOUT_MS`
- * instead, `stopping` is already on its way down, and `failed` is kept as it is so its owner can still read the
- * `status_detail` saying what went wrong.
+ * Every status that still holds a pod has one, because `desired` is what decides the StatefulSet's replicas and it
+ * is still `running` for all of them. `cloning` and `running` get the ordinary idle period. The two in which the pod
+ * is blocked on its owner get the shorter one. `failed` gets the idle period as well, not the shorter one: the pod
+ * is up — a failed agent's boot may be sitting watching for a credential its owner has yet to store — but the hub
+ * cannot tell that apart from a crash loop or a dead clone, so it gives every failure the longer deadline, which is
+ * also the more forgiving one for an owner who wants to read what happened.
+ *
+ * The rest have no deadline: `requested` and `stopped` hold no pod of this generation to reclaim, `provisioning`
+ * answers to `PROVISIONING_TIMEOUT_MS` instead, and `stopping` is already on its way down.
  */
 export function inactivityRule(status: string): InactivityRule | undefined {
   if (awaitsOwner(status)) {
     return "awaiting_owner";
+  }
+  if (status === "failed") {
+    return "failed";
   }
   return status === "cloning" || status === "running" ? "idle" : undefined;
 }

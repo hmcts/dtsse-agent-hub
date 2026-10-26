@@ -42,6 +42,8 @@ export interface VirtualAgentRow {
   lastActiveAt: Date | null;
   stoppedAt: Date | null;
   stopReason: StopReason | null;
+  /** Why it failed, kept when the stop that stopped it found it failed; `null` for every other stop. */
+  stopDetail: string | null;
   diskExpiresAt: Date | null;
   diskDeletedAt: Date | null;
   createdAt: Date;
@@ -71,6 +73,7 @@ const SELECT = {
   lastActiveAt: true,
   stoppedAt: true,
   stopReason: true,
+  stopDetail: true,
   diskExpiresAt: true,
   diskDeletedAt: true,
   createdAt: true
@@ -226,7 +229,15 @@ export async function setDesired(
     }
     let data: Record<string, unknown>;
     if (desired === "running") {
-      data = { startedAt: now, stoppedAt: null, stopReason: null, diskExpiresAt: null, diskDeletedAt: null, ...statusChange("requested", now) };
+      data = {
+        startedAt: now,
+        stoppedAt: null,
+        stopReason: null,
+        stopDetail: null,
+        diskExpiresAt: null,
+        diskDeletedAt: null,
+        ...statusChange("requested", now)
+      };
     } else {
       const settled = desired === "stopped" && row.status === "stopped";
       data = { ...NO_TOKEN, ...NO_PORTS, ...(desired === "stopped" ? { stopReason: "user" } : {}), ...(settled ? {} : statusChange("stopping", now)) };
