@@ -119,14 +119,21 @@ export const INACTIVITY_RULES = ["idle", "awaiting_owner", "failed"] as const sa
 export type InactivityRule = (typeof INACTIVITY_RULES)[number];
 
 /**
- * The inactivity rule an agent meant to be running is held to, or `undefined` when there is none.
+ * The inactivity rule an agent meant to be running is held to, or `undefined` when there is none. `desired` is what
+ * decides the StatefulSet's replicas, and it is `running` for every status here, so each of these holds a pod.
  *
- * Every status that still holds a pod has one, because `desired` is what decides the StatefulSet's replicas and it
- * is still `running` for all of them. `cloning` and `running` get the ordinary idle period. The two in which the pod
- * is blocked on its owner get the shorter one. `failed` gets the idle period as well, not the shorter one: the pod
- * is up — a failed agent's boot may be sitting watching for a credential its owner has yet to store — but the hub
- * cannot tell that apart from a crash loop or a dead clone, so it gives every failure the longer deadline, which is
- * also the more forgiving one for an owner who wants to read what happened.
+ * `cloning` and `running` get the ordinary idle period. The two in which the pod is blocked on its owner get the
+ * shorter one, since a sign-in or a credential someone means to give arrives in minutes.
+ *
+ * `failed` gets the idle period, which reclaims the pod of a failure that has gone quiet: one whose pod gave up and
+ * stopped reporting, and one the orchestrator observed as `ImagePullBackOff`, `OOMKilled` or `Unschedulable`, whose
+ * `status_changed_at` holds still because an observation never writes `last_active_at`. The longer deadline is the
+ * one to give these, because an owner coming back to a failure should have time to read it.
+ *
+ * It does not reach a pod that keeps restarting: `virtual-agent-boot` reports `provisioning` seconds into every
+ * container start, which refreshes `last_active_at` and takes the status out of `failed`, so a crash loop past that
+ * line looks continuously active and only the evening stop bounds it. Telling that apart from the restart of a pod
+ * whose owner has just fixed what was wrong needs a count of restarts, which the orchestrator does not report.
  *
  * The rest have no deadline: `requested` and `stopped` hold no pod of this generation to reclaim, `provisioning`
  * answers to `PROVISIONING_TIMEOUT_MS` instead, and `stopping` is already on its way down.

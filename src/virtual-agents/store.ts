@@ -240,7 +240,10 @@ export async function setDesired(
       };
     } else {
       const settled = desired === "stopped" && row.status === "stopped";
-      data = { ...NO_TOKEN, ...NO_PORTS, ...(desired === "stopped" ? { stopReason: "user" } : {}), ...(settled ? {} : statusChange("stopping", now)) };
+      // Why a failed agent failed is kept as the sweep's stop keeps it, so someone who stops their own failed agent
+      // can still read it; `statusChange` is about to clear the detail it came from.
+      const stop = desired === "stopped" ? { stopReason: "user" as const, stopDetail: row.status === "failed" ? row.statusDetail : null } : {};
+      data = { ...NO_TOKEN, ...NO_PORTS, ...stop, ...(settled ? {} : statusChange("stopping", now)) };
     }
     const updated = toRow(
       await tx.virtualAgent.update({

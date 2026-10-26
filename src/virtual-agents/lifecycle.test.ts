@@ -25,7 +25,7 @@ describe("POD_TRANSITIONS", () => {
 });
 
 describe("awaitsOwner", () => {
-  it("should name only the two waits that are the owner's to end", () => {
+  it("should name only the two waits that are the owner's to end, when the table is read as a whole", () => {
     expect(AWAITING_OWNER).toEqual(["awaiting_credentials", "awaiting_login"]);
   });
 

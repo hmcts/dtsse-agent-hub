@@ -120,25 +120,32 @@ describe("inactivityRule", () => {
     ["running", "idle"],
     ["cloning", "idle"],
     ["failed", "failed"]
-  ] as const)("should hold a %s agent to the %s deadline", (status, rule) => {
+  ] as const)("should hold an agent to the %2$s deadline when its status is %1$s", (status, rule) => {
     expect(inactivityRule(status)).toBe(rule);
   });
 
-  it.each(["requested", "provisioning", "stopping", "stopped"])("should leave a %s agent to the other rules", (status) => {
+  it.each(["requested", "provisioning", "stopping", "stopped"])("should leave a %s agent alone when the other rules cover it", (status) => {
     expect(inactivityRule(status)).toBeUndefined();
   });
 
-  it("should give every status that still holds a pod a deadline, so a new one is a decision rather than an omission", () => {
-    expect(VIRTUAL_AGENT_STATUSES.filter((status) => inactivityRule(status) !== undefined)).toEqual([
-      "awaiting_credentials",
-      "awaiting_login",
-      "cloning",
-      "running",
-      "failed"
-    ]);
+  it("should answer for every status when the whole list is read, so adding one without a decision fails here", () => {
+    // Every status appears, with "none" rather than a missing key, so a new status is an extra entry this fails on
+    // whether or not anyone gave it a rule.
+    const answers = Object.fromEntries(VIRTUAL_AGENT_STATUSES.map((status) => [status, inactivityRule(status) ?? "none"]));
+    expect(answers).toEqual({
+      requested: "none",
+      provisioning: "none",
+      awaiting_credentials: "awaiting_owner",
+      awaiting_login: "awaiting_owner",
+      cloning: "idle",
+      running: "idle",
+      stopping: "none",
+      stopped: "none",
+      failed: "failed"
+    });
   });
 
-  it("should name a rule that the stop can record as its reason", () => {
+  it("should name only rules the stop can record as its reason, so each reads as what the sweep decided", () => {
     expect(INACTIVITY_RULES).toEqual(["idle", "awaiting_owner", "failed"]);
   });
 });
