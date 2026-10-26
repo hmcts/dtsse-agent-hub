@@ -15,6 +15,19 @@ export const MAX_SESSIONS_LIMIT = 20;
 export const DEFAULT_IDLE_MINUTES = 20;
 // How long a session has to leave after `/exit` before its tmux session is killed.
 export const EXIT_GRACE_MS = 15000;
+/**
+ * How long a `busy` is believed with nothing new appended to the session's transcript.
+ *
+ * Claude Code's `Stop` hook is the only thing that clears the `busy` its `UserPromptSubmit` hook wrote, and it does
+ * not run for a turn the person interrupted, so the flag alone is not evidence of a turn still running. Every step
+ * of a real turn appends to the transcript, and the longest a single step can block is Claude Code's ten-minute tool
+ * timeout, so an hours-old transcript under a `busy` is a turn that ended without saying so.
+ *
+ * Two hours is an order of magnitude beyond that, because the two mistakes are not equal: a slot held too long is a
+ * wait, while evicting a session that is really working — a long build, a slow Jenkins wait — costs the person the
+ * answer it was in the middle of.
+ */
+export const BUSY_STALE_MS = 2 * 60 * 60 * 1000;
 export const REPORT_EVERY_MS = 60000;
 /**
  * How often a launcher this pod cannot run is said again while that is still true. On an interval, as `report()`
@@ -100,6 +113,9 @@ export type CreateAssistantSupervisorOptions = {
   exitGraceMs?: number;
   reportEveryMs?: number;
   refusalEveryMs?: number;
+  busyStaleMs?: number;
+  /** When this supervisor started, which bounds how old a `busy` it will believe is; a test passes its own. */
+  bootedAt?: number;
 };
 
 // The pod's state directory, which `virtual/phases.ts` also writes to. Spelled out rather than taken from
@@ -153,7 +169,9 @@ export function createAssistantSupervisor({
   idleMs = idleMinutes(env) * 60000,
   exitGraceMs = EXIT_GRACE_MS,
   reportEveryMs = REPORT_EVERY_MS,
-  refusalEveryMs = REFUSAL_EVERY_MS
+  refusalEveryMs = REFUSAL_EVERY_MS,
+  busyStaleMs = BUSY_STALE_MS,
+  bootedAt = now()
 }: CreateAssistantSupervisorOptions): AssistantSupervisor {
   const sessions = new Map<string, ConversationSession>();
   // Wakes waiting for a free slot, oldest first. A conversation whose session is stopping waits here too.
@@ -207,16 +225,34 @@ export function createAssistantSupervisor({
     }
   }
 
-  // Busy while the hooks say so. Otherwise last active when the status file or the transcript last changed:
-  // the Stop hook writes the one, and every turn appends to the other.
+  /**
+   * Busy while the hooks say so and the session is still showing progress. Last active when the status file or the
+   * transcript last changed either way: the Stop hook writes the one, and every turn appends to the other.
+   *
+   * A `busy` is believed only when the status file was written since this supervisor started, and only while there
+   * has been progress within `busyStaleMs`. `~/.claude` is a volume that outlives the pod, so a turn the pod went
+   * down in the middle of leaves `busy` behind on disk, and nothing rewrites it: a session resumed under the same
+   * session id finds the `enabled` file its predecessor left there too, so it goes straight to `live` without the
+   * enable that would have written the status afresh. No session can be mid-turn from before the process that would
+   * be running it, and such a `busy` taken at face value is a slot `leastActiveIdle` will not take and the idle
+   * sweep will not reach — on a disk that outlives the pod, so restarting does not clear it either.
+   *
+   * `active_at` moves with the two mtimes alone, never with the flag, so that a frozen `busy` cannot also read as
+   * the most recently used session on the pod. A turn that is really running appends to its transcript, which is
+   * what keeps it at the recent end of the eviction order and what makes it safe to discount a `busy` claimed
+   * before the boot: a genuine turn adopted across a supervisor restart is the last session eviction would pick and
+   * is nowhere near the idle stop.
+   */
   function refresh(s: ConversationSession): void {
     const status = statePath(s.session_id, "status");
     let text = "";
     try {
       text = (fs.readFileSync(status, "utf8") as string).trim();
     } catch {}
-    s.busy = text === "busy";
-    s.active_at = Math.max(s.active_at, s.busy ? now() : 0, mtime(status), mtime(transcript(s.session_id)));
+    const statusAt = mtime(status);
+    const progressAt = Math.max(statusAt, mtime(transcript(s.session_id)));
+    s.busy = text === "busy" && statusAt >= bootedAt && now() - progressAt < busyStaleMs;
+    s.active_at = Math.max(s.active_at, progressAt);
     if (s.phase === "starting" && fs.existsSync(statePath(s.session_id, "enabled"))) {
       s.phase = "live";
     }

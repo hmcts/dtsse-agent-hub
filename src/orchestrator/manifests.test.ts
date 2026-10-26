@@ -127,7 +127,7 @@ describe("statefulSet", () => {
       { name: "AGENT_HUB_VIRTUAL_AGENT_ID", value: ID },
       { name: "AGENT_HUB_MODEL_ROUTE", value: "own_licence" },
       { name: "AGENT_HUB_PLUGINS", value: "" },
-      { name: "AGENT_HUB_MAX_SESSIONS", value: "2" },
+      { name: "AGENT_HUB_MAX_SESSIONS", value: "5" },
       { name: "AZURE_TENANT_ID", value: "tenant" },
       { name: "DISABLE_AUTOUPDATER", value: "1" },
       { name: "HAI_IN_CONTAINER", value: "1" },
@@ -153,9 +153,9 @@ describe("statefulSet", () => {
   });
 
   it.each([
-    ["small", "2"],
-    ["medium", "4"],
-    ["large", "6"]
+    ["small", "5"],
+    ["medium", "8"],
+    ["large", "12"]
   ] as const)("should let a %s pod run %s conversation sessions beside its own when it is applied", (size, sessions) => {
     const [container] = podSpec(statefulSet({ ...AGENT, size }, SPEC, TOKEN)).containers;
 

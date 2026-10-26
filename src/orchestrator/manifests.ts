@@ -90,10 +90,19 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
 }
 
 /**
- * How many HMCTS Assistant conversation sessions a pod runs at once beside its own, by size: each is a Claude
- * process of its own.
+ * How many HMCTS Assistant conversation sessions a pod runs at once beside its own, by size.
+ *
+ * Each session is a Claude process of its own, with its own MCP servers, hai wrapper and bridge beside it, which
+ * measures at about 1.2Gi on a running `small` pod — three sessions there hold 4.1Gi of a cgroup whose limit is the
+ * 8Gi `SIZE_RESOURCES` gives it. So each cap is set against the memory limit of its own size, leaving the pod's own
+ * session and the supervisors room: `medium` keeps about a third of its 16Gi free at 8, and `large` half of its 32Gi
+ * at 12.
+ *
+ * `small` at 5 is the exception: five sessions and the pod's own come to roughly 7.5Gi of that 8Gi limit, and to
+ * nearly twice the 4Gi the pod requests. A small pod running five busy conversations at once is the case to watch,
+ * and `small` the size whose memory to raise if it OOMs or is evicted under node pressure.
  */
-export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 2, medium: 4, large: 6 };
+export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 5, medium: 8, large: 12 };
 
 /**
  * The pod is given its public domain rather than its URLs, so that a server starting or stopping changes the Service
