@@ -35,7 +35,8 @@ const STOP_REASON: Record<StopReason, string> = {
   evening: "Stopped for the evening",
   quota: "Stopped to stay within the cluster's quota",
   expired: "Stopped because its time ran out",
-  failed: "Stopped because it failed"
+  failed: "Stopped because it failed",
+  awaiting_owner: "Stopped while it was waiting for you to sign in"
 };
 
 export function stopReasonLabel(reason: StopReason): string {

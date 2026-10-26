@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { byCodePoint } from "../topics/slug.ts";
 import {
   APPLY_FAILURES_BEFORE_FAILED,
+  AWAITING_OWNER,
   afterApplyError,
+  awaitsOwner,
   type Current,
   nextStatus,
   type Observation,
@@ -19,6 +21,28 @@ function observed(overrides: Partial<Observation> = {}): Observation {
 describe("POD_TRANSITIONS", () => {
   it("should name every status exactly once when it is read as a table", () => {
     expect(Object.keys(POD_TRANSITIONS).sort(byCodePoint)).toEqual([...VIRTUAL_AGENT_STATUSES].sort(byCodePoint));
+  });
+});
+
+describe("awaitsOwner", () => {
+  it("should name only the two waits that are the owner's to end, when the table is read as a whole", () => {
+    expect(AWAITING_OWNER).toEqual(["awaiting_credentials", "awaiting_login"]);
+  });
+
+  it.each(["awaiting_credentials", "awaiting_login"])("should say a pod reporting %s is waiting on its owner", (phase) => {
+    expect(awaitsOwner(phase)).toBe(true);
+  });
+
+  it.each([
+    "provisioning",
+    "cloning",
+    "running",
+    "failed",
+    "requested",
+    "stopping",
+    "stopped"
+  ])("should say a pod reporting %s is not waiting on its owner", (phase) => {
+    expect(awaitsOwner(phase)).toBe(false);
   });
 });
 

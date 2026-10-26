@@ -109,6 +109,9 @@ export async function storePastedCode(
         updatedAt: now
       }
     });
+    // The owner acting on a sign-in is activity, where the pod's own prompts for it are not; without this the sweep's
+    // deadline for an agent waiting on its owner could stop one in the moments between the paste and the pod's fetch.
+    await tx.virtualAgent.update({ where: { id: virtualAgentId }, data: { lastActiveAt: now, updatedAt: now } });
     await announce(tx, virtualAgentId, virtualAgent.ownerOid);
   });
 }

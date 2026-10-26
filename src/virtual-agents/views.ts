@@ -33,6 +33,8 @@ export interface VirtualAgentCard {
   /** The workspace plugins its pod loads, in code-point order. */
   plugins: string[];
   stopReason: StopReason | null;
+  /** Why it failed, for an agent stopped after failing; `null` for every other stop. */
+  stopDetail: string | null;
   /** The latest pod report or transcript entry, or `null` before there has been either. */
   lastActivityAt: string | null;
   stoppedAt: string | null;
@@ -76,6 +78,7 @@ function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCa
     localOnlyPorts: row.localOnlyPorts,
     plugins: row.plugins,
     stopReason: row.stopReason,
+    stopDetail: row.stopDetail,
     lastActivityAt: iso(lastActivity(row.lastActiveAt, row.agentId === null ? undefined : newest.get(row.agentId))),
     stoppedAt: iso(row.stoppedAt),
     diskExpiresAt: iso(row.diskExpiresAt),

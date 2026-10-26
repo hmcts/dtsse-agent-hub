@@ -54,6 +54,7 @@ function card(overrides: Partial<VirtualAgentCard> = {}): VirtualAgentCard {
     localOnlyPorts: [],
     plugins: [],
     stopReason: null,
+    stopDetail: null,
     lastActivityAt: "2026-10-05T10:55:00.000Z",
     stoppedAt: null,
     diskExpiresAt: null,
@@ -99,7 +100,8 @@ describe("labels", () => {
     ["evening", "Stopped for the evening"],
     ["quota", "quota"],
     ["expired", "time ran out"],
-    ["failed", "it failed"]
+    ["failed", "it failed"],
+    ["awaiting_owner", "waiting for you to sign in"]
   ] as const)("should explain a stop when its reason is %s", (reason, text) => {
     expect(stopReasonLabel(reason)).toContain(text);
   });
@@ -267,6 +269,14 @@ describe("LifecyclePanel", () => {
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
     });
     expect((given.start.mock.calls[0] as unknown as [FormData])[0].get("id")).toBe(card().id);
+  });
+
+  it("should still say why an agent failed once the sweep has stopped it", () => {
+    const detail = "github: three sign-in codes went unused; paste a token on the credentials page";
+    render(<LifecyclePanel agent={card({ desired: "stopped", status: "stopped", stopReason: "failed", stopDetail: detail })} actions={actions()} />);
+
+    expect(screen.getByText("Stopped because it failed")).toBeTruthy();
+    expect(screen.getByText(detail)).toBeTruthy();
   });
 
   it("should ask again before deleting, and delete only once confirmed", async () => {

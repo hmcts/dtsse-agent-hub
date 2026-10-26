@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  awaitingOwnerMinutes,
+  DEFAULT_AWAITING_OWNER_MINUTES,
   DEFAULT_DISK_TTL_DAYS,
   DEFAULT_IDLE_MINUTES,
   DEFAULT_ORCHESTRATOR_LEASE_SECONDS,
@@ -40,6 +42,22 @@ describe("idleMinutes and diskTtlDays", () => {
 
   it.each(["0", "-5", "1.5", "two"])("should refuse %s when it is not a whole number of at least one", (value) => {
     expect(() => idleMinutes({ VIRTUAL_AGENT_IDLE_MINUTES: value })).toThrow(VirtualAgentConfigurationError);
+  });
+});
+
+describe("awaitingOwnerMinutes", () => {
+  it("should default to half an hour, well inside the idle period, when nothing is set", () => {
+    expect(awaitingOwnerMinutes({})).toBe(DEFAULT_AWAITING_OWNER_MINUTES);
+    expect(DEFAULT_AWAITING_OWNER_MINUTES).toBe(30);
+    expect(DEFAULT_AWAITING_OWNER_MINUTES).toBeLessThan(DEFAULT_IDLE_MINUTES);
+  });
+
+  it("should read a whole number when one is set", () => {
+    expect(awaitingOwnerMinutes({ VIRTUAL_AGENT_AWAITING_OWNER_MINUTES: "10" })).toBe(10);
+  });
+
+  it.each(["0", "-5", "1.5", "two"])("should refuse %s when it is not a whole number of at least one", (value) => {
+    expect(() => awaitingOwnerMinutes({ VIRTUAL_AGENT_AWAITING_OWNER_MINUTES: value })).toThrow(VirtualAgentConfigurationError);
   });
 });
 
