@@ -114,7 +114,8 @@ the `-staging` release.
 | `VIRTUAL_AGENTS_ENABLED` | off | `true` turns the feature on |
 | `ORCHESTRATOR_OIDS` | none | Comma-separated object ids of the orchestrator's service principals. With none, every orchestrator request answers 503 |
 | `ORCHESTRATOR_ROLE` | none | An app role the orchestrator's token must also carry, as `VirtualAgents.Orchestrate`. Unset, the `oid` alone is checked |
-| `VIRTUAL_AGENT_IDLE_MINUTES` | `120` | A running agent with no activity for this long is stopped |
+| `VIRTUAL_AGENT_IDLE_MINUTES` | `120` | A running, cloning or failed agent with no activity for this long is stopped |
+| `VIRTUAL_AGENT_AWAITING_OWNER_MINUTES` | `30` | An agent waiting for its owner to finish a sign-in or store a credential for this long is stopped |
 | `VIRTUAL_AGENT_EVENING_STOP` | `19:00` | UK time, `HH:MM`, at which every virtual agent started before it is stopped, on weekdays |
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
@@ -170,16 +171,51 @@ tools, and an agent starts without it. Like a GitHub token, only the owner's own
 
 An Atlassian sign-in (`atlassian`) is optional too: it gives an agent the Atlassian Teamwork Graph CLI, `twg`, for Jira
 and Confluence on hmcts.atlassian.net. It is not pasted: the pod relays a device code to its owner, then saves `twg`'s
-`auth.conf` without the access token, and saves it again whenever `twg` replaces its refresh token. Any Atlassian
-account is accepted, and labels the credential; the owner can have the agent sign in again from its page.
+sign-in file (`auth-profiles.json` from twg 1.3.9, `auth.conf` before it) without its access tokens, and saves it
+again whenever `twg` replaces its refresh token. Any Atlassian account is accepted, and labels the credential; the
+owner can have the agent sign in again from its page.
 
-Each code lasts two minutes, and the pod offers three of them. Two minutes is `twg login`'s own limit, not the
-server's: twg waits five minutes for a person at a terminal and two when it reads its environment as an agent's,
-which a pod's always is, because `AGENT_HUB_LAUNCH_TOKEN` is enough to tell it so. Two minutes is easy to miss when
-the sign-in page is on another screen, so each code that runs out unused is replaced. After the last the pod reports
-the sign-in expired, so the owner's screens say so instead of showing a code that no longer works, and the agent
-stops reading as waiting for them. Jira and Confluence are then unconfigured until the agent signs in again. A
-sign-in that breaks rather than running out — the owner refusing it, say — is reported at once, with no second code.
+One code lasts five minutes, which is the whole life Atlassian gives it, and the pod offers one. Five minutes is
+long enough to go and find the Atlassian sign-in page on another screen and type a code, and that is what the pod
+has to buy, because `twg login` has a limit of its own under Atlassian's: twg 1.3.3 waits five minutes for a person
+at a terminal and two when it reads its environment as an agent's. The pod therefore runs `twg login` with every
+agent-mode trigger taken out of the child's environment — twg needs none of them — and gets the full five minutes.
+
+twg's gate is two parts, and the explicit one runs first. `TWG_AGENT_HOST`, a table of agent hosts it knows by name
+(`CLAUDECODE`, `CLAUDE_CODE`, `CURSOR_AGENT`, `CODEX_SANDBOX` and the rest), `AGENT`, `AI_AGENT`,
+`TWG_METRICS_SOURCE` and `TWG_AGENT_DEFAULTS` each put it in agent mode on their own, short-circuiting before
+anything else. Only if none of them is set does twg scan the whole environment for a name with `AGENT` as a word in
+it, bar the ssh and gpg agent sockets, the user-agent strings, `AGENT_RUNTIME` and `AGENT_TRANSCRIPTS`, which the
+child therefore keeps; `AGENT_HUB_LAUNCH_TOKEN` and every other
+`AGENT_HUB_*` and `VIRTUAL_AGENT_*` variable matches that scan, so leaving the environment alone puts every pod
+sign-in in agent mode whatever else it does. All of it is droppable, and `twgAgentModeVars` in
+`packages/agent-hub/src/virtual/atlassian.ts` is the list, with the reason it exists beside it.
+
+A code that still runs out unused means the owner is not at their screen, and a second relayed to an empty chair
+runs out too while holding the agent in `awaiting_login`, so the pod reports the sign-in expired instead: the
+owner's screens say so rather than showing a code that no longer works, and the agent stops reading as waiting for
+them. Jira and Confluence are then unconfigured until the agent signs in again, which the owner can do from its
+page and which is a fresh five minutes. A sign-in that breaks rather than running out — the owner refusing it, say
+— is reported the same way, and at once.
+
+One code rather than two is what the five minutes cost. `agent-hub jira export` drives this sign-in under a
+600-second Bash timeout, and a command killed at that reports nothing and leaves the dead code on the owner's
+screen; two five-minute codes need 900 seconds of that budget and one needs 570. A code the owner can actually use
+is worth more than a second they could not, which is what the incident behind this showed: two codes, both two
+minutes, both expired unused.
+
+The five minutes is measured against twg 1.3.3, which is what the pod image carries. twg prints the figure itself,
+as "(300s remaining)", only outside agent mode, so the countdown appearing at all is what says the drop worked and
+a spinner with no figure means it did not. Moving the pod to a later twg means measuring that version's gate again
+and changing the drop list, and `TWG_DEVICE_CODE_EXPIRES_S` with it.
+
+**That move does not pass through this repo.** `VIRTUAL_AGENT_IMAGE` is digest-pinned in `cnp-flux-config` and
+still points at the cft-workspace devcontainer image rather than `docker/virtual-agent/Dockerfile`, and that
+devcontainer already pins twg 1.3.9. So the next digest bump in flux changes the pod's twg with nothing changed
+here and nobody reading this. Whoever bumps `twg_ver` or that digest owns re-measuring the gate. If the drop list
+is short on the new version, the code dies at two minutes while the owner's screen counts down from five:
+`twgLoginExpired` reads twg's own error code, so the expiry is still reported as an expiry and the owner is still
+told the code ran out — the only wrong thing is the clock.
 
 Each person also has a CLAUDE.md (`claude_md`), edited in the "Your CLAUDE.md" section of `/hub/virtual`, which every one of
 their virtual agents writes to `~/.claude/CLAUDE.md` before each start of Claude. It is kept in the credentials store
@@ -294,8 +330,30 @@ image is built on its pull request without being pushed, and both that build and
 its own missing `AGENT_HUB_URL` rather than for a missing interpreter, and both bins have to link into nvm's tree.
 Which client version a build baked in is in its
 log, or `npm ls -g --depth=0 @hmcts-cft/agent-hub` inside the image. `VIRTUAL_AGENT_IMAGE` is pinned by digest in
-cnp-flux-config and still points at the devcontainer image, which carries the same two things; moving it is its own
-change.
+cnp-flux-config and points at it. A pin moving there is not the whole story: the orchestrator reads
+`VIRTUAL_AGENT_IMAGE` from its own environment, so a pod created before that deployment has rolled is still given the
+previous image, and `kubectl -n <namespace> get deploy dtsse-agent-hub-orchestrator -o jsonpath` on that variable is
+what says which image the next pod will get.
+
+**What that image has to provide.** The orchestrator only takes a digest and names no image, so this is the contract
+rather than a description of one build of it:
+
+| The image must | Because |
+| --- | --- |
+| have `virtual-agent-boot` on the image's `PATH`, as a `/usr/local/bin` symlink | it is the container's `command`, and the kubelet resolves that with no shell, against the image's own `PATH`. npm installs it into nvm's version-specific bin directory, which only a shell that has sourced `nvm.sh` can see. `agent-hub` is linked beside it for convenience, not necessity, and does not work from a shell-less `PATH` at all: it needs node and, unlike boot, carries no `load_node` |
+| have `node` and `npm`, reachable by sourcing `$NVM_DIR/nvm.sh` | `virtual-agent-boot` sources it to upgrade the client; stage 1 refuses to start without either. The base installs nvm with `PROFILE=/dev/null` and sources it from `.bashrc` and `.zshrc` alone, so a login shell has no node either — which is what makes `kubectl exec` into a pod need `. "$HOME/.nvm/nvm.sh"` first |
+| have `jq`, `tmux`, `git`, `gh` and `curl` | boot builds every status body with `jq -cn` under `set -euo pipefail`, so without it a pod aborts at its first report and crash-loops having told the hub nothing; it clones over HTTPS with `gh`'s token and reports with `curl`, and stage 1 runs each session in tmux |
+| have the Azure CLI | the client shells out to `az` for the device-code sign-in and the token it caches (`src/virtual/sign-in.ts`), and stage 1 retries that sign-in indefinitely — so without `az` the agent sits at "Starting" with no failure its owner can act on |
+| have Claude Code and `hai` | `hai` execs `claude` by bare name, and stage 1 installs `hai` itself only while the image does not carry it. `twg` is the one genuinely optional tool: stage 1 skips the Atlassian sign-in without it |
+| use `/home/hmcts` as `$HOME` | the pod's volume mounts are hardcoded to it: `~/.claude`, `~/.azure` and `~/.config/gh`. `~/.claude` is a mount from the PVC, so a session's status and `enabled` files outlive the pod |
+| own `$HOME`, `$NVM_DIR` and npm's global prefix as uid and gid 1000 | the pod sets `runAsUser`, `runAsGroup` and `fsGroup` to 1000, which override whatever the image's `USER` says — so an image expecting root still starts, and the failure is `EACCES` when boot's `npm install -g` writes to a prefix it does not own. `runAsUser` is also what makes a named `USER` acceptable: given only a name, the kubelet cannot prove the user is not root and refuses a pod asking for `runAsNonRoot` |
+
+Nothing else is the image's business. The split worth stating, because it is not obvious from either repository: **this
+repository owns whatever a pod needs before the workspace is cloned, and the workspace owns whatever can change with
+it.** So the image, the container command, the two `HAI_*` markers and stage 1 itself are all here, while populating
+the clones — `scripts/bootstrap`, `scripts/sync` and the `apps/`, `libs/` and `platops/` layout — stays
+cft-workspace's, reached through the `prepare-workspace.sh` hook stage 1 calls and reported back through
+`repos-state`.
 
 **The client the pod boots on.** `virtual-agent-boot` installs `@hmcts-cft/agent-hub@latest` over the one its image
 carries before handing over to stage 1, `virtual-agent/entrypoint.sh` in that same package, so a client release

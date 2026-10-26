@@ -54,6 +54,7 @@ function card(overrides: Partial<VirtualAgentCard> = {}): VirtualAgentCard {
     localOnlyPorts: [],
     plugins: [],
     stopReason: null,
+    stopDetail: null,
     lastActivityAt: "2026-10-05T10:55:00.000Z",
     stoppedAt: null,
     diskExpiresAt: null,
@@ -99,7 +100,8 @@ describe("labels", () => {
     ["evening", "Stopped for the evening"],
     ["quota", "quota"],
     ["expired", "time ran out"],
-    ["failed", "it failed"]
+    ["failed", "it failed"],
+    ["awaiting_owner", "waiting for you to sign in"]
   ] as const)("should explain a stop when its reason is %s", (reason, text) => {
     expect(stopReasonLabel(reason)).toContain(text);
   });
@@ -267,6 +269,14 @@ describe("LifecyclePanel", () => {
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
     });
     expect((given.start.mock.calls[0] as unknown as [FormData])[0].get("id")).toBe(card().id);
+  });
+
+  it("should still say why an agent failed once the sweep has stopped it", () => {
+    const detail = "github: three sign-in codes went unused; paste a token on the credentials page";
+    render(<LifecyclePanel agent={card({ desired: "stopped", status: "stopped", stopReason: "failed", stopDetail: detail })} actions={actions()} />);
+
+    expect(screen.getByText("Stopped because it failed")).toBeTruthy();
+    expect(screen.getByText(detail)).toBeTruthy();
   });
 
   it("should ask again before deleting, and delete only once confirmed", async () => {
@@ -771,7 +781,8 @@ function login(overrides: Partial<LoginView> = {}): LoginView {
     verificationUri: "https://github.com/login/device",
     expiresAt: "2026-10-05T12:10:00.000Z",
     state: "pending",
-    codeWaiting: false,
+    updatedAt: "2026-10-05T12:08:00.000Z",
+    codeWaitingUntil: null,
     ...overrides
   };
 }
@@ -876,7 +887,7 @@ describe("OnboardingChecklist", () => {
         reconnect={ok()}
         needed={["claude"]}
         statuses={[]}
-        logins={[login({ kind: "claude", prompt: "paste_code", codeWaiting: true })]}
+        logins={[login({ kind: "claude", prompt: "paste_code", codeWaitingUntil: new Date(Date.now() + 5 * 60_000).toISOString() })]}
         paste={ok()}
         save={ok()}
         now={NOW}
@@ -885,6 +896,38 @@ describe("OnboardingChecklist", () => {
 
     expect(screen.queryByRole("form")).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("waiting for your virtual agent");
+  });
+
+  /**
+   * A pasted code keeps for `PASTED_CODE_TTL_MS` while the sign-in itself can run for `MAX_LOGIN_SECONDS`, and
+   * `takePastedCode` gives the pod nothing past the deadline without clearing the column. A card going by the column
+   * would promise for the rest of the hour that a dead code was on its way, with the box hidden — and
+   * `storePastedCode` would still take another.
+   */
+  it("should ask for the code again when the one the owner pasted is past being collected", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["claude"]}
+        statuses={[]}
+        logins={[
+          login({
+            kind: "claude",
+            prompt: "paste_code",
+            expiresAt: "2026-10-05T12:50:00.000Z",
+            codeWaitingUntil: "2026-10-05T11:55:00.000Z"
+          })
+        ]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("form", { name: "Paste the Claude code" })).toBeTruthy();
   });
 
   it("should offer a password box for the Bedrock API key and save it as the owner's credential when it is not stored", async () => {
@@ -1163,6 +1206,106 @@ describe("OnboardingChecklist", () => {
     );
 
     expect(screen.getByRole("alert").textContent).toContain("Azure sign-in failed");
+  });
+
+  /** `stored` is saved at 11:00 and `login` last written at 12:08, so a lapsed sign-in is the newer of the two. */
+  function lapsedChecklist(state: "expired" | "failed") {
+    return (
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["atlassian"]}
+        statuses={[stored("atlassian", "alice@justice.gov.uk")]}
+        logins={[login({ kind: "atlassian", state, expiresAt: "2026-10-05T11:59:00.000Z" })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+  }
+
+  // A card reads from both the credential and the sign-in, because nothing deletes a credential when its sign-in
+  // fails: storage alone would tick the one card whose sign-in the pod has just reported it could not use.
+  it("should not call a stored sign-in connected when a later sign-in lapsed over it", () => {
+    render(lapsedChecklist("expired"));
+
+    expect(screen.queryByText("✓ Connected")).toBeNull();
+    expect(screen.getByText("Sign-in expired")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("ran out before anyone used it");
+    expect(screen.getByRole("button", { name: "Reconnect Atlassian (Jira & Confluence)" })).toBeTruthy();
+  });
+
+  it("should say the stored sign-in failed when that is how the later sign-in ended", () => {
+    render(lapsedChecklist("failed"));
+
+    expect(screen.getByText("Last sign-in failed")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("sign-in failed");
+  });
+
+  // Nothing re-relays a sign-in by itself, so a card whose sign-in has lapsed needs the control that asks for one
+  // whether or not a value is still stored — and with none stored there is nothing to delete, so it does not say so.
+  it("should offer to sign in again, without promising a deletion, when a lapsed sign-in has nothing stored", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["atlassian"]}
+        statuses={[]}
+        logins={[login({ kind: "atlassian", state: "expired", expiresAt: "2026-10-05T11:59:00.000Z" })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect Atlassian (Jira & Confluence)" }));
+
+    const confirm = screen.getByRole("group", { name: "Confirm reconnecting Atlassian (Jira & Confluence)" });
+    expect(confirm.textContent).toContain("Restart this virtual agent");
+    expect(confirm.textContent).not.toContain("Delete");
+  });
+
+  // A card reading "Sign-in expired" over a tick saying the value is stored is the card disagreeing with itself, so
+  // a pasted key whose sign-in has lapsed is asked for again rather than ticked.
+  it("should ask for a pasted key again, and not tick it, when a later sign-in lapsed over it", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["claude"]}
+        statuses={[stored("claude")]}
+        logins={[login({ kind: "claude", state: "expired", expiresAt: "2026-10-05T11:59:00.000Z" })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.queryByText("✓ Stored")).toBeNull();
+    expect(screen.getByText("Sign-in expired")).toBeTruthy();
+    expect(screen.getByRole("form", { name: "Save your Claude token" })).toBeTruthy();
+  });
+
+  it("should still call a stored sign-in connected when the failure came before it was stored", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["atlassian"]}
+        statuses={[stored("atlassian")]}
+        logins={[login({ kind: "atlassian", state: "failed", expiresAt: "2026-10-05T10:30:00.000Z", updatedAt: "2026-10-05T10:30:00.000Z" })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.getByText("✓ Connected")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("should say why credentials cannot be stored when the deployment has nowhere to keep them", () => {

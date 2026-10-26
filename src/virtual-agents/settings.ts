@@ -8,6 +8,12 @@ import { DEFAULT_PUBLIC_DOMAIN } from "./ports.ts";
 export type Environment = Readonly<Record<string, string | undefined>>;
 
 export const DEFAULT_IDLE_MINUTES = 120;
+/**
+ * Far shorter than the idle period because the agent is not idle, it is blocked: someone who is going to enter a
+ * device code does it in minutes, and a device code lives 15, so half an hour is two codes' worth of patience. Past
+ * that nobody is coming, and the pod is holding a node to hand out codes to an empty room.
+ */
+export const DEFAULT_AWAITING_OWNER_MINUTES = 30;
 export const DEFAULT_EVENING_STOP = "19:00";
 export const DEFAULT_DISK_TTL_DAYS = 14;
 export const DEFAULT_ORCHESTRATOR_LEASE_SECONDS = 120;
@@ -32,6 +38,11 @@ function positiveWhole(env: Environment, name: string, fallback: number): number
 
 export function idleMinutes(env: Environment = process.env): number {
   return positiveWhole(env, "VIRTUAL_AGENT_IDLE_MINUTES", DEFAULT_IDLE_MINUTES);
+}
+
+/** How long an agent waiting on its owner, for a sign-in or a credential, waits before the sweep stops it. */
+export function awaitingOwnerMinutes(env: Environment = process.env): number {
+  return positiveWhole(env, "VIRTUAL_AGENT_AWAITING_OWNER_MINUTES", DEFAULT_AWAITING_OWNER_MINUTES);
 }
 
 export function diskTtlDays(env: Environment = process.env): number {

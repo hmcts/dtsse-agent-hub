@@ -1,5 +1,6 @@
 import type { EventHub } from "../realtime/hub.ts";
 import { type OnOpen, sseEvent } from "../realtime/sse.ts";
+import type { LookupFrame } from "./lookup-store.ts";
 import type { Wake } from "./store.ts";
 import type { UploadDeletion } from "./upload-disk.ts";
 
@@ -13,6 +14,8 @@ export interface SessionStreamSources {
   wake: (conversationId: string) => Promise<Wake | undefined | null>;
   /** The files the owner has asked the pod to delete and it has not yet reported gone, grouped by conversation. */
   deletions: () => Promise<UploadDeletion[]>;
+  /** The lookup to send the pod, `undefined` once it is answered or when it is not this assistant's. */
+  lookup: (lookupId: string) => Promise<LookupFrame | undefined>;
 }
 
 export function wakeFrame(wake: Wake): string {
@@ -25,6 +28,10 @@ export function closeFrame(conversationId: string): string {
 
 export function interruptFrame(conversationId: string): string {
   return sseEvent({ event: "interrupt", data: JSON.stringify({ conversation_id: conversationId }) });
+}
+
+export function lookupFrame(lookup: LookupFrame): string {
+  return sseEvent({ event: "lookup", data: JSON.stringify(lookup) });
 }
 
 export function deleteUploadsFrame(deletion: UploadDeletion): string {
@@ -44,6 +51,11 @@ export function deleteUploadsFrame(deletion: UploadDeletion): string {
  * A deletion replays on both, unlike a wake only in that nothing de-duplicates it: it names a state to reach, it is
  * idempotent — a file that is not there is a deletion that has already happened — and the pod's next report is what
  * stops it being read at all. A file somebody asked to delete while the pod was restarting must still go.
+ *
+ * A lookup is read and sent as soon as it is asked for, beside the queue rather than behind it, because somebody is
+ * typing and waiting for it; and like an interrupt it is never replayed, since the search it was for has been replaced
+ * by the time another stream opens. A read that fails loses that one lookup, which the browser reports as a timeout,
+ * rather than ending the stream.
  *
  * An interrupt is the exception to all of that: it is neither replayed on connect nor resent on a `resync`, because
  * it names no state to reach but a turn to end, and the turn a missed one would have ended is over by the time
@@ -109,6 +121,15 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
         if (open) {
           send(interruptFrame(event.conversation_id));
         }
+      } else if (event.type === "assistant_lookup" && event.virtual_agent_id === virtualAgentId) {
+        sources.lookup(event.lookup_id).then(
+          (lookup) => {
+            if (open && lookup !== undefined) {
+              send(lookupFrame(lookup));
+            }
+          },
+          () => undefined
+        );
       } else if (event.type === "assistant_uploads" && event.virtual_agent_id === virtualAgentId) {
         enqueue(sendDeletions);
       } else if (event.type === "resync") {

@@ -43,6 +43,7 @@ export const ENV_KEYS = [
   "CLAUDE_PID",
   "CLAUDE_PROJECT_DIR",
   "HOME",
+  "NVM_DIR",
   "PATH",
   "TWG_CONFIG_DIR",
   "VIRTUAL_AGENT_IGNORE_PORTS",

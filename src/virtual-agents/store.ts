@@ -5,7 +5,7 @@ import type { Identity } from "../users/identity.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
 import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken, withoutLaunchTokens } from "./launch-token.ts";
-import { afterApplyError, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
+import { afterApplyError, awaitsOwner, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
 import { checkName, createRefusal } from "./limits.ts";
 import { availablePlugins, checkPlugins, samePlugins, storedPlugins } from "./plugins.ts";
 import { normalisePorts, samePorts } from "./ports.ts";
@@ -42,6 +42,8 @@ export interface VirtualAgentRow {
   lastActiveAt: Date | null;
   stoppedAt: Date | null;
   stopReason: StopReason | null;
+  /** Why it failed, kept when the stop that stopped it found it failed; `null` for every other stop. */
+  stopDetail: string | null;
   diskExpiresAt: Date | null;
   diskDeletedAt: Date | null;
   createdAt: Date;
@@ -71,6 +73,7 @@ const SELECT = {
   lastActiveAt: true,
   stoppedAt: true,
   stopReason: true,
+  stopDetail: true,
   diskExpiresAt: true,
   diskDeletedAt: true,
   createdAt: true
@@ -255,6 +258,7 @@ export async function setDesired(
         startedAt: now,
         stoppedAt: null,
         stopReason: null,
+        stopDetail: null,
         diskExpiresAt: null,
         diskDeletedAt: null,
         ...NO_MEMORY_REPORT,
@@ -262,7 +266,10 @@ export async function setDesired(
       };
     } else {
       const settled = desired === "stopped" && row.status === "stopped";
-      data = { ...NO_TOKEN, ...NO_PORTS, ...(desired === "stopped" ? { stopReason: "user" } : {}), ...(settled ? {} : statusChange("stopping", now)) };
+      // Why a failed agent failed is kept as the sweep's stop keeps it, so someone who stops their own failed agent
+      // can still read it; `statusChange` is about to clear the detail it came from.
+      const stop = desired === "stopped" ? { stopReason: "user" as const, stopDetail: row.status === "failed" ? row.statusDetail : null } : {};
+      data = { ...NO_TOKEN, ...NO_PORTS, ...stop, ...(settled ? {} : statusChange("stopping", now)) };
     }
     const updated = toRow(
       await tx.virtualAgent.update({
@@ -497,7 +504,13 @@ export async function callerForLaunchToken(db: Database, token: string): Promise
 
 /**
  * The pod's report of how far its boot has got. Refused with 409 when the lifecycle does not allow it, such as from
- * an agent that is being stopped. Every report counts as activity.
+ * an agent that is being stopped.
+ *
+ * A report counts as activity unless the phase is one in which the pod is blocked on its owner. A pod relaying a
+ * sign-in nobody finishes reports a fresh device code every few minutes, and each report carries a different code, so
+ * nothing about the report itself gives it away: only the phase does. Counting those as activity is what let such a
+ * pod hold a node for as long as it kept asking. What moves the agent on is its owner, and the status change that
+ * follows is activity the sweep does see.
  */
 export async function reportStatus(prisma: PrismaClient, id: string, phase: PodPhase, detail: string | null, now: Date = new Date()): Promise<VirtualAgentRow> {
   return await prisma.$transaction(async (tx) => {
@@ -519,7 +532,7 @@ export async function reportStatus(prisma: PrismaClient, id: string, phase: PodP
           status: outcome.status,
           statusDetail: outcome.detail ?? null,
           ...(outcome.status === row.status ? {} : { statusChangedAt: now }),
-          lastActiveAt: now,
+          ...(awaitsOwner(phase) ? {} : { lastActiveAt: now }),
           updatedAt: now
         },
         select: SELECT

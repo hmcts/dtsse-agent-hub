@@ -54,6 +54,8 @@ export function LifecyclePanel({ agent, actions }: { agent: VirtualAgentCard; ac
       <div className="space-y-3 text-sm">
         {agent.statusDetail ? <p className="text-hub-text">{agent.statusDetail}</p> : null}
         {agent.desired === "stopped" && agent.stopReason ? <p className="text-hub-muted">{stopReasonLabel(agent.stopReason)}</p> : null}
+        {/* What a failed agent's status_detail said, which the stop cleared; the only place the owner can still read it. */}
+        {agent.desired === "stopped" && agent.stopDetail ? <p className="text-hub-text">{agent.stopDetail}</p> : null}
         {deleting ? (
           <p className="text-hub-muted">This virtual agent and its disk are being deleted.</p>
         ) : (

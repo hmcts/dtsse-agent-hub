@@ -13,6 +13,8 @@ const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 /** One attachment part is up to 4 MiB, which a slow pod connection will not pull inside the JSON timeout. */
 const PART_TIMEOUT_MS = 60000;
+/** How much of a body that is not the contract's `{ error }` object is worth keeping, and saying. */
+const BODY_TEXT_MAX = 200;
 
 /** The credential kinds `docs/agent-api.md` defines; any other gives 404. */
 export const CREDENTIAL_KINDS = ["github", "azure", "claude", "bedrock", "jenkins", "atlassian", "claude_md", "git_identity"] as const;
@@ -167,6 +169,25 @@ export type SessionsBody = {
 /** A conversation's Jira export result, as its session reports it: the issue key it created, or why it could not. */
 export type JiraExportReport = { export_id: string; key: string } | { export_id: string; error: string };
 
+/** A conversation's Confluence export result: the page it created and the title it was created with, or why it could not. */
+export type ConfluenceExportReport = { export_id: string; page_id: string; title?: string } | { export_id: string; error: string };
+
+/** One Jira project a lookup found: only what the person picks it by. */
+export type JiraProjectFound = { key: string; name: string };
+
+/** One Confluence page a lookup found: the ids an export needs, and the titles that say where it is. */
+export type ConfluencePageFound = {
+  id: string;
+  title: string;
+  space_id: string;
+  space_key: string;
+  space_name: string;
+  ancestors: string[];
+};
+
+/** The answer to one lookup: what twg found, or why it found nothing. */
+export type LookupAnswer = { results: JiraProjectFound[] | ConfluencePageFound[] } | { error: "signed_out" | "failed" | "superseded"; detail?: string };
+
 /** A conversation's one markdown document, which the person and the session both edit. */
 export type Artefact = {
   title: string | null;
@@ -230,16 +251,60 @@ export type TranscriptResponse = { accepted: number };
 export type CredentialResponse = { value: string };
 export type LoginCodeResponse = { code: string };
 
+/**
+ * How every call in this module reads a response body: the service's JSON when it sent a JSON object, and
+ * otherwise the first `BODY_TEXT_MAX` characters of whatever it did send, under `error`. A number, a string or an
+ * array is text as far as this is concerned — only an object can be the `{ error }` the contract promises, and
+ * typing a bare `404` as one would be a lie the callers below would carry.
+ *
+ * Streams read theirs this way too, rather than discarding a body they cannot parse, because a client talking to
+ * a service older than itself meets an unmatched path on a stream as readily as anywhere else and
+ * `isMissingRoute` has to be able to tell.
+ *
+ * `request` also reads its successful responses through this, so the rule above is what a 2xx payload gets as
+ * well: every route answering one sends a JSON object, and the ones that send nothing answer `204`, whose empty
+ * body gives `null`. A route that started answering 2xx with a top-level array, number or string would arrive at
+ * its caller as `{ error: "<the text>" }` cast to the expected type, so give it its own read rather than this one.
+ */
+const readBody = (text: string): ApiErrorBody | null => {
+  if (!text) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as ApiErrorBody;
+    }
+  } catch {}
+  return { error: text.slice(0, BODY_TEXT_MAX) };
+};
+
+// A body that came back as a page rather than this service's JSON: whatever a route of its own answers with, it
+// is never markup. Kept off the message, because a Next.js error document says nothing the status does not and
+// any slice of one is markup in a log; the body is still on the error for a caller that wants it.
+const isErrorPage = (body: ApiErrorBody | null): boolean => typeof body?.error === "string" && body.error.trimStart().startsWith("<");
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body: ApiErrorBody | null;
 
   constructor(status: number, body: ApiErrorBody | null, method: string, path: string) {
-    super(`${method} ${path} failed: ${status}${body?.error ? ` ${body.error}` : ""}`);
+    // Bounded like the text bodies `readBody` keeps, because a service's own `error` is not length-checked either
+    // and this message is what reaches a log.
+    const said = body?.error && !isErrorPage(body) ? ` ${String(body.error).slice(0, BODY_TEXT_MAX)}` : "";
+    super(`${method} ${path} failed: ${status}${said}`);
     this.status = status;
     this.body = body;
   }
 }
+
+/**
+ * Whether the service has no such route at all, rather than a route of its own that refused: an unmatched path
+ * answers with the app's own not-found page, where a route sends `{ error }` (`docs/agent-api.md`). A client
+ * published ahead of the deploy that carries its route sees this from every hub still on the older image, which
+ * is a deploy catching up rather than a fault.
+ */
+export const isMissingRoute = (error: unknown): boolean => error instanceof ApiError && error.status === 404 && isErrorPage(error.body);
 
 export type RunAz = (args: string[]) => Promise<string>;
 
@@ -360,6 +425,9 @@ export type Api = {
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
   putJiraExport: (agentId: string, body: JiraExportReport) => Promise<null>;
+  putConfluenceExport: (agentId: string, body: ConfluenceExportReport) => Promise<null>;
+  /** The supervisor's answer to one of its owner's Jira or Confluence lookups. */
+  putLookup: (virtualId: string, lookupId: string, body: LookupAnswer) => Promise<null>;
   /** One part of a file attached to a message in this agent's conversation. One part, never the whole file. */
   attachmentPart: (agentId: string, uploadId: string, index: number) => Promise<Uint8Array>;
   /** The whole file is on this pod's disk, which is what makes the hub delete its part rows. */
@@ -410,15 +478,7 @@ export function createApi({
       init.body = JSON.stringify(body);
     }
     const res = await fetchImpl(`${base}${path}`, init);
-    const text = await res.text();
-    let json: unknown = null;
-    if (text) {
-      try {
-        json = JSON.parse(text);
-      } catch {
-        json = { error: text.slice(0, 200) };
-      }
-    }
+    const json: unknown = readBody(await res.text());
     if (!res.ok) {
       throw new ApiError(res.status, json as ApiErrorBody | null, method, path);
     }
@@ -447,11 +507,11 @@ export function createApi({
   async function requestBytes(path: string, timeoutMs = PART_TIMEOUT_MS): Promise<Uint8Array> {
     const res = await fetchImpl(`${base}${path}`, { headers: await headers(), signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) {
-      let json: ApiErrorBody | null = null;
+      let text = "";
       try {
-        json = { error: (await res.text()).slice(0, 200) };
+        text = await res.text();
       } catch {}
-      throw new ApiError(res.status, json, "GET", path);
+      throw new ApiError(res.status, readBody(text), "GET", path);
     }
     return new Uint8Array(await res.arrayBuffer());
   }
@@ -463,11 +523,11 @@ export function createApi({
     }
     const res = await fetchImpl(`${base}${path}`, { headers: h, signal });
     if (!res.ok) {
-      let json: ApiErrorBody | null = null;
+      let text = "";
       try {
-        json = (await res.json()) as ApiErrorBody;
+        text = await res.text();
       } catch {}
-      throw new ApiError(res.status, json, "GET", path);
+      throw new ApiError(res.status, readBody(text), "GET", path);
     }
     return res;
   }
@@ -523,6 +583,8 @@ export function createApi({
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
+    putConfluenceExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/confluence`, body),
+    putLookup: (virtualId, lookupId, body) => request<null>("PUT", v(virtualId, `lookups/${encodeURIComponent(lookupId)}`), body),
     attachmentPart: (agentId, uploadId, index) => requestBytes(`${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/parts/${index}`),
     attachmentFetched: (agentId, uploadId) => request<null>("POST", `${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/fetched`),
     stream: (id, opts) => openStream(`${a(id)}/stream`, opts)

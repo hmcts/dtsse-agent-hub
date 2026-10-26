@@ -109,6 +109,9 @@ export async function storePastedCode(
         updatedAt: now
       }
     });
+    // The owner acting on a sign-in is activity, where the pod's own prompts for it are not; without this the sweep's
+    // deadline for an agent waiting on its owner could stop one in the moments between the paste and the pod's fetch.
+    await tx.virtualAgent.update({ where: { id: virtualAgentId }, data: { lastActiveAt: now, updatedAt: now } });
     await announce(tx, virtualAgentId, virtualAgent.ownerOid);
   });
 }
@@ -315,15 +318,30 @@ export interface LoginView {
   verificationUri: string;
   expiresAt: string;
   state: LoginState;
-  /** A code the owner pasted is waiting for the pod to fetch it. */
-  codeWaiting: boolean;
+  /**
+   * When `state` was last written, which is what orders a sign-in against the credential it is for: a `credential`
+   * row carries its own `updatedAt`, and the later of the two is the newer fact about whether the stored value
+   * works. Nothing deletes a credential when its sign-in fails, so this is the only thing that tells a working
+   * credential from one a pod has just failed to use.
+   */
+  updatedAt: string;
+  /**
+   * When a code the owner pasted stops being there for the pod to collect, or `null` when they have pasted none.
+   *
+   * The deadline rather than a flag, because the two are not the same answer for as long as 50 minutes:
+   * `takePastedCode` gives the pod nothing once this has passed but leaves the column set, and a login may run for
+   * `MAX_LOGIN_SECONDS` while a pasted code keeps for `PASTED_CODE_TTL_MS`. A flag read off the column would tell
+   * the owner their code was on its way for the rest of the hour, with the box to paste another one hidden —
+   * `storePastedCode` would still take one.
+   */
+  codeWaitingUntil: string | null;
 }
 
 /** The virtual agent's logins, for its owner's page. Never a pasted code. */
 export async function loginViews(db: Database, virtualAgentId: string): Promise<LoginView[]> {
   const rows = await db.virtualAgentLogin.findMany({
     where: { virtualAgentId },
-    select: { kind: true, prompt: true, userCode: true, verificationUri: true, expiresAt: true, state: true, pastedCodeExpiresAt: true }
+    select: { kind: true, prompt: true, userCode: true, verificationUri: true, expiresAt: true, state: true, updatedAt: true, pastedCodeExpiresAt: true }
   });
   return rows.map((row) => ({
     kind: row.kind,
@@ -332,6 +350,7 @@ export async function loginViews(db: Database, virtualAgentId: string): Promise<
     verificationUri: row.verificationUri,
     expiresAt: row.expiresAt.toISOString(),
     state: row.state,
-    codeWaiting: row.pastedCodeExpiresAt !== null
+    updatedAt: row.updatedAt.toISOString(),
+    codeWaitingUntil: row.pastedCodeExpiresAt?.toISOString() ?? null
   }));
 }

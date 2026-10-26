@@ -14,6 +14,7 @@ import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
+import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
 import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/JiraExport";
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { MessageAttachments } from "@/components/assistant/MessageAttachments";
@@ -34,6 +35,7 @@ export interface ChatActions {
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
   saveArtefact: SaveArtefactAction;
   exportToJira: ExportToJiraAction;
+  exportToConfluence?: ExportToConfluenceAction;
 }
 
 /**
@@ -430,6 +432,7 @@ export function ChatView({
           save={actions.saveArtefact}
           onClose={() => setPanel(false)}
           jira={{ exported: view.jira, access: jira, exportTo: actions.exportToJira }}
+          confluence={actions.exportToConfluence === undefined ? undefined : { exported: view.confluence, access: jira, exportTo: actions.exportToConfluence }}
           narrow={narrow}
         />
       ) : null}

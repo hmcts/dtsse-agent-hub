@@ -1,9 +1,10 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONNECTORS, connectionsPrompt, offeredConnections } from "@/assistant/connections";
+import { CONNECTORS, canSignInAgain, connectionsPrompt, offeredConnections } from "@/assistant/connections";
 import { readiness } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
 import { GettingReady, OnboardingGate } from "@/components/assistant/GettingReady";
@@ -47,8 +48,11 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
   };
 }
 
+/** When a stored credential was saved, so a sign-in can be put either side of it on purpose. */
+const STORED_AT = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+
 function statuses(...stored: CredentialKind[]): CredentialStatus[] {
-  return stored.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: null, updatedVia: null }));
+  return stored.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: STORED_AT, updatedVia: null }));
 }
 
 function login(kind: CredentialKind, overrides: Partial<LoginView> = {}): LoginView {
@@ -59,9 +63,15 @@ function login(kind: CredentialKind, overrides: Partial<LoginView> = {}): LoginV
     verificationUri: "https://example.com/device",
     expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
     state: "pending",
-    codeWaiting: false,
+    updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    codeWaitingUntil: null,
     ...overrides
   };
+}
+
+/** A sign-in that lapsed after the credential it was to replace was saved, which is a credential the pod cannot use. */
+function lapsed(kind: CredentialKind, state: "expired" | "failed" = "expired"): LoginView {
+  return login(kind, { state, expiresAt: new Date(Date.now() - 10 * 60_000).toISOString(), updatedAt: new Date(Date.now() - 60_000).toISOString() });
 }
 
 function ok() {
@@ -69,7 +79,19 @@ function ok() {
 }
 
 function ready(props: Partial<Parameters<typeof GettingReady>[0]> = {}) {
-  return <GettingReady assistant={assistant()} statuses={[]} unavailable={null} paste={ok()} save={ok()} onDone={() => undefined} {...props} />;
+  return (
+    <GettingReady
+      assistant={assistant()}
+      statuses={[]}
+      unavailable={null}
+      paste={ok()}
+      save={ok()}
+      reconnect={ok()}
+      now={Date.now()}
+      onDone={() => undefined}
+      {...props}
+    />
+  );
 }
 
 function connector(name: string): HTMLElement {
@@ -155,17 +177,55 @@ describe("GettingReady connectors", () => {
     expect(within(form).getByLabelText("Claude code")).toBeTruthy();
   });
 
+  /**
+   * A pasted code keeps for `PASTED_CODE_TTL_MS` while the sign-in itself can run for `MAX_LOGIN_SECONDS`, and
+   * `takePastedCode` gives the pod nothing past the deadline without clearing the column. So the row has to go by
+   * whether the code is still collectable: `storePastedCode` would take another, and the box is how they send it.
+   */
+  it("should ask for the code again when the one the person pasted is past being collected", () => {
+    const stale = login("claude", {
+      prompt: "paste_code",
+      userCode: null,
+      expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      codeWaitingUntil: new Date(Date.now() - 60_000).toISOString()
+    });
+    render(ready({ assistant: assistant("awaiting_login", { logins: [stale] }) }));
+
+    const claude = within(connector("Claude"));
+    expect(claude.queryByText(/Got it/)).toBeNull();
+    expect(claude.getByRole("form", { name: "Paste the Claude code" })).toBeTruthy();
+  });
+
   it("should say the code arrived when the person has pasted one the pod has yet to fetch", () => {
-    render(ready({ assistant: assistant("awaiting_login", { logins: [login("claude", { prompt: "paste_code", userCode: null, codeWaiting: true })] }) }));
+    render(
+      ready({
+        assistant: assistant("awaiting_login", {
+          logins: [login("claude", { prompt: "paste_code", userCode: null, codeWaitingUntil: new Date(Date.now() + 5 * 60_000).toISOString() })]
+        })
+      })
+    );
 
     expect(within(connector("Claude")).getByText(/Got it/)).toBeTruthy();
     expect(within(connector("Claude")).queryByRole("form")).toBeNull();
   });
 
-  it("should say a sign-in failed when the last one did", () => {
+  it("should say a sign-in failed, and offer to make it again, when the last one did", () => {
     render(ready({ assistant: assistant("running", { logins: [login("github", { state: "failed" })] }) }));
 
-    expect(within(connector("GitHub")).getByRole("alert").textContent).toContain("did not work");
+    const github = connector("GitHub");
+    expect(within(github).getByText("Last sign-in failed")).toBeTruthy();
+    expect(within(github).getByRole("button", { name: "Sign in again" })).toBeTruthy();
+  });
+
+  // A key the person pastes has its own way back, so the row says what became of the sign-in and points at it rather
+  // than promising an ask that is not coming: nothing re-relays until the pod next starts.
+  it("should point a lapsed pasted sign-in at the box that connects it rather than promising another ask", () => {
+    render(ready({ assistant: assistant("running", { needed: ["github", "azure", "claude"], logins: [login("claude", { state: "expired" })] }) }));
+
+    const alert = within(connector("Claude")).getByRole("alert").textContent ?? "";
+    expect(alert).toContain("ran out before anyone used it");
+    expect(alert).toContain("Claude token");
+    expect(alert).not.toContain("will ask again");
   });
 
   it("should show a sign-in as connecting while the assistant is starting", () => {
@@ -265,7 +325,7 @@ describe("GettingReady asks the person can act on", () => {
     const summary = assistant("awaiting_login", { needed: ["github", "azure", "bedrock"], logins: waitingOn.map((kind) => login(kind)) });
     render(ready({ assistant: summary, statuses: statuses("github", "bedrock", "atlassian") }));
 
-    const shown = offeredConnections(summary).map((row) => String(row.kind));
+    const shown = offeredConnections(summary, Date.now()).map((row) => String(row.kind));
     expect(waitingOn.filter((kind) => !shown.includes(kind))).toEqual([]);
     for (const kind of waitingOn) {
       expect(within(connector(CONNECTORS[kind]?.name ?? kind)).getByText("Waiting for you")).toBeTruthy();
@@ -347,7 +407,18 @@ describe("GettingReady when the hub cannot read the credentials", () => {
 
 describe("OnboardingGate", () => {
   function gate(summary: AssistantSummary, stored: CredentialStatus[] = [], dismissed = false) {
-    return <OnboardingGate assistant={summary} statuses={stored} unavailable={null} paste={ok()} save={ok()} dismissed={dismissed} />;
+    return (
+      <OnboardingGate
+        assistant={summary}
+        statuses={stored}
+        unavailable={null}
+        paste={ok()}
+        save={ok()}
+        reconnect={ok()}
+        now={Date.now()}
+        dismissed={dismissed}
+      />
+    );
   }
 
   it("should ask for nothing when every needed account is connected and the hub can read them", () => {
@@ -358,6 +429,8 @@ describe("OnboardingGate", () => {
         unavailable={null}
         paste={ok()}
         save={ok()}
+        reconnect={ok()}
+        now={Date.now()}
       />
     );
 
@@ -369,7 +442,18 @@ describe("OnboardingGate", () => {
 
   /** What the page passes when the hub cannot read the credential store: the reason, and no statuses to go on. */
   function unreadable(summary: AssistantSummary = assistant("running"), dismissed = false) {
-    return <OnboardingGate assistant={summary} statuses={[]} unavailable={UNREADABLE} paste={ok()} save={ok()} dismissed={dismissed} />;
+    return (
+      <OnboardingGate
+        assistant={summary}
+        statuses={[]}
+        unavailable={UNREADABLE}
+        paste={ok()}
+        save={ok()}
+        reconnect={ok()}
+        now={Date.now()}
+        dismissed={dismissed}
+      />
+    );
   }
 
   it("should let the person into their chat, and ask them for nothing, when the hub cannot read the credentials", () => {
@@ -482,8 +566,8 @@ describe("OnboardingGate", () => {
     expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
   });
 
-  // The reported shape of an ask nobody could clear: the notice reports the step the pod is stuck on, and the screen
-  // it opens listed every other connection as connected without a row for the one being waited on.
+  // Someone who has onboarded is asked only for a sign-in their pod has stopped for, and the screen the ask opens has
+  // to have that sign-in on it: a screen listing every other connection as connected is an ask nobody can clear.
   it("should list the sign-in the pod is waiting on when someone who has onboarded opens the progress", () => {
     const summary = assistant("awaiting_login", {
       needed: ["github", "azure", "bedrock"],
@@ -492,11 +576,324 @@ describe("OnboardingGate", () => {
     });
     render(gate(summary, statuses("github", "azure", "bedrock", "atlassian"), true));
 
-    expect(screen.getByRole("status").textContent).toBe("Waiting for you to connect your accounts…");
-    fireEvent.click(screen.getByRole("button", { name: "Show progress" }));
+    expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("sign in to Jenkins");
+    fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
 
     expect(within(connector("Jenkins")).getByText("Waiting for you")).toBeTruthy();
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("55");
+  });
+
+  /**
+   * A sign-in relayed while the person is already in a conversation has to reach them there. None of the gate's
+   * latches may hide it: `waiting` and `ranOnce` are settled by the time it arrives, an optional kind raises no
+   * connections ask, and the Jira footer shows a code only while an export is pending. A pod's code lasts two
+   * minutes, so an ask that waits for a navigation is an ask that arrives after the code is dead.
+   */
+  describe("a sign-in relayed after the page loaded", () => {
+    const ONBOARDED: CredentialKind[] = ["github", "azure", "claude", "atlassian"];
+
+    function running(logins: LoginView[]) {
+      return assistant("running", { onboarded: true, logins });
+    }
+
+    it("should ask on a banner when a sign-in arrives for someone whose assistant is already up", () => {
+      const { rerender } = render(gate(running([]), statuses(...ONBOARDED)));
+      expect(screen.queryByRole("region")).toBeNull();
+
+      rerender(gate(assistant("awaiting_login", { onboarded: true, logins: [login("atlassian")] }), statuses(...ONBOARDED)));
+
+      const banner = screen.getByRole("region", { name: "Sign in" });
+      expect(banner.textContent).toContain("Your assistant is waiting for you to sign in to Atlassian.");
+    });
+
+    it("should show the code when the person opens the sign-in from that banner", () => {
+      render(gate(running([login("atlassian")]), statuses(...ONBOARDED)));
+
+      fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
+
+      expect(screen.getByRole("dialog", { name: "Your assistant is ready" })).toBeTruthy();
+      expect(within(connector("Atlassian")).getByText("ABCD-1234")).toBeTruthy();
+    });
+
+    it("should put the banner back when the person closes the sign-in on Escape", () => {
+      render(gate(running([login("atlassian")]), statuses(...ONBOARDED)));
+      fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
+
+      fireEvent.keyDown(window, { key: "Escape" });
+
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.getByRole("region", { name: "Sign in" })).toBeTruthy();
+    });
+
+    it("should never offer to hide the ask, which is the only thing saying a code is waiting", () => {
+      render(gate(running([login("atlassian")]), statuses(...ONBOARDED)));
+
+      expect(screen.queryByRole("button", { name: "Hide this message" })).toBeNull();
+    });
+
+    it("should stop asking once the sign-in is over and done with", () => {
+      render(gate(running([login("atlassian", { state: "completed" })]), statuses(...ONBOARDED)));
+
+      expect(screen.queryByRole("region")).toBeNull();
+    });
+
+    // `failLogin` returns the assistant to `running` as the last code dies, so by then the status says nothing and
+    // the credential is still stored. The login row is the only thing left that knows, and the ask reads from it.
+    it("should ask about a stored sign-in that a later sign-in lapsed over", () => {
+      render(gate(running([lapsed("atlassian")]), statuses(...ONBOARDED)));
+
+      expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("could not sign in to Atlassian, and is not asking again by itself");
+    });
+
+    it("should offer the person a way to have their assistant sign in again when the stored sign-in has lapsed", async () => {
+      const reconnect = ok();
+      render(
+        <OnboardingGate
+          assistant={running([lapsed("atlassian")])}
+          statuses={statuses(...ONBOARDED)}
+          unavailable={null}
+          paste={ok()}
+          save={ok()}
+          reconnect={reconnect}
+          now={Date.now()}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
+
+      const row = connector("Atlassian");
+      expect(within(row).queryByText("✓ Connected")).toBeNull();
+      expect(within(row).getByText("Sign-in expired")).toBeTruthy();
+      fireEvent.click(within(row).getByRole("button", { name: "Sign in again" }));
+      await act(async () => {
+        fireEvent.submit(within(connector("Atlassian")).getByRole("form", { name: "Sign in to Atlassian again" }));
+      });
+
+      const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
+      expect([sent.get("id"), sent.get("kind")]).toEqual([ASSISTANT, "atlassian"]);
+    });
+
+    /**
+     * `reconnectSignIn` deletes a `credential` row, which is one per owner and kind, so it takes the value every
+     * virtual agent the person owns uses — and what marks this row lapsed is this agent's own login row, which says
+     * nothing about the others. So it asks before it does that, and says what it will take.
+     */
+    it("should ask before deleting the sign-in every one of their virtual agents uses", async () => {
+      const reconnect = ok();
+      render(
+        <OnboardingGate
+          assistant={running([lapsed("atlassian")])}
+          statuses={statuses(...ONBOARDED)}
+          unavailable={null}
+          paste={ok()}
+          save={ok()}
+          reconnect={reconnect}
+          now={Date.now()}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
+
+      expect(within(connector("Atlassian")).queryByRole("form")).toBeNull();
+      fireEvent.click(within(connector("Atlassian")).getByRole("button", { name: "Sign in again" }));
+
+      const row = connector("Atlassian");
+      expect(row.textContent).toContain("which all your virtual agents use");
+      expect(row.textContent).toContain("Your chats are kept");
+      await act(async () => undefined);
+      expect(reconnect).not.toHaveBeenCalled();
+    });
+
+    it("should let the person change their mind about signing in again", () => {
+      render(gate(running([lapsed("atlassian")]), statuses(...ONBOARDED)));
+      fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
+      fireEvent.click(within(connector("Atlassian")).getByRole("button", { name: "Sign in again" }));
+
+      fireEvent.click(within(connector("Atlassian")).getByRole("button", { name: "Cancel" }));
+
+      expect(within(connector("Atlassian")).queryByRole("form")).toBeNull();
+      expect(within(connector("Atlassian")).getByRole("button", { name: "Sign in again" })).toBeTruthy();
+    });
+
+    /**
+     * Where `reconnectSignIn` leaves the person: the credential deleted, the login row still lapsed, and the pod
+     * restarting. Nothing in the hub re-relays, so the row has to keep offering the only thing that asks — and say
+     * the truth about it, which is now a restart and not a deletion.
+     */
+    it("should keep offering the sign-in, and promise no deletion, once the credential has gone with it", () => {
+      render(gate(running([lapsed("atlassian")]), statuses("github", "azure", "claude")));
+
+      fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
+      fireEvent.click(within(connector("Atlassian")).getByRole("button", { name: "Sign in again" }));
+
+      const row = connector("Atlassian");
+      expect(within(row).getByRole("form", { name: "Sign in to Atlassian again" })).toBeTruthy();
+      expect(row.textContent).not.toContain("Delete");
+      expect(row.textContent).not.toContain("will appear here");
+    });
+
+    it("should say nothing is waiting on the person once they have sent the code back", () => {
+      const sent = login("claude", { prompt: "paste_code", userCode: null, codeWaitingUntil: new Date(Date.now() + 5 * 60_000).toISOString() });
+      render(gate(assistant("awaiting_login", { onboarded: true, logins: [sent] }), statuses(...ONBOARDED)));
+
+      expect(screen.queryByRole("region", { name: "Sign in" })).toBeNull();
+    });
+
+    it("should read out the ask, which arrives after the page and so is not read by being there", () => {
+      const { rerender } = render(gate(running([]), statuses(...ONBOARDED)));
+      expect(screen.getByTestId("sign-in-ask").textContent).toBe("");
+
+      rerender(gate(running([login("atlassian")]), statuses(...ONBOARDED)));
+
+      expect(screen.getByTestId("sign-in-ask").textContent).toBe("Your assistant is waiting for you to sign in to Atlassian.");
+    });
+
+    // A sentence, not a count: two asks a second apart would read as "2 new sign-ins", which names neither and says
+    // nothing to do about either.
+    it("should read out both sign-ins when a second one joins the first", () => {
+      const { rerender } = render(gate(running([login("atlassian")]), statuses(...ONBOARDED)));
+
+      rerender(gate(running([login("atlassian"), login("github")]), statuses(...ONBOARDED)));
+
+      expect(screen.getByTestId("sign-in-ask").textContent).toContain("GitHub and Atlassian");
+    });
+
+    // The message says what there is to do, so a fresh code arriving over a lapsed sign-in changes it — a sentence
+    // keyed to the names alone would be the same text and read out nothing, while the row went from a button to a code.
+    it("should read out the fresh code when one arrives for a sign-in that had lapsed", () => {
+      const { rerender } = render(gate(running([lapsed("atlassian")]), statuses(...ONBOARDED)));
+      const before = screen.getByTestId("sign-in-ask").textContent;
+
+      rerender(gate(running([login("atlassian")]), statuses(...ONBOARDED)));
+
+      expect(screen.getByTestId("sign-in-ask").textContent).not.toBe(before);
+      expect(screen.getByTestId("sign-in-ask").textContent).toContain("waiting for you to sign in to Atlassian");
+    });
+
+    it("should read out nothing once the ask has cleared", () => {
+      const { rerender } = render(gate(running([login("atlassian")]), statuses(...ONBOARDED)));
+
+      rerender(gate(running([login("atlassian", { state: "completed" })]), statuses(...ONBOARDED)));
+
+      expect(screen.getByTestId("sign-in-ask").textContent).toBe("");
+    });
+
+    it("should ask for nothing when a sign-in failed before the credential it belongs with was stored", () => {
+      const stale = login("atlassian", { state: "failed", updatedAt: new Date(Date.parse(STORED_AT) - 60_000).toISOString() });
+      render(gate(running([stale]), statuses(...ONBOARDED)));
+
+      expect(screen.queryByRole("region")).toBeNull();
+    });
+
+    /**
+     * `saveCredential` refuses a Claude token from somebody whose agents run on Amazon Bedrock, and a lapsed Claude
+     * row's only control is that box. Nothing clears the login row either, so an ask here would be one the person
+     * can neither satisfy nor dismiss, for as long as they use the Assistant.
+     */
+    it("should ask for nothing when the only lapsed sign-in is one the hub would take no value for", () => {
+      const summary = assistant("running", { needed: ["github", "azure", "bedrock"], onboarded: true, logins: [lapsed("claude")] });
+      render(gate(summary, statuses("github", "azure", "bedrock", "atlassian")));
+
+      expect(screen.queryByRole("region")).toBeNull();
+    });
+
+    it("should still ask while that sign-in's code is live, which goes back through the pod rather than the hub", () => {
+      const summary = assistant("running", { needed: ["github", "azure", "bedrock"], onboarded: true, logins: [login("claude")] });
+      render(gate(summary, statuses("github", "azure", "bedrock", "atlassian")));
+
+      expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("sign in to Claude");
+    });
+
+    it("should ask for nothing while the hub cannot read the credentials, which say nothing about any sign-in", () => {
+      render(
+        <OnboardingGate
+          assistant={running([lapsed("atlassian")])}
+          statuses={[]}
+          unavailable={UNREADABLE}
+          paste={ok()}
+          save={ok()}
+          reconnect={ok()}
+          now={Date.now()}
+          dismissed
+        />
+      );
+
+      expect(screen.queryByRole("region", { name: "Sign in" })).toBeNull();
+    });
+
+    /**
+     * The bar for the ask: an unhideable banner naming a sign-in with nothing to do about it is the fault this PR is
+     * for, not a report of it. So for every state a sign-in can be in, either no ask is raised or the screen the ask
+     * opens has a row for that sign-in with something on it that connects it — a code to enter, a box to paste a new
+     * value into, or a sign-in to have the assistant make again.
+     *
+     * Exhaustive over the connections the Assistant words and over what can become of a relayed sign-in, because the
+     * two states that got through review were adjacent ones: a Jenkins sign-in reported lapsed, which the banner
+     * named and the screen had no row for, and an Atlassian one lapsed with nothing stored, whose only control said
+     * the assistant would ask again when nothing was going to.
+     */
+    describe("every ask it raises", () => {
+      const LIVE = () => new Date(Date.now() + 10 * 60_000).toISOString();
+      const PAST = () => new Date(Date.now() - 60_000).toISOString();
+      /** What the assistant under test needs and offers, and so the credentials the hub would take from the person. */
+      const NEEDS: CredentialKind[] = ["bedrock"];
+      const OFFERS: CredentialKind[] = ["jenkins", "atlassian"];
+      const SITUATIONS = {
+        "a live code": { make: (kind: CredentialKind) => login(kind, { expiresAt: LIVE() }), live: true },
+        "a code that ran out with no pod report": { make: (kind: CredentialKind) => login(kind, { expiresAt: PAST() }), live: false },
+        "a sign-in reported expired": { make: (kind: CredentialKind) => lapsed(kind), live: false },
+        "a sign-in reported failed": { make: (kind: CredentialKind) => lapsed(kind, "failed"), live: false },
+        "a sign-in the person has sent a code back for": {
+          make: (kind: CredentialKind) => login(kind, { prompt: "paste_code", userCode: null, codeWaitingUntil: LIVE() }),
+          live: null
+        }
+      };
+      const CASES = (["github", "azure", "claude", "bedrock", "jenkins", "atlassian"] as const).flatMap((kind) =>
+        Object.keys(SITUATIONS).flatMap((situation) => [true, false].map((held) => ({ kind, situation, held })))
+      );
+
+      /** What `kind` is called on the screen, which is how its row is found. */
+      function named(kind: CredentialKind): string {
+        return CONNECTORS[kind]?.name ?? kind;
+      }
+
+      it.each(CASES)("should be one the person can act on for $kind with $situation when its credential is stored: $held", ({ kind, situation, held }) => {
+        const { make, live } = SITUATIONS[situation as keyof typeof SITUATIONS];
+        // Nothing the assistant needs is ever the kind under test, so `onboarded` is honestly true and the ask under
+        // test is the sign-in one rather than the connect one.
+        const summary = assistant("running", { needed: NEEDS, optional: OFFERS, onboarded: true, logins: [make(kind)] });
+        render(gate(summary, held ? statuses("bedrock", kind) : statuses("bedrock")));
+
+        // Asserted rather than skipped past, so every case says something. A code they have already sent back waits
+        // on nobody. A live one always asks, because finishing it goes back through the pod rather than through a
+        // credential the hub has to accept for them. A lapsed one asks only while there is a way back it will take.
+        const asked = screen.queryByRole("region", { name: "Sign in" }) !== null;
+        expect(asked).toBe(live === true || (live === false && canSignInAgain(kind, [...NEEDS, ...OFFERS])));
+        if (!asked) {
+          return;
+        }
+        fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
+        // A key the person pastes opens its box on Connect, and a sign-in the assistant makes puts its confirmation
+        // behind "Sign in again"; a relayed code already shows what it has.
+        for (const label of ["Connect", "Sign in again"]) {
+          const control = within(connector(named(kind))).queryByRole("button", { name: label });
+          if (control !== null) {
+            fireEvent.click(control);
+          }
+        }
+        const row = connector(named(kind));
+        if (live) {
+          // The code itself is the action: they type it on the page the row links to, so there is nothing to submit.
+          expect(row.querySelector("code")?.textContent).toBe("ABCD-1234");
+          return;
+        }
+        // Named rather than "any form", so a box whose save the hub would refuse cannot pass for an action: what is
+        // offered has to be the one control that fits, and each of these is accepted as it stands.
+        const forms = within(row)
+          .queryAllByRole("form")
+          .map((form) => form.getAttribute("aria-label"));
+
+        expect(forms).toEqual([CONNECTORS[kind]?.paste === null ? `Sign in to ${named(kind)} again` : `Save your ${CONNECTORS[kind]?.paste}`]);
+      });
+    });
   });
 
   it("should stay until the person chooses Start chatting when they finish onboarding during the visit", () => {
@@ -511,5 +908,119 @@ describe("OnboardingGate", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start chatting" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("region", { name: "Connect your accounts" })).toBeNull();
+  });
+});
+
+/**
+ * What the HTML the server sends says, which is everything a person has until the bundle has arrived — and for good
+ * where hydration fails or scripts do not run. These rows carry a device code as plain text and the provider's page
+ * as a plain `<a href>`, both of which work with no script at all, so a sign-in this HTML reads as live when it is
+ * dead is a working link and a number to type for something that cannot be completed. The clock comes in from the
+ * server component for that reason: it is a real time, and React serialises it, so the browser's first render is
+ * made from the same number and there is nothing for hydration to disagree about.
+ */
+describe("the HTML the server sends", () => {
+  const AN_HOUR_AGO = () => new Date(Date.now() - 60 * 60_000).toISOString();
+
+  function serverHtml(node: React.ReactElement): string {
+    return renderToString(node);
+  }
+
+  function gate(summary: AssistantSummary, stored: CredentialStatus[]) {
+    return <OnboardingGate assistant={summary} statuses={stored} unavailable={null} paste={ok()} save={ok()} reconnect={ok()} now={Date.now()} />;
+  }
+
+  /**
+   * Through the gate, which is where the clock comes from, and on a pod still in `awaiting_login` so the screen with
+   * the digits on it is part of the document rather than something the person has to open.
+   */
+  it("should offer no code for a device sign-in whose code ran out before the page was built", () => {
+    const dead = login("atlassian", { expiresAt: AN_HOUR_AGO(), updatedAt: AN_HOUR_AGO() });
+    const summary = assistant("awaiting_login", { onboarded: true, logins: [dead] });
+    const html = serverHtml(gate(summary, statuses("github", "azure", "claude", "atlassian")));
+
+    expect(html).not.toContain("ABCD-1234");
+    expect(html).not.toContain("enter this code");
+    expect(html).toContain("Sign-in expired");
+    expect(html).toContain("Sign in again");
+  });
+
+  /**
+   * An HTML payload can sit for a while before the browser takes it over, so the number it was built with is stale
+   * by then. The clock is re-read as the browser arrives rather than only at the first tick, or the page would go on
+   * offering a code that died between the two.
+   */
+  it("should drop a code that died between the page being built and the browser taking it over", () => {
+    const built = Date.now() - 60_000;
+    const died = login("atlassian", { expiresAt: new Date(Date.now() - 30_000).toISOString(), updatedAt: new Date(built).toISOString() });
+    const summary = assistant("awaiting_login", { onboarded: true, logins: [died] });
+
+    render(
+      <OnboardingGate
+        assistant={summary}
+        statuses={statuses("github", "azure", "claude", "atlassian")}
+        unavailable={null}
+        paste={ok()}
+        save={ok()}
+        reconnect={ok()}
+        now={built}
+      />
+    );
+
+    expect(screen.queryByText("ABCD-1234")).toBeNull();
+    expect(screen.getByText("Sign-in expired")).toBeTruthy();
+  });
+
+  it("should offer the code for a device sign-in whose code is still live when the page is built", () => {
+    const summary = assistant("awaiting_login", { onboarded: true, logins: [login("atlassian")] });
+    const html = serverHtml(gate(summary, statuses("github", "azure", "claude", "atlassian")));
+
+    expect(html).toContain("ABCD-1234");
+    expect(html).toContain("enter this code");
+  });
+
+  it("should ask for the code again when the one the person pasted was past collecting before the page was built", () => {
+    const dead = login("claude", {
+      prompt: "paste_code",
+      userCode: null,
+      expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      codeWaitingUntil: AN_HOUR_AGO()
+    });
+    const summary = assistant("awaiting_login", { needed: ["github", "azure", "claude"], onboarded: true, logins: [dead] });
+    const html = serverHtml(gate(summary, statuses("github", "azure", "claude")));
+
+    expect(html).not.toContain("Got it");
+    expect(html).toContain("Paste the Claude code");
+  });
+
+  // Both ways a Claude sign-in can be over for somebody on the Bedrock route: a pod's report, and a code that simply
+  // ran out. The second is the one a clock decides, so it is the one a stand-in clock would read as live.
+  it.each([
+    ["a pod reported it expired", "expired" as const],
+    ["its code ran out with no report", "pending" as const]
+  ])("should raise no ask for a Claude sign-in the hub would take no value for when %s", (_what, state) => {
+    const over = login("claude", { state, expiresAt: AN_HOUR_AGO(), updatedAt: AN_HOUR_AGO() });
+    const summary = assistant("running", { needed: ["github", "azure", "bedrock"], onboarded: true, logins: [over] });
+    const html = serverHtml(gate(summary, statuses("github", "azure", "bedrock", "atlassian")));
+
+    expect(html).not.toContain("Claude");
+    expect(html).not.toContain("Sign in");
+  });
+
+  /**
+   * The banner itself is in the HTML, because a person who can see it should have the ask with the page. The live
+   * region is not: a region is not announced for what it already holds, so an ask that was there at load would reach
+   * a screen-reader user only if they happened on the banner. Going from empty to the sentence is a change, and read.
+   */
+  it("should carry the ask but hold it back from the live region until the browser takes the page over", () => {
+    const relayed = assistant("running", { onboarded: true, logins: [login("atlassian")] });
+    const stored = statuses("github", "azure", "claude", "atlassian");
+    const html = serverHtml(gate(relayed, stored));
+
+    expect(html).toContain('aria-label="Sign in"');
+    expect(html).toContain('data-testid="sign-in-ask"></div>');
+
+    render(gate(relayed, stored));
+    expect(screen.getByTestId("sign-in-ask").textContent).toBe("Your assistant is waiting for you to sign in to Atlassian.");
   });
 });

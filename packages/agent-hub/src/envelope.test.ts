@@ -202,6 +202,25 @@ describe("assistantEnvelope", () => {
     expect(text).toContain(`\`agent-hub jira export ${exportId} --project VIBE --type Story\``);
   });
 
+  it("should give the one command to run, and the export id, when a Confluence export is pending", () => {
+    // Arrange
+    const exportId = "5b0e7c1a-1111-4222-8333-444455556666";
+    const frame: AssistantFrame = { ...pcs, confluence_export: { export_id: exportId, space_id: "280952876", parent_id: "280959611" } };
+
+    // Act
+    const text = assistantEnvelope({ ...personMessage, body: 'Please publish this document to Confluence, under "Guides" in CCD.' }, frame, null);
+
+    // Assert
+    expect(text).toMatch(`publish the conversation's document to Confluence as a new page (export ${exportId})`);
+    expect(text).toContain(`confluence export ${exportId} --space-id 280952876 --parent-id 280959611`);
+    expect(text.endsWith('\n---\nPlease publish this document to Confluence, under "Guides" in CCD.')).toBe(true);
+  });
+
+  it("should say nothing of Confluence when no export is pending", () => {
+    // Act & Assert
+    expect(assistantEnvelope(personMessage, { ...pcs, confluence_export: null }, null)).not.toMatch(/Confluence/);
+  });
+
   it("should say nothing of Jira when no export is pending", () => {
     // Act & Assert
     expect(assistantEnvelope(personMessage, { ...pcs, jira_export: null }, null)).not.toMatch(/Jira|twg/);

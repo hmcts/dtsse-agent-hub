@@ -13,7 +13,7 @@
  * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
  * from here; keep the two in step, so a name only one side knows is a type error on that side.
  */
-export type ClientFeature = "attachments" | "files" | "memory" | "memory-anon" | "stop";
+export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "memory-anon" | "stop";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
@@ -37,6 +37,9 @@ export type ClientFeature = "attachments" | "files" | "memory" | "memory-anon" |
  * sessions stream's `delete_uploads` frame. The hub gates both on this claim, so a build that did not claim it is
  * told plainly in the settings that it cannot report or delete, rather than shown an empty disk.
  *
+ * `lookups` is claimed because the assistant supervisor answers the sessions stream's `lookup` frame, searching the
+ * owner's Jira or Confluence with twg. The hub gates on it, answering `unsupported` to a pod that did not claim it.
+ *
  * `memory-anon` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it,
  * including `anon_bytes` from `memory.stat`, which the hub's memory route requires and computes its low-memory
  * warning from. This is the name the current hub gates the Size section on, so that it can tell a pod that cannot
@@ -48,4 +51,4 @@ export type ClientFeature = "attachments" | "files" | "memory" | "memory-anon" |
  * hub's Size section gates on `memory`. Dropping it would make such a pod read as an older client to the one hub
  * that still cares. It can go once no hub predating `anon_bytes` is running anywhere.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "memory", "memory-anon", "stop"];
+export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory", "memory-anon", "stop"];
