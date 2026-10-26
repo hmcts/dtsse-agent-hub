@@ -46,9 +46,16 @@ afterAll(() => {
   home.cleanup();
 });
 
-// A supervisor on a fake clock that starts at the real time, so the hooks' status files written now are "now".
-// `canRun` stands in for the launcher check, so these tests never depend on what is installed; `canRunProgram`
-// itself is tested in `tmux.test.ts`.
+/**
+ * A supervisor on a fake clock that starts at the real time, so the hooks' status files written now are "now".
+ * `canRun` stands in for the launcher check, so these tests never depend on what is installed; `canRunProgram`
+ * itself is tested in `tmux.test.ts`.
+ *
+ * The supervisor is told it booted ten minutes before that clock, and tests reckon against the `bootedAt` it
+ * returns. Letting it default to the clock would date every status file written "now" within a tick of the boot it
+ * is compared against, and a filesystem that keeps mtimes to the whole second — which the CI runner's does — then
+ * dates them just before it, so whether a busy session is believed would come down to the filesystem.
+ */
 function setup({ max = 2, idleMs = 20 * MINUTE, canRun = () => true }: { max?: number; idleMs?: number; canRun?: ProgramCheck } = {}) {
   fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
   const tmux = fakeTmux();
@@ -61,6 +68,7 @@ function setup({ max = 2, idleMs = 20 * MINUTE, canRun = () => true }: { max?: n
     }
   };
   const clock = { t: Date.now() };
+  const bootedAt = clock.t - 10 * MINUTE;
   const supervisor = createAssistantSupervisor({
     api,
     id: "va-assist",
@@ -70,9 +78,10 @@ function setup({ max = 2, idleMs = 20 * MINUTE, canRun = () => true }: { max?: n
     cwd: CWD,
     max,
     idleMs,
+    bootedAt,
     say: (message) => said.push(message)
   });
-  return { tmux, reports, said, clock, supervisor, lastReport: () => reports.at(-1) as SessionsBody };
+  return { tmux, reports, said, clock, bootedAt, supervisor, lastReport: () => reports.at(-1) as SessionsBody };
 }
 
 // What the hooks write for a session that has registered, as busy or idle, last changed `at` (ms).
@@ -437,10 +446,11 @@ describe("createAssistantSupervisor tick", () => {
 
 describe("createAssistantSupervisor and a busy it should not believe", () => {
   it("should evict a session whose busy was written before this supervisor started when a wake arrives at the cap", async () => {
-    // Arrange: a minute old, so only the boot makes it stale — the transcript bound is nowhere near.
-    const { tmux, supervisor, clock } = setup({ max: 1 });
+    // Arrange: dated well before the boot but only twenty minutes ago, so the boot is the only thing that makes it
+    // stale — the progress bound is nowhere near.
+    const { tmux, supervisor, bootedAt } = setup({ max: 1 });
     const [frozen, waiting] = [conversation(), conversation()];
-    hookStatus(frozen.session_id, "busy", clock.t - MINUTE);
+    hookStatus(frozen.session_id, "busy", bootedAt - 10 * MINUTE);
     await supervisor.wake(frozen);
 
     // Act
@@ -448,6 +458,21 @@ describe("createAssistantSupervisor and a busy it should not believe", () => {
 
     // Assert
     expect(tmux.sent(tmuxName(frozen.conversation_id))).toEqual([["send-keys", tmuxName(frozen.conversation_id), "/exit", "Enter"]]);
+  });
+
+  it("should not evict a session whose busy is dated a second before the boot by a coarse filesystem", async () => {
+    // Arrange: a turn that began as the supervisor came up, on a filesystem that keeps mtimes to the whole second.
+    const { tmux, supervisor, bootedAt } = setup({ max: 1 });
+    const [working, waiting] = [conversation(), conversation()];
+    await supervisor.wake(working);
+    hookStatus(working.session_id, "busy", bootedAt - 1000);
+
+    // Act
+    await supervisor.wake(waiting);
+
+    // Assert
+    expect(tmux.sent(tmuxName(working.conversation_id))).toHaveLength(0);
+    expect(supervisor.queue.map((w) => w.conversation_id)).toEqual([waiting.conversation_id]);
   });
 
   it("should not evict a session when its turn began after this supervisor started", async () => {

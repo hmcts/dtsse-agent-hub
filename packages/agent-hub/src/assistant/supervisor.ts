@@ -28,6 +28,20 @@ export const EXIT_GRACE_MS = 15000;
  * answer it was in the middle of.
  */
 export const BUSY_STALE_MS = 2 * 60 * 60 * 1000;
+/**
+ * How far before the supervisor started a status file may be dated and still count as written since.
+ *
+ * The comparison is between a time the kernel recorded for a write and a time this process took a moment later, so
+ * a filesystem that keeps mtimes coarsely is enough to put a turn that began as the pod came up on the wrong side
+ * of it. A pod's `~/.claude` volume is ext4, which keeps them to the nanosecond, but a laptop or a CI runner need
+ * not be, and whole seconds is common.
+ *
+ * Five seconds is well over the coarsest granularity in use anywhere — two for FAT, one for ext3 and HFS+ — and
+ * still far under the time any pod takes to go down and have a new supervisor running, which is what the
+ * comparison exists to tell apart. It buys back a five-second window in which a previous pod's `busy` is believed,
+ * and `BUSY_STALE_MS` is the backstop for that; the mistake it avoids is evicting a session that is really working.
+ */
+export const BUSY_BOOT_SLACK_MS = 5000;
 export const REPORT_EVERY_MS = 60000;
 /**
  * How often a launcher this pod cannot run is said again while that is still true. On an interval, as `report()`
@@ -229,13 +243,17 @@ export function createAssistantSupervisor({
    * Busy while the hooks say so and the session is still showing progress. Last active when the status file or the
    * transcript last changed either way: the Stop hook writes the one, and every turn appends to the other.
    *
-   * A `busy` is believed only when the status file was written since this supervisor started, and only while there
-   * has been progress within `busyStaleMs`. `~/.claude` is a volume that outlives the pod, so a turn the pod went
-   * down in the middle of leaves `busy` behind on disk, and nothing rewrites it: a session resumed under the same
-   * session id finds the `enabled` file its predecessor left there too, so it goes straight to `live` without the
-   * enable that would have written the status afresh. No session can be mid-turn from before the process that would
-   * be running it, and such a `busy` taken at face value is a slot `leastActiveIdle` will not take and the idle
-   * sweep will not reach — on a disk that outlives the pod, so restarting does not clear it either.
+   * A `busy` is believed only when the status file was written since this supervisor started, give or take
+   * `BUSY_BOOT_SLACK_MS` for how coarsely the filesystem keeps an mtime, and only while there has been progress
+   * within `busyStaleMs`. That bound needs no such slack: it weighs a duration against two hours, where a second
+   * either way is nothing, rather than against a time taken at almost the same instant.
+   *
+   * `~/.claude` is a volume that outlives the pod, so a turn the pod went down in the middle of leaves `busy`
+   * behind on disk, and nothing rewrites it: a session resumed under the same session id finds the `enabled` file
+   * its predecessor left there too, so it goes straight to `live` without the enable that would have written the
+   * status afresh. No session can be mid-turn from before the process that would be running it, and such a `busy`
+   * taken at face value is a slot `leastActiveIdle` will not take and the idle sweep will not reach — on a disk
+   * that outlives the pod, so restarting does not clear it either.
    *
    * `active_at` moves with the two mtimes alone, never with the flag, so that a frozen `busy` cannot also read as
    * the most recently used session on the pod. A turn that is really running appends to its transcript, which is
@@ -251,7 +269,7 @@ export function createAssistantSupervisor({
     } catch {}
     const statusAt = mtime(status);
     const progressAt = Math.max(statusAt, mtime(transcript(s.session_id)));
-    s.busy = text === "busy" && statusAt >= bootedAt && now() - progressAt < busyStaleMs;
+    s.busy = text === "busy" && statusAt >= bootedAt - BUSY_BOOT_SLACK_MS && now() - progressAt < busyStaleMs;
     s.active_at = Math.max(s.active_at, progressAt);
     if (s.phase === "starting" && fs.existsSync(statePath(s.session_id, "enabled"))) {
       s.phase = "live";
