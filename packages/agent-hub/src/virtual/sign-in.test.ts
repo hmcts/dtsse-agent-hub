@@ -112,6 +112,18 @@ describe("run", () => {
     // Assert: killed by a signal, so there is no exit code of its own.
     expect(r.code).toBe(1);
   });
+
+  it("should answer for a command whose descendants hold its pipes open past the kill", async () => {
+    // Arrange: the kill is certain and `close` is not — it waits for the pipes, and this leaves a subshell
+    // holding them. Without the giving-up step the timeout bounds nothing and the caller waits for ever.
+    // Act
+    const started = Date.now();
+    const r = await run("bash", ["-c", "( sleep 30 ) & printf out; printf err >&2; sleep 30"], { env: pod.env(), timeoutMs: 100 });
+
+    // Assert: answered with what the command had already said, inside the giving-up window.
+    expect(r).toEqual({ code: 1, stdout: "out", stderr: "err" });
+    expect(Date.now() - started).toBeLessThan(SIGKILL_AFTER_MS * 2);
+  }, 20_000);
 });
 
 describe("stripAnsi", () => {
@@ -324,13 +336,18 @@ describe("relayDeviceLogin", () => {
     // is the only way to reach the giving-up step, and it prints a device code after it, which nothing should
     // still be listening for. Nothing above this has a timeout of its own.
     pod.shim("stubborn", `trap '' TERM\n( sleep 13; printf '%s' "$2" >&2 ) &\nprintf '%s' "$1" >&2\nsleep 60`);
-    const sockets = () =>
-      (process as unknown as { _getActiveHandles: () => { constructor: { name: string } }[] })
+    // A child's stdio handles and the mock hub's connections are both `Socket`s, and only the second kind has a
+    // `remoteAddress`. Counting all of them would measure the hub reaping its own idle keep-alives against this
+    // test's fifteen seconds, which is a slack of two in whichever direction the reaping happens to fall — the
+    // same two this is here to catch.
+    const pipes = () =>
+      (process as unknown as { _getActiveHandles: () => { constructor: { name: string }; remoteAddress?: string }[] })
         ._getActiveHandles()
-        .filter((h) => h.constructor.name === "Socket").length;
-    // No code in what it prints first, so nothing is relayed and the hub is never called: the only sockets this
-    // can add are the child's own two pipes.
-    const before = sockets();
+        .filter((h) => h.constructor.name === "Socket" && h.remoteAddress === undefined).length;
+    // A tick for any earlier case's destroyed handles to drop out, so the baseline is what is really held and
+    // the count either side of the call differs by this child's pipes alone.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const before = pipes();
     const expiresIn = -29;
 
     // Act: `expiresIn + 30` is the kill timer, so one second in, then SIGKILL and the giving-up step follow it.
@@ -356,8 +373,8 @@ describe("relayDeviceLogin", () => {
     await new Promise((resolve) => setTimeout(resolve, 4000));
     // Its pipes are let go of, not merely stopped being waited on: they are ref'd handles, and `cli.ts` sets
     // `process.exitCode` without calling `process.exit`, so holding them would answer this call and still never
-    // let `agent-hub virtual github-login` return.
-    expect(sockets()).toBeLessThanOrEqual(before);
+    // let `agent-hub virtual github-login` return. Exactly the two this child opened, so the leak is the margin.
+    expect(pipes()).toBe(before);
     // And nothing is left reading it: relaying its code now would put a live one on the owner's screen that
     // this call has already answered `shown: false` for, with no `loginFailed` to withdraw it.
     expect(virtual().prompts).toEqual([]);

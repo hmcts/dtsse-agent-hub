@@ -120,7 +120,31 @@ export function run(cmd: string, args: string[], { env = process.env, timeoutMs 
       resolve({ code: 127, stdout, stderr: (e as Error).message });
       return;
     }
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    let abandon: NodeJS.Timeout | null = null;
+    let settled = false;
+    const finish = (result: RunResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (abandon) {
+        clearTimeout(abandon);
+      }
+      resolve(result);
+    };
+    // The kill is certain and `close` is not: it waits for these pipes to close, and a command that forked
+    // leaves descendants holding the write ends, so the timeout alone bounds nothing. `relayDeviceLogin` gives
+    // up the same way and for the same reason — the handles are ref'd, and the CLI exits only when the loop
+    // drains, so a caller would wait on this for ever rather than for `timeoutMs`.
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      abandon ??= setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        finish({ code: 1, stdout, stderr });
+      }, SIGKILL_AFTER_MS);
+    }, timeoutMs);
     child.stdout?.on("data", (d) => {
       stdout += d;
     });
@@ -128,12 +152,10 @@ export function run(cmd: string, args: string[], { env = process.env, timeoutMs 
       stderr += d;
     });
     child.on("error", (e) => {
-      clearTimeout(timer);
-      resolve({ code: 127, stdout, stderr: e.message });
+      finish({ code: 127, stdout, stderr: e.message });
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout, stderr });
+      finish({ code: code ?? 1, stdout, stderr });
     });
     if (input !== undefined) {
       child.stdin?.end(input);
