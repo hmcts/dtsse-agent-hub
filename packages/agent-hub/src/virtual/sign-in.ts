@@ -221,6 +221,11 @@ const CREDENTIAL_SHAPES: readonly RegExp[] = [
  * Replaces every credential-shaped run, so a command's own words can be logged. A device code is left alone: it
  * is relayed to the owner and logged beside the relay anyway, and it is what says whether an error is about the
  * code the owner is holding.
+ *
+ * Give it text whose whitespace is already collapsed, as `outputTail` does: the shapes that read a key before
+ * their value allow one space between them, so a value the command wrapped or indented away from its key goes
+ * unmatched. `outputTail` is the way in for anything a command printed; this is exported for a caller that has
+ * one string and knows its shape.
  */
 export function redactTokens(text: string): string {
   let out = text;
@@ -309,14 +314,25 @@ export function relayDeviceLogin({
       fn();
     };
     // SIGTERM asks, SIGKILL insists, and the third step is to stop waiting. A child can ignore the first —
-    // `trap '' TERM` survives `exec` — and surviving the second is enough if it forked, because the children it
-    // leaves behind hold these pipes open and `close` then never comes at all. Nothing above this has a timeout
-    // of its own, so without the last step the pod sits in `awaiting_login` for as long as it runs.
+    // `trap '' TERM` survives `exec` — and surviving the second is impossible, so a `close` that still has not
+    // come means a descendant it forked holds these pipes. Nothing above this has a timeout of its own, so
+    // without the last step the pod sits in `awaiting_login` for as long as it runs.
+    //
+    // Which is also why the pipes are destroyed rather than only abandoned. The very condition that gets this
+    // far — somebody else holding the write ends — is two ref'd Sockets pinning the event loop open, and
+    // `cli.ts` sets `process.exitCode` without calling `process.exit`, so settling the promise would leave the
+    // command running for ever and the boot script's loop no further on. Destroying them also takes `onData`
+    // out of the orphan's way: it would otherwise go on appending its output, and relay a code off it long
+    // after this call had answered.
     const endChild = () => {
       child.kill("SIGTERM");
       escalation ??= setTimeout(() => {
         child.kill("SIGKILL");
-        abandon ??= setTimeout(() => finish(null), SIGKILL_AFTER_MS);
+        abandon ??= setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          finish(null);
+        }, SIGKILL_AFTER_MS);
       }, SIGKILL_AFTER_MS);
     };
     const timer = setTimeout(endChild, (expiresIn + 30) * 1000);
@@ -468,12 +484,14 @@ const MAX_GAP_MS = 2 ** 31 - 1;
  * that brings back what the gap exists to stop, asked for by a variable nobody set.
  */
 export function githubSignInGapMs(env: Env = process.env): number {
-  const raw = env.AGENT_HUB_GITHUB_SIGN_IN_GAP_MS;
-  if (raw === undefined || raw.trim() === "") {
+  // Digits and nothing else: `Number` would otherwise read `1e4` as ten thousand and `0x10` as sixteen, so a
+  // typo in a hex-looking value would quietly become a sixteen-millisecond gap.
+  const raw = (env.AGENT_HUB_GITHUB_SIGN_IN_GAP_MS ?? "").trim();
+  if (!/^\d+$/.test(raw)) {
     return GITHUB_SIGN_IN_GAP_MS;
   }
   const asked = Number(raw);
-  return Number.isInteger(asked) && asked >= 0 && asked <= MAX_GAP_MS ? asked : GITHUB_SIGN_IN_GAP_MS;
+  return asked <= MAX_GAP_MS ? asked : GITHUB_SIGN_IN_GAP_MS;
 }
 
 /**
@@ -564,6 +582,14 @@ export async function githubLogin({
   let shown = false;
   // Whether a `gh auth login` exited 0 this call, so there is a token to read.
   let granted = false;
+  // The hub is owed one of `complete` or `failed` for every code it showed the owner, whichever way this call
+  // ends. Without it a pending row keeps a live code on their screen and the agent reads as waiting for them
+  // until the sweep expires the row, which does not put the status right. Few attempts: the detail is worth
+  // telling the hub, and a hub that cannot be told is not worth half a minute of the pod.
+  const reportNotSignedIn = (detail: string, expired: boolean) =>
+    withRetry(() => api.loginFailed(id, "github", { state: expired ? "expired" : "failed", detail }), { attempts: 3 }).catch((e: unknown) => {
+      say(`github: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`);
+    });
   if (token) {
     say("github: gh is already signed in; storing the token it holds");
   } else {
@@ -626,11 +652,17 @@ export async function githubLogin({
     }
   }
 
-  // Let out, not caught: a gh that could not be run leaves the token it was granted in its config, so the
-  // caller's next attempt finds it and finishes without relaying anything. The code on the owner's screen is one
-  // they have already used, and that attempt's `loginComplete` is what clears it.
+  // A gh that could not be run leaves the token it was granted in its config, so the caller's next attempt finds
+  // it and finishes without relaying anything: this is thrown rather than ended on the owner. The code is
+  // withdrawn first all the same — the next attempt completes the row from `failed` as readily as from
+  // `pending`, and a pod that restarts instead would otherwise leave one on their screen until the sweep.
   if (granted) {
-    token = await grantedGhToken(ghEnv);
+    try {
+      token = await grantedGhToken(ghEnv);
+    } catch (e) {
+      await reportNotSignedIn("github: the sign-in could not be finished; start the agent again to be sent another code", false);
+      throw e;
+    }
   }
   // The owner's part is done, so a hub that will not take what they granted throws from here rather than being
   // reported as a sign-in that failed. `loginComplete` goes first, so the usual case clears the pending row; one
@@ -644,9 +676,6 @@ export async function githubLogin({
     return "signed-in";
   }
 
-  // Reported before anything is rethrown, because the hub is owed one of `complete` or `failed` for every code
-  // it showed the owner. Without it a pending row keeps a live code on their screen and the agent reads as
-  // waiting for them until the sweep expires the row, which does not put the status right.
   if (shown) {
     const expired = thrown === undefined && last?.expired === true;
     const detail = expired
@@ -654,13 +683,10 @@ export async function githubLogin({
       : thrown !== undefined
         ? "github: the sign-in could not be finished; start the agent again to be sent another code"
         : "github: GitHub stopped the sign-in before it could be completed, so the code is no longer any use";
-    // Few attempts: the detail is worth telling the hub, and a hub that cannot be told is not worth half a minute.
-    await withRetry(() => api.loginFailed(id, "github", { state: expired ? "expired" : "failed", detail }), { attempts: 3 }).catch((e: unknown) => {
-      say(`github: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`);
-    });
     // gh's own words, redacted, are the only thing that says why it stopped polling: a sign-in that fails in a
     // pod is diagnosed from this line and nothing else.
     const said = thrown === undefined ? `gh auth login exited ${last?.code}; gh said: ${outputTail(last?.output ?? "")}` : (thrown as Error).message;
+    await reportNotSignedIn(detail, expired);
     say(`${detail} (${said})`);
     // The owner has had every code this offers, so asking again is not what is wanted even though an attempt
     // threw: a caller that retried would relay a fresh code on each pass, for as long as the pod ran.

@@ -19,6 +19,7 @@ import {
   usePodEnv
 } from "../__fixtures__/pod-shims.ts";
 import { type Api, ApiError, createApi } from "../api.ts";
+import { jiraExportSignInBudget } from "./atlassian.ts";
 import { packAzureCache, pruneMsalCache, unpackAzureCache } from "./azure-cache.ts";
 import { FatalError } from "./phases.ts";
 import {
@@ -222,6 +223,16 @@ describe("redactTokens", () => {
   });
 });
 
+describe("SIGKILL_AFTER_MS", () => {
+  // Asserted from this side because this is the file the cost comes from: `relayDeviceLogin` gives every code
+  // two of these beyond its own time, and `jiraExportSignInBudget` is the one caller that has to fit inside a
+  // timeout. Dropping the term there would understate the worst case and only show up as a killed command.
+  it("should be counted twice per code in the budget atlassian has to fit into", () => {
+    // Act & Assert
+    expect(jiraExportSignInBudget(1, 0) - jiraExportSignInBudget(0, 0)).toBe(30_000 + 2 * SIGKILL_AFTER_MS);
+  });
+});
+
 describe("githubSignInGapMs", () => {
   it("should take a whole number of milliseconds in range when one is asked for", () => {
     // Act & Assert
@@ -245,6 +256,9 @@ describe("githubSignInGapMs", () => {
     expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "soon" })).toBe(GITHUB_SIGN_IN_GAP_MS);
     expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "-1" })).toBe(GITHUB_SIGN_IN_GAP_MS);
     expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "1.5" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    // `Number` would read these as ten thousand and sixteen; a typo in one must not become a 16ms gap.
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "1e4" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "0x10" })).toBe(GITHUB_SIGN_IN_GAP_MS);
     expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: String(2 ** 31) })).toBe(GITHUB_SIGN_IN_GAP_MS);
   });
 });
@@ -304,32 +318,50 @@ describe("relayDeviceLogin", () => {
     expect((error as Error).message).toMatch(/definitely-not-a-command could not start: .*ENOENT/);
   });
 
-  it("should kill a command that ignores the signal, rather than wait on it for ever", async () => {
-    // Arrange: `trap '' TERM` is ignored across `exec`, so the sleep this starts inherits it and nothing but a
-    // kill ends the child. Nothing above this has a timeout of its own, so a promise that never settled here
-    // would leave the pod in `awaiting_login` for as long as it ran.
-    pod.shim("stubborn", `trap '' TERM\nprintf '%s' "$1" >&2\nsleep 60`);
+  it("should let go of a command that ignores the signal, rather than wait on it for ever", async () => {
+    // Arrange: `trap '' TERM` is ignored across `exec`, and the subshell this backgrounds inherits it and
+    // outlives every signal sent to its parent, holding the pipes open so that `close` can never arrive. That
+    // is the only way to reach the giving-up step, and it prints a device code after it, which nothing should
+    // still be listening for. Nothing above this has a timeout of its own.
+    pod.shim("stubborn", `trap '' TERM\n( sleep 13; printf '%s' "$2" >&2 ) &\nprintf '%s' "$1" >&2\nsleep 60`);
+    const sockets = () =>
+      (process as unknown as { _getActiveHandles: () => { constructor: { name: string } }[] })
+        ._getActiveHandles()
+        .filter((h) => h.constructor.name === "Socket").length;
+    // No code in what it prints first, so nothing is relayed and the hub is never called: the only sockets this
+    // can add are the child's own two pipes.
+    const before = sockets();
     const expiresIn = -29;
 
-    // Act: `expiresIn + 30` is the kill timer, so one second in, and the escalation follows it.
+    // Act: `expiresIn + 30` is the kill timer, so one second in, then SIGKILL and the giving-up step follow it.
     const started = Date.now();
-    const result = await relayDeviceLogin({
+    const error = await relayDeviceLogin({
       api: api(),
       id: VID,
       kind: "github",
       cmd: "stubborn",
-      args: [GH_OUTPUT],
+      args: ["waiting for the owner\n", GH_OUTPUT],
       env: pod.env(),
       parse: parseGhDeviceCode,
       expiresIn,
       label: "github"
-    });
+    }).catch((e: unknown) => e);
 
-    // Assert: killed rather than exited, which `run` reports as 1, and inside the escalation rather than the
-    // minute the child asked for.
-    expect(result.code).toBe(1);
+    // Assert: answered inside the escalation rather than the minute the child asked for.
+    expect((error as Error).message).toMatch(/stubborn printed no sign-in code/);
     expect(Date.now() - started).toBeLessThan(SIGKILL_AFTER_MS * 3);
-  }, 30_000);
+
+    // Then past the orphan's own print, which is when both of the things it must not do would show. A `destroy`
+    // releases its handle on a later tick, so the count is read here rather than the moment the call answered.
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    // Its pipes are let go of, not merely stopped being waited on: they are ref'd handles, and `cli.ts` sets
+    // `process.exitCode` without calling `process.exit`, so holding them would answer this call and still never
+    // let `agent-hub virtual github-login` return.
+    expect(sockets()).toBeLessThanOrEqual(before);
+    // And nothing is left reading it: relaying its code now would put a live one on the owner's screen that
+    // this call has already answered `shown: false` for, with no `loginFailed` to withdraw it.
+    expect(virtual().prompts).toEqual([]);
+  }, 40_000);
 
   it("should stop the command and reject when the code cannot be relayed to the hub", async () => {
     // Arrange: the hub refuses the relay outright, so the owner would never see the code. A 400 is not a
@@ -658,9 +690,12 @@ describe("githubLogin", () => {
     // Act
     const { error } = await captureStderrOfFailure(() => signIn({ FAKE_GH_TOKEN_UNREADABLE: "1" }));
 
-    // Assert
+    // Assert: thrown, so the caller retries rather than parking — and the code is withdrawn on the way out, so
+    // a pod that restarts instead of retrying does not leave one on the owner's screen until the sweep.
     expect((error as Error).message).toMatch(/gh auth token could not be run \(exit 127\)/);
-    expect(virtual().loginFailures).toEqual([]);
+    expect(virtual().loginFailures).toEqual([
+      { kind: "github", state: "failed", detail: "github: the sign-in could not be finished; start the agent again to be sent another code" }
+    ]);
     expect(virtual().credentials.has("github")).toBe(false);
   });
 
