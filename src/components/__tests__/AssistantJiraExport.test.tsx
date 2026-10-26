@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import type { JiraExportView } from "@/assistant/jira";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
+import { LOOKUP_AFTER_MS } from "@/components/assistant/AtlassianSearch";
 import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/JiraExport";
+import type { LookUp } from "@/components/assistant/lookupClient";
 import type { LoginView } from "@/virtual-agents/logins";
 
 const CONVERSATION = "22222222-2222-2222-2222-222222222222";
@@ -30,12 +32,14 @@ function panel({
   artefact = snapshot(),
   exported = { status: "none" },
   access = CONNECTED,
-  exportTo = exporting()
+  exportTo = exporting(),
+  lookUp
 }: {
   artefact?: ArtefactSnapshot;
   exported?: JiraExportView;
   access?: JiraAccess;
   exportTo?: ExportToJiraAction;
+  lookUp?: LookUp;
 } = {}) {
   return (
     <ArtefactPanel
@@ -45,7 +49,7 @@ function panel({
       save={vi.fn(async () => ({ ok: true as const, saved: true as const, version: 99 }))}
       onClose={() => undefined}
       narrow={false}
-      jira={{ exported, access, exportTo }}
+      jira={{ exported, access, exportTo, lookUp }}
     />
   );
 }
@@ -67,17 +71,18 @@ function atlassianLogin(overrides: Partial<LoginView> = {}): LoginView {
     verificationUri: "https://auth.atlassian.com/oauth/activate?user_code=4BFC-CC3A",
     expiresAt: new Date(Date.now() + 120_000).toISOString(),
     state: "pending",
-    codeWaiting: false,
+    updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    codeWaitingUntil: null,
     ...overrides
   };
 }
 
 describe("Jira export in the document panel", () => {
-  it("should offer the VIBE board and export to it when the document is saved", async () => {
+  it("should offer the VIBE backlog and export to it when the document is saved", async () => {
     const exportTo = exporting();
     render(panel({ exportTo }));
 
-    expect((screen.getByRole("combobox", { name: "Jira board" }) as HTMLSelectElement).value).toBe("VIBE");
+    expect(screen.getByRole("button", { name: "Change the Jira project, now VIBE" })).toBeTruthy();
     await act(async () => {
       fireEvent.click(exportButton());
     });
@@ -142,9 +147,12 @@ describe("Jira export in the document panel", () => {
       vi.advanceTimersByTime(3000);
     });
 
+    // The pod offers one code, so nothing follows this one: the clock alone is enough to say so, without waiting for
+    // the report that would otherwise leave the owner reading that a replacement is on its way
     expect(screen.queryByText("4BFC-CC3A")).toBeNull();
-    expect(screen.getByRole("alert").textContent).toContain("Your assistant is relaying a fresh one");
-    expect(screen.getByText("Signing in to Atlassian…")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("expired before it was used, so no ticket was created");
+    expect(screen.getByRole("alert").textContent).not.toContain("relaying a fresh one");
+    expect(screen.queryByText("Signing in to Atlassian…")).toBeNull();
   });
 
   it("should not announce the last export's expired sign-in while a new export is in flight", () => {
@@ -172,7 +180,7 @@ describe("Jira export in the document panel", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("should show the ticket with links to it, and no way to export again, when the export is done", () => {
+  it("should show the ticket in the backlog's place, and no way to export again, when the export is done", () => {
     render(panel({ exported: { status: "done", project: "VIBE", key: "VIBE-701", url: "https://hmcts.atlassian.net/browse/VIBE-701" } }));
 
     expect(screen.getByText(/Created/).textContent).toContain("VIBE-701");
@@ -180,7 +188,8 @@ describe("Jira export in the document panel", () => {
     expect(screen.getByRole("link", { name: "Open ticket" }).getAttribute("target")).toBe("_blank");
     expect(screen.getByText("In Jira")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /export/i })).toBeNull();
-    expect((screen.getByRole("combobox", { name: "Jira board" }) as HTMLSelectElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: /Change the Jira project/ })).toBeNull();
+    expect(screen.queryByText("Backlog")).toBeNull();
   });
 
   it("should show why and offer the export again when it failed", () => {
@@ -213,6 +222,39 @@ describe("Jira export in the document panel", () => {
       />
     );
 
-    expect(screen.queryByRole("combobox", { name: "Jira board" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Change the Jira project/ })).toBeNull();
+  });
+
+  it("should put the backlog back as it was when the person cancels the project search", () => {
+    render(panel());
+
+    fireEvent.click(screen.getByRole("button", { name: /Change the Jira project/ }));
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search your Jira projects" }), { key: "Escape" });
+
+    expect(screen.queryByRole("combobox", { name: "Search your Jira projects" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Change the Jira project, now VIBE" })).toBeTruthy();
+  });
+
+  it("should export to a project the person searched their Jira for when they change it for this document", async () => {
+    vi.useFakeTimers();
+    const exportTo = exporting();
+    const lookUp = vi.fn<LookUp>(async () => ({
+      status: "done",
+      results: [{ key: "PCS", name: "Possession claims", url: "https://hmcts.atlassian.net/browse/PCS" }]
+    }));
+    render(panel({ exportTo, lookUp }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Change the Jira project/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Search your Jira projects" }), { target: { value: "possess" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LOOKUP_AFTER_MS);
+    });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search your Jira projects" }), { key: "Enter" });
+    await act(async () => {
+      fireEvent.click(exportButton());
+    });
+
+    expect(lookUp).toHaveBeenCalledWith({ kind: "jira_project", query: "possess", space: null }, expect.any(AbortSignal));
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, project: "PCS" });
   });
 });

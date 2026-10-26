@@ -120,6 +120,9 @@ export function run(cmd: string, args: string[], { env = process.env, timeoutMs 
       resolve({ code: 127, stdout, stderr: (e as Error).message });
       return;
     }
+    // Declared before `finish` closes over them rather than after, so that a synchronous caller added later is
+    // an undefined timer to clear and not a temporal dead zone to throw out of the promise.
+    let timer: NodeJS.Timeout | undefined;
     let abandon: NodeJS.Timeout | null = null;
     let settled = false;
     const finish = (result: RunResult) => {
@@ -137,7 +140,7 @@ export function run(cmd: string, args: string[], { env = process.env, timeoutMs 
     // leaves descendants holding the write ends, so the timeout alone bounds nothing. `relayDeviceLogin` gives
     // up the same way and for the same reason — the handles are ref'd, and the CLI exits only when the loop
     // drains, so a caller would wait on this for ever rather than for `timeoutMs`.
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       child.kill("SIGKILL");
       abandon ??= setTimeout(() => {
         child.stdout?.destroy();
@@ -317,6 +320,9 @@ export function relayDeviceLogin({
     let shown = false;
     const child = spawn(cmd, args, { env, stdio: [respond ? "pipe" : "ignore", "pipe", "pipe"] });
     child.stdin?.on("error", () => {});
+    // Declared before `settle` closes over them rather than after, so that a synchronous caller added later is
+    // an undefined timer to clear and not a temporal dead zone to throw out of the promise.
+    let timer: NodeJS.Timeout | undefined;
     let escalation: NodeJS.Timeout | null = null;
     let abandon: NodeJS.Timeout | null = null;
     let settled = false;
@@ -357,7 +363,7 @@ export function relayDeviceLogin({
         }, SIGKILL_AFTER_MS);
       }, SIGKILL_AFTER_MS);
     };
-    const timer = setTimeout(endChild, (expiresIn + 30) * 1000);
+    timer = setTimeout(endChild, (expiresIn + 30) * 1000);
     const onData = (d: unknown) => {
       output += d;
       respond?.(output, child.stdin);

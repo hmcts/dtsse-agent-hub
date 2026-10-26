@@ -114,6 +114,7 @@ export type AssistantFrame = {
   artefact_version?: number | null;
   artefact_updated_by?: string | null;
   jira_export?: JiraExportFrame | null;
+  confluence_export?: ConfluenceExportFrame | null;
   /** The files attached to this message. Absent from a hub with uploads off, or one older than them. */
   attachments?: unknown;
 };
@@ -142,8 +143,8 @@ export const JIRA_EXPORT_BASH_TIMEOUT_MS = 600000;
  *
  * The session is told not to check anything around it, because looking at the document, twg or the new ticket is
  * exactly the extra round trips the one command is there to save. The Bash timeout is raised because the command
- * waits for the person when twg has to be signed in: twg gives them two minutes a code, and the command offers
- * more than one.
+ * waits for the person when twg has to be signed in: the one code it relays lasts five minutes, after the twg calls
+ * that come before it.
  *
  * These are the last lines before the skill line, which keeps its place against the `---`. They go after the
  * attachment lines, which are facts that stand on their own wherever they sit.
@@ -156,6 +157,34 @@ export function jiraExportLines(jira: JiraExportFrame): string[] {
     "It does every step itself: it checks twg is signed in as the user, reads the document, creates the ticket and reports it to the Assistant. Run again for the same export, it reports the ticket it already made rather than making another.",
     "Do not read the document, check twg, or look at the ticket yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which ticket it became, or why it could not be made, in the words the command printed."
+  ];
+}
+
+/** A publish of the conversation's document to Confluence the person has asked for and nobody has reported yet. */
+export type ConfluenceExportFrame = {
+  export_id: string;
+  space_id: string;
+  parent_id: string;
+};
+
+/**
+ * How to carry out a pending Confluence export: one command, `confluence export`, that checks twg's sign-in, reads
+ * the document, creates the page with the person's own sign-in and reports it. One command for the reason
+ * `jira export` is one: every tool call is another round trip to the model. The title and the document never appear
+ * in what the session types; the command reads them from the hub itself. Sent with every message while the export is
+ * pending; the command remembers the page it made for an export id, so running it again cannot make a second one.
+ *
+ * The Bash timeout is the Jira export's, because the command signs in through the same `atlassianLogin` and so has
+ * the same `jiraExportSignInBudget` to fit inside it. Placed as the Jira lines are, before the skill line, for the
+ * reason given there.
+ */
+export function confluenceExportLines(confluence: ConfluenceExportFrame): string[] {
+  return [
+    `The user has asked you to publish the conversation's document to Confluence as a new page (export ${confluence.export_id}).`,
+    `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} confluence export ${confluence.export_id} --space-id ${confluence.space_id} --parent-id ${confluence.parent_id}\``,
+    "It does every step itself: it checks twg is signed in as the user, reads the document, creates the page and reports it to the Assistant. Run again for the same export, it reports the page it already made rather than making another.",
+    "Do not read the document, check twg, or look at the page yourself, before or after; do not run any other command for this.",
+    "Then tell the user in one short sentence which page it became, or why it could not be made, in the words the command printed."
   ];
 }
 
@@ -261,6 +290,7 @@ export function assistantEnvelope(
     // as: here is the file, now run the skill.
     ...attachmentLines(attachments),
     ...(assistant.jira_export ? jiraExportLines(assistant.jira_export) : []),
+    ...(assistant.confluence_export ? confluenceExportLines(assistant.confluence_export) : []),
     ...skillLine(message.body, skills, ownerSkillLine),
     "---",
     message.body

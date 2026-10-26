@@ -228,7 +228,10 @@ upgrade_client() {
     command -v npm >/dev/null || { log "client upgrade skipped: npm is not on PATH"; return 0; }
     # Bounded, because npm would otherwise allow five minutes a request and two retries, and a feed that hangs
     # would hold the agent at "Starting" for as long as that takes.
-    if ! out=$(npm install -g --no-fund --no-audit --fetch-timeout=60000 --fetch-retries=1 \
+    #
+    # --ignore-scripts: nothing in this install needs a lifecycle script, and a pod runs it unattended on every
+    # boot. @hmcts-cft/agent-hub declares none and has no dependencies to declare any.
+    if ! out=$(npm install -g --ignore-scripts --no-fund --no-audit --fetch-timeout=60000 --fetch-retries=1 \
         --@hmcts-cft:registry=https://pkgs.dev.azure.com/hmcts/Artifacts/_packaging/hmcts-lib/npm/registry/ \
         "@hmcts-cft/agent-hub@latest" 2>&1); then
         log "could not upgrade the agent-hub client, keeping the image's: $(printf '%s' "$out" | tr '\n' ' ' | head -c 300)"

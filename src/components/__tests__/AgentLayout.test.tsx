@@ -33,6 +33,7 @@ const CARD: VirtualAgentCard = {
   localOnlyPorts: [],
   plugins: [],
   stopReason: null,
+  stopDetail: null,
   lastActivityAt: null,
   stoppedAt: null,
   diskExpiresAt: null,

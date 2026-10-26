@@ -10,6 +10,7 @@ import {
   canGrant,
   canLaunchTokenActForAgent,
   canLaunchTokenReadMessage,
+  canLookUpAtlassian,
   canManageConversationShares,
   canManageCredential,
   canManageGrants,
@@ -833,5 +834,18 @@ describe("the people lookup rules", () => {
     it("should not offer the viewer themselves", () => {
       expect(canSuggestPerson(OWNER, { oid: OWNER })).toBe(false);
     });
+  });
+});
+
+describe("the Atlassian rules", () => {
+  // The search runs as the owner's own Atlassian account, so a grant over their agents, even a `write` one, must not
+  // reach it.
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s searches Atlassian through the owner's assistant", (expected, role) => {
+    expect(canLookUpAtlassian(ROLES[role], { ownerOid: OWNER })).toBe(expected);
   });
 });

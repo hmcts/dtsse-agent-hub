@@ -38,16 +38,17 @@ export const TWG_LOGIN_OUTPUT =
   `  ⚠️  Only approve this request if you initiated it from your terminal.\r\n` +
   `\x1b[?25l\x1b[90m│\x1b[39m\r\n\x1b[36m◆\x1b[39m  Open in browser?\r\n` +
   `\x1b[36m│\x1b[39m  \x1b[32m●\x1b[39m Y \x1b[2m/\x1b[22m \x1b[2m○\x1b[22m \x1b[2mn\x1b[22m\r\n\x1b[36m└\x1b[39m\r\n\x1b[1A\r\n`;
-export const TWG_WAIT_OUTPUT = `\x1b[35m◒\x1b[39m    Waiting for authentication in browser... (120s remaining)\x1b[1G\x1b[J`;
+// The countdown twg draws only outside agent mode, which is where the pod's login runs: 300 seconds, measured
+// against twg 1.3.3 with the agent-mode triggers taken out of its environment.
+export const TWG_WAIT_OUTPUT = `\x1b[35m◒\x1b[39m    Waiting for authentication in browser... (300s remaining)\x1b[1G\x1b[J`;
 
 /**
- * How `twg login` 1.3.3 gives up when nobody uses its code: its own timer, which is two minutes whenever twg reads
- * the environment as an agent's. The bracketed error code is what tells this apart from any other failure.
+ * How `twg login` 1.3.3 gives up when nobody uses its code: its own timer, five minutes outside agent mode, which
+ * is where the pod's login runs. The bracketed error code is what tells this apart from any other failure.
  */
 export const TWG_LOGIN_TIMEOUT_OUTPUT =
-  `\r\n\x1b[31m✖\x1b[39m  OAuth authentication failed: Login timed out after 2 minutes: browser authentication was not ` +
-  `completed. This looks like a non-interactive/agent environment — run \`twg login\` yourself in an interactive ` +
-  `terminal to finish authenticating.\r\n  Code:        [login_timeout]\r\n`;
+  `\r\n\x1b[31m✖\x1b[39m  OAuth authentication failed: Login timed out after 5 minutes: browser authentication was not ` +
+  `completed. Run \`twg login\` again to retry.\r\n  Code:        [login_timeout]\r\n`;
 
 /** A sign-in that broke rather than ran out: the owner said no. Shaped as above, with a different code. */
 export const TWG_LOGIN_DENIED_OUTPUT = `\r\n\x1b[31m✖\x1b[39m  OAuth authentication failed: The user denied the request.\r\n  Code:        [access_denied]\r\n`;
@@ -105,6 +106,53 @@ export function twgAuthConf({ refresh = podSecrets.twgRefresh, access = podSecre
   ].join("\n");
 }
 
+const TWG_PROFILE_ID = "00000000-0000-4000-8000-000000000001";
+
+/**
+ * twg's auth-profiles.json as 1.3.9 writes it, on one line as the fake twg does: every field its schema requires,
+ * because 1.3.9 refuses the file without them.
+ */
+export function twgProfiles({ refresh = podSecrets.twgRefresh, access = podSecrets.twgAccess, user = "olive@hmcts.net" }: TwgAuthConfOptions = {}): string {
+  const site = "hmcts.atlassian.net";
+  const cloudId = "00000000-0000-4000-8000-0000000000c1";
+  return `${JSON.stringify({
+    version: 1,
+    revision: 1,
+    activeEnvironment: "prod",
+    defaults: { prod: TWG_PROFILE_ID },
+    profiles: [
+      {
+        id: TWG_PROFILE_ID,
+        name: "hmcts",
+        defaultName: "hmcts",
+        user,
+        site,
+        domain: site,
+        cloudId,
+        environment: "prod",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        authMethod: "oauth",
+        revision: 1,
+        bitbucket: false,
+        credentials: {
+          primary: {
+            user,
+            token: "",
+            authMethod: "oauth",
+            oauthAccessToken: access,
+            oauthRefreshToken: refresh,
+            oauthRefreshAt: "2099-01-01T00:00:00.000Z",
+            site,
+            domain: site,
+            cloudId,
+            twgEnv: "prod"
+          }
+        }
+      }
+    ]
+  })}\n`;
+}
+
 export type PodShims = {
   home: TempClaudeHome;
   bin: string;
@@ -116,6 +164,8 @@ export type PodShims = {
   scriptShim: () => void;
   /** The sign-in a pod would have after `twg login`, as the fake twg accepts it. */
   seedTwg: (env: Record<string, string>, refresh?: string) => void;
+  /** The environment variable names the last `twg login` was given, which is what its code's lifetime turns on. */
+  loginEnvNames: () => string[];
   /** Forgets everything one test wrote: the sign-ins on disk, the shims' counters and the pod's state dir. */
   reset: () => void;
   cleanup: () => void;
@@ -193,30 +243,53 @@ esac`
 esac`
   );
   scriptShim();
-  // Stands in for twg 1.3.3: each refresh rotates both tokens, and only the newest refresh token works.
+  // Stands in for twg 1.3.3, or 1.3.9 with FAKE_TWG_VERSION=1.3.9: each refresh rotates both tokens, and only the
+  // newest refresh token works. 1.3.9 keeps its sign-in in auth-profiles.json, refuses one missing a field its
+  // schema requires, and reports a refused refresh token in its JSON with exit 1.
   // `FAKE_TWG_LOGIN`: `expire` gives up on the code as twg's own timer does, after `FAKE_TWG_EXPIRE_AFTER` seconds;
   // `deny` fails for another reason after printing a code; `crash` fails before printing one.
+  // `login` writes down the names in its environment, because what is missing from them is what decides whether the
+  // real twg holds its code for five minutes or two.
   shim(
     "twg",
-    `auth="$TWG_CONFIG_DIR/auth.conf"
-current() { sed -n 's/^oauth-refresh-token=//p' "$auth" 2>/dev/null; }
+    `v139() { [ "$FAKE_TWG_VERSION" = 1.3.9 ]; }
+if v139; then auth="$TWG_CONFIG_DIR/auth-profiles.json"; else auth="$TWG_CONFIG_DIR/auth.conf"; fi
+current() {
+  if v139; then sed -n 's/.*"oauthRefreshToken":"\\([^"]*\\)".*/\\1/p' "$auth" 2>/dev/null; else sed -n 's/^oauth-refresh-token=//p' "$auth" 2>/dev/null; fi
+}
 valid() { [ -n "$(current)" ] && [ "$(current)" = "$(cat "$SHIM_STATE/twg-valid" 2>/dev/null)" ]; }
+has_access() { if v139; then grep -q '"oauthAccessToken":"[^"]' "$auth"; else grep -q '^oauth-access-token=' "$auth"; fi; }
+schema_ok() { ! v139 || [ ! -f "$auth" ] || { grep -q '"createdAt":' "$auth" && grep -q '"bitbucket":' "$auth" && grep -q '"oauthAccessToken":' "$auth"; }; }
 rotate() {
   n=$(($(cat "$SHIM_STATE/twg-n" 2>/dev/null || echo 0) + 1)); echo "$n" >"$SHIM_STATE/twg-n"
   mkdir -p "$TWG_CONFIG_DIR"
-  printf '# TWG CLI credentials\\n# Updated: %s\\n#\\n\\nuser=%s\\ntoken=oauth-managed\\nsite=hmcts\\ndomain=hmcts.atlassian.net\\nauth-method=oauth\\noauth-access-token=%s-%s\\noauth-refresh-token=%s-%s\\noauth-refresh-at=2099-01-01T00:00:00.000Z\\n' \\
-    "$n" "\${FAKE_TWG_USER:-olive@hmcts.net}" "$TWG_ACCESS" "$n" "$TWG_REFRESH" "$n" >"$auth"
-  cp "$auth" "$TWG_CONFIG_DIR/auth_oauth.conf"
+  user="\${FAKE_TWG_USER:-olive@hmcts.net}"
+  if v139; then
+    printf '{"version":1,"revision":%s,"activeEnvironment":"prod","defaults":{"prod":"p1"},"profiles":[{"id":"p1","name":"hmcts","defaultName":"hmcts","user":"%s","site":"hmcts.atlassian.net","domain":"hmcts.atlassian.net","environment":"prod","createdAt":"2026-01-01T00:00:00.000Z","authMethod":"oauth","revision":%s,"bitbucket":false,"credentials":{"primary":{"user":"%s","token":"","authMethod":"oauth","oauthAccessToken":"%s-%s","oauthRefreshToken":"%s-%s","oauthRefreshAt":"2099-01-01T00:00:00.000Z","twgEnv":"prod"}}}]}\\n' \\
+      "$n" "$user" "$n" "$user" "$TWG_ACCESS" "$n" "$TWG_REFRESH" "$n" >"$auth"
+  else
+    printf '# TWG CLI credentials\\n# Updated: %s\\n#\\n\\nuser=%s\\ntoken=oauth-managed\\nsite=hmcts\\ndomain=hmcts.atlassian.net\\nauth-method=oauth\\noauth-access-token=%s-%s\\noauth-refresh-token=%s-%s\\noauth-refresh-at=2099-01-01T00:00:00.000Z\\n' \\
+      "$n" "$user" "$TWG_ACCESS" "$n" "$TWG_REFRESH" "$n" >"$auth"
+    cp "$auth" "$TWG_CONFIG_DIR/auth_oauth.conf"
+  fi
   printf '%s-%s' "$TWG_REFRESH" "$n" >"$SHIM_STATE/twg-valid"
 }
+refused() {
+  if v139; then
+    printf '{"apiVersion":"v2","command":"auth.refresh","data":{"status":"error","rotated":false,"profiles":[{"name":"hmcts","environment":"prod","status":"error","errorCode":"unauthorized_client"}]}}\\n'; exit 1
+  fi
+  echo "Error: Authentication failed." >&2; exit 77
+}
 echo "$*" >>"$SHIM_STATE/twg.log"
+schema_ok || { printf '{"ok":false,"error":{"code":"TWG_COMMAND_FAILED","message":"Required"}}\\n'; exit 1; }
 case "$1 $2" in
   "auth refresh") [ -n "$FAKE_TWG_REFRESH_WIPES" ] && { rm -f "$auth"; echo "Error: could not write the credentials file." >&2; exit 1; }
-      valid || { echo "Error: Authentication failed." >&2; exit 77; }
+      valid || refused
       { [ "$3" = --force ] || [ -f "$SHIM_STATE/twg-due" ]; } && rotate; exit 0 ;;
-  "doctor -o") if [ -z "$FAKE_TWG_DOCTOR_FAILS" ] && valid && grep -q '^oauth-access-token=' "$auth"; then ok=true; else ok=false; fi
+  "doctor -o") if [ -z "$FAKE_TWG_DOCTOR_FAILS" ] && valid && has_access; then ok=true; else ok=false; fi
       printf '{"apiVersion":"v2","data":{"connectivity":{"attempted":true,"ok":%s}}}\\n' "$ok"; [ "$ok" = true ] ;;
-  "login --site") [ "$FAKE_TWG_LOGIN" = crash ] && { echo "twg: internal error" >&2; exit 70; }
+  "login --site") env | cut -d= -f1 | LC_ALL=C sort >"$SHIM_STATE/twg-login-env"
+      [ "$FAKE_TWG_LOGIN" = crash ] && { echo "twg: internal error" >&2; exit 70; }
       cat "$SHIM_STATE/twg-login.out"
       IFS= read -r -d $'\\r' answer
       [ "$answer" = n ] || { echo "opened a browser"; exit 5; }
@@ -247,20 +320,29 @@ esac`
 
   const seedTwg = (podEnv: Record<string, string>, refresh = `${podSecrets.twgRefresh}-0`) => {
     fs.mkdirSync(podEnv.TWG_CONFIG_DIR as string, { recursive: true });
-    fs.writeFileSync(path.join(podEnv.TWG_CONFIG_DIR as string, "auth.conf"), twgAuthConf({ refresh }));
+    const v139 = podEnv.FAKE_TWG_VERSION === "1.3.9";
+    fs.writeFileSync(
+      path.join(podEnv.TWG_CONFIG_DIR as string, v139 ? "auth-profiles.json" : "auth.conf"),
+      v139 ? twgProfiles({ refresh }) : twgAuthConf({ refresh })
+    );
     fs.writeFileSync(path.join(stateDir, "twg-valid"), refresh);
+  };
+
+  const loginEnvNames = (): string[] => {
+    const text = fs.readFileSync(path.join(stateDir, "twg-login-env"), "utf8");
+    return text.split("\n").filter((name) => name !== "");
   };
 
   const reset = () => {
     fs.rmSync(path.join(home.root, ".azure"), { recursive: true, force: true });
     fs.rmSync(path.join(home.root, ".twg"), { recursive: true, force: true });
-    for (const f of ["az-ok", "gh-token", "twg-valid", "twg-n", "twg-due", "twg.log"]) {
+    for (const f of ["az-ok", "gh-token", "twg-valid", "twg-n", "twg-due", "twg.log", "twg-login-env"]) {
       fs.rmSync(path.join(stateDir, f), { force: true });
     }
     fs.rmSync(path.join(home.hub, "virtual"), { recursive: true, force: true });
   };
 
-  return { home, bin, stateDir, env, shim, scriptShim, seedTwg, reset, cleanup: home.cleanup };
+  return { home, bin, stateDir, env, shim, scriptShim, seedTwg, loginEnvNames, reset, cleanup: home.cleanup };
 }
 
 /** Points `hubHome()` at the fake pod's HOME for the whole file, and gives back the restore. */

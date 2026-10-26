@@ -52,6 +52,7 @@ function Row({ agent, now }: { agent: VirtualAgentCard; now: number }) {
         {running && agent.lastActivityAt ? <span className="text-xs text-hub-muted">idle for {idleFor(agent.lastActivityAt, now)}</span> : null}
       </div>
       {agent.statusDetail ? <p className="text-xs text-hub-text">{agent.statusDetail}</p> : null}
+      {!running && agent.stopDetail ? <p className="text-xs text-hub-text">{agent.stopDetail}</p> : null}
       {!running && agent.stopReason ? (
         <p className="text-xs text-hub-muted">
           {stopReasonLabel(agent.stopReason)}

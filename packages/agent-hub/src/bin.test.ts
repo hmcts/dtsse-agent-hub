@@ -79,6 +79,115 @@ describe("bin/agent-hub", () => {
   });
 });
 
+// PATH alone does not find node outside an interactive shell: the devcontainer base installs nvm with
+// PROFILE=/dev/null and sources it from .bashrc and .zshrc only, so every `kubectl exec` into a pod arrives
+// without node and `bash -lc` does not help. Reading a pod's client version and reporting a stuck session both
+// failed on that, so the command sources nvm.sh for itself — but only below the hook gate, which has to decide
+// whether to start node without paying to start it.
+describe("bin/agent-hub when node is not on PATH", () => {
+  let root: string;
+  let tools: string;
+  let nodeDir: string;
+  let cli: string;
+  let bash: string;
+
+  function which(tool: string): string {
+    return spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim();
+  }
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-hub-nvm-"));
+    // Everything the script itself runs, and no node, so `command -v node` fails exactly as it does in a pod.
+    tools = path.join(root, "tools");
+    fs.mkdirSync(tools);
+    for (const tool of ["bash", "dirname", "readlink", "cat"]) {
+      fs.symlinkSync(which(tool), path.join(tools, tool));
+    }
+    bash = path.join(tools, "bash");
+    // What sourcing a real nvm.sh does: prepend the directory holding node.
+    nodeDir = path.join(root, "node-bin");
+    fs.mkdirSync(nodeDir);
+    fs.symlinkSync(process.execPath, path.join(nodeDir, "node"));
+    cli = path.join(root, "cli.mjs");
+    fs.writeFileSync(cli, 'console.log("cli ran");\n');
+  });
+
+  afterAll(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  // Writes the marker as well as putting node on PATH, so a caller can tell whether it was sourced at all.
+  function fakeNvmHome(name: string, { nvm }: { nvm: boolean }): { home: string; marker: string } {
+    const home = path.join(root, name);
+    const marker = path.join(home, "sourced");
+    fs.mkdirSync(home, { recursive: true });
+    if (nvm) {
+      fs.mkdirSync(path.join(home, ".nvm"), { recursive: true });
+      fs.writeFileSync(path.join(home, ".nvm", "nvm.sh"), `: > ${JSON.stringify(marker)}\nexport PATH=${JSON.stringify(nodeDir)}:"$PATH"\n`);
+    }
+    return { home, marker };
+  }
+
+  it("should source nvm and reach the cli when node is only on nvm's path", () => {
+    // Arrange
+    const { home, marker } = fakeNvmHome("home-with-nvm", { nvm: true });
+
+    // Act
+    const result = spawnSync(bash, [BIN, "help"], { encoding: "utf8", timeout: 20000, env: { PATH: tools, HOME: home, AGENT_HUB_CLI_JS: cli } });
+
+    // Assert
+    expect(result.stderr).not.toContain("node is not on PATH");
+    expect(result.stdout).toContain("cli ran");
+    expect(fs.existsSync(marker)).toBe(true);
+    expect(result.status).toBe(0);
+  });
+
+  it("should say what to install when node is absent from PATH and from nvm", () => {
+    // Arrange
+    const { home } = fakeNvmHome("home-without-nvm", { nvm: false });
+
+    // Act
+    const result = spawnSync(bash, [BIN, "help"], { encoding: "utf8", timeout: 20000, env: { PATH: tools, HOME: home, AGENT_HUB_CLI_JS: cli } });
+
+    // Assert
+    expect(result.stderr).toContain("agent-hub: node is not on PATH. Install Node 22 or later");
+    expect(result.stdout).not.toContain("cli ran");
+    expect(result.status).toBe(1);
+  });
+
+  // `set -u` aborts on an expansion of an unset variable, so an unset HOME gave bash's "unbound variable" in
+  // place of the error, for callers started with no shell in the way — which is the case this exists for.
+  it("should still say what to install when HOME is not set either", () => {
+    // Act
+    const result = spawnSync(bash, [BIN, "help"], { encoding: "utf8", timeout: 20000, env: { PATH: tools, AGENT_HUB_CLI_JS: cli } });
+
+    // Assert
+    expect(result.stderr).not.toMatch(/unbound variable/);
+    expect(result.stderr).toContain("agent-hub: node is not on PATH. Install Node 22 or later");
+    expect(result.status).toBe(1);
+  });
+
+  // UserPromptContext runs the gate synchronously on every prompt, so the cost of sourcing nvm has to stay out
+  // of the path a session that never enabled comms takes. The marker is the only thing that can prove it did not.
+  it("should not source nvm when the hook gate takes its fast path", () => {
+    // Arrange
+    const { home, marker } = fakeNvmHome("home-fast-path", { nvm: true });
+
+    // Act
+    const result = spawnSync(bash, [BIN, "hook", "SessionStart"], {
+      input: JSON.stringify({ session_id: "fast-path", source: "startup" }),
+      encoding: "utf8",
+      timeout: 20000,
+      env: { PATH: tools, HOME: home, CLAUDE_CONFIG_DIR: path.join(home, ".claude"), AGENT_HUB_CLI_JS: cli }
+    });
+
+    // Assert
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(result.stdout).not.toContain("cli ran");
+    expect(result.status).toBe(0);
+  });
+});
+
 // npm installs a bin as a symlink from <prefix>/bin, so the directory the hooks invoke has no dist/ beside it.
 // A gate that resolved its own path without following the chain found no CLI, and the hook path swallows the
 // failure, which turns every hook into a silent no-op. `AGENT_HUB_CLI_JS` is never set here: it would override
@@ -292,5 +401,16 @@ describe("the published tarball", () => {
 
   it("should declare no runtime dependencies, because the gate must not pay module-load cost", () => {
     expect(MANIFEST.dependencies).toBeUndefined();
+    expect(MANIFEST.optionalDependencies).toBeUndefined();
+    expect(MANIFEST.peerDependencies).toBeUndefined();
+  });
+
+  // Every install of this package passes --ignore-scripts, on the grounds that it declares none and
+  // has no dependency that could. A dependency with a postinstall would otherwise be installed
+  // unbuilt, in a pod and in an image, and fail at runtime with nothing said at build time.
+  it("should declare no install lifecycle script, because every install of it skips scripts", () => {
+    for (const name of ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack"]) {
+      expect(Object.keys((MANIFEST.scripts ?? {}) as Record<string, string>)).not.toContain(name);
+    }
   });
 });
