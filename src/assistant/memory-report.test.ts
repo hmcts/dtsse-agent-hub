@@ -22,6 +22,9 @@ import {
 const AT = new Date("2026-10-30T09:00:00.000Z");
 const LIMIT = 8 * 1024 ** 3;
 
+/** A `SizeResources` memory figure as bytes, so the checks below compare it against the constants in their own unit. */
+const requestedBytes = (gi: string) => Number(gi.replace("Gi", "")) * 1024 ** 3;
+
 function row(overrides: Partial<MemoryReportRow> = {}): MemoryReportRow {
   return {
     memoryLimitBytes: BigInt(LIMIT),
@@ -131,7 +134,7 @@ describe("memoryPressure", () => {
    */
   it.each(VIRTUAL_AGENT_SIZES)("should stay quiet for a %s pod holding its whole complement of chats", (size) => {
     const chats = CONVERSATION_SESSIONS[size];
-    const limit = Number(SIZE_RESOURCES[size].limits.memory.replace("Gi", "")) * 1024 ** 3;
+    const limit = requestedBytes(SIZE_RESOURCES[size].limits.memory);
     const full: MemoryUse = {
       reported: true,
       limitBytes: limit,
@@ -284,18 +287,23 @@ describe("sizeOffers", () => {
     ]);
   });
 
-  // 0.95Gi awake with nothing open plus 0.65Gi a chat, so a cap of N costs 0.95 + 0.65N Gi — and that has to stay
-  // inside the size's memory *request*, because a pod over its request is an eviction candidate under node pressure
-  // however much its limit leaves spare.
+  // The binding constraint on every cap, and the tighter of the two: a pod over its memory **request** is an
+  // eviction candidate under node pressure however much its limit leaves spare, where the warning only measures
+  // against the limit. So this is the check that fixes `small` at 4 rather than 5, and it derives from the two
+  // constants rather than restating them — a figure written in here passes at whatever they are later re-measured
+  // to, which is the failure the worked tables elsewhere already had.
   it.each(sizeOffers())("should keep $size's full complement of chats inside the memory it requests", ({ chats, requests }) => {
-    expect(0.95 + 0.65 * chats).toBeLessThanOrEqual(Number.parseInt(requests, 10));
+    expect(POD_BASELINE_MEMORY_BYTES + chats * CONVERSATION_MEMORY_BYTES).toBeLessThanOrEqual(requestedBytes(requests));
   });
 
-  // Which is what fixes `small` where it is: a fifth chat would be 4.20Gi against the 4Gi it requests.
+  // The other side of it for `small` alone, which is what makes 4 a ceiling there and not a bound that happens to
+  // hold: a fifth chat does not fit inside its 4Gi. Not asserted for the other two, because their requests are not
+  // what binds them — `medium` would hold ten and `large` twenty-three, and what stops them short of that is the
+  // absence of any measurement above two concurrent sessions.
   it("should have no room inside small's request for a chat beyond its cap", () => {
     const { chats, requests } = sizeOffer("small");
 
-    expect(0.95 + 0.65 * (chats + 1)).toBeGreaterThan(Number.parseInt(requests, 10));
+    expect(POD_BASELINE_MEMORY_BYTES + (chats + 1) * CONVERSATION_MEMORY_BYTES).toBeGreaterThan(requestedBytes(requests));
   });
 });
 

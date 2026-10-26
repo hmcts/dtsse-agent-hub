@@ -279,6 +279,26 @@ describe("the memory report of a pod the hub replaces", () => {
     expect(await stored(assistant)).toEqual(CLEARED);
   });
 
+  // An apply that failed may have left the minted token in no StatefulSet, so the next claim mints another and the
+  // reconcile applies afresh rather than keeping the pod it has — a replacement with no owner request behind it to
+  // have cleared the figures. Minting is where that is caught, which is why the clear rides on the mint and not only
+  // on the paths an owner takes.
+  it("should drop the report when a failed apply makes the orchestrator mint a new token", async () => {
+    const assistant = await reportedAtItsCeiling();
+    // What a failed apply leaves: a spec the orchestrator never got applied, so `generation > observed_generation`
+    // makes the agent due again, and `failedToApply` makes that claim mint a token rather than reuse the last one.
+    await prisma.virtualAgent.update({
+      where: { id: assistant },
+      data: { status: "failed", applyFailures: 1, generation: { increment: 1 } }
+    });
+
+    await claimVirtualAgents(prisma, "preview-01", { limit: 20 });
+
+    const row = await stored(assistant);
+    expect(row.memoryAnonBytes).toBeNull();
+    expect(row.memoryReportedAt).toBeNull();
+  });
+
   // A stopped pod keeps its figures: they are the last thing anyone measured, the section says so, and nothing is
   // going to raise a warning from them. This is the one path that must *not* clear.
   it("should keep the report when the agent is only stopped", async () => {

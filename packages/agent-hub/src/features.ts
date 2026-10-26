@@ -21,6 +21,11 @@ export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "me
  * nothing while reading a field is the trap the other way round, since a hub that then gates on it drops a field this
  * build would have acted on.
  *
+ * **Adding a name here means adding it to `features.test.ts` too.** This line and the `ClientFeature` union above are
+ * what every such change edits, so two branches adding a feature conflict on them, and a resolution taking either
+ * side drops the other's name with nothing to notice: a shorter array of the same type still typechecks. That test
+ * holds a second copy of this list for exactly that.
+ *
  * `attachments` is claimed because `parseAssistantFrame` carries `raw.attachments` and the bridge fetches each file to
  * disk before it delivers the message.
  *

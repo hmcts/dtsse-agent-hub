@@ -195,15 +195,20 @@ const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1
 
 /**
  * The memory report belongs to the pod that made it, so every path that asks for a new or replacement pod drops it:
- * starting, resizing, changing plugins, restarting, re-applying after a failure, and a takeover onto another cluster.
+ * starting, resizing, changing plugins and restarting, a takeover onto another cluster, and minting a launch token in
+ * `claimVirtualAgents`, which is the one that catches a pod being re-applied after a failure.
  *
  * Without this the next pod shows the last one's figures as what it is holding right now, and can inherit its
  * low-memory warning, until its own first report lands — the pod reports phase `running` before it starts its
  * supervisor, so there is a window where the row is running and the figures are the dead pod's.
  *
- * **Not applied when stopping**: there the figures are the last thing anyone measured and the Size section says as
- * much, which is the whole reason they are kept. Clearing is not enough on its own either — the outgoing pod has to
- * lose its launch token in the same breath, or it reports again and undoes this; see `NO_TOKEN`'s use below.
+ * **Not applied when stopping, deleting, or on the sweep's auto-stop**, though all three bump `pod_generation`: there
+ * the figures are the last thing anyone measured and the Size section says as much, which is the whole reason they
+ * are kept. So the rule is not "whatever bumps `pod_generation`" — it is whatever asks for a pod to come up.
+ *
+ * Clearing is not enough on its own where the pod being replaced is still running, because it can report again and
+ * undo it. Those paths drop the launch token in the same breath; see `NO_TOKEN`'s use below. The starting path needs
+ * no token drop, having none to drop.
  */
 const NO_MEMORY_REPORT = {
   memoryLimitBytes: null,
@@ -316,12 +321,16 @@ export async function renameVirtualAgent(prisma: PrismaClient, actorOid: string,
  * Refused only while the agent is being deleted, per `sizeChangeRefusal`; someone other than the owner is told there
  * is no such agent.
  *
- * **The launch token goes too**, as it does on a stop and a restart. Nothing is lost by shutting the outgoing pod out
- * early, because replacing it ends every session on it anyway and the person has already been told so. Keeping the
- * token had two costs: the old pod and its replacement would both hold a *valid* one over the handover, since nothing
+ * **The launch token goes too**, as it does on a stop, a restart, a takeover and the sweep's auto-stop. Keeping it had
+ * two costs: the outgoing pod and its replacement would both hold a *valid* one over the handover, since nothing
  * mints a replacement while the agent is `running` with a token it still has; and the old supervisor would go on
  * reporting, putting the figures this just cleared back — with the **old size's limit** beside them, which is a
  * ceiling the warning would then measure against.
+ *
+ * It is not free. The pod's last Atlassian cache sync runs on SIGTERM through this token, so a sign-in refreshed in
+ * the minutes before a resize is lost and the owner signs in to Jira again. What makes that acceptable is that it was
+ * already lost on every other replacement the hub initiates — all four of those paths drop the token — so this makes
+ * resize and plugins consistent with them rather than inventing a new loss. Narrowing it is its own change.
  */
 export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string, id: string, size: unknown, now: Date = new Date()): Promise<VirtualAgentRow> {
   const checked = checkSize(size);
@@ -721,7 +730,14 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
       let launchToken: string | undefined;
       if (row.desired === "running" && (!row.has_token || STARTING_FROM.includes(row.status) || failedToApply(row))) {
         const minted = mintLaunchToken();
-        await tx.virtualAgent.update({ where: { id: row.id }, data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now } });
+        // The memory report goes with the token. Every reason to mint one is a new pod coming up, and two of them —
+        // an agent with no token, and `failedToApply`, which makes the reconcile apply afresh rather than leave the
+        // pod it has — reach here without any owner request to have cleared the figures first. Clearing again on the
+        // paths that did is free, and makes "a token this pod minted" and "figures this pod reported" the same thing.
+        await tx.virtualAgent.update({
+          where: { id: row.id },
+          data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now, ...NO_MEMORY_REPORT }
+        });
         launchToken = minted.token;
       }
       claimed.push({

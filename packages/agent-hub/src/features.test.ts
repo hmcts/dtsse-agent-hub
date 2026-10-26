@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { CLIENT_FEATURES } from "./features.ts";
 
-// Invariants rather than the list itself: adding a feature is meant to be one entry here plus the code that reads
-// the field, not an entry plus a test to update.
+// Invariants first, and then — deliberately, for the reason given below — a second copy of the list. Adding a
+// feature is an entry in `CLIENT_FEATURES`, the code that reads the field, and a name here.
 describe("CLIENT_FEATURES", () => {
   it("should name each feature once in the form the hub accepts", () => {
     expect(new Set(CLIENT_FEATURES).size).toBe(CLIENT_FEATURES.length);
@@ -12,36 +12,30 @@ describe("CLIENT_FEATURES", () => {
     }
   });
 
-  // **The one assertion that catches any name a merge drops.** This list and the hub's `ClientFeature` union are each
-  // a single line that two branches add to at once, and a resolution of such a line keeps one side's name and loses
-  // the other's — while still typechecking, because what is left is a shorter array of the same type. A count is the
-  // whole-list form of that check: it fails whichever name went, and it fails a name added without one, which is the
-  // same mistake in the other direction. The named assertions below are not this check repeated; they are for the
-  // two names whose loss is actively *misdiagnosed* to the person rather than merely silent.
+  // **The count, which is what catches a name going missing whichever one it is.** This list and the hub's
+  // `ClientFeature` union are each a single line, and every change that adds a feature edits those same two lines,
+  // so two branches doing it conflict and a resolution that takes either side drops the other's name. Nothing else
+  // would catch that: a shorter array of the same type still typechecks. A count also fails a name *added* without
+  // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
+  // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
     expect(CLIENT_FEATURES).toHaveLength(6);
   });
 
-  // The hub refuses to stop an answer on a session that did not claim this, and its UI offers no stop control at
-  // all, so dropping the claim would take the feature away silently rather than break anything that says so.
-  it("should claim stop, since the supervisor acts on the sessions stream's interrupt", () => {
-    expect(CLIENT_FEATURES).toContain("stop");
-  });
-
-  // Named, where `attachments`, `files` and `memory` are not, because losing this one is *misdiagnosed* rather than
-  // merely silent: the hub refuses a report without `anon_bytes`, and the Size section then tells the person their
-  // assistant is running an older version that cannot report its memory. The count above is what catches the loss;
-  // this says which loss it was, so whoever reads the failure is not left to work out which name went.
-  it("should claim memory-anon, since the hub requires anon_bytes in the memory report", () => {
-    expect(CLIENT_FEATURES).toContain("memory-anon");
-  });
-
-  // The other of the pair, and the one that proves the hazard is symmetric: `memory-anon` and `lookups` were added by
-  // separate branches to the same line, so whichever side a resolution of it takes, the other name goes. Misdiagnosed
-  // the same way — the hub answers a lookup from a pod that did not claim it with `unsupported`, and the search tells
-  // the person their assistant needs an update it will get on its next restart. It will not: the claim is missing
-  // from the published client, so restarting changes nothing.
-  it("should claim lookups, since the supervisor answers the sessions stream's lookup frame", () => {
-    expect(CLIENT_FEATURES).toContain("lookups");
+  /**
+   * **Every name, spelled out, and the duplication is the point.** The count above says a name went; this says which,
+   * so whoever reads the failure is not left to work it out. Adding a feature means a line here as well as the entry
+   * and the code that reads the field — the one place in this file that is deliberately not an invariant.
+   *
+   * What each loss costs, because they are not alike. `memory-anon` and `lookups` are *misdiagnosed* to the person
+   * rather than merely withheld: without the first, the hub refuses a report with no `anon_bytes` and the Size
+   * section says their assistant is an older version that cannot report its memory; without the second, the hub
+   * answers a lookup with `unsupported` and the search says their assistant needs an update it will get on its next
+   * restart — which it will not, the claim being missing from the published client. `stop`, `attachments`, `files`
+   * and `memory` are quieter: the feature is withheld and nothing says so, which is why these two are worth the
+   * words and those four are covered by being on the list at all.
+   */
+  it.each(["attachments", "files", "lookups", "memory", "memory-anon", "stop"])("should claim %s", (feature) => {
+    expect(CLIENT_FEATURES).toContain(feature);
   });
 });

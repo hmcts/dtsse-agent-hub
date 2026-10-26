@@ -123,14 +123,16 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
  * guarantee while merely working.
  *
  * `small` is bound at 4 by its **memory** request: 4 chats is 3.55Gi of the 4Gi it requests and a fifth would be
- * 4.20Gi, outside it. The CPU convention happens to land on the same figure — 5 sessions at 0.93 of its one CPU, a
- * sixth at 1.12 — but that agreement is a coincidence of the two formulas at this one size and is not what fixes the
- * cap. `medium` and `large` are bound by neither: their memory requests would hold 10 and 23 chats, the CPU
+ * 4.20Gi, outside it. Those two are the argument for the figure, so they are stated. The CPU convention happens to
+ * land on the same cap at this one size, but that agreement is a coincidence of the two formulas and is not what
+ * fixes it, so its arithmetic is left as the formula above rather than worked out here. `medium` and `large` are bound by neither: their memory requests would hold 10 and 23 chats, the CPU
  * convention 9 and 20. What binds those two is the evidence. No pod has been measured above two concurrent sessions,
  * and the one burst figure there is, 568m mean over a session's busiest 30s window with 26 throttled periods in it,
- * is of a single session alone. So they sit deliberately well inside both, 6 taking 65% of `medium`'s CPU request
- * and 8 taking 42% of `large`'s at the working mean. Raising them wants a pod driven deliberately with its full
- * complement busy at once, which is the measurement nobody has.
+ * is of a single session alone. So they sit deliberately well inside both: `(cap + 1) × 186m` against the CPU
+ * request, and `POD_BASELINE_MEMORY_BYTES + cap × CONVERSATION_MEMORY_BYTES` against the memory one, both well
+ * under at either size. As formulas rather than percentages, because a percentage is right only at the cap it was
+ * worked out at and goes stale on a line nothing conflicts with. Raising them wants a pod driven deliberately with
+ * its full complement busy at once, which is the measurement nobody has.
  */
 export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 4, medium: 6, large: 8 };
 

@@ -119,14 +119,15 @@ export interface MemoryReportRow {
  * it reads as a pod that is merely slow to answer, and the person waits for a report that cannot come.
  *
  * **Nothing here can tell whose pod a report came from**, so nothing here tries. What keeps a report this pod's is in
- * `virtual-agents/store.ts`: every path that bumps `pod_generation` drops the report and the outgoing pod's launch
- * token together (`NO_MEMORY_REPORT` beside `NO_TOKEN`), so the old figures go and nothing can put them back. A pod
- * reports phase `running` before its supervisor starts, so what is left is a gap with no report rather than one with
- * the wrong report.
+ * `virtual-agents/store.ts`: every path that asks for a new or replacement pod drops the report (`NO_MEMORY_REPORT`),
+ * and wherever the pod being replaced is still running it drops that pod's launch token too (`NO_TOKEN`), so the old
+ * figures go and nothing can put them back. Stopping is not one of those paths and keeps the figures deliberately,
+ * even though it bumps `pod_generation` as well. A pod reports phase `running` before its supervisor starts, so what
+ * is left is a gap with no report rather than one with the wrong report.
  *
- * The case none of that covers is a pod the kubelet restarted underneath the hub — after the OOM kill this warning is
- * about — where no `pod_generation` moved and the hub was never told it was replaced. The pod's report as it boots
- * bounds that to the new supervisor's start rather than closing it, and nothing in this function can.
+ * The case none of that covers is a pod replaced without the hub asking — the kubelet restarting one after the OOM
+ * kill this warning is about, where no row changed at all. The pod's report as it boots bounds that to the new
+ * supervisor's start rather than closing it, and nothing in this function can.
  */
 export function memoryUse(row: MemoryReportRow): MemoryUse {
   if (
@@ -272,12 +273,13 @@ export interface MemoryPressure {
  * the first place, so it is the figure a headroom question can be asked of at all. `memory.peak` is still reported and
  * still leads the section as the fuller account of what the pod has had to hold; it informs, it does not decide.
  *
- * **What this detects is a pod approaching an OOM kill, not a pod full of chats.** A pod's chats hold
- * `POD_BASELINE_MEMORY_BYTES + cap × CONVERSATION_MEMORY_BYTES`, and this threshold is `limit − one conversation`. So
- * the two meet only at a cap above `(limit − 2 × CONVERSATION_MEMORY_BYTES) / CONVERSATION_MEMORY_BYTES`, which is
- * around ten chats on `small` and far more on the larger sizes — several times any cap `CONVERSATION_SESSIONS` holds,
- * because the caps are chosen to keep chats inside a size's memory *request* and this sits a conversation under its
- * *limit*, which is double the request.
+ * **What this detects is a pod approaching an OOM kill, not a pod full of chats.** A pod at its cap holds
+ * `POD_BASELINE_MEMORY_BYTES + cap × CONVERSATION_MEMORY_BYTES`, and this threshold is `limit − one conversation`, so
+ * solving the first past the second puts the meeting point at a cap above
+ * `(limit − POD_BASELINE_MEMORY_BYTES − CONVERSATION_MEMORY_BYTES) / CONVERSATION_MEMORY_BYTES` — not quite ten chats
+ * on `small` and over twice that on `medium`, which is several times any cap `CONVERSATION_SESSIONS` holds, because
+ * the caps are chosen to keep chats inside a size's memory *request* and this sits a conversation under its *limit*,
+ * which is double the request.
  *
  * The formula rather than a table of results, deliberately: that bound depends only on the limit and the two
  * constants, so it never moves, where the figures either side of it move with every cap and go stale on a line
