@@ -1183,10 +1183,8 @@ describe("OnboardingChecklist", () => {
     );
   }
 
-  /**
-   * The live fault on the one page that could have shown the code: the credential was still stored, so the card said
-   * "✓ Connected" about the sign-in the pod had just reported it could not use.
-   */
+  // A card reads from both the credential and the sign-in, because nothing deletes a credential when its sign-in
+  // fails: storage alone would tick the one card whose sign-in the pod has just reported it could not use.
   it("should not call a stored sign-in connected when a later sign-in lapsed over it", () => {
     render(lapsedChecklist("expired"));
 
@@ -1201,6 +1199,52 @@ describe("OnboardingChecklist", () => {
 
     expect(screen.getByText("Last sign-in failed")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("sign-in failed");
+  });
+
+  // Nothing re-relays a sign-in by itself, so a card whose sign-in has lapsed needs the control that asks for one
+  // whether or not a value is still stored — and with none stored there is nothing to delete, so it does not say so.
+  it("should offer to sign in again, without promising a deletion, when a lapsed sign-in has nothing stored", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["atlassian"]}
+        statuses={[]}
+        logins={[login({ kind: "atlassian", state: "expired", expiresAt: "2026-10-05T11:59:00.000Z" })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect Atlassian (Jira & Confluence)" }));
+
+    const confirm = screen.getByRole("group", { name: "Confirm reconnecting Atlassian (Jira & Confluence)" });
+    expect(confirm.textContent).toContain("Restart this virtual agent");
+    expect(confirm.textContent).not.toContain("Delete");
+  });
+
+  // A card reading "Sign-in expired" over a tick saying the value is stored is the card disagreeing with itself, so
+  // a pasted key whose sign-in has lapsed is asked for again rather than ticked.
+  it("should ask for a pasted key again, and not tick it, when a later sign-in lapsed over it", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["claude"]}
+        statuses={[stored("claude")]}
+        logins={[login({ kind: "claude", state: "expired", expiresAt: "2026-10-05T11:59:00.000Z" })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.queryByText("✓ Stored")).toBeNull();
+    expect(screen.getByText("Sign-in expired")).toBeTruthy();
+    expect(screen.getByRole("form", { name: "Save your Claude token" })).toBeTruthy();
   });
 
   it("should still call a stored sign-in connected when the failure came before it was stored", () => {

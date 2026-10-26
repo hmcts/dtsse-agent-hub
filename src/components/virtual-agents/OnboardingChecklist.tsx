@@ -53,18 +53,26 @@ export function checklistState(stored: boolean, login: LoginView | undefined, no
 }
 
 /**
- * What a sign-in card says beside its name, by where `connectionState` says the sign-in stands. One table, so the
- * card the owner is looking at and the tick on it cannot say different things: a stored credential a pod has just
- * failed to use is not "✓ Connected", and a card claiming it is leaves the owner nothing to act on.
+ * What a card says beside its name, by where `connectionState` says its credential stands. One table for every card,
+ * so the words and the tick on them cannot say different things: a stored credential a pod has just failed to use is
+ * not connected, and a card claiming it is leaves the owner nothing to act on.
+ *
+ * The Assistant's `CONNECTION_DETAILS` words the same states for a person reading their own sign-ins. These are this
+ * page's words for an owner reading one agent's credentials, which is a different question: a tick for the cards that
+ * carry one, and "waiting" meaning waiting for the agent to ask rather than "not connected".
  */
 const SIGN_IN_DETAIL: Record<ConnectionState, string> = {
   connected: "✓ Connected",
+  finishing: "Finishing signing in",
   refreshing: "Sign-in waiting for you",
   "signing-in": "Sign-in waiting for you",
   expired: "Sign-in expired",
   failed: "Last sign-in failed",
   waiting: "Waiting for your virtual agent to ask"
 };
+
+/** The same states for a key the owner pastes, where the question is whether a value is there rather than signed in. */
+const PASTED_DETAIL: Record<ConnectionState, string> = { ...SIGN_IN_DETAIL, connected: "✓ Stored", waiting: "Not stored" };
 
 /** Why a lapsed sign-in lapsed, which is what says whether the owner has a code to enter or a failure to read. */
 function lapsedLine(kind: CredentialKind, state: ConnectionState): string {
@@ -155,33 +163,72 @@ function Header({ kind, detail, ticked, children }: { kind: CredentialKind; deta
   );
 }
 
-/** A stored key is not asked for again; the pencil opens the box to replace it. */
-function PastedCard({ kind, stored, save }: { kind: CredentialKind; stored: boolean; save: FormAction }) {
+/**
+ * A key whose value is there and nothing says otherwise is not asked for again; the pencil opens the box to replace
+ * it. A stored key a later sign-in lapsed over is asked for, because the card beside it says it has stopped working
+ * and a tick with nothing to press would be the card disagreeing with its own alert.
+ */
+function PastedCard({ kind, stored, state, save }: { kind: CredentialKind; stored: boolean; state: ConnectionState; save: FormAction }) {
   const [replacing, setReplacing] = useState(false);
   const title = pastedName(kind);
+  const usable = state === "connected";
   return (
     <>
-      <Header kind={kind} detail={stored ? "✓ Stored" : "Not stored"} ticked={stored}>
-        {stored && !replacing ? (
+      <Header kind={kind} detail={PASTED_DETAIL[state]} ticked={usable}>
+        {usable && !replacing ? (
           <button type="button" className={ICON_BUTTON} aria-label={`Replace your ${title}`} onClick={() => setReplacing(true)}>
             <PencilIcon />
           </button>
         ) : null}
       </Header>
       {kind === "jenkins" ? <JenkinsHint /> : null}
-      {!stored ? <PasteCredential kind={kind} stored={false} save={save} /> : null}
-      {stored && replacing ? <PasteCredential kind={kind} stored save={save} onCancel={() => setReplacing(false)} /> : null}
+      {!usable ? <PasteCredential kind={kind} stored={stored} save={save} /> : null}
+      {usable && replacing ? <PasteCredential kind={kind} stored save={save} onCancel={() => setReplacing(false)} /> : null}
     </>
   );
 }
 
+/** What the confirmation asks and what the button that answers it is called, by what the action will actually do. */
+function reconnectWords(title: string, stored: boolean, running: boolean): { question: string; confirm: string } {
+  if (!stored) {
+    // Nothing to delete: the value went with the sign-in, or there never was one. All this does is restart.
+    return {
+      question: running
+        ? `Restart this virtual agent so it asks you to sign in to ${title} again?`
+        : `Have this virtual agent sign in to ${title} again? It is stopped, so it asks you when it next starts.`,
+      confirm: `Reconnect ${title}`
+    };
+  }
+  return {
+    question: running
+      ? `Delete your stored ${title} sign-in, which all your virtual agents use, and restart this one so it asks you to sign in again?`
+      : `Delete your stored ${title} sign-in, which all your virtual agents use? This one is stopped, so it asks you to sign in when it next starts.`,
+    confirm: running ? `Reconnect ${title}` : `Delete ${title} sign-in`
+  };
+}
+
 /**
- * Signing in again deletes the owner's stored credential, which all their virtual agents use, so it asks first. A
- * running agent restarts to relay a fresh sign-in; a stopped one asks when it next starts.
+ * Signing in again restarts the agent so its pod relays a fresh sign-in, and deletes the owner's stored credential on
+ * the way if there is one — which all their virtual agents use, so it asks first and says so. A stopped agent asks
+ * when it next starts. Offered for a lapsed sign-in with nothing stored too: nothing re-relays by itself, so without
+ * it that card is a card saying the sign-in is dead with no way to ask for another.
  */
-function Reconnect({ virtualAgentId, kind, running, reconnect }: { virtualAgentId: string; kind: CredentialKind; running: boolean; reconnect: FormAction }) {
+function Reconnect({
+  virtualAgentId,
+  kind,
+  stored,
+  running,
+  reconnect
+}: {
+  virtualAgentId: string;
+  kind: CredentialKind;
+  stored: boolean;
+  running: boolean;
+  reconnect: FormAction;
+}) {
   const [confirming, setConfirming] = useState(false);
   const title = TITLES[kind];
+  const words = reconnectWords(title, stored, running);
   if (!confirming) {
     return (
       <button type="button" className={ICON_BUTTON} aria-label={`Reconnect ${title}`} onClick={() => setConfirming(true)}>
@@ -191,17 +238,13 @@ function Reconnect({ virtualAgentId, kind, running, reconnect }: { virtualAgentI
   }
   return (
     <div className="basis-full space-y-2 pt-2" role="group" aria-label={`Confirm reconnecting ${title}`}>
-      <p className="text-sm text-hub-text">
-        {running
-          ? `Delete your stored ${title} sign-in, which all your virtual agents use, and restart this one so it asks you to sign in again?`
-          : `Delete your stored ${title} sign-in, which all your virtual agents use? This one is stopped, so it asks you to sign in when it next starts.`}
-      </p>
+      <p className="text-sm text-hub-text">{words.question}</p>
       <div className="flex flex-wrap items-start gap-2">
         <ActionForm action={reconnect} label={`Reconnect ${title}`}>
           <input type="hidden" name="id" value={virtualAgentId} />
           <input type="hidden" name="kind" value={kind} />
-          <button type="submit" className={DANGER}>
-            {running ? `Reconnect ${title}` : `Delete ${title} sign-in`}
+          <button type="submit" className={stored ? DANGER : BUTTON}>
+            {words.confirm}
           </button>
         </ActionForm>
         <button type="button" className={SECONDARY} onClick={() => setConfirming(false)}>
@@ -235,7 +278,7 @@ function Card({
 }) {
   const stored = status?.stored === true;
   const state = checklistState(stored, login, now);
-  const connection = connectionState(state, login, status);
+  const connection = connectionState(state, login, status, now);
   let body: React.ReactNode;
   if (state === "login" && login !== undefined) {
     body = (
@@ -245,13 +288,13 @@ function Card({
       </>
     );
   } else if (isPasted(kind)) {
-    body = <PastedCard kind={kind} stored={stored} save={save} />;
+    body = <PastedCard kind={kind} stored={stored} state={connection} save={save} />;
   } else {
     body = (
       <>
         <Header kind={kind} detail={SIGN_IN_DETAIL[connection]} ticked={connection === "connected"}>
-          {stored && desired !== "deleted" ? (
-            <Reconnect virtualAgentId={virtualAgentId} kind={kind} running={desired === "running"} reconnect={reconnect} />
+          {(stored || hasLapsed(connection)) && desired !== "deleted" ? (
+            <Reconnect virtualAgentId={virtualAgentId} kind={kind} stored={stored} running={desired === "running"} reconnect={reconnect} />
           ) : null}
         </Header>
         {kind === "atlassian" ? <AtlassianHint /> : null}

@@ -164,11 +164,8 @@ describe("the Assistant's settings cog", () => {
     expect(cog().textContent).toBe("!");
   });
 
-  /**
-   * The live fault, as the cog saw it: an Atlassian credential stored, two relayed codes that ran out unused, and no
-   * mark at all — `connectionState` answered "connected" for anything stored, so the badge built for a lapsed
-   * sign-in could never be reached.
-   */
+  // The badge for a lapsed optional sign-in is reachable only because a stored credential is not on its own counted
+  // as connected: a credential outlives the sign-in that failed to replace it, so storage alone would clear the mark.
   it("should say Atlassian needs attention when a stored sign-in is the one a later sign-in lapsed over", () => {
     const stale = login("atlassian", "expired", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
     render(<AssistantSettings connections={data(ALL_SIGNED_IN, [stale])} />);

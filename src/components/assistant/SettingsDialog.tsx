@@ -57,6 +57,8 @@ export const SETTINGS_TWO_PANE = `(min-width: ${SETTINGS_TWO_PANE_MIN_WIDTH}px)`
 
 const STATE_CLASS: Record<Connection["state"], string> = {
   connected: "text-asst-ok",
+  // The person has sent the code back and the pod has yet to collect it, so there is nothing for them to do.
+  finishing: "text-asst-muted",
   // A relayed sign-in is a wait on the person whether or not a credential sits behind it: a pod relays a code
   // because it cannot finish without them, so it is coloured as something to do rather than as a quiet renewal.
   refreshing: "text-asst-accent-soft",
@@ -613,7 +615,7 @@ export function AssistantSettings({
   // unmounts when it closes, would otherwise reopen showing a choice the page has moved on from.
   const [shownTheme, setShownTheme] = useState<Theme>(theme);
 
-  const list = connections(data, (stored, login) => checklistState(stored, login, now));
+  const list = connections(data, checklistState, now);
   const warning = connectionsWarning(list);
   const memory = size === undefined ? null : memoryWarning(memoryPressure(size.view.use, size.view.openChats, size.view.size));
   // In the order the dialog's sections come, so the name reads as a route through it. Empty is no mark at all.
