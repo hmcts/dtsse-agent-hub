@@ -16,21 +16,41 @@ import {
   hasLapsed,
   inWords,
   isConnection,
-  isUsable,
+  lapsedSinceStored,
+  needsPerson,
   OFFERED_OPTIONAL,
   offeredConnections,
   PROMPTED_CONNECTIONS,
-  PROMPTED_WHEN_LAPSED
+  PROMPTED_WHEN_ASKED,
+  type StoredCredential,
+  signInPrompt
 } from "./connections.ts";
 
 const NOW = Date.parse("2026-10-25T12:00:00.000Z");
 
+/** When a stored credential was saved, and a sign-in either side of it, so the two can be ordered on purpose. */
+const STORED_AT = "2026-10-24T09:00:00.000Z";
+const BEFORE_STORED = "2026-10-23T09:00:00.000Z";
+const AFTER_STORED = "2026-10-25T11:00:00.000Z";
+
 function status(kind: CredentialKind, stored: boolean, accountLabel: string | null = null): CredentialStatus {
-  return { kind, stored, accountLabel, updatedAt: stored ? "2026-10-24T09:00:00.000Z" : null, updatedVia: stored ? "pod" : null };
+  return { kind, stored, accountLabel, updatedAt: stored ? STORED_AT : null, updatedVia: stored ? "pod" : null };
 }
 
-function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(NOW + 600_000).toISOString()): LoginView {
-  return { kind, prompt: "device_code", userCode: "ABCD-1234", verificationUri: "https://example.com/device", expiresAt, state, codeWaiting: false };
+/** What `connectionState` needs of a credential: whether one is stored, and when it was last saved. */
+function held(updatedAt: string | null = STORED_AT): StoredCredential {
+  return { stored: true, updatedAt };
+}
+
+const NONE: StoredCredential = { stored: false, updatedAt: null };
+
+function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(NOW + 600_000).toISOString(), updatedAt = BEFORE_STORED): LoginView {
+  return { kind, prompt: "device_code", userCode: "ABCD-1234", verificationUri: "https://example.com/device", expiresAt, state, updatedAt, codeWaiting: false };
+}
+
+/** A sign-in that lapsed after the credential it was to replace was saved: the credential the pod could not use. */
+function lapsed(kind: CredentialKind, state: "expired" | "failed" = "expired"): LoginView {
+  return login(kind, state, new Date(NOW - 600_000).toISOString(), AFTER_STORED);
 }
 
 /** The checklist the virtual agent's own page uses, which `connections` is given rather than reimplementing. */
@@ -78,49 +98,91 @@ describe("isConnection", () => {
 
 describe("connectionState", () => {
   it("should be connected when the credential is stored", () => {
-    expect(connectionState("stored", undefined, true)).toBe("connected");
+    expect(connectionState("stored", undefined, held())).toBe("connected");
   });
 
   it("should be connected when the credential is stored and an older sign-in failed", () => {
-    expect(connectionState("stored", login("github", "failed"), true)).toBe("connected");
+    expect(connectionState("stored", login("github", "failed"), held())).toBe("connected");
   });
 
   it("should be signing in when a sign-in is waiting for a person who has none stored", () => {
-    expect(connectionState("login", login("github", "pending"), false)).toBe("signing-in");
+    expect(connectionState("login", login("github", "pending"), NONE)).toBe("signing-in");
   });
 
   it("should be refreshing when a sign-in is relayed for a credential that is already stored", () => {
-    expect(connectionState("login", login("github", "pending"), true)).toBe("refreshing");
+    expect(connectionState("login", login("github", "pending"), held())).toBe("refreshing");
   });
 
   it("should be waiting when nothing is stored and no sign-in has been asked for", () => {
-    expect(connectionState("waiting", undefined, false)).toBe("waiting");
+    expect(connectionState("waiting", undefined, NONE)).toBe("waiting");
+  });
+
+  it("should be waiting when nothing is known about the credential at all", () => {
+    expect(connectionState("waiting", undefined, undefined)).toBe("waiting");
   });
 
   it("should be waiting when a sign-in completed but its credential is no longer stored", () => {
-    expect(connectionState("waiting", login("github", "completed"), false)).toBe("waiting");
+    expect(connectionState("waiting", login("github", "completed"), NONE)).toBe("waiting");
   });
 
   it("should be failed when the last sign-in failed and nothing is stored", () => {
-    expect(connectionState("waiting", login("azure", "failed"), false)).toBe("failed");
+    expect(connectionState("waiting", login("azure", "failed"), NONE)).toBe("failed");
   });
 
   it("should be expired when the last sign-in expired and nothing is stored", () => {
-    expect(connectionState("waiting", login("azure", "expired"), false)).toBe("expired");
+    expect(connectionState("waiting", login("azure", "expired"), NONE)).toBe("expired");
   });
 
   it("should be expired when a sign-in is still pending but its code ran out", () => {
-    expect(connectionState("waiting", login("azure", "pending", new Date(NOW - 1000).toISOString()), false)).toBe("expired");
+    expect(connectionState("waiting", login("azure", "pending", new Date(NOW - 1000).toISOString()), NONE)).toBe("expired");
+  });
+
+  /**
+   * The live fault: a pod's restore of the stored sign-in was rejected, it relayed two codes, both ran out, and
+   * every surface still read "✓ Connected" because a credential is never deleted when its sign-in fails.
+   */
+  it("should be expired when the credential is stored and a later sign-in expired over it", () => {
+    expect(connectionState("stored", lapsed("atlassian"), held())).toBe("expired");
+  });
+
+  it("should be failed when the credential is stored and a later sign-in failed over it", () => {
+    expect(connectionState("stored", lapsed("atlassian", "failed"), held())).toBe("failed");
+  });
+
+  it("should be expired when the credential is stored with no record of when it was saved and a sign-in lapsed", () => {
+    expect(connectionState("stored", lapsed("atlassian"), held(null))).toBe("expired");
   });
 });
 
-describe("isUsable", () => {
-  it.each(["connected", "refreshing"] as const)("should count %s as a sign-in the person can use", (state) => {
-    expect(isUsable(state)).toBe(true);
+describe("lapsedSinceStored", () => {
+  it("should count a sign-in that lapsed after the credential was saved when asked", () => {
+    expect(lapsedSinceStored(lapsed("atlassian"), held())).toBe(true);
   });
 
-  it.each(["signing-in", "expired", "failed", "waiting"] as const)("should not count %s as a sign-in the person can use", (state) => {
-    expect(isUsable(state)).toBe(false);
+  it("should not count a sign-in that lapsed before the credential was saved when asked", () => {
+    expect(lapsedSinceStored(login("atlassian", "failed"), held())).toBe(false);
+  });
+
+  it.each(["pending", "completed"] as const)("should not count a %s sign-in, which says nothing has gone wrong", (state) => {
+    expect(lapsedSinceStored(login("atlassian", state, undefined, AFTER_STORED), held())).toBe(false);
+  });
+
+  it("should not count anything when there is no sign-in to go on", () => {
+    expect(lapsedSinceStored(undefined, held())).toBe(false);
+  });
+
+  it("should count a lapsed sign-in with nothing stored, which there is nothing newer to contradict", () => {
+    expect(lapsedSinceStored(login("atlassian", "expired"), NONE)).toBe(true);
+  });
+});
+
+describe("needsPerson", () => {
+  it.each(["refreshing", "signing-in", "expired", "failed"] as const)("should count %s as a sign-in only the person can finish", (state) => {
+    expect(needsPerson(state)).toBe(true);
+  });
+
+  it.each(["connected", "waiting"] as const)("should not count %s as a sign-in waiting on the person", (state) => {
+    expect(needsPerson(state)).toBe(false);
   });
 });
 
@@ -189,6 +251,20 @@ describe("connections", () => {
     expect(row).toMatchObject({ state: "failed", detail: "Last sign-in failed" });
   });
 
+  // What the incident looked like from the person's side: a stored Atlassian sign-in, two relayed codes that ran out
+  // unused, and a row reading "Connected" on every surface that shows one.
+  it("should say the sign-in expired when a stored credential is the one a later sign-in lapsed over", () => {
+    const [row] = list(["atlassian"], [status("atlassian", true, "alice@hmcts.net")], [lapsed("atlassian")]);
+
+    expect(row).toMatchObject({ state: "expired", detail: "Sign-in expired", accountLabel: "alice@hmcts.net" });
+  });
+
+  it("should still say the person is connected when a sign-in failed before their credential was stored", () => {
+    const [row] = list(["atlassian"], [status("atlassian", true)], [login("atlassian", "failed")]);
+
+    expect(row).toMatchObject({ state: "connected", detail: "Connected" });
+  });
+
   it("should ignore a status and a sign-in for another kind when it builds a row", () => {
     const [row] = list(["github"], [status("azure", true)], [login("azure", "pending")]);
 
@@ -213,9 +289,9 @@ describe("connectionsWarning", () => {
     expect(connectionsWarning(rows)).toBeNull();
   });
 
-  it("should prompt about the needed sign-ins and, once lapsed, the optional one", () => {
+  it("should prompt about the needed sign-ins and, once their assistant has asked, the optional one", () => {
     expect([...PROMPTED_CONNECTIONS]).toEqual(["github", "azure"]);
-    expect([...PROMPTED_WHEN_LAPSED]).toEqual(["atlassian"]);
+    expect([...PROMPTED_WHEN_ASKED]).toEqual(["atlassian"]);
   });
 
   it("should be nothing when there are no sign-ins to report on", () => {
@@ -241,16 +317,30 @@ describe("connectionsWarning", () => {
     expect(connectionsWarning(rows)).toBe("GitHub, Azure and Atlassian need your attention");
   });
 
+  // The badge the lapsed-sign-in rule exists to raise: everything is stored, so nothing else on any surface says
+  // the stored Atlassian sign-in is the one the pod could not use.
+  it("should warn about a stored sign-in that a later sign-in lapsed over", () => {
+    const rows = list(
+      ["github", "azure", "atlassian"],
+      [status("github", true), status("azure", true), status("atlassian", true)],
+      [lapsed("atlassian", "failed")]
+    );
+
+    expect(connectionsWarning(rows)).toBe("Atlassian needs your attention");
+  });
+
   it("should warn when a needed sign-in is still waiting for the person", () => {
     const rows = list(["github", "azure", "atlassian"], [status("azure", true), status("atlassian", true)], [login("github", "pending")]);
 
     expect(connectionsWarning(rows)).toBe("GitHub needs your attention");
   });
 
-  it("should not warn about a sign-in being refreshed behind one that is already stored", () => {
+  // A relayed code is a wait on the person whatever is stored behind it: nobody but them can enter it, and the one
+  // that nothing told anybody about ran out in two minutes.
+  it("should warn about a sign-in relayed behind one that is already stored", () => {
     const rows = list(["github", "azure", "atlassian"], [status("github", true), status("azure", true)], [login("github", "pending")]);
 
-    expect(connectionsWarning(rows)).toBeNull();
+    expect(connectionsWarning(rows)).toBe("GitHub needs your attention");
   });
 
   it("should not warn about an optional sign-in nobody ever set up", () => {
@@ -265,11 +355,21 @@ describe("connectionsWarning", () => {
     expect(connectionsWarning(rows)).toBe("Atlassian needs your attention");
   });
 
-  it("should not warn about an optional sign-in that is merely being refreshed", () => {
+  it("should warn about an optional sign-in their assistant has relayed a code for", () => {
     const rows = list(
       ["github", "azure", "atlassian"],
       [status("github", true), status("azure", true), status("atlassian", true)],
       [login("atlassian", "pending")]
+    );
+
+    expect(connectionsWarning(rows)).toBe("Atlassian needs your attention");
+  });
+
+  it("should not warn about an optional sign-in that is over and done with", () => {
+    const rows = list(
+      ["github", "azure", "atlassian"],
+      [status("github", true), status("azure", true), status("atlassian", true)],
+      [login("atlassian", "completed")]
     );
 
     expect(connectionsWarning(rows)).toBeNull();
@@ -291,6 +391,51 @@ describe("connectionsWarning", () => {
     const rows = connections({ kinds: [...PROMPTED_CONNECTIONS], statuses: [], logins: [], unavailable: "no Key Vault here" }, checklist);
 
     expect(connectionsWarning(rows)).toBeNull();
+  });
+});
+
+/**
+ * The ask that has to reach someone already sitting in the Assistant. Nothing they were looking at showed them the
+ * relayed code: the getting-ready screen had latched itself out for the visit, the Jira footer only shows one while
+ * an export is pending, and every row read as connected.
+ */
+describe("signInPrompt", () => {
+  const CONNECTED = [status("github", true), status("azure", true), status("atlassian", true)];
+
+  it("should have nothing to say when every sign-in is connected", () => {
+    expect(signInPrompt(list(["github", "azure", "atlassian"], CONNECTED))).toBeNull();
+  });
+
+  it("should have nothing to say about a sign-in nobody ever set up, which the connect ask covers", () => {
+    expect(signInPrompt(list(["github", "azure", "atlassian"], []))).toBeNull();
+  });
+
+  it("should name the sign-in when a code is waiting behind a stored credential", () => {
+    const prompt = signInPrompt(list(["github", "azure", "atlassian"], CONNECTED, [login("atlassian", "pending")]));
+
+    expect(prompt).toEqual({
+      label: "Sign in again",
+      message: "Your assistant is waiting for you to sign in to Atlassian.",
+      action: "Show the sign-in"
+    });
+  });
+
+  it("should name the sign-in when a stored credential is the one a later sign-in lapsed over", () => {
+    expect(signInPrompt(list(["github", "azure", "atlassian"], CONNECTED, [lapsed("atlassian")]))?.message).toBe(
+      "Your assistant is waiting for you to sign in to Atlassian."
+    );
+  });
+
+  it("should name every sign-in waiting on the person when more than one is", () => {
+    const rows = list(["github", "azure", "atlassian"], CONNECTED, [login("github", "pending"), lapsed("atlassian", "failed")]);
+
+    expect(signInPrompt(rows)?.message).toBe("Your assistant is waiting for you to sign in to GitHub and Atlassian.");
+  });
+
+  it("should have nothing to say when the hub cannot read the credentials, since it knows of no sign-in at all", () => {
+    const rows = connections({ kinds: ["github", "atlassian"], statuses: [], logins: [lapsed("atlassian")], unavailable: "no Key Vault here" }, checklist);
+
+    expect(signInPrompt(rows)).toBeNull();
   });
 });
 

@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { type ConnectionsPrompt, type Connector, connectionsPrompt, offeredConnections } from "@/assistant/connections";
+import {
+  CONNECTION_DETAILS,
+  type ConnectionsPrompt,
+  type Connector,
+  connectionState,
+  connections,
+  connectionsPrompt,
+  hasLapsed,
+  offeredConnections,
+  signInPrompt
+} from "@/assistant/connections";
 import { type ConnectionsAsk, connectionsAsk } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
@@ -139,39 +149,73 @@ function SignIn({ assistantId, login, name, paste }: { assistantId: string; logi
   );
 }
 
+/**
+ * The way back from a sign-in the assistant cannot finish on its own: the stored credential goes and the assistant
+ * restarts, so its pod finds none and relays a fresh code. The only thing a person can do about a credential their
+ * pod has already failed to use — nothing on this screen can mend the stored value, and waiting does not either,
+ * because the pod asks again only when it next starts.
+ *
+ * The consequence is said beside the button rather than behind a confirmation, because this row is only ever offered
+ * for a sign-in that has already stopped working: there is nothing here to lose.
+ */
+function SignInAgain({ assistantId, kind, name, reconnect }: { assistantId: string; kind: CredentialKind; name: string; reconnect: FormAction }) {
+  return (
+    <div className="flex flex-col gap-1.5 text-[13px] text-asst-body">
+      <p>Your assistant could not use your saved {name} sign-in. Signing in again restarts it; your chats are kept.</p>
+      <ActionForm action={reconnect} label={`Sign in to ${name} again`} className="flex flex-wrap items-center gap-2">
+        <input type="hidden" name="id" value={assistantId} />
+        <input type="hidden" name="kind" value={kind} />
+        <button type="submit" className={PRIMARY}>
+          Sign in again
+        </button>
+      </ActionForm>
+    </div>
+  );
+}
+
 function ConnectionRow({
   kind,
   connector,
-  stored,
+  status,
   login,
   assistantId,
   starting,
   paste,
   save,
+  reconnect,
   now,
   first
 }: {
   kind: CredentialKind;
   connector: Connector;
-  stored: boolean;
+  status: CredentialStatus | undefined;
   login: LoginView | undefined;
   assistantId: string;
   starting: boolean;
   paste: FormAction;
   save: FormAction;
+  reconnect: FormAction;
   now: number;
   first: boolean;
 }) {
   const [connecting, setConnecting] = useState(false);
-  const state = checklistState(stored, login, now);
+  const answer = checklistState(status?.stored === true, login, now);
+  const state = connectionState(answer, login, status);
   // What the person pastes to connect this one, or `null` when their assistant signs in and relays a code. The
   // connector's own answer, so a kind with no sign-in behind it is never offered a note about one never coming.
   const pasted = connector.paste;
+  // A stored sign-in the assistant made for itself and has since failed to use, which is the one case the row has an
+  // action of its own for: nothing here can mend a stored value, and the pod asks again only when it next starts.
+  // Anything the person pastes keeps offering its box, and a lapsed sign-in with nothing stored is one the pod still
+  // needs and will ask for again by itself.
+  const again = hasLapsed(state) && pasted === null && status?.stored === true;
   let right: React.ReactNode;
-  if (state === "stored") {
+  if (state === "connected") {
     right = <span className="shrink-0 text-[13px] font-medium text-asst-ok">✓ Connected</span>;
-  } else if (state === "login" || (!pasted && (connecting || starting))) {
-    right = <span className="shrink-0 text-[13px] text-asst-accent-soft">{state === "login" ? "Waiting for you" : "Connecting…"}</span>;
+  } else if (again) {
+    right = <span className="shrink-0 text-[13px] text-asst-warn">{CONNECTION_DETAILS[state]}</span>;
+  } else if (answer === "login" || (!pasted && (connecting || starting))) {
+    right = <span className="shrink-0 text-[13px] text-asst-accent-soft">{answer === "login" ? "Waiting for you" : "Connecting…"}</span>;
   } else {
     right = (
       <button
@@ -187,11 +231,13 @@ function ConnectionRow({
   // a field for the same credential, side by side, is two password boxes posting to different places, and a token
   // typed into the code box reaches the pod and comes back only as a sign-in that did not work.
   let below: React.ReactNode = null;
-  if (state === "login" && login !== undefined) {
+  if (answer === "login" && login !== undefined) {
     // The live sign-in wins over anything the person clicked before it arrived, which on the Claude row is the usual
     // order: they ask to connect, and the pod relays its code a moment later.
     below = <SignIn assistantId={assistantId} login={login} name={connector.name} paste={paste} />;
-  } else if (state !== "stored" && connecting && pasted !== null) {
+  } else if (again) {
+    below = <SignInAgain assistantId={assistantId} kind={kind} name={connector.name} reconnect={reconnect} />;
+  } else if (state !== "connected" && connecting && pasted !== null) {
     below = (
       <ActionForm action={save} label={`Save your ${pasted}`} className="flex flex-wrap items-center gap-2">
         <input type="hidden" name="kind" value={kind} />
@@ -201,7 +247,7 @@ function ConnectionRow({
         </button>
       </ActionForm>
     );
-  } else if (state !== "stored" && connecting) {
+  } else if (state !== "connected" && connecting) {
     below = <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>;
   }
   return (
@@ -217,7 +263,7 @@ function ConnectionRow({
         {right}
       </div>
       {below}
-      {state !== "login" && login?.state === "failed" ? (
+      {hasLapsed(state) && !again ? (
         <p role="alert" className="text-xs text-asst-error">
           That sign-in did not work. Your assistant will ask again.
         </p>
@@ -318,6 +364,10 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
  *
  * `onLeave` is how the screen is closed while a connection is still missing, and it is why the screen may cover the
  * page at all: it is a thing the person opened from the banner and can close again, not a gate across the Assistant.
+ *
+ * A row whose stored credential a pod has failed to use reads as lapsed rather than connected, and offers `reconnect`:
+ * nothing else on this screen can mend a stored value, so without it the one row that needs the person is the one
+ * with nothing on it to press.
  */
 export function GettingReady({
   assistant,
@@ -325,6 +375,7 @@ export function GettingReady({
   unavailable,
   paste,
   save,
+  reconnect,
   onDone,
   onLeave,
   returning = false,
@@ -333,13 +384,13 @@ export function GettingReady({
   statuses: CredentialStatus[];
   paste: FormAction;
   save: FormAction;
+  reconnect: FormAction;
   onDone: () => void;
   onLeave?: () => void;
   returning?: boolean;
 }) {
   const now = useNow();
   const ask = connectionsAsk(assistant.onboarded, unavailable);
-  const stored = (kind: CredentialKind) => statuses.some((status) => status.kind === kind && status.stored);
   const offered = offeredConnections(assistant);
   const starting = !assistant.readiness.failed && assistant.status !== "running";
   return (
@@ -356,12 +407,13 @@ export function GettingReady({
               key={kind}
               kind={kind}
               connector={connector}
-              stored={stored(kind)}
+              status={statuses.find((status) => status.kind === kind)}
               login={assistant.logins.find((login) => login.kind === kind)}
               assistantId={assistant.id}
               starting={starting}
               paste={paste}
               save={save}
+              reconnect={reconnect}
               now={now}
               first={index === 0}
             />
@@ -555,14 +607,27 @@ function storedKinds(statuses: CredentialStatus[]): Set<CredentialKind> {
  * connect it again, and a screen on it would be satisfied only by the credentials the hub is failing to read. They
  * are told why once instead, on a banner they can send away, and that is remembered in the same cookie a wait's is,
  * so moving between pages does not bring it back.
+ *
+ * A sign-in the pod is holding for the person is the one ask none of those latches may hide. It is read live from the
+ * sign-ins rather than from how far the assistant has got, for two reasons: a relay arriving after the page loaded
+ * finds `waiting` and `ranOnce` already settled for the visit, and the assistant does not stay in `awaiting_login`
+ * anyway — the last code dying takes it back to `running`, so a surface keyed to the status has nothing to show by
+ * the time the codes have run out. It is a banner, like every other ask here, and the screen behind it opens only
+ * when the person presses it: a code waiting is not worth taking away the conversation they are in the middle of.
  */
 export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean }) {
   const { assistant } = props;
   const visit = useVisit();
+  // Read once rather than on a timer. All it decides is whether a relayed code is still live, and the ask has to
+  // outlast the code either way: a banner that went quiet as the code ran out would take away the only thing saying
+  // a sign-in is waiting, at the moment it most needs saying. It is also every Assistant page, so a clock here is a
+  // re-render every few seconds for a deadline nobody is watching.
+  const [now] = useState(() => Date.now());
   const ask = connectionsAsk(assistant.onboarded, props.unavailable);
   const [needed] = useState(ask === "connect");
   const [waiting] = useState(ask === "done" && assistant.status !== "running");
   const [done, setDone] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [view, setView] = useState<"screen" | "notice" | "gone">(() => initialView(ask, dismissed));
   const running = assistant.status === "running";
   // Latched while rendering rather than in an effect, which runs after paint: the frame the person would see at the
@@ -592,10 +657,19 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
     setView("gone");
     rememberDismissal(assistant, true);
   }, [assistant]);
+  const stopAsking = useCallback(() => setAsking(false), []);
+  // Every sign-in the hub can see, so what the banner says is the same answer the cog badges on. Empty while the
+  // credentials cannot be read, which is the one case nothing here is allowed to make a claim about.
+  const rows = connections(
+    { kinds: [...assistant.needed, ...assistant.optional], statuses: props.statuses, logins: assistant.logins, unavailable: props.unavailable },
+    (stored, login) => checklistState(stored, login, now)
+  );
+  const relayed = signInPrompt(rows);
   const onboarding = (ask === "connect" || (needed && !done)) && view === "screen";
   const unknown = ask === "unknown" && view === "screen";
   const screen = waiting && !started && !onboarding && !unknown && view === "screen";
-  useEscape(onboarding || unknown || screen, unknown ? hide : dismiss);
+  const signIn = relayed !== null && asking && !onboarding && !unknown && !screen;
+  useEscape(onboarding || unknown || screen || signIn, unknown ? hide : signIn ? stopAsking : dismiss);
   if (onboarding) {
     return <GettingReady {...props} onDone={() => setDone(true)} onLeave={dismiss} />;
   }
@@ -609,12 +683,20 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
       <WarmingUp assistant={assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} />
     );
   }
+  if (signIn) {
+    return <GettingReady {...props} returning onDone={stopAsking} />;
+  }
   // Sent away for good, which only an `unknown` is ever allowed to be: an ask with something still to connect
   // outlasts anything the person closes, because it is the only thing telling them why nothing works.
   const silenced = view === "gone" && ask === "unknown";
   const prompt = silenced ? null : connectionsPrompt(ask, assistant.needed, storedKinds(props.statuses));
   if (prompt !== null) {
     return <ConnectionsBanner prompt={prompt} onShow={show} onHide={ask === "unknown" ? hide : undefined} />;
+  }
+  // Not hideable, for the same reason the ask to connect is not: it is the only thing telling the person their
+  // assistant is holding a code for them, and it clears itself the moment they have used it.
+  if (relayed !== null) {
+    return <ConnectionsBanner prompt={relayed} onShow={() => setAsking(true)} />;
   }
   // Only for a wait this visit began on: someone who arrives to an assistant already up is not shown the end of a
   // wait they never saw, however recently they sent one away.

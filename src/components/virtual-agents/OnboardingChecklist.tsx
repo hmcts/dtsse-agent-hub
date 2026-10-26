@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { type ConnectionState, connectionState, hasLapsed } from "@/assistant/connections";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { AtlassianHint } from "@/components/credentials/AtlassianHint";
 import { JenkinsHint } from "@/components/credentials/JenkinsHint";
@@ -49,6 +50,25 @@ export function checklistState(stored: boolean, login: LoginView | undefined, no
     return "login";
   }
   return stored ? "stored" : "waiting";
+}
+
+/**
+ * What a sign-in card says beside its name, by where `connectionState` says the sign-in stands. One table, so the
+ * card the owner is looking at and the tick on it cannot say different things: a stored credential a pod has just
+ * failed to use is not "✓ Connected", and a card claiming it is leaves the owner nothing to act on.
+ */
+const SIGN_IN_DETAIL: Record<ConnectionState, string> = {
+  connected: "✓ Connected",
+  refreshing: "Sign-in waiting for you",
+  "signing-in": "Sign-in waiting for you",
+  expired: "Sign-in expired",
+  failed: "Last sign-in failed",
+  waiting: "Waiting for your virtual agent to ask"
+};
+
+/** Why a lapsed sign-in lapsed, which is what says whether the owner has a code to enter or a failure to read. */
+function lapsedLine(kind: CredentialKind, state: ConnectionState): string {
+  return state === "failed" ? `The last ${TITLES[kind]} sign-in failed.` : `The last ${TITLES[kind]} sign-in ran out before anyone used it.`;
 }
 
 function PendingLogin({ virtualAgentId, login, paste }: { virtualAgentId: string; login: LoginView; paste: FormAction }) {
@@ -215,11 +235,12 @@ function Card({
 }) {
   const stored = status?.stored === true;
   const state = checklistState(stored, login, now);
+  const connection = connectionState(state, login, status);
   let body: React.ReactNode;
   if (state === "login" && login !== undefined) {
     body = (
       <>
-        <Header kind={kind} detail="Sign-in waiting for you" ticked={false} />
+        <Header kind={kind} detail={SIGN_IN_DETAIL[connection]} ticked={false} />
         <PendingLogin virtualAgentId={virtualAgentId} login={login} paste={paste} />
       </>
     );
@@ -228,7 +249,7 @@ function Card({
   } else {
     body = (
       <>
-        <Header kind={kind} detail={stored ? "✓ Connected" : "Waiting for your virtual agent to ask"} ticked={stored}>
+        <Header kind={kind} detail={SIGN_IN_DETAIL[connection]} ticked={connection === "connected"}>
           {stored && desired !== "deleted" ? (
             <Reconnect virtualAgentId={virtualAgentId} kind={kind} running={desired === "running"} reconnect={reconnect} />
           ) : null}
@@ -240,9 +261,9 @@ function Card({
   return (
     <li className="min-w-0 space-y-2 border-b border-hub-line px-4 py-3 last:border-b-0">
       {body}
-      {state !== "login" && login?.state === "failed" ? (
+      {state !== "login" && hasLapsed(connection) ? (
         <p role="alert" className="text-xs text-red-300">
-          The last {TITLES[kind]} sign-in failed.
+          {lapsedLine(kind, connection)}
         </p>
       ) : null}
     </li>
@@ -251,9 +272,13 @@ function Card({
 
 /**
  * What the virtual agent needs before it can work, one card per credential: stored, a sign-in waiting for the owner
- * with its code or a box to paste one into, or nothing yet. A key the owner pastes (Bedrock, Claude, the optional
- * Jenkins token) offers its box until it is stored; GitHub, Azure and the optional Atlassian come from the agent's own
- * sign-in, which the owner can have it do again. Only the owner ever sees this page.
+ * with its code or a box to paste one into, lapsed, or nothing yet. A key the owner pastes (Bedrock, Claude, the
+ * optional Jenkins token) offers its box until it is stored; GitHub, Azure and the optional Atlassian come from the
+ * agent's own sign-in, which the owner can have it do again. Only the owner ever sees this page.
+ *
+ * A stored credential is shown as connected only while no later sign-in has lapsed over it, which is `connectionState`
+ * asking `lapsedSinceStored`: a credential a pod has just failed to use is still stored, so storage alone would tick
+ * the one card that most needs the owner to act.
  */
 export function OnboardingChecklist({
   virtualAgentId,

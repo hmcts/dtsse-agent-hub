@@ -315,6 +315,13 @@ export interface LoginView {
   verificationUri: string;
   expiresAt: string;
   state: LoginState;
+  /**
+   * When `state` was last written, which is what orders a sign-in against the credential it is for: a `credential`
+   * row carries its own `updatedAt`, and the later of the two is the newer fact about whether the stored value
+   * works. Nothing deletes a credential when its sign-in fails, so this is the only thing that tells a working
+   * credential from one a pod has just failed to use.
+   */
+  updatedAt: string;
   /** A code the owner pasted is waiting for the pod to fetch it. */
   codeWaiting: boolean;
 }
@@ -323,7 +330,7 @@ export interface LoginView {
 export async function loginViews(db: Database, virtualAgentId: string): Promise<LoginView[]> {
   const rows = await db.virtualAgentLogin.findMany({
     where: { virtualAgentId },
-    select: { kind: true, prompt: true, userCode: true, verificationUri: true, expiresAt: true, state: true, pastedCodeExpiresAt: true }
+    select: { kind: true, prompt: true, userCode: true, verificationUri: true, expiresAt: true, state: true, updatedAt: true, pastedCodeExpiresAt: true }
   });
   return rows.map((row) => ({
     kind: row.kind,
@@ -332,6 +339,7 @@ export async function loginViews(db: Database, virtualAgentId: string): Promise<
     verificationUri: row.verificationUri,
     expiresAt: row.expiresAt.toISOString(),
     state: row.state,
+    updatedAt: row.updatedAt.toISOString(),
     codeWaiting: row.pastedCodeExpiresAt !== null
   }));
 }

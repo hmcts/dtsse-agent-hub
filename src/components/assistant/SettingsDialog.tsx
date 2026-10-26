@@ -57,8 +57,9 @@ export const SETTINGS_TWO_PANE = `(min-width: ${SETTINGS_TWO_PANE_MIN_WIDTH}px)`
 
 const STATE_CLASS: Record<Connection["state"], string> = {
   connected: "text-asst-ok",
-  // A sign-in being renewed behind a working one is news, not a problem, so it is not coloured like one.
-  refreshing: "text-asst-muted",
+  // A relayed sign-in is a wait on the person whether or not a credential sits behind it: a pod relays a code
+  // because it cannot finish without them, so it is coloured as something to do rather than as a quiet renewal.
+  refreshing: "text-asst-accent-soft",
   "signing-in": "text-asst-accent-soft",
   expired: "text-asst-warn",
   failed: "text-asst-error",
@@ -126,8 +127,10 @@ function Connections({ list, unavailable, warning }: Pick<SettingsView, "list" |
       {warning === null ? null : (
         <div className="flex flex-col gap-1 rounded-[10px] border border-asst-warn bg-asst-raised px-3.5 py-3">
           <p className="text-[13px] font-semibold text-asst-text">{warning}</p>
+          {/* This section lists where each sign-in stands and nothing more, so it says where the sign-in itself is. */}
           <p className="text-pretty text-[13px] text-asst-body">
-            You are not signed in to these, so your assistant cannot use them. You can carry on chatting, and it asks you to sign in when it next needs one.
+            Your assistant cannot use these until you have signed in. Close this and the message above your chats shows you the sign-in, with the code to enter
+            or a way to ask for a new one. You can carry on chatting either way.
           </p>
         </div>
       )}

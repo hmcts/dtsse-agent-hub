@@ -41,12 +41,17 @@ afterEach(() => {
 const KINDS: CredentialKind[] = ["github", "azure", "bedrock", "jenkins", "atlassian"];
 const ALL_SIGNED_IN: CredentialKind[] = ["github", "azure", "bedrock", "atlassian"];
 
+/** When a stored credential was saved, and a sign-in either side of it, so the two can be ordered on purpose. */
+const STORED_AT = "2026-10-24T09:00:00.000Z";
+const BEFORE_STORED = "2026-10-23T09:00:00.000Z";
+const AFTER_STORED = "2026-10-24T15:00:00.000Z";
+
 function status(kind: CredentialKind, accountLabel: string | null = null): CredentialStatus {
-  return { kind, stored: true, accountLabel, updatedAt: "2026-10-24T09:00:00.000Z", updatedVia: "pod" };
+  return { kind, stored: true, accountLabel, updatedAt: STORED_AT, updatedVia: "pod" };
 }
 
-function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(Date.now() + 600_000).toISOString()): LoginView {
-  return { kind, prompt: "device_code", userCode: "ABCD-1234", verificationUri: "https://example.com/device", expiresAt, state, codeWaiting: false };
+function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(Date.now() + 600_000).toISOString(), updatedAt = BEFORE_STORED): LoginView {
+  return { kind, prompt: "device_code", userCode: "ABCD-1234", verificationUri: "https://example.com/device", expiresAt, state, updatedAt, codeWaiting: false };
 }
 
 function data(stored: CredentialKind[], logins: LoginView[] = [], unavailable: string | null = null): ConnectionsData {
@@ -150,8 +155,30 @@ describe("the Assistant's settings cog", () => {
     expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs your attention");
   });
 
-  it("should not say a sign-in needs attention while it is only being refreshed behind a working one", () => {
+  // A relayed code is a wait on the person whatever is stored behind it: only they can enter it, and the badge is
+  // the one thing that says so to somebody who has sent the getting-ready screen away.
+  it("should say a sign-in needs attention while a code is waiting behind a working one", () => {
     render(<AssistantSettings connections={data(ALL_SIGNED_IN, [login("github", "pending")])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention");
+    expect(cog().textContent).toBe("!");
+  });
+
+  /**
+   * The live fault, as the cog saw it: an Atlassian credential stored, two relayed codes that ran out unused, and no
+   * mark at all — `connectionState` answered "connected" for anything stored, so the badge built for a lapsed
+   * sign-in could never be reached.
+   */
+  it("should say Atlassian needs attention when a stored sign-in is the one a later sign-in lapsed over", () => {
+    const stale = login("atlassian", "expired", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
+    render(<AssistantSettings connections={data(ALL_SIGNED_IN, [stale])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs your attention");
+    expect(cog().textContent).toBe("!");
+  });
+
+  it("should not say Atlassian needs attention when a sign-in failed before their credential was stored", () => {
+    render(<AssistantSettings connections={data(ALL_SIGNED_IN, [login("atlassian", "failed", undefined, BEFORE_STORED)])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings");
     expect(cog().textContent).toBe("");

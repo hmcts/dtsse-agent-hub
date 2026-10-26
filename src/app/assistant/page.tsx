@@ -10,7 +10,7 @@ import {
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
 import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { pasteLoginCode, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
 import { STARTERS } from "@/assistant/starters";
@@ -72,6 +72,7 @@ export default async function AssistantPage() {
         unavailable={home.credentials.available ? null : home.credentials.reason}
         paste={pasteLoginCode}
         save={saveCredential}
+        reconnect={reconnectSignIn}
         dismissed={waitingDismissed(jar.get(WAITING_COOKIE)?.value, home.assistant.id, home.assistant.startedAt)}
         theme={theme}
       />

@@ -14,7 +14,7 @@ import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/ass
 import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { pasteLoginCode, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
 import { offeredTemplates } from "@/assistant/templates";
@@ -96,6 +96,7 @@ export default async function ConversationPage({
         unavailable={home.credentials.available ? null : home.credentials.reason}
         paste={pasteLoginCode}
         save={saveCredential}
+        reconnect={reconnectSignIn}
         dismissed={waitingDismissed(jar.get(WAITING_COOKIE)?.value, home.assistant.id, home.assistant.startedAt)}
         theme={theme}
       />

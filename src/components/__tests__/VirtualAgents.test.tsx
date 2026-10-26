@@ -771,6 +771,7 @@ function login(overrides: Partial<LoginView> = {}): LoginView {
     verificationUri: "https://github.com/login/device",
     expiresAt: "2026-10-05T12:10:00.000Z",
     state: "pending",
+    updatedAt: "2026-10-05T12:08:00.000Z",
     codeWaiting: false,
     ...overrides
   };
@@ -1163,6 +1164,62 @@ describe("OnboardingChecklist", () => {
     );
 
     expect(screen.getByRole("alert").textContent).toContain("Azure sign-in failed");
+  });
+
+  /** `stored` is saved at 11:00 and `login` last written at 12:08, so a lapsed sign-in is the newer of the two. */
+  function lapsedChecklist(state: "expired" | "failed") {
+    return (
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["atlassian"]}
+        statuses={[stored("atlassian", "alice@justice.gov.uk")]}
+        logins={[login({ kind: "atlassian", state, expiresAt: "2026-10-05T11:59:00.000Z" })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+  }
+
+  /**
+   * The live fault on the one page that could have shown the code: the credential was still stored, so the card said
+   * "✓ Connected" about the sign-in the pod had just reported it could not use.
+   */
+  it("should not call a stored sign-in connected when a later sign-in lapsed over it", () => {
+    render(lapsedChecklist("expired"));
+
+    expect(screen.queryByText("✓ Connected")).toBeNull();
+    expect(screen.getByText("Sign-in expired")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("ran out before anyone used it");
+    expect(screen.getByRole("button", { name: "Reconnect Atlassian (Jira & Confluence)" })).toBeTruthy();
+  });
+
+  it("should say the stored sign-in failed when that is how the later sign-in ended", () => {
+    render(lapsedChecklist("failed"));
+
+    expect(screen.getByText("Last sign-in failed")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("sign-in failed");
+  });
+
+  it("should still call a stored sign-in connected when the failure came before it was stored", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["atlassian"]}
+        statuses={[stored("atlassian")]}
+        logins={[login({ kind: "atlassian", state: "failed", expiresAt: "2026-10-05T10:30:00.000Z", updatedAt: "2026-10-05T10:30:00.000Z" })]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.getByText("✓ Connected")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("should say why credentials cannot be stored when the deployment has nowhere to keep them", () => {
