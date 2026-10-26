@@ -18,14 +18,20 @@ import { describeSize } from "./upload-report.ts";
 export const MEMORY_REPORT_INTERVAL_MINUTES = 10;
 
 /**
- * What one HMCTS Assistant conversation costs the pod, measured on a live one: the `claude` process is about 310 MB
- * of it and the session's own MCP servers — playwright-mcp, azmcp, mcp-jenkins and their wrappers — are the larger
- * half.
+ * What one HMCTS Assistant conversation costs the pod: about 0.65Gi, the drop in the container cgroup's
+ * `memory.stat` `anon` when a preview pod went from two sessions to one. The same subtraction of every process's
+ * proportional set size puts it at 0.68Gi, and of `memory.current` at 0.69Gi. The session's own MCP servers —
+ * playwright-mcp, azmcp, mcp-jenkins and their wrappers — are about half of it, `claude` itself under a third, and
+ * agent-hub's bridge and `hai` the rest.
+ *
+ * **PSS, not RSS.** A session is twenty-odd node processes sharing one node binary and their `node_modules` pages;
+ * ΣRSS counts those pages once per process and puts the same marginal at 1.25Gi, nearly double. The MCP servers'
+ * heaps are their own, so what sharing there is buys less than it looks like it should.
  *
  * It is the unit the warning below is in, because it is the unit the person acts in: they open and close chats, and
  * they choose a size that holds a number of them. A share of the limit would be a round number nobody could check.
  */
-export const CONVERSATION_MEMORY_BYTES = Math.round(1.2 * 1024 * 1024 * 1024);
+export const CONVERSATION_MEMORY_BYTES = Math.round(0.65 * 1024 * 1024 * 1024);
 
 /** A pod's whole report. Every figure is of the container's own cgroup, in bytes. */
 export interface MemoryReport {
@@ -144,6 +150,14 @@ export interface MemoryPressure {
  * hundred megabytes of being killed reads as comfortable whenever nothing is mid-answer, which is most of the time
  * anyone looks. The peak is monotonic since the pod booted, so a report that is minutes old is a lower bound on it —
  * this understates the pressure and cannot invent it.
+ *
+ * `peak` counts the container's page cache as well as its heaps, and on the pods `CONVERSATION_MEMORY_BYTES` was
+ * measured on that cache was 2.1–2.4Gi of the workspace clone, so the peak sits well above the part of the pod the
+ * kernel cannot reclaim. The constant is still the right one to compare against it: a conversation moved
+ * `memory.current` by 0.69Gi and the page cache within it by 0.03Gi, so one more chat costs about the same 0.65Gi
+ * whichever of the two the comparison is in. What the cache costs is sensitivity — a pod that has merely read a lot
+ * of files reaches the threshold earlier than its heaps alone would — and closing that gap needs a figure for the
+ * non-reclaimable part, which the pod's three cgroup reads do not include.
  *
  * Nothing is said for a pod with no report: there is no ceiling to measure against, and the three sentences the
  * section shows instead are what honesty about that looks like.

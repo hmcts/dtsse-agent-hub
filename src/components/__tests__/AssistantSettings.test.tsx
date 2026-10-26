@@ -1522,9 +1522,17 @@ describe("the Assistant's size", () => {
   it("should give the peak against the limit, the live figure and when the pod last looked", () => {
     open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
 
-    expect(panel().textContent).toContain("3.2 GB of 8 GB at its busiest");
+    expect(panel().textContent).toContain("5.4 GB of 8 GB at its busiest");
     expect(panel().textContent).toContain("Using 3 GB right now");
     expect(panel().textContent).toContain("Last reported");
+  });
+
+  // In the figure a person reads rather than through the constant: the sentence used to carry its own number, which
+  // left it telling someone a chat costs one thing while the warning was computed from another.
+  it("should say what a chat costs from the same figure the warning is computed from", () => {
+    open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
+
+    expect(panel().textContent).toContain("Each chat you have open takes about 665.6 MB of it.");
   });
 
   it("should say the figures will not move while the assistant is stopped", () => {

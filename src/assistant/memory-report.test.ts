@@ -86,6 +86,15 @@ describe("memoryUse", () => {
 });
 
 describe("memoryPressure", () => {
+  // In bytes rather than through the constant, because the threshold is a measured cost: a test that reads it back
+  // from `CONVERSATION_MEMORY_BYTES` holds either side of the boundary wherever the constant happens to sit.
+  it("should put the threshold a measured 0.65Gi under the limit", () => {
+    const measured = Math.round(0.65 * 1024 ** 3);
+
+    expect(memoryPressure(reported(measured), 2, "small")).toBeUndefined();
+    expect(memoryPressure(reported(measured - 1), 2, "small")).toMatchObject({ limitBytes: LIMIT });
+  });
+
   // The boundary: exactly one conversation's worth of headroom still has room for the chat the person is about to
   // open, so it is not warned about. One byte less and it has not.
   it("should say nothing when the peak leaves room for exactly one more chat", () => {

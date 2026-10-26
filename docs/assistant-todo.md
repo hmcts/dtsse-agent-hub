@@ -23,8 +23,28 @@ Delete this file once everything below is done or has moved to Jira.
   - a fourth queues on `small`;
   - a reopened chat resumes the same session id;
   - `scripts/agent-hub artefact put` updates the panel live.
-- [x] Check memory and CPU with several sessions running at once. Measured on a running `small` pod: three sessions, the pod's own included, hold 4.1Gi of its 8Gi cgroup limit at 314m of CPU, so a session with its MCP servers, hai wrapper and bridge costs about 1.2Gi and about 100m idle. `small`'s cap is 3 on that basis (`CONVERSATION_SESSIONS` in `src/orchestrator/manifests.ts`), which leaves a third of the limit free. Still to do on `medium` and `large`, and with the sessions busy rather than idle, which is what raising either of their caps wants.
-- [x] **`small` does not get more memory.** It stays on 1 CPU / 4Gi requested: someone who needs more conversations at once moves up a size, rather than every `small` pod costing more. That is why the cap is 3 and not higher — three plus the pod's own fits the 8Gi limit with headroom, where five would have crowded it at about 7.5Gi.
+- [x] Check memory and CPU with several sessions running at once. **A conversation costs about 0.65Gi, and CPU rather than memory is what caps a pod.**
+
+  Measured in the preview cluster on 2026-10-26 by **proportional set size (PSS)**, read per process from `/proc/<pid>/smaps_rollup`, with the cgroup's own `/sys/fs/cgroup/memory.{current,peak,stat}` and `cpu.stat` as the totals. **PSS, not RSS**: a session is twenty-odd node processes sharing one node binary and their `node_modules` pages, and ΣRSS counts those pages once per process — it is where the old 1.2Gi came from, and it is nearly double the truth. Do not redo this with RSS. Per-process `Anonymous:` summed to within 0.3% of the cgroup's `memory.stat` `anon`, which is what makes the subtraction below trustworthy.
+
+  Of 28 pods, 10 ran `hmctsprod.azurecr.io/dtsse/virtual-agent` and 18 the pre-switch `cft-workspace/devcontainer`; 26 of the 28 were idle at the boot script alone (6–10 MiB) and gave only the stopped baseline. The marginal comes from `va-d5bcb7af-0` (devcontainer image) sampled four minutes apart as it went from two sessions to one — the same pod, owner and MCP set, so nothing but the session differs:
+
+  | route | marginal per conversation |
+  | --- | --- |
+  | cgroup `memory.stat` `anon` subtraction | **0.64Gi** |
+  | Σ PSS subtraction | 0.68Gi |
+  | `memory.current` subtraction | 0.69Gi |
+  | Σ RSS subtraction | 1.25Gi ← where 1.2Gi came from |
+
+  `CONVERSATION_MEMORY_BYTES` is **0.65Gi** on the `anon` figure, because `anon` is the part the kernel cannot reclaim and it is the only one of the four that is purely additive. Page cache was 2.1–2.4Gi on both awake pods — the 6.8GiB workspace clone, not the sessions — and moved only 0.03Gi per conversation, so the margin is the same whichever currency the comparison is in even though the level is not.
+
+  An awake pod with no conversations holds **0.95Gi** of `anon`: its own session 0.71–0.79Gi, the three agent-hub daemons 0.18–0.20Gi, entrypoint and tmux 0.012Gi. That is the mean of 15 samples of the two awake pods taken four minutes apart over 35 minutes, range 0.91–0.99Gi — so the baseline is firm even though the marginal rests on the one transition. A session splits 52% MCP servers and their wrappers, 30% `claude`, 19% bridge and `hai`.
+
+  **MCP servers share far less between sessions than it looks.** When the second session exited, the survivor's PSS *rose* 113 MiB while its `anon` did not move: that 113 MiB is what the two had been splitting, so about 14% of a session is genuinely shared and 86% is not. 80% of the MCP footprint is private heap — each session spawns its own playwright-mcp, azmcp and mcp-jenkins with heaps of their own, and only binary and library pages are common.
+- [x] **CPU binds every size; memory binds none.** `small` at 3 is 2.90Gi of `anon` against the 4Gi it **requests** — so contrary to the earlier RSS figure, no size exceeds its request at its cap and no pod is an eviction candidate for holding its full complement of chats. Measured CPU: 25–30m per idle session, 139–186m mean over a working 150s window, and **a single session on its own was throttled against `small`'s four-CPU limit** (26 periods of a 30s window at 568m mean; 0% on all 26 idle pods). So a session's bursts already want more than four CPUs and extra sessions buy contention, not throughput. `small` and `medium` share that four-CPU limit and neither can be raised on it; `medium`'s larger request guarantees two CPUs rather than one, a better floor under node pressure and not a higher ceiling. `large`'s limit is eight, so its cap went 6 → **7** — eight sessions on eight CPUs, the same CPU per session as the `small` 3 that production accepts.
+- [ ] **Raising capacity further needs higher CPU limits, not a bigger memory size.** Memory at the current caps is 15–37% of each limit. The missing measurement is several *busy* sessions in parallel on one pod, which needs a pod driven deliberately rather than sampled.
+- [ ] **The warning's left-hand side still counts page cache.** It is `memory.peak + CONVERSATION_MEMORY_BYTES > limit`, and `memory.peak` includes 2.1–2.4Gi of reclaimable cache set largely at boot, so a pod that has merely read a lot of files reaches the threshold earlier than its heaps alone would. Closing that needs a non-reclaimable figure in the pod's report, which its three cgroup reads do not include — a fourth, `anon`, and a client feature to gate it.
+- [x] **`small` does not get more memory.** It stays on 1 CPU / 4Gi requested: someone who needs more conversations at once moves up a size, rather than every `small` pod costing more. The cap is 3 because of the four-CPU limit, not memory — on the measured figures 3 conversations hold 2.90Gi of `anon`, inside that 4Gi request.
 - [ ] Tell Linus's `move-agent-hub-client` session what changed: `assistant.mjs` and the `artefact` commands still need absorbing into `packages/agent-hub`, there is no `AGENT_HUB_VIRTUAL_MODE` now, and `entrypoint.sh` always starts the supervisor.
 
 ## Rollout

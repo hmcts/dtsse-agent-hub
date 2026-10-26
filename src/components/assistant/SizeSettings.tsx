@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { AssistantMemory } from "@/assistant/memory";
 import {
+  CONVERSATION_MEMORY_BYTES,
   MEMORY_REPORT_INTERVAL_MINUTES,
   type MemoryPressure,
   type MemoryUse,
@@ -57,7 +58,11 @@ function Use({ use }: Readonly<{ use: MemoryUse }>) {
       <p className="text-sm font-semibold">
         {describeSize(use.peakBytes)} of {describeSize(use.limitBytes)} at its busiest
       </p>
-      <p className="text-[13px] text-asst-body">Using {describeSize(use.currentBytes)} right now. Each chat you have open takes about 1.2 GB of it.</p>
+      {/* The per-chat figure is the constant the warning is computed from, so the sentence cannot say one cost while
+          the threshold uses another. */}
+      <p className="text-[13px] text-asst-body">
+        Using {describeSize(use.currentBytes)} right now. Each chat you have open takes about {describeSize(CONVERSATION_MEMORY_BYTES)} of it.
+      </p>
       <p className="text-xs text-asst-muted">
         {use.stopped ? "Your assistant is stopped. Last reported " : "Last reported "}
         <Timestamp iso={use.at} />.
