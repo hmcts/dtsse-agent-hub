@@ -12,22 +12,19 @@ describe("CLIENT_FEATURES", () => {
     }
   });
 
-  // The hub refuses to stop an answer on a session that did not claim this, and its UI offers no stop control at
-  // all, so dropping the claim would take the feature away silently rather than break anything that says so.
-  it("should claim stop, since the supervisor acts on the sessions stream's interrupt", () => {
-    expect(CLIENT_FEATURES).toContain("stop");
-  });
-
-  // Named here as well as in the list, unlike most features, because this one is only ever added to the same single
-  // line of the same two tables that every other feature is added to: a merge that resolves that line in favour of
-  // one side drops whichever name the other side added, and without this the result is a build whose reports the hub
-  // refuses while its Size section calls every pod an older version. Nothing else would fail — dropping a name
-  // leaves a shorter array of the same type, so it still typechecks.
-  //
-  // **Every name added in another branch wants a line here too**, and the hazard is symmetric: a resolution taking
-  // this branch's side drops the other's just as silently. `lookups` has no assertion only because it does not exist
-  // in this tree yet; it needs one in whichever change brings it in.
-  it("should claim memory-anon, since the hub requires anon_bytes in the memory report", () => {
-    expect(CLIENT_FEATURES).toContain("memory-anon");
+  /**
+   * **Every name, spelled out, and the duplication is the point.**
+   *
+   * `CLIENT_FEATURES` and the `ClientFeature` union it is typed by are each a single line, and every change that adds
+   * a feature edits those same two lines. Two branches doing that conflict, and a resolution that takes either side
+   * drops the other side's name — which nothing else catches: a shorter array of the same type still typechecks, and
+   * the only symptom is the hub silently withholding a field, or gating a pod out of something it can do. This list
+   * is a second copy that has to be edited deliberately, so a resolution that loses a name fails here.
+   *
+   * It is the one place in this file that is not an invariant, for that reason. Adding a feature means a line here as
+   * well as the entry and the code that reads the field.
+   */
+  it.each(["attachments", "files", "memory", "memory-anon", "stop"])("should claim %s", (feature) => {
+    expect(CLIENT_FEATURES).toContain(feature);
   });
 });

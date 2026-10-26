@@ -326,21 +326,24 @@ carrying a rule it cannot support.
 last thing anyone measured, and the section says so — but they describe a container that no longer exists, so no
 warning is raised from them. A pod stopped mid-build must not tell its owner the next day that it is low on memory.
 
-**A replacement pod does not show the last one's figures.** Every path that bumps `pod_generation` drops the memory
-report in the same transaction — starting, resizing, changing plugins, restarting, and a takeover onto another
-cluster — because `running` goes true again and the figures would otherwise read as the new pod's: "Holding 7.9 GB
-right now" about a container that is gone. A stop does not drop them, for the reason above.
+**A replacement pod does not show the last one's figures.** Every path that asks for a new or replacement pod drops
+the memory report in the same transaction — starting, resizing, changing plugins, restarting, a takeover onto another
+cluster, and the orchestrator minting a launch token, which is what catches a pod re-applied after a failed apply.
+Otherwise `running` goes true again and the figures read as the new pod's: "Holding 7.9 GB right now" about a
+container that is gone.
 
-Dropping them is not enough on its own, because the outgoing pod can report again and put them back. Every one of
-those paths also drops the **launch token**, so it cannot: a resize and a plugins change do it for that reason, having
-nothing to drain since replacing the pod ends every session on it anyway, and it also stops the old pod and its
-replacement both holding a valid token over the handover.
+The rule is **not** "whatever bumps `pod_generation`": stopping, deleting and the sweep's auto-stop all bump it and
+all keep the figures, for the reason above.
+
+Dropping them is not enough where the pod being replaced is still running, because it can report again and put them
+back. Those paths drop its **launch token** in the same breath, so it cannot, and that also stops the outgoing pod and
+its replacement both holding a valid token over the handover. The starting path has no token to drop.
 
 **The window this leaves.** A pod reports phase `running` before it starts its supervisor, so between those two the
-row is running with no report at all, which the Size section says plainly. What is not closed is a pod the kubelet
-restarted underneath the hub — after the OOM kill this warning is about — where no `pod_generation` moved and the hub
-was never told. The pod sends its first report as it boots rather than a tick later, so that window is the new
-supervisor's boot rather than ten minutes, but it is a window.
+row is running with no report at all, which the Size section says plainly. What is not closed is a pod replaced
+without the hub asking — the kubelet restarting one after the OOM kill this warning is about, where no row changed at
+all. The pod sends its first report as it boots rather than a tick later, so that window is the new supervisor's boot
+rather than ten minutes, but it is a window.
 
 **Who sees it.** The owner alone, through `canSeeAssistantMemory`. No grant reaches it: a figure about someone's pod
 is not a session they chose to share.
