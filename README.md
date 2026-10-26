@@ -130,7 +130,7 @@ section of [`docs/agent-api.md`](docs/agent-api.md).
 - **It runs on the person's first virtual agent**, the oldest not being deleted, created as `assistant` when they
   have none; it counts towards the limit of 3 like any other. Every virtual agent can hold conversations: its pod
   runs a supervisor beside its own session, with up to `AGENT_HUB_MAX_SESSIONS` conversation sessions (4, 6 or 8
-  by size — see Sizes below). The agent's page in the hub lists its chats.
+  by size; `docs/agent-api.md` under Capacity has why). The agent's page in the hub lists its chats.
 - **A conversation's agent is created with it**, offline, under a session id the hub chose, so the person's messages
   queue as ordinary deliveries before any session runs. A message to an offline conversation sets a wake; the pod
   hears it on `GET /api/virtual/{id}/sessions`, starts `hai --session-id` (or `--resume`) in a tmux session of its

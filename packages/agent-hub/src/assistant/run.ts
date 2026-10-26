@@ -181,7 +181,23 @@ export async function runAssistantSupervisor({
     return { reconnect };
   }
 
-  const timer = setInterval(() => supervisor.tick().catch((e) => say(`tick failed: ${(e as Error).message}`)), tickMs);
+  // A session starting or ending steps the container's `anon` by about one conversation and is the only thing that
+  // moves it much, so the hub is told on the step rather than left to find out on the next reconcile. It is the
+  // figure the hub's low-memory warning is computed from, and a warning that lags a chat being closed by up to ten
+  // minutes is one the person has already acted on and been ignored for.
+  let reportedSessions = supervisor.sessions.size;
+  const timer = setInterval(() => {
+    supervisor
+      .tick()
+      .then(() => {
+        if (supervisor.sessions.size !== reportedSessions) {
+          reportedSessions = supervisor.sessions.size;
+          return reportMemory(memory).then(() => undefined);
+        }
+        return undefined;
+      })
+      .catch((e) => say(`tick failed: ${(e as Error).message}`));
+  }, tickMs);
   // A conversation deleted while this pod was stopped left its attachments on the volume and sent no `close` anybody
   // was there to hear, so the directories are swept against the hub's list from time to time.
   const reconciler = setInterval(() => {
@@ -190,9 +206,10 @@ export async function runAssistantSupervisor({
       // are dated with the report rather than presented as current.
       .then(() => reportUploads(uploads))
       .catch((e) => say(`reconciling uploads failed: ${(e as Error).message}`));
-    // On the same timer and not chained onto it: the memory report is three reads of this container's own cgroup, so
+    // On the same timer and not chained onto it: the memory report is four reads of this container's own cgroup, so
     // a volume this pod cannot measure must not cost it the memory figures, and a cgroup it cannot read must not cost
-    // it the disk figures. `memory.peak` is monotonic while the pod is up, so a late one understates and never lies.
+    // it the disk figures. This is the floor rather than the cadence — the tick above reports whenever the number of
+    // sessions changes, which is what actually moves the figure the hub warns on.
     reportMemory(memory).catch((e) => say(`reporting memory failed: ${(e as Error).message}`));
   }, reconcileMs);
   try {

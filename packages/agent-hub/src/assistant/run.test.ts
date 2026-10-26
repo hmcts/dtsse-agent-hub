@@ -8,6 +8,7 @@ import { conversation, fakeTmux } from "../__fixtures__/fake-tmux.ts";
 import { createMockHub } from "../__fixtures__/mock-hub.ts";
 import { ApiError, createApi } from "../api.ts";
 import { hubHome } from "../session.ts";
+import type { MemoryFs } from "./memory.ts";
 import { runAssistantSupervisor } from "./run.ts";
 import { tmuxName } from "./tmux.ts";
 
@@ -273,6 +274,45 @@ describe("runAssistantSupervisor", () => {
       stop.abort();
       await running;
       fs.rmSync(uploads, { recursive: true, force: true });
+    }
+  });
+
+  // A session starting or ending steps the container's `anon` by about one conversation and is the only thing that
+  // moves it much. It is also what the hub's low-memory warning is computed from, so a report that waited for the
+  // ten-minute reconcile would leave the warning describing a pod the person has already changed.
+  it("should report its memory as soon as the number of sessions changes, not on the next reconcile", async () => {
+    // Arrange: a reconcile far longer than the test, so only the session change can have caused a report.
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const stop = new AbortController();
+    const memoryFs = {
+      readFileSync: (file: string) => (String(file).endsWith("memory.stat") ? "anon 1717986918\n" : "4096\n")
+    } as unknown as MemoryFs;
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 20,
+      reconcileMs: 10 * 60 * 1000,
+      memoryFs
+    });
+    const memoryPuts = () => hub.calls.filter((c) => c.method === "PUT" && c.path === `/api/virtual/${VID}/memory`);
+
+    try {
+      // Act
+      hub.sendWake(VID, conversation());
+
+      // Assert
+      await waitUntil(() => memoryPuts().length >= 1, "the session starting to be reported as memory");
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
     }
   });
 

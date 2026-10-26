@@ -266,15 +266,21 @@ every call between the two is pod to hub. The pod reports, as it does for its di
 {
   "limit_bytes": 8589934592,   // memory.max: where the kernel kills the container
   "current_bytes": 3221225472, // memory.current
-  "peak_bytes": 5637144576     // memory.peak: the high-water mark since the pod booted
+  "peak_bytes": 5637144576,    // memory.peak: the high-water mark since the pod booted
+  "anon_bytes": 1717986918     // memory.stat's anon: the part that cannot be reclaimed
 }
 ```
 
-- The figures are the container's **own cgroup** — `memory.max`, `memory.current` and `memory.peak` under
-  `/sys/fs/cgroup` — so this is three small reads rather than a walk of anything, unlike the uploads report. A pod on
-  cgroup v1, or one whose `memory.max` is `max` (no limit at all), reports **nothing**: a ceiling is what every
-  sentence the hub writes about this is relative to, and a limit guessed from the size would be a figure presented as
-  measured. There is no partial report.
+- The figures are the container's **own cgroup** — `memory.max`, `memory.current`, `memory.peak` and `memory.stat`'s
+  `anon` line under `/sys/fs/cgroup` — so this is four small reads rather than a walk of anything, unlike the uploads
+  report. A pod on cgroup v1, or one whose `memory.max` is `max` (no limit at all), reports **nothing**: a ceiling is
+  what every sentence the hub writes about this is relative to, and a limit guessed from the size would be a figure
+  presented as measured. There is no partial report.
+- **`anon_bytes` is required, not optional.** It is what the warning is computed from, so a report without it is a
+  report the hub cannot say the one useful thing about. Optional would have made "an older client" and "a client whose
+  kernel has no `anon`" the same silence, which is the distinction the three states below exist to keep. A client from
+  before this field sends three figures, gets `400`, and is told apart by the `memory-anon` client feature: the
+  settings say it is running an older version, which is true and which the next boot fixes.
 - **A report of its own, not part of the uploads report.** The two are one `PUT` each on the same reconcile, and
   keeping them apart is what lets either fail alone: a cgroup the pod cannot read must not cost the person their disk
   figures, and a volume it cannot `statfs` must not cost them the memory warning. It also keeps the three
@@ -283,40 +289,45 @@ every call between the two is pod to hub. The pod reports, as it does for its di
 - Every figure is a whole number from 0 up, and `peak_bytes` is **not** required to be at least `current_bytes`:
   `memory.peak` is resettable on newer kernels, and refusing the report over it would lose the live figure too.
   Anything that is not a whole number is `400`.
-- Sent every 10 minutes, on the pod's uploads reconcile, so the hub's figures are always *as of* `memory_reported_at`
-  and the UI says when rather than presenting them as current. `current_bytes` is what the warning below is computed
-  from, because it is the figure that can come back down; a stale one can overstate as well as understate, which is
-  the price of that. `peak_bytes` leads the Size section as what the pod reached at its busiest, and nothing is
-  warned on it — nothing resets it while the pod lives, so a threshold crossed once would stay crossed for ever.
+- Sent every 10 minutes on the pod's uploads reconcile, **and on every change in the number of conversation sessions
+  running**, so the figures are never more than a reconcile behind the thing that moves them. A session starting or
+  ending steps `anon_bytes` by about one conversation and is the only event that does; between those steps `anon` is
+  flat — 15 samples of a working pod over 35 minutes held within 3%, while `current_bytes` and `peak_bytes` moved
+  several times that. An unconditioned 10-minute sample would be a poor instrument for a figure that moves in steps,
+  so the step is what triggers the report and the 10 minutes is only the floor.
+- The hub's figures are always *as of* `memory_reported_at` and the UI says when rather than presenting them as
+  current. `anon_bytes` is what the warning below is computed from. `peak_bytes` leads the Size section as what the
+  pod reached at its busiest, and nothing is warned on it: nothing resets it while the pod lives, so a threshold
+  crossed once would stay crossed for ever.
 - A report **notifies nobody**, for the reasons a disk report does not: it is read by the owner's own settings, and
   nothing streams it.
 
-**The warning.** The hub warns when the live figure leaves less than **one more conversation's worth** of headroom
-under the limit — `current_bytes + 0.65Gi > limit_bytes`. The threshold is derived rather than chosen: it is the
-measured cost of a conversation against the ceiling the pod itself reported, and a pod merely using memory within its
-size never raises it. The two things it names are the two things that change the answer: move up a size, or close some
-chats.
+**The warning.** The hub warns when the part of the pod that **cannot be reclaimed** leaves less than one more
+conversation's worth of headroom under the limit — `anon_bytes + 0.65Gi > limit_bytes`. A pod merely using memory
+within its size never raises it, and the two things it names are the two things that change the answer: move up a
+size, or close some chats.
 
-**Not `peak_bytes`, because the warning has to be able to clear.** Nothing resets `memory.peak` while the pod lives,
-so a threshold crossed once is crossed again by every later report — closing a chat drops `current_bytes` by about one
-conversation and leaves `peak_bytes` exactly where it was, which made one of the two remedies the warning offers work
-only by replacing the pod and the other not at all. `current_bytes` dips between turns and a report is up to ten
-minutes old, so a stale one can overstate where a stale peak could only understate; a figure that cannot come down at
-all is the worse of the two.
+**`anon_bytes`, because it is the only figure the sentence can be true of.** `memory.current` and `memory.peak` both
+count page cache, which was 2.1–2.4Gi of the 6.8GiB workspace clone on the pods the 0.65Gi was measured on. Cache is
+reclaimed at the `memory.max` watermark rather than kept, so a container that has read the clone sits high and stays
+high: a threshold on either figure is crossed by file reads, in which case there *is* room for another chat and
+"leaves less than another chat's worth free" is false exactly when it appears. Neither figure can be fixed by choosing
+the constant differently — `anon` is what the constant was measured as in the first place, it is purely additive, and
+a session starting or ending moves it by about one conversation and nothing else does. So the threshold is reachable
+by opening chats, which is what the warning says, and `peak_bytes` can go on leading the Size section as the fuller
+account of what the pod has had to hold without having to carry a rule it cannot support.
 
-**What it cannot tell you.** `current_bytes` counts the container's page cache, which was 2.1–2.4Gi of the workspace
-clone on the pods the 0.65Gi was measured on, and the per-size caps sit far below what the limits allow. So the
-threshold is **not reachable by opening chats at any size**: a pod at its cap settles near 6.2Gi of `small`'s 8Gi
-against a threshold of 7.35Gi, and the gap is wider on `medium` and `large`. What trips it in practice is page cache
-or the pod's own non-session work, which is why the warning's advice states what was measured and what each remedy
-frees rather than naming a person's chats as the cause. Making it mean what it says needs a figure for the part the
-kernel cannot reclaim, which the three cgroup reads above do not include.
+**A stopped pod is not warned about.** Nothing clears the last report when a pod stops — the figures are still the
+last thing anyone measured, and the section says so — but they describe a container that no longer exists, so no
+warning is raised from them. A pod stopped mid-build must not tell its owner the next day that it is low on memory.
 
 **Who sees it.** The owner alone, through `canSeeAssistantMemory`. No grant reaches it: a figure about someone's pod
 is not a session they chose to share.
 
-**An older client.** Gated on the `memory` client feature below. A pod whose current session has not claimed it is one
-the Assistant's settings say cannot report yet, rather than one shown `0`, which would read as an idle pod.
+**An older client.** Gated on the `memory-anon` client feature below, not `memory`: a pod claiming only `memory` sends
+three figures, which this route now refuses, so for the purposes of the Size section it reports nothing at all. Either
+way the settings say it cannot report yet, rather than showing it as `0`, which would read as an idle pod. A pod takes
+the current client when it boots, so this reaches a pod at its next start.
 
 **Changing size.** `size` is in the pod template, so a change bumps `pod_generation` and the orchestrator replaces the
 pod — which ends every conversation session running on it. The Assistant's settings say that before the person
@@ -443,6 +454,11 @@ Five names are in use, and the clients published from this repo claim all five.
   Claimed by the pod's **own** session, as `files` is, since the supervisor is what reports. Nothing is gated on it in
   the other direction — the hub sends no field for it — but the settings' Size section reads it to tell a pod that
   cannot report yet apart from one that has not reported yet, and says so rather than showing an unused pod.
+- `memory-anon`, because their supervisor reads `memory.stat`'s `anon` line as well and sends it as `anon_bytes`,
+  which that route now requires. A separate name rather than widening `memory`, because the two say different things
+  about the same pod: a build claiming `memory` alone would be one whose reports are refused, and the Size section has
+  to be able to word that as an older version rather than as a pod that has gone quiet. Claimed by the pod's **own**
+  session, as `memory` is.
 
 ## Replies
 

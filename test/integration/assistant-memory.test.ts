@@ -34,11 +34,14 @@ const LIMIT = 8 * 1024 ** 3;
  * the pod lives, so a threshold computed from it could never be cleared.
  */
 function report(headroom: number) {
-  return { limit_bytes: LIMIT, current_bytes: LIMIT - headroom, peak_bytes: LIMIT };
+  return { limit_bytes: LIMIT, current_bytes: LIMIT, peak_bytes: LIMIT, anon_bytes: LIMIT - headroom };
 }
 
-/** The shared fixture, bound to the claim this suite is about: the pod's own session reports its memory. */
-const assistantOf = podFixture(["memory"]);
+/**
+ * The shared fixture, bound to the claims this suite is about: the pod's own session reports its memory, including
+ * the `anon` figure the warning is computed from. Both names, because that is what a current client claims.
+ */
+const assistantOf = podFixture(["memory", "memory-anon"]);
 
 /** A chat with a session the pod says is running, which is what a change of size would end. */
 async function openChat(who: Person, title: string, sessionState: string | null = "live"): Promise<string> {
@@ -68,7 +71,7 @@ async function put(id: string, token: string, body: unknown): Promise<Response> 
 }
 
 describe("the memory an assistant reports", () => {
-  it("should show the three figures, dated, when the pod has reported", async () => {
+  it("should show the four figures, dated, when the pod has reported", async () => {
     const assistant = await assistantOf(ALICE);
 
     await reportMemoryUse(prisma, assistant, report(4 * CONVERSATION_MEMORY_BYTES));
@@ -77,8 +80,9 @@ describe("the memory an assistant reports", () => {
     expect(view?.use).toMatchObject({
       reported: true,
       limitBytes: LIMIT,
-      currentBytes: LIMIT - 4 * CONVERSATION_MEMORY_BYTES,
+      currentBytes: LIMIT,
       peakBytes: LIMIT,
+      anonBytes: LIMIT - 4 * CONVERSATION_MEMORY_BYTES,
       stopped: false
     });
     expect(view?.use.reported && typeof view.use.at).toBe("string");
@@ -93,6 +97,14 @@ describe("the memory an assistant reports", () => {
 
   it("should say the client is too old when the pod's own session never claimed the feature", async () => {
     const assistant = await assistantOf(ALICE, null);
+
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toEqual({ reported: false, reason: "older_client" });
+  });
+
+  // A client from before `anon_bytes` claims `memory` and sends three figures, which the route refuses. Shown as an
+  // older version rather than a pod that has gone quiet: it is, and its next boot fixes it.
+  it("should say the client is too old when its own session claims memory but not the anon figure", async () => {
+    const assistant = await podFixture(["memory"])(ALICE);
 
     expect((await assistantMemory(prisma, ALICE.oid, assistant))?.use).toEqual({ reported: false, reason: "older_client" });
   });
@@ -118,7 +130,7 @@ describe("the memory an assistant reports", () => {
     await reportMemoryUse(prisma, assistant, report(4 * CONVERSATION_MEMORY_BYTES));
     const view = await assistantMemory(prisma, ALICE.oid, assistant);
 
-    expect(view?.use.reported && view.use.currentBytes).toBe(LIMIT - 4 * CONVERSATION_MEMORY_BYTES);
+    expect(view?.use.reported && view.use.anonBytes).toBe(LIMIT - 4 * CONVERSATION_MEMORY_BYTES);
     expect(memoryPressure(view!.use, view!.openChats, view!.size)).toBeUndefined();
   });
 
@@ -182,8 +194,11 @@ describe("the memory route a pod reports on", () => {
 
   it.each([
     ["a missing figure", { limit_bytes: LIMIT, current_bytes: 1 }],
-    ["a figure that is not whole", { limit_bytes: LIMIT, current_bytes: 1.5, peak_bytes: 2 }],
-    ["a negative figure", { limit_bytes: LIMIT, current_bytes: 1, peak_bytes: -1 }]
+    ["a figure that is not whole", { limit_bytes: LIMIT, current_bytes: 1.5, peak_bytes: 2, anon_bytes: 1 }],
+    ["a negative figure", { limit_bytes: LIMIT, current_bytes: 1, peak_bytes: -1, anon_bytes: 1 }],
+    // What a client from before `anon_bytes` sends. Refused rather than stored without it, because the warning is
+    // computed from it and a report the warning cannot be computed from is not a weaker report.
+    ["the three figures an older client sends", { limit_bytes: LIMIT, current_bytes: 1, peak_bytes: 2 }]
   ])("should refuse %s rather than store half a report", async (_what, body) => {
     const assistant = await assistantOf(ALICE);
     const token = await launchToken(assistant);
@@ -198,7 +213,7 @@ describe("the memory route a pod reports on", () => {
     const assistant = await assistantOf(ALICE);
     const token = await launchToken(assistant);
 
-    expect((await put(assistant, token, { limit_bytes: LIMIT, current_bytes: 2048, peak_bytes: 1024 })).status).toBe(204);
+    expect((await put(assistant, token, { limit_bytes: LIMIT, current_bytes: 2048, peak_bytes: 1024, anon_bytes: 1024 })).status).toBe(204);
   });
 });
 

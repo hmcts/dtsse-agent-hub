@@ -419,8 +419,10 @@ model VirtualAgent {
   /// What the pod last reported its container cgroup says. Null means it has not said, not that it is idle.
   memoryLimitBytes    BigInt?                 @map("memory_limit_bytes")
   memoryCurrentBytes  BigInt?                 @map("memory_current_bytes")
-  /// The high-water mark since it booted, which the memory warning is computed from; see src/assistant/memory-report.ts.
+  /// The high-water mark since it booted, shown as what the pod reached at its busiest.
   memoryPeakBytes     BigInt?                 @map("memory_peak_bytes")
+  /// The part the kernel cannot reclaim, which the memory warning is computed from; see src/assistant/memory-report.ts.
+  memoryAnonBytes     BigInt?                 @map("memory_anon_bytes")
   memoryReportedAt    DateTime?               @map("memory_reported_at") @db.Timestamptz(6)
   startedAt           DateTime                @default(now()) @map("started_at") @db.Timestamptz(6)
   lastActiveAt        DateTime?               @map("last_active_at") @db.Timestamptz(6)
