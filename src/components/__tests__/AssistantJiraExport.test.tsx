@@ -220,6 +220,16 @@ describe("Jira export in the document panel", () => {
     expect(screen.queryByRole("button", { name: /Change the Jira project/ })).toBeNull();
   });
 
+  it("should put the backlog back as it was when the person cancels the project search", () => {
+    render(panel());
+
+    fireEvent.click(screen.getByRole("button", { name: /Change the Jira project/ }));
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search your Jira projects" }), { key: "Escape" });
+
+    expect(screen.queryByRole("combobox", { name: "Search your Jira projects" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Change the Jira project, now VIBE" })).toBeTruthy();
+  });
+
   it("should export to a project the person searched their Jira for when they change it for this document", async () => {
     vi.useFakeTimers();
     const exportTo = exporting();
