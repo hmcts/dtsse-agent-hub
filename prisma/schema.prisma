@@ -166,6 +166,7 @@ model User {
   assistantConversations AssistantConversation[]
   assistantUploads       AssistantUpload[]
   assistantTemplates     AssistantTemplate[]
+  assistantExportDefault AssistantExportDefault?
   conversationsSharedWithThem AssistantConversationShare[] @relation("shareRecipient")
   conversationsTheyShared     AssistantConversationShare[] @relation("shareOwner")
 
@@ -596,6 +597,25 @@ model AssistantTemplate {
   @@unique([ownerOid, name], map: "assistant_template_owner_name_key")
   @@index([ownerOid, name], map: "assistant_template_owner_idx")
   @@map("assistant_template")
+}
+
+/// Where a person's documents go by default, which the document panel starts from. See src/assistant/export-defaults.ts.
+model AssistantExportDefault {
+  ownerOid              String   @id @map("owner_oid")
+  jiraProject           String?  @map("jira_project")
+  jiraProjectName       String?  @map("jira_project_name")
+  confluenceParentId    String?  @map("confluence_parent_id")
+  confluenceParentTitle String?  @map("confluence_parent_title")
+  confluenceSpaceId     String?  @map("confluence_space_id")
+  confluenceSpaceKey    String?  @map("confluence_space_key")
+  confluenceSpaceName   String?  @map("confluence_space_name")
+  /// The titles above the parent page, from the space's top: at most 8 strings.
+  confluenceAncestors   Json     @default("[]") @map("confluence_ancestors")
+  updatedAt             DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
+
+  @@map("assistant_export_default")
 }
 
 /// One search of a person's Jira or Confluence, answered by their pod. See "Atlassian lookups" in docs/agent-api.md.

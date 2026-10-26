@@ -12,7 +12,9 @@ import { MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } 
 import type { UploadsOnDisk } from "@/assistant/upload-disk";
 import { MAX_REPORTED_FILES, type PodFile, type UploadsDisk } from "@/assistant/upload-report";
 import type { FormAction } from "@/components/ActionForm";
+import { LOOKUP_AFTER_MS } from "@/components/assistant/AtlassianSearch";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
+import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
@@ -1579,6 +1581,86 @@ describe("the Assistant's files", () => {
 
   it("should raise no WCAG A or AA violations with Files open", async () => {
     await auditOpenDialog("Files");
+  }, 20_000);
+});
+
+describe("the Assistant's Jira and Confluence defaults", () => {
+  const PROJECT = { key: "PCS", name: "Possession claims", url: "https://hmcts.atlassian.net/browse/PCS" };
+
+  function exportsSettings(overrides: Partial<AssistantExportDefaults> = {}): AssistantExportDefaults {
+    return {
+      defaults: { jira: null, confluence: null },
+      save: vi.fn(async (input: { jira: unknown; confluence: unknown }) => ({ ok: true as const, defaults: input as AssistantExportDefaults["defaults"] })),
+      access: { connected: true, login: null },
+      lookUp: vi.fn(async () => ({ status: "done" as const, results: [PROJECT] })),
+      ...overrides
+    };
+  }
+
+  it("should offer the section only when the page passes the defaults", () => {
+    open({ exports: exportsSettings() });
+
+    expect(sections()).toContain("Jira & Confluence");
+  });
+
+  it("should save a Jira project the person found by searching their own Jira", async () => {
+    vi.useFakeTimers();
+    const exports = exportsSettings();
+    open({ exports }, "Jira & Confluence");
+
+    fireEvent.click(within(screen.getByRole("group", { name: "Jira backlog" })).getByRole("button", { name: "Change" }));
+    fireEvent.change(screen.getByRole("combobox", { name: /default backlog/ }), { target: { value: "possess" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LOOKUP_AFTER_MS);
+    });
+    fireEvent.click(screen.getByRole("option"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    });
+    vi.useRealTimers();
+
+    expect(exports.save).toHaveBeenCalledWith({ jira: { key: "PCS", name: "Possession claims" }, confluence: null });
+    expect(screen.getByText("Your defaults are saved")).toBeTruthy();
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should clear a default and save nothing until something has changed", async () => {
+    const exports = exportsSettings({ defaults: { jira: { key: "VIBE", name: "Vibe" }, confluence: null } });
+    open({ exports }, "Jira & Confluence");
+
+    expect((screen.getByRole("button", { name: "Save defaults" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    });
+
+    expect(exports.save).toHaveBeenCalledWith({ jira: null, confluence: null });
+    const jira = within(screen.getByRole("group", { name: "Jira backlog" }));
+    const confluence = within(screen.getByRole("group", { name: "Confluence page" }));
+    expect(jira.getByText("VIBE")).toBeTruthy();
+    expect(jira.getByText("(default)")).toBeTruthy();
+    expect(jira.queryByRole("button", { name: "Clear" })).toBeNull();
+    expect(confluence.getByText("AI Resources")).toBeTruthy();
+    expect(confluence.getByText("(default)")).toBeTruthy();
+    expect(confluence.queryByRole("button", { name: "Clear" })).toBeNull();
+  });
+
+  it("should raise no WCAG A or AA violations with the section open", async () => {
+    const root = document.createElement("div");
+    root.className = "asst-theme";
+    document.body.append(root);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} exports={exportsSettings()} />, { container: root });
+    fireEvent.click(cog());
+    go("Jira & Confluence");
+    fireEvent.click(within(screen.getByRole("group", { name: "Confluence page" })).getByRole("button", { name: "Change" }));
+
+    const results = await axe.run(root, {
+      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
+      rules: { "color-contrast": { enabled: false } }
+    });
+
+    expect(results.violations.map((violation) => violation.id)).toEqual([]);
+    root.remove();
   }, 20_000);
 });
 

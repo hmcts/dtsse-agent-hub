@@ -13,6 +13,7 @@ import {
   canLookUpAtlassian,
   canManageConversationShares,
   canManageCredential,
+  canManageExportDefaults,
   canManageGrants,
   canManageTemplate,
   canManageUploadsOnDisk,
@@ -838,8 +839,8 @@ describe("the people lookup rules", () => {
 });
 
 describe("the Atlassian rules", () => {
-  // The search runs as the owner's own Atlassian account, so a grant over their agents, even a `write` one, must not
-  // reach it.
+  // The search and the defaults are both about the owner's own Atlassian account, so a grant over their agents, even
+  // a `write` one, must not reach either.
   it.each<[boolean, Role]>([
     [true, "owner"],
     [false, "read grantee"],
@@ -847,5 +848,13 @@ describe("the Atlassian rules", () => {
     [false, "stranger"]
   ])("should answer %s when the %s searches Atlassian through the owner's assistant", (expected, role) => {
     expect(canLookUpAtlassian(ROLES[role], { ownerOid: OWNER })).toBe(expected);
+  });
+
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s changes the owner's export defaults", (expected, role) => {
+    expect(canManageExportDefaults(ROLES[role], OWNER)).toBe(expected);
   });
 });

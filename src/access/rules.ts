@@ -493,3 +493,11 @@ export function canStopAssistantAnswer(actorOid: string, conversation: Conversat
 export function canLookUpAtlassian(viewerOid: string, virtualAgent: { ownerOid: string }): boolean {
   return viewerOid === virtualAgent.ownerOid;
 }
+
+/**
+ * Only its owner reads or changes where their documents go by default. Nothing about it is a secret, but it is theirs
+ * alone, as their templates are, and no grant reaches it.
+ */
+export function canManageExportDefaults(actorOid: string, ownerOid: string): boolean {
+  return actorOid === ownerOid;
+}

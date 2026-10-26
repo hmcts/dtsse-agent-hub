@@ -25,6 +25,8 @@ export interface JiraExportProps {
   exported: JiraExportView;
   access: JiraAccess;
   exportTo: ExportToJiraAction;
+  /** The person's own default project, which the panel starts from; none falls back to `DEFAULT_JIRA_PROJECT`. */
+  defaultProject?: JiraProjectChoice | null;
   /** The search the project picker runs; a test passes its own. */
   lookUp?: LookUp;
 }
@@ -65,10 +67,13 @@ function footerHint(idle: boolean, blocked: string | null, connected: boolean): 
   return blocked ?? (connected ? null : "You'll be asked to sign in to Atlassian, so the ticket is created as you.");
 }
 
-/** The project offered before the person picks one: the one the export went to, else the hub's. */
-function startingProject(exported: JiraExportView): JiraProjectChoice {
+/** The project offered before the person picks one: their default, else the hub's. */
+function startingProject(exported: JiraExportView, chosen: JiraProjectChoice | null | undefined): JiraProjectChoice {
   if (exported.status !== "none" && exported.project !== null) {
-    return { key: exported.project, name: exported.project };
+    return { key: exported.project, name: chosen?.key === exported.project ? chosen.name : exported.project };
+  }
+  if (chosen) {
+    return chosen;
   }
   const board = JIRA_BOARDS.find((entry) => entry.project === DEFAULT_JIRA_PROJECT);
   // The label leads with the key, which the picker already shows.
@@ -77,7 +82,7 @@ function startingProject(exported: JiraExportView): JiraProjectChoice {
 
 /**
  * The backlog the ticket goes to: the one chosen, with a way to search the person's own Jira for another. Any project
- * they can reach can be picked, and the change is for this document only.
+ * they can reach can be picked, and the change is for this document only; their default is in the settings.
  */
 export function ProjectPicker({
   project,
@@ -192,11 +197,12 @@ export function JiraFooter({
   exported,
   access,
   exportTo,
+  defaultProject,
   lookUp,
   saved,
   written
 }: JiraExportProps & { conversationId: string; saved: boolean; written: boolean }) {
-  const [chosen, setChosen] = useState(() => startingProject(exported));
+  const [chosen, setChosen] = useState(() => startingProject(exported, defaultProject));
   const project = chosen.key;
   // The export as the page showed it when the person clicked: until the page shows it changed, the click is what
   // is pending, so the button does not come back in the moment before the page catches up.

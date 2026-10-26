@@ -16,6 +16,11 @@ export interface ConfluenceExportProps {
   /** The same Atlassian sign-in the Jira export uses: twg signs in once for both. */
   access: JiraAccess;
   exportTo: ExportToConfluenceAction;
+  /**
+   * The person's own default parent page, which the panel starts from and whose space a search starts in; none falls
+   * back to `DEFAULT_CONFLUENCE_PARENT`.
+   */
+  defaultPage?: ConfluencePageChoice | null;
   lookUp?: LookUp;
 }
 
@@ -54,8 +59,8 @@ function fromResult(page: ConfluencePageResult): Chosen {
 
 /**
  * The page the document goes under: the one chosen, shown with where it is, and a way to search for another. A search
- * starts in the chosen page's space, which is the built-in page's until they pick elsewhere, and can be widened to
- * all of Confluence.
+ * starts in the chosen page's space, which is the person's default space until they pick elsewhere, and can be widened
+ * to all of Confluence.
  */
 function ParentPicker({
   parent,
@@ -132,12 +137,13 @@ export function ConfluenceFooter({
   conversationId,
   exported,
   exportTo,
+  defaultPage,
   lookUp,
   access,
   saved,
   written
 }: ConfluenceExportProps & { conversationId: string; saved: boolean; written: boolean }) {
-  const [parent, setParent] = useState<Chosen | null>(DEFAULT_CONFLUENCE_PARENT);
+  const [parent, setParent] = useState<Chosen | null>(defaultPage ?? DEFAULT_CONFLUENCE_PARENT);
   const shownExport = exported.status === "failed" ? `failed:${exported.error}` : exported.status;
   const [clickedAt, setClickedAt] = useState<string | null>(null);
   // When they clicked, standing in for the export's `requested_at` until the page has read it back, as in Jira's.
