@@ -65,8 +65,10 @@ test.describe("routes @regression", () => {
   // unmatched path gets the app's own not-found document, which starts with `<`. `isMissingRoute` in the client
   // rests on that, and a Next upgrade serving a plain-text 404 instead would quietly turn every client-newer-
   // than-hub skew back into a reported fault. No API route answers this path, now or planned.
+  // `maxRedirects: 0` so a route appearing here later fails as the redirect it is, rather than following it to
+  // something that answers 200 and reading as a mystery.
   test("should answer an unmatched API path with the not-found document, not JSON @regression", async ({ request }) => {
-    const response = await request.get("/api/agent/nonsense");
+    const response = await request.get("/api/agent/nonsense", { maxRedirects: 0 });
 
     expect(response.status()).toBe(404);
     expect(response.headers()["content-type"]).toContain("text/html");

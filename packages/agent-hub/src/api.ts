@@ -239,6 +239,11 @@ export type LoginCodeResponse = { code: string };
  * Streams read theirs this way too, rather than discarding a body they cannot parse, because a client talking to
  * a service older than itself meets an unmatched path on a stream as readily as anywhere else and
  * `isMissingRoute` has to be able to tell.
+ *
+ * `request` also reads its successful responses through this, so the rule above is what a 2xx payload gets as
+ * well: every route answering one sends a JSON object, and the ones that send nothing answer `204`, whose empty
+ * body gives `null`. A route that started answering 2xx with a top-level array, number or string would arrive at
+ * its caller as `{ error: "<the text>" }` cast to the expected type, so give it its own read rather than this one.
  */
 const readBody = (text: string): ApiErrorBody | null => {
   if (!text) {
