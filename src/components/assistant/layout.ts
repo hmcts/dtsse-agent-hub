@@ -22,6 +22,12 @@ export const ARTEFACT_WIDTH = 480;
 export const SIDEBAR_DRAWER_MAX_WIDTH = 767;
 export const ARTEFACT_OVERLAY_MAX_WIDTH = 900;
 
+/**
+ * The width below which the settings dialog has no room for its navigation beside a section, and becomes a list the
+ * person drills into instead. The Tailwind `sm` breakpoint, which is where the dialog's own `sm:` classes switch.
+ */
+export const SETTINGS_ONE_PANE_MAX_WIDTH = 639;
+
 /** Pixels the row keeps for the columns to the sidebar's right at a given window width. */
 export function besideSidebar(viewport: number): number {
   return CHAT_MIN_WIDTH + (viewport > ARTEFACT_OVERLAY_MAX_WIDTH ? ARTEFACT_MIN_WIDTH : 0);
