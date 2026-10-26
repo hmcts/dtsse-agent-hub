@@ -290,8 +290,9 @@ cnp-flux-config and still points at the devcontainer image, which carries the sa
 change.
 
 **The client the pod boots on.** `virtual-agent-boot` installs `@hmcts-cft/agent-hub@latest` over the one its image
-carries before handing over to the checkout's entrypoint, so a client release reaches a pod without an image rebuild
-and a digest bump. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
+carries before handing over to stage 1, `virtual-agent/entrypoint.sh` in that same package, so a client release
+reaches both the client and the pod runtime without an image rebuild and a digest bump. Stage 1 is taken from the
+checkout instead when the installed client ships none, which is a pod whose client predates the runtime moving here. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
 it ended up on either way. To hold a pod on that copy deliberately, set `VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE=true` on its
 StatefulSet with `kubectl set env` — the pod's environment is a fixed list with no pass-through, and the next apply of
 the StatefulSet drops it again.
