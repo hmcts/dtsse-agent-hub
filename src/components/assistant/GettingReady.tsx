@@ -1,10 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { type ConnectionsPrompt, type Connector, connectionsPrompt, offeredConnections } from "@/assistant/connections";
+import { type ConnectionsAsk, connectionsAsk } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
+import { waitingCookie } from "@/assistant/waiting";
+import {
+  firstWarmupMessage,
+  nextWarmupMessage,
+  WARMUP_PATIENCE_MS,
+  WARMUP_ROTATE_MS,
+  WARMUP_SIGNPOST,
+  WARMUP_SLOW,
+  type WarmupPhase,
+  waitingForPerson,
+  warmupPhase
+} from "@/assistant/warmup";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { Mark } from "@/components/assistant/AssistantShell";
+import { useVisit } from "@/components/assistant/AssistantVisit";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { LoginCountdown } from "@/components/virtual-agents/LoginCountdown";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
@@ -12,21 +27,12 @@ import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { LoginView } from "@/virtual-agents/logins";
 
-/** Each connection in words for someone who has never configured one. */
-const CONNECTORS: Partial<Record<CredentialKind, { name: string; initial: string; desc: string }>> = {
-  github: { name: "GitHub", initial: "G", desc: "Read repositories and open pull requests" },
-  azure: { name: "Azure", initial: "Az", desc: "Your HMCTS account, for pipelines and environments" },
-  atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)" },
-  claude: { name: "Claude", initial: "C", desc: "Your Claude licence" },
-  bedrock: { name: "AI model access", initial: "AI", desc: "Your Amazon Bedrock API key" }
-};
-
-/** An Atlassian sign-in is the one optional connection worth offering here; a Jenkins token is for engineers. */
-const OFFERED_OPTIONAL: readonly CredentialKind[] = ["atlassian"];
-
 const INPUT =
   "min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 font-plex-mono text-sm text-asst-text outline-none focus:border-asst-accent-line";
 const PRIMARY = "shrink-0 rounded-[9px] bg-asst-accent px-3.5 py-1.5 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover";
+const FOOTER = "h-[42px] rounded-[10px] px-5 text-sm";
+const FOOTER_PRIMARY = `${FOOTER} bg-asst-accent font-semibold text-asst-ink disabled:opacity-40`;
+const FOOTER_QUIET = `${FOOTER} border border-asst-strong font-medium text-asst-body hover:bg-asst-active`;
 
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
@@ -35,6 +41,52 @@ function useNow(): number {
     return () => clearInterval(timer);
   }, []);
   return now;
+}
+
+/** False until the browser has taken the page over, so a decision needing its clock is not made in a server render. */
+function useTicked(): boolean {
+  const [ticked, setTicked] = useState(false);
+  useEffect(() => {
+    setTicked(true);
+  }, []);
+  return ticked;
+}
+
+/**
+ * The line that rotates while the assistant starts. The first one is the phase's first message, not a random one,
+ * because the server renders this too and a random choice would not survive hydration; the picking begins once the
+ * browser has taken over.
+ *
+ * `since` is when the assistant last changed what it is doing, so how long the wait has gone on is measured from the
+ * wait itself rather than from this screen's mount. Someone who navigates between pages, or sends the screen away
+ * and opens it again, is still waiting on the same step, and must not be told it usually takes a couple of minutes
+ * for a step that has already taken ten.
+ */
+function useWarmupMessage(phase: WarmupPhase, rotating: boolean, since: number): { message: string; slow: boolean } {
+  // Keyed to the phase as well as held, so the pod moving on to the next step changes the line with the step beside
+  // it rather than at the next tick: "Preparing your workspace…" must not sit under "Putting the kettle on.".
+  const [shown, setShown] = useState(() => ({ phase, message: firstWarmupMessage(phase) }));
+  if (shown.phase !== phase) {
+    setShown({ phase, message: firstWarmupMessage(phase) });
+  }
+  const message = shown.phase === phase ? shown.message : firstWarmupMessage(phase);
+  // The server renders this too and its clock is not the browser's, so `slow` waits for the browser's: a wait
+  // crossing three minutes between the two renders would otherwise send the joke and hydrate the other line. The
+  // cost is that a screen opening on a wait already past three minutes shows a joke for one frame.
+  const ticked = useTicked();
+  const now = useNow();
+  const slow = ticked && rotating && now - since >= WARMUP_PATIENCE_MS;
+  useEffect(() => {
+    if (!rotating || slow) {
+      return;
+    }
+    const timer = setInterval(
+      () => setShown((previous) => ({ phase: previous.phase, message: nextWarmupMessage(previous.phase, previous.message, Math.random()) })),
+      WARMUP_ROTATE_MS
+    );
+    return () => clearInterval(timer);
+  }, [rotating, slow]);
+  return { message, slow };
 }
 
 /** What to do for a sign-in the assistant is waiting on: a code to enter on a page, or a code to paste back. */
@@ -87,8 +139,9 @@ function SignIn({ assistantId, login, name, paste }: { assistantId: string; logi
   );
 }
 
-function Connector({
+function ConnectionRow({
   kind,
+  connector,
   stored,
   login,
   assistantId,
@@ -99,6 +152,7 @@ function Connector({
   first
 }: {
   kind: CredentialKind;
+  connector: Connector;
   stored: boolean;
   login: LoginView | undefined;
   assistantId: string;
@@ -109,10 +163,10 @@ function Connector({
   first: boolean;
 }) {
   const [connecting, setConnecting] = useState(false);
-  const connector = CONNECTORS[kind] ?? { name: kind, initial: kind.slice(0, 1).toUpperCase(), desc: "" };
   const state = checklistState(stored, login, now);
-  // A Bedrock key is the one connection with no sign-in: the person pastes it.
-  const pasted = kind === "bedrock";
+  // What the person pastes to connect this one, or `null` when their assistant signs in and relays a code. The
+  // connector's own answer, so a kind with no sign-in behind it is never offered a note about one never coming.
+  const pasted = connector.paste;
   let right: React.ReactNode;
   if (state === "stored") {
     right = <span className="shrink-0 text-[13px] font-medium text-asst-ok">✓ Connected</span>;
@@ -129,6 +183,27 @@ function Connector({
       </button>
     );
   }
+  // One thing to do at a time, chosen here rather than by three conditions that have to agree: a relayed sign-in and
+  // a field for the same credential, side by side, is two password boxes posting to different places, and a token
+  // typed into the code box reaches the pod and comes back only as a sign-in that did not work.
+  let below: React.ReactNode = null;
+  if (state === "login" && login !== undefined) {
+    // The live sign-in wins over anything the person clicked before it arrived, which on the Claude row is the usual
+    // order: they ask to connect, and the pod relays its code a moment later.
+    below = <SignIn assistantId={assistantId} login={login} name={connector.name} paste={paste} />;
+  } else if (state !== "stored" && connecting && pasted !== null) {
+    below = (
+      <ActionForm action={save} label={`Save your ${pasted}`} className="flex flex-wrap items-center gap-2">
+        <input type="hidden" name="kind" value={kind} />
+        <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label={pasted} className={INPUT} />
+        <button type="submit" className={PRIMARY}>
+          Save
+        </button>
+      </ActionForm>
+    );
+  } else if (state !== "stored" && connecting) {
+    below = <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>;
+  }
   return (
     <li className={`flex flex-col gap-2.5 bg-asst-bg px-4 py-3.5 ${first ? "" : "border-t border-asst-line"}`}>
       <div className="flex items-center gap-3.5">
@@ -141,19 +216,7 @@ function Connector({
         </div>
         {right}
       </div>
-      {state === "login" && login !== undefined ? <SignIn assistantId={assistantId} login={login} name={connector.name} paste={paste} /> : null}
-      {state !== "stored" && pasted && connecting ? (
-        <ActionForm action={save} label="Save your Bedrock API key" className="flex flex-wrap items-center gap-2">
-          <input type="hidden" name="kind" value="bedrock" />
-          <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label="Bedrock API key" className={INPUT} />
-          <button type="submit" className={PRIMARY}>
-            Save
-          </button>
-        </ActionForm>
-      ) : null}
-      {state !== "stored" && !pasted && connecting && state !== "login" ? (
-        <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>
-      ) : null}
+      {below}
       {state !== "login" && login?.state === "failed" ? (
         <p role="alert" className="text-xs text-asst-error">
           That sign-in did not work. Your assistant will ask again.
@@ -164,34 +227,40 @@ function Connector({
 }
 
 /**
- * The first visit: the assistant warms up while the person connects the accounts it works with. The sign-ins come
- * from the assistant's pod as it reaches each one, so a connection shows "Connecting…" until its code appears. Once
- * every needed account is connected the person carries on; they are not shown this again.
+ * What the screen says it is for. The `unknown` line neither claims the person has connected anything nor asks them
+ * to: the hub has not read their credentials, and someone who has signed in everywhere must not be told otherwise.
  */
-export function GettingReady({
-  assistant,
-  statuses,
-  unavailable,
-  paste,
-  save,
-  onDone,
-  theme = "system"
-}: {
+function subtitleFor(ask: ConnectionsAsk, returning: boolean): string {
+  if (ask === "unknown") {
+    return "Your sign-ins cannot be checked just now, so your assistant may ask you for one as it goes.";
+  }
+  return returning
+    ? "Your assistant is waiting for you to sign in again before it can carry on."
+    : "While it gets ready, connect the tools it needs to work with your repos, tickets and pipelines.";
+}
+
+/** The footer button, which leaves rather than blocks unless there is something the person can actually connect. */
+function continueLabel(ask: ConnectionsAsk, returning: boolean): string {
+  if (ask === "unknown") {
+    return "Carry on";
+  }
+  if (ask === "connect") {
+    return "Connect the accounts above to continue";
+  }
+  return returning ? "Carry on without waiting" : "Start chatting";
+}
+
+/** What the appearance switch and the heading need, whichever of the two getting-ready screens is showing. */
+interface ScreenProps {
   assistant: AssistantSummary;
-  statuses: CredentialStatus[];
   unavailable: string | null;
-  paste: FormAction;
-  save: FormAction;
-  onDone: () => void;
   /** The appearance the person chose; the screen offers the switch, since it covers the sidebar's. */
   theme?: Theme;
-}) {
-  const now = useNow();
-  const stored = (kind: CredentialKind) => statuses.some((status) => status.kind === kind && status.stored);
-  const kinds = [...assistant.needed, ...assistant.optional.filter((kind) => OFFERED_OPTIONAL.includes(kind))];
+}
+
+/** The shell both getting-ready screens share: the mark, the heading, how far the assistant has got, and why not. */
+function ReadyShell({ assistant, unavailable, theme = "system", subtitle, children }: ScreenProps & { subtitle?: string; children: React.ReactNode }) {
   const { readiness } = assistant;
-  const starting = !readiness.failed && assistant.status !== "running";
-  const canContinue = assistant.onboarded;
   return (
     <div
       role="dialog"
@@ -209,7 +278,7 @@ export function GettingReady({
             <h1 id="getting-ready-title" className="text-[26px] font-medium tracking-tight">
               {readiness.ready ? "Your assistant is ready" : readiness.failed ? "Your assistant could not start" : "Your assistant is getting ready"}
             </h1>
-            <p className="text-pretty text-asst-muted">While it gets ready, connect the tools it needs to work with your repos, tickets and pipelines.</p>
+            {subtitle === undefined ? null : <p className="text-pretty text-asst-muted">{subtitle}</p>}
           </div>
           <div className="flex w-full flex-col gap-1.5">
             <div
@@ -229,11 +298,64 @@ export function GettingReady({
           </div>
         </div>
         {unavailable === null ? null : <p className="text-sm text-asst-error">{unavailable}</p>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The connections and the sign-ins the assistant's pod relays as it reaches each one, so a connection shows
+ * "Connecting…" until its code appears. On a first visit it is where the person connects the accounts their assistant
+ * works with, opened from the connections banner while the assistant warms up behind it.
+ * `returning` is the other way in — someone who connected everything on an earlier visit, whose assistant has
+ * stopped to ask them to sign in again — so the screen asks for that rather than introducing the connections, and
+ * its button leaves rather than finishing anything.
+ *
+ * `unavailable` is the third way in, and the connections are not listed at all for it: the hub has not read them,
+ * so every row would say "Connect" about a sign-in that may well be there. It says why instead, and its button
+ * leaves, because holding someone behind a checklist the hub cannot check is a door with no handle.
+ *
+ * `onLeave` is how the screen is closed while a connection is still missing, and it is why the screen may cover the
+ * page at all: it is a thing the person opened from the banner and can close again, not a gate across the Assistant.
+ */
+export function GettingReady({
+  assistant,
+  statuses,
+  unavailable,
+  paste,
+  save,
+  onDone,
+  onLeave,
+  returning = false,
+  theme = "system"
+}: ScreenProps & {
+  statuses: CredentialStatus[];
+  paste: FormAction;
+  save: FormAction;
+  onDone: () => void;
+  onLeave?: () => void;
+  returning?: boolean;
+}) {
+  const now = useNow();
+  const ask = connectionsAsk(assistant.onboarded, unavailable);
+  const stored = (kind: CredentialKind) => statuses.some((status) => status.kind === kind && status.stored);
+  const offered = offeredConnections(assistant);
+  const starting = !assistant.readiness.failed && assistant.status !== "running";
+  return (
+    <ReadyShell assistant={assistant} unavailable={unavailable} theme={theme} subtitle={subtitleFor(ask, returning)}>
+      {ask === "unknown" ? (
+        <p className="text-pretty text-asst-body">
+          Whatever you have already connected is still connected — the hub just cannot read your sign-ins at the moment, so it is not listing them. There is
+          nothing for you to set up again.
+        </p>
+      ) : (
         <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[14px] border border-asst-line">
-          {kinds.map((kind, index) => (
-            <Connector
+          {offered.map(({ kind, connector }, index) => (
+            <ConnectionRow
               key={kind}
               kind={kind}
+              connector={connector}
               stored={stored(kind)}
               login={assistant.logins.find((login) => login.kind === kind)}
               assistantId={assistant.id}
@@ -245,30 +367,256 @@ export function GettingReady({
             />
           ))}
         </ul>
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={onDone}
-            disabled={!canContinue}
-            className="h-[42px] rounded-[10px] bg-asst-accent px-5 text-sm font-semibold text-asst-ink disabled:opacity-40"
-          >
-            {canContinue ? "Start chatting" : "Connect the accounts above to continue"}
+      )}
+      <div className="flex justify-end gap-3">
+        {/* Beside the one button that is ever disabled, so the screen they opened is never one they cannot close. */}
+        {ask === "connect" && onLeave !== undefined ? (
+          <button type="button" onClick={onLeave} className={FOOTER_QUIET}>
+            Go to your chats
           </button>
-        </div>
+        ) : null}
+        <button type="button" onClick={onDone} disabled={ask === "connect"} className={FOOTER_PRIMARY}>
+          {continueLabel(ask, returning)}
+        </button>
       </div>
+    </ReadyShell>
+  );
+}
+
+/**
+ * What the Assistant has to ask or tell someone about their connections, and the way to the screen it is about.
+ *
+ * A banner and not a screen over everything, because being wrong about this is not symmetric. "You must do this
+ * first" is unrecoverable: it takes away the sidebar, every conversation and the settings that could fix it, over a
+ * state the person may not be able to satisfy — a model route their session disagrees with, a credentials vault that
+ * is down. A banner somebody scrolls past costs them only the thing they were already not doing. So the page stays
+ * theirs, and the screen opens only when they ask for it.
+ *
+ * `onHide` is left out for an ask there is something to do about, which is the whole of a `connect`: the ask has to
+ * outlast their attention, or they lose the only thing telling them why nothing works. An `unknown` has it, because
+ * there is nothing for them to do and saying so once is enough.
+ */
+function ConnectionsBanner({ prompt, onShow, onHide }: { prompt: ConnectionsPrompt; onShow: () => void; onHide?: () => void }) {
+  return (
+    <div
+      role="region"
+      aria-label={prompt.label}
+      className={`fixed left-1/2 top-[68px] z-40 flex w-[min(calc(100%-2rem),44rem)] -translate-x-1/2 flex-wrap items-center gap-3 rounded-[12px] border border-asst-accent-line bg-asst-raised py-2.5 pl-4 font-plex text-asst-text shadow-lg ${onHide === undefined ? "pr-4" : "pr-2.5"}`}
+    >
+      <p className="min-w-0 flex-1 text-[13px] text-asst-body">{prompt.message}</p>
+      <button
+        type="button"
+        onClick={onShow}
+        className="shrink-0 rounded-[9px] bg-asst-accent px-3.5 py-1.5 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover"
+      >
+        {prompt.action}
+      </button>
+      {onHide === undefined ? null : (
+        <button
+          type="button"
+          onClick={onHide}
+          aria-label="Hide this message"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-asst-muted hover:bg-asst-active hover:text-asst-text"
+        >
+          <span aria-hidden="true">✕</span>
+        </button>
+      )}
     </div>
   );
 }
 
 /**
- * Shows the getting-ready screen until the person has connected everything, and then until they choose to carry
- * on. Someone already onboarded never sees it, even while their assistant starts again after a night stopped.
+ * A return visit to an assistant that is not running and is not waiting on the person: the same progress, with
+ * nothing to do but wait, so a rotating line keeps them company and says how long this takes. Every connection is
+ * made and the pod is asking for none, so they are not listed. The button leaves: an assistant that could not start
+ * stays failed until a new pod starts reporting, so without one the screen would shut the person out of the hub.
  */
-export function OnboardingGate(props: Omit<Parameters<typeof GettingReady>[0], "onDone">) {
-  const [needed] = useState(!props.assistant.onboarded);
-  const [done, setDone] = useState(false);
-  if (props.assistant.onboarded && (!needed || done)) {
-    return null;
+export function WarmingUp({ assistant, unavailable, theme = "system", onDismiss }: ScreenProps & { onDismiss: () => void }) {
+  const { failed } = assistant.readiness;
+  const { message, slow } = useWarmupMessage(warmupPhase(assistant.status), !failed, Date.parse(assistant.statusChangedAt));
+  return (
+    <ReadyShell assistant={assistant} unavailable={unavailable} theme={theme}>
+      {failed ? null : (
+        <div className="flex flex-col gap-1.5">
+          {slow ? (
+            <p className="text-pretty text-asst-muted">{WARMUP_SLOW}</p>
+          ) : (
+            <>
+              {/* Not a live region: `readiness.step` is the one that reports progress, and this talks over it. */}
+              <p aria-hidden="true" className="text-pretty text-asst-muted">
+                {message}
+              </p>
+              <p className="text-xs text-asst-faint">{WARMUP_SIGNPOST}</p>
+            </>
+          )}
+        </div>
+      )}
+      <div className="flex justify-end">
+        <button type="button" onClick={onDismiss} className={failed ? FOOTER_PRIMARY : FOOTER_QUIET}>
+          {failed ? "Carry on without it" : "Carry on while it starts"}
+        </button>
+      </div>
+    </ReadyShell>
+  );
+}
+
+/**
+ * What is left once the person sends the waiting screen away: the step the screen was reporting, live, so someone
+ * who went off to read an old conversation is still told when their assistant comes up, and a way back to the screen
+ * until it has.
+ *
+ * It hangs below the chat's header rather than above the composer, which owns the bottom of the page: the composer
+ * centres its own error line and the guidance about checking answers and personal data there, and this must not
+ * cover either of them for the length of a start.
+ */
+function WaitingNotice({ assistant, onShow, onHide }: { assistant: AssistantSummary; onShow: () => void; onHide: () => void }) {
+  const { ready, step } = assistant.readiness;
+  return (
+    <div className="fixed left-1/2 top-[68px] z-40 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-full border border-asst-line bg-asst-raised py-2 pl-4 pr-2.5 font-plex text-asst-text shadow-lg">
+      <p role="status" className="min-w-0 truncate text-[13px] text-asst-body">
+        {step}
+      </p>
+      {ready ? null : (
+        <button type="button" onClick={onShow} className="shrink-0 rounded-full px-2.5 py-1 text-[13px] font-medium text-asst-accent-soft hover:bg-asst-active">
+          Show progress
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onHide}
+        aria-label="Hide your assistant's progress"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-asst-muted hover:bg-asst-active hover:text-asst-text"
+      >
+        <span aria-hidden="true">✕</span>
+      </button>
+    </div>
+  );
+}
+
+/** Closes whichever getting-ready screen is up on Escape, which `aria-modal` leads a keyboard user to expect. */
+function useEscape(active: boolean, close: () => void): void {
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, close]);
+}
+
+/** Remembers the person's choice where a navigation cannot lose it, or forgets it when they ask to watch again. */
+function rememberDismissal(assistant: AssistantSummary, dismissed: boolean): void {
+  // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API is missing from browsers HMCTS staff still use
+  document.cookie = waitingCookie(dismissed ? assistant : null);
+}
+
+/**
+ * Where a surface that is not a `done` starts, and where the cookie puts it again on the next page.
+ *
+ * Only a `done` opens on a screen, and only to report a wait: nothing covers the Assistant over an ask, which is
+ * what the banner is for. An `unknown` sent away is gone rather than back on its banner, because it has said the one
+ * thing it had to say; a `connect` sent away is back on its banner, because what it asked for is still missing.
+ */
+function initialView(ask: ConnectionsAsk, dismissed: boolean): "screen" | "notice" | "gone" {
+  if (ask === "done") {
+    return dismissed ? "notice" : "screen";
   }
-  return <GettingReady {...props} onDone={() => setDone(true)} />;
+  return dismissed && ask === "unknown" ? "gone" : "notice";
+}
+
+/** The kinds the hub has read a stored credential for, which is all the banner's wording needs of them. */
+function storedKinds(statuses: CredentialStatus[]): Set<CredentialKind> {
+  return new Set(statuses.filter((status) => status.stored).map((status) => status.kind));
+}
+
+/**
+ * Which of the getting-ready surfaces the Assistant's pages show, if any.
+ *
+ * Someone with a connection still to make gets the banner, and the connections screen when they open it from there.
+ * Someone who has onboarded waits instead when they arrive to an assistant that is not running: on the connections
+ * screen while its pod is asking them to sign in, so they can act on it, and on the warming-up screen otherwise.
+ * Every screen can be sent away, by its button or by Escape. What each leaves behind is what it still has to say: the
+ * waiting ones a notice reporting the rest of the wait, the connections the banner that sent them, and the one about
+ * sign-ins that cannot be checked nothing at all. Once the assistant is running no screen comes back this visit, and
+ * nor is one shown to someone who arrived to one already running.
+ *
+ * No screen's state can live here alone, because each of the Assistant's pages mounts this afresh: the choice to send
+ * one away is in the cookie `dismissed` is the page's reading of, and that the assistant has been running is in the
+ * visit the layout holds. Hiding the waiting notice is the one thing not carried: it is small, and a navigation
+ * bringing it back is what tells someone who hid it that their assistant has come up.
+ *
+ * Nobody is taken through the connections while the hub cannot read their credentials. `assistant.onboarded` is
+ * false then whatever the person has stored, so asking on it would tell someone who has connected everything to
+ * connect it again, and a screen on it would be satisfied only by the credentials the hub is failing to read. They
+ * are told why once instead, on a banner they can send away, and that is remembered in the same cookie a wait's is,
+ * so moving between pages does not bring it back.
+ */
+export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean }) {
+  const { assistant } = props;
+  const visit = useVisit();
+  const ask = connectionsAsk(assistant.onboarded, props.unavailable);
+  const [needed] = useState(ask === "connect");
+  const [waiting] = useState(ask === "done" && assistant.status !== "running");
+  const [done, setDone] = useState(false);
+  const [view, setView] = useState<"screen" | "notice" | "gone">(() => initialView(ask, dismissed));
+  const running = assistant.status === "running";
+  // Latched while rendering rather than in an effect, which runs after paint: the frame the person would see at the
+  // moment their assistant came up would be this screen saying it was ready, bar full, and then gone. Latched in the
+  // visit as well, so an assistant that stops again — the idle sweep while they read — does not put the screen over
+  // the page they are on, however many times they have moved between pages since it was up.
+  const [ranOnce, setRanOnce] = useState(running || visit.ran);
+  if (running && !ranOnce) {
+    setRanOnce(true);
+  }
+  const started = running || ranOnce;
+  useEffect(() => {
+    if (running) {
+      visit.sawRunning();
+    }
+  }, [running, visit]);
+  const dismiss = useCallback(() => {
+    setView("notice");
+    rememberDismissal(assistant, true);
+  }, [assistant]);
+  const show = () => {
+    setView("screen");
+    rememberDismissal(assistant, false);
+  };
+  // An `unknown` sent away has nothing left to say, so it goes rather than leaving its banner behind.
+  const hide = useCallback(() => {
+    setView("gone");
+    rememberDismissal(assistant, true);
+  }, [assistant]);
+  const onboarding = (ask === "connect" || (needed && !done)) && view === "screen";
+  const unknown = ask === "unknown" && view === "screen";
+  const screen = waiting && !started && !onboarding && !unknown && view === "screen";
+  useEscape(onboarding || unknown || screen, unknown ? hide : dismiss);
+  if (onboarding) {
+    return <GettingReady {...props} onDone={() => setDone(true)} onLeave={dismiss} />;
+  }
+  if (unknown) {
+    return <GettingReady {...props} onDone={hide} />;
+  }
+  if (screen) {
+    return waitingForPerson(assistant.status) ? (
+      <GettingReady {...props} returning onDone={dismiss} />
+    ) : (
+      <WarmingUp assistant={assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} />
+    );
+  }
+  // Sent away for good, which only an `unknown` is ever allowed to be: an ask with something still to connect
+  // outlasts anything the person closes, because it is the only thing telling them why nothing works.
+  const silenced = view === "gone" && ask === "unknown";
+  const prompt = silenced ? null : connectionsPrompt(ask, assistant.needed, storedKinds(props.statuses));
+  if (prompt !== null) {
+    return <ConnectionsBanner prompt={prompt} onShow={show} onHide={ask === "unknown" ? hide : undefined} />;
+  }
+  // Only for a wait this visit began on: someone who arrives to an assistant already up is not shown the end of a
+  // wait they never saw, however recently they sent one away.
+  return waiting && view === "notice" ? <WaitingNotice assistant={assistant} onShow={show} onHide={() => setView("gone")} /> : null;
 }

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { gitBranch, loadAgent, repoName, type StoredAgent, slugify, TOPIC_RE, workspaceRepoName, workspaceRoot } from "../agent.ts";
 import { type Api, createApi } from "../api.ts";
+import { CLIENT_FEATURES } from "../features.ts";
 import { holdNote } from "../held-notes.ts";
 import { findSecret } from "../secret-scan.ts";
 import {
@@ -265,7 +266,18 @@ export async function followWork(ctx: PassContext, { agent, touches, root }: Fol
     try {
       const repo = repoName(top.dir) || top.slug;
       const branch = branchOf(top.dir);
-      await api.register({ session_id: sid, name: agent.name ?? "", cwd: agent.cwd, repo, branch, host: os.hostname() });
+      // `client_features` goes on this register too, not just the one in `agent.ts`: the service replaces the
+      // column with whatever a register reports, so leaving it off here would downgrade a capable session to
+      // "claims nothing" the first time the person's edits moved to another repo.
+      await api.register({
+        session_id: sid,
+        name: agent.name ?? "",
+        cwd: agent.cwd,
+        repo,
+        branch,
+        host: os.hostname(),
+        client_features: [...CLIENT_FEATURES]
+      });
       Object.assign(agent, { repo, branch });
       writeJson(statePath(sid, "agent.json"), { ...(loadAgent(sid) || agent), repo, branch });
       log(sid, `stop-worker: now working in ${repo}${branch ? ` (${branch})` : ""}`);

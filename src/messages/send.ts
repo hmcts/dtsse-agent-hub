@@ -4,7 +4,7 @@ import { HttpError } from "../agent-api/http.ts";
 import { findAgent, isUuid, resolveTargets } from "../agents/store.ts";
 import type { PrismaClient } from "../store/prisma.ts";
 import type { ApiMessage } from "./shape.ts";
-import { type Author, createDirect, createPost } from "./store.ts";
+import { type Author, createDirect, createPost, type NewDirect } from "./store.ts";
 
 /**
  * What an agent or a person sends, with the access rules applied. Refusals are `HttpError`s carrying the contract's
@@ -85,7 +85,14 @@ export async function directAsAgent(prisma: PrismaClient, sender: AgentRef, requ
  * delivery the agent's stream sends and NOTIFYs every pod. An agent the sender cannot see is reported as missing,
  * not forbidden, so the refusal does not confirm that it exists.
  */
-export async function directAsPerson(prisma: PrismaClient, senderOid: string, agentId: string, body: string): Promise<ApiMessage> {
+/** `alongside` is `NewDirect`'s: work that shares the message's transaction, which the Assistant attaches files in. */
+export async function directAsPerson(
+  prisma: PrismaClient,
+  senderOid: string,
+  agentId: string,
+  body: string,
+  alongside?: NewDirect["alongside"]
+): Promise<ApiMessage> {
   const target = isUuid(agentId) ? await findAgent(prisma, agentId) : undefined;
   const grants = await grantsHeldBy(prisma, senderOid);
   if (target === undefined || !canViewAgent(senderOid, target, grants)) {
@@ -94,5 +101,5 @@ export async function directAsPerson(prisma: PrismaClient, senderOid: string, ag
   if (!canPersonMessageAgent(senderOid, target, grants)) {
     throw new HttpError(403, "you have read access to this agent, not write access");
   }
-  return await createDirect(prisma, { author: { oid: senderOid, agentId: null }, targetAgentId: target.id, inReplyTo: null, body });
+  return await createDirect(prisma, { author: { oid: senderOid, agentId: null }, targetAgentId: target.id, inReplyTo: null, body, alongside });
 }

@@ -33,6 +33,7 @@ import {
   workspaceRoot
 } from "./agent.ts";
 import { createApi } from "./api.ts";
+import { CLIENT_FEATURES } from "./features.ts";
 import { ensureStateDir, readJson, statePath, writeJson } from "./session.ts";
 import { skillsHash } from "./skills.ts";
 
@@ -493,6 +494,26 @@ describe("registerAgent", () => {
       // Assert
       expect(hub.agents.get(agent.agent_id)?.skills).toEqual(skills);
       expect(loadAgent("skills-register")?.skills_hash).toBe(skillsHash(skills));
+    } finally {
+      await hub.close();
+    }
+  });
+
+  it("should report what this build understands on every registration, so the hub never has to guess from a version", async () => {
+    // Arrange
+    const hub = createMockHub();
+    const url = await hub.listen();
+    const api = createApi({ baseUrl: url, devUser: "u-me|Me|me@example.com" });
+    const registrations = () => hub.calls.filter((c) => c.path === "/api/agent/register");
+
+    try {
+      // Act
+      const { agent } = await registerAgent(api, "features-register", { cwd: home.root, collectSkills: () => [] });
+      await registerAgent(api, "features-register", { cwd: home.root, collectSkills: () => [] });
+
+      // Assert
+      expect(registrations().map((call) => call.body.client_features)).toEqual([[...CLIENT_FEATURES], [...CLIENT_FEATURES]]);
+      expect(hub.agents.get(agent.agent_id)?.client_features).toEqual([...CLIENT_FEATURES]);
     } finally {
       await hub.close();
     }

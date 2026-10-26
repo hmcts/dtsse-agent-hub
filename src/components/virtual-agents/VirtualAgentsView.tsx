@@ -4,7 +4,7 @@ import { Timestamp } from "@/components/time/Timestamp";
 import type { ModelRoute } from "@/viewer/identity";
 import { diskWarningDays } from "@/virtual-agents/cleanup";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "@/virtual-agents/limits";
-import type { PluginOption } from "@/virtual-agents/plugins";
+import type { PluginOffer } from "@/virtual-agents/plugins";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 import { type CreateAction, CreateVirtualAgentForm } from "./CreateVirtualAgentForm";
 import { idleFor, statusLabel, stopReasonLabel } from "./labels";
@@ -45,7 +45,7 @@ function Row({ agent, now }: { agent: VirtualAgentCard; now: number }) {
   return (
     <li className="space-y-1 border-b border-hub-line px-4 py-3 last:border-b-0">
       <div className="flex flex-wrap items-baseline gap-x-3">
-        <a href={`/agents/${agent.id}`} className="font-bold text-hub-link hover:underline">
+        <a href={`/hub/agents/${agent.id}`} className="font-bold text-hub-link hover:underline">
           {agent.name}
         </a>
         <span className="text-xs text-hub-muted">{statusLabel(agent.status, agent.desired)}</span>
@@ -68,17 +68,7 @@ function Row({ agent, now }: { agent: VirtualAgentCard; now: number }) {
   );
 }
 
-export function CreateVirtualAgent({
-  route,
-  create,
-  refusal,
-  plugins = []
-}: {
-  route: ModelRoute;
-  create: CreateAction;
-  refusal?: string;
-  plugins?: readonly PluginOption[];
-}) {
+export function CreateVirtualAgent({ route, create, refusal, plugins }: { route: ModelRoute; create: CreateAction; refusal?: string; plugins: PluginOffer }) {
   return (
     <Section heading="Create a virtual agent">
       <div className="space-y-3 text-sm">
@@ -105,19 +95,22 @@ function liveCount(agents: readonly VirtualAgentCard[]): number {
   return agents.filter((agent) => agent.desired !== "deleted").length;
 }
 
-/** `plugins` is what `VIRTUAL_AGENT_PLUGINS` offers, for the create form to tick. */
+/**
+ * `plugins` is what `VIRTUAL_AGENT_PLUGINS` offers, for the create form to tick, or why it could not be read. It is
+ * required, here and on everything it is passed on to: see `CreateVirtualAgentForm`.
+ */
 export function VirtualAgentsView({
   agents,
   route,
   create,
   now,
-  plugins = []
+  plugins
 }: {
   agents: VirtualAgentCard[];
   route: ModelRoute;
   create: CreateAction;
   now: number;
-  plugins?: readonly PluginOption[];
+  plugins: PluginOffer;
 }) {
   return (
     <>

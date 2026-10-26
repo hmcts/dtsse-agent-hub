@@ -49,7 +49,9 @@ export type {
   FeedResponse,
   HeartbeatBody,
   LoginCompleteBody,
+  LoginFailedBody,
   LoginPromptBody,
+  MemoryReportBody,
   Message,
   MessageAuthor,
   MessageResponse,
@@ -74,10 +76,15 @@ export type {
 export { ApiError, CREDENTIAL_KINDS, createApi, createTokenProvider, DEFAULT_SCOPE, DEFAULT_URL, parseAzToken, requireAzureLogin } from "./api.ts";
 export type {
   AssistantSupervisor,
+  Attachment,
+  AttachmentFs,
   ConversationSession,
   CreateAssistantSupervisorOptions,
   CreateTmuxOptions,
+  FetchAttachmentsOptions,
   ProgramCheck,
+  ReadAttachments,
+  ReconcileUploadsOptions,
   ReportOutcome,
   RunAssistantSupervisorOptions,
   SavedSession,
@@ -90,24 +97,37 @@ export type {
   Wake
 } from "./assistant/index.ts";
 export {
+  attachmentPath,
   canRunProgram,
   claudeCommand,
   commandProgram,
+  conversationDir,
   createAssistantSupervisor,
   createTmux,
   DEFAULT_IDLE_MINUTES,
   DEFAULT_MAX_SESSIONS,
   EXIT_GRACE_MS,
+  fetchAttachments,
   idleMinutes,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS,
   MAX_SESSIONS_LIMIT,
   maxSessions,
   PROMPT_FILE,
+  parseAttachments,
   parseSavedSession,
   parseWake,
   REFUSAL_EVERY_MS,
   REPORT_EVERY_MS,
+  readAttachments,
+  reconcileUploads,
+  removeConversationUploads,
   runAssistantSupervisor,
-  tmuxName
+  safeName,
+  staleUploadDirs,
+  tmuxName,
+  unfetchedAttachments,
+  uploadsRoot
 } from "./assistant/index.ts";
 export type { Deliver, DirectEventAuthor, DirectEventMessage, ReconnectDecision, RetryState, RunBridgeOptions, StreamEnd } from "./bridge.ts";
 export {
@@ -115,6 +135,7 @@ export {
   parseAssistantFrame,
   parseAssistantProduct,
   parseDirectEventMessage,
+  parseJiraExportFrame,
   RAPID_CLOSE_MS,
   RAPID_CLOSES_BEFORE_BACKOFF,
   readStatus,
@@ -147,18 +168,31 @@ export {
 } from "./enable.ts";
 export type { Env, EnvKey } from "./env.ts";
 export { ENV_KEYS } from "./env.ts";
-export type { AssistantFrame, AssistantProduct, EnvelopeAuthor, EnvelopeMessage, EnvelopeOptions } from "./envelope.ts";
+export type {
+  AssistantFrame,
+  AssistantProduct,
+  AttachmentOutcome,
+  EnvelopeAuthor,
+  EnvelopeMessage,
+  EnvelopeOptions,
+  JiraExportFrame
+} from "./envelope.ts";
 export {
   assistantEnvelope,
+  attachmentLines,
   CLI,
   cliName,
   describeAuthor,
   directEnvelope,
   formatMessage,
+  JIRA_EXPORT_BASH_TIMEOUT_MS,
+  jiraExportLines,
   leadingSkill,
   ownerDirectEnvelope,
   ownerEnvelope
 } from "./envelope.ts";
+export type { ClientFeature } from "./features.ts";
+export { CLIENT_FEATURES } from "./features.ts";
 export type {
   ChooseIdentityOptions,
   ChosenIdentity,
@@ -385,6 +419,7 @@ export type {
 } from "./virtual/index.ts";
 export {
   ATLASSIAN_AUTH_MAX_CHARS,
+  ATLASSIAN_SIGN_IN_CODES,
   AZURE_CACHE_MAX_CHARS,
   atlassianLogin,
   azureDir,
@@ -396,11 +431,13 @@ export {
   DEVICE_CODE_EXPIRES_S,
   EXIT_FATAL,
   EXIT_NO_CREDENTIAL,
+  EXPIRY_TOLERANCE_S,
   FatalError,
   findClaudeToken,
   githubLogin,
   isCredentialKind,
   isVirtualPhase,
+  jiraExportSignInBudget,
   minimalProfile,
   OWNER_READABLE,
   PASTE_CODE_EXPIRES_S,
@@ -428,6 +465,7 @@ export {
   syncAzureCache,
   TWG_DEVICE_CODE_EXPIRES_S,
   twgDir,
+  twgLoginExpired,
   twgPromptsForBrowser,
   unpackAzureCache,
   VIRTUAL_USAGE,

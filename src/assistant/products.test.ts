@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PRODUCT, isProduct, PRODUCTS, productLabel } from "./products.ts";
+import { byCodePoint } from "../topics/slug.ts";
+import { DEFAULT_PRODUCT, isProduct, PRODUCTS, productLabel, storedProduct } from "./products.ts";
 
 describe("products", () => {
-  it("should offer the prototype's products, with Other the default", () => {
-    expect(PRODUCTS.map((product) => product.label)).toEqual(["CaTH Service", "CCD", "No Fault Divorce", "Probate", "Civil Possessions", "Other"]);
+  it("should offer General first, as the default, with the rest alphabetical", () => {
+    expect(PRODUCTS[0]).toEqual({ slug: "general", label: "General" });
+    expect(DEFAULT_PRODUCT).toBe("general");
     expect(isProduct(DEFAULT_PRODUCT)).toBe(true);
+
+    const rest = PRODUCTS.slice(1).map((product) => product.label.toLowerCase());
+    expect(rest).toEqual([...rest].sort(byCodePoint));
+  });
+
+  it("should offer each slug once", () => {
+    const slugs = PRODUCTS.map((product) => product.slug);
+    expect(new Set(slugs).size).toBe(slugs.length);
   });
 
   it("should fit every slug in the database's product check", () => {
@@ -13,16 +23,28 @@ describe("products", () => {
     }
   });
 
-  it.each([["ccd"], ["nfdiv"]])("should accept %s when it is offered", (slug) => {
+  it.each([["ccd"], ["nfdiv"], ["send-letter"]])("should accept %s when it is offered", (slug) => {
     expect(isProduct(slug)).toBe(true);
   });
 
-  it.each([["CCD"], ["unknown"], [""], [42], [null]])("should refuse %j when it is not an offered slug", (slug) => {
+  it.each([["CCD"], ["other"], ["unknown"], [""], [42], [null]])("should refuse %j when it is not an offered slug", (slug) => {
     expect(isProduct(slug)).toBe(false);
   });
 
   it("should label a slug no longer offered as itself", () => {
-    expect(productLabel("pcs")).toBe("Civil Possessions");
+    expect(productLabel("other")).toBe("other");
     expect(productLabel("retired")).toBe("retired");
+  });
+
+  it("should label an offered slug with its display name", () => {
+    expect(productLabel("pcs")).toBe("Possession Claims Service (PCS)");
+  });
+
+  it.each([["ccd"], ["general"], ["send-letter"]])("should stand for itself when %s is offered", (slug) => {
+    expect(storedProduct(slug)).toBe(slug);
+  });
+
+  it.each([["other"], ["retired"], ["CCD"], [""]])("should stand for the default when %j is not offered", (slug) => {
+    expect(storedProduct(slug)).toBe(DEFAULT_PRODUCT);
   });
 });

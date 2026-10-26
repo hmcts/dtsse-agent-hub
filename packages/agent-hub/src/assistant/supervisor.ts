@@ -7,6 +7,7 @@ import { workspaceRoot } from "../agent.ts";
 import type { Api, SessionReport } from "../api.ts";
 import type { Env } from "../env.ts";
 import { hubHome, projectTranscriptPath, statePath, validSessionId } from "../session.ts";
+import { removeConversationUploads, uploadsRoot } from "./attachments.ts";
 import { canRunProgram, claudeCommand, commandProgram, createTmux, type ProgramCheck, type Tmux, tmuxName } from "./tmux.ts";
 
 export const DEFAULT_MAX_SESSIONS = 2;
@@ -14,6 +15,33 @@ export const MAX_SESSIONS_LIMIT = 20;
 export const DEFAULT_IDLE_MINUTES = 20;
 // How long a session has to leave after `/exit` before its tmux session is killed.
 export const EXIT_GRACE_MS = 15000;
+/**
+ * How long a `busy` is believed with nothing new appended to the session's transcript.
+ *
+ * Claude Code's `Stop` hook is the only thing that clears the `busy` its `UserPromptSubmit` hook wrote, and it does
+ * not run for a turn the person interrupted, so the flag alone is not evidence of a turn still running. Every step
+ * of a real turn appends to the transcript, and the longest a single step can block is Claude Code's ten-minute tool
+ * timeout, so an hours-old transcript under a `busy` is a turn that ended without saying so.
+ *
+ * Two hours is an order of magnitude beyond that, because the two mistakes are not equal: a slot held too long is a
+ * wait, while evicting a session that is really working — a long build, a slow Jenkins wait — costs the person the
+ * answer it was in the middle of.
+ */
+export const BUSY_STALE_MS = 2 * 60 * 60 * 1000;
+/**
+ * How far before the supervisor started a status file may be dated and still count as written since.
+ *
+ * The comparison is between a time the kernel recorded for a write and a time this process took a moment later, so
+ * a filesystem that keeps mtimes coarsely is enough to put a turn that began as the pod came up on the wrong side
+ * of it. A pod's `~/.claude` volume is ext4, which keeps them to the nanosecond, but a laptop or a CI runner need
+ * not be, and whole seconds is common.
+ *
+ * Five seconds is well over the coarsest granularity in use anywhere — two for FAT, one for ext3 and HFS+ — and
+ * still far under the time any pod takes to go down and have a new supervisor running, which is what the
+ * comparison exists to tell apart. It buys back a five-second window in which a previous pod's `busy` is believed,
+ * and `BUSY_STALE_MS` is the backstop for that; the mistake it avoids is evicting a session that is really working.
+ */
+export const BUSY_BOOT_SLACK_MS = 5000;
 export const REPORT_EVERY_MS = 60000;
 /**
  * How often a launcher this pod cannot run is said again while that is still true. On an interval, as `report()`
@@ -67,6 +95,7 @@ export type AssistantSupervisor = {
   queue: Wake[];
   max: number;
   wake: (data: unknown) => Promise<void>;
+  interrupt: (data: unknown) => Promise<void>;
   close: (data: unknown) => Promise<void>;
   tick: () => Promise<void>;
   adopt: () => Promise<void>;
@@ -76,7 +105,7 @@ export type AssistantSupervisor = {
 export type ReportOutcome = "unchanged" | "reported" | "error";
 
 /** The filesystem calls the supervisor makes; a test passes `node:fs` or its own. */
-export type SupervisorFs = Pick<typeof nodeFs, "statSync" | "readFileSync" | "writeFileSync" | "existsSync" | "mkdirSync" | "renameSync">;
+export type SupervisorFs = Pick<typeof nodeFs, "statSync" | "readFileSync" | "writeFileSync" | "existsSync" | "mkdirSync" | "renameSync" | "rmSync">;
 
 export type CreateAssistantSupervisorOptions = {
   api: Pick<Api, "putSessions">;
@@ -89,13 +118,18 @@ export type CreateAssistantSupervisorOptions = {
   now?: () => number;
   say?: (message: string) => void;
   /** Where each conversation's session runs, and so what a relative path in its command resolves against: the
-   * workspace checkout root, because `claudeCommand` names the prompt file through a path relative to it. */
+   * workspace checkout root, which is where a session is expected to work. */
   cwd?: string;
+  /** Where conversations' attachments live; a deleted conversation's directory goes with its session. */
+  uploadsDir?: string;
   max?: number;
   idleMs?: number;
   exitGraceMs?: number;
   reportEveryMs?: number;
   refusalEveryMs?: number;
+  busyStaleMs?: number;
+  /** When this supervisor started, which bounds how old a `busy` it will believe is; a test passes its own. */
+  bootedAt?: number;
 };
 
 // The pod's state directory, which `virtual/phases.ts` also writes to. Spelled out rather than taken from
@@ -144,11 +178,14 @@ export function createAssistantSupervisor({
   now = Date.now,
   say = () => {},
   cwd = workspaceRoot(),
+  uploadsDir = uploadsRoot(env, cwd),
   max = maxSessions(env),
   idleMs = idleMinutes(env) * 60000,
   exitGraceMs = EXIT_GRACE_MS,
   reportEveryMs = REPORT_EVERY_MS,
-  refusalEveryMs = REFUSAL_EVERY_MS
+  refusalEveryMs = REFUSAL_EVERY_MS,
+  busyStaleMs = BUSY_STALE_MS,
+  bootedAt = now()
 }: CreateAssistantSupervisorOptions): AssistantSupervisor {
   const sessions = new Map<string, ConversationSession>();
   // Wakes waiting for a free slot, oldest first. A conversation whose session is stopping waits here too.
@@ -202,16 +239,38 @@ export function createAssistantSupervisor({
     }
   }
 
-  // Busy while the hooks say so. Otherwise last active when the status file or the transcript last changed:
-  // the Stop hook writes the one, and every turn appends to the other.
+  /**
+   * Busy while the hooks say so and the session is still showing progress. Last active when the status file or the
+   * transcript last changed either way: the Stop hook writes the one, and every turn appends to the other.
+   *
+   * A `busy` is believed only when the status file was written since this supervisor started, give or take
+   * `BUSY_BOOT_SLACK_MS` for how coarsely the filesystem keeps an mtime, and only while there has been progress
+   * within `busyStaleMs`. That bound needs no such slack: it weighs a duration against two hours, where a second
+   * either way is nothing, rather than against a time taken at almost the same instant.
+   *
+   * `~/.claude` is a volume that outlives the pod, so a turn the pod went down in the middle of leaves `busy`
+   * behind on disk, and nothing rewrites it: a session resumed under the same session id finds the `enabled` file
+   * its predecessor left there too, so it goes straight to `live` without the enable that would have written the
+   * status afresh. No session can be mid-turn from before the process that would be running it, and such a `busy`
+   * taken at face value is a slot `leastActiveIdle` will not take and the idle sweep will not reach — on a disk
+   * that outlives the pod, so restarting does not clear it either.
+   *
+   * `active_at` moves with the two mtimes alone, never with the flag, so that a frozen `busy` cannot also read as
+   * the most recently used session on the pod. A turn that is really running appends to its transcript, which is
+   * what keeps it at the recent end of the eviction order and what makes it safe to discount a `busy` claimed
+   * before the boot: a genuine turn adopted across a supervisor restart is the last session eviction would pick and
+   * is nowhere near the idle stop.
+   */
   function refresh(s: ConversationSession): void {
     const status = statePath(s.session_id, "status");
     let text = "";
     try {
       text = (fs.readFileSync(status, "utf8") as string).trim();
     } catch {}
-    s.busy = text === "busy";
-    s.active_at = Math.max(s.active_at, s.busy ? now() : 0, mtime(status), mtime(transcript(s.session_id)));
+    const statusAt = mtime(status);
+    const progressAt = Math.max(statusAt, mtime(transcript(s.session_id)));
+    s.busy = text === "busy" && statusAt >= bootedAt - BUSY_BOOT_SLACK_MS && now() - progressAt < busyStaleMs;
+    s.active_at = Math.max(s.active_at, progressAt);
     if (s.phase === "starting" && fs.existsSync(statePath(s.session_id, "enabled"))) {
       s.phase = "live";
     }
@@ -376,6 +435,48 @@ export function createAssistantSupervisor({
     await report();
   }
 
+  /**
+   * Ends the turn a conversation's session is in the middle of, without stopping the session: `Escape` is Claude
+   * Code's own `chat:cancel` binding, which that session's own keyboard would send, so the conversation, the
+   * transcript and the pane all survive it. Not `C-c`, which the same gesture chain also exits the app on, and not
+   * a signal or `kill-session`, either of which would cost the person the session the stop was meant to preserve.
+   *
+   * The status file is written `idle` with it, because **Claude Code runs no `Stop` hook for a turn the user
+   * interrupted** — that hook is what normally clears the `busy` the `UserPromptSubmit` hook set. Left alone, the
+   * file would say `busy` until the person's *next* prompt finished a turn, the bridge would keep heartbeating it,
+   * and the hub's "working" line would spin for ever on an answer that had already stopped. The idle sweep cannot
+   * save it either: heartbeats are still arriving.
+   *
+   * Written before the keys rather than after, so a `sendKeys` that throws still leaves the status honest: the worst
+   * case then is a turn that is still running and reads as idle for the few seconds until its own `Stop` hook fires,
+   * which is the error worth having of the two.
+   *
+   * Nothing to interrupt is the common case rather than an error: the hub sends an `interrupt` once and never
+   * replays it, so one arriving for a conversation with no session, or with a session already on its way out, is a
+   * stop whose turn has already ended. Escape with no turn running is a key that pane's binding is not listening
+   * for, so acting anyway would be harmless — but saying so in the log is more use than sending it.
+   */
+  async function interrupt(data: unknown): Promise<void> {
+    const cid = asRecord(data)?.conversation_id;
+    const s = typeof cid === "string" ? sessions.get(cid) : undefined;
+    if (!s || s.phase === "stopping") {
+      say(`ignoring an interrupt for conversation ${String(cid)}: ${s ? "its session is stopping" : "it has no session here"}`);
+      return;
+    }
+    try {
+      // `refresh` reads this file back for `busy` and for the idle clock, so nothing in memory is set here.
+      fs.writeFileSync(statePath(s.session_id, "status"), "idle\n");
+    } catch (e) {
+      say(`conversation ${s.conversation_id}: could not mark its session idle: ${(e as Error).message}`);
+    }
+    try {
+      await tmux.sendKeys(s.name, "Escape");
+      say(`conversation ${s.conversation_id}: interrupted its session`);
+    } catch (e) {
+      say(`conversation ${s.conversation_id}: could not interrupt its session: ${(e as Error).message}`);
+    }
+  }
+
   async function close(data: unknown): Promise<void> {
     const cid = asRecord(data)?.conversation_id;
     const queued = queue.findIndex((w) => w.conversation_id === cid);
@@ -385,6 +486,15 @@ export function createAssistantSupervisor({
     const s = typeof cid === "string" ? sessions.get(cid) : undefined;
     if (s) {
       await stop(s, "the conversation was deleted");
+    }
+    // The chat is gone, so the files the person attached to it have nothing left to belong to. A conversation deleted
+    // while this pod was stopped sends no `close`; `reconcileUploads` is what catches that one.
+    if (typeof cid === "string") {
+      try {
+        removeConversationUploads(uploadsDir, cid, fs);
+      } catch (e) {
+        say(`conversation ${cid}: could not remove its uploads: ${(e as Error).message}`);
+      }
     }
     await report();
   }
@@ -448,6 +558,7 @@ export function createAssistantSupervisor({
     queue,
     max,
     wake: (data) => serial(() => wake(data)),
+    interrupt: (data) => serial(() => interrupt(data)),
     close: (data) => serial(() => close(data)),
     tick: () => serial(tick),
     adopt: () => serial(adopt),

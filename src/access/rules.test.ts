@@ -2,27 +2,48 @@ import { describe, expect, it } from "vitest";
 import {
   type AgentRef,
   agentAccess,
+  attachmentDownload,
+  type ConversationShare,
   canActAsVirtualAgent,
   canAgentMessageAgent,
+  canAttachUpload,
   canGrant,
   canLaunchTokenActForAgent,
   canLaunchTokenReadMessage,
+  canManageConversationShares,
   canManageCredential,
   canManageGrants,
+  canManageTemplate,
+  canManageUploadsOnDisk,
   canManageVirtualAgent,
   canOwnerReadCredential,
   canPersonMessageAgent,
   canReadMessage,
+  canRemoveUploadFromDisk,
   canSeeAgentSkills,
+  canSeeAssistantMemory,
+  canSessionUseAttachment,
+  canShareConversationWith,
+  canStopAssistantAnswer,
+  canSuggestPerson,
   canUseCredentialRoutes,
   canViewAgent,
+  canViewConversation,
+  canViewSharedConversation,
   canViewTranscript,
   canViewVirtualAgent,
   canVirtualAgentStoreCredential,
+  canWriteUpload,
+  conversationAccess,
   type Grant,
   grantLevel,
+  MAX_PEOPLE_SUGGESTIONS,
   type MessageRef,
-  replyRoute
+  MIN_PEOPLE_QUERY,
+  peopleLookup,
+  replyRoute,
+  type SharedConversationRef,
+  type UploadRef
 } from "./rules.ts";
 
 const OWNER = "oid-owner";
@@ -299,6 +320,18 @@ describe("canManageCredential", () => {
   });
 });
 
+describe("canManageTemplate", () => {
+  // Reading is the same decision as writing, and no grant reaches a prompt somebody wrote for themselves.
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s reads or changes the owner's templates", (expected, role) => {
+    expect(canManageTemplate(ROLES[role], OWNER)).toBe(expected);
+  });
+});
+
 describe("canManageVirtualAgent", () => {
   it.each<[boolean, Role]>([
     [true, "owner"],
@@ -442,5 +475,363 @@ describe("canLaunchTokenReadMessage", () => {
 
   it("should refuse every direct when the virtual agent has no sessions yet", () => {
     expect(canLaunchTokenReadMessage([], direct(null, session))).toBe(false);
+  });
+});
+
+describe("the upload rules", () => {
+  const CONVERSATION = "conv-1";
+
+  function upload(overrides: Partial<UploadRef> = {}): UploadRef {
+    return { conversationId: CONVERSATION, ownerOid: OWNER, messageId: null, state: "pending", ...overrides };
+  }
+
+  describe("canWriteUpload", () => {
+    it.each([["pending"], ["stored"]] as const)("should allow the owner to write an upload that is %s", (state) => {
+      expect(canWriteUpload(OWNER, upload({ state }))).toBe(true);
+    });
+
+    it("should refuse anyone but the person who started it, grant or no grant", () => {
+      expect(canWriteUpload(WRITER, upload())).toBe(false);
+      expect(canWriteUpload(STRANGER, upload())).toBe(false);
+    });
+
+    it("should refuse an upload already attached to a message, since there is nothing left to write", () => {
+      expect(canWriteUpload(OWNER, upload({ state: "stored", messageId: "41" }))).toBe(false);
+    });
+
+    it.each([["fetched"], ["expired"]] as const)("should refuse an upload that is %s", (state) => {
+      expect(canWriteUpload(OWNER, upload({ state }))).toBe(false);
+    });
+  });
+
+  describe("canAttachUpload", () => {
+    it("should allow the owner to attach their own finished upload to its own conversation", () => {
+      expect(canAttachUpload(OWNER, CONVERSATION, upload({ state: "stored" }))).toBe(true);
+    });
+
+    it("should refuse an upload of another conversation", () => {
+      expect(canAttachUpload(OWNER, "conv-2", upload({ state: "stored" }))).toBe(false);
+    });
+
+    it("should refuse someone else's upload", () => {
+      expect(canAttachUpload(STRANGER, CONVERSATION, upload({ state: "stored" }))).toBe(false);
+    });
+
+    it("should refuse an upload that is still arriving", () => {
+      expect(canAttachUpload(OWNER, CONVERSATION, upload({ state: "pending" }))).toBe(false);
+    });
+
+    it("should refuse an upload already on a message, so it is attached once", () => {
+      expect(canAttachUpload(OWNER, CONVERSATION, upload({ state: "stored", messageId: "41" }))).toBe(false);
+    });
+  });
+
+  describe("canSessionUseAttachment", () => {
+    const attached = upload({ state: "stored", messageId: "41" });
+
+    it("should let a conversation's session read a part of its own attachment", () => {
+      expect(canSessionUseAttachment(CONVERSATION, attached, "part")).toBe(true);
+    });
+
+    it("should refuse an attachment of another conversation", () => {
+      expect(canSessionUseAttachment("conv-2", attached, "part")).toBe(false);
+    });
+
+    it("should refuse an agent that is not a conversation's at all", () => {
+      expect(canSessionUseAttachment(null, attached, "part")).toBe(false);
+    });
+
+    it("should refuse an upload that never reached a message", () => {
+      expect(canSessionUseAttachment(CONVERSATION, upload({ state: "stored" }), "part")).toBe(false);
+    });
+
+    it.each([["pending"], ["fetched"], ["expired"]] as const)("should refuse reading a part when the upload is %s", (state) => {
+      expect(canSessionUseAttachment(CONVERSATION, upload({ state, messageId: "41" }), "part")).toBe(false);
+    });
+
+    it.each([["stored"], ["fetched"]] as const)("should accept a fetched report when the upload is %s", (state) => {
+      expect(canSessionUseAttachment(CONVERSATION, upload({ state, messageId: "41" }), "fetched")).toBe(true);
+    });
+
+    it.each([["pending"], ["expired"]] as const)("should refuse a fetched report when the upload is %s", (state) => {
+      expect(canSessionUseAttachment(CONVERSATION, upload({ state, messageId: "41" }), "fetched")).toBe(false);
+    });
+  });
+
+  describe("attachmentDownload", () => {
+    const NOW = new Date("2026-10-21T12:00:00.000Z");
+    const SOON = new Date("2026-10-21T14:00:00.000Z");
+    const PASSED = new Date("2026-10-21T11:00:00.000Z");
+    const sent = upload({ state: "fetched", messageId: "41" });
+
+    it.each([["stored"], ["fetched"]] as const)("should let the owner download their own upload when it is %s", (state) => {
+      expect(attachmentDownload(OWNER, upload({ state, messageId: "41" }), SOON, NOW)).toBe("ok");
+    });
+
+    it("should let the owner download an upload that never reached a message, since it is still their file", () => {
+      expect(attachmentDownload(OWNER, upload({ state: "stored" }), SOON, NOW)).toBe("ok");
+    });
+
+    it("should refuse anyone but the owner, grant or no grant, as though the upload did not exist", () => {
+      expect(attachmentDownload(WRITER, sent, SOON, NOW)).toBe("not_yours");
+      expect(attachmentDownload(READER, sent, SOON, NOW)).toBe("not_yours");
+      expect(attachmentDownload(STRANGER, sent, SOON, NOW)).toBe("not_yours");
+    });
+
+    it("should tell the owner the bytes are gone once the window has closed", () => {
+      expect(attachmentDownload(OWNER, sent, PASSED, NOW)).toBe("not_held");
+    });
+
+    it("should refuse the instant the window closes, rather than at the instant after it", () => {
+      expect(attachmentDownload(OWNER, sent, NOW, NOW)).toBe("not_held");
+    });
+
+    it("should refuse an expired upload even inside the window, which is a sweep that has already run", () => {
+      expect(attachmentDownload(OWNER, upload({ state: "expired", messageId: "41" }), SOON, NOW)).toBe("not_held");
+    });
+
+    it("should refuse an upload still arriving, whose parts would make a file with holes in it", () => {
+      expect(attachmentDownload(OWNER, upload({ state: "pending" }), SOON, NOW)).toBe("not_held");
+    });
+
+    it("should refuse someone else's expired upload as not theirs, saying nothing about its state", () => {
+      expect(attachmentDownload(STRANGER, upload({ state: "expired", messageId: "41" }), PASSED, NOW)).toBe("not_yours");
+    });
+  });
+
+  describe("canManageUploadsOnDisk", () => {
+    it("should let a person see and clear what is on their own assistant's disk", () => {
+      expect(canManageUploadsOnDisk(OWNER, OWNER)).toBe(true);
+    });
+
+    // A grant is over sessions a person chose to share, and what is on their assistant's volume is neither a session
+    // nor something they shared, so this rule takes no grants at all rather than some it would ignore.
+    it.each([
+      ["writer", WRITER],
+      ["reader", READER],
+      ["stranger", STRANGER]
+    ] as const)("should refuse a %s, however much access they hold over that person's agents", (_role, oid) => {
+      expect(canManageUploadsOnDisk(oid, OWNER)).toBe(false);
+    });
+  });
+
+  describe("canRemoveUploadFromDisk", () => {
+    it.each([["stored"], ["fetched"], ["expired"]] as const)("should let the owner clear a %s upload that reached a message", (state) => {
+      expect(canRemoveUploadFromDisk(OWNER, upload({ state, messageId: "41" }))).toBe(true);
+    });
+
+    // A pod only ever fetches what was sent, so an upload still in a composer has no copy on its disk to clear.
+    it("should refuse an upload that never reached a message, which no pod has a copy of", () => {
+      expect(canRemoveUploadFromDisk(OWNER, upload({ state: "stored" }))).toBe(false);
+    });
+
+    it.each([
+      ["writer", WRITER],
+      ["reader", READER],
+      ["stranger", STRANGER]
+    ] as const)("should refuse a %s clearing the owner's file", (_role, oid) => {
+      expect(canRemoveUploadFromDisk(oid, upload({ state: "fetched", messageId: "41" }))).toBe(false);
+    });
+  });
+
+  describe("canSeeAssistantMemory", () => {
+    it("should let a person see what their own assistant reports about its memory", () => {
+      expect(canSeeAssistantMemory(OWNER, OWNER)).toBe(true);
+    });
+
+    // As with the files on its disk, a grant is over sessions a person chose to share; how much memory their
+    // assistant is using is neither.
+    it.each([
+      ["writer", WRITER],
+      ["reader", READER],
+      ["stranger", STRANGER]
+    ] as const)("should refuse a %s, however much access they hold over that person's agents", (_role, oid) => {
+      expect(canSeeAssistantMemory(oid, OWNER)).toBe(false);
+    });
+  });
+
+  describe("conversations", () => {
+    it("should let a person see their own chat", () => {
+      expect(canViewConversation("alice", { ownerOid: "alice" })).toBe(true);
+    });
+
+    it("should refuse someone else's chat", () => {
+      expect(canViewConversation("bob", { ownerOid: "alice" })).toBe(false);
+    });
+
+    // A grant covers every agent its owner has, and a chat's session agent is one of them. The chat is still nobody
+    // else's, which is why this rule takes no grants at all rather than being handed some it would ignore.
+    it("should refuse someone else's chat however much access they hold over that person's agents", () => {
+      const write: Grant[] = [{ ownerOid: "alice", granteeOid: "bob", level: "write" }];
+
+      expect(canViewAgent("bob", { id: "a1", ownerOid: "alice" }, write)).toBe(true);
+      expect(canViewConversation("bob", { ownerOid: "alice" })).toBe(false);
+    });
+
+    // A `write` grantee can message any other agent of this owner's, so it is the one worth naming: a conversation's
+    // agent is the owner's alone, and interrupting its turn is further still than sending it something.
+    it.each<[boolean, Role]>([
+      [true, "owner"],
+      [false, "read grantee"],
+      [false, "write grantee"],
+      [false, "stranger"]
+    ])("should answer %s when the %s stops the answer in the owner's chat", (expected, role) => {
+      expect(canStopAssistantAnswer(ROLES[role], { ownerOid: OWNER })).toBe(expected);
+    });
+  });
+});
+
+describe("the conversation share rules", () => {
+  const CONVERSATION: SharedConversationRef = { id: "conv-1", ownerOid: OWNER };
+  const RECIPIENT = "oid-recipient";
+  const SHARES: ConversationShare[] = [
+    { conversationId: CONVERSATION.id, recipientOid: RECIPIENT },
+    // A share of another conversation of the same owner, which must not carry over to this one.
+    { conversationId: "conv-2", recipientOid: STRANGER }
+  ];
+
+  describe("conversationAccess", () => {
+    it("should answer owner when the viewer owns the conversation", () => {
+      expect(conversationAccess(OWNER, CONVERSATION, SHARES)).toBe("owner");
+    });
+
+    it("should answer reader when the viewer is named in a share of that conversation", () => {
+      expect(conversationAccess(RECIPIENT, CONVERSATION, SHARES)).toBe("reader");
+    });
+
+    it("should answer none when the viewer is named only in a share of another conversation", () => {
+      expect(conversationAccess(STRANGER, CONVERSATION, SHARES)).toBe("none");
+    });
+
+    it("should answer none when the conversation is shared with nobody", () => {
+      expect(conversationAccess(RECIPIENT, CONVERSATION, [])).toBe("none");
+    });
+
+    it.each([
+      ["a read grantee of the owner's agents", READER],
+      ["a write grantee of the owner's agents", WRITER]
+    ])("should answer none for %s, since no agent grant reaches a conversation", (_label, viewerOid) => {
+      expect(conversationAccess(viewerOid, CONVERSATION, SHARES)).toBe("none");
+    });
+  });
+
+  describe("canViewSharedConversation", () => {
+    it.each([
+      ["its owner", OWNER],
+      ["someone named in a share of it", RECIPIENT]
+    ])("should allow %s", (_label, viewerOid) => {
+      expect(canViewSharedConversation(viewerOid, CONVERSATION, SHARES)).toBe(true);
+    });
+
+    // The one that matters: holding the link is not being on the list, so a stranger handed it reads nothing. The
+    // rule takes no link, token or secret at all, which is why there is nothing a link alone could satisfy.
+    it.each([
+      ["a stranger", STRANGER],
+      ["a read grantee of the owner's agents", READER],
+      ["a write grantee of the owner's agents", WRITER]
+    ])("should refuse %s, however they came by the address", (_label, viewerOid) => {
+      expect(canViewSharedConversation(viewerOid, CONVERSATION, SHARES)).toBe(false);
+    });
+
+    it("should refuse everyone but the owner while the conversation is shared with nobody", () => {
+      expect(canViewSharedConversation(OWNER, CONVERSATION, [])).toBe(true);
+      for (const viewerOid of [RECIPIENT, READER, WRITER, STRANGER]) {
+        expect(canViewSharedConversation(viewerOid, CONVERSATION, [])).toBe(false);
+      }
+    });
+  });
+
+  // A share is of the conversation, never of its agent, so everything decided about the agent still answers for a
+  // recipient exactly as it does for a stranger: the UI stream's watch, the agent API's routes and the rosters.
+  describe("what a share does not widen", () => {
+    const agent: AgentRef = { id: "conversation-agent", ownerOid: OWNER, ownerOnly: true };
+    const asGrants: Grant[] = [...GRANTS, { ownerOid: OWNER, granteeOid: RECIPIENT, level: "write" }];
+
+    it.each([
+      ["see the conversation's agent", canViewAgent],
+      ["read its transcript", canViewTranscript],
+      ["message it", canPersonMessageAgent],
+      ["see the skills it offers", canSeeAgentSkills]
+    ])("should not let a share recipient %s", (_label, rule) => {
+      expect(rule(RECIPIENT, agent, [])).toBe(false);
+      // Not even with a grant over the owner's agents on top, which is what `ownerOnly` is for.
+      expect(rule(RECIPIENT, agent, asGrants)).toBe(false);
+    });
+
+    it("should still let the owner do all of it", () => {
+      for (const rule of [canViewAgent, canViewTranscript, canPersonMessageAgent, canSeeAgentSkills]) {
+        expect(rule(OWNER, agent, [])).toBe(true);
+      }
+    });
+  });
+
+  describe("canManageConversationShares", () => {
+    it("should allow the owner", () => {
+      expect(canManageConversationShares(OWNER, CONVERSATION)).toBe(true);
+    });
+
+    it.each([
+      ["a recipient of it", RECIPIENT],
+      ["a write grantee of the owner's agents", WRITER],
+      ["a stranger", STRANGER]
+    ])("should refuse %s", (_label, actorOid) => {
+      expect(canManageConversationShares(actorOid, CONVERSATION)).toBe(false);
+    });
+  });
+
+  describe("canShareConversationWith", () => {
+    it("should let the owner share with someone the hub knows", () => {
+      expect(canShareConversationWith(OWNER, CONVERSATION, RECIPIENT, true)).toBe(true);
+    });
+
+    it("should refuse someone who has never used the hub", () => {
+      expect(canShareConversationWith(OWNER, CONVERSATION, RECIPIENT, false)).toBe(false);
+    });
+
+    it("should refuse sharing a conversation with its own owner", () => {
+      expect(canShareConversationWith(OWNER, CONVERSATION, OWNER, true)).toBe(false);
+    });
+
+    it.each([
+      ["a recipient", RECIPIENT],
+      ["a write grantee of the owner's agents", WRITER],
+      ["a stranger", STRANGER]
+    ])("should refuse %s sharing someone else's conversation", (_label, actorOid) => {
+      expect(canShareConversationWith(actorOid, CONVERSATION, STRANGER, true)).toBe(false);
+    });
+  });
+});
+
+describe("the people lookup rules", () => {
+  describe("peopleLookup", () => {
+    it("should answer a query of the shortest length it accepts", () => {
+      expect(peopleLookup("no")).toEqual({ ok: true, query: "no", limit: MAX_PEOPLE_SUGGESTIONS });
+    });
+
+    it("should trim the query, so the spaces around a name do not count towards its length", () => {
+      expect(peopleLookup("  norton  ")).toEqual({ ok: true, query: "norton", limit: MAX_PEOPLE_SUGGESTIONS });
+    });
+
+    it.each([[""], [" "], ["n"], ["  n "]])("should refuse %p, which is too little to match anyone against", (raw) => {
+      expect(peopleLookup(raw)).toEqual({ ok: false });
+    });
+
+    it("should hold the shortest query to two characters, so one letter does not answer with the hub", () => {
+      expect(MIN_PEOPLE_QUERY).toBe(2);
+    });
+
+    it("should keep one answer short enough not to be a list", () => {
+      expect(MAX_PEOPLE_SUGGESTIONS).toBe(8);
+    });
+  });
+
+  describe("canSuggestPerson", () => {
+    it("should offer anyone else the hub knows", () => {
+      expect(canSuggestPerson(OWNER, { oid: STRANGER })).toBe(true);
+    });
+
+    it("should not offer the viewer themselves", () => {
+      expect(canSuggestPerson(OWNER, { oid: OWNER })).toBe(false);
+    });
   });
 });

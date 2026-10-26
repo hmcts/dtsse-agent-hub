@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Grant, MessageRef } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
@@ -250,8 +251,17 @@ describe("selectFrame", () => {
     );
   });
 
-  it("should send nothing about a virtual agent when it is someone else's, whatever the grants", async () => {
-    expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: OWNER }, TOPICS, sources([]))).toBeUndefined();
+  it("should tell a grant-holder which virtual agent changed when they may see its owner's agents", async () => {
+    expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: OWNER }, TOPICS, sources(READ))).toBe(
+      `event: virtual_agent\ndata: ${JSON.stringify({ virtual_agent_id: "va-1" })}\n\n`
+    );
+  });
+
+  it.each<[string, string, Grant[]]>([
+    ["the viewer holds no grant over its owner", OWNER, []],
+    ["the viewer's only grant is from someone else", STRANGER, READ]
+  ])("should send nothing about a virtual agent the viewer does not own when %s", async (_label, ownerOid, grants) => {
+    expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: ownerOid }, TOPICS, sources(grants))).toBeUndefined();
   });
 
   it("should tell the owner which of their assistant conversations changed when it is theirs", async () => {
@@ -516,5 +526,17 @@ describe("uiStream", () => {
     await settle();
 
     expect(frames).toEqual([]);
+  });
+});
+
+describe("selectFrame's cover of HubEvent", () => {
+  // `selectFrame` returns `string | undefined`, so a `HubEvent` member it has no arm for would fall off the end of
+  // the switch as `undefined` — the same answer as "not yours to see" — and the page would never hear about it.
+  // `noImplicitReturns` is the whole guard: with it, that case is TS7030 at the function. Nothing else in the suite
+  // fails if the flag goes, so this reads it.
+  it("should be guarded by noImplicitReturns, which turns a missing arm into a compile error", async () => {
+    const tsconfig = await readFile(new URL("../../tsconfig.json", import.meta.url), "utf8");
+
+    expect(tsconfig).toMatch(/"noImplicitReturns":\s*true/);
   });
 });

@@ -16,6 +16,12 @@ export interface Registration {
   host: string | null;
   /** Left as stored when `undefined`: not every registration carries them. */
   skills?: Skill[];
+  /**
+   * What the registering client claimed it understands. Stored as reported and *replaced* every time, `undefined`
+   * included, unlike `skills`: it describes the build now running the session, and a claim kept from an earlier
+   * register would have the hub send a field this client does not read.
+   */
+  clientFeatures?: string[];
   /** The assistant conversation this session is for, sent by an assistant pod's conversation sessions only. */
   conversationId?: string | null;
 }
@@ -48,6 +54,7 @@ export class SessionOwnedElsewhere extends Error {}
 export async function registerAgent(prisma: PrismaClient, owner: Caller, registration: Registration): Promise<{ id: string; name: string }> {
   const virtualAgentId = owner.virtualAgentId ?? null;
   const skills = registration.skills === undefined ? null : JSON.stringify(registration.skills);
+  const clientFeatures = registration.clientFeatures === undefined ? null : JSON.stringify(registration.clientFeatures);
   const conversationId = registration.conversationId ?? null;
   return await prisma.$transaction(async (tx) => {
     if (virtualAgentId === null) {
@@ -73,17 +80,19 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
             { id: string; skills: unknown }[]
           >`SELECT id::text AS id, skills FROM agent WHERE session_id = ${registration.sessionId} FOR UPDATE`;
     const [agent] = await tx.$queryRaw<{ id: string; name: string }[]>`
-      INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills, assistant_conversation_id)
+      INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills, client_features, assistant_conversation_id)
       VALUES (
         ${owner.oid}, ${registration.sessionId},
         COALESCE((SELECT name FROM virtual_agent WHERE id = ${virtualAgentId}::uuid), ${registration.name}),
         ${registration.cwd}, ${registration.repo},
         ${registration.branch}, ${registration.host}, 'idle', now(), (SELECT COALESCE(max(id), 0) FROM message), ${virtualAgentId}::uuid,
-        COALESCE(${skills}::jsonb, '[]'::jsonb), ${conversationId}::uuid
+        COALESCE(${skills}::jsonb, '[]'::jsonb), ${clientFeatures}::jsonb, ${conversationId}::uuid
       )
       ON CONFLICT (session_id) DO UPDATE
         SET name = EXCLUDED.name, cwd = EXCLUDED.cwd, repo = EXCLUDED.repo, branch = EXCLUDED.branch, host = EXCLUDED.host,
-            status = 'idle', last_heartbeat_at = now(), ended_at = NULL, skills = COALESCE(${skills}::jsonb, agent.skills)
+            status = 'idle', last_heartbeat_at = now(), ended_at = NULL, skills = COALESCE(${skills}::jsonb, agent.skills),
+            -- Not COALESCEd, unlike the skills: whatever this register reported is what is running, nothing included.
+            client_features = EXCLUDED.client_features
         WHERE agent.owner_oid = EXCLUDED.owner_oid AND agent.virtual_agent_id IS NOT DISTINCT FROM EXCLUDED.virtual_agent_id
           AND agent.assistant_conversation_id IS NOT DISTINCT FROM EXCLUDED.assistant_conversation_id
       RETURNING id::text AS id, name

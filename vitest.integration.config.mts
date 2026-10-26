@@ -9,7 +9,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
-      "server-only": fileURLToPath(new URL("./test/integration/server-only-stub.ts", import.meta.url))
+      "server-only": fileURLToPath(new URL("./test/integration/server-only-stub.ts", import.meta.url)),
+      // The published client's own source, so the one test that crosses the two halves of the Assistant's uploads
+      // runs the pod's real parser, fetcher and envelope against the hub's real routes. An alias rather than a path
+      // import because `tsconfig.json` excludes `packages` on purpose; `test/integration/pod-client.d.ts` says why
+      // and declares the surface.
+      "pod-client": fileURLToPath(new URL("./packages/agent-hub/src/index.ts", import.meta.url))
     }
   },
   test: {
@@ -17,6 +22,10 @@ export default defineConfig({
     include: ["test/integration/**/*.test.ts"],
     globalSetup: ["./test/integration/setup.ts"],
     pool: "forks",
+    // `--expose-gc` so the upload suite can measure what the hub *retains* while parts are in flight rather than how
+    // much it allocated and threw away. Without it `heapUsed` is dominated by uncollected garbage and a reader that
+    // buffered a whole file would be indistinguishable from one that holds a single part.
+    execArgv: ["--expose-gc"],
     maxWorkers: 1,
     fileParallelism: false,
     testTimeout: 30_000,

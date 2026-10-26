@@ -57,7 +57,11 @@ export default defineConfig({
         "src/virtual-agents/sweep.ts",
         "src/virtual-agents/views.ts",
         "src/virtual-agents/stop.ts",
+        "src/assistant/jira-store.ts",
         "src/assistant/store.ts",
+        "src/assistant/template-store.ts",
+        "src/assistant/upload-store.ts",
+        "src/assistant/upload-sweep.ts",
         "src/assistant/views.ts"
       ],
       reporter: ["lcov", "text"],

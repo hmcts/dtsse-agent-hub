@@ -1,4 +1,5 @@
 import { canReadMessage, type Grant, type MessageRef } from "../access/rules.ts";
+import { ATTACHMENT_SELECT, attachmentView, type MessageAttachment } from "../assistant/upload-store.ts";
 import type { Database } from "../store/prisma.ts";
 import { type ApiMessage, toApiMessage } from "./shape.ts";
 import { MESSAGE_SELECT } from "./store.ts";
@@ -13,6 +14,12 @@ export type DeliveryView = "queued" | "delivered" | "expired";
 export interface ThreadMessage extends ApiMessage {
   /** `null` for a message with no target agent: an agent's reply into its own thread has nothing to deliver. */
   delivery: DeliveryView | null;
+  /**
+   * Files the person attached, for the Assistant's thread to show as chips, and empty for every other message.
+   * Optional so a message built by hand — a send's own answer before it is read back, a test's fixture — needs no
+   * empty array of its own; everything loaded from the database carries one. `threadItems` normalises it.
+   */
+  attachments?: MessageAttachment[];
 }
 
 export interface LoadedThreadMessage {
@@ -26,7 +33,8 @@ const SELECT = {
   authorAgent: { select: { id: true, name: true, ownerOid: true } },
   targetAgent: { select: { id: true, ownerOid: true } },
   parent: { select: { authorOid: true } },
-  deliveries: { select: { agentId: true, state: true } }
+  deliveries: { select: { agentId: true, state: true } },
+  uploads: { select: ATTACHMENT_SELECT, orderBy: { createdAt: "asc" } }
 } as const;
 
 type Row = {
@@ -44,12 +52,14 @@ type Row = {
   targetAgent: { id: string; ownerOid: string } | null;
   parent: { authorOid: string } | null;
   deliveries: { agentId: string; state: DeliveryView }[];
+  uploads: { id: string; fileName: string; bytes: bigint; mediaType: string; state: string; createdAt: Date }[];
 };
 
 function toLoaded(row: Row): LoadedThreadMessage {
   const delivery = row.deliveries.find((entry) => entry.agentId === row.targetAgentId)?.state ?? null;
+  const attachments = row.uploads.map(attachmentView);
   return {
-    message: { ...toApiMessage(row), delivery },
+    message: { ...toApiMessage(row), delivery, attachments },
     ref: {
       kind: row.kind,
       authorOid: row.authorOid,

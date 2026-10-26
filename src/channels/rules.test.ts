@@ -111,10 +111,10 @@ describe("viewScope", () => {
 
 describe("viewHref", () => {
   it("should build a readable shareable link with commas when the view is any", () => {
-    expect(viewHref(["pcs-api", "database"], "any")).toBe("/c?topics=pcs-api,database");
+    expect(viewHref(["pcs-api", "database"], "any")).toBe("/hub/c?topics=pcs-api,database");
   });
 
   it("should carry the mode when the view is all", () => {
-    expect(viewHref(["pcs-api", "database"], "all")).toBe("/c?topics=pcs-api,database&mode=all");
+    expect(viewHref(["pcs-api", "database"], "all")).toBe("/hub/c?topics=pcs-api,database&mode=all");
   });
 });

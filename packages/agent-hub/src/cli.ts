@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bridgePid, loadAgent, normaliseTopics, type StoredAgent, stopBridge } from "./agent.ts";
-import { type Api, ApiError, type ArtefactBody, CREDENTIAL_KINDS, createApi, type Message, type PostBody } from "./api.ts";
+import { type Api, ApiError, type ArtefactBody, CREDENTIAL_KINDS, createApi, type JiraExportReport, type Message, type PostBody } from "./api.ts";
 import { runBridge } from "./bridge.ts";
 import { type DirectEntry, type DirectPeer, peerOf, peerOfReply, readDirects, recordDirect } from "./directs.ts";
 import { clearOptOut, type EnableSessionResult, enableSession, markOptedOut, runAutoEnable } from "./enable.ts";
@@ -16,13 +16,14 @@ import type { Env } from "./env.ts";
 import { CLI, formatMessage } from "./envelope.ts";
 import { type HookPayload, runHook } from "./hooks.ts";
 import { describeInbound, inboundAccepted, inboundFix, setupInbound } from "./inbound.ts";
+import { EXPORT_ID_RE, JIRA_BROWSE_URL, JIRA_KEY_RE, MAX_JIRA_ERROR, runJiraExport } from "./jira-export.ts";
 import { MAX_POST_TOPICS } from "./limits.ts";
 import { withRetry } from "./retry.ts";
 import { findSecret } from "./secret-scan.ts";
 import { ensureStateDir, isEnabled, log, logPath, readJson, readText, removeFile, requireSessionId, statePath, validSessionId } from "./session.ts";
 import { runStopWorker } from "./stop-worker/index.ts";
 import { fastForward, parseSavedState, setTranscriptOff, syncStatePath, transcriptOffByEnv, transcriptOffBySession } from "./transcript-sync.ts";
-import { EXIT_NO_CREDENTIAL, isCredentialKind, OWNER_READABLE, runVirtual } from "./virtual/index.ts";
+import { atlassianLogin, EXIT_NO_CREDENTIAL, isCredentialKind, OWNER_READABLE, run, runVirtual } from "./virtual/index.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
 export const USAGE = `usage: ${CLI} <command> [args]
@@ -57,6 +58,12 @@ export const USAGE = `usage: ${CLI} <command> [args]
   artefact put [--title T] [--base N]
                               replace the document with markdown read from stdin; --base is the version
                               it was edited from (read first when omitted), and a newer one is refused
+  jira export <export-id> --project P --type T [--labels a,b]
+                              in an HMCTS Assistant conversation: create the Jira ticket for an export the
+                              user asked for with twg, signing in first if it is not, and report it; run
+                              again for the same export, it reports the ticket already made
+  jira report <export-id> --key K | --error E
+                              report the Jira ticket made for an export by hand, or why it could not be made
   credentials get <kind>      print your stored credential and nothing else (exit ${EXIT_NO_CREDENTIAL} if there is
                               none); agent-hub returns only bedrock and claude_md to people, any kind to a pod
   credentials set <kind> [--from-gh]
@@ -626,6 +633,93 @@ const artefact: Command = async (cli, argv) => {
   return 0;
 };
 
+const PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
+const WORD_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+// Only a conversation's agent has a document and an export, so a 404 is the session, not a missing agent.
+function noExport(e: unknown): never {
+  if (e instanceof ApiError && e.status === 404) {
+    throw new Error("this session is not an HMCTS Assistant conversation, so it has no Jira export");
+  }
+  throw e;
+}
+
+const jiraReport = async (cli: Cli, exportId: string, flags: Record<string, string>): Promise<number> => {
+  if ((flags.key === undefined) === (flags.error === undefined)) {
+    throw new UsageError("jira report takes one of --key or --error");
+  }
+  if (flags.key !== undefined && !JIRA_KEY_RE.test(flags.key)) {
+    throw new UsageError(`--key must be an issue key such as VIBE-123, not ${flags.key}`);
+  }
+  const error = flags.error?.trim();
+  if (error === "") {
+    throw new UsageError("--error needs a reason");
+  }
+  const agent = requireAgent(requireSessionId(cli.env));
+  const body: JiraExportReport =
+    flags.key !== undefined ? { export_id: exportId, key: flags.key } : { export_id: exportId, error: (error ?? "").slice(0, MAX_JIRA_ERROR) };
+  await cli.api().putJiraExport(agent.agent_id, body).catch(noExport);
+  cli.print(flags.key !== undefined ? `agent-hub: reported ${flags.key} for export ${exportId}` : `agent-hub: reported export ${exportId} as failed`);
+  return 0;
+};
+
+// The whole export as one command, so the session spends one tool call on it rather than one per step.
+const jiraExport = async (cli: Cli, exportId: string, flags: Record<string, string>): Promise<number> => {
+  const project = flags.project ?? "";
+  const issueType = flags.type ?? "";
+  const labels = flags.labels ? flags.labels.split(",") : [];
+  if (!PROJECT_RE.test(project)) {
+    throw new UsageError("jira export needs --project, a Jira project key such as VIBE");
+  }
+  if (!WORD_RE.test(issueType)) {
+    throw new UsageError("jira export needs --type, an issue type such as Story");
+  }
+  if (!labels.every((label) => WORD_RE.test(label))) {
+    throw new UsageError("--labels must be comma-separated words");
+  }
+  const agent = requireAgent(requireSessionId(cli.env));
+  const api = cli.api();
+  const outcome = await runJiraExport(
+    {
+      api,
+      agentId: agent.agent_id,
+      env: cli.env,
+      run,
+      login: virtualAgent(cli.env) ? () => atlassianLogin({ api, env: cli.env }) : null,
+      print: cli.print
+    },
+    { exportId, project, issueType, labels }
+  ).catch(noExport);
+  if ("error" in outcome) {
+    cli.print(`agent-hub: no ticket was created for export ${exportId}: ${outcome.error} The user has been shown this.`);
+    return 1;
+  }
+  cli.print(
+    `agent-hub: ${outcome.again ? "already created" : "created"} ${outcome.key} for export ${exportId} and reported it; the user's Assistant shows a link to ${JIRA_BROWSE_URL}${outcome.key}`
+  );
+  return 0;
+};
+
+const jira: Command = async (cli, argv) => {
+  const { flags, rest } = parseFlags(argv, ["key", "error", "project", "type", "labels"]);
+  const [action, exportId, ...extra] = rest;
+  if (action !== "report" && action !== "export") {
+    throw new UsageError("jira takes report or export");
+  }
+  if (!exportId || !EXPORT_ID_RE.test(exportId)) {
+    throw new UsageError(`jira ${action} needs the export id it was asked under`);
+  }
+  if (extra.length) {
+    throw new UsageError(`unexpected argument: ${extra[0]}`);
+  }
+  const others = action === "report" ? ["project", "type", "labels"] : ["key", "error"];
+  const stray = others.find((name) => flags[name] !== undefined);
+  if (stray) {
+    throw new UsageError(`--${stray} does not go with jira ${action}`);
+  }
+  return action === "report" ? jiraReport(cli, exportId, flags) : jiraExport(cli, exportId, flags);
+};
+
 const agents: Command = async (cli) => {
   const res = await cli.api().agents();
   if (!res.agents.length) {
@@ -780,6 +874,7 @@ export const COMMANDS: Record<string, Command> = {
   directory,
   agents,
   artefact,
+  jira,
   hook,
   bridge,
   "auto-enable": autoEnable,

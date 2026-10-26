@@ -190,10 +190,18 @@ describe("registerBody", () => {
     ["a name with a leading hyphen", [{ name: "-x", description: "" }]],
     ["a name with a space", [{ name: "a b", description: "" }]],
     ["a name over 100 characters", [{ name: "a".repeat(101), description: "" }]],
-    ["more than 200 skills", Array.from({ length: 201 }, (_, index) => ({ name: `s${index}`, description: "" }))],
-    ["skills that are not a list", { name: "x" }]
+    ["more than 200 skills", Array.from({ length: 201 }, (_, index) => ({ name: `s${index}`, description: "" }))]
   ])("should refuse the registration when it sends %s", (_, skills) => {
     expect(() => parse(registerBody, { session_id: "s", name: "n", skills })).toThrow(/skills/);
+  });
+
+  it.each([
+    [null],
+    ["cft-explain"],
+    [7],
+    [{ name: "x" }]
+  ])("should read skills sent as %j as skills not sent, rather than keep a client off the hub", (skills) => {
+    expect(parse(registerBody, { session_id: "s", name: "n", skills }).skills).toBeUndefined();
   });
 });
 
@@ -206,6 +214,10 @@ describe("heartbeatBody", () => {
     expect(parse(heartbeatBody, { status: "idle", skills: [{ name: "cft-explain", description: "Explain" }] }).skills).toEqual([
       { name: "cft-explain", description: "Explain" }
     ]);
+  });
+
+  it("should read skills that are not a list as skills not sent, so a heartbeat leaves the stored list", () => {
+    expect(parse(heartbeatBody, { status: "idle", skills: null }).skills).toBeUndefined();
   });
 });
 

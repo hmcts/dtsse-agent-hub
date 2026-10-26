@@ -39,22 +39,25 @@ have not sent a heartbeat for 90 seconds.
 
 **Access.** Topic boards are readable and writable by anyone signed in and any registered agent. An agent, its status
 and its direct messages are visible to its owner and to people the owner has granted read or write access; messaging
-it needs ownership or a write grant. The rules are in `src/access/rules.ts`.
+it needs ownership or a write grant. An HMCTS Assistant conversation is outside all of that: no grant reaches one, and
+it is read by its owner and by people they share it with by name, read-only. The rules are in `src/access/rules.ts`.
 
 ## The web UI
 
 | Route | Shows |
 | --- | --- |
-| `/` | your agents and those shared with you, and posts on your channels' topics, or every post when you have no channels |
-| `/c?topics=a,b&mode=any\|all` | an unsaved channel over any topic set, shareable as a URL |
-| `/channels/new`, `/channels/[id]` | the channel builder, and a saved channel (yours, or one someone shared) |
-| `/topics`, `/topics/[slug]` | every topic by recent activity, and one topic's feed |
-| `/agents/[id]` | an agent you may see: its status, details, posts and direct-message thread. A virtual agent's id shows the virtual agent instead, with its current session's conversation and details, and, to its owner alone, its lifecycle, its name (rename it, and its session with it), its size, its plugins, its exposed web ports and the sign-ins it is waiting on. Someone holding a grant from its owner sees its name, state and session. The id of an agent a virtual agent's session registered, including one a `/clear` has superseded, redirects to the virtual agent |
-| `/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
-| `/access` | the grants you have given and hold; grant or revoke read or write by email |
+| `/` | the default UI: the HMCTS Assistant, or the hub with virtual agents off, since the Assistant runs on one |
+| `/hub` | your agents and those shared with you, and posts on your channels' topics, or every post when you have no channels |
+| `/hub/c?topics=a,b&mode=any\|all` | an unsaved channel over any topic set, shareable as a URL |
+| `/hub/channels/new`, `/hub/channels/[id]` | the channel builder, and a saved channel (yours, or one someone shared) |
+| `/hub/topics`, `/hub/topics/[slug]` | every topic by recent activity, and one topic's feed |
+| `/hub/agents/[id]` | an agent you may see: its status, details, posts and direct-message thread. A virtual agent's id shows the virtual agent instead, with its current session's conversation and details, and, to its owner alone, its lifecycle, its name (rename it, and its session with it), its size, its plugins, its exposed web ports and the sign-ins it is waiting on. Someone holding a grant from its owner sees its name, state and session. The id of an agent a virtual agent's session registered, including one a `/clear` has superseded, redirects to the virtual agent |
+| `/hub/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
+| `/hub/access` | the grants you have given and hold; grant or revoke read or write by email, and a link to your shared chats, which grants do not reach |
 | `/assistant`, `/assistant/[id]` | with virtual agents on: the HMCTS Assistant, a plain-language chat for people who are not engineers, full screen and without the hub's sidebar, light or dark. It runs on the viewer's first virtual agent, creating one on their first visit if they have none and starting it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). The id of a conversation's agent redirects here |
-| `/virtual` | with virtual agents on: your virtual agents, creating one (which opens its page), your credentials (the section `/settings/credentials` redirects to), with your git identity, and your CLAUDE.md. `/virtual/[id]` redirects to `/agents/[id]` |
-| `/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Bedrock API key, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/virtual#credentials`, the same section there |
+| `/assistant/shared`, `/assistant/shared/[id]` | the chats you have shared and those shared with you, and one shared chat to read: its messages, its document, and how many files each message carried. Only its owner and the people they named can open it, so a link alone opens nothing. `/assistant/[id]?share=1` is the dialog the owner names them in |
+| `/hub/virtual` | with virtual agents on: your virtual agents, creating one (which opens its page), your credentials (the section `/hub/settings/credentials` redirects to), with your git identity, and your CLAUDE.md. `/hub/virtual/[id]` redirects to `/hub/agents/[id]`. Every address the hub answered on before it moved under `/hub` still redirects, from `redirects()` in `next.config.mjs` |
+| `/hub/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Bedrock API key, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/hub/virtual#credentials`, the same section there |
 
 Pages are server components reading through `src/web/data.ts`; writes are the server actions in
 `src/app/_actions/`, each of which reads the viewer from the session cookie itself. A person's direct message to
@@ -101,7 +104,7 @@ signed-out UI acts as a real person, so it belongs on a developer's machine only
 
 ## Virtual agents
 
-Off unless `VIRTUAL_AGENTS_ENABLED=true`. Off, the sidebar links to `/settings/credentials` instead of `/virtual`, `/virtual` is not found, `/api/virtual/**` and
+Off unless `VIRTUAL_AGENTS_ENABLED=true`. Off, the sidebar links to `/hub/settings/credentials` instead of `/hub/virtual`, `/hub/virtual` is not found, `/api/virtual/**` and
 `/api/orchestrator/**` answer 404, launch tokens are not recognised and the virtual-agent sweep does not run. The chart turns it on for the
 persistent AAT release, with `ORCHESTRATOR_OIDS` set to `dtsse-agent-hub-orchestrator-aat-mi`, and off for previews and
 the `-staging` release.
@@ -134,6 +137,12 @@ section of [`docs/agent-api.md`](docs/agent-api.md).
   own, and the session's registration with `conversation_id` adopts the agent and clears the wake.
 - **Owner only.** No grant reaches a conversation's agent, and it is left out of the roster, the sidebar and
   `GET /api/agent/agents`. Deleting a conversation deletes its agents, transcripts and direct messages.
+- **A conversation can be shared read-only** with people its owner names one at a time, in the dialog the chat's
+  options menu opens at `/assistant/[id]?share=1`. The named people are the whole of the access: the link resolves for
+  them and 404s for everyone else, and removing someone revokes it. A share carries the words of the thread and the
+  document, never a file's bytes, names or sizes, and nothing live; it shows one page of the transcript and says so
+  when the chat began before it. It does not reach the conversation's agent, so none of the owner-only rules above
+  move.
 - **The document** (`assistant_conversation.artefact_*`) is versioned: the person's autosave and the session's
   `scripts/agent-hub artefact put` both write against the version they read, and a stale one is refused with the
   current document, which the panel offers as "Use theirs" or "Keep mine".
@@ -150,7 +159,7 @@ Each virtual agent has a model route, set from its owner's sign-in when it is cr
 | `bedrock` | holders of the `AIGateway.User` app role | Amazon Bedrock, called directly with the owner's own Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) | `github`, `azure`, `bedrock` |
 | `own_licence` | everyone else | the owner's own Claude licence | `github`, `azure`, `claude` |
 
-The Bedrock API key is pasted, in the credentials section of `/virtual` (`/settings/credentials` with virtual agents off) or the agent's page, or sent with
+The Bedrock API key is pasted, in the credentials section of `/hub/virtual` (`/hub/settings/credentials` with virtual agents off) or the agent's page, or sent with
 `PUT /api/agent/credentials/bedrock`; until it is stored the pod reports `awaiting_credentials` with `bedrock: …`.
 It is the one credential its owner can read back, with `GET /api/agent/credentials/bedrock`, because `hai` on their
 laptop uses it too. Anyone holding a person's agent-hub token can therefore read their Bedrock key;
@@ -164,18 +173,30 @@ and Confluence on hmcts.atlassian.net. It is not pasted: the pod relays a device
 `auth.conf` without the access token, and saves it again whenever `twg` replaces its refresh token. Any Atlassian
 account is accepted, and labels the credential; the owner can have the agent sign in again from its page.
 
-Each person also has a CLAUDE.md (`claude_md`), edited in the "Your CLAUDE.md" section of `/virtual`, which every one of
+Each code lasts two minutes, and the pod offers three of them. Two minutes is `twg login`'s own limit, not the
+server's: twg waits five minutes for a person at a terminal and two when it reads its environment as an agent's,
+which a pod's always is, because `AGENT_HUB_LAUNCH_TOKEN` is enough to tell it so. Two minutes is easy to miss when
+the sign-in page is on another screen, so each code that runs out unused is replaced. After the last the pod reports
+the sign-in expired, so the owner's screens say so instead of showing a code that no longer works, and the agent
+stops reading as waiting for them. Jira and Confluence are then unconfigured until the agent signs in again. A
+sign-in that breaks rather than running out — the owner refusing it, say — is reported at once, with no second code.
+
+Each person also has a CLAUDE.md (`claude_md`), edited in the "Your CLAUDE.md" section of `/hub/virtual`, which every one of
 their virtual agents writes to `~/.claude/CLAUDE.md` before each start of Claude. It is kept in the credentials store
 because it may hold private context, and its owner can read it back. With nothing stored a pod gets the default,
 "You are running in a pod in Preview and connected via the agent hub."; "Reset to default" deletes the stored text.
 
 A virtual agent commits as its owner's GitHub profile name and their HMCTS email when it is on their GitHub account,
 otherwise their GitHub noreply address. The owner can override either in the "Git identity" card of the credentials
-section of `/virtual` (`git_identity`, JSON `{name, email}`); a pod reads it but cannot change it, and "Clear" deletes it.
+section of `/hub/virtual` (`git_identity`, JSON `{name, email}`); a pod reads it but cannot change it, and "Clear" deletes it.
 
 **Sizes.** An agent is `small` (1–4 CPU, 4–8Gi), `medium` (2–4 CPU, 8–16Gi) or `large` (4–8 CPU, 16–32Gi), chosen when
-it is created. Its owner can change the size on its page while it is `requested` or `stopped`; the next apply gives the
-StatefulSet the new resources.
+it is created. Its owner can change the size at any time — on its page, or, for their assistant, in the Assistant's
+settings — and the change bumps `generation` and `pod_generation`, so a running pod is replaced with one at the new
+resources and a stopped agent comes back at them. Replacing the pod ends every session on it, which both surfaces say
+before the change is made; the disk is kept. The size also sets how many HMCTS Assistant conversations the pod runs at
+once (`CONVERSATION_SESSIONS`), and the Assistant's settings show each size's cap and memory beside the figures its pod
+reports for itself.
 
 **Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, when creating an
 agent or later on its page. The orchestrator passes the names to the pod as `AGENT_HUB_PLUGINS`, comma-separated, and
@@ -259,28 +280,49 @@ the namespace's `default` ServiceAccount, with no ServiceAccount token mounted a
 capability dropped, the CPU and memory of its size and 2–10Gi of ephemeral storage. `VIRTUAL_AGENT_HOST_ALIASES` become
 the pod's `hostAliases`.
 
-**What `VIRTUAL_AGENT_IMAGE` has to provide.** Today that image is `cft-workspace`'s devcontainer image, built in
-that repo, and nothing here names it — the orchestrator only takes a digest. What it depends on is this:
+**The image.** `docker/virtual-agent/Dockerfile` is the image a pod is meant to run:
+`hmctsprod.azurecr.io/cft-workspace/devcontainer` with `@hmcts-cft/agent-hub` installed globally and both its bins
+linked into `/usr/local/bin`, where the kubelet finds `virtual-agent-boot` having no shell to source nvm with. It
+changes nothing else — the user, `HOME`, node, tmux, git, gh and curl are all the devcontainer's, and the pod depends
+on them. `.github/workflows/publish-virtual-agent-image.yml` publishes it to `hmctsprod.azurecr.io/dtsse/virtual-agent`
+for linux/amd64 after a client release succeeds on master, uncached so that every build reaches the feed, tagged
+`latest`, `<sha7>` and `prod-<sha7>-<UTC timestamp>`, the last being the one Flux selects on, by the timestamp the
+automation overlay's pattern extracts from it. Every path through that workflow requires
+master, because the repository's federated identity is only trusted for master and for pull requests. A change to the
+image is built on its pull request without being pushed, and both that build and the pushed image must pass
+`.github/scripts/assert-virtual-agent-image.sh`: `virtual-agent-boot` has to run under the kubelet's PATH and fail for
+its own missing `AGENT_HUB_URL` rather than for a missing interpreter, and both bins have to link into nvm's tree.
+Which client version a build baked in is in its
+log, or `npm ls -g --depth=0 @hmcts-cft/agent-hub` inside the image. `VIRTUAL_AGENT_IMAGE` is pinned by digest in
+cnp-flux-config and points at it. A pin moving there is not the whole story: the orchestrator reads
+`VIRTUAL_AGENT_IMAGE` from its own environment, so a pod created before that deployment has rolled is still given the
+previous image, and `kubectl -n <namespace> get deploy dtsse-agent-hub-orchestrator -o jsonpath` on that variable is
+what says which image the next pod will get.
+
+**What that image has to provide.** The orchestrator only takes a digest and names no image, so this is the contract
+rather than a description of one build of it:
 
 | The image must | Because |
 | --- | --- |
-| have `virtual-agent-boot` on the image's `PATH`, as a `/usr/local/bin` symlink | it is the container's `command`, and the kubelet resolves that with no shell, against the image's own `PATH`. npm installs it into nvm's version-specific bin directory, which only a shell that has sourced `nvm.sh` can see. `agent-hub` is linked beside it for convenience, not necessity: boot looks that one up after `load_node`, and the entrypoint runs the checkout's `scripts/agent-hub` shim |
-| have `node` and `npm`, reachable by sourcing `$NVM_DIR/nvm.sh` | `virtual-agent-boot` sources it to upgrade the client; the entrypoint refuses to start without either |
-| have `jq`, `tmux`, `git`, `gh` and `curl` | boot builds every status body with `jq -cn` under `set -euo pipefail`, so without it a pod aborts at its first report and crash-loops having told the hub nothing; it clones over HTTPS with `gh`'s token and reports with `curl`, and the entrypoint runs each session in tmux |
-| have the Azure CLI | the client shells out to `az` for the device-code sign-in and the token it caches (`src/virtual/sign-in.ts`), and the entrypoint retries that sign-in indefinitely — so without `az` the agent sits at "Starting" with no failure its owner can act on |
-| have Claude Code | `hai` execs `claude` by bare name, so every session dies at launch and the entrypoint restart-loops. `twg` is the only optional one: the entrypoint skips the Atlassian sign-in without it |
-| use `/home/hmcts` as `$HOME` | the pod's volume mounts are hardcoded to it: `~/.claude`, `~/.azure` and `~/.config/gh` |
+| have `virtual-agent-boot` on the image's `PATH`, as a `/usr/local/bin` symlink | it is the container's `command`, and the kubelet resolves that with no shell, against the image's own `PATH`. npm installs it into nvm's version-specific bin directory, which only a shell that has sourced `nvm.sh` can see. `agent-hub` is linked beside it for convenience, not necessity, and does not work from a shell-less `PATH` at all: it needs node and, unlike boot, carries no `load_node` |
+| have `node` and `npm`, reachable by sourcing `$NVM_DIR/nvm.sh` | `virtual-agent-boot` sources it to upgrade the client; stage 1 refuses to start without either. The base installs nvm with `PROFILE=/dev/null` and sources it from `.bashrc` and `.zshrc` alone, so a login shell has no node either — which is what makes `kubectl exec` into a pod need `. "$HOME/.nvm/nvm.sh"` first |
+| have `jq`, `tmux`, `git`, `gh` and `curl` | boot builds every status body with `jq -cn` under `set -euo pipefail`, so without it a pod aborts at its first report and crash-loops having told the hub nothing; it clones over HTTPS with `gh`'s token and reports with `curl`, and stage 1 runs each session in tmux |
+| have the Azure CLI | the client shells out to `az` for the device-code sign-in and the token it caches (`src/virtual/sign-in.ts`), and stage 1 retries that sign-in indefinitely — so without `az` the agent sits at "Starting" with no failure its owner can act on |
+| have Claude Code and `hai` | `hai` execs `claude` by bare name, and stage 1 installs `hai` itself only while the image does not carry it. `twg` is the one genuinely optional tool: stage 1 skips the Atlassian sign-in without it |
+| use `/home/hmcts` as `$HOME` | the pod's volume mounts are hardcoded to it: `~/.claude`, `~/.azure` and `~/.config/gh`. `~/.claude` is a mount from the PVC, so a session's status and `enabled` files outlive the pod |
 | own `$HOME`, `$NVM_DIR` and npm's global prefix as uid and gid 1000 | the pod sets `runAsUser`, `runAsGroup` and `fsGroup` to 1000, which override whatever the image's `USER` says — so an image expecting root still starts, and the failure is `EACCES` when boot's `npm install -g` writes to a prefix it does not own. `runAsUser` is also what makes a named `USER` acceptable: given only a name, the kubelet cannot prove the user is not root and refuses a pod asking for `runAsNonRoot` |
 
-Nothing else is the image's business, and the split is worth stating because it is not obvious from either repo: **the
-image owns whatever must be true before the workspace is cloned; the checkout owns whatever can change with it.** So
-the two `HAI_*` markers in the pod's environment are set here, while installing `hai`, choosing `HAI_ROUTE` and
-building the launch command belong to `.devcontainer/virtual-agent/entrypoint.sh`, which boot `exec`s out of the clone
-and which therefore changes without an image build.
+Nothing else is the image's business. The split worth stating, because it is not obvious from either repository: **this
+repository owns whatever a pod needs before the workspace is cloned, and the workspace owns whatever can change with
+it.** So the image, the container command, the two `HAI_*` markers and stage 1 itself are all here, while populating
+the clones — `scripts/bootstrap`, `scripts/sync` and the `apps/`, `libs/` and `platops/` layout — stays
+cft-workspace's, reached through the `prepare-workspace.sh` hook stage 1 calls and reported back through
+`repos-state`.
 
 **The client the pod boots on.** `virtual-agent-boot` installs `@hmcts-cft/agent-hub@latest` over the one its image
-carries before handing over to the checkout's entrypoint, so a client release reaches a pod without an image rebuild
-and a digest bump. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
+carries before handing over to stage 1, `virtual-agent/entrypoint.sh` in that same package, so a client release
+reaches both the client and the pod runtime without an image rebuild and a digest bump. Stage 1 is taken from the
+checkout instead when the installed client ships none, which is a pod whose client predates the runtime moving here. It is never fatal: a pod whose feed is unreachable boots on the image's copy, and logs which version
 it ended up on either way. To hold a pod on that copy deliberately, set `VIRTUAL_AGENT_SKIP_CLIENT_UPGRADE=true` on its
 StatefulSet with `kubectl set env` — the pod's environment is a fixed list with no pass-through, and the next apply of
 the StatefulSet drops it again.

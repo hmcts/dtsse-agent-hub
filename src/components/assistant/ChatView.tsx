@@ -2,16 +2,21 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { clientSupports } from "@/agents/client-features";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
-import { PRODUCTS, productLabel } from "@/assistant/products";
+import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
-import { type Progress, progress, type ThreadItem, threadItems } from "@/assistant/thread";
+import { type Progress, progress, progressAnnouncement, progressLabel, type ThreadItem, threadItems } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
 import { useLiveConversation } from "@/components/agents/useLiveConversation";
 import { ArtefactPanel, type SaveArtefactAction } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
+import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
+import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/JiraExport";
+import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
+import { MessageAttachments } from "@/components/assistant/MessageAttachments";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubEvent } from "@/components/live/HubStream";
@@ -20,29 +25,71 @@ import type { AgentStatus } from "@/realtime/events";
 import type { ActionResult } from "@/web/action";
 
 export interface ChatActions {
-  send: (input: { conversationId: unknown; body: unknown }) => Promise<ActionResult<{ message: ThreadMessage }>>;
+  send: (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult<{ message: ThreadMessage }>>;
   warm: (input: { conversationId: unknown }) => Promise<ActionResult>;
+  /** `stopped` is false for a press the answer beat, which ends no turn and is told to nobody. */
+  stop: (input: { conversationId: unknown }) => Promise<ActionResult<{ stopped: boolean }>>;
   setProduct: (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
   rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
   saveArtefact: SaveArtefactAction;
+  exportToJira: ExportToJiraAction;
 }
 
-function Dots({ label }: { label: string }) {
+/**
+ * What the assistant is doing, shown while it works. Not itself a live region: the activity changes with every tool
+ * call, and the one region on the page announces only the facts that settle (`progressAnnouncement`).
+ */
+function Dots({ doing }: { doing: Progress }) {
   return (
-    <div className="flex items-center gap-3.5" role="status">
+    <div className="flex items-center gap-3.5">
       <Mark size="sm" />
       <span className="flex items-center gap-1" aria-hidden="true">
         {[0, 1, 2].map((dot) => (
           <span key={dot} className="h-1.5 w-1.5 animate-asst-dot rounded-full bg-asst-accent" style={{ animationDelay: `${dot * 0.15}s` }} />
         ))}
       </span>
-      <span className="text-[13px] text-asst-muted">{label}</span>
+      <span className="text-[13px] text-asst-muted">{progressLabel(doing)}</span>
     </div>
   );
 }
 
+/**
+ * Stops the answer being written. Rendered only where `doing.state` is `working` — the session itself reads `busy` —
+ * so the only stop that can find nothing to end is one pressed in the seconds that status is stale. A session still
+ * starting, or a message still being sent, has no turn to interrupt and is offered no button.
+ *
+ * `pressed` is what stands in for the control going away: the thread takes a moment to come back with the stop
+ * recorded, and a button that stayed live through it invites a second press at a turn already ending.
+ */
+function StopButton({ onStop }: { onStop: () => Promise<void> }) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={pressed}
+      onClick={() => {
+        setPressed(true);
+        void onStop().finally(() => setPressed(false));
+      }}
+      className="flex items-center gap-1.5 rounded-full border border-asst-strong px-2.5 py-1 text-xs text-asst-muted hover:bg-asst-field disabled:opacity-60"
+    >
+      <span aria-hidden="true" className="h-2 w-2 rounded-[2px] bg-current" />
+      Stop
+    </button>
+  );
+}
+
 function Item({ item }: { item: ThreadItem }) {
+  if (item.type === "stopped") {
+    return (
+      <li className="flex items-center gap-3 text-xs text-asst-faint">
+        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+        You stopped this answer
+        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+      </li>
+    );
+  }
   if (item.type === "product") {
     return (
       <li className="flex items-center gap-3 text-xs text-asst-faint">
@@ -56,7 +103,10 @@ function Item({ item }: { item: ThreadItem }) {
     return (
       <li className="flex flex-col items-end gap-1">
         <span className="sr-only">You said:</span>
-        <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-[18px_18px_4px_18px] bg-asst-bubble px-4 py-2.5">{item.text}</div>
+        {item.text === "" ? null : (
+          <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-[18px_18px_4px_18px] bg-asst-bubble px-4 py-2.5">{item.text}</div>
+        )}
+        <MessageAttachments attachments={item.attachments} />
         {item.delivery === "expired" ? <span className="text-xs text-asst-error">Not delivered. Send it again.</span> : null}
       </li>
     );
@@ -120,103 +170,10 @@ function ConfirmProduct({ from, to, onCancel, onConfirm }: { from: string; to: s
   );
 }
 
-function ChatMenu({ title, onRename, onDelete }: { title: string; onRename: (title: string) => Promise<void>; onDelete: () => Promise<void> }) {
-  const [open, setOpen] = useState<"closed" | "menu" | "rename" | "delete">("closed");
-  const [draft, setDraft] = useState(title);
-  const ref = useRef<HTMLDivElement>(null);
-  const titleBox = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (open === "rename") {
-      titleBox.current?.focus();
-    }
-  }, [open]);
-  useEffect(() => {
-    if (open === "closed") {
-      return;
-    }
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent ? event.key === "Escape" : !ref.current?.contains(event.target as Node)) {
-        setOpen("closed");
-      }
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [open]);
-  const item = "rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active";
-  return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        type="button"
-        aria-label="Chat options"
-        aria-haspopup="menu"
-        aria-expanded={open !== "closed"}
-        onClick={() => setOpen(open === "closed" ? "menu" : "closed")}
-        className="flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-lg text-asst-muted hover:bg-asst-field hover:text-asst-text"
-      >
-        ⋯
-      </button>
-      {open === "closed" ? null : (
-        <div className="absolute right-0 top-[calc(100%+6px)] z-30 flex w-[260px] flex-col gap-0.5 rounded-xl border border-asst-strong bg-asst-hover p-1.5 shadow-2xl">
-          {open === "menu" ? (
-            <div role="menu" aria-label="Chat options" className="flex flex-col gap-0.5">
-              <button type="button" role="menuitem" className={item} onClick={() => setOpen("rename")}>
-                Rename
-              </button>
-              <button type="button" role="menuitem" className={`${item} text-asst-error`} onClick={() => setOpen("delete")}>
-                Delete chat
-              </button>
-            </div>
-          ) : open === "rename" ? (
-            <form
-              method="post"
-              className="flex flex-col gap-2 p-1"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void onRename(draft).then(() => setOpen("closed"));
-              }}
-            >
-              <label className="text-xs text-asst-faint" htmlFor="chat-title">
-                Chat name
-              </label>
-              <input
-                ref={titleBox}
-                id="chat-title"
-                value={draft}
-                maxLength={200}
-                onChange={(event) => setDraft(event.target.value)}
-                className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-none focus:border-asst-accent-line"
-              />
-              <button type="submit" className="self-end rounded-lg bg-asst-accent px-3 py-1.5 text-sm font-semibold text-asst-ink">
-                Save
-              </button>
-            </form>
-          ) : (
-            <div className="flex flex-col gap-2 p-1">
-              <p className="text-sm">Delete this chat and its document? This cannot be undone.</p>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setOpen("closed")} className="rounded-lg border border-asst-strong px-3 py-1.5 text-sm">
-                  Cancel
-                </button>
-                <button type="button" onClick={() => void onDelete()} className="rounded-lg bg-asst-error px-3 py-1.5 text-sm font-semibold text-asst-ink">
-                  Delete
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function useNarrow(): boolean {
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 900px)");
+    const query = window.matchMedia(`(max-width: ${ARTEFACT_OVERLAY_MAX_WIDTH}px)`);
     const update = () => setNarrow(query.matches);
     update();
     query.addEventListener("change", update);
@@ -227,11 +184,27 @@ function useNarrow(): boolean {
 
 /**
  * One conversation: what the person and the assistant said, a line saying what the assistant is doing while it
- * works, and the composer; beside it, the conversation's document. Kept live by the conversation's agent's events;
+ * works and how many subagents it is waiting on, and the composer; beside it, the conversation's document. The line
+ * comes from the session's transcript and its own status, both already streamed here, so no page read follows a tool
+ * call. Kept live by the conversation's agent's events;
  * a change to the conversation itself (its product, title, document or session) re-renders the page, which hands
  * down the new `view`.
  */
-export function ChatView({ view, templates, actions }: { view: ConversationView; templates: readonly Template[]; actions: ChatActions }) {
+export function ChatView({
+  view,
+  templates,
+  viewerOid,
+  actions,
+  jira
+}: {
+  view: ConversationView;
+  templates: readonly Template[];
+  /** Who is reading, which the composer keys its draft on. */
+  viewerOid: string;
+  actions: ChatActions;
+  /** Whether the person has connected Jira, for the document's export. */
+  jira: JiraAccess;
+}) {
   const router = useRouter();
   const arrivals = useAnnouncer("replies");
   const live = useLiveConversation(view.agentId, view.page, { onReply: () => arrivals.announce("New reply from the assistant") });
@@ -259,8 +232,23 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
     seenVersion.current = Math.max(seenVersion.current, view.artefact.version);
   }, [view.artefact.version, view.artefact.updatedBy, arrivals]);
 
-  const thread = threadItems(live.items, view.productHistory);
+  // The picker can only show a product it offers, so it and the dialog it opens read the stored one through this.
+  const product = storedProduct(view.product);
+  const thread = threadItems(live.items, view.productHistory, view.stopHistory);
   const doing: Progress = progress(live.items, thread, status, view.sessionState);
+  /**
+   * Both halves of "there is something to stop, and stopping it will work".
+   *
+   * `working` and not merely "not idle": the waking states are a session still starting or a message still on its
+   * way, where there is no turn to interrupt. It also stands in for the staleness of `clientFeatures`, which is
+   * written at registration and never cleared — a conversation whose session was idle-reaped still claims `stop`,
+   * and only the status says it is not running.
+   *
+   * The claim itself is the other half. A pod takes the current client when it boots, so a conversation on an older
+   * session has no stop until that session is next started; a button there would do nothing, which is worse than
+   * the plain wait.
+   */
+  const stoppable = doing.state === "working" && clientSupports(view.clientFeatures, "stop");
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
@@ -269,13 +257,25 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
     updatedBy: view.artefact.updatedBy
   };
 
-  async function send(body: string): Promise<string | null> {
-    const result = await actions.send({ conversationId: view.id, body });
+  async function send(body: string, uploadIds: string[]): Promise<string | null> {
+    const result = await actions.send({ conversationId: view.id, body, uploadIds });
     if (!result.ok) {
       return result.error;
     }
     live.addMessage(result.message);
     return null;
+  }
+
+  async function stop(): Promise<void> {
+    const result = await actions.stop({ conversationId: view.id });
+    setError(result.ok ? null : result.error);
+    // Only for a stop that ended a turn. Said rather than left to the thread's redraw, because the stop is the one
+    // thing here a person does and gets no reply to, and the line that records it is a quiet separator a reader is
+    // not sent to. A press the answer beat records nothing, so there is nothing to announce either.
+    if (result.ok && result.stopped) {
+      arrivals.announce("Stopped");
+    }
+    router.refresh();
   }
 
   async function changeProduct(product: string): Promise<void> {
@@ -290,37 +290,56 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-asst-field px-4">
           <SidebarToggle />
-          <h1 className="min-w-0 truncate text-[15px] font-medium">{view.title}</h1>
+          {/* Gives way long before the product chip beside it, keeping 4rem so the start of the name always shows. */}
+          <h1 className="min-w-[4rem] shrink-[999] truncate text-[15px] font-medium">{view.title}</h1>
           <label className="sr-only" htmlFor="chat-product">
             Product
           </label>
-          <select
-            id="chat-product"
-            value={view.product}
-            onChange={(event) => setPendingProduct(event.target.value)}
-            className="shrink-0 cursor-pointer appearance-none rounded-md border border-asst-accent-line bg-transparent px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft outline-none focus:border-asst-accent"
-          >
-            {PRODUCTS.map((product) => (
-              <option key={product.slug} value={product.slug} className="bg-asst-raised normal-case">
-                {product.label}
-              </option>
-            ))}
-          </select>
+          {/*
+            The chip draws the chosen label itself, truncated, and its own arrow, with the real select laid over it
+            at full size and invisible: a native select is as wide as its widest option, the longest label here runs
+            to 40 characters, and how a select renders a value too long for it is the engine's business rather than
+            `text-overflow`'s. The chip never goes below 4rem, so it stays readable and operable in a 320px header.
+          */}
+          <div className="relative flex min-w-[4rem] max-w-[9.5rem] shrink items-center gap-1.5 rounded-md border border-asst-accent-line px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft focus-within:border-asst-accent">
+            <span aria-hidden="true" className="min-w-0 truncate">
+              {productLabel(product)}
+            </span>
+            <span aria-hidden="true" className="shrink-0 text-[7px] leading-none text-asst-accent">
+              ▼
+            </span>
+            <select
+              id="chat-product"
+              value={product}
+              onChange={(event) => setPendingProduct(event.target.value)}
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 outline-none"
+            >
+              {PRODUCTS.map((offered) => (
+                <option key={offered.slug} value={offered.slug} className="bg-asst-raised normal-case">
+                  {offered.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
             {panel ? null : (
               <button
                 type="button"
                 onClick={() => setPanel(true)}
-                className="flex h-[34px] items-center gap-2 whitespace-nowrap rounded-[9px] border border-asst-strong pl-2.5 pr-3 text-[13px] hover:border-asst-accent-line hover:bg-asst-field"
+                // Named here as well, because below 480px the icon stands alone so that a 320px header still fits
+                // the title, the product chip and both buttons.
+                aria-label={view.artefact.version > 0 ? "Open document" : "Add document"}
+                className="flex h-[34px] items-center whitespace-nowrap rounded-[9px] border border-asst-strong px-2.5 text-[13px] hover:border-asst-accent-line hover:bg-asst-field min-[480px]:gap-2 min-[480px]:pr-3"
               >
                 <span aria-hidden="true" className="text-lg leading-none text-asst-accent">
                   +
                 </span>
-                {view.artefact.version > 0 ? "Open document" : "Add document"}
+                <span className="hidden min-[480px]:inline">{view.artefact.version > 0 ? "Open document" : "Add document"}</span>
               </button>
             )}
             <ChatMenu
               title={view.title}
+              shareHref={`/assistant/${view.id}?share=1`}
               onRename={async (title) => {
                 const result = await actions.rename({ conversationId: view.id, title });
                 setError(result.ok ? null : result.error);
@@ -359,7 +378,20 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
                 <Item key={item.key} item={item} />
               ))}
             </ol>
-            {doing.state === "idle" ? null : <Dots label={doing.label} />}
+            {doing.state === "idle" ? null : (
+              <div className="flex items-center gap-3">
+                <Dots doing={doing} />
+                {stoppable ? <StopButton onStop={stop} /> : null}
+              </div>
+            )}
+            {/*
+              Always in the page, even with nothing to say: a live region added to the document at the same moment as
+              its first text is not reliably announced. Emptying it as the answer settles is deliberate too, so the
+              next thing it says is read as new.
+            */}
+            <p role="status" className="sr-only">
+              {progressAnnouncement(doing)}
+            </p>
           </div>
           <AnnouncerRegion text={arrivals.text} />
         </div>
@@ -372,7 +404,14 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
             )}
             <Composer
               templates={templates}
+              viewerOid={viewerOid}
+              // The conversation, not its agent: a /clear registers a new agent and remounts the page, and the
+              // half-written message belongs to the conversation the person never left.
+              draftId={view.id}
               onSend={send}
+              conversationId={view.id}
+              skills={view.skills}
+              dropZone={scroller.ref}
               onFocus={() => {
                 if (!warmed.current && status === "offline") {
                   warmed.current = true;
@@ -390,11 +429,12 @@ export function ChatView({ view, templates, actions }: { view: ConversationView;
           productLabel={view.productLabel}
           save={actions.saveArtefact}
           onClose={() => setPanel(false)}
+          jira={{ exported: view.jira, access: jira, exportTo: actions.exportToJira }}
           narrow={narrow}
         />
       ) : null}
-      {pendingProduct !== null && pendingProduct !== view.product ? (
-        <ConfirmProduct from={view.product} to={pendingProduct} onCancel={() => setPendingProduct(null)} onConfirm={() => void changeProduct(pendingProduct)} />
+      {pendingProduct !== null && pendingProduct !== product ? (
+        <ConfirmProduct from={product} to={pendingProduct} onCancel={() => setPendingProduct(null)} onConfirm={() => void changeProduct(pendingProduct)} />
       ) : null}
     </div>
   );

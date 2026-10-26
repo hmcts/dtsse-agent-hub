@@ -75,7 +75,7 @@ export function sampleTranscript(prefix: string): TranscriptEntry[] {
 
 /** Builds a channel through the builder and returns its URL. */
 export async function buildChannel(page: Page, name: string, topics: string[]): Promise<string> {
-  await page.goto("/channels/new");
+  await page.goto("/hub/channels/new");
   const search = page.getByLabel(/^Topics/);
   for (const topic of topics) {
     await search.fill(topic);
@@ -84,6 +84,6 @@ export async function buildChannel(page: Page, name: string, topics: string[]): 
   }
   await page.getByLabel("Name").fill(name);
   await page.getByRole("button", { name: "Save channel" }).click();
-  await page.waitForURL(/\/channels\/[0-9a-f-]{36}$/);
+  await page.waitForURL(/\/hub\/channels\/[0-9a-f-]{36}$/);
   return new URL(page.url()).pathname;
 }

@@ -1,11 +1,11 @@
 import { expect, type Page, test } from "@playwright/test";
 import { asPersona, unique } from "./hub";
 
-/** With virtual agents on, `/settings/credentials` sends people to the credentials section of `/virtual`. */
+/** With virtual agents on, `/hub/settings/credentials` sends people to the credentials section of `/hub/virtual`. */
 async function openCredentials(page: Page): Promise<void> {
-  const response = await page.goto("/settings/credentials");
+  const response = await page.goto("/hub/settings/credentials");
   expect(response?.status()).toBe(200);
-  if (new URL(page.url()).pathname === "/virtual") {
+  if (new URL(page.url()).pathname === "/hub/virtual") {
     expect(new URL(page.url()).hash).toBe("#credentials");
     await expect(page.getByRole("region", { name: "Credentials" })).toBeVisible();
   } else {

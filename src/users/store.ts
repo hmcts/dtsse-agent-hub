@@ -4,9 +4,13 @@ import type { Identity } from "./identity.ts";
 /**
  * Records a person, or refreshes what we know of them.
  *
- * Called on every web sign-in and every authenticated agent request. The update is skipped unless something
- * changed or the row is more than five minutes stale, so a heartbeat every 30 seconds is not a write every 30
- * seconds.
+ * Called on every web sign-in, on every web read that resolves the viewer, when an agent registers, and on an agent
+ * request made with a person's own delegated token. Not on a pod's: `agentRoute` calls this only when the caller is
+ * not a launch token, because a launch token was looked up through its owner's existing `user` row and nothing the
+ * pod sends should rewrite that row. Keep that guard — pod traffic is the bulk of a virtual agent's requests.
+ *
+ * The update is skipped unless something changed or the row is more than five minutes stale, so a heartbeat every 30
+ * seconds is not a write every 30 seconds.
  */
 export async function upsertUser(db: Database, identity: Identity): Promise<void> {
   const email = identity.email ?? null;
@@ -33,5 +37,29 @@ export interface KnownUser {
 export async function usersByEmail(db: Database, email: string): Promise<KnownUser[]> {
   return await db.$queryRaw<KnownUser[]>`
     SELECT oid, name, email, tid FROM "user" WHERE lower(email) = lower(${email.trim()}) ORDER BY oid
+  `;
+}
+
+/** The characters `LIKE` reads as pattern rather than text, so a typed `%` matches a literal one. */
+function literal(value: string): string {
+  return value.toLowerCase().replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+/**
+ * People the hub knows whose name starts a word with `query`, or whose address starts with it, nearest the start of
+ * the name first. A search, never a list: `peopleLookup` in `src/access/rules.ts` is what decides that a query is
+ * specific enough to answer at all and how many people one answer may carry.
+ *
+ * A word prefix rather than a substring, so "nor" finds Linus Norton without "or" finding everyone.
+ */
+export async function searchUsers(db: Database, query: string, limit: number): Promise<KnownUser[]> {
+  const starts = `${literal(query)}%`;
+  const word = `% ${literal(query)}%`;
+  return await db.$queryRaw<KnownUser[]>`
+    SELECT oid, name, email, tid
+      FROM "user"
+     WHERE lower(name) LIKE ${starts} OR lower(name) LIKE ${word} OR lower(coalesce(email, '')) LIKE ${starts}
+     ORDER BY lower(name), oid
+     LIMIT ${limit}
   `;
 }

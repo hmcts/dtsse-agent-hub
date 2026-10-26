@@ -33,6 +33,24 @@ export type HubEvent =
    */
   | { type: "assistant_conversation"; conversation_id: string; virtual_agent_id: string; owner_oid: string }
   /**
+   * The person stopped the answer their conversation was working on, so its pod should interrupt the session.
+   *
+   * Its own type rather than an `assistant_conversation`, because it is the one assistant event that is an instruction
+   * and not a change to re-read: a subscriber acts on it once, where every `assistant_conversation` re-reads the row
+   * and would therefore need the stop persisted as pending and cleared again. A NOTIFY lost while the listener was
+   * down is the right thing to lose — the turn it would have ended is long over, and a stop that fired on the
+   * `resync` replay would interrupt whatever the session had moved on to.
+   */
+  | { type: "assistant_stop"; conversation_id: string; virtual_agent_id: string; owner_oid: string }
+  /**
+   * The owner asked for files on `virtual_agent_id`'s own volume to be deleted, so its pod should go and delete them.
+   *
+   * Carries the assistant rather than a conversation, because one request can cover every conversation at once and
+   * the stream re-reads the outstanding ones anyway. That it re-reads is the difference from `assistant_stop`: the
+   * request is a row, so a NOTIFY lost while the listener was down costs nothing and the `resync` replay is wanted.
+   */
+  | { type: "assistant_uploads"; virtual_agent_id: string; owner_oid: string }
+  /**
    * Published in-process only, when the listener reconnects. NOTIFYs sent while it was disconnected are lost, so
    * every stream re-reads its queued deliveries.
    */
@@ -102,6 +120,14 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
     case "assistant_conversation":
       return isId(event.conversation_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)
         ? { type: "assistant_conversation", conversation_id: event.conversation_id, virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
+        : undefined;
+    case "assistant_stop":
+      return isId(event.conversation_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)
+        ? { type: "assistant_stop", conversation_id: event.conversation_id, virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
+        : undefined;
+    case "assistant_uploads":
+      return isId(event.virtual_agent_id) && isId(event.owner_oid)
+        ? { type: "assistant_uploads", virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
         : undefined;
     default:
       return undefined;

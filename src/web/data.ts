@@ -1,11 +1,25 @@
 import "server-only";
 import { grantsHeldBy } from "../access/load.ts";
-import { canOwnerReadCredential, canReadMessage } from "../access/rules.ts";
+import { canManageConversationShares, canOwnerReadCredential, canReadMessage } from "../access/rules.ts";
 import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
+import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
+import {
+  accessToConversation,
+  conversationRef,
+  conversationsSharedBy,
+  conversationsSharedWith,
+  type SharedChatLink,
+  type SharePerson,
+  shareRecipients
+} from "../assistant/shares.ts";
+import { type SharedConversationView, sharedConversation } from "../assistant/sharing.ts";
 import { conversationAgent, ensureAssistant, findAssistant, findConversation } from "../assistant/store.ts";
+import { listTemplates } from "../assistant/template-store.ts";
+import type { SavedTemplate } from "../assistant/templates.ts";
+import { type UploadsOnDisk, uploadsOnDisk } from "../assistant/upload-disk.ts";
 import {
   type AssistantSummary,
   assistantSummary,
@@ -13,7 +27,9 @@ import {
   type ConversationView,
   conversationGroups,
   conversationLinks,
-  conversationView
+  conversationView,
+  type UnsentChat,
+  unsentChat
 } from "../assistant/views.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
@@ -31,8 +47,11 @@ import { listTopics, mostActiveTopics } from "../topics/store.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
+import { availablePlugins, PluginConfigurationError, type PluginOffer, type PluginOption } from "../virtual-agents/plugins.ts";
 import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
+import { liveModelRoutes } from "../virtual-agents/store.ts";
 import {
+  claudeTokenUsable,
   type VirtualAgentCard,
   type VirtualAgentDetail,
   type VirtualAgentSummary,
@@ -91,27 +110,33 @@ export async function access(viewer: Identity) {
   return { given, received };
 }
 
-export type CredentialSettings =
-  | { available: true; modelRoute: ModelRoute; statuses: CredentialStatus[] }
-  | { available: false; modelRoute: ModelRoute; reason: string };
+export type CredentialSettings = { modelRoute: ModelRoute; claudeTokenUsable: boolean } & (
+  | { available: true; statuses: CredentialStatus[] }
+  | { available: false; reason: string }
+);
 
 /**
  * What the viewer has stored, as metadata: nothing here carries a credential's value. Their CLAUDE.md and git identity
  * are not among them; `claudeMdSettings` and `gitIdentitySettings` read those for their own forms.
+ *
+ * `modelRoute` is the viewer's own, which is what a new agent of theirs would be created on; `claudeTokenUsable`
+ * answers the one question that route is not enough for, because it is the agents' routes that decide whether a
+ * Claude token is any use.
  */
 export async function credentialSettings(viewer: Viewer): Promise<CredentialSettings> {
+  const route = { modelRoute: viewer.modelRoute, claudeTokenUsable: claudeTokenUsable(viewer.modelRoute, await liveModelRoutes(prisma, viewer.oid)) };
   const backend = credentialBackend(prisma);
   if (!backend.available) {
-    return { available: false, modelRoute: viewer.modelRoute, reason: backend.reason };
+    return { ...route, available: false, reason: backend.reason };
   }
   const refusal = ownerRefusal(backend.store, viewer.oid);
   if (refusal !== undefined) {
-    return { available: false, modelRoute: viewer.modelRoute, reason: refusal.message };
+    return { ...route, available: false, reason: refusal.message };
   }
   const statuses = await credentialStatus(prisma, viewer.oid);
   return {
+    ...route,
     available: true,
-    modelRoute: viewer.modelRoute,
     statuses: statuses.filter((status) => status.kind !== "claude_md" && status.kind !== "git_identity")
   };
 }
@@ -223,7 +248,7 @@ export async function virtualAgentPage(viewer: Viewer, id: string): Promise<Virt
 export type AgentRoute = { variant: "virtual"; page: VirtualAgentPageView } | { variant: "local"; view: AgentView } | { variant: "moved"; to: string };
 
 /**
- * What `/agents/{id}` shows. A virtual agent's id is its page. An agent one of its sessions registered moves there,
+ * What `/hub/agents/{id}` shows. A virtual agent's id is its page. An agent one of its sessions registered moves there,
  * since a virtual agent registers a new agent on every `/clear` and its page always shows the current one. Any other
  * agent is shown as itself. `undefined` is the not-found for an id that is none of these, or that the viewer may not
  * see.
@@ -252,10 +277,46 @@ export interface AssistantHome {
   assistant: AssistantSummary;
   credentials: CredentialSettings;
   conversations: { label: DateGroup; items: ConversationLink[] }[];
+  /**
+   * The workspace plugins this hub offers, and the ones the viewer's assistant loads; `null` when the configuration
+   * cannot be read, which is not the same as its offering nothing.
+   */
+  plugins: { available: PluginOption[]; checked: string[] } | null;
 }
 
 function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
   return new Set(credentials.available ? credentials.statuses.filter((status) => status.stored).map((status) => status.kind) : []);
+}
+
+/**
+ * `VIRTUAL_AGENT_PLUGINS` as a plugin form can use it: its options, or the reason it is unreadable. The one catch a
+ * malformed configuration gets, which every surface that offers plugins reads through, so none of them can let it
+ * throw out through a page.
+ *
+ * What a surface then does with an unreadable configuration differs, and the asymmetry is deliberate. The hub's own
+ * plugin surfaces, `/hub/virtual` and `/hub/agents/{id}`, name the variable and the fault in place of the plugin
+ * form, because the person reading them is the person who can fix it, and that now costs the plugin form alone
+ * rather than the whole page. The Assistant says nothing and hides the section, because it is someone's whole chat
+ * surface and a configuration they can neither see nor fix must not put a hub error in front of their chats.
+ *
+ * Neither may answer an unreadable configuration with an empty offer. "The hub offers none" is a state a person can
+ * trust and act on; "the configuration cannot be read" is not, and silently merging the two would show every plugin
+ * an agent already loads as one the hub no longer offers.
+ */
+export function pluginOffer(): PluginOffer {
+  try {
+    return { ok: true, available: availablePlugins() };
+  } catch (error) {
+    if (error instanceof PluginConfigurationError) {
+      return { ok: false, error: error.message };
+    }
+    throw error;
+  }
+}
+
+function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugins"] {
+  const offer = pluginOffer();
+  return offer.ok ? { available: [...offer.available], checked: assistant.plugins } : null;
 }
 
 /**
@@ -265,17 +326,56 @@ function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const assistant = await ensureAssistant(prisma, viewer);
   const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
-  return { assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)), credentials, conversations };
+  return {
+    assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)),
+    credentials,
+    conversations,
+    plugins: pluginSettings(assistant)
+  };
 }
 
-/** The sidebar and the assistant's state alone, for pages that must not start or create it. */
-export async function assistantSidebar(viewer: Viewer): Promise<AssistantHome | undefined> {
+/**
+ * The new chat the viewer already opened for a file and never sent, for `/assistant` to hand back to that screen.
+ * Its own read rather than part of `openAssistant`, because every other page that renders the sidebar has no use for
+ * it and should not pay for the query.
+ */
+export async function unsentNewChat(viewer: Viewer): Promise<UnsentChat | undefined> {
+  return await unsentChat(prisma, viewer.oid);
+}
+
+/**
+ * What the viewer's assistant holds on its own volume, for the settings dialog's Files section. `undefined` when
+ * they have no assistant at all, which is the one case the section is not offered.
+ *
+ * Its own read rather than part of `openAssistant`, because only the settings dialog uses it and it costs a second
+ * query over the viewer's uploads. The owner check is the store's, through `canManageUploadsOnDisk`.
+ */
+export async function assistantFiles(viewer: Viewer): Promise<UploadsOnDisk | undefined> {
   const assistant = await findAssistant(prisma, viewer.oid);
-  if (assistant === undefined) {
-    return undefined;
-  }
-  const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
-  return { assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)), credentials, conversations };
+  return assistant === undefined ? undefined : await uploadsOnDisk(prisma, viewer.oid, assistant.id);
+}
+
+/**
+ * How much the viewer's assistant has to work with, for the settings dialog's Size section: its size, what its pod
+ * reports about its memory, and how many chats have a session on it. `undefined` when they have no assistant at all,
+ * which is the one case the section is not offered.
+ *
+ * Its own read rather than part of `openAssistant`, as the files are: only the settings dialog uses it, and it costs a
+ * second query over the viewer's conversations. The owner check is the store's, through `canSeeAssistantMemory`.
+ */
+export async function assistantSize(viewer: Viewer): Promise<AssistantMemory | undefined> {
+  const assistant = await findAssistant(prisma, viewer.oid);
+  return assistant === undefined ? undefined : await assistantMemory(prisma, viewer.oid, assistant.id);
+}
+
+/**
+ * The viewer's own saved prompts, for the settings dialog to edit and both composers to offer.
+ *
+ * Its own read rather than part of `openAssistant` so the one place that decides whose templates these are is the
+ * store, which asks `canManageTemplate` with the viewer as both the actor and the owner.
+ */
+export async function assistantTemplates(viewer: Identity): Promise<SavedTemplate[]> {
+  return await listTemplates(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
 }
 
 /** One of the viewer's conversations, or `undefined` for the not-found the page answers. */
@@ -285,4 +385,32 @@ export async function assistantConversation(viewer: Viewer, id: string): Promise
     return undefined;
   }
   return await conversationView(prisma, conversation, await conversationAgent(prisma, conversation));
+}
+
+/**
+ * The read-only share of a conversation, for its owner or for someone they named, and `undefined` for everyone else
+ * — including someone who was handed the link, since the link is how a recipient reaches a share and never what
+ * grants one. `accessToConversation` applies `canViewSharedConversation`.
+ */
+export async function sharedChat(viewer: Identity, id: string): Promise<SharedConversationView | undefined> {
+  const allowed = await accessToConversation(prisma, viewer.oid, id);
+  if (allowed === undefined) {
+    return undefined;
+  }
+  return await sharedConversation(prisma, allowed.conversation, allowed.access);
+}
+
+/** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */
+export async function chatShares(viewer: Identity, id: string): Promise<SharePerson[] | undefined> {
+  const conversation = await conversationRef(prisma, id);
+  if (conversation === undefined || !canManageConversationShares(viewer.oid, conversation)) {
+    return undefined;
+  }
+  return await shareRecipients(prisma, id);
+}
+
+/** Both sides of the viewer's shares: their own chats they have shared, and the chats shared with them. */
+export async function sharedChats(viewer: Identity): Promise<{ given: SharedChatLink[]; received: SharedChatLink[] }> {
+  const [given, received] = await Promise.all([conversationsSharedBy(prisma, viewer.oid), conversationsSharedWith(prisma, viewer.oid)]);
+  return { given, received };
 }

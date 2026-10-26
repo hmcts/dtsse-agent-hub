@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { boundedArray } from "../agent-api/bounded-array.ts";
 import { POD_PHASES } from "./lifecycle.ts";
 import { MAX_EXPOSED_PORT, MAX_REPORTED_PORTS, MIN_EXPOSED_PORT } from "./ports.ts";
 
@@ -57,6 +58,12 @@ export const completeBody = z.object({
   account_label: optionalText(200)
 });
 
+/** The pod's word that a sign-in it relayed is over without the owner finishing it. */
+export const loginFailedBody = z.object({
+  state: z.enum(["expired", "failed"]),
+  detail: optionalText(MAX_DETAIL)
+});
+
 export const claimBody = z.object({ cluster: z.string().trim().regex(CLUSTER, "must be 1–100 letters, digits, dots, hyphens or underscores") });
 
 export const observedBody = z.object({
@@ -67,10 +74,9 @@ export const observedBody = z.object({
   disk_deleted: z.boolean().optional()
 });
 
-const reportedPorts = z
-  .array(z.number().int().min(MIN_EXPOSED_PORT).max(MAX_EXPOSED_PORT))
-  .max(MAX_REPORTED_PORTS)
-  .refine((ports) => new Set(ports).size === ports.length, "must not list a port twice");
+const reportedPorts = boundedArray(z.number().int().min(MIN_EXPOSED_PORT).max(MAX_EXPOSED_PORT), MAX_REPORTED_PORTS, {
+  refine: { check: (ports) => new Set(ports).size === ports.length, message: "must not list a port twice" }
+});
 
 export const portsBody = z.object({
   ports: reportedPorts,

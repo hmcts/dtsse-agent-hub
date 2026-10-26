@@ -12,15 +12,18 @@ import { PluginsPanel } from "@/components/virtual-agents/PluginsPanel";
 import { PortsPanel } from "@/components/virtual-agents/PortsPanel";
 import { RenameVirtualAgent } from "@/components/virtual-agents/RenameVirtualAgent";
 import { SizePanel } from "@/components/virtual-agents/SizePanel";
+import { type VirtualAgentActions, VirtualAgentPanel } from "@/components/virtual-agents/VirtualAgentPanel";
 import { VirtualAgentRefresh } from "@/components/virtual-agents/VirtualAgentRefresh";
 import { createLimit, DiskNotice, VirtualAgentsView } from "@/components/virtual-agents/VirtualAgentsView";
 import type { CredentialStatus } from "@/credentials/store";
 import type { LoginView } from "@/virtual-agents/logins";
+import { NO_PLUGINS, type PluginOffer } from "@/virtual-agents/plugins";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
+import type { VirtualAgentPageView } from "@/web/data";
 
 const refresh = vi.fn();
 const push = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push }), usePathname: () => "/" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push }), usePathname: () => "/hub" }));
 
 const hubHandlers = new Map<string, (data: unknown) => void>();
 vi.mock("@/components/live/HubStream", () => ({
@@ -114,10 +117,10 @@ describe("labels", () => {
 
 describe("VirtualAgentsView", () => {
   it("should list the viewer's agents with their status, idle time and a link to each", () => {
-    render(<VirtualAgentsView agents={[card()]} route="bedrock" create={created()} now={NOW} />);
+    render(<VirtualAgentsView agents={[card()]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
     const list = screen.getByRole("list", { name: "Your virtual agents" });
-    expect(within(list).getByRole("link", { name: "pcs-api" }).getAttribute("href")).toBe("/agents/0f8a6a1e-0000-4000-8000-000000000001");
+    expect(within(list).getByRole("link", { name: "pcs-api" }).getAttribute("href")).toBe("/hub/agents/0f8a6a1e-0000-4000-8000-000000000001");
     expect(list.textContent).toContain("Running");
     expect(list.textContent).toContain("idle for 1 h 5 min");
   });
@@ -137,6 +140,7 @@ describe("VirtualAgentsView", () => {
         route="bedrock"
         create={created()}
         now={NOW}
+        plugins={NO_PLUGINS}
       />
     );
 
@@ -146,7 +150,7 @@ describe("VirtualAgentsView", () => {
   });
 
   it("should warn that a virtual agent acts with the viewer's access and name the model route when it offers to create one", () => {
-    render(<VirtualAgentsView agents={[]} route="own-licence" create={created()} now={NOW} />);
+    render(<VirtualAgentsView agents={[]} route="own-licence" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
     expect(screen.getByText("A virtual agent acts with your GitHub and Azure access.")).toBeTruthy();
     expect(screen.getByText(/your own Claude licence/)).toBeTruthy();
@@ -155,14 +159,14 @@ describe("VirtualAgentsView", () => {
   });
 
   it("should name Amazon Bedrock and the viewer's Bedrock API key when the viewer is on the Bedrock route", () => {
-    render(<VirtualAgentsView agents={[]} route="bedrock" create={created()} now={NOW} />);
+    render(<VirtualAgentsView agents={[]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
     expect(screen.getByText("Model: Amazon Bedrock, with your Bedrock API key")).toBeTruthy();
   });
 
   it("should send the name to the create action and open the new agent's page when the form is submitted", async () => {
     const create = vi.fn(async () => ({ ok: true as const, id: "0f8a6a1e-0000-4000-8000-000000000009", confirmation: "pcs-api is starting" }));
-    render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} />);
+    render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} plugins={NO_PLUGINS} />);
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "pcs-api" } });
     await act(async () => {
@@ -170,12 +174,12 @@ describe("VirtualAgentsView", () => {
     });
 
     expect((create.mock.calls[0] as unknown as [FormData])[0].get("name")).toBe("pcs-api");
-    expect(push).toHaveBeenCalledWith("/agents/0f8a6a1e-0000-4000-8000-000000000009");
+    expect(push).toHaveBeenCalledWith("/hub/agents/0f8a6a1e-0000-4000-8000-000000000009");
     expect(refresh).not.toHaveBeenCalled();
   });
 
   it("should still offer the create form when the viewer has two agents running", () => {
-    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b" })]} route="bedrock" create={created()} now={NOW} />);
+    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b" })]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
     expect(screen.getByRole("form", { name: "Create a virtual agent" })).toBeTruthy();
     expect(screen.getByText("2 of 3")).toBeTruthy();
@@ -183,7 +187,7 @@ describe("VirtualAgentsView", () => {
 
   it("should offer no create form and say why when the viewer is at the limit", () => {
     const agents = [card(), card({ id: "b", name: "b" }), card({ id: "c", name: "c" })];
-    render(<VirtualAgentsView agents={agents} route="bedrock" create={created()} now={NOW} />);
+    render(<VirtualAgentsView agents={agents} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
     expect(screen.queryByRole("form", { name: "Create a virtual agent" })).toBeNull();
     expect(screen.getByText("3 of 3")).toBeTruthy();
@@ -191,7 +195,15 @@ describe("VirtualAgentsView", () => {
   });
 
   it("should leave an agent being deleted out of the counter when the viewer has one", () => {
-    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b", desired: "deleted" })]} route="bedrock" create={created()} now={NOW} />);
+    render(
+      <VirtualAgentsView
+        agents={[card(), card({ id: "b", name: "b", desired: "deleted" })]}
+        route="bedrock"
+        create={created()}
+        now={NOW}
+        plugins={NO_PLUGINS}
+      />
+    );
 
     expect(screen.getByText("1 of 3")).toBeTruthy();
   });
@@ -332,7 +344,7 @@ describe("RenameVirtualAgent", () => {
 describe("running agent detail", () => {
   it("should show what a running agent's pod last said, such as its background clone", () => {
     const detail = "Claude is ready; cloning repositories (12/241)";
-    render(<VirtualAgentsView agents={[card({ statusDetail: detail })]} route="bedrock" create={created()} now={NOW} />);
+    render(<VirtualAgentsView agents={[card({ statusDetail: detail })]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
     render(<LifecyclePanel agent={card({ statusDetail: detail })} actions={{ start: ok(), stop: ok(), remove: ok() }} />);
 
     expect(screen.getAllByText(detail)).toHaveLength(2);
@@ -350,10 +362,42 @@ describe("running agent detail", () => {
 });
 
 describe("the plugins choice", () => {
-  const OFFERED = [
-    { name: "dtsse", description: "DTSSE docs" },
-    { name: "pcs", description: "" }
-  ];
+  const OFFERED: PluginOffer = {
+    ok: true,
+    available: [
+      { name: "dtsse", description: "DTSSE docs" },
+      { name: "pcs", description: "" }
+    ]
+  };
+  /** Worded as `availablePlugins` throws it, which is the message `pluginOffer` hands the page. */
+  const UNREADABLE: PluginOffer = { ok: false, error: 'VIRTUAL_AGENT_PLUGINS has "Not A Plugin Name", which is not a plugin name' };
+  const FAULT =
+    'Plugins cannot be offeredVIRTUAL_AGENT_PLUGINS has "Not A Plugin Name", which is not a plugin name.' +
+    " Nothing can be ticked until the hub's configuration is corrected; the rest of this page is unaffected.";
+
+  function actions(): VirtualAgentActions {
+    return { lifecycle: { start: ok(), stop: ok(), remove: ok() }, rename: ok(), resize: ok(), plugins: ok(), paste: ok(), reconnect: ok(), save: ok() };
+  }
+
+  /** An agent's own page as its owner sees it, with no session registered yet, so only the side panel is in play. */
+  function ownedPage(agent: VirtualAgentCard = card()): VirtualAgentPageView {
+    return {
+      summary: {
+        id: agent.id,
+        name: agent.name,
+        desired: agent.desired,
+        status: agent.status,
+        agentId: null,
+        owner: { oid: "alice", name: "Alice", tid: "hmcts" }
+      },
+      manage: {
+        detail: { card: agent, logins: [], needed: ["github"], optional: [] },
+        credentials: { available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: [stored("github")] },
+        chats: []
+      },
+      linked: null
+    };
+  }
 
   it("should offer a checkbox per plugin with its description on the create form and send the ticked ones", async () => {
     const create = created();
@@ -375,16 +419,72 @@ describe("the plugins choice", () => {
     expect((create.mock.calls[0] as unknown as [FormData])[0].getAll("plugins")).toEqual(["pcs"]);
   });
 
-  it("should leave plugins off the create form when the hub offers none", () => {
-    render(<VirtualAgentsView agents={[]} route="bedrock" create={created()} now={NOW} />);
+  it("should leave plugins off the create form, and say nothing about the configuration, when the hub legitimately offers none", () => {
+    render(<VirtualAgentsView agents={[]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
     expect(screen.queryByRole("group", { name: "Plugins" })).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("form", { name: "Create a virtual agent" })).toBeTruthy();
+  });
+
+  it("should name VIRTUAL_AGENT_PLUGINS in place of the create form's picker, and leave the rest of /hub/virtual working, when the configuration cannot be read", async () => {
+    const create = created();
+    render(<VirtualAgentsView agents={[card()]} route="bedrock" create={create} now={NOW} plugins={UNREADABLE} />);
+
+    expect(screen.getByRole("alert").textContent).toBe(FAULT);
+    expect(screen.queryByRole("group", { name: "Plugins" })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(within(screen.getByRole("list", { name: "Your virtual agents" })).getAllByRole("listitem")).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "ccd" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Create a virtual agent" }));
+    });
+
+    expect((create.mock.calls[0] as unknown as [FormData])[0].getAll("plugins")).toEqual([]);
+  });
+
+  it("should name VIRTUAL_AGENT_PLUGINS in place of the plugin form, and leave the rest of an agent's panel working, when the configuration cannot be read", () => {
+    render(<VirtualAgentPanel page={ownedPage()} actions={actions()} now={NOW} session={null} plugins={UNREADABLE} />);
+
+    expect(screen.getByRole("alert").textContent).toBe(FAULT);
+    expect(screen.getByRole("heading", { name: "Plugins" })).toBeTruthy();
+    expect(screen.queryByRole("form", { name: "Change the plugins of pcs-api" })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    expect(screen.getByRole("form", { name: "Rename pcs-api" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Sign-ins" })).toBeTruthy();
+    expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
+      "Lifecycle",
+      "Name",
+      "Size",
+      "Plugins",
+      "Web servers",
+      "HMCTS Assistant chats",
+      "Sign-ins",
+      "GitHub"
+    ]);
+  });
+
+  it("should offer the plugin form on an agent's panel, and say nothing about the configuration, when it can be read", () => {
+    render(<VirtualAgentPanel page={ownedPage(card({ plugins: ["pcs"] }))} actions={actions()} now={NOW} session={null} plugins={OFFERED} />);
+
+    expect(screen.getByRole("form", { name: "Change the plugins of pcs-api" })).toBeTruthy();
+    expect(screen.getAllByRole("checkbox").map((box) => (box as HTMLInputElement).value)).toEqual(["dtsse", "pcs"]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("should leave the plugin section off an agent's panel, and say nothing about the configuration, when the hub legitimately offers none and the agent has none", () => {
+    render(<VirtualAgentPanel page={ownedPage()} actions={actions()} now={NOW} session={null} plugins={NO_PLUGINS} />);
+
+    expect(screen.queryByRole("heading", { name: "Plugins" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("form", { name: "Rename pcs-api" })).toBeTruthy();
   });
 
   it("should show the ticked plugins, say a save restarts the agent, and send the new set when the agent is running", async () => {
     const save = vi.fn(async () => ({ ok: true as const, confirmation: "pcs-api is restarting with its new plugins" }));
-    render(<PluginsPanel agent={card({ plugins: ["pcs"] })} available={OFFERED} save={save} />);
+    render(<PluginsPanel agent={card({ plugins: ["pcs"] })} offer={OFFERED} save={save} />);
 
     expect((screen.getByRole("checkbox", { name: /pcs/ }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: /dtsse/ }) as HTMLInputElement).checked).toBe(false);
@@ -401,7 +501,7 @@ describe("the plugins choice", () => {
 
   it("should send no plugins when every box is unticked", async () => {
     const save = ok();
-    render(<PluginsPanel agent={card({ plugins: ["pcs"] })} available={OFFERED} save={save} />);
+    render(<PluginsPanel agent={card({ plugins: ["pcs"] })} offer={OFFERED} save={save} />);
 
     fireEvent.click(screen.getByRole("checkbox", { name: /pcs/ }));
     await act(async () => {
@@ -415,14 +515,14 @@ describe("the plugins choice", () => {
     ["requested", "running"],
     ["stopped", "stopped"]
   ] as const)("should not warn of a restart when the agent is %s", (status, desired) => {
-    render(<PluginsPanel agent={card({ status, desired })} available={OFFERED} save={ok()} />);
+    render(<PluginsPanel agent={card({ status, desired })} offer={OFFERED} save={ok()} />);
 
     expect(screen.queryByText(/Saving restarts/)).toBeNull();
     expect(screen.getByRole("form", { name: "Change the plugins of pcs-api" })).toBeTruthy();
   });
 
   it("should list a ticked plugin the hub no longer offers as unavailable so it can be unticked", () => {
-    render(<PluginsPanel agent={card({ plugins: ["civil", "pcs"] })} available={OFFERED} save={ok()} />);
+    render(<PluginsPanel agent={card({ plugins: ["civil", "pcs"] })} offer={OFFERED} save={ok()} />);
 
     const civil = screen.getByRole("checkbox", { name: /civil/ }) as HTMLInputElement;
     expect(civil.checked).toBe(true);
@@ -430,11 +530,39 @@ describe("the plugins choice", () => {
     expect(screen.getAllByRole("checkbox").map((box) => (box as HTMLInputElement).value)).toEqual(["dtsse", "pcs", "civil"]);
   });
 
-  it.each([
+  it("should offer the owner one control that removes every plugin, beside the fault, when the configuration cannot be read", async () => {
+    const save = ok();
+    render(<PluginsPanel agent={card({ plugins: ["civil", "pcs"] })} offer={UNREADABLE} save={save} />);
+
+    expect(screen.getByRole("alert").textContent).toBe(FAULT);
+    expect(screen.getByText("civil, pcs")).toBeTruthy();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove all plugins" })).toBeTruthy();
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Change the plugins of pcs-api" }));
+    });
+
+    // The empty list is the one save the store takes while the configuration is malformed: `checkPlugins` reads the
+    // offer list only to check names being ticked, so unticking everything never raises its error.
+    const sent = (save.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.getAll("plugins")]).toEqual([card().id, []]);
+  });
+
+  it("should offer no form beside the fault when the configuration cannot be read and the agent has no plugins to remove", () => {
+    render(<PluginsPanel agent={card()} offer={UNREADABLE} save={ok()} />);
+
+    expect(screen.getByRole("alert").textContent).toBe(FAULT);
+    expect(screen.getByText("None")).toBeTruthy();
+    expect(screen.queryByRole("form", { name: "Change the plugins of pcs-api" })).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it.each<[string, VirtualAgentCard, PluginOffer]>([
     ["the agent is being deleted", card({ desired: "deleted", plugins: ["pcs"] }), OFFERED],
-    ["the hub offers none and the agent has none", card(), []]
-  ])("should show nothing when %s", (_label, agent, available) => {
-    const { container } = render(<PluginsPanel agent={agent} available={available} save={ok()} />);
+    ["the agent is being deleted and the configuration cannot be read", card({ desired: "deleted", plugins: ["pcs"] }), UNREADABLE],
+    ["the hub offers none and the agent has none", card(), NO_PLUGINS]
+  ])("should show nothing when %s", (_label, agent, offer) => {
+    const { container } = render(<PluginsPanel agent={agent} offer={offer} save={ok()} />);
 
     expect(container.textContent).toBe("");
   });
@@ -443,7 +571,7 @@ describe("the plugins choice", () => {
 describe("the size choice", () => {
   it("should offer every size on the create form, small first, and send the one chosen", async () => {
     const create = vi.fn(async () => ({ ok: true as const, id: "0f8a6a1e-0000-4000-8000-000000000009", confirmation: "big is starting" }));
-    render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} />);
+    render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} plugins={NO_PLUGINS} />);
 
     const size = screen.getByLabelText("Size") as HTMLSelectElement;
     expect([...size.options].map((option) => option.textContent)).toEqual([
@@ -465,7 +593,7 @@ describe("the size choice", () => {
     ["requested", "running"],
     ["stopped", "stopped"]
   ] as const)("should offer to change the size when the agent is %s", async (status, desired) => {
-    const resize = vi.fn(async () => ({ ok: true as const, confirmation: "pcs-api is now medium" }));
+    const resize = vi.fn(async () => ({ ok: true as const, confirmation: "It starts at medium the next time it runs." }));
     render(<SizePanel agent={card({ status, desired })} resize={resize} />);
 
     fireEvent.change(screen.getByLabelText("Size"), { target: { value: "medium" } });
@@ -475,15 +603,18 @@ describe("the size choice", () => {
 
     const sent = (resize.mock.calls[0] as unknown as [FormData])[0];
     expect([sent.get("id"), sent.get("size")]).toEqual([card().id, "medium"]);
-    expect(screen.getByRole("status").textContent).toBe("pcs-api is now medium");
+    expect(screen.getByRole("status").textContent).toBe("It starts at medium the next time it runs.");
+    expect(screen.getByText("It starts at the new size the next time it runs.")).toBeTruthy();
   });
 
-  it("should show the size and say to stop the agent when it is running", () => {
+  // The size is in the pod template, so a change replaces a running pod. The panel offers the change and says what it
+  // ends, rather than withholding it until the agent is stopped.
+  it("should offer the change and say it restarts the agent when it is running", () => {
     render(<SizePanel agent={card({ size: "large" })} resize={ok()} />);
 
-    expect(screen.getByText("Large: 4–8 CPUs, 16Gi–32Gi memory")).toBeTruthy();
-    expect(screen.getByText("Stop it to change its size.")).toBeTruthy();
-    expect(screen.queryByRole("form")).toBeNull();
+    expect((screen.getByLabelText("Size") as HTMLSelectElement).value).toBe("large");
+    expect(screen.getByText("Changing the size restarts it, which ends every session running on it. Its disk is kept.")).toBeTruthy();
+    expect(screen.getByRole("form", { name: "Change the size of pcs-api" })).toBeTruthy();
   });
 
   it("should show nothing when the agent is being deleted", () => {
@@ -1099,7 +1230,7 @@ describe("Sidebar", () => {
   it("should link to the viewer's virtual agents and not to a separate credentials page when the feature is on", () => {
     render(<Sidebar data={data} viewer={viewer} signInDisabled virtualAgents />);
 
-    expect(screen.getByRole("link", { name: "Virtual agents" }).getAttribute("href")).toBe("/virtual");
+    expect(screen.getByRole("link", { name: "Virtual agents" }).getAttribute("href")).toBe("/hub/virtual");
     expect(screen.queryByRole("link", { name: "Credentials" })).toBeNull();
   });
 
@@ -1107,6 +1238,6 @@ describe("Sidebar", () => {
     render(<Sidebar data={data} viewer={viewer} signInDisabled />);
 
     expect(screen.queryByRole("link", { name: "Virtual agents" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Credentials" }).getAttribute("href")).toBe("/settings/credentials");
+    expect(screen.getByRole("link", { name: "Credentials" }).getAttribute("href")).toBe("/hub/settings/credentials");
   });
 });

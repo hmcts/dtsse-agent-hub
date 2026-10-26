@@ -35,7 +35,10 @@ const CASES = [
   "client-upgrade",
   "client-upgrade-offline",
   "client-upgrade-no-npm",
-  "client-upgrade-pinned"
+  "client-upgrade-pinned",
+  "package-entrypoint",
+  "client-upgrade-ships-entrypoint",
+  "checkout-entrypoint"
 ];
 
 let stateDir: string;
@@ -81,18 +84,27 @@ function runScript(args: string[], env: Record<string, string> = {}): Promise<Ru
 }
 
 // The mock hub, and the state file the script's jq assertions read: what the virtual agent has been told,
-// rewritten after every request the hub answers, as the script's own mock-hub process used to write it.
+// rewritten as each of the hub's responses goes out, as the script's own mock-hub process used to write it.
+//
+// It goes to a temp file in the same directory and is renamed over the state, so a read is either the whole
+// previous state or the whole new one: writing the path itself truncates it first, and a jq that reads the
+// empty file answers with an empty value and exit 0, which an assertion cannot tell apart from a phase the
+// pod never reported. And it is written as the response goes out rather than on that response's `finish`,
+// which is emitted only after the data has reached the socket — late enough for the script to be asserting
+// on a state a request behind.
 async function runCase(name: string): Promise<Run> {
   const hub = createMockHub({ launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
   const url = await hub.listen();
   const state = path.join(stateDir, `${name}.json`);
   const v = hub.virtuals.get(VID)!;
   const dump = () => {
-    fs.writeFileSync(state, JSON.stringify({ status: v.status, prompts: v.prompts, completes: v.completes, github: v.credentials.get("github") ?? null }));
+    fs.writeFileSync(
+      `${state}.tmp`,
+      JSON.stringify({ status: v.status, prompts: v.prompts, completes: v.completes, github: v.credentials.get("github") ?? null })
+    );
+    fs.renameSync(`${state}.tmp`, state);
   };
-  hub.server.on("request", (_req, res) => {
-    res.on("finish", dump);
-  });
+  hub.onBeforeRespond(dump);
   dump();
   try {
     return await runScript([name], { HUB_URL: url, HUB_STATE: state, VID, LAUNCH });

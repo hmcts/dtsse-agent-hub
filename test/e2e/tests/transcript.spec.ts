@@ -15,7 +15,7 @@ test.describe("agent conversation @regression", () => {
       const page = await owner.newPage();
       // An entry stored before the page is watching the agent is not announced to it, so the upload waits for the stream.
       const watching = page.waitForResponse((response) => response.url().includes(`/api/ui/stream?agent=${agent}`));
-      await page.goto(`/agents/${agent}`);
+      await page.goto(`/hub/agents/${agent}`);
       const conversation = page.getByRole("list", { name: "Conversation" });
 
       await expect(conversation.getByText("Please run the unit tests")).toBeVisible();
