@@ -1533,8 +1533,7 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     expect(jira.getByText("VIBE")).toBeTruthy();
     expect(jira.getByText("(default)")).toBeTruthy();
     expect(jira.queryByRole("button", { name: "Clear" })).toBeNull();
-    expect(confluence.getByText("Court and Tribunal Hearings (CaTH) AI Project")).toBeTruthy();
-    expect(confluence.getByText("Under AI Resources")).toBeTruthy();
+    expect(confluence.getByText("Under AI Resources/Court and Tribunal Hearings (CaTH) AI Project")).toBeTruthy();
     expect(confluence.getByText("(default)")).toBeTruthy();
     expect(confluence.queryByRole("button", { name: "Clear" })).toBeNull();
   });

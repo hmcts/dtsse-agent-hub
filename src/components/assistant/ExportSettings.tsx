@@ -158,12 +158,12 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
         label="Confluence page"
         hint="New pages go under this one, and searches start in its space."
         builtIn={
-          <span className="flex min-w-0 flex-col leading-tight" title={breadcrumb(DEFAULT_CONFLUENCE_PARENT).join(" › ")}>
-            <span className="flex min-w-0 items-baseline gap-2">
-              <span className="truncate text-[13px] font-medium">{DEFAULT_CONFLUENCE_PARENT.space_name}</span>
-              <BuiltIn />
-            </span>
-            <span className="truncate text-xs text-asst-faint">Under {DEFAULT_CONFLUENCE_PARENT.title}</span>
+          // Wrapped rather than cut short: the space's name is long, and it is the part that says where pages go.
+          <span className="text-pretty text-[13px] leading-snug" title={breadcrumb(DEFAULT_CONFLUENCE_PARENT).join(" › ")}>
+            <span className="font-medium">
+              Under {DEFAULT_CONFLUENCE_PARENT.title}/{DEFAULT_CONFLUENCE_PARENT.space_name}
+            </span>{" "}
+            <BuiltIn />
           </span>
         }
         current={
