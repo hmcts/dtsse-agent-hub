@@ -241,6 +241,10 @@ seed_github_when_asked() {
 # first pass re-reads the same refused token and must say nothing, or it replaces the message it has just sent
 # with one about a token the owner did not paste. The next token they paste is also refused, which does have to
 # be reported, and the one after it gets the pod booting — so exactly one refusal is reported, not two.
+#
+# An `rc 137` here is that silence breaking rather than a slow machine: the extra report overwrites the detail
+# the seeder waits for, so nothing is ever pasted and the boot runs until the watchdog kills it. The case takes
+# about a second and a half of the watchdog's thirty, so a timeout is not what a 137 means.
 case_sign_in_not_completed() {
     setup sign-in-not-completed
     seed_github "$STALE_TOKEN"
@@ -253,7 +257,9 @@ case_sign_in_not_completed() {
             seed_github_when_asked 'refused the stored token' "$GOOD_TOKEN"
     ) &
     local seeder=$!
-    boot FAKE_GH_LOGIN_FAILS="error: HTTP 429"
+    # The client waits a minute between codes, which no watchdog here would outlast; the three attempts are the
+    # point, not the minutes. This is the same variable a pod gets to be watched through a sign-in.
+    boot FAKE_GH_LOGIN_FAILS="error: HTTP 429" AGENT_HUB_GITHUB_SIGN_IN_GAP_MS=10
     kill "$seeder" 2>/dev/null
     wait "$seeder" 2>/dev/null
     [ "$BOOT_RC" -eq 0 ] &&

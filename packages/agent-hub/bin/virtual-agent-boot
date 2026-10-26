@@ -90,7 +90,7 @@ hub_retry() {
             return 1
         fi
         log "$1 $2: hub answered $HUB_STATUS; retrying in ${delay}s"
-        sleep "$delay"
+        sleep_interruptibly "$delay"
         delay=$((delay * 2 > 60 ? 60 : delay * 2))
     done
 }

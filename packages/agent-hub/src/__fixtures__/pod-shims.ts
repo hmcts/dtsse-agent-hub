@@ -170,14 +170,18 @@ sleep 30`
   *) echo "unexpected az $*" >&2; exit 2 ;;
 esac`
   );
-  // The two shapes a GitHub sign-in fails in, each giving the words gh prints: `FAKE_GH_LOGIN_FAILS` after the
-  // code, which is a sign-in that broke under the owner, and `FAKE_GH_LOGIN_CRASHES` instead of one, which
-  // leaves them nothing to enter. Both exit 1 with no token, and what gh said is their only record.
+  // The ways a GitHub sign-in fails, each giving the words gh prints: `FAKE_GH_LOGIN_FAILS` after the code,
+  // which is a sign-in that broke under the owner, and `FAKE_GH_LOGIN_CRASHES` instead of one, which leaves them
+  // nothing to enter. Both exit 1 with no token, and what gh said is their only record.
+  // `FAKE_GH_LOGIN_IGNORES_TERM` is the opposite: gh finishes and exits 0 whatever is sent to it, which is a
+  // sign-in the owner completed in the window where the relay of its code was still failing.
+  // `FAKE_GH_TOKEN_UNREADABLE` makes `auth token` exit 127, as `run` answers for a command it cannot spawn.
   shim(
     "gh",
     `case "$1 $2" in
   "auth login") [ -n "$GH_TOKEN$GITHUB_TOKEN" ] && exit 9; [ "$BROWSER" = true ] || exit 8; printf '%s\\n' "$*" > "$SHIM_STATE/gh-login-args"
       [ -n "$FAKE_GH_LOGIN_CRASHES" ] && { printf '%s\\n' "$FAKE_GH_LOGIN_CRASHES" >&2; exit 1; }
+      [ -n "$FAKE_GH_LOGIN_IGNORES_TERM" ] && trap '' TERM
       cat "$SHIM_STATE/gh.out" >&2; sleep 0.3
       [ -n "$FAKE_GH_LOGIN_FAILS" ] && { printf '%s\\n' "$FAKE_GH_LOGIN_FAILS" >&2; exit 1; }
       printf '%s' "$FAKE_GH_TOKEN" > "$SHIM_STATE/gh-token"; echo "✓ Authentication complete." >&2 ;;
