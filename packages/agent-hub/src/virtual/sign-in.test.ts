@@ -199,6 +199,18 @@ describe("redactTokens", () => {
     expect(redactTokens("! First copy your one-time code: 7B7F-C198")).toBe("! First copy your one-time code: 7B7F-C198");
     expect(redactTokens("error: HTTP 429 (slow_down)")).toBe("error: HTTP 429 (slow_down)");
   });
+
+  it("should replace every other kind the hub stores, because relayDeviceLogin quotes output for all of them", () => {
+    // Arrange: `az` and `twg` go through the same helper as `gh`, so a list that knew GitHub's shapes alone
+    // would be a safety net for one caller in three.
+    const jwt = `${"eyJ"}hbGciOiJSUzI1NiJ9.${"eyJ"}zdWIiOiJvbGl2ZSJ9.${"S1gn4tur3"}_${"Zy3"}`;
+
+    // Act & Assert
+    expect(redactTokens(`token=${CLAUDE_TOKEN}`)).toBe(`token=${REDACTED}`);
+    expect(redactTokens(`oauth-refresh-token=${podSecrets.twgRefresh}`)).toBe(`oauth-refresh-token=${REDACTED}`);
+    expect(redactTokens(`oauth-access-token=${podSecrets.twgAccess}`)).toBe(`oauth-access-token=${REDACTED}`);
+    expect(redactTokens(`Bearer ${jwt}`)).toBe(`Bearer ${REDACTED}`);
+  });
 });
 
 describe("ghLoginExpired", () => {
@@ -432,26 +444,29 @@ describe("githubLogin", () => {
     expect(stderr).not.toContain(GH_TOKEN);
   });
 
-  it("should report the sign-in not completed when gh ends the sign-in but holds no token", async () => {
-    // Arrange: FAKE_GH_TOKEN unset, so the shim writes an empty token file.
+  it("should throw when gh signs in and then holds no token, which is this pod's fault and not the owner's", async () => {
+    // Arrange: FAKE_GH_TOKEN unset, so the shim writes an empty token file and `gh auth token` succeeds with
+    // nothing to say. The sign-in itself exited 0, so the owner did everything asked of them.
     // Act
-    const { result } = await captureStderr(() => githubLogin({ api: api(), env: pod.env() }));
+    const { error } = await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env() }));
 
     // Assert
-    expect(result).toBe("not-signed-in");
+    expect((error as Error).message).toMatch(/gh auth login exited 0 but gh auth token gave no token \(exit 0\)/);
+    expect(virtual().loginFailures).toEqual([]);
     expect(virtual().credentials.has("github")).toBe(false);
   });
 
   it("should relay a fresh code on a later call, which is what keeps a dead one off the owner's screen", async () => {
     // Arrange: a sign-in nobody completed ends the call, and an owner who stops and starts the agent gets a new
     // pod and a new call. Each code replaces the one before it on their screen, so no code outlives its time.
-    await captureStderr(() => githubLogin({ api: api(), env: pod.env() }));
+    await captureStderr(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_LOGIN_FAILS: "error: HTTP 429" }), codes: 1 }));
 
     // Act
     await captureStderr(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_TOKEN: GH_TOKEN }) }));
 
     // Assert
     expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(2);
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
   });
 
   it("should log what gh said, with any token redacted, when the sign-in breaks", async () => {
@@ -470,17 +485,35 @@ describe("githubLogin", () => {
     expect(stderr).not.toContain(leaked);
   });
 
-  it("should relay one code only and report the sign-in failed when it broke rather than ran out", async () => {
-    // Arrange: a code is completable only while gh polls for it, so a sign-in that broke took the code with it
-    // and another would repeat the fault. gh's words say nothing about running out, which is what decides it.
+  it("should spend every code and report the sign-in failed when GitHub answers the poll with a fault", async () => {
+    // Arrange: a fault is the case this exists for, and may not last, so each code is a fresh chance at it. One
+    // code and then silence would turn a single bad answer from GitHub into a pod that has stopped asking.
     // Act
     const { result } = await captureStderr(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_LOGIN_FAILS: "error: HTTP 429" }) }));
 
     // Assert
     expect(result).toBe("not-signed-in");
-    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(1);
+    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(GITHUB_SIGN_IN_CODES);
     expect(virtual().loginFailures).toEqual([
       { kind: "github", state: "failed", detail: "github: GitHub stopped the sign-in before it could be completed, so the code is no longer any use" }
+    ]);
+  });
+
+  it("should report the sign-in and stop asking when the relay fails after the hub already had the code", async () => {
+    // Arrange: `loginPrompt` lands and the `virtualStatus` beside it is refused, so a live code is on the
+    // owner's screen and the relay still fails. The hub is owed a `failed` for that code or it keeps a pending
+    // row and the agent reads as waiting for them; and the owner has been asked, so a caller must not retry
+    // without bound and put a fresh code there on every pass. 400 rather than 500, so `withRetry` does not.
+    hub.failNextStatuses(1, 400);
+
+    // Act
+    const { result } = await captureStderr(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_TOKEN: GH_TOKEN }) }));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(1);
+    expect(virtual().loginFailures).toEqual([
+      { kind: "github", state: "failed", detail: "github: the sign-in could not be finished; start the agent again to be sent another code" }
     ]);
   });
 
@@ -512,7 +545,20 @@ describe("githubLogin", () => {
     expect((error as Error).message).toContain("could not reach github.com");
     expect(virtual().prompts).toEqual([]);
     expect(virtual().loginFailures).toEqual([]);
-    expect(stderr).not.toContain("Paste a GitHub token");
+    // Nothing was shown, so there is nothing to withdraw, and saying the hub could not be told would be noise
+    // about a sign-in it never had.
+    expect(stderr).not.toMatch(/could not tell agent-hub/);
+  });
+
+  it("should throw and name the exit code when gh auth token cannot be run at all", async () => {
+    // Arrange: exit 127 is what `run` answers for a command it could not spawn, and 1 for one it killed at the
+    // timeout. Neither is an answer about the owner, so neither may be read as a token gh does not hold.
+    // Act
+    const { error } = await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_TOKEN_UNREADABLE: "1" }) }));
+
+    // Assert
+    expect((error as Error).message).toMatch(/gh auth token gave no token \(exit 127\)/);
+    expect(virtual().loginFailures).toEqual([]);
   });
 
   it("should throw rather than report a failed sign-in when the hub cannot be given a token gh did grant", async () => {

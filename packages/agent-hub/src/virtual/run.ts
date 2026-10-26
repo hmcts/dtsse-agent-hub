@@ -19,8 +19,8 @@ export const VIRTUAL_USAGE = `usage: ${CLI} virtual <command>
 
   status <phase> [detail…]    report a phase (${PHASES.join(", ")})
   azure-login                 restore the stored Azure sign-in, or relay a device-code sign-in
-  github-login                relay GitHub device-code sign-ins and store the token; exit ${EXIT_NO_CREDENTIAL} when the
-                              owner completed none of them, which is not worth retrying
+  github-login                relay GitHub device-code sign-ins and store the token; exit ${EXIT_NO_CREDENTIAL} when every
+                              code was shown to the owner and none completed, which asking again will not fix
   claude-login                relay a Claude sign-in (own licence) and store the token
   atlassian-login             restore the stored twg (Jira, Confluence) sign-in, or relay a device-code
                               sign-in; exit ${EXIT_NO_CREDENTIAL} when the owner does not complete it

@@ -55,6 +55,7 @@ export {
   childEnv,
   claudeLogin,
   DEVICE_CODE_EXPIRES_S,
+  DeviceLoginError,
   EXPIRY_TOLERANCE_S,
   findClaudeToken,
   GITHUB_SIGN_IN_CODES,

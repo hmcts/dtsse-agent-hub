@@ -164,11 +164,12 @@ export type MockHubOptions = {
 // the ack would.
 export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEvent = true, replayAcked = false, launchTokens = {} }: MockHubOptions = {}) {
   const options = { maxLifetimeMs, reconnectEvent, replayAcked };
-  const failures: { stream: number[]; ack: number[]; transcript: number[]; credential: number[] } = {
+  const failures: { stream: number[]; ack: number[]; transcript: number[]; credential: number[]; status: number[] } = {
     stream: [],
     ack: [],
     transcript: [],
-    credential: []
+    credential: [],
+    status: []
   };
   // Set through onBeforeRespond, for a caller that keeps a copy of what the hub recorded.
   let beforeRespond: (() => void) | null = null;
@@ -321,6 +322,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     }
     const v = virtuals.get(id) as VirtualRecord;
     if (req.method === "POST" && area === "status" && !kind) {
+      const refused = failures.status.shift();
+      if (refused !== undefined) {
+        return send(res, refused, { error: "status refused" });
+      }
       if (!PHASES.has(body.phase)) {
         return send(res, 400, { error: "bad phase" });
       }
@@ -895,7 +900,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     onBeforeRespond(hook: () => void) {
       beforeRespond = hook;
     },
-    // The next `count` stream requests, acks, transcript uploads or credential saves answer `status` instead.
+    // The next `count` stream requests, acks, transcript uploads, credential saves or phase reports answer
+    // `status` instead.
     failNextStreams(count: number, status = 500) {
       for (let i = 0; i < count; i++) {
         failures.stream.push(status);
@@ -914,6 +920,11 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     failNextCredentialPuts(count: number, status = 500) {
       for (let i = 0; i < count; i++) {
         failures.credential.push(status);
+      }
+    },
+    failNextStatuses(count: number, status = 500) {
+      for (let i = 0; i < count; i++) {
+        failures.status.push(status);
       }
     },
     async listen(): Promise<string> {

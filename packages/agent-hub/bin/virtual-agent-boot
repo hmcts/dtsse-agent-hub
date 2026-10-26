@@ -48,6 +48,14 @@ EXIT_NO_CREDENTIAL=4
 
 log() { printf '%s virtual-agent-boot: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
 
+# bash runs a trap only once the foreground child is done, so a plain `sleep 300` swallows the TERM the kubelet
+# sends and the pod is SIGKILLed at the grace period with nothing logged. Backgrounding it and waiting lets the
+# TERM handler run at once. Stage 1's entrypoint.sh has the same function for the same reason.
+sleep_interruptibly() {
+    sleep "$1" &
+    wait $! 2>/dev/null || true
+}
+
 TMP="$(mktemp -d)"
 chmod 700 "$TMP"
 trap 'rm -rf "$TMP"' EXIT
@@ -257,13 +265,18 @@ agent_hub_client() {
 
 configure_git
 token=""
-until token=$(github_credential); do sleep 10; done
+# The stored token GitHub has already refused, so the wait below does not report it as news: it is what set
+# `github_missing`, and reporting it again would replace the message telling the owner how to get another code
+# within a second of sending it.
+github_refused=""
+until token=$(github_credential); do sleep_interruptibly 10; done
 github_missing="no GitHub token stored"
 if [[ -n "$token" ]]; then
     if gh_login_with_token "$token"; then
         github_missing=""
     else
         github_missing="the stored GitHub token was refused"
+        github_refused="$token"
     fi
 fi
 unset token
@@ -277,9 +290,10 @@ if [[ -n "$github_missing" ]]; then
         { report failed "the image has no agent-hub client: neither $WORKSPACE/scripts/agent-hub nor an agent-hub on PATH"; exit 1; }
     log "signing in to GitHub with $client"
     # The client relays a bounded number of codes itself, so the two outcomes are told apart by exit code rather
-    # than by retrying both: $EXIT_NO_CREDENTIAL means the codes are spent and only the owner can act now, and
-    # asking again would hand them a fresh code every few minutes for as long as the pod runs. Anything else is a
-    # fault to ride out unattended — an unreachable hub, a gh that will not run — and the backoff is for those.
+    # than by retrying both: $EXIT_NO_CREDENTIAL means every code it offers reached the owner and none was
+    # completed, and asking again would hand them a fresh one every few minutes for as long as the pod runs.
+    # Anything else never reached them — an unreachable hub, a gh that will not run, a token the hub would not
+    # take — so it says nothing about them and the backoff below rides it out unattended.
     delay=30
     asked=0
     while :; do
@@ -288,7 +302,7 @@ if [[ -n "$github_missing" ]]; then
         [[ "$rc" -eq 0 ]] && break
         [[ "$rc" -eq "$EXIT_NO_CREDENTIAL" ]] && { asked=1; break; }
         log "github sign-in failed (exit $rc); retrying in ${delay}s"
-        sleep "$delay"
+        sleep_interruptibly "$delay"
         delay=$((delay * 2 > 300 ? 300 : delay * 2))
     done
     # A stored token is the other way in, so that is what the pod waits for, and waiting costs one GET rather
@@ -297,15 +311,16 @@ if [[ -n "$github_missing" ]]; then
     if [[ "$asked" -eq 1 ]]; then
         report awaiting_credentials "github: nobody completed the sign-in. Paste a GitHub token at $HUB/hub/settings/credentials, or stop and start this agent to be sent another code."
         log "github sign-in did not complete; waiting for a stored GitHub token rather than asking again"
-        refused=""
+        refused="$github_refused"
         until token=$(github_credential) && [[ -n "$token" ]] && gh_login_with_token "$token"; do
-            # Keyed on the value, so each token pasted is reported once and a second bad one is reported too.
-            # Without this the owner is left watching the message that asked them for the token they just gave.
+            # Keyed on the value, so each token pasted is reported once and a second bad one is reported too,
+            # while the one already known refused is not. Without this the owner is left watching the message
+            # that asked them for the token they just gave, or the one that asked for any token at all.
             if [[ -n "${token:-}" && "$refused" != "$token" ]]; then
                 report awaiting_credentials "github: GitHub refused the stored token. Paste a current one with the user:email scope at $HUB/hub/settings/credentials."
                 refused="$token"
             fi
-            sleep 30
+            sleep_interruptibly 30
         done
         unset token refused
         log "signed in with the GitHub token the owner stored"

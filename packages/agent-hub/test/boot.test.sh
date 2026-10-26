@@ -47,6 +47,8 @@ trap '[ -n "${KEEP:-}" ] || rm -rf "$T"' EXIT
 # Not a real credential: what the fake gh hands back, and what the hub should end up holding.
 GOOD_TOKEN="gh-boot-test-token"
 STALE_TOKEN="gh-boot-test-stale"
+# A second token GitHub also refuses: the fake gh accepts FAKE_GOOD_TOKEN alone, so any other value is refused.
+OTHER_STALE_TOKEN="gh-boot-test-stale-again"
 
 pass=0
 fail=0
@@ -233,32 +235,39 @@ seed_github_when_asked() {
     return 1
 }
 
-# The whole of what an owner who does not complete the sign-in goes through: it is asked for a bounded number of
-# times and then reported, rather than minting a fresh code every few minutes for as long as the pod runs; the
-# pod waits in `awaiting_credentials`, the phase that puts the owner on the screen with the box to paste a token
-# into; the first token they paste is one GitHub refuses, which has to be reported or they are left watching the
-# message that asked for the token they just gave; and the second gets the pod booting.
+# The whole of what an owner who does not complete the sign-in goes through. The pod starts with a stored token
+# GitHub has already refused, so the codes are relayed; they go unanswered and the pod asks for a token instead,
+# in `awaiting_credentials`, the phase that puts the owner on the screen with the box to paste one into. Its
+# first pass re-reads the same refused token and must say nothing, or it replaces the message it has just sent
+# with one about a token the owner did not paste. The next token they paste is also refused, which does have to
+# be reported, and the one after it gets the pod booting — so exactly one refusal is reported, not two.
 case_sign_in_not_completed() {
     setup sign-in-not-completed
+    seed_github "$STALE_TOKEN"
     (
-        seed_github_when_asked 'Paste a GitHub token at' "$STALE_TOKEN" &&
+        # A second of the wait loop, whose sleep is the 0.05s fake, is twenty-odd passes over the refused token
+        # already stored. Without it the next token could arrive before the first pass and the silence this
+        # asserts would be silence about nothing.
+        seed_github_when_asked 'Paste a GitHub token at' "$STALE_TOKEN" && "$REAL_SLEEP" 1 &&
+            seed_github "$OTHER_STALE_TOKEN" &&
             seed_github_when_asked 'refused the stored token' "$GOOD_TOKEN"
     ) &
     local seeder=$!
     boot FAKE_GH_LOGIN_FAILS="error: HTTP 429"
     kill "$seeder" 2>/dev/null
     wait "$seeder" 2>/dev/null
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh login-with-token gh setup-git gh setup-git git clone npm install entrypoint " &&
+    [ "$BOOT_RC" -eq 0 ] &&
+        order_is "gh device-login gh device-login gh device-login gh login-with-token gh setup-git gh setup-git git clone npm install entrypoint " &&
         ok "stops asking, signs in with the token that works and boots on" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
-    [ "$(hub '.prompts | length')" -eq 1 ] && ok "relays one code only, and none while waiting" || no "prompts: $(hub -c '.prompts')"
+    [ "$(hub '.prompts | length')" -eq 3 ] && ok "relays its budget of codes, and none while waiting" || no "prompts: $(hub -c '.prompts')"
     [ "$(hub '.loginFailures[0].state')" = failed ] && ok "tells the hub the sign-in did not complete" || no "loginFailures: $(hub -c '.loginFailures')"
     # `failed` would route an onboarded owner to the warming-up screen, which offers no box to paste a token in.
     [ "$(hub '[.status[] | select(.phase == "failed")] | length')" -eq 0 ] &&
         ok "never fails the agent, which would route the owner off the screen that has the token form" || no "status: $(hub -c '.status')"
     hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'Paste a GitHub token at' &&
         ok "asks for a token in the phase that offers one" || no "status: $(hub -c '.status')"
-    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("refused the stored token"))] | length')" -ge 1 ] &&
-        ok "tells the owner the token they pasted was refused" || no "status: $(hub -c '.status')"
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("refused the stored token"))] | length')" -eq 1 ] &&
+        ok "reports the token the owner pasted, and not the one already known refused" || no "status: $(hub -c '.status')"
     grep -q 'gh said:.*error: HTTP 429' "$C/out" && ok "logs what gh said" || no "gh output not logged: $(grep 'gh auth login' "$C/out")"
 }
 
