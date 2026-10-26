@@ -12,7 +12,6 @@ import {
   captureStderr,
   captureStderrOfFailure,
   createPodShims,
-  GH_OUTPUT,
   msalCache,
   type PodShims,
   podSecrets,
@@ -28,9 +27,9 @@ import {
   findClaudeToken,
   ghSaid,
   githubLogin,
+  MAX_LOGIN_DETAIL_CHARS,
   parseAzDeviceCode,
   parseClaudeAuthorizeUrl,
-  parseGhDeviceCode,
   type RelayDeviceLoginResult,
   relayDeviceLogin,
   run,
@@ -148,18 +147,6 @@ describe("parseAzDeviceCode", () => {
   });
 });
 
-describe("parseGhDeviceCode", () => {
-  it("should read the device page and the one-time code out of what gh prints", () => {
-    // Act & Assert
-    expect(parseGhDeviceCode(GH_OUTPUT)).toEqual({ verification_uri: "https://github.com/login/device", user_code: "7B7F-C198" });
-  });
-
-  it("should be null until the URL is printed too", () => {
-    // Act & Assert
-    expect(parseGhDeviceCode("! First copy your one-time code: 7B7F-C198\n")).toBeNull();
-  });
-});
-
 describe("parseClaudeAuthorizeUrl", () => {
   it("should take the URL from the OSC 8 hyperlink when setup-token draws its TUI", () => {
     // Act & Assert
@@ -212,7 +199,7 @@ describe("relayDeviceLogin", () => {
     // retryable status, so `withRetry` gives up on the first attempt.
     const failing: Pick<Api, "loginPrompt" | "virtualStatus"> = {
       loginPrompt: async () => {
-        throw new ApiError(400, { error: "hub down" }, "POST", `/api/virtual/${VID}/login/github`);
+        throw new ApiError(400, { error: "hub down" }, "POST", `/api/virtual/${VID}/login/azure`);
       },
       virtualStatus: async () => null
     };
@@ -222,18 +209,18 @@ describe("relayDeviceLogin", () => {
       relayDeviceLogin({
         api: failing,
         id: VID,
-        kind: "github",
+        kind: "azure",
         cmd: "bash",
-        args: ["-c", `printf '%s' ${JSON.stringify(GH_OUTPUT)}; sleep 30`],
+        args: ["-c", `printf '%s' ${JSON.stringify(AZ_OUTPUT)}; sleep 30`],
         env: pod.env(),
-        parse: parseGhDeviceCode,
+        parse: parseAzDeviceCode,
         expiresIn: 1,
-        label: "github"
+        label: "azure"
       })
     );
 
     // Assert
-    expect((error as Error).message).toMatch(/^could not relay the github sign-in code: POST .*400 hub down$/);
+    expect((error as Error).message).toMatch(/^could not relay the azure sign-in code: POST .*400 hub down$/);
     expect(stderr).toBe("");
   });
 
@@ -241,12 +228,12 @@ describe("relayDeviceLogin", () => {
     return relayDeviceLogin({
       api: api(),
       id: VID,
-      kind: "github",
+      kind: "azure",
       cmd: "bash",
-      args: ["-c", `printf '%s' ${JSON.stringify(GH_OUTPUT)}; ${script}`],
+      args: ["-c", `printf '%s' ${JSON.stringify(AZ_OUTPUT)}; ${script}`],
       env: pod.env(),
-      parse: parseGhDeviceCode,
-      label: "github",
+      parse: parseAzDeviceCode,
+      label: "azure",
       ...options
     });
   }
@@ -452,12 +439,51 @@ describe("githubLogin", () => {
     expect(stderr).toMatch(/github: could not tell agent-hub the sign-in was not completed/);
   });
 
-  it("should fail without storing anything when gh will not take the token GitHub gave", async () => {
-    // Arrange: gh validates a token as it stores it, so one GitHub will not accept is caught here.
+  it("should say which OAuth app the owner is being asked to authorise", async () => {
+    // Arrange
     const fetchImpl = githubAnswering(token(GH_TOKEN));
 
     // Act
-    const { error } = await captureStderrOfFailure(() =>
+    const { stderr } = await captureStderr(() => githubLogin({ api: api(), env: pod.env(), fetchImpl, wait: noWait }));
+
+    // Assert: the default is the app every gh binary carries, so without this line the only record of whose
+    // app a pod's owner granted is a constant in the source.
+    expect(stderr).toMatch(/github: signing in through the GitHub CLI OAuth app \(client 178c6fc778ccc68e1d6a\)/);
+  });
+
+  it("should call it expired, not refused, when GitHub says the code ran out", async () => {
+    // Arrange: GitHub's own clock beats ours every time — ours starts after the mint and after the relay — so
+    // `expired_token` is what an owner who never entered the code actually produces.
+    const fetchImpl = githubAnswering(new URLSearchParams({ error: "expired_token", error_description: "The code expired." }).toString());
+
+    // Act
+    const { error } = await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env(), fetchImpl, wait: noWait }));
+
+    // Assert
+    expect((error as Error).message).toBe("github: the sign-in code ran out before it was used");
+    expect(virtual().loginFailures).toEqual([{ kind: "github", state: "expired", detail: "github: the sign-in code ran out before it was used" }]);
+  });
+
+  it("should keep a token the owner granted when gh cannot reach GitHub to validate it", async () => {
+    // Arrange: gh exits 1 whether the token is bad or the API is briefly away, so the attempt is repeated.
+    const fetchImpl = githubAnswering(token(GH_TOKEN));
+
+    // Act
+    const { result } = await captureStderr(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_STORE_FAILS: "2" }), fetchImpl, wait: noWait }));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
+    expect(virtual().loginFailures).toEqual([]);
+  });
+
+  it("should store a token the owner granted before gh is handed it, and report when gh refuses it", async () => {
+    // Arrange: a token GitHub will not accept. The owner's grant is still the scarce thing, so it is on the hub
+    // before gh is asked — the next start reads it, reports it refused and relays a fresh code.
+    const fetchImpl = githubAnswering(token(GH_TOKEN));
+
+    // Act
+    const { error, stderr } = await captureStderrOfFailure(() =>
       githubLogin({ api: api(), env: pod.env({ FAKE_GH_REFUSES_TOKEN: GH_TOKEN }), fetchImpl, wait: noWait })
     );
 
@@ -465,8 +491,38 @@ describe("githubLogin", () => {
     expect((error as Error).message).toBe(
       "gh would not store the GitHub token the owner signed in for (exit 1): error validating token: HTTP 401: Bad credentials"
     );
-    expect(virtual().credentials.has("github")).toBe(false);
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
     expect(virtual().completes).toEqual([]);
+    expect(virtual().loginFailures).toEqual([
+      { kind: "github", state: "failed", detail: expect.stringContaining("the token is stored, so the next start will try it") }
+    ]);
+    expect(stderr).not.toContain(GH_TOKEN);
+  });
+
+  it("should bound the detail it reports, because the hub rejects one over 500 characters", async () => {
+    // Arrange: a transport fault whose own message is long — an undici error with its causes reads like this —
+    // on a code with a second to live, so the detail it ends up reporting is built from that message. The hub
+    // answers `400` to a detail over 500 characters and a `400` is not retryable, so an unbounded one is a
+    // report the owner never gets and an agent left reading as waiting for them.
+    const fetchImpl = ((): typeof fetch => {
+      let first = true;
+      return (async () => {
+        if (first) {
+          first = false;
+          return new Response(deviceCode({ expires_in: "1" }), { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+        }
+        throw new Error(`connect ECONNREFUSED ${"140.82.121.4:443 ".repeat(60)}`);
+      }) as unknown as typeof fetch;
+    })();
+
+    // Act
+    const { error } = await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env(), fetchImpl }));
+
+    // Assert: the thrown error keeps the whole of it for the pod's own log; only the report is cut.
+    expect((error as Error).message.length).toBeGreaterThan(MAX_LOGIN_DETAIL_CHARS);
+    const [failure] = virtual().loginFailures;
+    expect(failure).toMatchObject({ kind: "github", state: "failed" });
+    expect((failure as { detail: string }).detail.length).toBe(MAX_LOGIN_DETAIL_CHARS);
   });
 
   it("should keep the owner's code and poll on when GitHub answers a fault, which is what gh will not do", async () => {

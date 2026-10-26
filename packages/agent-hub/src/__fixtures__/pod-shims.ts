@@ -25,7 +25,6 @@ export const AUTHORIZE_URL =
   `&code_challenge=${"A1b2C3d4".repeat(5)}&code_challenge_method=S256&state=${"Zy3_".repeat(8)}`;
 
 export const AZ_OUTPUT = "To sign in, use a web browser to open the page https://login.microsoft.com/device and enter the code LNKR6UHMN to authenticate.\n";
-export const GH_OUTPUT = "\n! First copy your one-time code: 7B7F-C198\nOpen this URL to continue in your web browser: https://github.com/login/device\n";
 export const CLAUDE_OUTPUT =
   `\x1b[?25l\x1b[1mWelcome to Claude Code v2.1.287\x1b[22m\r\n Browser didn't open? Use the url below to sign in (c to copy)\r\n\r\n` +
   `\x1b]8;id=1om6vol;${AUTHORIZE_URL}\x1b\\${AUTHORIZE_URL}\x1b]8;;\x1b\\\r\n\r\n Paste code here if prompted > `;
@@ -221,13 +220,16 @@ esac`
   );
   // `auth login` only takes a token on stdin, as the client gives it one: the device flow itself is no longer
   // gh's, so there is nothing for this to print a code from. `FAKE_GH_REFUSES_TOKEN` is a token GitHub will
-  // not have, which is what gh validating it as it stores looks like from here.
+  // not have, which is what gh validating it as it stores looks like from here; `FAKE_GH_STORE_FAILS` is how
+  // many of those validations cannot reach GitHub at all, which looks the same and is not the same.
   shim(
     "gh",
     `case "$1 $2" in
   "auth login") [ -n "$GH_TOKEN$GITHUB_TOKEN" ] && exit 9; printf '%s\\n' "$*" > "$SHIM_STATE/gh-login-args"
       case "$*" in *--with-token*) ;; *) echo "unexpected gh auth login $*" >&2; exit 2 ;; esac
       IFS= read -r token || token=""
+      n=$(( $(cat "$SHIM_STATE/gh-store-n" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "$SHIM_STATE/gh-store-n"
+      [ "$n" -le "\${FAKE_GH_STORE_FAILS:-0}" ] && { echo "error connecting to api.github.com" >&2; exit 1; }
       [ -n "$token" ] && [ "$token" != "\${FAKE_GH_REFUSES_TOKEN:-}" ] ||
         { echo "error validating token: HTTP 401: Bad credentials" >&2; exit 1; }
       printf '%s' "$token" > "$SHIM_STATE/gh-token" ;;
@@ -331,7 +333,7 @@ esac`
   const reset = () => {
     fs.rmSync(path.join(home.root, ".azure"), { recursive: true, force: true });
     fs.rmSync(path.join(home.root, ".twg"), { recursive: true, force: true });
-    for (const f of ["az-ok", "gh-token", "twg-valid", "twg-n", "twg-due", "twg.log", "twg-login-env"]) {
+    for (const f of ["az-ok", "gh-token", "gh-store-n", "gh-login-args", "twg-valid", "twg-n", "twg-due", "twg.log", "twg-login-env"]) {
       fs.rmSync(path.join(stateDir, f), { force: true });
     }
     fs.rmSync(path.join(home.hub, "virtual"), { recursive: true, force: true });

@@ -10,6 +10,10 @@ import {
   deviceFlowRetryable,
   GITHUB_CLIENT_ID,
   GITHUB_SCOPES,
+  MAX_DESCRIPTION_CHARS,
+  MAX_ERROR_CHARS,
+  MAX_INTERVAL_S,
+  MAX_LOGIN_SECONDS,
   MAX_TRANSIENT_WAIT_S,
   MIN_INTERVAL_S,
   nextWaitSeconds,
@@ -149,9 +153,52 @@ describe("classifyPollAnswer", () => {
     expect(classifyPollAnswer(200, null, { error: "something_new" })).toMatchObject({ outcome: "fatal", error: "something_new" });
   });
 
-  it("should end the sign-in when a 200 carries neither a token nor an error", () => {
+  it("should call the owner's code expired when GitHub says it ran out, rather than refused", () => {
+    // Act & Assert: `expired` is the hub's word for a code that reached its expires_in unused, and the only
+    // other state is `failed`, which reads to the owner as something that broke under them.
+    expect(classifyPollAnswer(200, null, { error: "expired_token", error_description: "The code expired." })).toEqual({ outcome: "expired" });
+  });
+
+  it("should wait and keep the code when a 200 carries neither a token nor an error", () => {
+    // Act & Assert: a captive portal, an egress interstitial or a truncated body all answer like this.
+    expect(classifyPollAnswer(200, null, {})).toEqual({
+      outcome: "retry",
+      seconds: null,
+      detail: "GitHub answered 200 with neither a token nor an error"
+    });
+  });
+
+  it("should wait and keep the code when a fault carries an error key, because GitHub did not write it", () => {
+    // Act & Assert: the OAuth answers come back on 200 (400 and 401 for a host that is not github.com), so an
+    // `error` on a 502 belongs to whatever answered in GitHub's place and is not the owner's code to spend.
+    expect(classifyPollAnswer(502, null, { error: "access_denied" })).toEqual({
+      outcome: "retry",
+      seconds: null,
+      detail: "GitHub answered HTTP 502"
+    });
+  });
+
+  it("should read an OAuth refusal on the statuses the spec allows one, for a host that is not github.com", () => {
     // Act & Assert
-    expect(classifyPollAnswer(200, null, {})).toMatchObject({ outcome: "fatal", error: "" });
+    expect(classifyPollAnswer(400, null, { error: "access_denied" })).toMatchObject({ outcome: "fatal", error: "access_denied" });
+    expect(classifyPollAnswer(401, null, { error: "incorrect_client_credentials" })).toMatchObject({ outcome: "fatal" });
+  });
+
+  it("should bound error_description, because the hub rejects a detail over 500 characters", () => {
+    // Act
+    const answer = classifyPollAnswer(200, null, { error: "access_denied", error_description: "x".repeat(900) });
+
+    // Assert
+    expect(answer).toMatchObject({ outcome: "fatal" });
+    expect((answer as { detail: string }).detail.length).toBeLessThanOrEqual(MAX_DESCRIPTION_CHARS + 40);
+  });
+
+  it("should bound the error word too, because an OAuth code is a short identifier", () => {
+    // Act
+    const answer = classifyPollAnswer(200, null, { error: "e".repeat(900) });
+
+    // Assert
+    expect((answer as { error: string }).error).toHaveLength(MAX_ERROR_CHARS);
   });
 
   it("should wait and keep the code when GitHub answers 429, honouring Retry-After", () => {
@@ -265,7 +312,67 @@ describe("requestDeviceCode", () => {
     const error = await requestDeviceCode({ env: ENV, fetchImpl }).catch((e: unknown) => e);
 
     // Assert
-    expect((error as Error).message).toMatch(/without a code and an https page/);
+    expect((error as Error).message).toMatch(/without an https page/);
+  });
+
+  it("should refuse a page too long for the hub to take, rather than relay a sign-in it will reject", async () => {
+    // Arrange
+    const uri = `https://github.com/login/device?${"x".repeat(2100)}`;
+    const { fetchImpl } = fakeFetch([{ body: form({ device_code: "d", user_code: "AAAA-BBBB", verification_uri: uri }) }]);
+
+    // Act
+    const error = await requestDeviceCode({ env: ENV, fetchImpl }).catch((e: unknown) => e);
+
+    // Assert
+    expect((error as Error).message).toMatch(/without an https page/);
+  });
+
+  it("should refuse a code the owner could not be asked to enter", async () => {
+    // Arrange: the hub takes letters, digits and hyphens, at most 64 of them, and rejects anything else.
+    const { fetchImpl } = fakeFetch([
+      { body: form({ device_code: "d", user_code: "no spaces allowed", verification_uri: "https://github.com/login/device" }) }
+    ]);
+
+    // Act
+    const error = await requestDeviceCode({ env: ENV, fetchImpl }).catch((e: unknown) => e);
+
+    // Assert
+    expect((error as Error).message).toMatch(/without a code the owner could be asked to enter/);
+  });
+
+  it("should clamp a lifetime and an interval past the bounds, rather than relay a sign-in the hub rejects", async () => {
+    // Arrange: `expires_in` over an hour is a `400` from the hub, which is not retryable, so the attempt would
+    // end with no code on the owner's screen and no failure reported either.
+    const { fetchImpl } = fakeFetch([
+      {
+        body: form({
+          device_code: "d",
+          user_code: "AAAA-BBBB",
+          verification_uri: "https://github.com/login/device",
+          expires_in: "99999",
+          interval: "100000"
+        })
+      }
+    ]);
+
+    // Act
+    const code = await requestDeviceCode({ env: ENV, fetchImpl });
+
+    // Assert
+    expect(code.expires_in).toBe(MAX_LOGIN_SECONDS);
+    expect(code.interval).toBe(MAX_INTERVAL_S);
+  });
+
+  it("should wait out a fault carrying an error key rather than take it for a refusal", async () => {
+    // Arrange
+    const { fetchImpl } = fakeFetch([{ status: 502, body: form({ error: "device_flow_disabled" }) }]);
+
+    // Act
+    const error = await requestDeviceCode({ env: ENV, fetchImpl }).catch((e: unknown) => e);
+
+    // Assert
+    expect(deviceFlowRetryable(error)).toBe(true);
+    expect((error as Error).message).toMatch(/HTTP 502/);
   });
 });
 
@@ -325,6 +432,19 @@ describe("pollDeviceToken", () => {
 
     // Assert
     expect(t.waits).toEqual([10000, MAX_TRANSIENT_WAIT_S * 1000]);
+  });
+
+  it("should not cut a fault's wait below the interval the server has already set", async () => {
+    // Arrange: a code whose minimum `slow_down` has walked up to 125s, then a 429. Capping the whole wait at
+    // 120s would poll 130s early against that minimum and earn another permanent slow_down.
+    const { fetchImpl } = fakeFetch([{ status: 429, headers: { "Retry-After": "60" }, body: "" }, { body: form({ access_token: TOKEN }) }]);
+    const t = clock();
+
+    // Act
+    await pollDeviceToken({ code: { ...code, interval: 125 }, env: ENV, fetchImpl, wait: t.wait, now: t.now, random: half });
+
+    // Assert
+    expect(t.waits).toEqual([250000, 250000]);
   });
 
   it("should keep the owner's code and wait when the poll cannot reach GitHub at all", async () => {
@@ -398,6 +518,60 @@ describe("pollDeviceToken", () => {
     // 899s at one poll per 10s, with the last wait cut short so the final poll lands on the deadline.
     expect(urls).toHaveLength(90);
     expect(t.waits.at(-1)).toBe(9000);
+  });
+
+  it("should call the code expired the moment GitHub says so, rather than wait out our own clock", async () => {
+    // Arrange: our deadline is set after the code was minted and after the relay, so GitHub's always runs out
+    // first; its own word is what the owner's report has to come from.
+    const { fetchImpl, urls } = fakeFetch([{ body: PENDING }, { body: form({ error: "expired_token", error_description: "The code expired." }) }]);
+    const t = clock();
+
+    // Act
+    const result = await pollDeviceToken({ code, env: ENV, fetchImpl, wait: t.wait, now: t.now, random: half });
+
+    // Assert
+    expect(result).toEqual({ outcome: "expired" });
+    expect(urls).toHaveLength(2);
+  });
+
+  it("should not call the code expired when no poll ever reached GitHub", async () => {
+    // Arrange: every poll met a fault, so nothing says the owner left the code unused — the opposite, in fact.
+    const { fetchImpl } = fakeFetch([{ throws: "socket hang up" }]);
+    const t = clock();
+
+    // Act
+    const result = await pollDeviceToken({ code: { ...code, expires_in: 20 }, env: ENV, fetchImpl, wait: t.wait, now: t.now, random: half });
+
+    // Assert
+    expect(result).toEqual({
+      outcome: "refused",
+      error: "",
+      detail: "the code ran out without GitHub answering a single poll (the poll could not reach GitHub (socket hang up))"
+    });
+  });
+
+  it("should still call it expired when GitHub answered and then faults ran the code out", async () => {
+    // Arrange: GitHub was answering, so the code really was on the owner's screen unused.
+    const { fetchImpl } = fakeFetch([{ body: PENDING }, { throws: "socket hang up" }]);
+    const t = clock();
+
+    // Act
+    const result = await pollDeviceToken({ code: { ...code, expires_in: 30 }, env: ENV, fetchImpl, wait: t.wait, now: t.now, random: half });
+
+    // Assert
+    expect(result).toEqual({ outcome: "expired" });
+  });
+
+  it("should bound the loop by its own ceiling whoever built the code", async () => {
+    // Arrange: a code claiming a week, which `requestDeviceCode` would have clamped.
+    const { fetchImpl } = fakeFetch([{ body: PENDING }]);
+    const t = clock();
+
+    // Act
+    await pollDeviceToken({ code: { ...code, expires_in: 604800 }, env: ENV, fetchImpl, wait: t.wait, now: t.now, random: half });
+
+    // Assert
+    expect(t.waits.reduce((a, b) => a + b, 0)).toBe(MAX_LOGIN_SECONDS * 1000);
   });
 
   it("should not poll once the code has run out, so a fault cannot spend it twice", async () => {

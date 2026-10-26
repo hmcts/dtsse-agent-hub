@@ -478,7 +478,6 @@ export {
   packAzureCache,
   parseAzDeviceCode,
   parseClaudeAuthorizeUrl,
-  parseGhDeviceCode,
   parseTwgDeviceCode,
   pruneMsalCache,
   readAtlassianAuth,

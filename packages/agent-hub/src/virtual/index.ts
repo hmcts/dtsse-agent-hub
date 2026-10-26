@@ -61,7 +61,6 @@ export {
   PASTE_CODE_EXPIRES_S,
   parseAzDeviceCode,
   parseClaudeAuthorizeUrl,
-  parseGhDeviceCode,
   relayDeviceLogin,
   run,
   stripAnsi

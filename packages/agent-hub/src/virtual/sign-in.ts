@@ -11,7 +11,7 @@ import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
 import { azureDir, restoreAzureCache, syncAzureCache } from "./azure-cache.ts";
-import { deviceFlowRetryable, pollDeviceToken, requestDeviceCode } from "./github-device-flow.ts";
+import { deviceFlowRetryable, oauthAppLabel, pollDeviceToken, requestDeviceCode } from "./github-device-flow.ts";
 import { FatalError, say } from "./phases.ts";
 
 export const DEVICE_CODE_EXPIRES_S = 900;
@@ -137,14 +137,6 @@ export function run(cmd: string, args: string[], { env = process.env, timeoutMs 
 export function parseAzDeviceCode(text: string): DeviceCodePrompt | null {
   const m = /open the page (https:\/\/\S+?)\.? and enter the code ([A-Z0-9-]+)/.exec(text);
   return m ? { verification_uri: m[1] as string, user_code: m[2] as string } : null;
-}
-
-// `gh auth login --web` without a TTY (2.97) writes to stderr:
-// "! First copy your one-time code: 7B7F-C198" then "Open this URL to continue in your web browser: https://github.com/login/device"
-export function parseGhDeviceCode(text: string): DeviceCodePrompt | null {
-  const code = /one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(text);
-  const url = /(https:\/\/github\.com\/login\/device)\b/.exec(text);
-  return code && url ? { verification_uri: url[1] as string, user_code: code[1] as string } : null;
 }
 
 /** OSC sequences, CSI sequences, charset selections and the single-character escapes, in that order. */
@@ -301,11 +293,28 @@ export async function azureLogin({ api = createApi(), env = process.env }: Login
 
 const GH_CLEAN = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"];
 
-/** How much of a command's own complaint is worth repeating, as one line. */
+/**
+ * How much of a command's own complaint is worth repeating, as one line. Bounded and **not** redacted: the one
+ * caller hands gh its token on stdin, so the stream this quotes carries gh's words about a token and never the
+ * token, which is what makes quoting it at all acceptable. Nothing else may be put through it.
+ */
 export function ghSaid(stderr: string): string {
   const text = stderr.replace(/\s+/g, " ").trim();
   return text === "" ? "it said nothing" : text.slice(0, 200);
 }
+
+/**
+ * A detail the hub will take: it bounds `detail` at 500 characters and **rejects** anything longer rather than
+ * truncating it, and a `400` is not retryable, so an over-long detail is a report that never arrives.
+ */
+export const MAX_LOGIN_DETAIL_CHARS = 500;
+
+export function loginDetail(detail: string): string {
+  return detail.slice(0, MAX_LOGIN_DETAIL_CHARS);
+}
+
+/** How many times gh is asked to store a token the owner has already granted. */
+export const GH_STORE_ATTEMPTS = 3;
 
 export type GithubLoginOptions = LoginOptions & {
   fetchImpl?: typeof fetch;
@@ -323,6 +332,7 @@ export type GithubLoginOptions = LoginOptions & {
 export async function githubLogin({ api = createApi(), env = process.env, fetchImpl, wait }: GithubLoginOptions = {}): Promise<"signed-in"> {
   const { id } = requireVirtualAgent(env);
   const ghEnv = childEnv(env, GH_CLEAN);
+  say(`github: signing in through ${oauthAppLabel(env)}`);
   const code = await withRetry(() => requestDeviceCode({ env, fetchImpl }), { retryable: deviceFlowRetryable, wait });
   await withRetry(
     async () => {
@@ -342,29 +352,65 @@ export async function githubLogin({ api = createApi(), env = process.env, fetchI
     const expired = polled.outcome === "expired";
     const detail = expired ? "github: the sign-in code ran out before it was used" : `github: the sign-in was refused (${polled.detail})`;
     say(detail);
-    // The owner is otherwise left holding a code that no longer works, with nothing but this pod's stderr
-    // saying so. Few attempts: the caller is about to be told this failed either way.
-    await withRetry(() => api.loginFailed(id, "github", { state: expired ? "expired" : "failed", detail }), { attempts: 3, wait }).catch((e: unknown) => {
-      say(`github: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`);
-    });
+    await reportGithubFailure({ api, id, state: expired ? "expired" : "failed", detail, wait });
     throw new Error(detail);
   }
   const token = polled.token;
-  const stored = await run("gh", ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--with-token"], {
-    env: ghEnv,
-    input: `${token}\n`
-  });
-  if (stored.code !== 0) {
-    // gh's own words, bounded: it validates the token against the API and says what GitHub answered, which is
-    // the difference between a scope the app no longer grants and a token GitHub has already revoked. gh writes
-    // no token to this stream — it is the one being handed to it — so quoting it is safe.
-    throw new Error(`gh would not store the GitHub token the owner signed in for (exit ${stored.code}): ${ghSaid(stored.stderr)}`);
+  // Stored before gh is handed it, because the owner's grant is the scarce thing in this function: a token they
+  // have already authorised must not be lost to a fault while gh validates it, and a stored token that GitHub
+  // has since revoked costs one line of the next start's log, which reports it and relays a fresh code.
+  await withRetry(() => api.putCredential(id, "github", token), { wait });
+  const refusal = await withRetry(
+    async () => {
+      const r = await run("gh", ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--with-token"], {
+        env: ghEnv,
+        input: `${token}\n`
+      });
+      if (r.code !== 0) {
+        // gh's own words: it validates the token against the API as it writes it, and what GitHub answered is
+        // the difference between a scope the app no longer grants and a token already revoked. Retried because
+        // a fault reaching the API reads exactly the same as a refusal from it, and three tries cost seconds.
+        throw new Error(`gh would not store the GitHub token the owner signed in for (exit ${r.code}): ${ghSaid(r.stderr)}`);
+      }
+    },
+    { attempts: GH_STORE_ATTEMPTS, wait }
+  ).then(
+    () => null,
+    (e: unknown) => e as Error
+  );
+  if (refusal) {
+    const detail = `github: ${refusal.message}; the token is stored, so the next start will try it`;
+    say(detail);
+    await reportGithubFailure({ api, id, state: "failed", detail, wait });
+    throw refusal;
   }
   const login = (await run("gh", ["api", "user", "--jq", ".login"], { env: ghEnv })).stdout.trim();
   await withRetry(() => api.loginComplete(id, "github", login ? { account_label: login } : {}), { wait });
-  await withRetry(() => api.putCredential(id, "github", token), { wait });
   say(`github: signed in${login ? ` as ${login}` : ""}`);
   return "signed-in";
+}
+
+/**
+ * The hub is owed one of `complete` or `failed` for every sign-in shown to an owner, who is otherwise left
+ * holding a code that no longer works and an agent that reads as waiting for them. Few attempts, and never
+ * fatal: the caller is about to be told the sign-in failed either way.
+ */
+async function reportGithubFailure({
+  api,
+  id,
+  state,
+  detail,
+  wait
+}: {
+  api: Pick<Api, "loginFailed">;
+  id: string;
+  state: "expired" | "failed";
+  detail: string;
+  wait?: (ms: number) => Promise<void>;
+}): Promise<void> {
+  await withRetry(() => api.loginFailed(id, "github", { state, detail: loginDetail(detail) }), { attempts: 3, wait }).catch((e: unknown) => {
+    say(`github: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`);
+  });
 }
 
 const CLAUDE_CLEAN = [
