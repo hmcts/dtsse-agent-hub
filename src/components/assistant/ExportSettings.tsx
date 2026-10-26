@@ -6,7 +6,7 @@ import { DEFAULT_CONFLUENCE_PARENT } from "@/assistant/confluence";
 import type { DefaultConfluencePage, DefaultJiraProject, ExportDefaults } from "@/assistant/export-defaults";
 import { DEFAULT_JIRA_PROJECT } from "@/assistant/jira";
 import { breadcrumb, type ConfluencePageResult, type JiraProjectResult } from "@/assistant/lookups";
-import { AtlassianSearch, shortCrumb } from "@/components/assistant/AtlassianSearch";
+import { AtlassianSearch } from "@/components/assistant/AtlassianSearch";
 import type { JiraAccess } from "@/components/assistant/JiraExport";
 import type { LookUp } from "@/components/assistant/lookupClient";
 import type { ActionResult } from "@/web/action";
@@ -157,20 +157,17 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
         id="assistant-settings-confluence-default"
         label="Confluence page"
         hint="New pages go under this one, and searches start in its space."
+        // Just the page's title, the default's and a chosen one's alike; where it sits is in the tooltip.
         builtIn={
-          // Wrapped rather than cut short: the space's name is long, and it is the part that says where pages go.
-          <span className="text-pretty text-[13px] leading-snug" title={breadcrumb(DEFAULT_CONFLUENCE_PARENT).join(" › ")}>
-            <span className="font-medium">
-              Under {DEFAULT_CONFLUENCE_PARENT.title}/{DEFAULT_CONFLUENCE_PARENT.space_name}
-            </span>{" "}
+          <span className="flex min-w-0 items-baseline gap-2 text-[13px]" title={breadcrumb(DEFAULT_CONFLUENCE_PARENT).join(" › ")}>
+            <span className="truncate font-medium">{DEFAULT_CONFLUENCE_PARENT.title}</span>
             <BuiltIn />
           </span>
         }
         current={
           confluence === null ? null : (
-            <span className="flex min-w-0 flex-col leading-tight" title={breadcrumb(confluence).join(" › ")}>
-              <span className="truncate text-[13px] font-medium">{confluence.title}</span>
-              <span className="truncate text-xs text-asst-faint">{shortCrumb(breadcrumb(confluence).slice(0, -1))}</span>
+            <span className="block truncate text-[13px] font-medium" title={breadcrumb(confluence).join(" › ")}>
+              {confluence.title}
             </span>
           )
         }
