@@ -155,6 +155,11 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     // pod's report revalidate `/assistant`, so there is nothing for an open stream to tell a browser about.
     case "assistant_uploads":
       return undefined;
+    // A lookup is asked and answered between the hub and the pod; the browser that asked is waiting on its own
+    // request for the answer, so no stream needs to carry either.
+    case "assistant_lookup":
+    case "assistant_lookup_answered":
+      return undefined;
     case "resync":
       return RESYNC;
   }

@@ -49,6 +49,50 @@ async function waitUntil(fn: () => boolean, what: string, timeoutMs = 8000): Pro
 }
 
 describe("runAssistantSupervisor", () => {
+  it("should answer a lookup on the sessions stream with what twg found, without waiting on the supervisor", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const stop = new AbortController();
+    const lookupId = "5b0e7c1a-1111-4222-8333-444455556666";
+    const projects = JSON.stringify({ data: { status: 200, body: { values: [{ key: "VIBE", name: "Vibe-Coding Enablement" }] } } });
+    const twg: string[][] = [];
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50,
+      lookups: {
+        run: async (_cmd, args) => {
+          twg.push(args);
+          return { code: 0, stdout: projects, stderr: "" };
+        },
+        login: async () => true
+      }
+    });
+
+    try {
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open");
+
+      // Act
+      hub.sendLookup(VID, { lookup_id: lookupId, kind: "jira_project", query: "vibe", space: null, sign_in: false });
+
+      // Assert
+      await waitUntil(() => hub.lookupAnswers.length === 1, "the lookup to be answered");
+      expect(hub.lookupAnswers[0]).toEqual({ virtual_id: VID, lookup_id: lookupId, body: { results: [{ key: "VIBE", name: "Vibe-Coding Enablement" }] } });
+      expect(twg[0]?.slice(0, 2)).toEqual(["api", "jira:/rest/api/3/project/search"]);
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
+    }
+  });
+
   it("should start sessions for the wakes on the sessions stream, reconnect at once at its lifetime and stop one on close", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
@@ -156,6 +200,7 @@ describe("runAssistantSupervisor", () => {
       putSessions: async () => null,
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
+      putLookup: async () => null,
       putMemory: async () => null,
       sessionsStream: async (): Promise<Response> => {
         opens.push(Date.now());
@@ -204,6 +249,7 @@ describe("runAssistantSupervisor", () => {
         putSessions: async () => null,
         conversations: async () => ({ conversations: [] }),
         putUploads: async () => null,
+        putLookup: async () => null,
         putMemory: async () => null,
         sessionsStream: async () => new Response("", { status: 200 })
       },
@@ -239,6 +285,7 @@ describe("runAssistantSupervisor", () => {
       putSessions: async () => null,
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
+      putLookup: async () => null,
       putMemory: async () => null,
       sessionsStream: async () => new Response("", { status: 200 })
     };
@@ -281,6 +328,7 @@ describe("runAssistantSupervisor", () => {
       putSessions: async () => null,
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
+      putLookup: async () => null,
       putMemory: async () => null,
       sessionsStream: async (_id: string, opts: { signal?: AbortSignal } = {}): Promise<Response> => {
         opens += 1;
@@ -326,6 +374,7 @@ describe("runAssistantSupervisor", () => {
       putSessions: async () => null,
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
+      putLookup: async () => null,
       putMemory: async () => null,
       sessionsStream: async () => new Response("event: wake\ndata: {oops\n\nevent: close\ndata: nope\n\nevent: reconnect\ndata: {}\n\n", { status: 200 })
     };

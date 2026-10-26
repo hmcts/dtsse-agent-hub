@@ -42,15 +42,19 @@ export type {
   Artefact,
   ArtefactBody,
   ArtefactResponse,
+  ConfluenceExportReport,
+  ConfluencePageFound,
   CreateApiOptions,
   CredentialKind,
   DirectBody,
   DirectCandidate,
   FeedResponse,
   HeartbeatBody,
+  JiraProjectFound,
   LoginCompleteBody,
   LoginFailedBody,
   LoginPromptBody,
+  LookupAnswer,
   MemoryReportBody,
   Message,
   MessageAuthor,
@@ -82,6 +86,7 @@ export type {
   CreateAssistantSupervisorOptions,
   CreateTmuxOptions,
   FetchAttachmentsOptions,
+  LookupFrame,
   ProgramCheck,
   ReadAttachments,
   ReconcileUploadsOptions,
@@ -103,6 +108,7 @@ export {
   commandProgram,
   conversationDir,
   createAssistantSupervisor,
+  createLookupRunner,
   createTmux,
   DEFAULT_IDLE_MINUTES,
   DEFAULT_MAX_SESSIONS,
@@ -115,6 +121,7 @@ export {
   maxSessions,
   PROMPT_FILE,
   parseAttachments,
+  parseLookupFrame,
   parseSavedSession,
   parseWake,
   REFUSAL_EVERY_MS,
@@ -134,6 +141,7 @@ export {
   nextBackoff,
   parseAssistantFrame,
   parseAssistantProduct,
+  parseConfluenceExportFrame,
   parseDirectEventMessage,
   parseJiraExportFrame,
   RAPID_CLOSE_MS,
@@ -142,6 +150,17 @@ export {
   reconnectDelay,
   runBridge
 } from "./bridge.ts";
+export type { ConfluenceExportDeps, ConfluenceExportOutcome, ConfluenceExportRequest } from "./confluence-export.ts";
+export {
+  CONFLUENCE_EXPORT_ID_RE,
+  confluenceExportsDir,
+  confluenceFailure,
+  datedTitle,
+  pageBody,
+  pageTitle,
+  parseCreatedPageId,
+  runConfluenceExport
+} from "./confluence-export.ts";
 export type { DirectAuthor, DirectDirection, DirectEntry, DirectMessage, DirectPeer, RecordDirectOptions } from "./directs.ts";
 export { parseDirectEntry, peerOf, peerOfReply, readDirects, recordDirect } from "./directs.ts";
 export type {
@@ -172,6 +191,7 @@ export type {
   AssistantFrame,
   AssistantProduct,
   AttachmentOutcome,
+  ConfluenceExportFrame,
   EnvelopeAuthor,
   EnvelopeMessage,
   EnvelopeOptions,
@@ -182,6 +202,7 @@ export {
   attachmentLines,
   CLI,
   cliName,
+  confluenceExportLines,
   describeAuthor,
   directEnvelope,
   formatMessage,
@@ -467,6 +488,7 @@ export {
   twgDir,
   twgLoginExpired,
   twgPromptsForBrowser,
+  twgRefreshRejected,
   unpackAzureCache,
   VIRTUAL_USAGE,
   virtualStateDir

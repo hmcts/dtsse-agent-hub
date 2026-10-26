@@ -1564,6 +1564,48 @@ process.exit(2);
     expect(reported(agentId)).toHaveLength(0);
   });
 
+  const confluenceReported = (agentId: string) => hub.confluenceReports.filter((r) => r.agent_id === agentId);
+
+  it("should report the page, or why there is none, when confluence report runs in a conversation", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+
+    // Act
+    const created = await cli(["confluence", "report", EXPORT, "--page-id", "300000001", "--title", "Guide"], { sid });
+    const failed = await cli(["confluence", "report", EXPORT, "--error", "  No permission  "], { sid });
+
+    // Assert
+    expect(created.code, created.errors.join("\n")).toBe(0);
+    expect(created.text()).toMatch(/reported page 300000001 for export/);
+    expect(failed.code).toBe(0);
+    expect(confluenceReported(agentId)).toEqual([
+      { agent_id: agentId, export_id: EXPORT, page_id: "300000001", title: "Guide" },
+      { agent_id: agentId, export_id: EXPORT, error: "No permission" }
+    ]);
+  });
+
+  it("should refuse a confluence command that is not one page or one reason for an export id", async () => {
+    // Arrange
+    const { sid, agentId } = await session();
+
+    // Act & Assert
+    for (const args of [
+      ["confluence"],
+      ["confluence", "report", "not-an-id", "--page-id", "1"],
+      ["confluence", "report", EXPORT],
+      ["confluence", "report", EXPORT, "--page-id", "1", "--error", "both"],
+      ["confluence", "report", EXPORT, "--page-id", "one"],
+      ["confluence", "report", EXPORT, "--error", "x", "--title", "t"],
+      ["confluence", "report", EXPORT, "--page-id", "1", "--space-id", "2"],
+      ["confluence", "export", EXPORT, "--space-id", "CCD", "--parent-id", "1"],
+      ["confluence", "export", EXPORT, "--space-id", "1"]
+    ]) {
+      const r = await cli(args, { sid });
+      expect(r.code, args.join(" ")).toBe(2);
+    }
+    expect(confluenceReported(agentId)).toHaveLength(0);
+  });
+
   it("should say the session has no Jira export when jira report runs outside a conversation", async () => {
     // Arrange
     const { sid } = await session({ conversation: false });

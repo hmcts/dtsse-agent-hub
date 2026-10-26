@@ -8,8 +8,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bridgePid, loadAgent, normaliseTopics, type StoredAgent, stopBridge } from "./agent.ts";
-import { type Api, ApiError, type ArtefactBody, CREDENTIAL_KINDS, createApi, type JiraExportReport, type Message, type PostBody } from "./api.ts";
+import {
+  type Api,
+  ApiError,
+  type ArtefactBody,
+  type ConfluenceExportReport,
+  CREDENTIAL_KINDS,
+  createApi,
+  type JiraExportReport,
+  type Message,
+  type PostBody
+} from "./api.ts";
 import { runBridge } from "./bridge.ts";
+import { CONFLUENCE_EXPORT_ID_RE, CONFLUENCE_ID_RE, MAX_CONFLUENCE_ERROR, MAX_PAGE_TITLE, runConfluenceExport } from "./confluence-export.ts";
 import { type DirectEntry, type DirectPeer, peerOf, peerOfReply, readDirects, recordDirect } from "./directs.ts";
 import { clearOptOut, type EnableSessionResult, enableSession, markOptedOut, runAutoEnable } from "./enable.ts";
 import type { Env } from "./env.ts";
@@ -64,6 +75,13 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               again for the same export, it reports the ticket already made
   jira report <export-id> --key K | --error E
                               report the Jira ticket made for an export by hand, or why it could not be made
+  confluence export <export-id> --space-id S --parent-id P
+                              in an HMCTS Assistant conversation: publish the document as a new Confluence
+                              page under page P for an export the user asked for, with twg, signing in first
+                              if it is not, and report it; run again for the same export, it reports the page
+                              already made
+  confluence report <export-id> --page-id N [--title T] | --error E
+                              report the Confluence page made for an export by hand, or why it could not be made
   credentials get <kind>      print your stored credential and nothing else (exit ${EXIT_NO_CREDENTIAL} if there is
                               none); agent-hub returns only bedrock and claude_md to people, any kind to a pod
   credentials set <kind> [--from-gh]
@@ -720,6 +738,94 @@ const jira: Command = async (cli, argv) => {
   return action === "report" ? jiraReport(cli, exportId, flags) : jiraExport(cli, exportId, flags);
 };
 
+// Only a conversation's agent has a document and an export, so a 404 is the session, not a missing agent.
+function noConfluenceExport(e: unknown): never {
+  if (e instanceof ApiError && e.status === 404) {
+    throw new Error("this session is not an HMCTS Assistant conversation, so it has no Confluence export");
+  }
+  throw e;
+}
+
+const confluenceReport = async (cli: Cli, exportId: string, flags: Record<string, string>): Promise<number> => {
+  if ((flags["page-id"] === undefined) === (flags.error === undefined)) {
+    throw new UsageError("confluence report takes one of --page-id or --error");
+  }
+  if (flags["page-id"] !== undefined && !CONFLUENCE_ID_RE.test(flags["page-id"])) {
+    throw new UsageError(`--page-id must be a page's numeric id, not ${flags["page-id"]}`);
+  }
+  if (flags.title !== undefined && flags["page-id"] === undefined) {
+    throw new UsageError("--title goes with --page-id");
+  }
+  const error = flags.error?.trim();
+  if (error === "") {
+    throw new UsageError("--error needs a reason");
+  }
+  const title = flags.title?.trim().slice(0, MAX_PAGE_TITLE);
+  const agent = requireAgent(requireSessionId(cli.env));
+  const body: ConfluenceExportReport =
+    flags["page-id"] !== undefined
+      ? { export_id: exportId, page_id: flags["page-id"], ...(title ? { title } : {}) }
+      : { export_id: exportId, error: (error ?? "").slice(0, MAX_CONFLUENCE_ERROR) };
+  await cli.api().putConfluenceExport(agent.agent_id, body).catch(noConfluenceExport);
+  cli.print(
+    flags["page-id"] !== undefined ? `agent-hub: reported page ${flags["page-id"]} for export ${exportId}` : `agent-hub: reported export ${exportId} as failed`
+  );
+  return 0;
+};
+
+// The whole export as one command, so the session spends one tool call on it rather than one per step.
+const confluenceExport = async (cli: Cli, exportId: string, flags: Record<string, string>): Promise<number> => {
+  const spaceId = flags["space-id"] ?? "";
+  const parentId = flags["parent-id"] ?? "";
+  if (!CONFLUENCE_ID_RE.test(spaceId)) {
+    throw new UsageError("confluence export needs --space-id, a Confluence space's numeric id");
+  }
+  if (!CONFLUENCE_ID_RE.test(parentId)) {
+    throw new UsageError("confluence export needs --parent-id, the numeric id of the page to put it under");
+  }
+  const agent = requireAgent(requireSessionId(cli.env));
+  const api = cli.api();
+  const outcome = await runConfluenceExport(
+    {
+      api,
+      agentId: agent.agent_id,
+      env: cli.env,
+      run,
+      login: virtualAgent(cli.env) ? () => atlassianLogin({ api, env: cli.env }) : null,
+      print: cli.print
+    },
+    { exportId, spaceId, parentId }
+  ).catch(noConfluenceExport);
+  if ("error" in outcome) {
+    cli.print(`agent-hub: no page was created for export ${exportId}: ${outcome.error} The user has been shown this.`);
+    return 1;
+  }
+  cli.print(
+    `agent-hub: ${outcome.again ? "already created" : "created"} the page "${outcome.title}" (${outcome.pageId}) for export ${exportId} and reported it; the user's Assistant shows a link to it`
+  );
+  return 0;
+};
+
+const confluence: Command = async (cli, argv) => {
+  const { flags, rest } = parseFlags(argv, ["space-id", "parent-id", "page-id", "title", "error"]);
+  const [action, exportId, ...extra] = rest;
+  if (action !== "report" && action !== "export") {
+    throw new UsageError("confluence takes export or report");
+  }
+  if (!exportId || !CONFLUENCE_EXPORT_ID_RE.test(exportId)) {
+    throw new UsageError(`confluence ${action} needs the export id it was asked under`);
+  }
+  if (extra.length) {
+    throw new UsageError(`unexpected argument: ${extra[0]}`);
+  }
+  const others = action === "report" ? ["space-id", "parent-id"] : ["page-id", "title", "error"];
+  const stray = others.find((name) => flags[name] !== undefined);
+  if (stray) {
+    throw new UsageError(`--${stray} does not go with confluence ${action}`);
+  }
+  return action === "report" ? confluenceReport(cli, exportId, flags) : confluenceExport(cli, exportId, flags);
+};
+
 const agents: Command = async (cli) => {
   const res = await cli.api().agents();
   if (!res.agents.length) {
@@ -875,6 +981,7 @@ export const COMMANDS: Record<string, Command> = {
   agents,
   artefact,
   jira,
+  confluence,
   hook,
   bridge,
   "auto-enable": autoEnable,

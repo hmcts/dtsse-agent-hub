@@ -9,8 +9,9 @@ import type { Api, Artefact, JiraExportReport } from "./api.ts";
 import type { Env } from "./env.ts";
 import { withRetry } from "./retry.ts";
 import { hubHome, readJson, writeJson } from "./session.ts";
+import { claimExport, releaseExport, twgFailureLine, twgSignInProblem } from "./twg-export.ts";
 import type { AtlassianLoginResult } from "./virtual/atlassian.ts";
-import { type RunResult, stripAnsi } from "./virtual/sign-in.ts";
+import type { RunResult } from "./virtual/sign-in.ts";
 
 export const EXPORT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/;
@@ -22,9 +23,6 @@ export const MAX_SUMMARY = 255;
 const FALLBACK_SUMMARY = "HMCTS Assistant document";
 // Long enough for a slow Jira, short enough that a hung twg is reported well inside the hub's 15-minute timeout.
 const CREATE_TIMEOUT_MS = 120000;
-const WHOAMI_TIMEOUT_MS = 30000;
-// The hub's export timeout: a lock older than this belongs to an export the hub has already given up on.
-const LOCK_STALE_MS = 15 * 60_000;
 
 export type JiraExportRequest = {
   exportId: string;
@@ -60,29 +58,6 @@ function rememberedKey(dir: string, exportId: string): string | null {
 
 function rememberKey(dir: string, exportId: string, key: string): void {
   writeJson(path.join(dir, `${exportId}.json`), { key, created_at: new Date().toISOString() });
-}
-
-/**
- * Claims the export for this process, so two messages delivered while it is pending cannot each run twg. False when
- * another live command holds it; a lock older than the hub's timeout is taken over.
- */
-function claim(dir: string, exportId: string): boolean {
-  const lock = path.join(dir, `${exportId}.lock`);
-  try {
-    fs.closeSync(fs.openSync(lock, "wx", 0o600));
-    return true;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw e;
-    }
-  }
-  try {
-    if (Date.now() - fs.statSync(lock).mtimeMs <= LOCK_STALE_MS) {
-      return false;
-    }
-  } catch {}
-  fs.writeFileSync(lock, "", { mode: 0o600 });
-  return true;
 }
 
 /** One line of Jira summary: the document's title, else its first heading, else a plain fallback. */
@@ -130,34 +105,7 @@ export function parseCreatedKey(stdout: string, project: string): string | null 
 
 /** Why twg failed, in one line the person can read: its JSON error message when it gave one, else stderr's first line. */
 export function twgFailure(result: RunResult): string {
-  let message: unknown;
-  try {
-    const parsed = JSON.parse(result.stdout) as { error?: { message?: unknown } | string; message?: unknown } | null;
-    message = typeof parsed?.error === "string" ? parsed.error : (parsed?.error?.message ?? parsed?.message);
-  } catch {}
-  const line =
-    (typeof message === "string" && message.trim()) ||
-    stripAnsi(`${result.stderr}\n${result.stdout}`)
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .find((l) => l !== "");
-  const why = line ? `Jira refused the ticket: ${line}` : `twg exited ${result.code} without saying why.`;
-  return why.length > MAX_JIRA_ERROR ? `${why.slice(0, MAX_JIRA_ERROR - 1)}…` : why;
-}
-
-async function signedIn(deps: JiraExportDeps): Promise<string | null> {
-  const whoami = await deps.run("twg", ["whoami"], { env: deps.env, timeoutMs: WHOAMI_TIMEOUT_MS });
-  if (whoami.code === 0) {
-    return null;
-  }
-  if (whoami.code === 127) {
-    return "twg is not installed here, so the ticket could not be created.";
-  }
-  if (!deps.login) {
-    return "twg is not signed in to Atlassian, so the ticket could not be created.";
-  }
-  deps.print("agent-hub: twg is not signed in; asking the user to sign in to Atlassian");
-  return (await deps.login()) === "not-signed-in" ? "The Atlassian sign-in was not completed, so the ticket could not be created." : null;
+  return twgFailureLine(result, "Jira refused the ticket", MAX_JIRA_ERROR);
 }
 
 async function create(deps: JiraExportDeps, request: JiraExportRequest): Promise<JiraExportOutcome> {
@@ -166,7 +114,7 @@ async function create(deps: JiraExportDeps, request: JiraExportRequest): Promise
   if (!doc.markdown.trim()) {
     return { error: "The document is empty, so there was nothing to export." };
   }
-  const notSignedIn = await signedIn(deps);
+  const notSignedIn = await twgSignInProblem(deps, "the ticket");
   if (notSignedIn) {
     return { error: notSignedIn };
   }
@@ -207,7 +155,7 @@ export async function runJiraExport(deps: JiraExportDeps, request: JiraExportReq
   if (known) {
     outcome = { key: known, again: true };
   } else {
-    if (!claim(dir, request.exportId)) {
+    if (!claimExport(dir, request.exportId)) {
       throw new Error(`export ${request.exportId} is already running in another command; wait for that one rather than starting another`);
     }
     try {
@@ -216,7 +164,7 @@ export async function runJiraExport(deps: JiraExportDeps, request: JiraExportReq
         rememberKey(dir, request.exportId, outcome.key);
       }
     } finally {
-      fs.rmSync(path.join(dir, `${request.exportId}.lock`), { force: true });
+      releaseExport(dir, request.exportId);
     }
   }
   const report: JiraExportReport = "key" in outcome ? { export_id: request.exportId, key: outcome.key } : { export_id: request.exportId, error: outcome.error };

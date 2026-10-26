@@ -5,7 +5,9 @@ import { createPortal } from "react-dom";
 import type { ArtefactSnapshot, SaveArtefactResult } from "@/app/_actions/assistant";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
-import { JiraBanner, type JiraExportProps, JiraFooter } from "@/components/assistant/JiraExport";
+import { ConfluenceBanner, type ConfluenceExportProps } from "@/components/assistant/ConfluenceExport";
+import { ExportFooter } from "@/components/assistant/ExportFooter";
+import { JiraBanner, type JiraExportProps } from "@/components/assistant/JiraExport";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import { ScrollPane } from "@/components/Markup";
@@ -202,7 +204,8 @@ export function ArtefactPanel({
   save,
   onClose,
   narrow,
-  jira
+  jira,
+  confluence
 }: {
   conversationId: string;
   artefact: ArtefactSnapshot;
@@ -212,6 +215,8 @@ export function ArtefactPanel({
   narrow: boolean;
   /** The export to Jira, below the document; left out, the panel has none. */
   jira?: JiraExportProps;
+  /** The publish to Confluence, beside the Jira export; left out, the panel has none. */
+  confluence?: ConfluenceExportProps;
 }) {
   const [title, setTitle] = useState(artefact.title ?? "Untitled document");
   const [markdown, setMarkdown] = useState(artefact.version === 0 ? starterDocument(productLabel) : artefact.markdown);
@@ -485,6 +490,7 @@ export function ArtefactPanel({
         </div>
       )}
       {jira === undefined ? null : <JiraBanner exported={jira.exported} />}
+      {confluence === undefined ? null : <ConfluenceBanner exported={confluence.exported} />}
       {mode === "edit" ? (
         // The textarea fills the scroller and scrolls itself, so the tab stop a keyboard user needs is the box.
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -505,15 +511,8 @@ export function ArtefactPanel({
           {markdown.trim() === "" ? <p className="text-asst-faint">This document is empty.</p> : <AssistantMarkdown source={markdown} document />}
         </ScrollPane>
       )}
-      {jira === undefined ? null : (
-        <JiraFooter
-          conversationId={conversationId}
-          exported={jira.exported}
-          access={jira.access}
-          exportTo={jira.exportTo}
-          saved={state === "saved" && conflict === null}
-          written={base > 0}
-        />
+      {jira === undefined && confluence === undefined ? null : (
+        <ExportFooter conversationId={conversationId} jira={jira} confluence={confluence} saved={state === "saved" && conflict === null} written={base > 0} />
       )}
       {printing ? <PrintSheet title={title} markdown={markdown} /> : null}
     </section>

@@ -181,6 +181,9 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   // agent id → the conversation's document, for conversations' agents
   const artefacts = new Map<string, Artefact>();
   const jiraReports: Record<string, unknown>[] = [];
+  const confluenceReports: Record<string, unknown>[] = [];
+  // Every answer a supervisor gave to a lookup, in the order they came.
+  const lookupAnswers: { virtual_id: string; lookup_id: string; body: Record<string, unknown> }[] = [];
   // upload id → the parts the pod may still fetch, and whether it has reported having the whole file
   const attachments = new Map<string, { parts: Uint8Array[]; fetched: boolean }>();
   // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
@@ -325,6 +328,14 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     if (req.method === "GET" && area === "conversations" && !kind) {
       const ids = new Set([...agents.values()].filter((a) => a.conversation_id).map((a) => a.conversation_id as string));
       return send(res, 200, { conversations: [...ids].map((conversationId) => ({ id: conversationId })) });
+    }
+    if (req.method === "PUT" && area === "lookups" && kind && !sub) {
+      const answered = Array.isArray(body.results) ? body.results.length <= 10 : ["signed_out", "failed", "superseded"].includes(body.error);
+      if (!answered) {
+        return send(res, 400, { error: "bad lookup answer" });
+      }
+      lookupAnswers.push({ virtual_id: id, lookup_id: kind, body });
+      return send(res, 204);
     }
     if (req.method === "PUT" && area === "uploads" && !kind) {
       const whole = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 0;
@@ -792,6 +803,18 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       jiraReports.push({ agent_id: agent.id, ...body });
       return send(res, 204);
     }
+    if (action === "confluence" && req.method === "PUT") {
+      if (!agent.conversation_id) {
+        return send(res, 404, { error: "not a conversation" });
+      }
+      const created = typeof body.page_id === "string" && /^[0-9]{1,20}$/.test(body.page_id);
+      const failed = typeof body.error === "string" && body.error.trim() !== "" && body.error.length <= 300;
+      if (typeof body.export_id !== "string" || created === failed) {
+        return send(res, 400, { error: "bad confluence report" });
+      }
+      confluenceReports.push({ agent_id: agent.id, ...body });
+      return send(res, 204);
+    }
     // The pod-facing half of an Assistant attachment: one part's raw bytes, and the report that deletes them.
     if (action === "attachments") {
       const upload = attachments.get(parts[4] as string);
@@ -849,6 +872,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     personCredentials,
     artefacts,
     jiraReports,
+    confluenceReports,
+    lookupAnswers,
     attachments,
     sessionStreams,
     // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session
@@ -866,6 +891,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     // them, so unlike an interrupt a test may send it more than once.
     sendDeleteUploads(virtualId: string, data: { conversation_id: string; upload_ids: string[] }) {
       sessionStreams.get(virtualId)?.write(`event: delete_uploads\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+    // The owner searching their Jira or Confluence. Sent once and never replayed, as the hub does.
+    sendLookup(virtualId: string, data: Record<string, unknown>) {
+      sessionStreams.get(virtualId)?.write(`event: lookup\ndata: ${JSON.stringify(data)}\n\n`);
     },
     sendClose(virtualId: string, data: { conversation_id: string }) {
       const v = virtuals.get(virtualId) as VirtualRecord;

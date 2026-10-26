@@ -1,6 +1,7 @@
-// Jira and Confluence through the `twg` CLI. twg keeps its OAuth sign-in in auth.conf; the hub holds that file
-// without its access token, which lasts an hour and is most of it. Every refresh rotates the refresh token, so
-// the rotated one is stored before anything else can fail — a spent token left on the hub signs the pod out.
+// Jira and Confluence through the `twg` CLI. twg keeps its OAuth sign-in in auth-profiles.json (1.3.9 on) or
+// auth.conf (1.3.3, which 1.3.9 still reads but never converts); the hub holds whichever the pod has, without its
+// access tokens, which last an hour and are most of it. Every refresh rotates the refresh token, so the rotated
+// one is stored before anything else can fail — a spent token left on the hub signs the pod out.
 //
 // Nothing here is fatal: a pod with no Atlassian sign-in still works.
 import fs from "node:fs";
@@ -13,14 +14,21 @@ import { withRetry } from "../retry.ts";
 import { readText, sha256 } from "../session.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
 import { say, virtualStateDir } from "./phases.ts";
-import { type Respond, relayDeviceLogin, run, stripAnsi } from "./sign-in.ts";
+import { type Respond, type RunResult, relayDeviceLogin, run, stripAnsi } from "./sign-in.ts";
 
 export const ATLASSIAN_AUTH_MAX_CHARS = 24000;
 /**
  * How long a pod's `twg login` holds its device code: 120 seconds, not the 300 the server's `expires_in` says.
- * twg 1.3.3 waits `min(expires_in, 120s in agent mode, 300s otherwise)`, and reads any environment variable whose
- * name has `AGENT` as a word in it as a sign it is being run by an agent. `AGENT_HUB_LAUNCH_TOKEN` is always in a
- * pod's environment, so every pod sign-in is agent mode and every code dies at two minutes.
+ * twg 1.3.3 waits `min(expires_in, 120s in agent mode, 300s otherwise)`, and calls itself an agent's when any
+ * environment variable's name has `AGENT` as a word in it, bar a short denylist. `AGENT_HUB_LAUNCH_TOKEN` is
+ * always in a pod's environment and matches, so every pod sign-in is agent mode and every code dies at two
+ * minutes. The gate is that whole-environment scan, not a `CLAUDECODE`/`AI_AGENT` check, so the login below runs
+ * with the pod's environment as it is: there is nothing to drop that would buy the other three minutes.
+ *
+ * twg prints the figure itself, as "(Ns remaining)", only outside agent mode, so a pod cannot read its own
+ * lifetime off the output it relays and this constant is the only place it can live. Whoever moves the pod image
+ * off twg 1.3.3 has to measure the gate again: a `twg login` that prints that countdown is not in agent mode and
+ * is holding its code for 300 seconds.
  *
  * Overstating it is the one thing that must not happen: the wall-clock check below would then never call a
  * genuine expiry an expiry, and the second code would never be offered.
@@ -40,8 +48,10 @@ export const TWG_DEVICE_CODE_EXPIRES_S = 120;
  * codes have to fit in what is left. `jiraExportSignInBudget` is where that sum is checked.
  */
 export const ATLASSIAN_SIGN_IN_CODES = 2;
-// What `twg auth refresh` (1.3.3) exits with when Atlassian rejects the refresh token.
+// What `twg auth refresh` 1.3.3 exits with when Atlassian rejects the refresh token. 1.3.9 exits 1 and says why
+// in its JSON instead.
 const TWG_EXIT_AUTH_INVALID = 77;
+const TWG_REJECTED_CODES = new Set(["unauthorized_client", "invalid_grant"]);
 
 // The twg calls `atlassianLogin` can make before the first code is relayed, at their timeouts below: one
 // `twg whoami` from `jira-export.ts`, a `twg auth refresh --force` on the sign-in already on disk, another on the
@@ -90,6 +100,11 @@ export function twgDir(env: Env = process.env): string {
 }
 
 const twgAuthFile = (env: Env): string => path.join(twgDir(env), "auth.conf");
+const twgProfilesFile = (env: Env): string => path.join(twgDir(env), "auth-profiles.json");
+// Every file a twg sign-in can leave behind: auth_oauth.conf is a copy 1.3.3 writes and never reads.
+const TWG_AUTH_FILES = ["auth-profiles.json", "auth.conf", "auth_oauth.conf"];
+// A stored auth-profiles.json is JSON, and an auth.conf never starts with a brace.
+const isProfiles = (text: string): boolean => text.trimStart().startsWith("{");
 // Written only once a sign-in is stored on the hub, so cache-sync never runs `twg auth refresh` while
 // atlassian-login is still restoring or signing in.
 const atlassianShaFile = (): string => path.join(virtualStateDir(), "atlassian-auth.sha");
@@ -115,19 +130,52 @@ export const twgPromptsForBrowser = (raw: string): boolean => /Open in browser\?
 export const twgLoginExpired = (raw: string): boolean =>
   /\[(?:login_timeout|expired_token)\]|Login timed out after|device code has expired/i.test(stripAnsi(raw));
 
+/** auth-profiles.json when twg has one, which is where 1.3.9 signs in, otherwise auth.conf. */
 export function readAtlassianAuth(env: Env = process.env): string | null {
-  try {
-    return fs.readFileSync(twgAuthFile(env), "utf8");
-  } catch {
-    return null;
+  for (const file of [twgProfilesFile(env), twgAuthFile(env)]) {
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch {}
   }
+  return null;
 }
 
+type TwgCredential = { user?: unknown; oauthAccessToken?: unknown; oauthRefreshToken?: unknown };
+type TwgProfile = { id?: unknown; user?: unknown; credentials?: Record<string, TwgCredential | null> | null };
+type TwgProfiles = { activeEnvironment?: unknown; defaults?: Record<string, unknown> | null; profiles?: unknown };
+
+const nonEmpty = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+
 /**
- * twg's auth.conf as agent-hub keeps it: without the access token, which lasts an hour and is most of the
- * file. Every refresh rotates the refresh token, so the value changes each time.
+ * Blanks every access token rather than deleting it, because twg 1.3.9 refuses an auth-profiles.json missing a
+ * field its schema requires. The account is the default profile's for the active environment, else the first
+ * that can refresh.
  */
-export function packAtlassianAuth(text: string, { max = ATLASSIAN_AUTH_MAX_CHARS }: { max?: number } = {}): PackedAtlassianAuth {
+function packProfiles(text: string): { value: string; user: string | null } {
+  let parsed: TwgProfiles;
+  try {
+    parsed = JSON.parse(text) as TwgProfiles;
+  } catch {
+    throw new Error("twg auth-profiles.json is not JSON");
+  }
+  const profiles = Array.isArray(parsed?.profiles) ? (parsed.profiles as TwgProfile[]) : [];
+  const credentials = (p: TwgProfile) => Object.values(p?.credentials ?? {}).filter((c): c is TwgCredential => typeof c === "object" && c !== null);
+  for (const c of profiles.flatMap(credentials)) {
+    if ("oauthAccessToken" in c) {
+      c.oauthAccessToken = "";
+    }
+  }
+  const signedIn = profiles.filter((p) => credentials(p).some((c) => nonEmpty(c.oauthRefreshToken)));
+  if (signedIn.length === 0) {
+    throw new Error("twg auth-profiles.json holds no oauthRefreshToken");
+  }
+  const active = typeof parsed.activeEnvironment === "string" ? parsed.defaults?.[parsed.activeEnvironment] : undefined;
+  const profile = signedIn.find((p) => p.id === active) ?? signedIn[0];
+  const user = [profile?.user, ...credentials(profile as TwgProfile).map((c) => c.user)].find(nonEmpty)?.trim() || null;
+  return { value: JSON.stringify(parsed), user };
+}
+
+function packAuthConf(text: string): { value: string; user: string | null } {
   const value = String(text)
     .split(/\r?\n/)
     .filter((line) => !line.startsWith("oauth-access-token="))
@@ -136,20 +184,35 @@ export function packAtlassianAuth(text: string, { max = ATLASSIAN_AUTH_MAX_CHARS
   if (!/^oauth-refresh-token=\S/m.test(value)) {
     throw new Error("twg auth.conf holds no oauth-refresh-token");
   }
+  return { value, user: /^user=(.+)$/m.exec(value)?.[1]?.trim() || null };
+}
+
+/**
+ * twg's sign-in as agent-hub keeps it: auth-profiles.json or auth.conf without its access tokens. Every refresh
+ * rotates the refresh token, so the value changes each time.
+ */
+export function packAtlassianAuth(text: string, { max = ATLASSIAN_AUTH_MAX_CHARS }: { max?: number } = {}): PackedAtlassianAuth {
+  const profiles = isProfiles(String(text));
+  const { value, user } = profiles ? packProfiles(String(text)) : packAuthConf(text);
   if (value.length > max) {
-    throw new Error(`twg auth.conf without its access token is ${value.length} characters, over the hub's ${max}`);
+    const name = profiles ? "auth-profiles.json" : "auth.conf";
+    throw new Error(`twg ${name} without its access tokens is ${value.length} characters, over the hub's ${max}`);
   }
-  const user = /^user=(.+)$/m.exec(value)?.[1]?.trim() || null;
   return { value, sha: sha256(value), user };
 }
 
-/** auth.conf is all twg reads: it ignores auth_oauth.conf, and refetches cloud-ids/ itself. */
+/**
+ * Writes the sign-in back as the file it came from, and removes the other, so twg never reads an older sign-in
+ * beside it. twg ignores auth_oauth.conf, and refetches cloud-ids/ itself.
+ */
 export function restoreAtlassianAuth(value: string, { env = process.env }: { env?: Env } = {}): void {
   const { value: packed } = packAtlassianAuth(value);
   const dir = twgDir(env);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(twgAuthFile(env), `${packed}\n`, { mode: 0o600 });
-  fs.chmodSync(twgAuthFile(env), 0o600);
+  const [file, other] = isProfiles(packed) ? [twgProfilesFile(env), twgAuthFile(env)] : [twgAuthFile(env), twgProfilesFile(env)];
+  fs.rmSync(other, { force: true });
+  fs.writeFileSync(file, `${packed}\n`, { mode: 0o600 });
+  fs.chmodSync(file, 0o600);
 }
 
 /** PUTs auth.conf (refreshed first, if due, with `refresh`) when it differs from the last one stored. */
@@ -198,12 +261,33 @@ async function twgOk(env: Env): Promise<boolean> {
 }
 
 /**
- * Refreshes the sign-in in auth.conf now, which also gives the restored one an access token, and stores the
- * rotated refresh token before anything else can fail. False when Atlassian rejects it.
+ * Whether `twg auth refresh -o json` says there is no sign-in it can refresh: Atlassian refused the refresh token,
+ * or (1.3.9, exit 0) twg found no OAuth sign-in to refresh at all.
+ */
+export function twgRefreshRejected({ code, stdout }: Pick<RunResult, "code" | "stdout">): boolean {
+  if (code === TWG_EXIT_AUTH_INVALID) {
+    return true;
+  }
+  let data: { status?: unknown; profiles?: unknown } | undefined;
+  try {
+    data = (JSON.parse(stdout) as { data?: typeof data }).data;
+  } catch {
+    return false;
+  }
+  if (data?.status === "not_applicable") {
+    return true;
+  }
+  const profiles = Array.isArray(data?.profiles) ? (data.profiles as { errorCode?: unknown }[]) : [];
+  return code !== 0 && profiles.some((p) => typeof p?.errorCode === "string" && TWG_REJECTED_CODES.has(p.errorCode));
+}
+
+/**
+ * Refreshes the sign-in now, which also gives the restored one an access token, and stores the rotated refresh
+ * token before anything else can fail. False when Atlassian rejects it.
  */
 async function refreshAtlassian({ api, id, env }: { api: Pick<Api, "putCredential">; id: string; env: Env }): Promise<boolean> {
-  const r = await run("twg", ["auth", "refresh", "--force"], { env, timeoutMs: 60000 });
-  if (r.code === TWG_EXIT_AUTH_INVALID) {
+  const r = await run("twg", ["auth", "refresh", "--force", "-o", "json"], { env, timeoutMs: 60000 });
+  if (twgRefreshRejected(r)) {
     return false;
   }
   if (r.code !== 0) {
@@ -230,7 +314,7 @@ export async function atlassianLogin({
 }: AtlassianLoginOptions = {}): Promise<AtlassianLoginResult> {
   const { id } = requireVirtualAgent(env);
   fs.rmSync(atlassianShaFile(), { force: true });
-  // An auth.conf already here is from an earlier attempt in this pod, and at least as new as the stored one:
+  // A sign-in already here is from an earlier attempt in this pod, and at least as new as the stored one:
   // that attempt may have spent the stored refresh token.
   let local: string | null = null;
   try {
@@ -268,8 +352,9 @@ export async function atlassianLogin({
   // an attempt that throws has usually already shown them one.
   try {
     for (let attempt = 1; attempt <= codes; attempt++) {
-      // Each attempt starts from no sign-in on disk, so the auth.conf read after it can only be this attempt's.
-      for (const f of ["auth.conf", "auth_oauth.conf"]) {
+      // Each attempt starts from no sign-in on disk, so the file read after it can only be this attempt's, and a
+      // 1.3.9 pod never reads an auth.conf left beside the auth-profiles.json it has just written.
+      for (const f of TWG_AUTH_FILES) {
         fs.rmSync(path.join(twgDir(env), f), { force: true });
       }
       let answered = false;
