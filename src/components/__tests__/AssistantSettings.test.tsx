@@ -10,6 +10,7 @@ import type { UploadsOnDisk } from "@/assistant/upload-disk";
 import { MAX_REPORTED_FILES, type PodFile, type UploadsDisk } from "@/assistant/upload-report";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
+import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
@@ -899,21 +900,48 @@ function selected(): string {
  * test of the narrow interface is a test that defines one — which is also what says plainly which interface it is
  * about.
  */
-function narrow(): void {
+/** The `change` listeners `useTwoPane` has registered, so a test can take the screen across the breakpoint. */
+let resized: (() => void)[] = [];
+
+/**
+ * A viewport of `width`, answering the dialog's own `min-width` query and dispatching `change` when it moves — so a
+ * test of a resize exercises the listener rather than only the first read. jsdom has no `matchMedia` at all, which is
+ * why every other test here takes the hook's fallback and is wide.
+ */
+function viewport(width: number): (next: number) => void {
+  let current = width;
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     configurable: true,
     value: (query: string) => ({
-      matches: true,
+      // A getter, as a real `MediaQueryList` has: the hook keeps the object and reads `matches` again inside its
+      // `change` handler, so a plain property would freeze the answer at the width the dialog opened on.
+      get matches() {
+        return current >= SETTINGS_TWO_PANE_MIN_WIDTH;
+      },
       media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {}
+      addEventListener: (_event: string, listener: () => void) => resized.push(listener),
+      removeEventListener: (_event: string, listener: () => void) => {
+        resized = resized.filter((other) => other !== listener);
+      }
     })
   });
+  return (next: number) => {
+    current = next;
+    for (const listener of [...resized]) {
+      listener();
+    }
+  };
+}
+
+/** The dialog as a 390×844 screen has it. */
+function narrow(): void {
+  viewport(390);
 }
 
 function wideAgain(): void {
   Reflect.deleteProperty(window, "matchMedia");
+  resized = [];
 }
 
 describe("the Assistant's settings navigation", () => {
@@ -1106,12 +1134,84 @@ describe("the Assistant's settings on a narrow screen", () => {
 });
 
 /**
- * An axe audit of the dialog itself, which has none anywhere else: the Assistant's end-to-end audit covers only the
- * new-chat and getting-ready screens, because every other surface needs a pod and the dialog's cog is underneath the
- * getting-ready screen until one is running. Run here it costs a render, and it is the check that the navigation's
- * tablist, its panel and the group headings hold together rather than only looking as though they do.
+ * A phone turned on its side crosses the breakpoint with the dialog open — 390×844 becomes 844×390 — so the two
+ * interfaces have to hand over rather than start again.
+ */
+describe("the Assistant's settings across a change of width", () => {
+  afterEach(wideAgain);
+
+  function notes(): HTMLTextAreaElement {
+    return screen.getByLabelText("CLAUDE.md") as HTMLTextAreaElement;
+  }
+
+  it("should keep what the person has typed in a section when the screen becomes too narrow for two panes", () => {
+    const resize = viewport(1024);
+    open(everything(), "Claude.md");
+    fireEvent.change(notes(), { target: { value: "# Me\n\nHalf a thought" } });
+
+    act(() => resize(390));
+
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.getByRole("button", { name: "Back to settings" })).toBeTruthy();
+    expect(notes().value).toBe("# Me\n\nHalf a thought");
+  });
+
+  it("should keep what the person has typed when a narrow screen becomes wide enough for two panes", () => {
+    const resize = viewport(390);
+    open(everything());
+    fireEvent.click(screen.getByRole("button", { name: "Claude.md" }));
+    fireEvent.change(notes(), { target: { value: "# Me\n\nHalf a thought" } });
+
+    act(() => resize(1024));
+
+    expect(within(nav()).getByRole("tab", { name: "Claude.md" }).getAttribute("aria-selected")).toBe("true");
+    expect(notes().value).toBe("# Me\n\nHalf a thought");
+  });
+
+  // The element focus was on goes with the navigation that is replaced, and focus would otherwise fall to the body —
+  // outside the trap, with nothing to read.
+  it.each([
+    [1024, 390, "Back to settings"],
+    [390, 1024, "Claude.md"]
+  ])("should move focus to the navigation of whichever interface is showing when the width changes from %i to %i", (from, to, entry) => {
+    const resize = viewport(from);
+    open(everything());
+    if (from === 390) {
+      fireEvent.click(screen.getByRole("button", { name: "Claude.md" }));
+    } else {
+      go("Claude.md");
+    }
+
+    act(() => resize(to));
+
+    expect(document.activeElement).toBe(screen.getByRole(to === 390 ? "button" : "tab", { name: entry }));
+  });
+
+  it("should keep the trap working, with the panel still in it, after the width has changed", () => {
+    const resize = viewport(1024);
+    open(everything(), "Templates");
+
+    act(() => resize(390));
+    const items = stops();
+    items.at(-1)?.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+
+    expect(items).toContain(screen.getByRole("button", { name: "Back to settings" }));
+    expect(document.activeElement).toBe(items[0]);
+  });
+});
+
+/**
+ * An axe audit of the dialog itself, which has none anywhere else: the Assistant's end-to-end audit opens
+ * `/assistant` and never the cog, because the dialog's cog is underneath the getting-ready screen until a pod is
+ * running. Run here it costs tens of milliseconds, and it is what checks that the navigation's tablist, its panel
+ * and the relations between them hold together rather than only look as though they do.
  *
- * Colour is not audited here — jsdom has no layout and no computed colour — so contrast stays the end-to-end run's.
+ * **It is structural and name-based only, and must not be read as "the dialog is accessible."** jsdom has no layout
+ * and no computed colour, so `color-contrast` is turned off rather than silently inapplicable — and since nothing
+ * end to end ever opens this dialog, its contrast, including `text-asst-error` on `bg-asst-hover`, is audited
+ * **nowhere**. Nor does this catch everything structural: a non-`tab` child of a tablist passes it even with the
+ * `aria-hidden` taken off, which is why the group headings have a test of their own.
  */
 async function auditOpenDialog(section?: string): Promise<void> {
   const root = document.createElement("div");
@@ -1132,6 +1232,8 @@ async function auditOpenDialog(section?: string): Promise<void> {
 }
 
 describe("the Assistant's settings accessibility", () => {
+  afterEach(wideAgain);
+
   for (const section of ["Appearance", "Claude.md", "Tools", "Connections", "Templates"]) {
     it(`should raise no WCAG A or AA violations with ${section} open`, async () => {
       await auditOpenDialog(section);
