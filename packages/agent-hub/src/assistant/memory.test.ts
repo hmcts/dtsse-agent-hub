@@ -120,8 +120,9 @@ describe("reportMemory", () => {
     expect(putMemory).not.toHaveBeenCalled();
   });
 
-  // Not retried here: the next reconcile measures again, and the peak is monotonic while the pod is up, so a lost
-  // report costs a late figure and never a wrong one.
+  // Not retried here: the figures are re-read and re-sent on the next session change or reconcile, and `anon` is flat
+  // between those, so a lost report costs a late figure rather than a wrong one. Not because anything is monotonic —
+  // `anon` falls when a session ends.
   it("should say so and give up, rather than retry, when the hub refuses the report", async () => {
     const said: string[] = [];
     const api = {

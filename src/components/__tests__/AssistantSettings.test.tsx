@@ -1479,12 +1479,13 @@ const GIB = 1024 ** 3;
 const LIMIT = 8 * GIB;
 
 /**
- * A memory report whose live figure leaves `headroom` under the limit, which is what the warning's threshold is
+ * A memory report whose non-reclaimable figure leaves `headroom` under the limit, which is what the threshold is
  * about.
  *
- * Its peak is pinned at the limit, which a peak may always be and which the warning must not react to on its own:
- * `memory.peak` never falls while the pod lives, so every expectation below that no warning is shown is also a check
- * that a pod which once touched its ceiling is not warned about for ever.
+ * **Both figures that count page cache are pinned at the limit** — `currentBytes` and `peakBytes` — and neither may
+ * raise the warning on its own: a pod that has merely read its workspace clone sits at its ceiling on both of them,
+ * and `memory.peak` never falls while the pod lives. So every expectation below that no warning is shown is also a
+ * check that the rule reads `anonBytes` and nothing else.
  */
 function use(headroom: number, overrides: Partial<Extract<MemoryUse, { reported: true }>> = {}): MemoryUse {
   return {
@@ -1533,8 +1534,8 @@ describe("the Assistant's size", () => {
     expect(panel().textContent).toContain(`You are on small: ${CONVERSATION_SESSIONS.small} chats at once, ${SIZE_RESOURCES.small.limits.memory} of memory.`);
   });
 
-  // The peak leads because it is the fuller account of what the pod has had to hold; the live figure beside it is
-  // what the warning is computed from, because it is the one that can come back down.
+  // The peak leads because it is the fuller account of what the pod has had to hold; the figure beside it is the part
+  // that cannot be reclaimed, which is what the warning is computed from and what a chat adds to.
   it("should give the peak against the limit, what it is holding of that, and when the pod last looked", () => {
     open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
 
@@ -1578,43 +1579,42 @@ describe("the Assistant's size", () => {
   });
 
   // The threshold: exactly one conversation's worth of headroom still has room for the chat about to be opened.
-  it("should raise no warning when the live figure leaves room for exactly one more chat", () => {
+  it("should raise no warning when what it cannot reclaim leaves room for exactly one more chat", () => {
     open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES) }) }, "Size");
 
     expect(panel().textContent).not.toContain("low on memory");
   });
 
-  it("should warn, and name both ways out, when the live figure leaves a byte less than one more chat", () => {
+  it("should warn, and name the size to move to, when what it cannot reclaim leaves a byte less than one more chat", () => {
     open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES - 1), openChats: 3 }) }, "Size");
 
     expect(panel().textContent).toContain("Your assistant is low on memory");
     expect(panel().textContent).toContain(
-      `Move up to medium below for ${CONVERSATION_SESSIONS.medium} chats at once and ${SIZE_RESOURCES.medium.limits.memory} of memory, or close a chat you have finished with to free about 0.65 GB.`
+      `Move up to medium below for ${SIZE_RESOURCES.medium.limits.memory} of memory and ${CONVERSATION_SESSIONS.medium} chats at once. Closing a chat frees about 0.65 GB of it.`
     );
   });
 
-  // Telling someone with one chat open to close some chats is telling them to stop working.
-  it("should offer only the bigger size when there is one chat open", () => {
+  // A pod's chats cannot reach this threshold, so closing one is given as a quantity and never as the remedy.
+  it("should not tell the person to close a chat when it warns", () => {
     open({ size: size({ use: use(0), openChats: 1 }) }, "Size");
 
     expect(panel().textContent).toContain("Move up to medium below");
-    expect(panel().textContent).not.toContain("or close a chat");
+    expect(panel().textContent).not.toContain("close a chat you have finished with");
   });
 
-  it("should say to close a chat, and offer no bigger size, on the largest size there is when several are open", () => {
+  it("should offer no bigger size on the largest size there is when a chat is open", () => {
     open({ size: size({ use: use(0), size: "large", openChats: 3 }) }, "Size");
 
-    expect(panel().textContent).toContain("This is the largest size there is, so close a chat you have finished with");
+    expect(panel().textContent).toContain("This is the largest size there is. Closing a chat frees about 0.65 GB of it.");
     expect(panel().textContent).not.toContain("Move up to");
   });
 
-  // Nothing to move up to and nothing to close but the chat in use, so the warning is the measurement alone rather
-  // than an instruction to stop working.
-  it("should offer nothing beyond the measurement on the largest size when one chat is open", () => {
-    open({ size: size({ use: use(0), size: "large", openChats: 1 }) }, "Size");
+  // With nothing open, what closing a chat would free is a fact about nothing.
+  it("should leave the per-chat figure out on the largest size when no chat is open", () => {
+    open({ size: size({ use: use(0), size: "large", openChats: 0 }) }, "Size");
 
     expect(panel().textContent).toContain("Your assistant is low on memory");
-    expect(panel().textContent).not.toContain("close a chat");
+    expect(panel().textContent).not.toContain("Closing a chat");
     expect(panel().textContent).not.toContain("Move up to");
   });
 

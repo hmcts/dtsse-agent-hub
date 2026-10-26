@@ -231,9 +231,10 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
-  // A session starting or ending steps the container's `anon` by about one conversation and is the only thing that
-  // moves it much. It is also what the hub's low-memory warning is computed from, so a report that waited for the
-  // ten-minute reconcile would leave the warning describing a pod the person has already changed.
+  // A session starting or ending steps the container's `anon` by about one conversation, and nothing else steps it.
+  // It is also what the hub's low-memory warning is computed from, so a report that waited for the ten-minute
+  // reconcile would leave the warning describing a pod the person has already changed. Work inside a session moves
+  // `anon` with no step to trigger on, which is what keeps that reconcile worth having.
   it("should report its memory as soon as the number of sessions changes, not on the next reconcile", async () => {
     // Arrange: a reconcile far longer than the test, so only the session change can have caused a report.
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });

@@ -29,9 +29,11 @@ beforeEach(async () => {
 const LIMIT = 8 * 1024 ** 3;
 
 /**
- * A report whose live figure leaves `headroom` bytes under the limit, which is what the warning's threshold is about.
- * Its peak is pinned at the limit, which the warning must not react to on its own: nothing resets `memory.peak` while
- * the pod lives, so a threshold computed from it could never be cleared.
+ * A report whose non-reclaimable figure leaves `headroom` bytes under the limit, which is what the threshold is about.
+ *
+ * **Both figures that count page cache are pinned at the limit** — `current_bytes` and `peak_bytes` — and neither may
+ * raise the warning on its own: a pod that has merely read its workspace clone sits at its ceiling on both, and
+ * nothing resets `memory.peak` while the pod lives, so a threshold computed from it could never be cleared.
  */
 function report(headroom: number) {
   return { limit_bytes: LIMIT, current_bytes: LIMIT, peak_bytes: LIMIT, anon_bytes: LIMIT - headroom };
@@ -144,7 +146,7 @@ describe("the memory an assistant reports", () => {
     expect((await assistantMemory(prisma, ALICE.oid, assistant))?.openChats).toBe(2);
   });
 
-  it("should warn once the live figure leaves no room for another chat, and name the size to move to", async () => {
+  it("should warn once what it cannot reclaim leaves no room for another chat, and name the size to move to", async () => {
     const assistant = await assistantOf(ALICE);
     await openChat(ALICE, "Possession claim");
 

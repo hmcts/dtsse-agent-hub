@@ -11,7 +11,7 @@ import { describeSize } from "./upload-report.ts";
  * The hub cannot see a pod's memory — every call between the two is pod to hub — so everything here is *as of* a
  * report, and the states below exist so that "we have not heard" is never shown as an idle pod. This is the same
  * shape as the uploads report in `upload-report.ts`, for the same reasons; what differs is that the figures come out
- * of the container's own cgroup, which is three small reads rather than a walk of a volume.
+ * of the container's own cgroup, which is four small reads rather than a walk of a volume.
  */
 
 /** How often the pod reports, which is the uploads reconcile it rides along with, for wording "when". */
@@ -105,6 +105,12 @@ export interface MemoryReportRow {
  * the same reason: a pod that has never been up has no session, so no client to have a claim either way, and
  * "running an older version" would be a guess about it. Once it *is* running, an older client has to come first or
  * it reads as a pod that is merely slow to answer, and the person waits for a report that cannot come.
+ *
+ * **Nothing here can tell whose pod a report came from**, so nothing here tries: a report is only ever this pod's
+ * because the store drops it whenever the hub asks for a new or replacement one (`NO_MEMORY_REPORT` in
+ * `virtual-agents/store.ts`), and the pod sends its first report as it boots rather than a tick later. A pod the
+ * kubelet restarted underneath the hub — after the OOM kill this warning is about — is the one case neither covers,
+ * and it is closed by that first report rather than by anything in this function.
  */
 export function memoryUse(row: MemoryReportRow): MemoryUse {
   if (
@@ -182,17 +188,42 @@ export interface MemoryPressure {
  * would be false exactly when it appeared. Neither is rescued by choosing the constant differently, because the
  * problem is what the figure tracks rather than its scale.
  *
- * `anon` is the part the kernel cannot reclaim, it is purely additive, a session starting or ending moves it by about
- * one conversation and nothing else moves it much — 15 samples of a working pod held within 3% — and it is what the
- * constant was measured as in the first place. So the threshold is reachable by opening chats, which is what the
- * warning says, and it falls again when one is closed, so the remedy the advice offers is the remedy that clears it.
- * `memory.peak` is still reported and still leads the section as the fuller account of what the pod has had to hold;
- * it informs, it does not decide.
+ * `anon` is the part the kernel cannot reclaim, it is purely additive, and it is what the constant was measured as in
+ * the first place, so it is the figure a headroom question can be asked of at all. `memory.peak` is still reported and
+ * still leads the section as the fuller account of what the pod has had to hold; it informs, it does not decide.
+ *
+ * **What this detects is a pod approaching an OOM kill, not a pod full of chats.** The structural reason holds at any
+ * cap: `CONVERSATION_SESSIONS` is chosen to keep a pod's chats inside its memory *request*, and this threshold is a
+ * conversation short of its *limit*, which is double the request. So a pod holding its full complement cannot reach
+ * it, and raising a cap does not change that — it would take a cap of about 10 on `small` before the two met.
+ *
+ * The figures, **at the caps in `CONVERSATION_SESSIONS` as this comment is written**, which are the `cap` column: the
+ * `anon` column is `0.95 + 0.65 × cap`, so it moves whenever a cap does, and the threshold column never does.
+ *
+ * | size | cap | `anon` at that cap | must exceed | short by | cap it would take |
+ * | --- | --- | --- | --- | --- | --- |
+ * | `small` | 3 | 2.90Gi | 7.35Gi | 4.45Gi | 9.8 |
+ * | `medium` | 4 | 3.55Gi | 15.35Gi | 11.80Gi | 22.2 |
+ * | `large` | 7 | 5.50Gi | 31.35Gi | 25.85Gi | 46.8 |
+ *
+ * **What crosses it is the work inside a chat, not the number of them.** `CONVERSATION_MEMORY_BYTES` is what a
+ * session *settles* at, not a ceiling it cannot pass: a build, a dependency tree, a language server or a leak can put
+ * one session gigabytes above it, and the pod's own work can do the same. That is the reconciliation between the two
+ * things said above — `0.95 + 0.65N` predicts a pod whose sessions are doing what they were measured doing, and this
+ * threshold is for when one of them is not. If the additivity held without exception the warning could never fire at
+ * any cap, and if the warning fires the additivity has an exception; the exception is work, and it is the thing worth
+ * warning about, because it ends in the kernel killing the container and nobody outside the pod can see it coming:
+ * the limit is in the pod's cgroup and every call between pod and hub is pod to hub.
+ *
+ * So `memoryAdvice` must not say the count of chats did this. The honest reading of the threshold is "one
+ * conversation's worth from the ceiling", where the conversation is the unit the person thinks in rather than a claim
+ * about the cause.
  *
  * **A stopped pod is never warned about.** Nothing clears the last report when a pod stops, and the section still
- * shows it, because it is the last thing anyone measured. But it describes a container that no longer exists: a pod
- * stopped mid-build at 7.9Gi must not tell its owner the next day that it is low on memory, and a pod just restarted
- * must not carry the old pod's warning for the ten minutes before the new one reports.
+ * shows it, because it is the last thing anyone measured. But it describes a container that no longer exists, so a
+ * pod stopped mid-build at 7.9Gi must not tell its owner the next day that it is low on memory. A *replacement* pod
+ * is a different problem with a different fix: the store drops the report rather than this guard catching it, since
+ * `running` is true again and the figures would otherwise read as the new pod's.
  *
  * Nothing is said for a pod with no report either: there is no ceiling to measure against, and the three sentences
  * the section shows instead are what honesty about that looks like.
@@ -222,28 +253,31 @@ export function memoryWarning(pressure: MemoryPressure | undefined): string | nu
 }
 
 /**
- * The warning in full: what the pod is holding, and what each thing the person can do would free.
+ * The warning in full: what the pod is holding that cannot be freed up, and what a bigger size would give it.
  *
- * **"holding", not "reached", and the `anon` figure rather than the peak.** The section's first line already says
- * what the pod reached at its busiest, which is a bigger number than this one; two sentences using the same verb for
- * two different figures, the second smaller, reads as one of them being wrong. This names what it is counting
- * instead.
+ * **It does not say the person's chats did this, and it does not offer closing one as the cure.** A pod's whole
+ * complement of chats cannot reach this threshold at any size or cap — `memoryPressure` has the arithmetic — so when
+ * this fires the chats are a fraction of what is being held and closing one would not change the answer. At a `small`
+ * cap of 3 they are 1.95Gi of the 7.4Gi a firing pod holds, a quarter of it; a bigger cap raises that share without
+ * ever making it the cause. A bigger size is the remedy, because it doubles the limit the pod is running into. The
+ * per-chat figure is still worth giving someone deciding what to do, so it is stated as a quantity rather than as
+ * the thing to do, and left out when no chat is open to close, where it would be a fact about nothing.
  *
- * **Closing a chat is offered only when there is one to close that is not the one in use.** With a single chat open
- * it would be an instruction to stop working, and with none it would name something the person does not have — which
- * matters more now the sentence promises a specific amount for doing it. On the largest size there is no bigger size
- * to offer either, so when neither remedy applies the warning is the measurement alone: there is nothing useful to
- * suggest, and inventing one would be worse than saying so.
+ * **"holding", not "reached".** The section's first line already says what the pod reached at its busiest, which is a
+ * bigger number than this one; two sentences using the same verb for two different figures, the second smaller, reads
+ * as one of them being wrong.
  */
 export function memoryAdvice(pressure: MemoryPressure): string {
-  const holding = `Its chats and tools are holding ${describeSize(pressure.anonBytes)} of its ${describeSize(pressure.limitBytes)}, which leaves less than another chat's worth free.`;
-  const closing = pressure.openChats > 1 ? `close a chat you have finished with to free about ${describeChatCost()}` : undefined;
-  const bigger = pressure.nextSize;
-  if (bigger === undefined) {
-    return closing === undefined ? holding : `${holding} This is the largest size there is, so ${closing}.`;
+  const said = [
+    `It is holding ${describeSize(pressure.anonBytes)} of its ${describeSize(pressure.limitBytes)} in memory that cannot be freed up, which leaves less than another chat's worth spare.`,
+    pressure.nextSize === undefined
+      ? "This is the largest size there is."
+      : `Move up to ${pressure.nextSize.size} below for ${pressure.nextSize.limit} of memory and ${pressure.nextSize.chats} chats at once.`
+  ];
+  if (pressure.openChats > 0) {
+    said.push(`Closing a chat frees about ${describeChatCost()} of it.`);
   }
-  const orClose = closing === undefined ? "" : `, or ${closing}`;
-  return `${holding} Move up to ${bigger.size} below for ${bigger.chats} chats at once and ${bigger.limit} of memory${orClose}.`;
+  return said.join(" ");
 }
 
 /** The chats a change of size would stop, as the question names them. */

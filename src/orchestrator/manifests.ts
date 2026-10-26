@@ -115,7 +115,8 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
  * An awake pod with no conversations holds about 0.95Gi of `anon`: its own session, the three agent-hub daemons and
  * the entrypoint. So a cap of N costs 0.95 + 0.65N, and every cap below is inside its size's memory **request**, let
  * alone its limit — `small` at 3 is 2.90Gi of the 4Gi it requests, so a pod holding its full complement of chats is
- * not an eviction candidate for doing so.
+ * not an eviction candidate for doing so. `small` is the size that binds: it stays inside its request up to a cap of
+ * 4, where `medium` holds to 10 and `large` to 23, so that is the number to re-check before raising this.
  *
  * **CPU is what binds, and at the limit rather than the request.** A single session was throttled against `small`'s
  * four-CPU limit, 26 periods of a 30s window at 568m mean, so a session's bursts already want more than four CPUs

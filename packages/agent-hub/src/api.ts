@@ -206,7 +206,7 @@ export type UploadsReportBody = {
 };
 
 /**
- * What this container's memory cgroup says: `memory.max`, `memory.current` and `memory.peak`.
+ * What this container's memory cgroup says: `memory.max`, `memory.current`, `memory.peak` and `memory.stat`'s `anon`.
  *
  * All four or none. Every sentence the hub writes about memory is relative to the limit, and `anon_bytes` is what it
  * warns on, so a partial report would be a figure it had to guess rather than a weaker one — the hub refuses one.
