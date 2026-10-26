@@ -23,6 +23,7 @@ import {
   runBridge
 } from "./bridge.ts";
 import type { Env } from "./env.ts";
+import { CLIENT_FEATURES } from "./features.ts";
 import { ensureStateDir, statePath, writeJson } from "./session.ts";
 import { type SkillListing, skillsHash } from "./skills.ts";
 import { setTranscriptOff } from "./transcript-sync.ts";
@@ -106,7 +107,7 @@ async function startBridge(hubOptions: MockHubOptions, { env: extraEnv, ...bridg
   const url = await hub.listen();
   const api = createApi({ baseUrl: url, devUser: DEV_USER });
   const sid = `bridge-test-${++nextSession}`;
-  const { agent_id: agentId } = await api.register({ session_id: sid, name: sid });
+  const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
   ensureStateDir(sid);
   fs.writeFileSync(statePath(sid, "enabled"), "");
   writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, ...savedAgent });
@@ -463,7 +464,7 @@ describe("runBridge", () => {
     const url = await hub.listen();
     const api = createApi({ baseUrl: url, devUser: DEV_USER });
     const sid = `bridge-test-${++nextSession}`;
-    const { agent_id: agentId } = await api.register({ session_id: sid, name: sid });
+    const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
     ensureStateDir(sid);
     fs.writeFileSync(statePath(sid, "enabled"), "");
     writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid });
@@ -635,7 +636,7 @@ describe("runBridge", () => {
       const url = await hub.listen();
       const api = createApi({ baseUrl: url, devUser: DEV_USER });
       const sid = `bridge-test-${++nextSession}`;
-      const { agent_id: agentId } = await api.register({ session_id: sid, name: sid });
+      const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
       ensureStateDir(sid);
       fs.writeFileSync(statePath(sid, "enabled"), "");
       writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid });
@@ -695,6 +696,126 @@ describe("runBridge", () => {
         product: "ccd",
         product_label: "Core Case Data"
       });
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  /** One upload as the mock hub holds it, and as `held` below takes it. */
+  type HeldUpload = [uploadId: string, upload: { parts: Uint8Array[]; fetched: boolean }];
+
+  /**
+   * Starts a bridge on an assistant conversation, sends the owner's one message carrying `attachments`, and answers
+   * the envelope it was delivered as, with the directory it was given and what the hub was left holding.
+   *
+   * The attachment cases below differ only in what the hub holds and what the frame says about the file, so
+   * everything around that is here. `frame` overrides a field of the `assistant` object, which is how the case of a
+   * frame with no `conversation_id` is written: the field is serialised away, as it would be by a hub that sent none.
+   */
+  async function deliverWithAttachments({
+    conversationId,
+    attachments,
+    held = [],
+    frame = {}
+  }: {
+    conversationId: string;
+    attachments: unknown[];
+    held?: readonly HeldUpload[];
+    frame?: Record<string, unknown>;
+  }): Promise<{ delivered: string; uploads: string; stillHeld: Map<string, { parts: Uint8Array[]; fetched: boolean }> }> {
+    const uploads = fs.mkdtempSync(path.join(home.root, "uploads-"));
+    const bridge = await startBridge({ pingMs: 5000 }, { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: conversationId, AGENT_HUB_UPLOADS_DIR: uploads } });
+    for (const [uploadId, upload] of held) {
+      bridge.hub.attachments.set(uploadId, upload);
+    }
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "what does this say?", {
+        assistant: {
+          conversation_id: conversationId,
+          product: "pcs",
+          product_label: "Possession claims",
+          artefact_version: 0,
+          artefact_updated_by: null,
+          attachments,
+          ...frame
+        }
+      });
+      await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
+      return { delivered: bridge.socketWrites[0] as string, uploads, stillHeld: bridge.hub.attachments };
+    } finally {
+      await bridge.stop();
+    }
+  }
+
+  it("should write an attached file to disk, report it fetched and name its path when the frame carries attachments", async () => {
+    // Arrange
+    const conversationId = "1dc5f5a0-1234-4000-8000-00000000000c";
+    const uploadId = "2dc5f5a0-1234-4000-8000-00000000000d";
+
+    // Act
+    const { delivered, uploads, stillHeld } = await deliverWithAttachments({
+      conversationId,
+      attachments: [{ upload_id: uploadId, name: "letter.pdf", bytes: 6, media_type: "application/pdf", part_bytes: 4, parts: 2 }],
+      held: [[uploadId, { parts: [new Uint8Array(4).fill(1), new Uint8Array(2).fill(2)], fetched: false }]]
+    });
+
+    // Assert
+    const file = path.join(uploads, conversationId, `${uploadId}-letter.pdf`);
+    expect([...fs.readFileSync(file)]).toEqual([1, 1, 1, 1, 2, 2]);
+    expect(stillHeld.get(uploadId)).toEqual({ parts: [], fetched: true });
+    expect(delivered).toMatch(/already saved on this machine at the absolute path below/);
+    expect(delivered).toContain(`- ${file} (application/pdf,`);
+  });
+
+  it("should still deliver the message, saying the file could not be retrieved, when the attachment cannot be fetched", async () => {
+    // Act: the hub knows nothing of this upload, so every part is a 404.
+    const { delivered } = await deliverWithAttachments({
+      conversationId: "3dc5f5a0-1234-4000-8000-00000000000e",
+      attachments: [{ upload_id: "4dc5f5a0-1234-4000-8000-00000000000f", name: "scan.png", bytes: 6, media_type: "image/png", part_bytes: 4, parts: 2 }]
+    });
+
+    // Assert
+    expect(delivered).toMatch(/could not be retrieved and is not on this machine: scan\.png/);
+    expect(delivered).toMatch(/\n---\nwhat does this say\?$/);
+  });
+
+  it("should say the file could not be retrieved when the frame names one but no conversation to fetch it for", async () => {
+    // Act: a frame carrying attachments and no `conversation_id`, which is the shape a hub this client does not fully
+    // understand would send. Without it there is no directory to write to, so nothing can be fetched.
+    const { delivered } = await deliverWithAttachments({
+      conversationId: "5dc5f5a0-1234-4000-8000-000000000010",
+      attachments: [{ upload_id: "6dc5f5a0-1234-4000-8000-000000000011", name: "scan.png", bytes: 6, media_type: "image/png", part_bytes: 4, parts: 2 }],
+      frame: { conversation_id: undefined }
+    });
+
+    // Assert: the message is delivered and names the file as one that could not be retrieved. Delivering it with the
+    // file left out would read as though nothing had been attached, which is the one thing this must not do.
+    expect(delivered).toMatch(/could not be retrieved and is not on this machine: scan\.png/);
+    expect(delivered).toMatch(/ask them to attach it again/);
+    expect(delivered).toMatch(/\n---\nwhat does this say\?$/);
+  });
+
+  it("should ask the assistant conversation to run the skill when the user's message starts with one the session has", async () => {
+    // Arrange
+    const bridge = await startBridge(
+      { pingMs: 5000 },
+      { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: "c1" }, skills: () => [{ name: "cft-explain", description: "Explain" }] }
+    );
+    const assistant = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Act
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "/cft-explain what is CDAM?", { assistant });
+      await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "/pcs:start-env aat", { assistant });
+      await waitUntil(() => bridge.socketWrites.length >= 2, "the second message");
+
+      // Assert
+      expect(bridge.socketWrites[0]).toMatch(/\nIt starts with \/cft-explain: run the cft-explain skill with the rest of the message as its arguments/);
+      expect(bridge.socketWrites[1]).not.toMatch(/skill/);
     } finally {
       await bridge.stop();
     }

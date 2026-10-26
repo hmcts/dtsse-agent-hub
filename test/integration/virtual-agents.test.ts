@@ -59,9 +59,10 @@ vi.mock("next/cache", async () => {
 const { actAs, revalidated } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/virtual-agents.ts");
 const { agentActivity, agentRoute, virtualAgentPage, virtualAgentsPage } = await import("../../src/web/data.ts");
-const credentialsPage = await import("../../src/app/(hub)/settings/credentials/page.tsx");
-const agentsPage = await import("../../src/app/(hub)/agents/[id]/page.tsx");
-const oldVirtualAgentPage = await import("../../src/app/(hub)/virtual/[id]/page.tsx");
+const credentialsPage = await import("../../src/app/hub/settings/credentials/page.tsx");
+const agentsPage = await import("../../src/app/hub/agents/[id]/page.tsx");
+const oldVirtualAgentPage = await import("../../src/app/hub/virtual/[id]/page.tsx");
+const virtualHubPage = await import("../../src/app/hub/virtual/page.tsx");
 
 const SECRET = "a-test-session-secret-long-enough-to-be-plausible";
 
@@ -1735,11 +1736,11 @@ describe("renaming a virtual agent", () => {
   });
 });
 
-describe("/settings/credentials", () => {
+describe("/hub/settings/credentials", () => {
   it("should send the viewer to the credentials section of the virtual agents page when virtual agents are on", async () => {
     actAs("alice");
 
-    await expect(credentialsPage.default()).rejects.toMatchObject({ digest: expect.stringContaining(";/virtual#credentials;") });
+    await expect(credentialsPage.default()).rejects.toMatchObject({ digest: expect.stringContaining(";/hub/virtual#credentials;") });
   });
 
   it("should render the standalone page when virtual agents are off", async () => {
@@ -1849,6 +1850,22 @@ describe("a virtual agent's plugins", () => {
     expect((await row(created.id)).plugins).toEqual([]);
   });
 
+  // The offer list is only read once a name is ticked, so a hub whose configuration is malformed can still create the
+  // virtual agents nobody asked plugins for — every Assistant, among them. Ticking one is a use of the configuration
+  // and still fails loudly.
+  it("should create an agent with no plugins when the hub's plugin configuration is malformed", async () => {
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    expect((await createWith([])).plugins).toEqual([]);
+  });
+
+  it("should fail to create an agent with a ticked plugin when the hub's plugin configuration is malformed", async () => {
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    await expect(createWith(["pcs"])).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
+    expect(await prisma.virtualAgent.count()).toBe(0);
+  });
+
   it("should refuse to create an agent with a plugin the hub does not offer, and create nothing", async () => {
     await insertUser(ALICE);
     actAs("alice");
@@ -1908,6 +1925,24 @@ describe("a virtual agent's plugins", () => {
     expect(await row(agent.id)).toMatchObject({ plugins: [], generation: agent.generation });
   });
 
+  // What the store checks is the names being ticked, so unticking everything never reads the offer list and so never
+  // raises its error. That is the recovery route the owner gets: `PluginsPanel` keeps its form, with one control that
+  // submits an empty list, whenever an agent has plugins and the offer could not be read.
+  it("should let the owner clear every plugin while the hub's plugin configuration is malformed", async () => {
+    const agent = await createWith(["pcs"]);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    expect(await setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, [])).toMatchObject({ plugins: [] });
+  });
+
+  it("should fail to tick a plugin while the hub's plugin configuration is malformed", async () => {
+    const agent = await createWith(["pcs"]);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    await expect(setVirtualAgentPlugins(prisma, ALICE.oid, agent.id, ["pcs", "dtsse"])).rejects.toThrow("VIRTUAL_AGENT_PLUGINS");
+    expect((await row(agent.id)).plugins).toEqual(["pcs"]);
+  });
+
   it("should keep a plugin no longer offered when the owner leaves it ticked, but not let it be added again once unticked", async () => {
     const agent = await createWith(["pcs"]);
     vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "dtsse");
@@ -1946,6 +1981,28 @@ describe("a virtual agent's plugins", () => {
       prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: Array.from({ length: 21 }, (_unused, index) => `p-${index}`) } })
     ).rejects.toThrow(/virtual_agent_plugins_check/);
     await expect(prisma.virtualAgent.update({ where: { id: agent.id }, data: { plugins: { pcs: true } } })).rejects.toThrow(/virtual_agent_plugins_check/);
+  });
+
+  /*
+   * `/hub/virtual` calls `pluginOffer()` in the body of its async default export, so awaiting the page function runs
+   * it: this rejected with `PluginConfigurationError` before the offer was caught, and resolves now. Awaiting the
+   * function is the whole of what this suite can do with a page — it gets the element tree back unrendered, because
+   * rendering one would need SSR of a tree holding client components and server actions, which nothing here does.
+   *
+   * That is why `/hub/agents/{id}` has no twin of this test rather than being an omission. There `pluginOffer()` sits
+   * inside a nested, non-async `VirtualAgent` component, so an awaited page call returns a tree with it unrendered
+   * and never calls it; only a real render would reach a throw in it.
+   *
+   * The type guarantee is narrower than it looks, so it is no substitute. `plugins` being required stops the prop
+   * being left off, and `PluginOffer` being a union stops `plugins={availablePlugins()}`, but
+   * `plugins={{ ok: true, available: availablePlugins() }}` typechecks, throws, and 500s the page.
+   */
+  it("should answer /hub/virtual with the plugin fault rather than throw when the hub's plugin configuration is malformed", async () => {
+    await insertUser(ALICE);
+    actAs("alice");
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    await expect(virtualHubPage.default()).resolves.toBeDefined();
   });
 });
 
@@ -2108,7 +2165,7 @@ describe("PUT /api/virtual/{id}/ports", () => {
   });
 });
 
-describe("/agents/{id}", () => {
+describe("/hub/agents/{id}", () => {
   const ALICE_VIEWER = { ...ALICE, tid: "dev", modelRoute: "bedrock" as const };
   const BOB_VIEWER = { ...BOB, tid: "dev", modelRoute: "bedrock" as const };
 
@@ -2140,9 +2197,9 @@ describe("/agents/{id}", () => {
     const second = (await jsonOf(await register(token, "va-session-2"))).agent_id;
     actAs("alice");
 
-    expect(await agentRoute(ALICE_VIEWER, first)).toEqual({ variant: "moved", to: `/agents/${id}` });
-    await expect(visit(first)).rejects.toMatchObject({ digest: expect.stringContaining(`;/agents/${id};`) });
-    await expect(visit(second)).rejects.toMatchObject({ digest: expect.stringContaining(`;/agents/${id};`) });
+    expect(await agentRoute(ALICE_VIEWER, first)).toEqual({ variant: "moved", to: `/hub/agents/${id}` });
+    await expect(visit(first)).rejects.toMatchObject({ digest: expect.stringContaining(`;/hub/agents/${id};`) });
+    await expect(visit(second)).rejects.toMatchObject({ digest: expect.stringContaining(`;/hub/agents/${id};`) });
     expect(await agentRoute(ALICE_VIEWER, id)).toMatchObject({ variant: "virtual", page: { linked: { agent: { id: second } } } });
   });
 
@@ -2166,7 +2223,7 @@ describe("/agents/{id}", () => {
       variant: "virtual",
       page: { summary: { id, owner: { oid: ALICE.oid } }, manage: null, linked: { agent: { id: agentId }, access: "read" } }
     });
-    expect(await agentRoute(BOB_VIEWER, agentId)).toEqual({ variant: "moved", to: `/agents/${id}` });
+    expect(await agentRoute(BOB_VIEWER, agentId)).toEqual({ variant: "moved", to: `/hub/agents/${id}` });
   });
 
   it("should answer not found when a stranger visits a virtual agent, its session, or an id that is nothing", async () => {
@@ -2190,11 +2247,11 @@ describe("/agents/{id}", () => {
     expect(await agentRoute(ALICE_VIEWER, id)).toBeUndefined();
   });
 
-  it("should redirect the old virtual agent address to /agents/{id} when it is visited", async () => {
+  it("should redirect the old virtual agent address to /hub/agents/{id} when it is visited", async () => {
     const agent = await create(ALICE, "pcs-api");
 
     await expect(oldVirtualAgentPage.default({ params: Promise.resolve({ id: agent.id }) })).rejects.toMatchObject({
-      digest: expect.stringContaining(`;/agents/${agent.id};`)
+      digest: expect.stringContaining(`;/hub/agents/${agent.id};`)
     });
   });
 
@@ -2204,7 +2261,7 @@ describe("/agents/{id}", () => {
 
     await actions.stopVirtualAgent(form({ id: agent.id }));
 
-    expect(revalidated).toEqual(expect.arrayContaining(["/virtual", `/agents/${agent.id}`]));
+    expect(revalidated).toEqual(expect.arrayContaining(["/hub/virtual", `/hub/agents/${agent.id}`]));
   });
 });
 

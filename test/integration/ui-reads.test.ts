@@ -1,10 +1,10 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentView } from "../../src/agents/views.ts";
 import { saveChannel } from "../../src/channels/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import type { Identity } from "../../src/users/identity.ts";
-import { agentActivity, agentRoute, channel, messagePage, overview, sidebarData, topics as topicList } from "../../src/web/data.ts";
+import { agentActivity, agentRoute, channel, messagePage, overview, pluginOffer, sidebarData, topics as topicList } from "../../src/web/data.ts";
 import { insertAgent, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 
 const ALICE = { oid: "oid-alice", name: "Alice", email: "alice@example.com" };
@@ -13,7 +13,7 @@ const CAROL = { oid: "oid-carol", name: "Carol", email: "carol@example.com" };
 
 const viewer = (who: Person): Identity => ({ ...who, tid: "dev" });
 
-/** The agent `who` sees on `/agents/{id}`, when it is an agent shown as itself. */
+/** The agent `who` sees on `/hub/agents/{id}`, when it is an agent shown as itself. */
 async function agentPage(who: Person, id: string): Promise<AgentView | undefined> {
   const route = await agentRoute({ ...viewer(who), modelRoute: "bedrock" }, id);
   return route?.variant === "local" ? route.view : undefined;
@@ -231,5 +231,38 @@ describe("messagePage", () => {
     for (const id of ["abc", "0", "007", "-1", "9223372036854775808", "999999"]) {
       expect(await messagePage(viewer(ALICE), id)).toBeUndefined();
     }
+  });
+});
+
+// The one catch a malformed `VIRTUAL_AGENT_PLUGINS` gets, so no page that offers plugins can let it throw. The hub's
+// own plugin surfaces show `error` in place of the ticks; the Assistant hides its section. Neither may answer
+// an unreadable configuration with an empty offer, which is why the two are separate states here.
+describe("pluginOffer", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("should offer what the hub is configured with, in the order given", () => {
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "pcs=PCS team workflows,dtsse");
+
+    expect(pluginOffer()).toEqual({
+      ok: true,
+      available: [
+        { name: "pcs", description: "PCS team workflows" },
+        { name: "dtsse", description: "" }
+      ]
+    });
+  });
+
+  it("should offer an empty list when the hub is configured with no plugins", () => {
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "");
+
+    expect(pluginOffer()).toEqual({ ok: true, available: [] });
+  });
+
+  it("should name the variable and the fault, rather than throw or offer none, when the configuration is malformed", () => {
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "dtsse,Not A Plugin Name");
+
+    expect(pluginOffer()).toEqual({ ok: false, error: 'VIRTUAL_AGENT_PLUGINS has "Not A Plugin Name", which is not a plugin name' });
   });
 });

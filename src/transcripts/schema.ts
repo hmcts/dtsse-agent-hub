@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { boundedArray } from "../agent-api/bounded-array.ts";
 import { messageIdOf } from "../messages/limits.ts";
 import { contentBytes, ENTRY_KEY_PATTERN, MAX_BATCH_ENTRIES, MAX_ENTRY_CONTENT_BYTES, MAX_ENTRY_KEY, MAX_REDACTED_PATTERN, MAX_SESSION_ID } from "./limits.ts";
 
@@ -106,7 +107,7 @@ const entry = z
 
 export const transcriptBody = z.object({
   session_id: z.string().trim().min(1).max(MAX_SESSION_ID),
-  entries: z.array(entry).min(1).max(MAX_BATCH_ENTRIES, `at most ${MAX_BATCH_ENTRIES} entries per request`)
+  entries: boundedArray(entry, MAX_BATCH_ENTRIES, { min: 1, message: `at most ${MAX_BATCH_ENTRIES} entries per request` })
 });
 
 export type NewTranscriptEntry = z.output<typeof entry>;

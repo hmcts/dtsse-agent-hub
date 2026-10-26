@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { onboarded, readiness } from "./onboarding.ts";
+import { connectionsAsk, onboarded, readiness } from "./onboarding.ts";
 
 describe("readiness", () => {
   it("should be complete and ready when the assistant is running", () => {
@@ -28,5 +28,23 @@ describe("onboarded", () => {
 
   it("should not be onboarded when a needed credential is missing", () => {
     expect(onboarded(["github", "azure", "bedrock"], new Set(["github", "azure"]))).toBe(false);
+  });
+
+  it("should be onboarded with no Atlassian, Jenkins, CLAUDE.md or git identity stored, since none of those is needed", () => {
+    expect(onboarded(["github", "azure", "claude"], new Set(["github", "azure", "claude"]))).toBe(true);
+  });
+});
+
+describe("connectionsAsk", () => {
+  it("should ask for the accounts when none of the needed credentials is stored", () => {
+    expect(connectionsAsk(false, null)).toBe("connect");
+  });
+
+  it("should ask for nothing when every needed credential is stored", () => {
+    expect(connectionsAsk(true, null)).toBe("done");
+  });
+
+  it("should not ask for the accounts when the hub could not read the credentials it judged that on", () => {
+    expect(connectionsAsk(false, "this deployment has no credentials vault")).toBe("unknown");
   });
 });

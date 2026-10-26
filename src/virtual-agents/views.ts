@@ -104,6 +104,18 @@ export function neededCredentials(route: ModelRoute): CredentialKind[] {
   return route === "own-licence" ? ["github", "azure", "claude"] : ["github", "azure", "bedrock"];
 }
 
+/**
+ * Whether a Claude token is any use to this person, which is what decides whether they may store one.
+ *
+ * An agent's route is fixed on its row when it is created, and its pod boots on that; the person's own route follows
+ * their `AIGateway.User` app role, read fresh at each sign-in. So the two disagree for as long as it takes someone
+ * granted or losing that role to replace their agents, and the agents are what needs the token. Their own route
+ * stands in for the agent they have not created yet, which would be made on the route they are on now.
+ */
+export function claudeTokenUsable(viewerRoute: ModelRoute, agentRoutes: readonly ModelRoute[]): boolean {
+  return viewerRoute === "own-licence" || agentRoutes.includes("own-licence");
+}
+
 /** The agent, its logins and what it needs, or `undefined` when there is no such agent or it is not the viewer's. */
 export async function virtualAgentDetail(db: Database, viewerOid: string, id: string): Promise<VirtualAgentDetail | undefined> {
   if (!isUuid(id)) {

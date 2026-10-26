@@ -61,7 +61,7 @@ describe("ChannelBuilder", () => {
     await save();
 
     expect(saveAction).toHaveBeenCalledWith({ name: "PCS data", topics: ["pcs-api", "database"], match: "all", shared: true });
-    expect(pushed).toEqual(["/channels/channel-1"]);
+    expect(pushed).toEqual(["/hub/channels/channel-1"]);
   });
 
   it("should refuse to save and say why when no topic is chosen", async () => {

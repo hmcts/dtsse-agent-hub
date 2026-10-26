@@ -9,6 +9,7 @@ import { createMockHub } from "./__fixtures__/mock-hub.ts";
 import { type Api, ApiError, createApi, type RequestOptions, type TranscriptBody, type TranscriptResponse } from "./api.ts";
 import type { Env } from "./env.ts";
 import { directEnvelope } from "./envelope.ts";
+import { CLIENT_FEATURES } from "./features.ts";
 import { ensureStateDir, readJson, statePath } from "./session.ts";
 import {
   BACKFILL_BYTES,
@@ -203,6 +204,33 @@ describe("toEntries", () => {
         )
       )
     ).not.toContain("secret thoughts");
+  });
+
+  // Both shapes are real: a line carries `interruptedMessageId` most of the time but not always, and neither carries
+  // `isMeta`, so without this the notice would upload and read in the Assistant's thread as a message the person
+  // typed. Content as an array as well as a string, which is how Claude Code actually writes it.
+  it("should skip the notice Claude Code writes where the person interrupted a turn", () => {
+    // Arrange
+    const notices: unknown[] = [
+      userLine("[Request interrupted by user]", { interruptedMessageId: "msg_1" }),
+      userLine([{ type: "text", text: "[Request interrupted by user]" }], { interruptedMessageId: "msg_1" }),
+      userLine([{ type: "text", text: "[Request interrupted by user for tool use]" }]),
+      userLine([{ type: "text", text: "  [Request interrupted by user]  " }])
+    ];
+
+    // Act & Assert
+    for (const line of notices) {
+      expect(toEntries(line), JSON.stringify(line).slice(0, 80)).toEqual([]);
+    }
+    expect(parseEntries(jsonl(...notices))).toEqual([]);
+  });
+
+  it("should keep a message that only mentions an interrupt, which the person did type", () => {
+    // Act
+    const entries = toEntries(userLine("Why did [Request interrupted by user] show up in my thread?"));
+
+    // Assert
+    expect(entries).toEqual([expect.objectContaining({ role: "user" })]);
   });
 
   it("should key an entry by uuid and part index, counting the parts it skipped", () => {
@@ -723,7 +751,7 @@ describe("createTranscriptSync", () => {
     try {
       const api = createApi({ baseUrl: url, devUser: "u-me|Me|me@example.com" });
       const sid = `sync-test-${++nextSession}`;
-      const { agent_id: agentId } = await api.register({ session_id: sid, name: sid });
+      const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
       ensureStateDir(sid);
       const file = path.join(home.root, `${sid}.jsonl`);
       const lines: unknown[] = [];

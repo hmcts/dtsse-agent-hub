@@ -117,10 +117,11 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
     // `HAI_ENV_READY` as well — the two together short-circuit the route resolution that builds the Bedrock
     // environment the `bedrock` route needs.
     { name: "HAI_IN_CONTAINER", value: "1" },
-    // A pod runs the hai its image was built with, for the same reason its settings pin an image digest. Left to
-    // itself hai checks npm on every session start, and `CONVERSATION_SESSIONS` starts enough of them at once that
-    // concurrent `npm install -g` runs would race on one nvm prefix. Claude Code's DISABLE_AUTOUPDATER is a
-    // different switch and does not cover this.
+    // A pod runs the hai its entrypoint installed at boot, for its whole lifetime. Boot resolves `@latest` once and
+    // this pins that choice: left to itself hai checks npm on every session start, and `CONVERSATION_SESSIONS`
+    // starts enough of them at once that concurrent `npm install -g` runs would race on one nvm prefix. It also
+    // keeps hai from moving under a running agent mid-work. The image's own hai is only the floor boot keeps when
+    // the install fails. Claude Code's DISABLE_AUTOUPDATER is a different switch and does not cover this.
     { name: "HAI_NO_UPDATE", value: "1" },
     { name: "KNOWLEDGE_SWEEP_CHILD", value: "1" },
     { name: "VIRTUAL_AGENT_PUBLIC_DOMAIN", value: spec.publicDomain },

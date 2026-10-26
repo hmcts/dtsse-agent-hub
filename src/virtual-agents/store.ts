@@ -137,7 +137,7 @@ export async function createVirtualAgent(prisma: PrismaClient, request: NewVirtu
   if (!size.ok) {
     throw new HttpError(400, size.error);
   }
-  const plugins = checkPlugins(request.plugins, offeredPlugins());
+  const plugins = checkPlugins(request.plugins, offeredPlugins);
   if (!plugins.ok) {
     throw new HttpError(400, plugins.error);
   }
@@ -170,6 +170,16 @@ export async function findVirtualAgent(db: Database, id: string): Promise<Virtua
 export async function listVirtualAgents(db: Database, ownerOid: string): Promise<VirtualAgentRow[]> {
   const rows = await db.virtualAgent.findMany({ where: { ownerOid }, select: SELECT, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
   return rows.map(toRow);
+}
+
+/**
+ * The model routes the owner's live virtual agents are on, without repeats and in no particular order: what decides
+ * which credentials any pod of theirs will ask for, since each pod boots on its own row's route. Deleted agents are
+ * left out because nothing boots from them again.
+ */
+export async function liveModelRoutes(db: Database, ownerOid: string): Promise<ModelRoute[]> {
+  const rows = await db.virtualAgent.findMany({ where: { ownerOid, desired: { not: "deleted" } }, select: { modelRoute: true } });
+  return [...new Set(rows.map((row) => toRoute(row.modelRoute)))];
 }
 
 const NO_TOKEN = { launchTokenHash: null, launchTokenIssuedAt: null } as const;
@@ -315,7 +325,7 @@ export async function setVirtualAgentPlugins(
     if (row.desired === "deleted") {
       throw new HttpError(409, "that virtual agent is being deleted");
     }
-    const checked = checkPlugins(plugins, [...offeredPlugins(), ...row.plugins]);
+    const checked = checkPlugins(plugins, () => [...offeredPlugins(), ...row.plugins]);
     if (!checked.ok) {
       throw new HttpError(400, checked.error);
     }

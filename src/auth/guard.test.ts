@@ -43,7 +43,7 @@ describe("exempt", () => {
     expect(exempt(path)).toBe(true);
   });
 
-  it.each(["/", "/c", "/agents/0f8a", "/access"])("should require a session for %s", (path) => {
+  it.each(["/", "/hub", "/hub/c", "/hub/agents/0f8a", "/hub/access"])("should require a session for %s", (path) => {
     expect(exempt(path)).toBe(false);
   });
 
@@ -62,12 +62,12 @@ describe("exempt", () => {
 });
 
 describe("safeReturnTo", () => {
-  it.each(["/", "/c?topics=pcs-api,database&mode=any", "/agents/0f8a", "/access#grants"])("should keep the same-origin path %s", (path) => {
+  it.each(["/", "/hub", "/hub/c?topics=pcs-api,database&mode=any", "/hub/agents/0f8a", "/hub/access#grants"])("should keep the same-origin path %s", (path) => {
     expect(safeReturnTo(path)).toBe(path);
   });
 
   it("should keep a path containing a hyphen, which a careless character class would reject", () => {
-    expect(safeReturnTo("/c?topics=pcs-api")).toBe("/c?topics=pcs-api");
+    expect(safeReturnTo("/hub/c?topics=pcs-api")).toBe("/hub/c?topics=pcs-api");
   });
 
   it.each([

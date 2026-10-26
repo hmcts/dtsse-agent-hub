@@ -1,4 +1,4 @@
-import type { PluginOption } from "@/virtual-agents/plugins";
+import type { PluginOffer, PluginOption } from "@/virtual-agents/plugins";
 
 /** What the hub offers, then any ticked name it no longer does, which can be kept or unticked but not ticked again. */
 export function pluginChoices(available: readonly PluginOption[], checked: readonly string[]): (PluginOption & { offered: boolean })[] {
@@ -8,11 +8,28 @@ export function pluginChoices(available: readonly PluginOption[], checked: reado
 }
 
 /**
- * A checkbox per workspace plugin, each a `plugins` field, so the form sends the ticked names and nothing for none.
- * Nothing at all when there is nothing to offer or keep.
+ * What a malformed `VIRTUAL_AGENT_PLUGINS` shows instead of the ticks. It quotes the variable and the fault, because
+ * the fix is a change to the hub's configuration and the reader is who makes it; the surrounding page is unaffected,
+ * so it says that too rather than leave the reader wondering what else to distrust.
  */
-export function PluginsField({ available, checked = [] }: { available: readonly PluginOption[]; checked?: readonly string[] }) {
-  const choices = pluginChoices(available, checked);
+export function PluginConfigurationFault({ error }: { error: string }) {
+  return (
+    <div role="alert" className="block basis-full rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-amber-200">
+      <p className="font-semibold">Plugins cannot be offered</p>
+      <p className="mt-1 text-xs">{error}. Nothing can be ticked until the hub's configuration is corrected; the rest of this page is unaffected.</p>
+    </div>
+  );
+}
+
+/**
+ * A checkbox per workspace plugin, each a `plugins` field, so the form sends the ticked names and nothing for none.
+ * An offer that could not be read says so in their place. Nothing at all when there is nothing to offer or keep.
+ */
+export function PluginsField({ offer, checked = [] }: { offer: PluginOffer; checked?: readonly string[] }) {
+  if (!offer.ok) {
+    return <PluginConfigurationFault error={offer.error} />;
+  }
+  const choices = pluginChoices(offer.available, checked);
   if (choices.length === 0) {
     return null;
   }

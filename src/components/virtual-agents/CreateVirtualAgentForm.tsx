@@ -2,7 +2,7 @@
 
 import { ActionForm } from "@/components/ActionForm";
 import { MAX_NAME_LENGTH } from "@/virtual-agents/limits";
-import type { PluginOption } from "@/virtual-agents/plugins";
+import type { PluginOffer } from "@/virtual-agents/plugins";
 import type { ActionResult } from "@/web/action";
 import { PluginsField } from "./PluginsField";
 import { SizeSelect } from "./SizePanel";
@@ -16,16 +16,20 @@ const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white ho
 /**
  * A client component because `navigate` is a function, which cannot cross from a Server Component; `create` is a
  * server action, which can.
+ *
+ * `plugins` is required, and is so on every component that passes it on. A default of "the hub offers none" would let
+ * a caller that forgot it compile, and the form would then tell the person the hub has no plugins — the quiet collapse
+ * `PluginOffer`'s unreadable arm exists to prevent, arrived at by omission instead.
  */
-export function CreateVirtualAgentForm({ create, plugins = [] }: { create: CreateAction; plugins?: readonly PluginOption[] }) {
+export function CreateVirtualAgentForm({ create, plugins }: { create: CreateAction; plugins: PluginOffer }) {
   return (
-    <ActionForm action={create} navigate={(created) => `/agents/${created.id}`} label="Create a virtual agent" className="flex flex-wrap items-end gap-3">
+    <ActionForm action={create} navigate={(created) => `/hub/agents/${created.id}`} label="Create a virtual agent" className="flex flex-wrap items-end gap-3">
       <label className="block">
         <span className="block text-hub-text">Name</span>
         <input name="name" required maxLength={MAX_NAME_LENGTH} autoComplete="off" spellCheck={false} className={INPUT} />
       </label>
       <SizeSelect />
-      <PluginsField available={plugins} />
+      <PluginsField offer={plugins} />
       <button type="submit" className={BUTTON}>
         Create
       </button>

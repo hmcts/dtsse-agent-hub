@@ -1,21 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { decodeEvent, encodeEvent, type NotifiedEvent } from "./events.ts";
+import { NOTIFIED_EVENTS } from "./__fixtures__/events.ts";
+import { decodeEvent, encodeEvent } from "./events.ts";
 
 describe("encodeEvent and decodeEvent", () => {
-  it.each<NotifiedEvent>([
-    { type: "post", message_id: "12" },
-    { type: "direct", message_id: "13", target_agent_id: "agent-b", author_agent_id: "agent-a" },
-    { type: "direct", message_id: "14", target_agent_id: null, author_agent_id: "agent-a" },
-    { type: "direct", message_id: "15", target_agent_id: "agent-b", author_agent_id: null },
-    { type: "agent_status", agent_id: "agent-a", owner_oid: "oid-a", status: "offline" },
-    { type: "agent_skills", agent_id: "agent-a", owner_oid: "oid-a" },
-    { type: "delivery", message_id: "16", agent_id: "agent-b", state: "delivered" },
-    { type: "grant", owner_oid: "oid-a", grantee_oid: "oid-b" },
-    { type: "transcript", agent_id: "agent-a", owner_oid: "oid-a", last_id: "17" },
-    { type: "credential", owner_oid: "oid-a", kind: "github" },
-    { type: "virtual_agent", virtual_agent_id: "va-a", owner_oid: "oid-a" },
-    { type: "assistant_conversation", conversation_id: "c-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }
-  ])("should carry a $type event across unchanged", (event) => {
+  // Driven from the samples record rather than a list written here, because `decodeEvent` answers `undefined` for a
+  // type it has no arm for: a new member of the union would be published, cross pods and be dropped by every pod but
+  // the publisher, which with more than one replica looks like the UI updating about half the time.
+  it.each(NOTIFIED_EVENTS)("should carry a $type event across unchanged", (event) => {
     expect(decodeEvent(encodeEvent(event))).toEqual(event);
   });
 
@@ -48,7 +39,10 @@ describe("encodeEvent and decodeEvent", () => {
     ["a virtual agent without an owner", JSON.stringify({ type: "virtual_agent", virtual_agent_id: "va" })],
     ["a conversation without an id", JSON.stringify({ type: "assistant_conversation", virtual_agent_id: "va", owner_oid: "o" })],
     ["a conversation without its assistant", JSON.stringify({ type: "assistant_conversation", conversation_id: "c", owner_oid: "o" })],
-    ["a conversation without an owner", JSON.stringify({ type: "assistant_conversation", conversation_id: "c", virtual_agent_id: "va" })]
+    ["a conversation without an owner", JSON.stringify({ type: "assistant_conversation", conversation_id: "c", virtual_agent_id: "va" })],
+    ["a stop without a conversation", JSON.stringify({ type: "assistant_stop", virtual_agent_id: "va", owner_oid: "o" })],
+    ["a stop without its assistant", JSON.stringify({ type: "assistant_stop", conversation_id: "c", owner_oid: "o" })],
+    ["a stop without an owner", JSON.stringify({ type: "assistant_stop", conversation_id: "c", virtual_agent_id: "va" })]
   ])("should ignore %s", (_label, payload) => {
     expect(decodeEvent(payload)).toBeUndefined();
   });

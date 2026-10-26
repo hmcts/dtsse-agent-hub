@@ -78,7 +78,7 @@ describe("SidebarDrawer", () => {
     const { rerender } = render(<Page />);
     fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
 
-    navigation.pathname = "/topics";
+    navigation.pathname = "/hub/topics";
     act(() => rerender(<Page />));
 
     expect(drawer().className).toContain("max-md:invisible");

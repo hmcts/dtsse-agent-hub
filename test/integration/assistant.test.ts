@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setGrant } from "../../src/access/load.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
@@ -8,8 +9,9 @@ import * as agentsRoute from "../../src/app/api/agent/agents/route.ts";
 import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
+import * as uiTranscriptRoute from "../../src/app/api/ui/agents/[id]/transcript/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
-import { createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
+import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { expireDeliveries } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
@@ -77,12 +79,26 @@ async function startedAssistant(): Promise<{ id: string; token: string; claimed:
   return { id: assistant.id, token: claimed.launch_token!, claimed };
 }
 
-function register(token: string, sessionId: string, conversationId?: string): Promise<Response> {
+function register(
+  token: string,
+  sessionId: string,
+  conversationId?: string,
+  reported: { skills?: { name: string; description: string }[]; clientFeatures?: string[] } = {}
+): Promise<Response> {
   return pod(registerRoute.POST, token, "/api/agent/register", {}, "POST", {
     session_id: sessionId,
     name: "session",
-    ...(conversationId === undefined ? {} : { conversation_id: conversationId })
+    ...(conversationId === undefined ? {} : { conversation_id: conversationId }),
+    ...(reported.skills === undefined ? {} : { skills: reported.skills }),
+    // Left out unless a test is a newer client: a pod runs whatever client version its image booted with.
+    ...(reported.clientFeatures === undefined ? {} : { client_features: reported.clientFeatures })
   });
+}
+
+/** The browser's own read of a session's transcript, as the person named by `persona`. */
+function uiTranscript(persona: string, agentId: string): Promise<Response> {
+  const request = new NextRequest(`http://localhost:3000/api/ui/agents/${agentId}/transcript`, { headers: { cookie: `ah_dev_persona=${persona}` } });
+  return uiTranscriptRoute.GET(request, { params: Promise.resolve({ id: agentId }) });
 }
 
 async function sessionOf(conversationId: string): Promise<{ agentId: string; sessionId: string }> {
@@ -122,6 +138,54 @@ describe("the person's assistant", () => {
     expect(second.assistant.id).toBe(first.assistant.id);
     expect(await prisma.virtualAgent.findMany({ where: { ownerOid: ALICE.oid }, select: { name: true } })).toEqual([{ name: "assistant" }]);
     expect(first.assistant).toMatchObject({ needed: ["github", "azure", "claude"], onboarded: false, readiness: { percent: 10 } });
+  });
+
+  it("should offer the plugins the hub is configured with, and the ones the assistant loads", async () => {
+    await insertUser(ALICE);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "pcs=PCS team workflows,dtsse");
+
+    expect((await openAssistant(VIEWER)).plugins).toEqual({
+      available: [
+        { name: "pcs", description: "PCS team workflows" },
+        { name: "dtsse", description: "" }
+      ],
+      checked: []
+    });
+  });
+
+  it("should offer an empty list of plugins when the hub is configured with none", async () => {
+    await insertUser(ALICE);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "");
+
+    expect((await openAssistant(VIEWER)).plugins).toEqual({ available: [], checked: [] });
+  });
+
+  // A malformed configuration hides the plugins section and leaves the rest of the Assistant working, because it is
+  // someone's whole chat surface and they can neither see the configuration nor fix it. Both halves of that are load
+  // bearing: the section hides because `pluginOffer` catches, and the first visit gets that far at all because
+  // `createVirtualAgent` reads the offer list only when plugins are ticked. The hub's own plugin surfaces read the
+  // same catch and name the fault in place of their plugin form, which is where it is actionable.
+  it("should create the assistant and hide the plugins section on a first visit when the configuration is malformed", async () => {
+    await insertUser(ALICE);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    const home = await openAssistant(VIEWER);
+
+    expect(home.plugins).toBeNull();
+    expect(await prisma.virtualAgent.findMany({ where: { ownerOid: ALICE.oid }, select: { name: true, plugins: true } })).toEqual([
+      { name: "assistant", plugins: [] }
+    ]);
+  });
+
+  it("should hide the plugins section on a return visit when the configuration is malformed", async () => {
+    await insertUser(ALICE);
+    const existing = await ensureAssistant(prisma, VIEWER);
+    vi.stubEnv("VIRTUAL_AGENT_PLUGINS", "Not A Plugin Name");
+
+    const home = await openAssistant(VIEWER);
+
+    expect(home.plugins).toBeNull();
+    expect(home.assistant.id).toBe(existing.id);
   });
 
   it("should use the person's first virtual agent when they already have several", async () => {
@@ -167,6 +231,25 @@ describe("the person's assistant", () => {
 
     expect((await ensureAssistant(prisma, VIEWER)).desired).toBe("running");
   });
+
+  // `ensureAssistant` leaves an existing row's `model_route` alone, and the pod boots on it, so an `AIGateway.User`
+  // app role granted after the row was made puts the viewer on a different route from their own assistant. What
+  // `/assistant` asks for must then be storable: it asks for the row's credentials, and the only Claude token the
+  // hub will ever hand that pod is the one this page can take.
+  it.each([
+    ["bedrock", "own-licence", ["github", "azure", "claude"], true],
+    ["own-licence", "bedrock", ["github", "azure", "bedrock"], true],
+    ["own-licence", "own-licence", ["github", "azure", "claude"], true],
+    ["bedrock", "bedrock", ["github", "azure", "bedrock"], false]
+  ] as const)("should ask for the assistant's own credentials and allow every one of them when the viewer is on %s and the row on %s", async (viewerRoute, rowRoute, needed, claudeTokenUsable) => {
+    await insertUser(ALICE);
+    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: rowRoute, name: "assistant" });
+
+    const home = await openAssistant({ ...ALICE, tid: "dev", modelRoute: viewerRoute });
+
+    expect(home.assistant.needed).toEqual(needed);
+    expect(home.credentials).toMatchObject({ modelRoute: viewerRoute, claudeTokenUsable });
+  });
 });
 
 describe("conversations", () => {
@@ -192,7 +275,7 @@ describe("conversations", () => {
 
   it("should adopt the conversation's agent and clear its wake when the pod's session registers for it", async () => {
     const { id: assistantId, token } = await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "hello" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "hello" })) as { id: string }).id;
     const { agentId, sessionId } = await sessionOf(id);
 
     const response = await register(token, sessionId, id);
@@ -206,7 +289,7 @@ describe("conversations", () => {
 
   it("should move the conversation to the new session's agent when a /clear registers a new session id", async () => {
     const { token } = await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "hello" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "hello" })) as { id: string }).id;
     const { agentId, sessionId } = await sessionOf(id);
     await register(token, sessionId, id);
 
@@ -220,7 +303,7 @@ describe("conversations", () => {
     const { token } = await startedAssistant();
     await insertUser(BOB);
     const bobs = await ensureAssistant(prisma, { oid: BOB.oid, modelRoute: "bedrock" });
-    const conversation = await createConversation(prisma, BOB.oid, { product: "other" });
+    const conversation = await createConversation(prisma, BOB.oid, { product: "general" });
 
     expect(bobs.id).not.toBe(conversation.id);
     expect((await register(token, "stray", conversation.id)).status).toBe(409);
@@ -243,13 +326,13 @@ describe("conversations", () => {
     expect(data).toMatchObject({
       from_owner: true,
       message: { body: "What is a conditional order?" },
-      assistant: { conversation_id: id, product: "nfdiv", product_label: "No Fault Divorce", artefact_version: 0, artefact_updated_by: null }
+      assistant: { conversation_id: id, product: "nfdiv", product_label: "No Fault Divorce (NFDIV)", artefact_version: 0, artefact_updated_by: null }
     });
   });
 
   it("should not expire a new message to a conversation whose agent has been offline for days", async () => {
     await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "old" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "old" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
     await prisma.agent.update({ where: { id: agentId }, data: { lastHeartbeatAt: new Date(Date.now() - 3 * 86_400_000) } });
 
@@ -270,7 +353,7 @@ describe("conversations", () => {
     await startedAssistant();
     await insertUser(BOB);
     await setGrant(prisma, ALICE.oid, BOB.oid, "write");
-    const id = ((await actions.startConversation({ product: "other", body: "private" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "private" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
     await expect(directAsPerson(prisma, BOB.oid, agentId, "peek")).rejects.toMatchObject({ status: 404 });
@@ -280,7 +363,7 @@ describe("conversations", () => {
 
   it("should send the hub's agent page for a conversation's agent to the conversation", async () => {
     await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "hi" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
     expect(await agentRoute(VIEWER, agentId)).toEqual({ variant: "moved", to: `/assistant/${id}` });
@@ -296,9 +379,52 @@ describe("conversations", () => {
     expect(await actions.sendAssistantMessage({ conversationId: id, body: "hi" })).toEqual({ ok: false, error: "that conversation no longer exists" });
   });
 
+  /**
+   * The activity line, including how many subagents the answer is waiting on, is derived in the browser from these
+   * entries. Nothing says so on the wire, so what keeps it from a non-owner is the transcript read itself.
+   */
+  it("should send a session's tool calls to the owner and to nobody else, so only they see what it is doing", async () => {
+    const { token } = await startedAssistant();
+    await insertUser(BOB);
+    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
+    const id = ((await actions.startConversation({ product: "general", body: "look into this" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id);
+    await pod(transcriptRoute.POST, token, `/api/agent/${agentId}/transcript`, { agentId }, "POST", {
+      session_id: sessionId,
+      entries: [{ key: "e1", role: "tool_use", content: { id: "t1", name: "Agent", input: { description: "dig" } }, occurred_at: new Date().toISOString() }]
+    });
+
+    const owner = await uiTranscript("alice", agentId);
+    expect(owner.status).toBe(200);
+    expect((await jsonOf(owner)).entries).toMatchObject([{ role: "tool_use", content: { id: "t1", name: "Agent" } }]);
+
+    expect((await uiTranscript("bob", agentId)).status).toBe(404);
+    expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "bedrock" }, id)).toBeUndefined();
+  });
+
+  it("should carry the session's skills to the conversation page, and none before a session registers", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+
+    expect((await assistantConversation(VIEWER, id))?.skills).toEqual([]);
+    await register(token, sessionId, id, {
+      skills: [
+        { name: "cft-how-to", description: "Find a how-to recipe" },
+        { name: "cft-explain", description: "Answer a what is X question" }
+      ]
+    });
+
+    expect((await assistantConversation(VIEWER, id))?.skills).toEqual([
+      { name: "cft-explain", description: "Answer a what is X question" },
+      { name: "cft-how-to", description: "Find a how-to recipe" }
+    ]);
+  });
+
   it("should record each change of product, and leave it alone when it is the same", async () => {
     await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "hi" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
 
     expect(await actions.setConversationProduct({ conversationId: id, product: "ccd" })).toEqual({ ok: true });
     await actions.setConversationProduct({ conversationId: id, product: "ccd" });
@@ -308,9 +434,80 @@ describe("conversations", () => {
     expect(conversation.productHistory.map((change) => change.product)).toEqual(["ccd"]);
   });
 
+  it("should store and record the pick when the product picked is the default a retired slug reads as", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "ccd", body: "hi" })) as { id: string }).id;
+    await prisma.$executeRaw`UPDATE assistant_conversation SET product = 'other' WHERE id = ${id}::uuid`;
+
+    expect(await actions.setConversationProduct({ conversationId: id, product: "general" })).toEqual({ ok: true });
+
+    const [row] = await prisma.$queryRaw<{ product: string }[]>`SELECT product FROM assistant_conversation WHERE id = ${id}::uuid`;
+    expect(row!.product).toBe("general");
+    expect((await findConversation(prisma, ALICE.oid, id))!.productHistory.map((change) => change.product)).toEqual(["general"]);
+  });
+
+  it("should read as the default on every page when a conversation is on a product no longer offered", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "ccd", body: "hi" })) as { id: string }).id;
+    // What a replica still on the previous bundle writes during a rolling deploy, and what a retirement leaves.
+    await prisma.$executeRaw`UPDATE assistant_conversation SET product = 'other' WHERE id = ${id}::uuid`;
+
+    const view = (await assistantConversation(VIEWER, id))!;
+
+    expect(view).toMatchObject({ product: "general", productLabel: "General" });
+    expect((await findConversation(prisma, ALICE.oid, id))!.product).toBe("general");
+    expect((await openAssistant(VIEWER)).conversations.flatMap((group) => group.items)).toMatchObject([{ id, product: "general", productLabel: "General" }]);
+  });
+
+  it("should tell the session the stored product when a conversation is on one no longer offered", async () => {
+    const { id: assistantId } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "ccd", body: "hi" })) as { id: string }).id;
+    await prisma.$executeRaw`UPDATE assistant_conversation SET product = 'other' WHERE id = ${id}::uuid`;
+
+    const { agentId } = await sessionOf(id);
+
+    // The session keeps the subject it was started in; its label is the slug, since the list has no name for it.
+    expect(await assistantFrame(prisma, agentId)).toMatchObject({ product: "other", product_label: "other" });
+    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.product)).toEqual(["other"]);
+  });
+
+  it("should carry attachments on a frame built for a delivery and leave them out of one built for a wake", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+    // A client from before client features existed: it reports none, so it claims none. No frame field is gated on
+    // the claim yet, so what decides `attachments` is the message, not the session — see `AssistantFrame`.
+    await register(token, sessionId, id);
+    const { agentId } = await sessionOf(id);
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).clientFeatures).toBeNull();
+
+    const { id: messageId } = await prisma.message.findFirstOrThrow({ where: { kind: "direct" }, select: { id: true } });
+    const frame = { conversation_id: id, product: "general", product_label: "General", artefact_version: 0, artefact_updated_by: null };
+
+    // A wake is "this conversation needs a session", so there is no message whose files the field could name.
+    expect(await assistantFrame(prisma, agentId)).toEqual(frame);
+    expect(await assistantFrame(prisma, agentId, messageId)).toEqual({ ...frame, attachments: [] });
+  });
+
+  it("should offer the conversation what its session's client claimed, so the composer can act on it", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+
+    // Before any session has registered, and after an old client's, the conversation claims nothing.
+    expect((await assistantConversation(VIEWER, id))!.clientFeatures).toBeNull();
+    await register(token, sessionId, id);
+    expect((await assistantConversation(VIEWER, id))!.clientFeatures).toBeNull();
+
+    // The pod is restarted on a newer client, which re-registers the same session.
+    await register(token, sessionId, id, { clientFeatures: ["attachments"] });
+
+    expect((await assistantConversation(VIEWER, id))!.clientFeatures).toEqual(["attachments"]);
+  });
+
   it("should rename and delete a conversation with everything it holds", async () => {
     await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "hi" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
     expect(await actions.renameConversation({ conversationId: id, title: "  Listing   notes " })).toEqual({ ok: true });
@@ -324,7 +521,7 @@ describe("conversations", () => {
 
   it("should wake a conversation when its composer is focused and the session is offline", async () => {
     const { id: assistantId, token } = await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "hi" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { sessionId } = await sessionOf(id);
     await register(token, sessionId, id);
     await prisma.agent.updateMany({ where: { sessionId }, data: { status: "offline" } });
@@ -358,7 +555,7 @@ describe("the sessions stream and report", () => {
 
   it("should ask the pod to resume a session that has sent its transcript", async () => {
     const { id: assistantId, token } = await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "hi" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { agentId, sessionId } = await sessionOf(id);
     await register(token, sessionId, id);
     await pod(transcriptRoute.POST, token, `/api/agent/${agentId}/transcript`, { agentId }, "POST", {
@@ -370,13 +567,13 @@ describe("the sessions stream and report", () => {
 
     await actions.sendAssistantMessage({ conversationId: id, body: "again" });
 
-    expect(await pendingWakes(prisma, assistantId)).toEqual([{ conversation_id: id, session_id: sessionId, resume: true, product: "other" }]);
+    expect(await pendingWakes(prisma, assistantId)).toEqual([{ conversation_id: id, session_id: sessionId, resume: true, product: "general" }]);
   });
 
   it("should store what the supervisor reports, and clear a conversation it leaves out", async () => {
     const { id: assistantId, token } = await startedAssistant();
-    const first = ((await actions.startConversation({ product: "other", body: "one" })) as { id: string }).id;
-    const second = ((await actions.startConversation({ product: "other", body: "two" })) as { id: string }).id;
+    const first = ((await actions.startConversation({ product: "general", body: "one" })) as { id: string }).id;
+    const second = ((await actions.startConversation({ product: "general", body: "two" })) as { id: string }).id;
     const put = (body: unknown) => pod(sessionsRoute.PUT, token, `/api/virtual/${assistantId}/sessions`, { virtualAgentId: assistantId }, "PUT", body);
 
     expect(
@@ -403,6 +600,70 @@ describe("the sessions stream and report", () => {
     expect((await put({ sessions: [], max: 0 })).status).toBe(400);
   });
 
+  it("should send the pod an interrupt, and record the stop, when the person stops the answer", async () => {
+    const { id: assistantId, token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id, { clientFeatures: ["stop"] });
+    await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
+
+    const abort = new AbortController();
+    const stream = frames(
+      await pod(sessionsRoute.GET, token, `/api/virtual/${assistantId}/sessions`, { virtualAgentId: assistantId }, "GET", undefined, abort.signal)
+    );
+
+    const result = await actions.stopAssistantAnswer({ conversationId: id });
+    const [interrupt] = await stream.named("interrupt", 1);
+    abort.abort();
+    await stream.cancel();
+
+    expect(result).toEqual({ ok: true, stopped: true });
+    expect(JSON.parse(interrupt!.data!)).toEqual({ conversation_id: id });
+    expect((await assistantConversation(VIEWER, id))?.stopHistory).toHaveLength(1);
+  });
+
+  it("should do nothing when there is no answer running to stop", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id, { clientFeatures: ["stop"] });
+    await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "idle" });
+
+    // Pressing stop as the answer lands is a race nobody can be expected to win, so it is not a refusal — but
+    // `stopped: false` is what keeps the caller from saying it stopped, and nothing goes in the thread either.
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toEqual({ ok: true, stopped: false });
+    expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
+  });
+
+  it("should refuse to stop, and record nothing, when the session's client cannot act on an interrupt", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id);
+    await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
+
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toMatchObject({ ok: false });
+    expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
+  });
+
+  it("should not let anyone but the owner stop a conversation's answer", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id, { clientFeatures: ["stop"] });
+    await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
+    await insertUser(BOB);
+    // A write grant is the most anyone else can hold, and it lets them message any other agent of Alice's. The
+    // refusal comes from the owner-scoped read rather than from `canStopAssistantAnswer`, which the action names
+    // after it and `rules.test.ts` covers; this is the end of it that the person would meet.
+    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
+    actAs("bob");
+
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toMatchObject({ ok: false });
+    actAs("alice");
+    expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
+  });
+
   it("should refuse the sessions routes to another virtual agent's launch token", async () => {
     const { token } = await startedAssistant();
     await insertUser(BOB);
@@ -417,7 +678,7 @@ describe("the sessions stream and report", () => {
 describe("artefacts", () => {
   it("should let the session write the document against its version and refuse a stale one", async () => {
     const { token } = await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "draft it" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "draft it" })) as { id: string }).id;
     const { agentId, sessionId } = await sessionOf(id);
     await register(token, sessionId, id);
     const route = (method: string, body?: unknown) =>
@@ -433,7 +694,7 @@ describe("artefacts", () => {
 
   it("should save the person's edit, and hand back the assistant's newer version when theirs is stale", async () => {
     const { token } = await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "draft it" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "draft it" })) as { id: string }).id;
     const { agentId, sessionId } = await sessionOf(id);
     await register(token, sessionId, id);
 
@@ -466,7 +727,7 @@ describe("the idle sweep", () => {
 
   it("should keep an assistant running while any of its sessions is busy", async () => {
     const { id: assistantId, token } = await startedAssistant();
-    const id = ((await actions.startConversation({ product: "other", body: "hi" })) as { id: string }).id;
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { agentId, sessionId } = await sessionOf(id);
     await register(token, sessionId, id);
     await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });

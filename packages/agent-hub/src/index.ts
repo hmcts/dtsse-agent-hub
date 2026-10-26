@@ -74,10 +74,15 @@ export type {
 export { ApiError, CREDENTIAL_KINDS, createApi, createTokenProvider, DEFAULT_SCOPE, DEFAULT_URL, parseAzToken, requireAzureLogin } from "./api.ts";
 export type {
   AssistantSupervisor,
+  Attachment,
+  AttachmentFs,
   ConversationSession,
   CreateAssistantSupervisorOptions,
   CreateTmuxOptions,
+  FetchAttachmentsOptions,
   ProgramCheck,
+  ReadAttachments,
+  ReconcileUploadsOptions,
   ReportOutcome,
   RunAssistantSupervisorOptions,
   SavedSession,
@@ -90,24 +95,37 @@ export type {
   Wake
 } from "./assistant/index.ts";
 export {
+  attachmentPath,
   canRunProgram,
   claudeCommand,
   commandProgram,
+  conversationDir,
   createAssistantSupervisor,
   createTmux,
   DEFAULT_IDLE_MINUTES,
   DEFAULT_MAX_SESSIONS,
   EXIT_GRACE_MS,
+  fetchAttachments,
   idleMinutes,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS,
   MAX_SESSIONS_LIMIT,
   maxSessions,
   PROMPT_FILE,
+  parseAttachments,
   parseSavedSession,
   parseWake,
   REFUSAL_EVERY_MS,
   REPORT_EVERY_MS,
+  readAttachments,
+  reconcileUploads,
+  removeConversationUploads,
   runAssistantSupervisor,
-  tmuxName
+  safeName,
+  staleUploadDirs,
+  tmuxName,
+  unfetchedAttachments,
+  uploadsRoot
 } from "./assistant/index.ts";
 export type { Deliver, DirectEventAuthor, DirectEventMessage, ReconnectDecision, RetryState, RunBridgeOptions, StreamEnd } from "./bridge.ts";
 export {
@@ -147,9 +165,10 @@ export {
 } from "./enable.ts";
 export type { Env, EnvKey } from "./env.ts";
 export { ENV_KEYS } from "./env.ts";
-export type { AssistantFrame, AssistantProduct, EnvelopeAuthor, EnvelopeMessage, EnvelopeOptions } from "./envelope.ts";
+export type { AssistantFrame, AssistantProduct, AttachmentOutcome, EnvelopeAuthor, EnvelopeMessage, EnvelopeOptions } from "./envelope.ts";
 export {
   assistantEnvelope,
+  attachmentLines,
   CLI,
   cliName,
   describeAuthor,
@@ -159,6 +178,8 @@ export {
   ownerDirectEnvelope,
   ownerEnvelope
 } from "./envelope.ts";
+export type { ClientFeature } from "./features.ts";
+export { CLIENT_FEATURES } from "./features.ts";
 export type {
   ChooseIdentityOptions,
   ChosenIdentity,
