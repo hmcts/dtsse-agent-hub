@@ -25,6 +25,16 @@ function Item({ item }: { item: SharedThreadItem }) {
       </li>
     );
   }
+  // Said of the owner rather than of the reader, who stopped nothing: without it an answer simply ends mid-thought.
+  if (item.type === "stopped") {
+    return (
+      <li className="flex items-center gap-3 text-xs text-asst-faint">
+        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+        This answer was stopped
+        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+      </li>
+    );
+  }
   if (item.type === "user") {
     return (
       <li className="flex flex-col items-end gap-1">

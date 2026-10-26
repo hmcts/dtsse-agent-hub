@@ -207,7 +207,7 @@ describe("reading a shared conversation", () => {
       access: "reader",
       document: { title: "Draft order", markdown: "## Draft order\n\nThe property, the date and the costs." }
     });
-    expect(view?.thread.map((item) => (item.type === "product" ? item.label : item.text))).toEqual([
+    expect(view?.thread.map((item) => ("text" in item ? item.text : item.type))).toEqual([
       "What goes in a possession order?",
       "The property, the date and the costs."
     ]);

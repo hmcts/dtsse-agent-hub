@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { canStopAssistantAnswer } from "@/access/rules";
 import { HttpError } from "@/agent-api/http";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import {
@@ -14,6 +15,7 @@ import {
   renameConversation as rename,
   requestWake,
   setProduct,
+  stopAnswer,
   touchConversation,
   writeArtefact
 } from "@/assistant/store";
@@ -170,6 +172,41 @@ export async function warmConversation(input: { conversationId: unknown }): Prom
       await requestWake(prisma, conversation);
     }
     return { ok: true };
+  });
+}
+
+/**
+ * Stops the answer the conversation is working on.
+ *
+ * `stopped` says whether a turn was actually ended, because the caller must not tell the person it was when it was
+ * not. It is `false` only for the race: the UI offers the control while the session reads `busy`, and that is at most
+ * a few seconds stale, so an answer can land between the press and the read. Nothing is recorded and nothing is
+ * said — a separator under a completed answer would be a worse lie than silence.
+ *
+ * A session whose client is too old to act on an interrupt is a refusal rather than a quiet `false`, because waiting
+ * will not make that one stoppable.
+ */
+export async function stopAssistantAnswer(input: { conversationId: unknown }): Promise<ActionResult<{ stopped: boolean }>> {
+  return await runAction<{ stopped: boolean }>("stop assistant answer", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+    if (conversation === undefined) {
+      return MISSING;
+    }
+    // The owner-scoped read above is the enforcement: it reports anyone else's conversation as missing. This names
+    // the rule, so that "only the owner may interrupt a turn" is written down and tested somewhere rather than
+    // living in one query's WHERE clause, and so a future unscoped read seam has something to fail against.
+    if (!canStopAssistantAnswer(viewer.oid, conversation)) {
+      return MISSING;
+    }
+    const outcome = await stopAnswer(prisma, conversation);
+    if (outcome === "unsupported-client") {
+      return { ok: false, error: "this chat's assistant was started by an older version that cannot be stopped. It can be stopped once it next starts." };
+    }
+    return { ok: true, stopped: outcome === "stopped" };
   });
 }
 

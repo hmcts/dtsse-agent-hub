@@ -402,6 +402,161 @@ describe("createAssistantSupervisor tick", () => {
   });
 });
 
+describe("createAssistantSupervisor interrupt", () => {
+  it("should send Escape to the conversation's pane when its answer is interrupted", async () => {
+    // Arrange
+    const { tmux, supervisor } = setup();
+    const c = conversation();
+    await supervisor.wake(c);
+    hookStatus(c.session_id, "busy");
+
+    // Act
+    await supervisor.interrupt({ conversation_id: c.conversation_id });
+
+    // Assert
+    expect(tmux.sent(tmuxName(c.conversation_id))).toEqual([["send-keys", tmuxName(c.conversation_id), "Escape"]]);
+  });
+
+  // Claude Code runs no `Stop` hook for a turn the user interrupted, and that hook is the only other thing that
+  // clears `busy`. Left `busy`, the bridge keeps heartbeating it and the hub's working line spins for ever.
+  it("should mark the session idle when its answer is interrupted, since no Stop hook will", async () => {
+    // Arrange
+    const { supervisor } = setup();
+    const c = conversation();
+    await supervisor.wake(c);
+    hookStatus(c.session_id, "busy");
+
+    // Act
+    await supervisor.interrupt({ conversation_id: c.conversation_id });
+
+    // Assert
+    expect(fs.readFileSync(statePath(c.session_id, "status"), "utf8").trim()).toBe("idle");
+  });
+
+  it("should stop reporting the session as busy once its answer is interrupted", async () => {
+    // Arrange
+    const { supervisor } = setup();
+    const c = conversation();
+    await supervisor.wake(c);
+    hookStatus(c.session_id, "busy");
+    await supervisor.tick();
+    expect(supervisor.sessions.get(c.conversation_id)?.busy).toBe(true);
+
+    // Act
+    await supervisor.interrupt({ conversation_id: c.conversation_id });
+    await supervisor.tick();
+
+    // Assert
+    expect(supervisor.sessions.get(c.conversation_id)?.busy).toBe(false);
+  });
+
+  it("should still send the keys when the status file cannot be written", async () => {
+    // Arrange
+    const tmux = fakeTmux();
+    const said: string[] = [];
+    const c = conversation();
+    const supervisor = createAssistantSupervisor({
+      api: { putSessions: async () => null },
+      id: "va-assist",
+      tmux,
+      canRun: () => true,
+      cwd: CWD,
+      say: (message) => said.push(message),
+      fs: {
+        ...fs,
+        writeFileSync: (file: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+          if (String(file).endsWith("status")) {
+            throw new Error("read-only file system");
+          }
+          return (fs.writeFileSync as (...args: unknown[]) => void)(file, ...rest);
+        }
+      }
+    });
+    await supervisor.wake(c);
+
+    // Act
+    await supervisor.interrupt({ conversation_id: c.conversation_id });
+
+    // Assert
+    expect(tmux.sent(tmuxName(c.conversation_id))).toEqual([["send-keys", tmuxName(c.conversation_id), "Escape"]]);
+    expect(said.some((line) => line.includes("could not mark its session idle: read-only file system"))).toBe(true);
+  });
+
+  it("should leave the session running when its answer is interrupted, so the conversation survives the stop", async () => {
+    // Arrange
+    const { tmux, supervisor, lastReport } = setup();
+    const c = conversation();
+    await supervisor.wake(c);
+    hookStatus(c.session_id, "busy");
+
+    // Act
+    await supervisor.interrupt({ conversation_id: c.conversation_id });
+    await supervisor.tick();
+
+    // Assert
+    expect(tmux.alive.has(tmuxName(c.conversation_id))).toBe(true);
+    expect(tmux.killed(tmuxName(c.conversation_id))).toBe(false);
+    expect(supervisor.sessions.get(c.conversation_id)?.phase).toBe("live");
+    expect(lastReport().sessions).toEqual([{ conversation_id: c.conversation_id, state: "live" }]);
+  });
+
+  it("should do nothing but say so when the conversation has no session here", async () => {
+    // Arrange
+    const { tmux, supervisor, said } = setup();
+    const c = conversation();
+
+    // Act
+    await supervisor.interrupt({ conversation_id: c.conversation_id });
+
+    // Assert
+    expect(tmux.calls).toEqual([]);
+    expect(said.at(-1)).toContain("it has no session here");
+  });
+
+  it("should not interrupt a session that is already stopping, whose turn has ended with it", async () => {
+    // Arrange
+    const { tmux, supervisor, said } = setup();
+    const c = conversation();
+    await supervisor.wake(c);
+    await supervisor.close({ conversation_id: c.conversation_id });
+
+    // Act
+    await supervisor.interrupt({ conversation_id: c.conversation_id });
+
+    // Assert
+    expect(tmux.sent(tmuxName(c.conversation_id))).toEqual([["send-keys", tmuxName(c.conversation_id), "/exit", "Enter"]]);
+    expect(said.at(-1)).toContain("its session is stopping");
+  });
+
+  it("should ignore an interrupt naming no conversation", async () => {
+    // Arrange
+    const { tmux, supervisor } = setup();
+
+    // Act
+    await supervisor.interrupt({});
+    await supervisor.interrupt(null);
+
+    // Assert
+    expect(tmux.calls).toEqual([]);
+  });
+
+  it("should say why when tmux refuses the keys, rather than let the failure out", async () => {
+    // Arrange
+    const { tmux, supervisor, said } = setup();
+    const c = conversation();
+    await supervisor.wake(c);
+    tmux.sendKeys = async () => {
+      throw new Error("no server running");
+    };
+
+    // Act
+    await supervisor.interrupt({ conversation_id: c.conversation_id });
+
+    // Assert
+    expect(said.at(-1)).toContain("could not interrupt its session: no server running");
+  });
+});
+
 describe("createAssistantSupervisor close", () => {
   it("should stop the session when its conversation is closed, and forget a queued wake for it", async () => {
     // Arrange

@@ -5,7 +5,7 @@ import { agentConversation } from "../transcripts/views.ts";
 import { productLabel } from "./products.ts";
 import type { SharedConversationRow } from "./shares.ts";
 import { readArtefact } from "./store.ts";
-import { type ProductMark, type ThreadItem, threadItems } from "./thread.ts";
+import { type ProductMark, type StopMark, type ThreadItem, threadItems } from "./thread.ts";
 import { UNTITLED } from "./views.ts";
 
 /**
@@ -37,11 +37,16 @@ export type SharedThreadItem =
   /** `attachmentCount` stands in for the files, whose names and sizes a share does not carry. */
   | { type: "user"; key: string; at: string; text: string; attachmentCount: number }
   | { type: "assistant"; key: string; at: string; text: string }
-  | { type: "product"; key: string; at: string; label: string };
+  | { type: "product"; key: string; at: string; label: string }
+  /** Where the owner stopped an answer, so a reader knows why one ends where it does rather than mid-thought. */
+  | { type: "stopped"; key: string; at: string };
 
 /**
  * The thread with everything a share does not carry taken out: the attachments down to a count, and the delivery
  * state, which says whether the owner's message reached their own assistant and is theirs to act on.
+ *
+ * Every other kind of item passes through, which is deliberate: a kind the thread grows is part of what was said
+ * until someone decides otherwise, and the type above is what makes that decision explicit rather than silent.
  */
 export function sharedThreadItems(items: readonly ThreadItem[]): SharedThreadItem[] {
   return items.map((item) => {
@@ -78,6 +83,10 @@ function marks(value: unknown): ProductMark[] {
     : [];
 }
 
+function stops(value: unknown): StopMark[] {
+  return Array.isArray(value) ? value.filter((mark): mark is StopMark => typeof mark === "object" && mark !== null && typeof mark.at === "string") : [];
+}
+
 /**
  * The share page's read, for a viewer `canViewSharedConversation` has already allowed.
  *
@@ -93,7 +102,7 @@ export async function sharedConversation(
 ): Promise<SharedConversationView | undefined> {
   const row = await db.assistantConversation.findUnique({
     where: { id: conversation.id },
-    select: { title: true, product: true, productHistory: true, agentId: true, owner: { select: { name: true } } }
+    select: { title: true, product: true, productHistory: true, stopHistory: true, agentId: true, owner: { select: { name: true } } }
   });
   if (row === null) {
     return undefined;
@@ -109,7 +118,7 @@ export async function sharedConversation(
     title: row.title ?? UNTITLED,
     productLabel: productLabel(row.product),
     ownerName: row.owner.name,
-    thread: sharedThreadItems(threadItems(items, marks(row.productHistory))),
+    thread: sharedThreadItems(threadItems(items, marks(row.productHistory), stops(row.stopHistory))),
     // `olderBefore` is the entry the owner's own page would ask for the previous page before; here it only says that
     // there is one.
     earlierHidden: page?.olderBefore !== null && page?.olderBefore !== undefined,

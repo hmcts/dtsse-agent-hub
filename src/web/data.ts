@@ -16,6 +16,8 @@ import {
 } from "../assistant/shares.ts";
 import { type SharedConversationView, sharedConversation } from "../assistant/sharing.ts";
 import { conversationAgent, ensureAssistant, findConversation } from "../assistant/store.ts";
+import { listTemplates } from "../assistant/template-store.ts";
+import type { SavedTemplate } from "../assistant/templates.ts";
 import {
   type AssistantSummary,
   assistantSummary,
@@ -337,6 +339,16 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
  */
 export async function unsentNewChat(viewer: Viewer): Promise<UnsentChat | undefined> {
   return await unsentChat(prisma, viewer.oid);
+}
+
+/**
+ * The viewer's own saved prompts, for the settings dialog to edit and both composers to offer.
+ *
+ * Its own read rather than part of `openAssistant` so the one place that decides whose templates these are is the
+ * store, which asks `canManageTemplate` with the viewer as both the actor and the owner.
+ */
+export async function assistantTemplates(viewer: Identity): Promise<SavedTemplate[]> {
+  return await listTemplates(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
 }
 
 /** One of the viewer's conversations, or `undefined` for the not-found the page answers. */

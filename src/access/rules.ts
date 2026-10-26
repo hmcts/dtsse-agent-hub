@@ -17,11 +17,12 @@
  * - An HMCTS Assistant conversation, and the agent its sessions run as, are its owner's alone: no grant extends to
  *   either, since the conversation is a private chat rather than a session they chose to share. Nor to a file
  *   attached to one of its messages: only the person who uploaded it may add parts to it or discard it, and only the
- *   session of the conversation it was attached to may fetch its bytes.
+ *   session of the conversation it was attached to may fetch its bytes. Nor to the person's saved Assistant
+ *   templates, which only they read or change.
  * - A conversation its owner may nonetheless share, read-only, with people they name one at a time. A recipient
- *   reads the thread and the document on the share's own page and can do nothing else: not send, rename, delete,
- *   edit the document, download an attachment, search for the chat, or watch it live. The share does not reach the
- *   conversation's agent, so every rule above still answers `none` for a recipient.
+ *   reads the thread and the document on the share's own page and can do nothing else: not send, stop an answer,
+ *   rename, delete, edit the document, download an attachment, search for the chat, or watch it live. The share does
+ *   not reach the conversation's agent, so every rule above still answers `none` for a recipient.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
  */
@@ -184,6 +185,16 @@ export function canVirtualAgentStoreCredential(kind: string): boolean {
   return kind !== "claude_md" && kind !== "git_identity";
 }
 
+/**
+ * Whether `actorOid` may read, save, rename or delete `ownerOid`'s saved Assistant templates. Their own alone, and
+ * reading is the same decision as writing: a template is a prompt somebody wrote for themselves, so there is nothing
+ * about it a reader is entitled to that an editor is not. No grant extends to them, for the same reason none extends
+ * to an Assistant conversation — a grant is over sessions a person chose to share, and these are not part of one.
+ */
+export function canManageTemplate(actorOid: string, ownerOid: string): boolean {
+  return actorOid === ownerOid;
+}
+
 export type UploadState = "pending" | "stored" | "fetched" | "expired";
 
 /** The columns every upload rule reads. */
@@ -278,10 +289,12 @@ export function canUseCredentialRoutes(caller: { virtualAgentId?: string }): boo
   return caller.virtualAgentId === undefined;
 }
 
-/** A conversation as the share rules read it. The id as well as the owner, because a share is of one conversation. */
-export interface SharedConversationRef {
+/**
+ * A conversation as the share rules read it: `ConversationRef`, which is what every rule about a chat takes, and its
+ * id as well, because a share is of one conversation rather than of a person's chats.
+ */
+export interface SharedConversationRef extends ConversationRef {
   id: string;
-  ownerOid: string;
 }
 
 /** One read-only share of one conversation with one named person. The rows are the whole of the access. */
@@ -391,4 +404,14 @@ export interface ConversationRef {
  */
 export function canViewConversation(viewerOid: string, conversation: ConversationRef): boolean {
   return viewerOid === conversation.ownerOid;
+}
+
+/**
+ * Only its owner stops an answer their conversation is working on. The same single answer as
+ * `canViewConversation`'s, and its own rule for the same reason: interrupting a turn is an act on the session rather
+ * than a read of the chat, so it is worth saying separately that no grant reaches it — not even a `write` one, which
+ * elsewhere lets a grantee message an agent.
+ */
+export function canStopAssistantAnswer(actorOid: string, conversation: ConversationRef): boolean {
+  return actorOid === conversation.ownerOid;
 }

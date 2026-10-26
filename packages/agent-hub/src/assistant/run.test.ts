@@ -106,6 +106,45 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
+  it("should send Escape to a conversation's pane, and keep its session, when the sessions stream carries an interrupt", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const tmux = fakeTmux();
+    const stop = new AbortController();
+    const c = conversation();
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: {},
+      tmux,
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50
+    });
+    const name = tmuxName(c.conversation_id);
+
+    try {
+      hub.sendWake(VID, c);
+      await waitUntil(() => tmux.starts().length === 1, "the wake to start a session");
+
+      // Act
+      hub.sendInterrupt(VID, { conversation_id: c.conversation_id });
+
+      // Assert
+      await waitUntil(() => tmux.sent(name).length === 1, "the pane to be sent a key");
+      expect(tmux.sent(name)).toEqual([["send-keys", name, "Escape"]]);
+      expect(tmux.alive.has(name), "the session outlives the interrupt").toBe(true);
+      expect(tmux.killed(name)).toBe(false);
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
+    }
+  });
+
   it("should log a refused sessions stream as an ordinary error and retry it with backoff when the hub answers 403", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });

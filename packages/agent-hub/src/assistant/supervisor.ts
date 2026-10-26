@@ -68,6 +68,7 @@ export type AssistantSupervisor = {
   queue: Wake[];
   max: number;
   wake: (data: unknown) => Promise<void>;
+  interrupt: (data: unknown) => Promise<void>;
   close: (data: unknown) => Promise<void>;
   tick: () => Promise<void>;
   adopt: () => Promise<void>;
@@ -380,6 +381,48 @@ export function createAssistantSupervisor({
     await report();
   }
 
+  /**
+   * Ends the turn a conversation's session is in the middle of, without stopping the session: `Escape` is Claude
+   * Code's own `chat:cancel` binding, which that session's own keyboard would send, so the conversation, the
+   * transcript and the pane all survive it. Not `C-c`, which the same gesture chain also exits the app on, and not
+   * a signal or `kill-session`, either of which would cost the person the session the stop was meant to preserve.
+   *
+   * The status file is written `idle` with it, because **Claude Code runs no `Stop` hook for a turn the user
+   * interrupted** — that hook is what normally clears the `busy` the `UserPromptSubmit` hook set. Left alone, the
+   * file would say `busy` until the person's *next* prompt finished a turn, the bridge would keep heartbeating it,
+   * and the hub's "working" line would spin for ever on an answer that had already stopped. The idle sweep cannot
+   * save it either: heartbeats are still arriving.
+   *
+   * Written before the keys rather than after, so a `sendKeys` that throws still leaves the status honest: the worst
+   * case then is a turn that is still running and reads as idle for the few seconds until its own `Stop` hook fires,
+   * which is the error worth having of the two.
+   *
+   * Nothing to interrupt is the common case rather than an error: the hub sends an `interrupt` once and never
+   * replays it, so one arriving for a conversation with no session, or with a session already on its way out, is a
+   * stop whose turn has already ended. Escape with no turn running is a key that pane's binding is not listening
+   * for, so acting anyway would be harmless — but saying so in the log is more use than sending it.
+   */
+  async function interrupt(data: unknown): Promise<void> {
+    const cid = asRecord(data)?.conversation_id;
+    const s = typeof cid === "string" ? sessions.get(cid) : undefined;
+    if (!s || s.phase === "stopping") {
+      say(`ignoring an interrupt for conversation ${String(cid)}: ${s ? "its session is stopping" : "it has no session here"}`);
+      return;
+    }
+    try {
+      // `refresh` reads this file back for `busy` and for the idle clock, so nothing in memory is set here.
+      fs.writeFileSync(statePath(s.session_id, "status"), "idle\n");
+    } catch (e) {
+      say(`conversation ${s.conversation_id}: could not mark its session idle: ${(e as Error).message}`);
+    }
+    try {
+      await tmux.sendKeys(s.name, "Escape");
+      say(`conversation ${s.conversation_id}: interrupted its session`);
+    } catch (e) {
+      say(`conversation ${s.conversation_id}: could not interrupt its session: ${(e as Error).message}`);
+    }
+  }
+
   async function close(data: unknown): Promise<void> {
     const cid = asRecord(data)?.conversation_id;
     const queued = queue.findIndex((w) => w.conversation_id === cid);
@@ -461,6 +504,7 @@ export function createAssistantSupervisor({
     queue,
     max,
     wake: (data) => serial(() => wake(data)),
+    interrupt: (data) => serial(() => interrupt(data)),
     close: (data) => serial(() => close(data)),
     tick: () => serial(tick),
     adopt: () => serial(adopt),

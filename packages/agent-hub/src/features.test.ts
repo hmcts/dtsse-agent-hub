@@ -11,4 +11,10 @@ describe("CLIENT_FEATURES", () => {
       expect(feature.length, feature).toBeLessThanOrEqual(50);
     }
   });
+
+  // The hub refuses to stop an answer on a session that did not claim this, and its UI offers no stop control at
+  // all, so dropping the claim would take the feature away silently rather than break anything that says so.
+  it("should claim stop, since the supervisor acts on the sessions stream's interrupt", () => {
+    expect(CLIENT_FEATURES).toContain("stop");
+  });
 });

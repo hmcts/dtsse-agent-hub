@@ -30,6 +30,13 @@ describe("sharedThreadItems", () => {
     expect(sharedThreadItems(thread)).toEqual(thread);
   });
 
+  // Without it the shared thread would end an answer mid-thought with nothing to say why.
+  it("should keep where the owner stopped an answer", () => {
+    const thread: ThreadItem[] = [{ type: "stopped", key: "s1", at: "2026-10-25T09:00:02.000Z" }];
+
+    expect(sharedThreadItems(thread)).toEqual(thread);
+  });
+
   it("should reduce the files on a message to how many there were, naming none of them", () => {
     const shared = sharedThreadItems([user({ attachments: [ATTACHMENT, { ...ATTACHMENT, id: "upload-2", name: "tenancy.docx" }] })]);
 

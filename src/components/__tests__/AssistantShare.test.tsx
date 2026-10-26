@@ -381,6 +381,21 @@ describe("SharedChat", () => {
     expect(screen.getByText("2 files sent with this message")).toBeTruthy();
   });
 
+  it("should say that an answer was stopped, rather than letting it end mid-thought", () => {
+    render(
+      <SharedChat
+        view={view({
+          thread: [
+            { type: "assistant", key: "t1", at: "2026-10-25T09:00:01.000Z", text: "The property, the" },
+            { type: "stopped", key: "s1", at: "2026-10-25T09:00:02.000Z" }
+          ]
+        })}
+      />
+    );
+
+    expect(screen.getByText("This answer was stopped")).toBeTruthy();
+  });
+
   it("should say so when the chat began before the part it shows", () => {
     render(<SharedChat view={view({ earlierHidden: true })} />);
 

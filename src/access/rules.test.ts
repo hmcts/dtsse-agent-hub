@@ -12,6 +12,7 @@ import {
   canManageConversationShares,
   canManageCredential,
   canManageGrants,
+  canManageTemplate,
   canManageVirtualAgent,
   canOwnerReadCredential,
   canPersonMessageAgent,
@@ -19,6 +20,7 @@ import {
   canSeeAgentSkills,
   canSessionUseAttachment,
   canShareConversationWith,
+  canStopAssistantAnswer,
   canSuggestPerson,
   canUseCredentialRoutes,
   canViewAgent,
@@ -314,6 +316,18 @@ describe("canManageCredential", () => {
   });
 });
 
+describe("canManageTemplate", () => {
+  // Reading is the same decision as writing, and no grant reaches a prompt somebody wrote for themselves.
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s reads or changes the owner's templates", (expected, role) => {
+    expect(canManageTemplate(ROLES[role], OWNER)).toBe(expected);
+  });
+});
+
 describe("canManageVirtualAgent", () => {
   it.each<[boolean, Role]>([
     [true, "owner"],
@@ -556,6 +570,17 @@ describe("the upload rules", () => {
 
       expect(canViewAgent("bob", { id: "a1", ownerOid: "alice" }, write)).toBe(true);
       expect(canViewConversation("bob", { ownerOid: "alice" })).toBe(false);
+    });
+
+    // A `write` grantee can message any other agent of this owner's, so it is the one worth naming: a conversation's
+    // agent is the owner's alone, and interrupting its turn is further still than sending it something.
+    it.each<[boolean, Role]>([
+      [true, "owner"],
+      [false, "read grantee"],
+      [false, "write grantee"],
+      [false, "stranger"]
+    ])("should answer %s when the %s stops the answer in the owner's chat", (expected, role) => {
+      expect(canStopAssistantAnswer(ROLES[role], { ownerOid: OWNER })).toBe(expected);
     });
   });
 });

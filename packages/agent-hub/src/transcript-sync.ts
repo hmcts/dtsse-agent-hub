@@ -76,6 +76,18 @@ function directId(text: string): string | null {
 }
 
 /**
+ * The line Claude Code writes where a turn the user interrupted stopped. It is `type: "user"` and carries no
+ * `isMeta`, so nothing above drops it, and uploaded it would show in the Assistant's thread as a message the person
+ * typed — which they did not; they pressed Stop, and the thread says so in its own words. Matched on the text
+ * because there is no flag for it: `interruptedMessageId` is on the line most of the time but not always.
+ */
+const INTERRUPT_NOTICES: readonly string[] = ["[Request interrupted by user]", "[Request interrupted by user for tool use]"];
+
+function interruptNotice(text: string): boolean {
+  return INTERRUPT_NOTICES.includes(text.trim());
+}
+
+/**
  * The entries one transcript line maps to, before secret scanning and truncation. The line is whatever Claude
  * Code appended to the JSONL, so every field it is read for is checked.
  */
@@ -110,6 +122,9 @@ export function toEntries(line: unknown): ScrubbedEntry[] {
     return text.trim() ? [entry(0, "system", { text })] : [];
   }
   if (raw.isMeta) {
+    return [];
+  }
+  if (type === "user" && interruptNotice(typeof content === "string" ? content : textParts(content))) {
     return [];
   }
   if (typeof content === "string") {
