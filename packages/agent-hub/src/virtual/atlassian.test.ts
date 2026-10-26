@@ -17,8 +17,9 @@ import {
   twgAuthConf,
   usePodEnv
 } from "../__fixtures__/pod-shims.ts";
-import { createApi } from "../api.ts";
+import { type Api, ApiError, createApi } from "../api.ts";
 import {
+  ATLASSIAN_SIGN_IN_CODES,
   atlassianLogin,
   packAtlassianAuth,
   parseTwgDeviceCode,
@@ -52,6 +53,7 @@ afterEach(() => {
   v.status.length = 0;
   v.prompts.length = 0;
   v.completes.length = 0;
+  v.loginFailures.length = 0;
   v.credentials.clear();
   pod.reset();
 });
@@ -262,6 +264,7 @@ describe("atlassianLogin", () => {
     expect(virtual().status[0]?.phase).toBe("awaiting_login");
     expect(virtual().status[0]?.detail).toMatch(new RegExp(`atlassian: .*${TWG_CODE}`));
     expect(virtual().completes).toEqual([{ kind: "atlassian", account_label: "olive.owner@justice.gov.uk" }]);
+    expect(virtual().loginFailures).toEqual([]);
     expect(storedAtlassian()).toMatch(rotatedTo(1));
     expect(storedAtlassian()).not.toContain("oauth-access-token");
     expect(twgLog()).toMatch(/^login --site hmcts$/m);
@@ -321,16 +324,59 @@ describe("atlassianLogin", () => {
     expect(storedAtlassian()).toMatch(rotatedTo(1));
   });
 
-  it("should leave Jira and Confluence signed out when the device code expires", async () => {
+  it("should leave Jira and Confluence signed out, and tell the hub, when the sign-in breaks rather than runs out", async () => {
     // Act
     const { result, stderr } = await captureStderr(() => atlassianLogin({ api: api(), env: pod.env({ FAKE_TWG_LOGIN: "expire" }) }));
 
-    // Assert
+    // Assert: twg gave up at once, so the code was never the owner's to miss and no second one is offered
     expect(result).toBe("not-signed-in");
     expect(stderr).toMatch(/sign-in was not completed .*Jira and Confluence stay signed out/);
     expect(virtual().prompts).toHaveLength(1);
+    expect(virtual().loginFailures).toEqual([{ kind: "atlassian", state: "failed", detail: expect.stringContaining("was not completed") }]);
     expect(virtual().credentials.has("atlassian")).toBe(false);
     expect(virtual().completes).toEqual([]);
+  });
+
+  it("should offer a second code and then report the sign-in expired when the first runs out unused", async () => {
+    // Arrange: each code is offered for a second, and twg holds it past that before giving up, as it does at 300s
+    const env = pod.env({ FAKE_TWG_LOGIN: "expire", FAKE_TWG_EXPIRE_AFTER: "1.2" });
+
+    // Act
+    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: api(), env, expiresIn: 1 }));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(virtual().prompts).toHaveLength(ATLASSIAN_SIGN_IN_CODES);
+    expect(stderr).toMatch(/ran out before it was used; relaying a fresh one/);
+    expect(virtual().loginFailures).toEqual([{ kind: "atlassian", state: "expired", detail: expect.stringContaining("ran out before it was used") }]);
+    expect(virtual().completes).toEqual([]);
+  });
+
+  it("should offer no code beyond the bound, however long the owner takes", async () => {
+    // Arrange
+    const env = pod.env({ FAKE_TWG_LOGIN: "expire", FAKE_TWG_EXPIRE_AFTER: "1.2" });
+
+    // Act
+    await captureStderr(() => atlassianLogin({ api: api(), env, expiresIn: 1, codes: 3 }));
+
+    // Assert: the bound is the only thing that stops it, so it is what the count follows
+    expect(virtual().prompts).toHaveLength(3);
+    expect(virtual().loginFailures).toHaveLength(1);
+  });
+
+  it("should stay signed out, and say why, when the hub will not take the report", async () => {
+    // Arrange
+    const refusing: Api = {
+      ...api(),
+      loginFailed: () => Promise.reject(new ApiError(404, { error: "there is no atlassian sign-in to report on" }, "POST", "login/atlassian/failed"))
+    };
+
+    // Act
+    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: refusing, env: pod.env({ FAKE_TWG_LOGIN: "expire" }) }));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(stderr).toMatch(/could not tell agent-hub the sign-in was not completed/);
   });
 
   it("should fail without failing the agent when twg prints no code at all", async () => {

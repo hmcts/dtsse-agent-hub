@@ -30,6 +30,8 @@ export const CLAUDE_OUTPUT =
   `\x1b[?25l\x1b[1mWelcome to Claude Code v2.1.287\x1b[22m\r\n Browser didn't open? Use the url below to sign in (c to copy)\r\n\r\n` +
   `\x1b]8;id=1om6vol;${AUTHORIZE_URL}\x1b\\${AUTHORIZE_URL}\x1b]8;;\x1b\\\r\n\r\n Paste code here if prompted > `;
 
+// `FAKE_TWG_LOGIN=expire` gives up as twg does when nobody uses its code. `FAKE_TWG_EXPIRE_AFTER` is how long it
+// holds the code first, so a test can outlast a short `expiresIn` and have the relay count as expired.
 // What `twg login --site hmcts` 1.3.3 draws on a pty, with a colour reset between the URL's characters.
 export const TWG_LOGIN_OUTPUT =
   `\r\n\x1b[1m\x1b[38;5;253m  TWG Login (OAuth)\x1b[39m\x1b[22m\r\n\x1b[38;5;253m  ${"─".repeat(17)}\x1b[39m\r\n\r\n` +
@@ -194,7 +196,7 @@ case "$1 $2" in
       IFS= read -r -d $'\\r' answer
       [ "$answer" = n ] || { echo "opened a browser"; exit 5; }
       for i in 1 2 3; do cat "$SHIM_STATE/twg-wait.out"; sleep 0.1; done
-      [ "$FAKE_TWG_LOGIN" = expire ] && { printf '\\r\\n  Device code expired.\\r\\n'; exit 1; }
+      [ "$FAKE_TWG_LOGIN" = expire ] && { sleep "\${FAKE_TWG_EXPIRE_AFTER:-0}"; printf '\\r\\n  Device code expired.\\r\\n'; exit 1; }
       rotate; printf '\\r\\n\\x1b[32m✓\\x1b[39m  Authentication successful!\\r\\n' ;;
   *) echo "unexpected twg $*" >&2; exit 2 ;;
 esac`

@@ -219,6 +219,42 @@ describe("relayDeviceLogin", () => {
     expect((error as Error).message).toMatch(/^could not relay the github sign-in code: POST .*400 hub down$/);
     expect(stderr).toBe("");
   });
+
+  it("should call the code expired when it was on the owner's screen for the whole of its life", async () => {
+    // Act
+    const result = await relayDeviceLogin({
+      api: api(),
+      id: VID,
+      kind: "github",
+      cmd: "bash",
+      args: ["-c", `printf '%s' ${JSON.stringify(GH_OUTPUT)}; sleep 1.2; exit 1`],
+      env: pod.env(),
+      parse: parseGhDeviceCode,
+      expiresIn: 1,
+      label: "github"
+    });
+
+    // Assert
+    expect(result).toMatchObject({ code: 1, expired: true });
+  });
+
+  it("should not call it expired when the command gave up while the code still had time left", async () => {
+    // Act
+    const result = await relayDeviceLogin({
+      api: api(),
+      id: VID,
+      kind: "github",
+      cmd: "bash",
+      args: ["-c", `printf '%s' ${JSON.stringify(GH_OUTPUT)}; exit 1`],
+      env: pod.env(),
+      parse: parseGhDeviceCode,
+      expiresIn: 30,
+      label: "github"
+    });
+
+    // Assert
+    expect(result).toMatchObject({ code: 1, expired: false });
+  });
 });
 
 describe("azureLogin", () => {
@@ -318,6 +354,18 @@ describe("githubLogin", () => {
     // Assert
     expect((error as Error).message).toMatch(/gh auth login exited 0 without a token/);
     expect(virtual().credentials.has("github")).toBe(false);
+  });
+
+  it("should relay a fresh code on every call, which is what keeps a dead one off the owner's screen", async () => {
+    // Arrange: a failed GitHub sign-in throws, and `virtual-agent-boot` calls this again until it works. The
+    // relay is what Atlassian's lacks: a new code replaces the old one, so no code outlives its own time by long.
+    await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env() }));
+
+    // Act
+    await captureStderr(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_TOKEN: GH_TOKEN }) }));
+
+    // Assert
+    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(2);
   });
 });
 

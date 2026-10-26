@@ -163,6 +163,55 @@ export async function failForAzureAccount(prisma: PrismaClient, virtualAgent: Vi
   });
 }
 
+/**
+ * Takes the agent out of `awaiting_login` once no sign-in of any kind is still pending, with `detail` beside the new
+ * status. `startLogin` is what put it there, so a login that stops being pending is what takes it back out: left
+ * behind, the agent reads as waiting for its owner for ever, and the getting-ready screen asks them to sign in to
+ * something no pod is asking about.
+ *
+ * `running` is the honest answer: only the pod holding the current launch token may report a login over, so a pod
+ * reporting one is a pod working again, and its own next report says how far it has got.
+ */
+async function leaveAwaitingLogin(tx: Database, virtualAgent: VirtualAgentRow, detail: string | null, now: Date): Promise<void> {
+  const pending = await tx.virtualAgentLogin.count({ where: { virtualAgentId: virtualAgent.id, state: "pending" } });
+  if (pending > 0) {
+    return;
+  }
+  const current = await findVirtualAgent(tx, virtualAgent.id);
+  if (current !== undefined && current.status === "awaiting_login") {
+    await moveTo(tx, current, "running", detail, now);
+  }
+}
+
+/**
+ * The pod's word that a sign-in it relayed is over and the owner did not finish it: `expired` when the code reached
+ * its expiry unused, `failed` for anything else. The counterpart of `completeLogin`, and the only thing that turns a
+ * dead code on the owner's screen into something that says so.
+ */
+export async function failLogin(
+  prisma: PrismaClient,
+  virtualAgent: VirtualAgentRow,
+  kind: CredentialKind,
+  outcome: { state: "expired" | "failed"; detail: string | null },
+  now: Date = new Date()
+): Promise<void> {
+  const existing = await prisma.virtualAgentLogin.findUnique({
+    where: { virtualAgentId_kind: { virtualAgentId: virtualAgent.id, kind } },
+    select: { state: true }
+  });
+  if (existing === null) {
+    throw new HttpError(404, `there is no ${kind} sign-in to report on`);
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.virtualAgentLogin.update({
+      where: { virtualAgentId_kind: { virtualAgentId: virtualAgent.id, kind } },
+      data: { state: outcome.state, ...NO_PASTED_CODE, updatedAt: now }
+    });
+    await leaveAwaitingLogin(tx, virtualAgent, outcome.detail, now);
+    await announce(tx, virtualAgent.id, virtualAgent.ownerOid);
+  });
+}
+
 export interface LoginCompletion {
   accountOid: string | null;
   accountLabel: string | null;
@@ -172,7 +221,8 @@ export interface LoginCompletion {
  * The pod's word that a login finished. An Azure login must be the owner's own account: anything else is a sign-in
  * as someone else, so the token cache it produced is deleted, the agent is failed and the login with it, and the
  * pod is answered 409. A GitHub, Claude or Atlassian login is simply marked done: an Atlassian account other than the
- * owner's own may be the one they mean their agents to use.
+ * owner's own may be the one they mean their agents to use. Either way the agent leaves `awaiting_login` once no
+ * sign-in is still pending.
  */
 export async function completeLogin(
   prisma: PrismaClient,
@@ -210,6 +260,7 @@ export async function completeLogin(
         await notify(tx, { type: "credential", owner_oid: virtualAgent.ownerOid, kind });
       }
     }
+    await leaveAwaitingLogin(tx, virtualAgent, null, now);
     await announce(tx, virtualAgent.id, virtualAgent.ownerOid);
   });
 }

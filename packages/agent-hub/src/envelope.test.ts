@@ -190,6 +190,20 @@ describe("assistantEnvelope", () => {
     expect(text.endsWith("\n---\nPlease export this document to the VIBE backlog in Jira.")).toBe(true);
   });
 
+  it("should say to report the export failed when the owner does not finish the Atlassian sign-in", () => {
+    // Arrange: the session is the only thing that can put the export back in front of the person
+    const exportId = "5b0e7c1a-1111-4222-8333-444455556666";
+    const frame: AssistantFrame = { ...pcs, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: [] } };
+
+    // Act
+    const text = assistantEnvelope(personMessage, frame, null);
+
+    // Assert
+    expect(text).toMatch("It exits 4 if they did not sign in");
+    expect(text).toMatch(`jira report ${exportId} --error "the Atlassian sign-in was not completed"`);
+    expect(text).toMatch(/do not poll anything while it runs/);
+  });
+
   it("should say nothing of Jira when no export is pending", () => {
     // Act & Assert
     expect(assistantEnvelope(personMessage, { ...pcs, jira_export: null }, null)).not.toMatch(/Jira|twg/);

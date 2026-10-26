@@ -114,6 +114,40 @@ describe("Jira export in the document panel", () => {
     expect(screen.getByRole("link", { name: "the Atlassian sign-in page" }).getAttribute("href")).toContain("auth.atlassian.com");
   });
 
+  it.each(["expired", "failed"] as const)("should say the code expired, rather than show it, once the pod has %s the sign-in", (state) => {
+    render(panel({ exported: { status: "pending", project: "VIBE" }, access: { connected: false, login: atlassianLogin({ state }) } }));
+
+    expect(screen.getByRole("alert").textContent).toContain("expired before it was used, so no ticket was created");
+    expect(screen.getByRole("alert").textContent).toContain("Export again for a fresh code");
+    expect(screen.queryByText("4BFC-CC3A")).toBeNull();
+    expect(screen.queryByText("Signing in to Atlassian…")).toBeNull();
+  });
+
+  it("should stop offering a code the moment its own time runs out, before the pod has said anything", () => {
+    vi.useFakeTimers();
+    render(
+      panel({
+        exported: { status: "pending", project: "VIBE" },
+        access: { connected: false, login: atlassianLogin({ expiresAt: new Date(Date.now() + 2000).toISOString() }) }
+      })
+    );
+    expect(screen.getByText("4BFC-CC3A")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(screen.queryByText("4BFC-CC3A")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("Your assistant is relaying a fresh one");
+    expect(screen.getByText("Signing in to Atlassian…")).toBeTruthy();
+  });
+
+  it("should say nothing about a sign-in when no export is waiting on one", () => {
+    render(panel({ access: { connected: false, login: atlassianLogin({ state: "expired" }) } }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("should show the ticket with links to it, and no way to export again, when the export is done", () => {
     render(panel({ exported: { status: "done", project: "VIBE", key: "VIBE-701", url: "https://hmcts.atlassian.net/browse/VIBE-701" } }));
 

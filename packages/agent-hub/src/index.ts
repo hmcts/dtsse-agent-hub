@@ -49,6 +49,7 @@ export type {
   FeedResponse,
   HeartbeatBody,
   LoginCompleteBody,
+  LoginFailedBody,
   LoginPromptBody,
   Message,
   MessageAuthor,
@@ -416,6 +417,7 @@ export type {
 } from "./virtual/index.ts";
 export {
   ATLASSIAN_AUTH_MAX_CHARS,
+  ATLASSIAN_SIGN_IN_CODES,
   AZURE_CACHE_MAX_CHARS,
   atlassianLogin,
   azureDir,

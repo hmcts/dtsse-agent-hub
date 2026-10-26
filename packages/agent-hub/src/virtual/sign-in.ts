@@ -52,6 +52,12 @@ export type RelayDeviceLoginOptions = {
 export type RelayDeviceLoginResult = {
   code: number;
   output: string;
+  /**
+   * Whether the code was still on the owner's screen for its whole `expiresIn` before the command gave up, which is
+   * what tells "nobody used it in time" apart from "the sign-in broke": the two are the same exit code, and only one
+   * of them is worth offering the owner another code for.
+   */
+  expired: boolean;
 };
 
 export type LoginOptions = {
@@ -178,6 +184,7 @@ export function relayDeviceLogin({
     let output = "";
     let relayed: Promise<void> | null = null;
     let failed: Error | null = null;
+    let relayedAt = 0;
     const child = spawn(cmd, args, { env, stdio: [respond ? "pipe" : "ignore", "pipe", "pipe"] });
     child.stdin?.on("error", () => {});
     const timer = setTimeout(() => child.kill("SIGTERM"), (expiresIn + 30) * 1000);
@@ -191,6 +198,7 @@ export function relayDeviceLogin({
       if (!prompt) {
         return;
       }
+      relayedAt = Date.now();
       relayed = withRetry(async () => {
         await api.loginPrompt(id, kind, { prompt: "device_code", ...prompt, expires_in: expiresIn });
         await api.virtualStatus(id, "awaiting_login", `${label}: the owner must enter code ${prompt.user_code} at ${prompt.verification_uri}`);
@@ -220,7 +228,7 @@ export function relayDeviceLogin({
         reject(new Error(`${cmd} printed no sign-in code (exit ${code})`));
         return;
       }
-      resolve({ code: code ?? 1, output });
+      resolve({ code: code ?? 1, output, expired: Date.now() - relayedAt >= expiresIn * 1000 });
     });
   });
 }

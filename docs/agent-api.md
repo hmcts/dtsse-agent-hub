@@ -373,7 +373,7 @@ All of `/api/virtual/**` and `/api/orchestrator/**` answer `404` unless the serv
 | `requested` | Created or started; not yet applied | the hub |
 | `provisioning` | The StatefulSet is applied and the pod is starting | the orchestrator, or the pod |
 | `awaiting_credentials` | The pod is fetching the owner's credentials, or waiting for one to be stored: `status_detail` names the kind first, as `bedrock: …` while it waits for the owner to paste a Bedrock API key | the pod |
-| `awaiting_login` | The pod is waiting for the owner to finish a sign-in | the pod, or `POST login/{kind}` |
+| `awaiting_login` | The pod is waiting for the owner to finish a sign-in | the pod, or `POST login/{kind}`; left by `POST login/{kind}/complete` or `…/failed` once no sign-in is still pending |
 | `cloning` | Accepted, but no longer reported: the pod clones and syncs repositories in the background once Claude has started | the pod |
 | `running` | Claude is running. `status_detail` says how far the background clone has got, as `Claude is ready; cloning repositories (n/241)` and then `Claude is ready; repositories ready` | the pod |
 | `stopping` | Meant to be stopped or deleted; a pod or disk is still there, or the orchestrator has yet to say otherwise | the hub, or the orchestrator |
@@ -401,6 +401,9 @@ Every `/api/virtual/{virtual_agent_id}/…` route needs that virtual agent's own
 | `POST /api/virtual/{id}/login/{kind}` | `{prompt, verification_uri, user_code?, expires_in}` | `204`. Shows a sign-in to the owner, replacing any earlier one of that kind, and sets `awaiting_login`. `prompt` is `device_code` (the owner enters `user_code`, letters, digits and hyphens, at `verification_uri`) or `paste_code` (the owner opens `verification_uri` and pastes back the code it gives them, as `claude setup-token` asks). `verification_uri` must be `https`; `expires_in` is 1–3600 seconds. |
 | `GET /api/virtual/{id}/login/{kind}/code` | — | For a `paste_code` sign-in: `200 {code}`, the code the owner pasted, which is deleted as it is read; `204` until there is one, or once it is more than 10 minutes old. Poll it. |
 | `POST /api/virtual/{id}/login/{kind}/complete` | `{account_oid?, account_label?}` | `204`, marking the sign-in completed and, when `account_label` is sent, labelling the stored credential with it. For `azure`, `account_oid` must be the owner's oid: otherwise the stored Azure credential is deleted, the agent is `failed` and the answer is `409`, so whichever of the save and `complete` comes first refuses another account, and the pod should restart on a `409`. Any other kind, `atlassian` included, completes whatever account it names. No sign-in of that kind gives `404`. |
+| `POST /api/virtual/{id}/login/{kind}/failed` | `{state, detail?}` | `204`, marking a sign-in the pod relayed and gave up on. `state` is `expired` (the code reached its `expires_in` unused) or `failed` (anything else); `detail` is at most 500 characters and becomes the agent's `status_detail`. No sign-in of that kind gives `404`. This is the counterpart of `complete`, and the pod owes the hub one or the other: without it the owner is left a code that no longer works and an agent that reads as waiting for them. |
+
+Both `complete` and `failed` take the agent out of `awaiting_login` when no sign-in of any kind is still pending, because a pod waiting for nobody is not awaiting a login. It becomes `running`: only the pod that holds the current launch token can report either, and a pod reporting one is a pod working again. Its own next report says how far it has got.
 
 ### Orchestrator routes
 

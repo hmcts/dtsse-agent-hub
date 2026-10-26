@@ -144,7 +144,7 @@ export function jiraExportLines(jira: JiraExportFrame): string[] {
     `The user has asked you to export the conversation's document to the ${jira.project} backlog in Jira (export ${jira.export_id}).`,
     `If you have already created a ticket for export ${jira.export_id}, do not create another: report its key with step 4 and say so.`,
     "Otherwise, run exactly these steps. twg is signed in as the user, so they are the ticket's reporter:",
-    `1. If \`twg whoami\` fails, run \`${CLI} virtual atlassian-login\`; the user is shown a code to sign in with. Then carry on.`,
+    `1. If \`twg whoami\` fails, run \`${CLI} virtual atlassian-login\`; the user is shown a code to sign in with. It waits for them, so do not poll anything while it runs. It exits 4 if they did not sign in: stop there and report that with step 4, as \`${CLI} jira report ${jira.export_id} --error "the Atlassian sign-in was not completed"\`, which is what puts the export back in front of them. Otherwise carry on.`,
     `2. mkdir -p ${dir} && ${CLI} artefact get --json | jq -r .title > ${dir}/title && ${CLI} artefact get > ${dir}/document.md`,
     `3. twg jira workitem create --space=${jira.project} --type=${jira.issue_type} --summary="$(cat ${dir}/title)" --description="$(cat ${dir}/document.md)" --description-format=markdown${labels} --output=json --output-summary=none`,
     `4. Report the key from its output with \`${CLI} jira report ${jira.export_id} --key <KEY>\`, or if it failed, why in one plain sentence with \`${CLI} jira report ${jira.export_id} --error "<why>"\`.`,

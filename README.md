@@ -173,6 +173,11 @@ and Confluence on hmcts.atlassian.net. It is not pasted: the pod relays a device
 `auth.conf` without the access token, and saves it again whenever `twg` replaces its refresh token. Any Atlassian
 account is accepted, and labels the credential; the owner can have the agent sign in again from its page.
 
+Each code lasts five minutes, which is what `twg login` gives it, and the pod offers two of them: five minutes is easy
+to miss when the sign-in page is on another screen. After the second the pod reports the sign-in expired, so the
+owner's screens say so instead of showing a code that no longer works, and the agent stops reading as waiting for
+them. Jira and Confluence are then unconfigured until the agent signs in again.
+
 Each person also has a CLAUDE.md (`claude_md`), edited in the "Your CLAUDE.md" section of `/hub/virtual`, which every one of
 their virtual agents writes to `~/.claude/CLAUDE.md` before each start of Claude. It is kept in the credentials store
 because it may hold private context, and its owner can read it back. With nothing stored a pod gets the default,
