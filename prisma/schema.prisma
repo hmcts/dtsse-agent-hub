@@ -414,6 +414,12 @@ model VirtualAgent {
   /// How many it holds in all, which is more than `uploadsFiles` names once it holds more than the cap.
   uploadsFilesTotal   Int?                    @map("uploads_files_total")
   uploadsReportedAt   DateTime?               @map("uploads_reported_at") @db.Timestamptz(6)
+  /// What the pod last reported its container cgroup says. Null means it has not said, not that it is idle.
+  memoryLimitBytes    BigInt?                 @map("memory_limit_bytes")
+  memoryCurrentBytes  BigInt?                 @map("memory_current_bytes")
+  /// The high-water mark since it booted, which the memory warning is computed from; see src/assistant/memory-report.ts.
+  memoryPeakBytes     BigInt?                 @map("memory_peak_bytes")
+  memoryReportedAt    DateTime?               @map("memory_reported_at") @db.Timestamptz(6)
   startedAt           DateTime                @default(now()) @map("started_at") @db.Timestamptz(6)
   lastActiveAt        DateTime?               @map("last_active_at") @db.Timestamptz(6)
   stoppedAt           DateTime?               @map("stopped_at") @db.Timestamptz(6)

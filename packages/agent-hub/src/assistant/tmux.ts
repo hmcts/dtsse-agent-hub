@@ -3,10 +3,17 @@
 import { execFile } from "node:child_process";
 import nodeFs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Env } from "../env.ts";
 
-/** The system prompt the pod appends for a conversation's session. It is a cft-workspace file, not this package's. */
-export const PROMPT_FILE = ".devcontainer/virtual-agent/assistant-prompt.md";
+/**
+ * The system prompt the pod appends for a conversation's session, shipped beside the pod runtime that starts the
+ * supervisor. Absolute, resolved from this module rather than named relative to anything: tmux runs the command
+ * line in the workspace, and the package is installed under a global `node_modules` that the workspace says
+ * nothing about. `dist/assistant/` is two directories below the package root, which is where `virtual-agent/`
+ * sits in both the source tree and the tarball.
+ */
+export const PROMPT_FILE = fileURLToPath(new URL("../../virtual-agent/assistant-prompt.md", import.meta.url));
 
 const TMUX_TIMEOUT_MS = 10000;
 
@@ -27,11 +34,16 @@ export function tmuxName(conversationId: string): string {
 // of its own are `--settings` and a `--plugin-dir` per plugin — never a permission flag. So
 // `--dangerously-skip-permissions` has to be here. Nobody can answer a prompt in a pod, and the first one would
 // hang the session. The prompt file is appended on a resume too: Claude Code keeps no system prompt in the transcript.
+//
+// tmux runs this line through `/bin/sh -c`, so the prompt file is quoted: it is an install-derived absolute path
+// now rather than a fixed name, and a package root holding a space would otherwise split into two arguments and
+// start the session with no system prompt. Single quotes, because a path may hold a `$` or a backslash; one
+// holding a single quote is the only shape left, and no npm prefix has one.
 export function claudeCommand(sessionId: string, resume: boolean): string {
-  return `hai --dangerously-skip-permissions ${resume ? "--resume" : "--session-id"} ${sessionId} --append-system-prompt-file ${PROMPT_FILE}`;
+  return `hai --dangerously-skip-permissions ${resume ? "--resume" : "--session-id"} ${sessionId} --append-system-prompt-file '${PROMPT_FILE}'`;
 }
 
-/** The program a command line runs: its first word. The supervisor builds the command, so there is nothing quoted to split. */
+/** The program a command line runs: its first word, which is always a bare `hai` and never quoted. */
 export function commandProgram(command: string): string {
   return command.trim().split(/\s+/)[0] ?? "";
 }

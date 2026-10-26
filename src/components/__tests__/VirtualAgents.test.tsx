@@ -593,7 +593,7 @@ describe("the size choice", () => {
     ["requested", "running"],
     ["stopped", "stopped"]
   ] as const)("should offer to change the size when the agent is %s", async (status, desired) => {
-    const resize = vi.fn(async () => ({ ok: true as const, confirmation: "pcs-api is now medium" }));
+    const resize = vi.fn(async () => ({ ok: true as const, confirmation: "It starts at medium the next time it runs." }));
     render(<SizePanel agent={card({ status, desired })} resize={resize} />);
 
     fireEvent.change(screen.getByLabelText("Size"), { target: { value: "medium" } });
@@ -603,15 +603,18 @@ describe("the size choice", () => {
 
     const sent = (resize.mock.calls[0] as unknown as [FormData])[0];
     expect([sent.get("id"), sent.get("size")]).toEqual([card().id, "medium"]);
-    expect(screen.getByRole("status").textContent).toBe("pcs-api is now medium");
+    expect(screen.getByRole("status").textContent).toBe("It starts at medium the next time it runs.");
+    expect(screen.getByText("It starts at the new size the next time it runs.")).toBeTruthy();
   });
 
-  it("should show the size and say to stop the agent when it is running", () => {
+  // The size is in the pod template, so a change replaces a running pod. The panel offers the change and says what it
+  // ends, rather than withholding it until the agent is stopped.
+  it("should offer the change and say it restarts the agent when it is running", () => {
     render(<SizePanel agent={card({ size: "large" })} resize={ok()} />);
 
-    expect(screen.getByText("Large: 4–8 CPUs, 16Gi–32Gi memory")).toBeTruthy();
-    expect(screen.getByText("Stop it to change its size.")).toBeTruthy();
-    expect(screen.queryByRole("form")).toBeNull();
+    expect((screen.getByLabelText("Size") as HTMLSelectElement).value).toBe("large");
+    expect(screen.getByText("Changing the size restarts it, which ends every session running on it. Its disk is kept.")).toBeTruthy();
+    expect(screen.getByRole("form", { name: "Change the size of pcs-api" })).toBeTruthy();
   });
 
   it("should show nothing when the agent is being deleted", () => {

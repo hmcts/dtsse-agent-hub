@@ -14,6 +14,7 @@ import type { AssistantExportDefaults } from "@/components/assistant/ExportSetti
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
+import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import type { ActionResult } from "@/web/action";
@@ -99,6 +100,7 @@ export function AssistantShell({
   claudeMd,
   templates,
   files,
+  size,
   exports,
   actions,
   children
@@ -117,6 +119,8 @@ export function AssistantShell({
   /** The person's own saved prompts, which the footer's settings lists and edits. */
   templates?: AssistantTemplates;
   files?: AssistantFiles;
+  /** How much its pod has to work with, which the footer's settings shows and changes. */
+  size?: AssistantSize;
   /** Where the person's documents go by default, which the footer's settings shows and edits. */
   exports?: AssistantExportDefaults;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
@@ -306,6 +310,7 @@ export function AssistantShell({
               claudeMd={claudeMd}
               templates={templates}
               files={files}
+              size={size}
               exports={exports}
             />
           </div>

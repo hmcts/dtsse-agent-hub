@@ -113,6 +113,7 @@ A share exposes the words of the thread and the conversation's artefact, and not
 | `GET /api/virtual/{id}/conversations` | — | `200 {conversations: [{id}]}`, every conversation of that virtual agent. The pod reconciles its `/workspace/uploads/<conversation-id>/` directories against this list (see Attachments below), so a conversation deleted while it was stopped — which sends no `close` it was there to hear — still has its files removed. |
 | `PUT /api/virtual/{id}/uploads` | `{uploads_bytes, volume_used_bytes, volume_total_bytes, files_total, files: [{upload_id, bytes}], deleted: [upload_id]}` | `204`. What the pod holds on its own volume, replacing its last report, and which deletions it has carried out; see Uploads on the pod's disk below. |
 | `PUT /api/virtual/{id}/lookups/{lookup_id}` | `{results}` or `{error, detail?}` | `204`. The answer to one `lookup`; see Atlassian lookups below. |
+| `PUT /api/virtual/{id}/memory` | `{limit_bytes, current_bytes, peak_bytes}` | `204`. What the pod's container cgroup says about its own memory, replacing its last report; see Memory in the pod below. |
 
 **Registering.** The supervisor starts each session with the conversation's `session_id` and with `AGENT_HUB_CONVERSATION_ID` in its environment, and the session registers with `conversation_id` set, using the launch token. That registration adopts the agent the hub created, makes it the conversation's current agent and clears the wake, and does **not** make it the virtual agent's current agent. A later registration with the same `conversation_id` and a new `session_id` (after `/clear`) becomes the conversation's current agent instead. A `conversation_id` that is not one of the launch token's virtual agent's conversations, or sent without a launch token, gives `409`. A conversation's session subscribes to no topics.
 
@@ -241,6 +242,60 @@ Metadata rows cascade from the message and from the conversation, so deleting ei
 
 **Which sessions count as busy.** The hooks' `busy` is believed only while the status file was written since the supervisor started — give or take five seconds, because the comparison is against a time taken a moment later and a filesystem that keeps mtimes to the whole second would otherwise put a turn that began as the pod came up on the wrong side of it — and while the session has shown progress, a write to the status file or the transcript, in the last two hours. `~/.claude` is a volume that outlives the pod, so a turn a pod went down in the middle of leaves `busy` on disk with nothing to rewrite it: Claude Code runs no `Stop` hook for an interrupted turn, and a session resumed under the same session id skips the enable that writes it afresh. Taken at face value, that frozen flag is a slot nothing can evict and the idle stop never reaches, and the slot it holds cannot be recovered by restarting the pod. A session's place in the eviction order comes from those two mtimes alone and never from the flag, which is what keeps a genuine turn — one appending to its transcript — at the recent end of the order and makes it safe to discount a `busy` claimed before the boot. Two hours rather than something tighter because evicting a session that is really working, on a long build or a slow wait, costs the person the answer it was in the middle of.
 
+## Memory in the pod
+
+A conversation session costs about **1.2Gi**, for the reasons under Capacity above, and the pod's own work is on top
+of that. So a pod reaches the ceiling of its size with nothing wrong with it — and the hub cannot see that either:
+every call between the two is pod to hub. The pod reports, as it does for its disk.
+
+**Reporting.** `PUT /api/virtual/{id}/memory` replaces the virtual agent's last report:
+
+```jsonc
+{
+  "limit_bytes": 8589934592,   // memory.max: where the kernel kills the container
+  "current_bytes": 3221225472, // memory.current
+  "peak_bytes": 5637144576     // memory.peak: the high-water mark since the pod booted
+}
+```
+
+- The figures are the container's **own cgroup** — `memory.max`, `memory.current` and `memory.peak` under
+  `/sys/fs/cgroup` — so this is three small reads rather than a walk of anything, unlike the uploads report. A pod on
+  cgroup v1, or one whose `memory.max` is `max` (no limit at all), reports **nothing**: a ceiling is what every
+  sentence the hub writes about this is relative to, and a limit guessed from the size would be a figure presented as
+  measured. There is no partial report.
+- **A report of its own, not part of the uploads report.** The two are one `PUT` each on the same reconcile, and
+  keeping them apart is what lets either fail alone: a cgroup the pod cannot read must not cost the person their disk
+  figures, and a volume it cannot `statfs` must not cost them the memory warning. It also keeps the three
+  cannot-tell sentences distinguishable — each report has its own client feature and its own `*_reported_at`, where
+  optional fields inside one body would make "an older client" and "a client that could not measure" the same silence.
+- Every figure is a whole number from 0 up, and `peak_bytes` is **not** required to be at least `current_bytes`:
+  `memory.peak` is resettable on newer kernels, and refusing the report over it would lose the live figure too.
+  Anything that is not a whole number is `400`.
+- Sent every 10 minutes, on the pod's uploads reconcile, so the hub's figures are always *as of* `memory_reported_at`
+  and the UI says when rather than presenting them as current. `peak_bytes` is what the warning below is computed
+  from, and a stale peak is a **lower bound** on the true one, so a late report understates the pressure and never
+  invents it. `current_bytes` dips between turns and is shown beside the peak rather than warned on.
+- A report **notifies nobody**, for the reasons a disk report does not: it is read by the owner's own settings, and
+  nothing streams it.
+
+**The warning.** The hub warns when the peak leaves less than **one more conversation's worth** of headroom under the
+limit — `peak_bytes + 1.2Gi > limit_bytes`. The threshold is derived rather than chosen: it is the measured cost of
+a conversation against the ceiling the pod itself reported, so what it says is the thing the person can act on ("there
+is no room for another chat at this size"), and a pod merely using memory within its size never raises it. The two
+things it names are the two things that change the answer: move up a size, or close some chats.
+
+**Who sees it.** The owner alone, through `canSeeAssistantMemory`. No grant reaches it: a figure about someone's pod
+is not a session they chose to share.
+
+**An older client.** Gated on the `memory` client feature below. A pod whose current session has not claimed it is one
+the Assistant's settings say cannot report yet, rather than one shown `0`, which would read as an idle pod.
+
+**Changing size.** `size` is in the pod template, so a change bumps `pod_generation` and the orchestrator replaces the
+pod — which ends every conversation session running on it. The Assistant's settings say that before the person
+commits, with the per-size session cap and memory from the same constants the orchestrator applies (see Capacity
+above), and count the chats that are running. A chat is not lost: its session resumes from the pod's disk on the next
+wake, with `resume` true. The turn in flight is.
+
 ## Credentials
 
 `PUT` and `DELETE /api/agent/credentials/{kind}` store and remove the credentials a person's virtual agents use on their behalf. They act on the caller's own credentials only; nothing in the path or body names an owner.
@@ -339,7 +394,7 @@ field out and the UI can say that the feature is not available on that session y
 - It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
   been upgraded re-registers.
 
-Four names are in use, and the clients published from this repo claim all four.
+Five names are in use, and the clients published from this repo claim all five.
 
 - `attachments`, because they read the `attachments` on an Assistant `direct` frame and fetch each file to the pod's
   disk. No hub field is gated on it — the frame carries `attachments` to every session — so a client too old to claim
@@ -356,6 +411,10 @@ Four names are in use, and the clients published from this repo claim all four.
 - `lookups`, because their supervisor answers the sessions stream's `lookup` frame (see Atlassian lookups). Claimed by
   the pod's own session, as `files` is. Gated: the hub answers a lookup for a pod that has not claimed it with
   `unsupported`, and sends it no frame.
+- `memory`, because their supervisor reads its own container cgroup and reports it (`PUT /api/virtual/{id}/memory`).
+  Claimed by the pod's **own** session, as `files` is, since the supervisor is what reports. Nothing is gated on it in
+  the other direction — the hub sends no field for it — but the settings' Size section reads it to tell a pod that
+  cannot report yet apart from one that has not reported yet, and says so rather than showing an unused pod.
 
 ## Replies
 
@@ -412,7 +471,7 @@ All of `/api/virtual/**` and `/api/orchestrator/**` answer `404` unless the serv
 | `requested` | Created or started; not yet applied | the hub |
 | `provisioning` | The StatefulSet is applied and the pod is starting | the orchestrator, or the pod |
 | `awaiting_credentials` | The pod is fetching the owner's credentials, or waiting for one to be stored: `status_detail` names the kind first, as `bedrock: …` while it waits for the owner to paste a Bedrock API key | the pod |
-| `awaiting_login` | The pod is waiting for the owner to finish a sign-in | the pod, or `POST login/{kind}` |
+| `awaiting_login` | The pod is waiting for the owner to finish a sign-in | the pod, or `POST login/{kind}`; left by `POST login/{kind}/complete` or `…/failed` once no sign-in is still pending |
 | `cloning` | Accepted, but no longer reported: the pod clones and syncs repositories in the background once Claude has started | the pod |
 | `running` | Claude is running. `status_detail` says how far the background clone has got, as `Claude is ready; cloning repositories (n/241)` and then `Claude is ready; repositories ready` | the pod |
 | `stopping` | Meant to be stopped or deleted; a pod or disk is still there, or the orchestrator has yet to say otherwise | the hub, or the orchestrator |
@@ -440,6 +499,9 @@ Every `/api/virtual/{virtual_agent_id}/…` route needs that virtual agent's own
 | `POST /api/virtual/{id}/login/{kind}` | `{prompt, verification_uri, user_code?, expires_in}` | `204`. Shows a sign-in to the owner, replacing any earlier one of that kind, and sets `awaiting_login`. `prompt` is `device_code` (the owner enters `user_code`, letters, digits and hyphens, at `verification_uri`) or `paste_code` (the owner opens `verification_uri` and pastes back the code it gives them, as `claude setup-token` asks). `verification_uri` must be `https`; `expires_in` is 1–3600 seconds. |
 | `GET /api/virtual/{id}/login/{kind}/code` | — | For a `paste_code` sign-in: `200 {code}`, the code the owner pasted, which is deleted as it is read; `204` until there is one, or once it is more than 10 minutes old. Poll it. |
 | `POST /api/virtual/{id}/login/{kind}/complete` | `{account_oid?, account_label?}` | `204`, marking the sign-in completed and, when `account_label` is sent, labelling the stored credential with it. For `azure`, `account_oid` must be the owner's oid: otherwise the stored Azure credential is deleted, the agent is `failed` and the answer is `409`, so whichever of the save and `complete` comes first refuses another account, and the pod should restart on a `409`. Any other kind, `atlassian` included, completes whatever account it names. No sign-in of that kind gives `404`. |
+| `POST /api/virtual/{id}/login/{kind}/failed` | `{state, detail?}` | `204`, marking a sign-in the pod relayed and gave up on. `state` is `expired` (the code reached its `expires_in` unused) or `failed` (anything else); `detail` is at most 500 characters and becomes the agent's `status_detail`. No sign-in of that kind gives `404`. This is the counterpart of `complete`, and the pod owes the hub one or the other: without it the owner is left a code that no longer works and an agent that reads as waiting for them. |
+
+Both `complete` and `failed` take the agent out of `awaiting_login` when no sign-in of any kind is still pending, because a pod waiting for nobody is not awaiting a login. It becomes `running`: only the pod that holds the current launch token can report either, and a pod reporting one is a pod working again. Its own next report says how far it has got.
 
 ### Orchestrator routes
 

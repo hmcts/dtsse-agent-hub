@@ -17,7 +17,8 @@
   "files": [
     "bin",
     "dist",
-    "secret-patterns"
+    "secret-patterns",
+    "virtual-agent"
   ],
   "exports": {
     ".": {

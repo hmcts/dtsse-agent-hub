@@ -201,6 +201,7 @@ describe("runAssistantSupervisor", () => {
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
       putLookup: async () => null,
+      putMemory: async () => null,
       sessionsStream: async (): Promise<Response> => {
         opens.push(Date.now());
         throw new ApiError(403, { error: "forbidden" }, "GET", `/api/virtual/${VID}/sessions`);
@@ -249,6 +250,7 @@ describe("runAssistantSupervisor", () => {
         conversations: async () => ({ conversations: [] }),
         putUploads: async () => null,
         putLookup: async () => null,
+        putMemory: async () => null,
         sessionsStream: async () => new Response("", { status: 200 })
       },
       id: VID,
@@ -284,6 +286,7 @@ describe("runAssistantSupervisor", () => {
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
       putLookup: async () => null,
+      putMemory: async () => null,
       sessionsStream: async () => new Response("", { status: 200 })
     };
     const running = runAssistantSupervisor({
@@ -326,6 +329,7 @@ describe("runAssistantSupervisor", () => {
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
       putLookup: async () => null,
+      putMemory: async () => null,
       sessionsStream: async (_id: string, opts: { signal?: AbortSignal } = {}): Promise<Response> => {
         opens += 1;
         const body = new ReadableStream<Uint8Array>({
@@ -371,6 +375,7 @@ describe("runAssistantSupervisor", () => {
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
       putLookup: async () => null,
+      putMemory: async () => null,
       sessionsStream: async () => new Response("event: wake\ndata: {oops\n\nevent: close\ndata: nope\n\nevent: reconnect\ndata: {}\n\n", { status: 200 })
     };
     const running = runAssistantSupervisor({

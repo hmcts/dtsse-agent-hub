@@ -10,7 +10,7 @@ import {
   MAX_LOOKUP_QUERY,
   searchable
 } from "@/assistant/lookups";
-import { SignInPrompt } from "@/components/assistant/AtlassianSignIn";
+import { SignInPrompt, signInNote, signInStage, useSignInClock } from "@/components/assistant/AtlassianSignIn";
 import type { JiraAccess } from "@/components/assistant/JiraExport";
 import { lookUp as fetchLookup, type LookUp } from "@/components/assistant/lookupClient";
 
@@ -119,6 +119,9 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
   // Bumped to run the same search again: while the assistant starts, and once a sign-in has finished.
   const [attempt, setAttempt] = useState(0);
   const retries = useRef(0);
+  // When the person asked for the sign-in, and the clock that decides whether its code can still be used.
+  const [signInAt, setSignInAt] = useState<number | null>(null);
+  const now = useSignInClock(access.login);
   const space = scoped && scope !== null ? scope.key : null;
   const results = shown.phase === "found" ? shown.results : [];
   const current = results.length === 0 ? -1 : Math.min(active, results.length - 1);
@@ -189,6 +192,7 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
   }, [query, space, kind, attempt, lookUp]);
 
   async function signIn(): Promise<void> {
+    setSignInAt(Date.now());
     setShown({ phase: "signing_in", results: [] });
     const answer = await lookUp({ kind, query, space, signIn: true }, new AbortController().signal).catch(() => null);
     if (answer === null || answer.status === "failed") {
@@ -223,7 +227,10 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
     }
   }
 
-  const login = access.login?.kind === "atlassian" && access.login.state === "pending" ? access.login : null;
+  // Read as the exports read it, from when the person asked, so a code left over from an earlier sign-in, or one that
+  // has run out, is never offered as the one to use.
+  const stage = signInStage(access.login, now ?? 0, signInAt ?? now ?? 0);
+  const note = shown.phase === "signing_in" ? signInNote(stage, "search", "Sign in again") : null;
   return (
     // `min-w-0` all the way down, so the box and a long result truncate within the panel rather than run past it.
     <div className="flex min-w-0 basis-full flex-col gap-2">
@@ -267,7 +274,12 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
           Sign in to Atlassian
         </button>
       ) : null}
-      {shown.phase === "signing_in" && login !== null ? <SignInPrompt login={login} /> : null}
+      {shown.phase === "signing_in" && stage === "live" && access.login ? <SignInPrompt login={access.login} /> : null}
+      {note === null ? null : (
+        <p role="alert" className="text-[13px] text-asst-error">
+          {note}
+        </p>
+      )}
       <div
         id={listId}
         role="listbox"

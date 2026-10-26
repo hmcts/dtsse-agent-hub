@@ -11,7 +11,7 @@ import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/ass
 import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { pasteLoginCode, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
 import { STARTERS } from "@/assistant/starters";
@@ -22,7 +22,7 @@ import { AssistantShell, type ConversationActions } from "@/components/assistant
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { requireViewer } from "@/viewer/current";
-import { assistantExportDefaults, assistantFiles, assistantTemplates, claudeMdSettings, openAssistant, unsentNewChat } from "@/web/data";
+import { assistantExportDefaults, assistantFiles, assistantSize, assistantTemplates, claudeMdSettings, openAssistant, unsentNewChat } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -42,12 +42,13 @@ export default async function AssistantPage() {
   const viewer = await requireViewer();
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
-  const [home, unsent, claudeMd, mine, files, defaults] = await Promise.all([
+  const [home, unsent, claudeMd, mine, files, size, defaults] = await Promise.all([
     openAssistant(viewer),
     unsentNewChat(viewer),
     claudeMdSettings(viewer),
     assistantTemplates(viewer),
     assistantFiles(viewer),
+    assistantSize(viewer),
     assistantExportDefaults(viewer)
   ]);
   // The same sign-in the conversation page gives the document panel, for the settings' searches.
@@ -69,6 +70,7 @@ export default async function AssistantPage() {
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
       files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}
+      size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
     >
       <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />

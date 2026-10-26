@@ -58,6 +58,12 @@ export const completeBody = z.object({
   account_label: optionalText(200)
 });
 
+/** The pod's word that a sign-in it relayed is over without the owner finishing it. */
+export const loginFailedBody = z.object({
+  state: z.enum(["expired", "failed"]),
+  detail: optionalText(MAX_DETAIL)
+});
+
 export const claimBody = z.object({ cluster: z.string().trim().regex(CLUSTER, "must be 1–100 letters, digits, dots, hyphens or underscores") });
 
 export const observedBody = z.object({

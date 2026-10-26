@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
 import { captureStderr, createPodShims, type PodShims, podSecrets, usePodEnv } from "../__fixtures__/pod-shims.ts";
 import { createApi } from "../api.ts";
+import { ATLASSIAN_SIGN_IN_CODES } from "./atlassian.ts";
 import { EXIT_FATAL, EXIT_NO_CREDENTIAL } from "./phases.ts";
 import { runVirtual, VIRTUAL_USAGE } from "./run.ts";
 import { run } from "./sign-in.ts";
@@ -36,6 +37,7 @@ afterEach(() => {
   v.status.length = 0;
   v.prompts.length = 0;
   v.completes.length = 0;
+  v.loginFailures.length = 0;
   v.credentials.clear();
   v.codes.clear();
   v.ports.length = 0;
@@ -146,16 +148,28 @@ describe("runVirtual azure-login", () => {
 });
 
 describe("runVirtual atlassian-login", () => {
-  it("should exit 4, never fatally, when the owner lets the device code expire", async () => {
+  it("should exit 4, never fatally, when the owner lets every device code expire", async () => {
     // Act
     const r = await virtualCommand(["atlassian-login"], { env: pod.env({ FAKE_TWG_LOGIN: "expire" }) });
 
     // Assert
     expect(r.code).toBe(EXIT_NO_CREDENTIAL);
-    expect(r.stderr).toMatch(/sign-in was not completed .*Jira and Confluence stay signed out/);
-    expect(virtual().prompts).toHaveLength(1);
+    expect(r.stderr).toMatch(/ran out before it was used; Jira and Confluence stay signed out/);
+    expect(virtual().prompts).toHaveLength(ATLASSIAN_SIGN_IN_CODES);
+    expect(virtual().loginFailures).toEqual([{ kind: "atlassian", state: "expired", detail: expect.stringContaining("ran out before it was used") }]);
     expect(virtual().credentials.has("atlassian")).toBe(false);
     expect(virtual().completes).toEqual([]);
+  });
+
+  it("should exit 4 after one code when the sign-in broke rather than ran out", async () => {
+    // Act
+    const r = await virtualCommand(["atlassian-login"], { env: pod.env({ FAKE_TWG_LOGIN: "deny" }) });
+
+    // Assert
+    expect(r.code).toBe(EXIT_NO_CREDENTIAL);
+    expect(r.stderr).toMatch(/sign-in was not completed .*Jira and Confluence stay signed out/);
+    expect(virtual().prompts).toHaveLength(1);
+    expect(virtual().loginFailures).toEqual([{ kind: "atlassian", state: "failed", detail: expect.stringContaining("was not completed") }]);
   });
 
   it("should exit 1 and leave the agent unfailed when twg prints no code at all", async () => {

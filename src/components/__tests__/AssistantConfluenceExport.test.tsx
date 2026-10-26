@@ -162,7 +162,7 @@ describe("Confluence export in the document panel", () => {
       })
     );
 
-    expect(screen.getByText("✓ Created Story")).toBeTruthy();
+    expect(screen.getByText("✓ Created page")).toBeTruthy();
     expect(screen.getByRole("link", { name: "View in Confluence" }).getAttribute("href")).toBe("https://hmcts.atlassian.net/wiki/spaces/CCD/pages/9");
     expect(screen.getByText("In Confluence")).toBeTruthy();
     expect(screen.getByText("Story · under Guides")).toBeTruthy();
@@ -346,7 +346,12 @@ describe("shortCrumb and openingDestination", () => {
   it("should open on an export in progress, else the one not yet done", () => {
     const none = { status: "none" } as const;
     expect(openingDestination(none, none)).toBe("jira");
-    expect(openingDestination(none, { status: "pending", parentTitle: "P", spaceName: "S" })).toBe("confluence");
-    expect(openingDestination({ status: "pending", project: "VIBE" }, { status: "pending", parentTitle: "P", spaceName: "S" })).toBe("jira");
+    expect(openingDestination(none, { status: "pending", parentTitle: "P", spaceName: "S", requestedAt: "2026-10-26T12:00:00.000Z" })).toBe("confluence");
+    expect(
+      openingDestination(
+        { status: "pending", project: "VIBE", requestedAt: "2026-10-26T12:00:00.000Z" },
+        { status: "pending", parentTitle: "P", spaceName: "S", requestedAt: "2026-10-26T12:00:00.000Z" }
+      )
+    ).toBe("jira");
   });
 });

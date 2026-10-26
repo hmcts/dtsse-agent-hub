@@ -3,6 +3,7 @@
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { type Connection, type ConnectionsData, connections, connectionsWarning } from "@/assistant/connections";
+import { memoryPressure, memoryWarning } from "@/assistant/memory-report";
 import type { AssistantPluginsData } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
@@ -10,6 +11,7 @@ import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeM
 import { type AssistantExportDefaults, ExportSettings } from "@/components/assistant/ExportSettings";
 import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
+import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
@@ -27,6 +29,7 @@ interface SettingsView {
   claudeMd: AssistantClaudeMd | undefined;
   templates: AssistantTemplates | undefined;
   files: AssistantFiles | undefined;
+  size: AssistantSize | undefined;
   exports: AssistantExportDefaults | undefined;
 }
 
@@ -227,6 +230,15 @@ const SECTIONS: readonly SettingsSection[] = [
     // empty panel is worse than no item, and `pluginChoices` is the one place that decides what there is to tick.
     shown: (view) => view.plugins !== undefined && pluginChoices(view.plugins.available, view.plugins.checked).length > 0,
     panel: (view) => (view.plugins === undefined ? null : <Plugins plugins={view.plugins} />)
+  },
+  {
+    id: "size",
+    label: "Size",
+    // With the agent rather than on its own, because what it changes is how much the agent has to work with — and
+    // the memory figures it shows are only readable as "room for another chat", which is an agent fact.
+    group: "Agent",
+    shown: (view) => view.size !== undefined,
+    panel: (view) => (view.size === undefined ? null : <Size size={view.size} />)
   },
   {
     id: "connections",
@@ -571,9 +583,14 @@ function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) 
 }
 
 /**
- * The cog beside the person's name in the sidebar, and the settings it opens. It carries a warning when a sign-in
- * needs them: the mark is a `!` rather than only a colour, and the cog's own name says which sign-ins, so the prompt
+ * The cog beside the person's name in the sidebar, and the settings it opens. It carries a warning when something in
+ * them needs the person: the mark is a `!` rather than only a colour, and the cog's own name says what, so the prompt
  * does not depend on seeing the yellow.
+ *
+ * **One mark, however many reasons.** A sign-in that has lapsed and an assistant short of memory both put the person
+ * in the same dialog, and a second badge beside this one would be two things competing to be noticed and neither
+ * read. So the reasons are joined into the cog's accessible name instead, in the order the dialog's own sections
+ * come.
  */
 export function AssistantSettings({
   theme = "system",
@@ -582,6 +599,7 @@ export function AssistantSettings({
   claudeMd,
   templates,
   files,
+  size,
   exports
 }: {
   theme?: Theme;
@@ -590,6 +608,7 @@ export function AssistantSettings({
   claudeMd?: AssistantClaudeMd;
   templates?: AssistantTemplates;
   files?: AssistantFiles;
+  size?: AssistantSize;
   exports?: AssistantExportDefaults;
 }) {
   const cog = useRef<HTMLButtonElement>(null);
@@ -604,6 +623,9 @@ export function AssistantSettings({
 
   const list = connections(data, (stored, login) => checklistState(stored, login, now));
   const warning = connectionsWarning(list);
+  const memory = size === undefined ? null : memoryWarning(memoryPressure(size.view.use, size.view.openChats, size.view.size));
+  // In the order the dialog's sections come, so the name reads as a route through it. Empty is no mark at all.
+  const attention = [memory, warning].filter((reason): reason is string => reason !== null);
 
   /**
    * The element the `--asst-*` colours are declared on. The dialog is rendered into it rather than into `body`: it
@@ -633,7 +655,7 @@ export function AssistantSettings({
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={warning === null ? "Settings" : `Settings. ${warning}`}
+        aria-label={attention.length === 0 ? "Settings" : `Settings. ${attention.join(". ")}`}
         title="Settings"
         onClick={() => {
           setNow(Date.now());
@@ -645,7 +667,7 @@ export function AssistantSettings({
         className="relative -my-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"
       >
         <CogIcon />
-        {warning === null ? null : (
+        {attention.length === 0 ? null : (
           <span
             aria-hidden="true"
             className="absolute -right-0.5 -top-0.5 flex h-[15px] w-[15px] items-center justify-center rounded-full bg-asst-warn text-[10px] font-bold leading-none text-asst-rail"
@@ -657,7 +679,7 @@ export function AssistantSettings({
       {open
         ? createPortal(
             <Dialog
-              view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, claudeMd, templates, files, exports }}
+              view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, claudeMd, templates, files, size, exports }}
               onClose={close}
             />,
             themeRoot()

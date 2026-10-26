@@ -105,7 +105,7 @@ export interface ConfluencePlace {
 /** What the document panel shows of the conversation's Confluence export. */
 export type ConfluenceExportView =
   | { status: "none" }
-  | ({ status: "pending" } & ConfluencePlace)
+  | ({ status: "pending"; requestedAt: string } & ConfluencePlace)
   | ({ status: "done"; pageId: string; pageTitle: string | null; url: string } & ConfluencePlace)
   | { status: "failed"; place: ConfluencePlace | null; error: string };
 
@@ -134,7 +134,9 @@ export function confluenceExportView(row: ConfluenceExportRow, now: Date = new D
     };
   }
   if (row.confluenceStatus === "pending" && place !== null) {
-    return expired(row.confluenceRequestedAt, now) ? { status: "failed", place, error: TIMED_OUT } : { status: "pending", ...place };
+    return expired(row.confluenceRequestedAt, now)
+      ? { status: "failed", place, error: TIMED_OUT }
+      : { status: "pending", ...place, requestedAt: (row.confluenceRequestedAt as Date).toISOString() };
   }
   if (row.confluenceStatus === "failed") {
     return { status: "failed", place, error: row.confluenceError ?? "The page could not be created." };

@@ -4,36 +4,20 @@
 // The pod's own half — measuring the volume and deleting the files — is in the client package's
 // `src/assistant/disk.test.ts` and `src/assistant/attachments.test.ts`.
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
+import { createConversation } from "../../src/assistant/store.ts";
 import { pendingUploadDeletions, reportedUploadIds, reportUploadsOnDisk, requestUploadRemoval, uploadsOnDisk } from "../../src/assistant/upload-disk.ts";
 import { createEventHub } from "../../src/realtime/hub.ts";
 import { startListener } from "../../src/realtime/listener.ts";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
-import { devIdentity, type Viewer } from "../../src/viewer/identity.ts";
 import { assistantFiles } from "../../src/web/data.ts";
+import { ALICE, BOB, podFixture, viewer } from "./assistant-pod.ts";
 import { connect, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 
-vi.mock("next/headers", async () => {
-  const { jar } = await import("./web-session.ts");
-  return { cookies: async () => ({ get: (name: string) => (jar.has(name) ? { name, value: jar.get(name)! } : undefined) }) };
-});
-vi.mock("next/cache", async () => {
-  const { revalidated } = await import("./web-session.ts");
-  return { revalidatePath: (path: string) => void revalidated.push(path) };
-});
+vi.mock("next/headers", async () => (await import("./web-session.ts")).nextHeadersMock());
+vi.mock("next/cache", async () => (await import("./web-session.ts")).nextCacheMock());
 
 const { actAs } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/assistant-files.ts");
-
-function persona(name: string): Person {
-  const identity = devIdentity(name);
-  return { oid: identity.oid, name: identity.name, email: identity.email! };
-}
-
-const ALICE = persona("alice");
-const BOB = persona("bob");
-
-const viewer = (who: Person): Viewer => ({ ...who, tid: "dev", modelRoute: "own-licence" });
 
 const client = await connect();
 
@@ -46,36 +30,8 @@ beforeEach(async () => {
   actAs("alice");
 });
 
-/**
- * The person's assistant, running, with its own session registered as its current agent — which is where the `files`
- * claim lives, because the supervisor is what reports and what deletes, not a conversation's session.
- */
-async function assistantOf(
-  who: Person,
-  features: string[] | null = ["files"],
-  status: "running" | "stopped" = "running",
-  { session = true } = {}
-): Promise<string> {
-  await insertUser(who);
-  const assistant = await ensureAssistant(prisma, viewer(who));
-  if (!session) {
-    // An assistant whose supervisor has never registered, so there is no client to have claimed anything.
-    await prisma.virtualAgent.update({ where: { id: assistant.id }, data: { status } });
-    return assistant.id;
-  }
-  const agent = await prisma.agent.create({
-    data: {
-      ownerOid: who.oid,
-      sessionId: `${who.oid}-pod`,
-      name: "assistant",
-      virtualAgentId: assistant.id,
-      ...(features === null ? {} : { clientFeatures: features })
-    },
-    select: { id: true }
-  });
-  await prisma.virtualAgent.update({ where: { id: assistant.id }, data: { status, agentId: agent.id } });
-  return assistant.id;
-}
+/** The shared fixture, bound to the claim this suite is about: the pod's own session reports and deletes files. */
+const assistantOf = podFixture(["files"]);
 
 /** An attachment that reached a message, as a pod would have fetched it, with one part row still held. */
 async function sentUpload(who: Person, conversationId: string, name: string, bytes: number): Promise<string> {
