@@ -15,7 +15,8 @@ export {
   TWG_DEVICE_CODE_EXPIRES_S,
   twgDir,
   twgLoginExpired,
-  twgPromptsForBrowser
+  twgPromptsForBrowser,
+  twgRefreshRejected
 } from "./atlassian.ts";
 export type { AzureProfile, MsalCache, PackedAzureCache, SyncAzureCacheOptions, SyncAzureCacheResult } from "./azure-cache.ts";
 export {

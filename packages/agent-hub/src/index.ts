@@ -488,6 +488,7 @@ export {
   twgDir,
   twgLoginExpired,
   twgPromptsForBrowser,
+  twgRefreshRejected,
   unpackAzureCache,
   VIRTUAL_USAGE,
   virtualStateDir
