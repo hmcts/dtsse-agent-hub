@@ -3,12 +3,25 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
-import { type Api, ApiError, createApi, createTokenProvider, DEFAULT_SCOPE, DEFAULT_URL, parseAzToken, type RunAz, requireAzureLogin } from "./api.ts";
+import {
+  type Api,
+  ApiError,
+  createApi,
+  createTokenProvider,
+  DEFAULT_SCOPE,
+  DEFAULT_URL,
+  isMissingRoute,
+  parseAzToken,
+  type RunAz,
+  requireAzureLogin
+} from "./api.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 
 const VID = "0f8a6a1e-1234-4000-8000-00000000000a";
 const LAUNCH = `launch-${"q".repeat(16)}`;
 const DEV_USER = "oid-alice|Alice Smith|alice@example.com";
+/** What an unmatched path answers with: the first of the Next.js not-found document, as `request` slices it. */
+const ERROR_PAGE = '<!DOCTYPE html><html lang="en" class="dark h-full"><head><meta charSet="utf-8"/>';
 
 let hub: MockHub;
 let url: string;
@@ -78,6 +91,35 @@ describe("ApiError", () => {
   it("should name only the status when there is no body", () => {
     // Act and assert
     expect(new ApiError(503, null, "GET", "/api/agent/agents").message).toBe("GET /api/agent/agents failed: 503");
+  });
+
+  it("should keep an error page out of the message when the service answers with one rather than JSON", () => {
+    // Act
+    const error = new ApiError(404, { error: ERROR_PAGE }, "POST", "/api/virtual/x/login/atlassian/failed");
+
+    // Assert: the document is still on the error, and none of it is in the sentence anything logs
+    expect(error.message).toBe("POST /api/virtual/x/login/atlassian/failed failed: 404");
+    expect(error.body).toEqual({ error: ERROR_PAGE });
+  });
+});
+
+describe("isMissingRoute", () => {
+  it("should be true when a 404 came back as the app's own error page", () => {
+    // Act and assert
+    expect(isMissingRoute(new ApiError(404, { error: ERROR_PAGE }, "POST", "/api/virtual/x/login/atlassian/failed"))).toBe(true);
+  });
+
+  it("should be false when a route of the hub's own answered the 404", () => {
+    // Act and assert: a route that refuses sends JSON, and is a refusal to read rather than a deploy to wait for
+    expect(isMissingRoute(new ApiError(404, { error: "there is no atlassian sign-in to report on" }, "POST", "/api/virtual/x/login/atlassian/failed"))).toBe(
+      false
+    );
+  });
+
+  it("should be false for another status, and for anything that is not an ApiError", () => {
+    // Act and assert
+    expect(isMissingRoute(new ApiError(500, { error: ERROR_PAGE }, "POST", "/api/virtual/x/login/atlassian/failed"))).toBe(false);
+    expect(isMissingRoute(new Error("fetch failed"))).toBe(false);
   });
 });
 

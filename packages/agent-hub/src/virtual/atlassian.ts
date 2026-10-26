@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Api } from "../api.ts";
-import { createApi } from "../api.ts";
+import { createApi, isMissingRoute } from "../api.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
 import { readText, sha256 } from "../session.ts";
@@ -246,7 +246,11 @@ export async function syncAtlassianAuth({
   if (!force && readText(atlassianShaFile()) === sha) {
     return "unchanged";
   }
-  await withRetry(() => api.putCredential(id, "atlassian", value), { attempts: 3 });
+  // The whole module's retry budget, not a shorter one: the token just read off disk has already replaced the one
+  // the hub holds, and Atlassian will take nothing else, so a store that gives up early leaves a spent token
+  // behind for the next pod to be refused. Its ~31 seconds of backoff rides out a hub between replicas, and fits
+  // inside the 60 the pod gets after SIGTERM, where this is the last store there will be.
+  await withRetry(() => api.putCredential(id, "atlassian", value));
   fs.writeFileSync(atlassianShaFile(), `${sha}\n`);
   return "stored";
 }
@@ -408,7 +412,14 @@ export async function atlassianLogin({
   // The owner is otherwise left holding a code that no longer works, with nothing but this pod's stderr saying so.
   // Few attempts: nothing here is fatal, and a hub that cannot be told is not worth half a minute of the pod.
   await withRetry(() => api.loginFailed(id, "atlassian", { state: expired ? "expired" : "failed", detail }), { attempts: 3 }).catch((e: unknown) => {
-    say(`atlassian: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`);
+    // A hub with no such route is one older than this client, which the deploy behind it puts right on its own,
+    // so it is said plainly and once. Everything else — a refusal, a fault, a hub that cannot be reached at all
+    // — is a report that will not arrive, and is said as the failure it is.
+    say(
+      isMissingRoute(e)
+        ? "atlassian: this agent-hub is older than this client, which has no route to tell it the sign-in was not completed"
+        : `atlassian: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`
+    );
   });
   if (thrown !== undefined) {
     throw thrown;

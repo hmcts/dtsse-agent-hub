@@ -228,16 +228,30 @@ export type TranscriptResponse = { accepted: number };
 export type CredentialResponse = { value: string };
 export type LoginCodeResponse = { code: string };
 
+// A body that came back as a page rather than this service's JSON: whatever a route of its own answers with, it
+// is never markup. Kept off the message, because a Next.js error document says nothing the status does not and
+// any slice of one is markup in a log; the body is still on the error for a caller that wants it.
+const isErrorPage = (body: ApiErrorBody | null): boolean => typeof body?.error === "string" && body.error.trimStart().startsWith("<");
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body: ApiErrorBody | null;
 
   constructor(status: number, body: ApiErrorBody | null, method: string, path: string) {
-    super(`${method} ${path} failed: ${status}${body?.error ? ` ${body.error}` : ""}`);
+    const said = body?.error && !isErrorPage(body) ? ` ${body.error}` : "";
+    super(`${method} ${path} failed: ${status}${said}`);
     this.status = status;
     this.body = body;
   }
 }
+
+/**
+ * Whether the service has no such route at all, rather than a route of its own that refused: an unmatched path
+ * answers with the app's own not-found page, where a route sends `{ error }`. A client published ahead of the
+ * deploy that carries its route sees this from every hub still on the older image, which is a deploy catching
+ * up rather than a fault.
+ */
+export const isMissingRoute = (error: unknown): boolean => error instanceof ApiError && error.status === 404 && isErrorPage(error.body);
 
 export type RunAz = (args: string[]) => Promise<string>;
 
