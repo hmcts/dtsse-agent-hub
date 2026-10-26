@@ -26,11 +26,16 @@ import {
   claudeLogin,
   EXPIRY_TOLERANCE_S,
   findClaudeToken,
+  GITHUB_SIGN_IN_CODES,
   githubLogin,
+  OUTPUT_TAIL_CHARS,
+  outputTail,
   parseAzDeviceCode,
   parseClaudeAuthorizeUrl,
   parseGhDeviceCode,
+  REDACTED,
   type RelayDeviceLoginResult,
+  redactTokens,
   relayDeviceLogin,
   run,
   stripAnsi
@@ -60,6 +65,7 @@ afterEach(() => {
   v.status.length = 0;
   v.prompts.length = 0;
   v.completes.length = 0;
+  v.loginFailures.length = 0;
   v.credentials.clear();
   v.codes.clear();
   pod.reset();
@@ -171,6 +177,43 @@ describe("findClaudeToken", () => {
   it("should be null while only the sign-in prompt has been printed", () => {
     // Act & Assert
     expect(findClaudeToken(CLAUDE_OUTPUT)).toBeNull();
+  });
+});
+
+describe("redactTokens", () => {
+  it("should replace a prefixed GitHub token and a classic one when both are in the text", () => {
+    // Arrange: built here rather than written out, as every secret-shaped value in this suite is.
+    const prefixed = `${"gh"}u_${"Q7w8E9r0".repeat(3)}`;
+    const classic = "a".repeat(20) + "9".repeat(20);
+
+    // Act
+    const redacted = redactTokens(`signed in with ${prefixed} and ${classic}`);
+
+    // Assert
+    expect(redacted).toBe(`signed in with ${REDACTED} and ${REDACTED}`);
+  });
+
+  it("should keep the device code and the reason a sign-in failed, which are what the log is read for", () => {
+    // Act & Assert
+    expect(redactTokens("! First copy your one-time code: 7B7F-C198")).toBe("! First copy your one-time code: 7B7F-C198");
+    expect(redactTokens("error: HTTP 429 (slow_down)")).toBe("error: HTTP 429 (slow_down)");
+  });
+});
+
+describe("outputTail", () => {
+  it("should give one line with the escapes gone and the whitespace collapsed", () => {
+    // Act & Assert
+    expect(outputTail("\x1b[1m! First copy\x1b[22m\n\n  your code\n")).toBe("! First copy your code");
+  });
+
+  it("should keep the end when the output is longer than the limit, because the reason is its last word", () => {
+    // Act
+    const tail = outputTail(`${"x".repeat(OUTPUT_TAIL_CHARS)} error: HTTP 429`);
+
+    // Assert
+    expect(tail.startsWith("…")).toBe(true);
+    expect(tail.endsWith("error: HTTP 429")).toBe(true);
+    expect(tail).toHaveLength(OUTPUT_TAIL_CHARS + 1);
   });
 });
 
@@ -373,9 +416,9 @@ describe("githubLogin", () => {
     expect(virtual().credentials.has("github")).toBe(false);
   });
 
-  it("should relay a fresh code on every call, which is what keeps a dead one off the owner's screen", async () => {
-    // Arrange: a failed GitHub sign-in throws, and `virtual-agent-boot` calls this again until it works. The
-    // relay is what Atlassian's lacks: a new code replaces the old one, so no code outlives its own time by long.
+  it("should relay a fresh code on a later call, which is what keeps a dead one off the owner's screen", async () => {
+    // Arrange: a failed sign-in throws, and an owner who stops and starts the agent gets a new pod and a new
+    // call. Each code replaces the one before it on their screen, so no code outlives its own time by long.
     await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env() }));
 
     // Act
@@ -383,6 +426,63 @@ describe("githubLogin", () => {
 
     // Assert
     expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(2);
+  });
+
+  it("should put what gh said in the error, with any token redacted, when the sign-in breaks", async () => {
+    // Arrange: gh's own words are the only record of why a poll stopped. The token shape must not survive them;
+    // the reason must. Both are built here, as every secret-shaped value in this suite is.
+    const leaked = `${"gh"}o_${"L3ak3dT0k3n".repeat(3)}`;
+    const reason = `error: HTTP 429 and a token ${leaked} it should not have printed`;
+
+    // Act
+    const { error, stderr } = await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_LOGIN_FAILS: reason }) }));
+
+    // Assert
+    expect((error as Error).message).toContain("gh said:");
+    expect((error as Error).message).toContain("error: HTTP 429");
+    expect((error as Error).message).toContain(REDACTED);
+    expect((error as Error).message).not.toContain(leaked);
+    expect(stderr).not.toContain(leaked);
+  });
+
+  it("should relay one code only and report the sign-in failed when it broke rather than ran out", async () => {
+    // Arrange: the owner's code is still live at GitHub for the rest of its fifteen minutes, so a fresh one
+    // would replace the code they may be part way through entering.
+    // Act
+    await captureStderrOfFailure(() => githubLogin({ api: api(), env: pod.env({ FAKE_GH_LOGIN_FAILS: "error: HTTP 429" }) }));
+
+    // Assert
+    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(1);
+    expect(virtual().loginFailures).toEqual([{ kind: "github", state: "failed", detail: "github: gh auth login exited 1 without a token" }]);
+  });
+
+  it("should stop at its budget of codes and report the sign-in expired when each one runs out unused", async () => {
+    // Arrange: an `expiresIn` under EXPIRY_TOLERANCE_S makes every attempt count as a code that reached its
+    // expiry unused, which is the only outcome that earns another.
+    // Act
+    const { error } = await captureStderrOfFailure(() =>
+      githubLogin({ api: api(), env: pod.env({ FAKE_GH_LOGIN_FAILS: "error: authentication timed out" }), expiresIn: 1 })
+    );
+
+    // Assert
+    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(GITHUB_SIGN_IN_CODES);
+    expect(virtual().loginFailures).toEqual([{ kind: "github", state: "expired", detail: "github: the sign-in code ran out before it was used" }]);
+    expect((error as Error).message).toContain("authentication timed out");
+  });
+
+  it("should rethrow and say the hub could not be told when gh prints no code for the owner at all", async () => {
+    // Arrange: gh fails before printing a code, so the owner was shown nothing and the hub has no sign-in of
+    // this kind to fail — which is itself worth a line, because it is the one outcome it is not told about.
+    // Act
+    const { error, stderr } = await captureStderrOfFailure(() =>
+      githubLogin({ api: api(), env: pod.env({ FAKE_GH_LOGIN_CRASHES: "error: could not reach github.com" }) })
+    );
+
+    // Assert
+    expect((error as Error).message).toMatch(/gh printed no sign-in code \(exit 1\)/);
+    expect(virtual().prompts).toEqual([]);
+    expect(virtual().loginFailures).toEqual([]);
+    expect(stderr).toMatch(/could not tell agent-hub the sign-in was not completed/);
   });
 });
 

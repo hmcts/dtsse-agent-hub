@@ -170,11 +170,17 @@ sleep 30`
   *) echo "unexpected az $*" >&2; exit 2 ;;
 esac`
   );
+  // The two shapes a GitHub sign-in fails in, each giving the words gh prints: `FAKE_GH_LOGIN_FAILS` after the
+  // code, which is a sign-in that broke under the owner, and `FAKE_GH_LOGIN_CRASHES` instead of one, which
+  // leaves them nothing to enter. Both exit 1 with no token, and what gh said is their only record.
   shim(
     "gh",
     `case "$1 $2" in
   "auth login") [ -n "$GH_TOKEN$GITHUB_TOKEN" ] && exit 9; [ "$BROWSER" = true ] || exit 8; printf '%s\\n' "$*" > "$SHIM_STATE/gh-login-args"
-      cat "$SHIM_STATE/gh.out" >&2; sleep 0.3; printf '%s' "$FAKE_GH_TOKEN" > "$SHIM_STATE/gh-token"; echo "✓ Authentication complete." >&2 ;;
+      [ -n "$FAKE_GH_LOGIN_CRASHES" ] && { printf '%s\\n' "$FAKE_GH_LOGIN_CRASHES" >&2; exit 1; }
+      cat "$SHIM_STATE/gh.out" >&2; sleep 0.3
+      [ -n "$FAKE_GH_LOGIN_FAILS" ] && { printf '%s\\n' "$FAKE_GH_LOGIN_FAILS" >&2; exit 1; }
+      printf '%s' "$FAKE_GH_TOKEN" > "$SHIM_STATE/gh-token"; echo "✓ Authentication complete." >&2 ;;
   "auth token") cat "$SHIM_STATE/gh-token" 2>/dev/null || exit 1 ;;
   "api user") [ -n "$FAKE_GH_USER" ] && { printf '%s\\n' "$FAKE_GH_USER"; exit 0; }; echo octocat ;;
   "api user/emails") [ -n "$FAKE_GH_EMAILS" ] && { printf '%s\\n' "$FAKE_GH_EMAILS"; exit 0; }; echo '{"message":"Not Found"}'; exit 1 ;;

@@ -273,12 +273,20 @@ if [[ -n "$github_missing" ]]; then
     client=$(agent_hub_client) ||
         { report failed "the image has no agent-hub client: neither $WORKSPACE/scripts/agent-hub nor an agent-hub on PATH"; exit 1; }
     log "signing in to GitHub with $client"
-    delay=30
-    until "$client" virtual github-login; do
-        log "github sign-in did not complete; retrying in ${delay}s"
-        sleep "$delay"
-        delay=$((delay * 2 > 300 ? 300 : delay * 2))
-    done
+    # One call, which relays a bounded number of codes itself and tells the hub when none of them was completed.
+    # There is no loop around it on purpose: each code replaces the one before it on the owner's screen, so an
+    # owner who is not going to sign in should be asked once and then told, not handed a fresh code every few
+    # minutes for as long as the pod runs. A stored token is the other way in, so that is what the pod waits for,
+    # and waiting costs one GET rather than another device code nobody uses.
+    if ! "$client" virtual github-login; then
+        report failed "github: nobody completed the sign-in. Paste a GitHub token at $HUB/hub/settings/credentials, or stop and start this agent to be sent another code."
+        log "github sign-in did not complete; waiting for a stored GitHub token rather than asking again"
+        until token=$(github_credential) && [[ -n "$token" ]] && gh_login_with_token "$token"; do
+            sleep 30
+        done
+        unset token
+        log "signed in with the GitHub token the owner stored"
+    fi
     gh auth setup-git --hostname github.com
     report provisioning
 fi

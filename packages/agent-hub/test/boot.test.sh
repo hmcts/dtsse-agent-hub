@@ -9,8 +9,8 @@
 #   bash test/boot.test.sh --list          # the case names, which is what the wrapper iterates
 #
 # HUB_URL and HUB_STATE are required: the hub answers on the first and rewrites the second
-# ({status, prompts, completes, github}) as each response it sends goes out, so a read taken the moment a
-# boot returns holds everything the boot was told. VID and LAUNCH name the virtual agent it minted the
+# ({status, prompts, completes, loginFailures, github}) as each response it sends goes out, so a read taken the
+# moment a boot returns holds everything the boot was told. VID and LAUNCH name the virtual agent it minted the
 # launch token for. BOOT is the script under test and AGENT_HUB_CLI_JS the client's CLI, so both can be
 # pointed elsewhere.
 
@@ -18,7 +18,7 @@
 # shellcheck disable=SC2015,SC2016
 set -u
 
-CASES=(no-token refused-token stored-token-no-access checkout-client broken-checkout-client no-client trailing-slash
+CASES=(no-token refused-token sign-in-not-completed stored-token-no-access checkout-client broken-checkout-client no-client trailing-slash
     client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint client-upgrade-ships-entrypoint
     checkout-entrypoint)
 
@@ -84,6 +84,8 @@ case "$1 $2" in
             [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && { echo "GH_TOKEN reached gh auth login" >&2; exit 1; }
             printf '\n! First copy your one-time code: 7B7F-C198\nOpen this URL to continue in your web browser: https://github.com/login/device\n' >&2
             echo "gh device-login" >>"$FAKE_DIR/order.log"
+            # A sign-in that breaks under the owner: the code is printed, then gh stops polling and says why.
+            [ -n "${FAKE_GH_LOGIN_FAILS:-}" ] && { printf '%s\n' "$FAKE_GH_LOGIN_FAILS" >&2; exit 1; }
         fi
         touch "$FAKE_DIR/gh.signed-in" ;;
     "auth setup-git") echo "gh setup-git" >>"$FAKE_DIR/order.log" ;;
@@ -213,6 +215,33 @@ case_refused_token() {
         ok "a refused stored token falls back to the device-code sign-in" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     hub '.status[1].detail' | grep -q '^github: the stored GitHub token was refused' && ok "says the stored token was refused" || no "status: $(hub -c '.status')"
     [ "$(hub '.github')" = "$GOOD_TOKEN" ] && ok "replaces the token on the hub" || no "the token was not replaced"
+}
+
+# A sign-in nobody completes is asked for a bounded number of times and then reported, rather than minting a
+# fresh code every few minutes for as long as the pod runs. A stored token is the other way in, so that is what
+# the pod waits for once it has stopped asking.
+case_sign_in_not_completed() {
+    setup sign-in-not-completed
+    # The owner pastes a token once they see the agent has failed, which is what the detail asks them to do.
+    (
+        n=0
+        while [ "$n" -lt 300 ]; do
+            [ "$(jq -r '.status[-1].phase' "$HUB_STATE" 2>/dev/null)" = failed ] && { seed_github "$GOOD_TOKEN"; break; }
+            "$REAL_SLEEP" 0.1
+            n=$((n + 1))
+        done
+    ) &
+    local seeder=$!
+    boot FAKE_GH_LOGIN_FAILS="error: HTTP 429"
+    kill "$seeder" 2>/dev/null
+    wait "$seeder" 2>/dev/null
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh login-with-token gh setup-git gh setup-git git clone npm install entrypoint " &&
+        ok "stops asking, signs in with the stored token and boots on" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(hub '.prompts | length')" -eq 1 ] && ok "relays one code only" || no "prompts: $(hub -c '.prompts')"
+    [ "$(hub '.loginFailures[0].state')" = failed ] && ok "tells the hub the sign-in did not complete" || no "loginFailures: $(hub -c '.loginFailures')"
+    hub '.status[] | select(.phase == "failed") | .detail' | grep -q 'Paste a GitHub token at' &&
+        ok "fails the agent with what the owner can do about it" || no "status: $(hub -c '.status')"
+    grep -q 'gh said:.*error: HTTP 429' "$C/out" && ok "logs what gh said" || no "gh output not logged: $(grep 'gh auth login' "$C/out")"
 }
 
 case_stored_token_no_access() {
@@ -392,6 +421,7 @@ run_case() {
     case "$1" in
         no-token) case_no_token ;;
         refused-token) case_refused_token ;;
+        sign-in-not-completed) case_sign_in_not_completed ;;
         stored-token-no-access) case_stored_token_no_access ;;
         checkout-client) case_checkout_client ;;
         broken-checkout-client) case_broken_checkout_client ;;
