@@ -15,40 +15,149 @@ import { withRetry } from "../retry.ts";
 import { readText, sha256 } from "../session.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
 import { say, virtualStateDir } from "./phases.ts";
-import { type Respond, type RunResult, relayDeviceLogin, run, stripAnsi } from "./sign-in.ts";
+import { childEnv, type Respond, type RunResult, relayDeviceLogin, run, stripAnsi } from "./sign-in.ts";
 
 export const ATLASSIAN_AUTH_MAX_CHARS = 24000;
 /**
- * How long a pod's `twg login` holds its device code: 120 seconds, not the 300 the server's `expires_in` says.
- * twg 1.3.3 waits `min(expires_in, 120s in agent mode, 300s otherwise)`, and calls itself an agent's when any
- * environment variable's name has `AGENT` as a word in it, bar a short denylist. `AGENT_HUB_LAUNCH_TOKEN` is
- * always in a pod's environment and matches, so every pod sign-in is agent mode and every code dies at two
- * minutes. The gate is that whole-environment scan, not a `CLAUDECODE`/`AI_AGENT` check, so the login below runs
- * with the pod's environment as it is: there is nothing to drop that would buy the other three minutes.
+ * How long a pod's `twg login` holds its device code: the whole 300 seconds Atlassian's `expires_in` gives it.
+ * twg 1.3.3 waits `min(expires_in, 120s in agent mode, 300s otherwise)`, so the figure is 300 only because
+ * `twgLoginEnv` takes every agent-mode trigger out of the login's environment.
  *
- * twg prints the figure itself, as "(Ns remaining)", only outside agent mode, so a pod cannot read its own
- * lifetime off the output it relays and this constant is the only place it can live. Whoever moves the pod image
- * off twg 1.3.3 has to measure the gate again: a `twg login` that prints that countdown is not in agent mode and
- * is holding its code for 300 seconds.
+ * twg prints the figure itself, as "(Ns remaining)", only outside agent mode, so the countdown appearing at all is
+ * what says the drop worked: a spinner with no figure is agent mode and a two-minute code. A pod does not read it,
+ * because `relayDeviceLogin` has already told the owner how long they have by then, so this constant is where the
+ * figure lives.
  *
- * Overstating it is the one thing that must not happen: the wall-clock check below would then never call a
- * genuine expiry an expiry, and the second code would never be offered.
+ * Overstating it is the one thing that must not happen: the wall-clock check in `relayDeviceLogin` would then never
+ * call a genuine expiry an expiry, and a code nobody used would be reported as a sign-in that broke. That check is
+ * why 300 is safe without having seen Atlassian's `expires_in` for twg's device-code client, which only a completed
+ * sign-in would show: twg takes the lower of the two, so a shorter one would make the owner's clock run long and
+ * `twgLoginExpired` would still read the expiry off twg's own error code.
  */
-export const TWG_DEVICE_CODE_EXPIRES_S = 120;
+export const TWG_DEVICE_CODE_EXPIRES_S = 300;
 /**
- * How many codes one call offers the owner. Two minutes is enough to type a code already in front of you and easy to
- * miss if you have to go and find the Atlassian sign-in page on another screen, so the first code running out is not
- * read as the owner declining. A pod re-offering for ever would instead hold an agent in `awaiting_login` on behalf
- * of somebody who has walked away, and only a code that ran out unused earns another: a sign-in that broke is
- * reported at once.
+ * How many codes one call offers the owner: one, for the full five minutes. Five minutes is long enough to go and
+ * find the Atlassian sign-in page on another screen and type a code, which is the thing a code has to survive, and
+ * a code that ran out after five means the owner is not at their screen — a fresh one relayed to an empty chair runs
+ * out too, while holding the agent in `awaiting_login` and a `agent-hub jira export` open on behalf of somebody who
+ * has walked away. An owner who comes back late has their agent's page to sign in again from, and that is a fresh
+ * code with a fresh five minutes; a code too short to use at all is what nobody can recover from.
  *
- * Two is where it stops, and what bounds it is the session, not the owner's patience. `agent-hub jira export` drives
- * this sign-in, and the envelope tells the session to run it under `JIRA_EXPORT_BASH_TIMEOUT_MS`; killed at that, the
- * command reports nothing and the owner is left with the dead code this exists to prevent. The worst case through
- * `atlassianLogin` is `twg whoami`, two `twg auth refresh` calls and a `twg doctor` before the first code, so the
- * codes have to fit in what is left. `jiraExportSignInBudget` is where that sum is checked.
+ * What bounds this is the session rather than taste. `agent-hub jira export` drives this sign-in, and the envelope
+ * tells the session to run it under `JIRA_EXPORT_BASH_TIMEOUT_MS`; killed at that, the command reports nothing and
+ * the owner is left with the dead code this whole path exists to prevent. The worst case through `atlassianLogin` is
+ * `twg whoami`, two `twg auth refresh` calls and a `twg doctor` before the code, so the code has to fit in what is
+ * left. `jiraExportSignInBudget` is where that sum is checked, and a second code at 300 seconds does not fit in it.
+ *
+ * `relayDeviceLogin`'s `expired` flag still earns its place with one code: it is what makes the hub report
+ * `state: "expired"` rather than `"failed"`, so the owner's screen says the code ran out instead of that the
+ * sign-in broke.
  */
-export const ATLASSIAN_SIGN_IN_CODES = 2;
+export const ATLASSIAN_SIGN_IN_CODES = 1;
+/**
+ * twg 1.3.3's agent-mode gate is two parts, and this explicit one runs first: `TWG_AGENT_HOST`, the table of agent
+ * hosts twg knows by name, the two generic markers, the metrics source and `TWG_AGENT_DEFAULTS` each put it in agent
+ * mode on their own, short-circuiting before the environment-wide scan below is reached. Any one of them left in
+ * place costs the code three of its five minutes, whatever else the environment holds.
+ *
+ * `__CFBundleIdentifier` is macOS's, and triggers only on Codex's bundle id.
+ */
+export const TWG_AGENT_VARS = [
+  "TWG_AGENT_HOST",
+  "TWG_AGENT_DEFAULTS",
+  "TWG_METRICS_SOURCE",
+  "AGENT",
+  "AI_AGENT",
+  "__CFBundleIdentifier",
+  "CLAUDECODE",
+  "CLAUDE_CODE",
+  "CLAUDE_CODE_ENTRYPOINT",
+  "CLAUDE_AGENT_SDK_VERSION",
+  "CURSOR_AGENT",
+  "CURSOR_TRACE_ID",
+  "GEMINI_CLI",
+  "CODEX_SANDBOX",
+  "CODEX_THREAD_ID",
+  "CODEX_CI",
+  "ROVO_AGENT",
+  "ROVO_DEV",
+  "ROVODEV",
+  "REPLIT_AGENT",
+  "REPL_ID",
+  "AUGMENT_AGENT",
+  "GOOSE_PROVIDER",
+  "CLINE_ACTIVE",
+  "OPENCODE",
+  "OPENCODE_CLIENT",
+  "TRAE_AI_SHELL_ID"
+];
+/**
+ * How twg 1.3.3 reads every other name once none of the gates above has fired: `AGENT` as a word in the raw
+ * uppercased name. A pod's `AGENT_HUB_*` and `VIRTUAL_AGENT_*` variables all match, which is why a pod sign-in was
+ * agent mode whatever else it did.
+ */
+const TWG_AGENT_NAME = /(^|_)AGENT($|_)/;
+/**
+ * The names that scan matches and twg exempts anyway, so they are not triggers and the child keeps them: the ssh
+ * and gpg agent sockets (`SSH_AGENT*`, `GPG_AGENT*`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`), the user-agent strings,
+ * and `AGENT_RUNTIME` and `AGENT_TRANSCRIPTS`. Keeping them is what stops this from taking a variable away from a
+ * child that may want it, which is the only cost of over-dropping — the code's lifetime is not at stake either
+ * way, because twg was never going to read them.
+ *
+ * twg narrows the scan once more and this does not: it also ignores a name that normalises to fewer than three
+ * characters or to one of its own hosts. Not following that over-drops, which is the safe direction, and a pod's
+ * environment carries no such name anyway.
+ */
+const TWG_AGENT_NAME_KEEP = new Set([
+  "SSH_AUTH_SOCK",
+  "GPG_AGENT_INFO",
+  "HTTP_USER_AGENT",
+  "NPM_CONFIG_USER_AGENT",
+  "USER_AGENT",
+  "AGENT_RUNTIME",
+  "AGENT_TRANSCRIPTS"
+]);
+const TWG_AGENT_NAME_KEEP_PREFIXES = ["SSH_AGENT", "GPG_AGENT"];
+
+/**
+ * Everything in `env` that twg 1.3.3 would read as a marker that an agent is running it, and so has to go before
+ * `twg login` is given a copy.
+ *
+ * This list is what buys the device code its full five minutes, and it is not an optimisation to be simplified away:
+ * twg needs none of these variables, and in agent mode it holds the code for 120 seconds, which is not long enough
+ * for somebody to find the Atlassian sign-in page on another screen and type the code into it. Both halves of the
+ * gate have to be covered, because the explicit one above short-circuits the scan rather than the other way round.
+ *
+ * Measured against **twg 1.3.3**, which is what the pod image carries. The gate has to be measured again on any
+ * later twg: a `twg login` printing "(300s remaining)" is outside agent mode and one drawing a spinner with no
+ * figure is in it. That move does not pass through this repo — `VIRTUAL_AGENT_IMAGE` is digest-pinned in
+ * cnp-flux-config, still points at the cft-workspace devcontainer image rather than `docker/virtual-agent/`, and
+ * that devcontainer already pins twg 1.3.9 — so whoever bumps the digest owns the re-measure.
+ *
+ * A trigger a later twg adds and this misses holds the code for 120 seconds while the owner's screen counts down
+ * from 300. `twgLoginExpired` reads twg's own error code, so the expiry is still reported as an expiry and the
+ * owner is still told the code ran out: the only wrong thing is the clock.
+ */
+export function twgAgentModeVars(env: Env): string[] {
+  return Object.keys(env).filter(
+    (name) =>
+      TWG_AGENT_VARS.includes(name) ||
+      (TWG_AGENT_NAME.test(name.toUpperCase()) &&
+        !TWG_AGENT_NAME_KEEP.has(name.toUpperCase()) &&
+        !TWG_AGENT_NAME_KEEP_PREFIXES.some((prefix) => name.toUpperCase().startsWith(prefix)))
+  );
+}
+
+/**
+ * The environment `twg login` runs with: the pod's, without the agent-mode triggers above, because twg needs none
+ * of them and a code that lasts two minutes is one the owner cannot use. `BROWSER` is `true` so twg's offer to open
+ * the device page is a no-op in a pod with no browser.
+ */
+export const twgLoginEnv = (env: Env): NodeJS.ProcessEnv => ({
+  ...childEnv(env, twgAgentModeVars(env)),
+  BROWSER: "true",
+  TERM: "xterm-256color"
+});
 // What `twg auth refresh` 1.3.3 exits with when Atlassian rejects the refresh token. 1.3.9 exits 1 and says why
 // in its JSON instead.
 const TWG_EXIT_AUTH_INVALID = 77;
@@ -333,9 +442,10 @@ async function refreshAtlassian({
 
 /**
  * Jira and Confluence through twg are optional, so nothing here is fatal. Restores the sign-in stored on the
- * hub, or relays `twg login` device codes to the owner, up to `ATLASSIAN_SIGN_IN_CODES` of them. Returns
- * 'not-signed-in' when the owner did not complete any of them, having told the hub so: the owner's screen then
- * says the sign-in expired instead of showing a code that no longer works.
+ * hub, or relays a `twg login` device code to the owner, `ATLASSIAN_SIGN_IN_CODES` of them in all, each lasting
+ * `TWG_DEVICE_CODE_EXPIRES_S` because `twgLoginEnv` keeps twg out of agent mode. Returns 'not-signed-in' when the
+ * owner completed none of them, having told the hub so: the owner's screen then says the sign-in expired instead
+ * of showing a code that no longer works.
  */
 export async function atlassianLogin({
   api = createApi(),
@@ -404,7 +514,7 @@ export async function atlassianLogin({
         kind: "atlassian",
         cmd: "script",
         args: ["-q", "-e", "-c", "stty cols 1000 rows 50 2>/dev/null; exec twg login --site hmcts", "/dev/null"],
-        env: { ...env, BROWSER: "true", TERM: "xterm-256color" },
+        env: twgLoginEnv(env),
         parse: parseTwgDeviceCode,
         respond,
         expiresIn,

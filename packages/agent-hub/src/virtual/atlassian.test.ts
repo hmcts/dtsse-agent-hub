@@ -34,7 +34,9 @@ import {
   readAtlassianAuth,
   restoreAtlassianAuth,
   syncAtlassianAuth,
+  TWG_AGENT_VARS,
   TWG_DEVICE_CODE_EXPIRES_S,
+  twgAgentModeVars,
   twgDir,
   twgLoginExpired,
   twgPromptsForBrowser,
@@ -422,8 +424,9 @@ describe("atlassianLogin", () => {
 
     // Assert
     expect(result).toBe("signed-in");
-    // The hub is told twg's own limit, not the server's `expires_in`: the owner's countdown has to be the real one.
-    expect(virtual().prompts).toEqual([{ kind: "atlassian", prompt: "device_code", verification_uri: TWG_URL, user_code: TWG_CODE, expires_in: 120 }]);
+    // The owner's countdown has to be the real one, which is twg's own limit: the full `expires_in` here, because
+    // the login runs outside agent mode.
+    expect(virtual().prompts).toEqual([{ kind: "atlassian", prompt: "device_code", verification_uri: TWG_URL, user_code: TWG_CODE, expires_in: 300 }]);
     expect(virtual().status[0]?.phase).toBe("awaiting_login");
     expect(virtual().status[0]?.detail).toMatch(new RegExp(`atlassian: .*${TWG_CODE}`));
     expect(virtual().completes).toEqual([{ kind: "atlassian", account_label: "olive.owner@justice.gov.uk" }]);
@@ -543,20 +546,94 @@ describe("atlassianLogin", () => {
     expect(storedProfile()?.credentials.primary.oauthRefreshToken).toBe(`${TWG_REFRESH}-1`);
   });
 
-  it("should offer another code, and then report the sign-in expired, when twg says its code ran out", async () => {
-    // Arrange: twg's own timeout, which it reports in two seconds here and in two minutes in a pod. Nothing waits
+  it("should report the sign-in expired, and relay no further code, when twg says its code ran out", async () => {
+    // Arrange: twg's own timeout, which it reports in two seconds here and in five minutes in a pod. Nothing waits
     // out a clock: the bracketed error code is what says the code ran out rather than the sign-in breaking.
     const env = pod.env({ FAKE_TWG_LOGIN: "expire" });
 
     // Act
     const { result, stderr } = await captureStderr(() => atlassianLogin({ api: api(), env }));
 
-    // Assert
+    // Assert: one code, so an owner who was away for five minutes gets the expiry told to them rather than a second
+    // code relayed to an empty chair
     expect(result).toBe("not-signed-in");
-    expect(virtual().prompts).toHaveLength(ATLASSIAN_SIGN_IN_CODES);
-    expect(stderr).toMatch(/ran out before it was used; relaying a fresh one/);
+    expect(ATLASSIAN_SIGN_IN_CODES).toBe(1);
+    expect(virtual().prompts).toHaveLength(1);
+    expect(stderr).not.toMatch(/relaying a fresh one/);
     expect(virtual().loginFailures).toEqual([{ kind: "atlassian", state: "expired", detail: expect.stringContaining("ran out before it was used") }]);
     expect(virtual().completes).toEqual([]);
+  });
+
+  it("should relay the code with every twg agent-mode trigger out of the login's environment", async () => {
+    // Arrange: a pod's own variables, plus a marker from each of the gates twg reads before its environment-wide
+    // scan, and the names that scan exempts, which twg ignores and a child keeps
+    const env = pod.env({
+      CLAUDECODE: "1",
+      CLAUDE_CODE_ENTRYPOINT: "cli",
+      TWG_AGENT_DEFAULTS: "1",
+      TWG_AGENT_HOST: "claude-code",
+      TWG_METRICS_SOURCE: "agent-skill",
+      AGENT: "claude",
+      AI_AGENT: "claude",
+      SSH_AUTH_SOCK: "/run/ssh-agent.sock",
+      SSH_AGENT_PID: "4242",
+      USER_AGENT: "curl/8"
+    });
+
+    // Act
+    const result = await atlassianLogin({ api: api(), env });
+
+    // Assert: a trigger left in would have twg hold the code for 120 seconds instead of the 300 the owner was
+    // promised, and twg draws no countdown in agent mode, so the pod could not tell
+    expect(result).toBe("signed-in");
+    const names = pod.loginEnvNames();
+    // Named rather than derived from the drop list, so taking one out of that list fails here too
+    expect(names).not.toContain("CLAUDECODE");
+    expect(names).not.toContain("CLAUDE_CODE_ENTRYPOINT");
+    expect(names).not.toContain("TWG_AGENT_DEFAULTS");
+    expect(names).not.toContain("TWG_AGENT_HOST");
+    expect(names).not.toContain("TWG_METRICS_SOURCE");
+    expect(names).not.toContain("AGENT");
+    expect(names).not.toContain("AI_AGENT");
+    expect(names).not.toContain("AGENT_HUB_LAUNCH_TOKEN");
+    expect(names).not.toContain("AGENT_HUB_URL");
+    // Everything twg's scan would still look at, which is only the names it exempts anyway
+    expect(names.filter((name) => /(^|_)AGENT($|_)/.test(name.toUpperCase()) || TWG_AGENT_VARS.includes(name))).toEqual(["SSH_AGENT_PID", "USER_AGENT"]);
+    expect(names).toContain("SSH_AUTH_SOCK");
+    expect(names).toContain("TWG_CONFIG_DIR");
+  });
+
+  it("should drop every variable twg 1.3.3 reads as an agent's, and nothing twg exempts", () => {
+    // Arrange: the gate is two parts, and the explicit one runs first, so neither half may be left out
+    const env = {
+      AGENT_HUB_LAUNCH_TOKEN: "t",
+      VIRTUAL_AGENT_STATE: "/state",
+      CLAUDECODE: "1",
+      __CFBundleIdentifier: "com.openai.codex",
+      agent_hub_url: "https://hub",
+      SSH_AUTH_SOCK: "/run/ssh-agent.sock",
+      SSH_AGENT_PID: "4242",
+      GPG_AGENT_INFO: "/run/gpg",
+      HTTP_USER_AGENT: "curl/8",
+      NPM_CONFIG_USER_AGENT: "yarn/4",
+      USER_AGENT: "curl/8",
+      AGENT_RUNTIME: "pod",
+      AGENT_TRANSCRIPTS: "/transcripts",
+      HOME: "/home/hmcts",
+      TWG_CONFIG_DIR: "/home/hmcts/.config/twg"
+    };
+
+    // Act & Assert
+    expect(twgAgentModeVars(env).toSorted((a, b) => (a < b ? -1 : 1))).toEqual([
+      "AGENT_HUB_LAUNCH_TOKEN",
+      "CLAUDECODE",
+      "VIRTUAL_AGENT_STATE",
+      "__CFBundleIdentifier",
+      "agent_hub_url"
+    ]);
+    expect(TWG_AGENT_VARS).toHaveLength(27);
+    expect(TWG_AGENT_VARS).toContain("CLAUDECODE");
+    expect(TWG_AGENT_VARS).toContain("TWG_AGENT_DEFAULTS");
   });
 
   it("should offer no code beyond the bound, however long the owner takes", async () => {
@@ -574,12 +651,15 @@ describe("atlassianLogin", () => {
   it("should report the owner's last code inside the time the session gives the export command", () => {
     // Act & Assert: killed at the Bash timeout, the command reports nothing and the dead code stays on the owner's
     // screen, which is the fault this whole path exists to prevent. The code count is bounded by this, not by taste.
-    expect(TWG_DEVICE_CODE_EXPIRES_S).toBe(120);
+    expect(TWG_DEVICE_CODE_EXPIRES_S).toBe(300);
+    expect(jiraExportSignInBudget()).toBe(570000);
     expect(jiraExportSignInBudget()).toBeLessThan(JIRA_EXPORT_BASH_TIMEOUT_MS);
   });
 
   it("should not fit another code into that time, which is why the bound is where it is", () => {
-    // Act & Assert
+    // Act & Assert: the five minutes and the one code are the same decision — two of them is 900 seconds against a
+    // 600-second Bash timeout, so a code lasting its full life is what the count was traded for
+    expect(jiraExportSignInBudget(ATLASSIAN_SIGN_IN_CODES + 1)).toBe(900000);
     expect(jiraExportSignInBudget(ATLASSIAN_SIGN_IN_CODES + 1)).toBeGreaterThan(JIRA_EXPORT_BASH_TIMEOUT_MS);
   });
 
@@ -696,8 +776,8 @@ describe("atlassianLogin", () => {
       }
     } satisfies Api;
 
-    // Act
-    const { error, stderr } = await captureStderrOfFailure(() => atlassianLogin({ api: onSecond, env }));
+    // Act: two codes, because a later attempt is what this is about; a pod offers one
+    const { error, stderr } = await captureStderrOfFailure(() => atlassianLogin({ api: onSecond, env, codes: 2 }));
 
     // Assert
     expect((error as Error).message).toMatch(/could not relay the atlassian sign-in code/);

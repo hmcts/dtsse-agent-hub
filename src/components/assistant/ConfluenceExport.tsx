@@ -187,7 +187,7 @@ export function ConfluenceFooter({
       )}
       {done !== null ? null : pending ? (
         <span role="status" className="flex h-[34px] shrink-0 items-center text-[13px] text-asst-accent-soft">
-          {stage === "live" || stage === "renewing" ? "Signing in to Atlassian…" : "Creating page…"}
+          {stage === "live" ? "Signing in to Atlassian…" : "Creating page…"}
         </span>
       ) : (
         <button
