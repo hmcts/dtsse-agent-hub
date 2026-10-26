@@ -29,15 +29,35 @@ export const TWG_DEVICE_CODE_EXPIRES_S = 120;
 /**
  * How many codes one call offers the owner. Two minutes is enough to type a code already in front of you and easy to
  * miss if you have to go and find the Atlassian sign-in page on another screen, so the first code running out is not
- * read as the owner declining. Three is where it stops, for about six minutes of codes: that is the time budget this
- * bound exists to spend, and it leaves the fifteen minutes a Jira export waits with room for the restore attempts
- * before the first code and for the session to report the outcome after the last. A pod re-offering for ever would
- * instead hold an agent in `awaiting_login` on behalf of somebody who has walked away. Only a code that ran out
- * unused earns another; a sign-in that broke is reported at once.
+ * read as the owner declining. A pod re-offering for ever would instead hold an agent in `awaiting_login` on behalf
+ * of somebody who has walked away, and only a code that ran out unused earns another: a sign-in that broke is
+ * reported at once.
+ *
+ * Two is where it stops, and what bounds it is the session, not the owner's patience. `agent-hub jira export` drives
+ * this sign-in, and the envelope tells the session to run it under `JIRA_EXPORT_BASH_TIMEOUT_MS`; killed at that, the
+ * command reports nothing and the owner is left with the dead code this exists to prevent. The worst case through
+ * `atlassianLogin` is `twg whoami`, two `twg auth refresh` calls and a `twg doctor` before the first code, so the
+ * codes have to fit in what is left. `jiraExportSignInBudget` is where that sum is checked.
  */
-export const ATLASSIAN_SIGN_IN_CODES = 3;
+export const ATLASSIAN_SIGN_IN_CODES = 2;
 // What `twg auth refresh` (1.3.3) exits with when Atlassian rejects the refresh token.
 const TWG_EXIT_AUTH_INVALID = 77;
+
+// The twg calls `atlassianLogin` can make before the first code is relayed, at their timeouts below: one
+// `twg whoami` from `jira-export.ts`, a `twg auth refresh --force` on the sign-in already on disk, another on the
+// one restored from the hub, and the `twg doctor` that follows a refresh which succeeded.
+const SIGN_IN_OVERHEAD_MS = 30000 + 60000 + 60000 + 90000;
+
+/**
+ * The longest `atlassianLogin` can take to report that nobody completed the sign-in. Every relayed code is killed
+ * `expiresIn + 30` seconds in (`relayDeviceLogin`), after the fixed twg calls above.
+ *
+ * This has to stay inside the Bash timeout the envelope gives `agent-hub jira export`: a command killed before it
+ * reports leaves the owner the dead code and the agent in `awaiting_login`, which is the whole fault this guards.
+ */
+export function jiraExportSignInBudget(codes = ATLASSIAN_SIGN_IN_CODES, expiresIn = TWG_DEVICE_CODE_EXPIRES_S): number {
+  return SIGN_IN_OVERHEAD_MS + codes * (expiresIn + 30) * 1000;
+}
 
 export type PackedAtlassianAuth = {
   value: string;

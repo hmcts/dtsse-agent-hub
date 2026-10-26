@@ -8,7 +8,16 @@ import { type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home
 import { conversation, fakeTmux } from "../__fixtures__/fake-tmux.ts";
 import type { SessionsBody } from "../api.ts";
 import { ensureStateDir, hubHome, projectTranscriptPath, statePath } from "../session.ts";
-import { createAssistantSupervisor, EXIT_GRACE_MS, idleMinutes, maxSessions, parseSavedSession, parseWake, REFUSAL_EVERY_MS } from "./supervisor.ts";
+import {
+  BUSY_STALE_MS,
+  createAssistantSupervisor,
+  EXIT_GRACE_MS,
+  idleMinutes,
+  maxSessions,
+  parseSavedSession,
+  parseWake,
+  REFUSAL_EVERY_MS
+} from "./supervisor.ts";
 import { claudeCommand, commandProgram, PROMPT_FILE, type ProgramCheck, tmuxName } from "./tmux.ts";
 
 const CWD = "/workspace/cft-workspace";
@@ -37,9 +46,16 @@ afterAll(() => {
   home.cleanup();
 });
 
-// A supervisor on a fake clock that starts at the real time, so the hooks' status files written now are "now".
-// `canRun` stands in for the launcher check, so these tests never depend on what is installed; `canRunProgram`
-// itself is tested in `tmux.test.ts`.
+/**
+ * A supervisor on a fake clock that starts at the real time, so the hooks' status files written now are "now".
+ * `canRun` stands in for the launcher check, so these tests never depend on what is installed; `canRunProgram`
+ * itself is tested in `tmux.test.ts`.
+ *
+ * The supervisor is told it booted ten minutes before that clock, and tests reckon against the `bootedAt` it
+ * returns. Letting it default to the clock would date every status file written "now" within a tick of the boot it
+ * is compared against, and a filesystem that keeps mtimes to the whole second — which the CI runner's does — then
+ * dates them just before it, so whether a busy session is believed would come down to the filesystem.
+ */
 function setup({ max = 2, idleMs = 20 * MINUTE, canRun = () => true }: { max?: number; idleMs?: number; canRun?: ProgramCheck } = {}) {
   fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
   const tmux = fakeTmux();
@@ -52,6 +68,7 @@ function setup({ max = 2, idleMs = 20 * MINUTE, canRun = () => true }: { max?: n
     }
   };
   const clock = { t: Date.now() };
+  const bootedAt = clock.t - 10 * MINUTE;
   const supervisor = createAssistantSupervisor({
     api,
     id: "va-assist",
@@ -61,9 +78,10 @@ function setup({ max = 2, idleMs = 20 * MINUTE, canRun = () => true }: { max?: n
     cwd: CWD,
     max,
     idleMs,
+    bootedAt,
     say: (message) => said.push(message)
   });
-  return { tmux, reports, said, clock, supervisor, lastReport: () => reports.at(-1) as SessionsBody };
+  return { tmux, reports, said, clock, bootedAt, supervisor, lastReport: () => reports.at(-1) as SessionsBody };
 }
 
 // What the hooks write for a session that has registered, as busy or idle, last changed `at` (ms).
@@ -72,6 +90,14 @@ function hookStatus(sid: string, status: "busy" | "idle", at = Date.now()): void
   fs.writeFileSync(statePath(sid, "enabled"), "x");
   fs.writeFileSync(statePath(sid, "status"), `${status}\n`);
   fs.utimesSync(statePath(sid, "status"), at / 1000, at / 1000);
+}
+
+// What a turn appends as it runs: Claude Code's own transcript of the session, last written `at` (ms).
+function transcriptWritten(sid: string, at: number): void {
+  const file = projectTranscriptPath(CWD, sid);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, "{}\n");
+  fs.utimesSync(file, at / 1000, at / 1000);
 }
 
 describe("parseWake", () => {
@@ -386,7 +412,7 @@ describe("createAssistantSupervisor tick", () => {
     expect(supervisor.sessions.has(c.conversation_id)).toBe(false);
   });
 
-  it("should not stop a session when it is busy, however long ago it started", async () => {
+  it("should not stop a session when it is busy and its turn started an hour ago", async () => {
     // Arrange
     const { tmux, supervisor, clock } = setup({ idleMs: 20 * MINUTE });
     const c = conversation();
@@ -399,6 +425,123 @@ describe("createAssistantSupervisor tick", () => {
 
     // Assert
     expect(tmux.sent(tmuxName(c.conversation_id))).toHaveLength(0);
+  });
+
+  it("should stop a session whose busy was written before this supervisor started once it has been idle that long", async () => {
+    // Arrange: a turn the pod before this one went down in the middle of, left `busy` on the volume. `~/.claude`
+    // outlives the pod, and the resumed session skips the enable that would have rewritten the file.
+    const { tmux, supervisor, clock } = setup({ idleMs: 20 * MINUTE });
+    const c = conversation();
+    hookStatus(c.session_id, "busy", clock.t - 24 * 60 * MINUTE);
+    await supervisor.wake(c);
+
+    // Act
+    clock.t += 21 * MINUTE;
+    await supervisor.tick();
+
+    // Assert
+    expect(tmux.sent(tmuxName(c.conversation_id))).toEqual([["send-keys", tmuxName(c.conversation_id), "/exit", "Enter"]]);
+  });
+});
+
+describe("createAssistantSupervisor and a busy it should not believe", () => {
+  it("should evict a session whose busy was written before this supervisor started when a wake arrives at the cap", async () => {
+    // Arrange: dated well before the boot but only twenty minutes ago, so the boot is the only thing that makes it
+    // stale — the progress bound is nowhere near.
+    const { tmux, supervisor, bootedAt } = setup({ max: 1 });
+    const [frozen, waiting] = [conversation(), conversation()];
+    hookStatus(frozen.session_id, "busy", bootedAt - 10 * MINUTE);
+    await supervisor.wake(frozen);
+
+    // Act
+    await supervisor.wake(waiting);
+
+    // Assert
+    expect(tmux.sent(tmuxName(frozen.conversation_id))).toEqual([["send-keys", tmuxName(frozen.conversation_id), "/exit", "Enter"]]);
+  });
+
+  it("should not evict a session whose busy is dated a second before the boot by a coarse filesystem", async () => {
+    // Arrange: a turn that began as the supervisor came up, on a filesystem that keeps mtimes to the whole second.
+    const { tmux, supervisor, bootedAt } = setup({ max: 1 });
+    const [working, waiting] = [conversation(), conversation()];
+    await supervisor.wake(working);
+    hookStatus(working.session_id, "busy", bootedAt - 1000);
+
+    // Act
+    await supervisor.wake(waiting);
+
+    // Assert
+    expect(tmux.sent(tmuxName(working.conversation_id))).toHaveLength(0);
+    expect(supervisor.queue.map((w) => w.conversation_id)).toEqual([waiting.conversation_id]);
+  });
+
+  it("should not evict a session when its turn began after this supervisor started", async () => {
+    // Arrange
+    const { tmux, supervisor, clock } = setup({ max: 1 });
+    const [working, waiting] = [conversation(), conversation()];
+    await supervisor.wake(working);
+    hookStatus(working.session_id, "busy", clock.t);
+
+    // Act
+    clock.t += 5 * MINUTE;
+    await supervisor.wake(waiting);
+
+    // Assert
+    expect(tmux.sent(tmuxName(working.conversation_id))).toHaveLength(0);
+    expect(supervisor.queue.map((w) => w.conversation_id)).toEqual([waiting.conversation_id]);
+  });
+
+  it("should evict a busy session when nothing has been written for longer than the busy bound", async () => {
+    // Arrange
+    const { tmux, supervisor, clock } = setup({ max: 1 });
+    const [stuck, waiting] = [conversation(), conversation()];
+    await supervisor.wake(stuck);
+    hookStatus(stuck.session_id, "busy", clock.t);
+
+    // Act: the turn was interrupted, so no Stop hook ran and nothing on disk has moved since.
+    clock.t += BUSY_STALE_MS + MINUTE;
+    await supervisor.wake(waiting);
+
+    // Assert
+    expect(tmux.sent(tmuxName(stuck.conversation_id))).toEqual([["send-keys", tmuxName(stuck.conversation_id), "/exit", "Enter"]]);
+  });
+
+  it("should not evict a busy session past the busy bound when its transcript is still growing", async () => {
+    // Arrange
+    const { tmux, supervisor, clock } = setup({ max: 1 });
+    const [working, waiting] = [conversation(), conversation()];
+    await supervisor.wake(working);
+    hookStatus(working.session_id, "busy", clock.t);
+
+    // Act: a long turn, with its last tool result appended a minute ago.
+    clock.t += BUSY_STALE_MS + MINUTE;
+    transcriptWritten(working.session_id, clock.t - MINUTE);
+    await supervisor.wake(waiting);
+
+    // Assert
+    expect(tmux.sent(tmuxName(working.conversation_id))).toHaveLength(0);
+    expect(supervisor.queue.map((w) => w.conversation_id)).toEqual([waiting.conversation_id]);
+  });
+
+  it("should take the eviction order from the session's own writes rather than from a spell of busy", async () => {
+    // Arrange: `worked` starts a turn, `idle` finishes one four minutes later, so `worked` is the older of the two
+    // on disk. The first tick reads `worked` as busy, which must leave its place in the order alone.
+    const { tmux, supervisor, clock } = setup({ max: 2 });
+    const [worked, idle, waiting] = [conversation(), conversation(), conversation()];
+    await supervisor.wake(worked);
+    await supervisor.wake(idle);
+    hookStatus(worked.session_id, "busy", clock.t);
+    hookStatus(idle.session_id, "idle", clock.t + 4 * MINUTE);
+    clock.t += 5 * MINUTE;
+    await supervisor.tick();
+
+    // Act: its turn ends without a Stop hook, so the busy is eventually no longer believed.
+    clock.t += BUSY_STALE_MS;
+    await supervisor.wake(waiting);
+
+    // Assert
+    expect(tmux.sent(tmuxName(worked.conversation_id))).toEqual([["send-keys", tmuxName(worked.conversation_id), "/exit", "Enter"]]);
+    expect(tmux.sent(tmuxName(idle.conversation_id))).toHaveLength(0);
   });
 });
 

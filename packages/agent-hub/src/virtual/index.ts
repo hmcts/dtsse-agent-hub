@@ -6,6 +6,7 @@ export {
   ATLASSIAN_AUTH_MAX_CHARS,
   ATLASSIAN_SIGN_IN_CODES,
   atlassianLogin,
+  jiraExportSignInBudget,
   packAtlassianAuth,
   parseTwgDeviceCode,
   readAtlassianAuth,

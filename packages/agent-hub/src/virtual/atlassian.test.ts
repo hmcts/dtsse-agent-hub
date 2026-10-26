@@ -2,6 +2,7 @@
 // every refresh and accepts only the newest refresh token — which is what makes storing the rotated one
 // before anything else can fail the thing worth testing.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
@@ -20,10 +21,13 @@ import {
   twgAuthConf,
   usePodEnv
 } from "../__fixtures__/pod-shims.ts";
-import { type Api, ApiError, type CredentialKind, createApi, type LoginPromptBody } from "../api.ts";
+import { type Api, ApiError, type Artefact, type CredentialKind, createApi, type JiraExportReport, type LoginPromptBody } from "../api.ts";
+import { JIRA_EXPORT_BASH_TIMEOUT_MS } from "../envelope.ts";
+import { runJiraExport } from "../jira-export.ts";
 import {
   ATLASSIAN_SIGN_IN_CODES,
   atlassianLogin,
+  jiraExportSignInBudget,
   packAtlassianAuth,
   parseTwgDeviceCode,
   readAtlassianAuth,
@@ -34,6 +38,7 @@ import {
   twgLoginExpired,
   twgPromptsForBrowser
 } from "./atlassian.ts";
+import { run } from "./sign-in.ts";
 
 const VID = "va-atlassian";
 const OWNER = { oid: "oid-owner", name: "Olive Owner", email: "olive@example.com" };
@@ -393,10 +398,16 @@ describe("atlassianLogin", () => {
     expect(virtual().loginFailures).toHaveLength(1);
   });
 
-  it("should relay three codes by default, which is about six minutes of twg's two-minute codes", () => {
-    // Act & Assert: the bound is a time budget, and the constant it is spent against is twg's real one
+  it("should report the owner's last code inside the time the session gives the export command", () => {
+    // Act & Assert: killed at the Bash timeout, the command reports nothing and the dead code stays on the owner's
+    // screen, which is the fault this whole path exists to prevent. The code count is bounded by this, not by taste.
     expect(TWG_DEVICE_CODE_EXPIRES_S).toBe(120);
-    expect(ATLASSIAN_SIGN_IN_CODES * TWG_DEVICE_CODE_EXPIRES_S).toBeLessThan(15 * 60);
+    expect(jiraExportSignInBudget()).toBeLessThan(JIRA_EXPORT_BASH_TIMEOUT_MS);
+  });
+
+  it("should not fit another code into that time, which is why the bound is where it is", () => {
+    // Act & Assert
+    expect(jiraExportSignInBudget(ATLASSIAN_SIGN_IN_CODES + 1)).toBeGreaterThan(JIRA_EXPORT_BASH_TIMEOUT_MS);
   });
 
   it("should stay signed out, and say why, when the hub will not take the report", async () => {
@@ -421,6 +432,48 @@ describe("atlassianLogin", () => {
     // Assert
     expect((error as Error).message).toMatch(/printed no sign-in code/);
     expect(virtual().status.some((s) => s.phase === "failed")).toBe(false);
+  });
+
+  it("should tell both the hub and the Jira export when the owner lets every code expire", async () => {
+    // Arrange: `agent-hub jira export` drives this sign-in, as `cli.ts` wires it, and is the only thing that puts
+    // the export back in front of the person. Both reports have to come out of the one run: the sign-in's, so their
+    // screens stop offering a dead code, and the export's, so the button comes back with a reason on it.
+    const reports: JiraExportReport[] = [];
+    const hubApi = api();
+    const deps = {
+      api: {
+        getArtefact: async (): Promise<Artefact> => ({
+          title: "Fee stories",
+          markdown: "# Stories\n\nAs a claimant…",
+          version: 3,
+          updated_by: "agent",
+          updated_at: null
+        }),
+        putJiraExport: async (_agentId: string, body: JiraExportReport) => {
+          reports.push(body);
+          return null;
+        }
+      },
+      agentId: "a-conversation",
+      env: pod.env({ FAKE_TWG_LOGIN: "expire" }),
+      run,
+      login: () => atlassianLogin({ api: hubApi, env: pod.env({ FAKE_TWG_LOGIN: "expire" }) }),
+      print: () => {},
+      dir: fs.mkdtempSync(path.join(os.tmpdir(), "atlassian-export-"))
+    };
+
+    // Act
+    const { result: outcome } = await captureStderr(() =>
+      runJiraExport(deps, { exportId: "5b0e7c1a-1111-4222-8333-444455556666", project: "VIBE", issueType: "Story", labels: [] })
+    );
+
+    // Assert
+    expect(virtual().prompts).toHaveLength(ATLASSIAN_SIGN_IN_CODES);
+    expect(virtual().loginFailures).toEqual([{ kind: "atlassian", state: "expired", detail: expect.stringContaining("ran out before it was used") }]);
+    expect(outcome).toEqual({ error: "The Atlassian sign-in was not completed, so the ticket could not be created." });
+    expect(reports).toEqual([
+      { export_id: "5b0e7c1a-1111-4222-8333-444455556666", error: "The Atlassian sign-in was not completed, so the ticket could not be created." }
+    ]);
   });
 
   it("should still report the sign-in when a later attempt throws, so no dead code is left with the hub", async () => {

@@ -602,6 +602,21 @@ describe("the sessions stream and report", () => {
     expect((await put({ sessions: [], max: 0 })).status).toBe(400);
   });
 
+  it("should answer the wake when the supervisor reports a session live, and keep it while one is still starting", async () => {
+    // A conversation resumed on a new pod never registers again, so the report is the only thing that can answer its
+    // wake. Left pending, it is replayed on every stream the pod opens and keeps taking a newer conversation's slot.
+    const { id: assistantId, token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const put = (body: unknown) => pod(sessionsRoute.PUT, token, `/api/virtual/${assistantId}/sessions`, { virtualAgentId: assistantId }, "PUT", body);
+
+    await put({ sessions: [{ conversation_id: id, state: "starting", detail: "resuming the conversation" }], max: 5 });
+    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.conversation_id)).toEqual([id]);
+
+    await put({ sessions: [{ conversation_id: id, state: "live" }], max: 5 });
+
+    expect(await pendingWakes(prisma, assistantId)).toEqual([]);
+  });
+
   it("should send the pod an interrupt, and record the stop, when the person stops the answer", async () => {
     const { id: assistantId, token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;

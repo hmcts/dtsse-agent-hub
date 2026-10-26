@@ -171,7 +171,7 @@ describe("assistantEnvelope", () => {
     expect(text.split("\n")).toContain("Product area: not chosen.");
   });
 
-  it("should give the exact twg steps and the export id to report under when a Jira export is pending", () => {
+  it("should give one jira export command for the export id and nothing else to run when a Jira export is pending", () => {
     // Arrange
     const exportId = "5b0e7c1a-1111-4222-8333-444455556666";
     const frame: AssistantFrame = { ...pcs, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] } };
@@ -181,17 +181,17 @@ describe("assistantEnvelope", () => {
 
     // Assert
     expect(text).toMatch(`export the conversation's document to the VIBE backlog in Jira (export ${exportId})`);
-    expect(text).toMatch(`If you have already created a ticket for export ${exportId}, do not create another`);
-    expect(text).toMatch(/virtual atlassian-login/);
-    expect(text).toContain(
-      `twg jira workitem create --space=VIBE --type=Story --summary="$(cat /tmp/jira-export-${exportId}/title)" --description="$(cat /tmp/jira-export-${exportId}/document.md)" --description-format=markdown --labels=hmcts-assistant --output=json --output-summary=none`
-    );
-    expect(text).toMatch(`jira report ${exportId} --key <KEY>`);
+    expect(text).toContain(`\`agent-hub jira export ${exportId} --project VIBE --type Story --labels hmcts-assistant\``);
+    expect(text).toMatch(/Bash timeout of 600000 ms/);
+    expect(text).toMatch(/reports the ticket it already made rather than making another/);
+    expect(text).toMatch(/Do not read the document, check twg, or look at the ticket yourself/);
+    // Every step is the command's now, so none of them is spelled out for the session to run one by one.
+    expect(text).not.toMatch(/twg jira workitem create|twg whoami|artefact get|jira report/);
     expect(text.endsWith("\n---\nPlease export this document to the VIBE backlog in Jira.")).toBe(true);
   });
 
-  it("should say to report the export failed when the owner does not finish the Atlassian sign-in", () => {
-    // Arrange: the session is the only thing that can put the export back in front of the person
+  it("should leave --labels out of the command when the export has none", () => {
+    // Arrange
     const exportId = "5b0e7c1a-1111-4222-8333-444455556666";
     const frame: AssistantFrame = { ...pcs, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: [] } };
 
@@ -199,9 +199,7 @@ describe("assistantEnvelope", () => {
     const text = assistantEnvelope(personMessage, frame, null);
 
     // Assert
-    expect(text).toMatch("It exits 4 if they did not sign in");
-    expect(text).toMatch(`jira report ${exportId} --error "the Atlassian sign-in was not completed"`);
-    expect(text).toMatch(/do not poll anything while it runs/);
+    expect(text).toContain(`\`agent-hub jira export ${exportId} --project VIBE --type Story\``);
   });
 
   it("should say nothing of Jira when no export is pending", () => {
@@ -209,9 +207,9 @@ describe("assistantEnvelope", () => {
     expect(assistantEnvelope(personMessage, { ...pcs, jira_export: null }, null)).not.toMatch(/Jira|twg/);
   });
 
-  it("should keep the export's steps between the attachment lines and the skill line when a message carries all three", () => {
-    // The skill line owns the place against the separator, and a numbered procedure reads straight through when no
-    // block of paths is dropped into the middle of it.
+  it("should keep the export's instructions between the attachment lines and the skill line when a message carries all three", () => {
+    // The skill line owns the place against the separator, and the export's instructions read straight through
+    // when no block of paths is dropped into the middle of them.
     // Arrange
     const exportId = "5b0e7c1a-1111-4222-8333-444455556666";
     const frame: AssistantFrame = { ...pcs, jira_export: { export_id: exportId, project: "VIBE", issue_type: "Story", labels: ["hmcts-assistant"] } };
@@ -229,7 +227,7 @@ describe("assistantEnvelope", () => {
     expect(lines.indexOf("- /workspace/uploads/c1/u1-letter.pdf (application/pdf, 1 KB)")).toBeLessThan(
       lines.findIndex((line) => line.startsWith("The user has asked you to export"))
     );
-    expect(lines.findIndex((line) => line.startsWith("4. Report the key"))).toBeLessThan(sep - 1);
+    expect(lines.findIndex((line) => line.startsWith("Then tell the user"))).toBeLessThan(sep - 1);
   });
 
   it("should name the absolute path of a file already on disk, before the separator, when one was attached", () => {

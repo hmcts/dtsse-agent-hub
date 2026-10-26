@@ -178,7 +178,7 @@ const PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
 const WORD_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
- * A pending Jira export on the frame, or null. Its values go into the `twg` command the session is told to run, so
+ * A pending Jira export on the frame, or null. Its values go into the `jira export` command the session is told to run, so
  * anything but an id, a project key and plain words is dropped rather than passed on.
  */
 export function parseJiraExportFrame(value: unknown): JiraExportFrame | null {
