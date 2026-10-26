@@ -87,7 +87,8 @@ function login(kind: CredentialKind): LoginView {
     verificationUri: "https://example.com/device",
     expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
     state: "pending",
-    codeWaiting: false
+    updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    codeWaitingUntil: null
   };
 }
 
@@ -295,7 +296,18 @@ describe("WarmingUp hydration", () => {
 describe("OnboardingGate while the assistant starts", () => {
   function gate(summary: AssistantSummary, statuses: CredentialStatus[] = [], dismissed = false) {
     const noop = vi.fn(async () => ({ ok: true as const }));
-    return <OnboardingGate assistant={summary} statuses={statuses} unavailable={null} paste={noop} save={noop} dismissed={dismissed} />;
+    return (
+      <OnboardingGate
+        assistant={summary}
+        statuses={statuses}
+        unavailable={null}
+        paste={noop}
+        save={noop}
+        reconnect={noop}
+        now={Date.now()}
+        dismissed={dismissed}
+      />
+    );
   }
 
   it("should wait on the warming-up screen when someone who has onboarded arrives to a stopped assistant", () => {
@@ -364,13 +376,26 @@ describe("OnboardingGate while the assistant starts", () => {
     expect(screen.queryByText(WARMUP_SIGNPOST)).toBeNull();
   });
 
-  it("should take a returning person to their chats rather than onboarding when they leave the sign-in", () => {
+  // What is left behind is the sign-in, not the step: the ask is the thing with something to do about it, and the
+  // assistant does not stay in `awaiting_login` for long enough to be the thing that reports it.
+  it("should leave the sign-in behind on a banner when a returning person carries on to their chats", () => {
     render(gate(assistant("awaiting_login", { logins: [login("azure")] }), stored("github", "azure", "claude")));
 
     fireEvent.click(screen.getByRole("button", { name: "Carry on without waiting" }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("status").textContent).toBe("Waiting for you to connect your accounts…");
+    const banner = screen.getByRole("region", { name: "Sign in" });
+    expect(banner.textContent).toContain("Your assistant is waiting for you to sign in to Azure.");
+  });
+
+  it("should open the sign-in again from that banner when the person asks for it", () => {
+    render(gate(assistant("awaiting_login", { logins: [login("azure")] }), stored("github", "azure", "claude")));
+    fireEvent.click(screen.getByRole("button", { name: "Carry on without waiting" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+    expect(screen.getByText("ABCD-1234")).toBeTruthy();
   });
 
   it("should let the person carry on to their conversations when their assistant could not start", () => {

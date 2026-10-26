@@ -1173,7 +1173,7 @@ describe("logins", () => {
     }
     expect((await row(id)).status).toBe("awaiting_login");
     expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.logins).toEqual([
-      expect.objectContaining({ kind: "github", prompt: "device_code", userCode: "ABCD-1234", state: "pending", codeWaiting: false })
+      expect.objectContaining({ kind: "github", prompt: "device_code", userCode: "ABCD-1234", state: "pending", codeWaitingUntil: null })
     ]);
     expect(await virtualAgentDetail(prisma, BOB.oid, id)).toBeUndefined();
   });
@@ -1198,7 +1198,7 @@ describe("logins", () => {
     });
     const sealed = await prisma.virtualAgentLogin.findFirstOrThrow();
     expect(Buffer.from(sealed.pastedCodeCiphertext!).toString("utf8")).not.toContain("pasted#code-123");
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.logins[0]?.codeWaiting).toBe(true);
+    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.logins[0]?.codeWaitingUntil).not.toBeNull();
 
     const first = await fetchCode(id, token, "claude");
     expect(first.status).toBe(200);
