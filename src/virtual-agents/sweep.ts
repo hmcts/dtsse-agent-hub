@@ -1,6 +1,6 @@
 import type { PrismaClient } from "../store/prisma.ts";
-import { CLAIM_TIMEOUT_MS, dueEveningStop, isIdle, lastActivity, PROVISIONING_TIMEOUT_MS } from "./cleanup.ts";
-import { eveningStop, idleMinutes, type WallClock } from "./settings.ts";
+import { CLAIM_TIMEOUT_MS, dueEveningStop, type InactivityRule, inactivityRule, isIdle, lastActivity, PROVISIONING_TIMEOUT_MS } from "./cleanup.ts";
+import { awaitingOwnerMinutes, eveningStop, idleMinutes, type WallClock } from "./settings.ts";
 import { announce, stopVirtualAgents } from "./stop.ts";
 
 export const VIRTUAL_AGENT_SWEEP_INTERVAL_MS = 60_000;
@@ -11,6 +11,7 @@ const VIRTUAL_AGENT_SWEEP_LOCK_KEY = 0x76697274_61676e74n;
 export interface VirtualAgentSweepOptions {
   now?: Date;
   idleMinutes?: number;
+  awaitingOwnerMinutes?: number;
   eveningStop?: WallClock;
 }
 
@@ -23,6 +24,8 @@ export interface VirtualAgentSweepResult {
   claimsReleased: number;
   /** Agents stopped for being idle. */
   idle: string[];
+  /** Agents stopped because their pod was still waiting for its owner to sign in or store a credential. */
+  awaitingOwner: string[];
   /** Agents stopped at the end of the working day. */
   evening: string[];
 }
@@ -46,12 +49,16 @@ interface Candidate {
  * - logins past their expiry are expired, and pasted codes past theirs are removed;
  * - claims older than `CLAIM_TIMEOUT_MS` are released, so another orchestrator may take them;
  * - on a weekday evening every agent still meant to be running, unless started after the stop time, is stopped;
- * - otherwise a running agent whose linked agent is not busy and that has shown no activity, no transcript entry or
- *   pod report, for the idle period is stopped.
+ * - otherwise an agent whose linked agent is not busy and that has shown no activity, no transcript entry or pod
+ *   report, for the deadline `inactivityRule` puts its status on is stopped: the idle period for one working, the
+ *   shorter one for a pod blocked on its owner.
  */
 export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualAgentSweepOptions = {}): Promise<VirtualAgentSweepResult | undefined> {
   const now = options.now ?? new Date();
-  const idle = options.idleMinutes ?? idleMinutes();
+  const deadlines: Record<InactivityRule, number> = {
+    idle: options.idleMinutes ?? idleMinutes(),
+    awaiting_owner: options.awaitingOwnerMinutes ?? awaitingOwnerMinutes()
+  };
   const stop = options.eveningStop ?? eveningStop();
   return await prisma.$transaction(async (tx) => {
     const [lock] = await tx.$queryRaw<{ locked: boolean }[]>`SELECT pg_try_advisory_xact_lock(${VIRTUAL_AGENT_SWEEP_LOCK_KEY}) AS locked`;
@@ -102,24 +109,30 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
        WHERE v.desired = 'running'
     `;
     const evening = candidates.filter((candidate) => dueEveningStop(candidate.started_at, now, stop)).map((candidate) => candidate.id);
-    const idling = candidates
-      .filter((candidate) => !evening.includes(candidate.id) && candidate.status === "running")
-      .filter((candidate) => {
+    const inactive = candidates
+      .filter((candidate) => !evening.includes(candidate.id))
+      .flatMap((candidate) => {
+        const rule = inactivityRule(candidate.status);
+        if (rule === undefined) {
+          return [];
+        }
         // A start is activity: an agent started again after a night stopped has only yesterday's timestamps otherwise.
         const active =
           lastActivity(candidate.started_at, candidate.status_changed_at, candidate.last_active_at, candidate.last_entry_at) ?? candidate.started_at;
-        return isIdle(candidate.agent_status, active, now, idle);
-      })
-      .map((candidate) => candidate.id);
+        return isIdle(candidate.agent_status, active, now, deadlines[rule]) ? [{ id: candidate.id, rule }] : [];
+      });
+    const ids = (rule: InactivityRule): string[] => inactive.filter((entry) => entry.rule === rule).map((entry) => entry.id);
 
     const stoppedEvening = await stopVirtualAgents(tx, evening, "evening", now);
-    const stoppedIdle = await stopVirtualAgents(tx, idling, "idle", now);
+    const stoppedIdle = await stopVirtualAgents(tx, ids("idle"), "idle", now);
+    const stoppedAwaiting = await stopVirtualAgents(tx, ids("awaiting_owner"), "awaiting_owner", now);
 
     return {
       failed: failed.map((row) => row.id),
       loginsExpired: expired.map((row) => row.id),
       claimsReleased,
       idle: stoppedIdle.map((row) => row.id),
+      awaitingOwner: stoppedAwaiting.map((row) => row.id),
       evening: stoppedEvening.map((row) => row.id)
     };
   });
@@ -139,9 +152,10 @@ export function startVirtualAgentSweep(prisma: PrismaClient, intervalMs: number 
     running = true;
     sweepVirtualAgents(prisma)
       .then((result) => {
-        if (result !== undefined && result.failed.length + result.idle.length + result.evening.length > 0) {
+        if (result !== undefined && result.failed.length + result.idle.length + result.awaitingOwner.length + result.evening.length > 0) {
           console.info(
-            `virtual-agent sweep: ${result.failed.length} failed to start, ${result.idle.length} stopped as idle, ${result.evening.length} stopped for the evening`
+            `virtual-agent sweep: ${result.failed.length} failed to start, ${result.idle.length} stopped as idle, ` +
+              `${result.awaitingOwner.length} stopped still waiting for their owner, ${result.evening.length} stopped for the evening`
           );
         }
       })

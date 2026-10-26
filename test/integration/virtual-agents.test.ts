@@ -23,9 +23,10 @@ import { putCredential, readCredential, type SecretStore } from "../../src/crede
 import { directAsAgent, directAsPerson, postAs } from "../../src/messages/send.ts";
 import { queuedDeliveries, queuedDelivery } from "../../src/messages/store.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
+import { dueEveningStop } from "../../src/virtual-agents/cleanup.ts";
 import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
-import { storePastedCode } from "../../src/virtual-agents/logins.ts";
+import { completeLogin, startLogin, storePastedCode } from "../../src/virtual-agents/logins.ts";
 import { stopVirtualAgents } from "../../src/virtual-agents/stop.ts";
 import {
   type ClaimedVirtualAgent,
@@ -770,6 +771,26 @@ describe("/api/virtual/{id}/status", () => {
     expect(stored.lastActiveAt).not.toBeNull();
   });
 
+  it("should not count a pod's wait on its owner as activity, however often it re-announces it", async () => {
+    const agent = await create(ALICE, "pcs-api");
+    const base = Date.now();
+    const minutesAgo = (minutes: number) => new Date(base - minutes * 60_000);
+
+    await reportStatus(prisma, agent.id, "provisioning", null, minutesAgo(100));
+    await reportStatus(prisma, agent.id, "awaiting_credentials", "github: no GitHub token stored", minutesAgo(95));
+    // Each attempt gets a device code of its own, so nothing but the phase tells these apart from progress.
+    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code A1B2-C3D4", minutesAgo(90));
+    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code E5F6-G7H8", minutesAgo(1));
+
+    const waiting = await row(agent.id);
+    expect(waiting).toMatchObject({ status: "awaiting_login", statusDetail: "github: the owner must enter code E5F6-G7H8" });
+    expect(waiting.lastActiveAt).toEqual(minutesAgo(100));
+
+    await reportStatus(prisma, agent.id, "cloning", "hmcts/cft-workspace", minutesAgo(0));
+
+    expect((await row(agent.id)).lastActiveAt).toEqual(minutesAgo(0));
+  });
+
   it("should refuse a pod's way back to running from failed, and accept a restart", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
     await status(id, token, { phase: "failed", detail: "git clone failed" });
@@ -1467,10 +1488,23 @@ describe("from_owner on an agent's stream", () => {
 
 describe("sweepVirtualAgents", () => {
   const NOW = new Date("2026-10-26T12:00:00.000Z");
-  const OPTIONS = { now: NOW, idleMinutes: 120, eveningStop: { hour: 19, minute: 0 } };
+  const OPTIONS = { now: NOW, idleMinutes: 120, awaitingOwnerMinutes: 30, eveningStop: { hour: 19, minute: 0 } };
+  /** Long enough to have started on the Sunday evening, which no weekday evening stop reaches. */
+  const OVERNIGHT = 18 * 60;
 
   function ago(minutes: number): Date {
     return new Date(NOW.getTime() - minutes * 60_000);
+  }
+
+  /** An agent whose pod reported `phase` overnight and has re-reported it every five minutes for the last hour. */
+  async function waitingSince(owner: Person, name: string, phase: "awaiting_login" | "awaiting_credentials"): Promise<VirtualAgentRow> {
+    const agent = await create(owner, name);
+    await reportStatus(prisma, agent.id, phase, `${phase} 0`, ago(OVERNIGHT));
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(OVERNIGHT) } });
+    for (let minutes = 60; minutes >= 0; minutes -= 5) {
+      await reportStatus(prisma, agent.id, phase, `${phase} ${minutes}`, ago(minutes));
+    }
+    return await row(agent.id);
   }
 
   it("should fail an agent still provisioning with nothing from its pod for fifteen minutes", async () => {
@@ -1567,6 +1601,82 @@ describe("sweepVirtualAgents", () => {
     const result = await sweepVirtualAgents(prisma, OPTIONS);
 
     expect(result).toMatchObject({ idle: [] });
+    expect((await row(agent.id)).desired).toBe("running");
+  });
+
+  it.each([
+    "awaiting_login",
+    "awaiting_credentials"
+  ] as const)("should stop an agent that has spent the night asking its owner for %s and getting nothing", async (phase) => {
+    const stalled = await waitingSince(ALICE, "stalled", phase);
+    expect(stalled).toMatchObject({ status: phase, desired: "running", statusDetail: `${phase} 0` });
+    // The Sunday evening start is past every weekday stop, so the evening rule is not what catches this one.
+    expect(dueEveningStop(stalled.startedAt, NOW, OPTIONS.eveningStop)).toBe(false);
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ awaitingOwner: [stalled.id], idle: [], evening: [] });
+    expect(await row(stalled.id)).toMatchObject({ desired: "stopped", stopReason: "awaiting_owner" });
+  });
+
+  it("should leave an agent its owner has just signed in to, where the pod's own prompts would not have saved it", async () => {
+    const waiting = await waitingSince(ALICE, "signed-in", "awaiting_login");
+    await startLogin(
+      prisma,
+      waiting,
+      "github",
+      { prompt: "device_code", verificationUri: "https://github.com/login/device", userCode: "A1B2-C3D4", expiresInSeconds: 900 },
+      ago(5)
+    );
+    await completeLogin(prisma, undefined, await row(waiting.id), "github", { accountOid: null, accountLabel: "alice" }, ago(2));
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ awaitingOwner: [], idle: [] });
+    expect(await row(waiting.id)).toMatchObject({ status: "running", desired: "running" });
+  });
+
+  it("should leave an agent whose owner has just pasted the code its pod is waiting to fetch", async () => {
+    const waiting = await waitingSince(ALICE, "pasted", "awaiting_login");
+    await startLogin(prisma, waiting, "claude", { prompt: "paste_code", verificationUri: "https://claude.ai/", userCode: null, expiresInSeconds: 900 }, ago(5));
+    await storePastedCode(prisma, ALICE.oid, waiting.id, "claude", "the-code", SECRET, ago(2));
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ awaitingOwner: [], idle: [] });
+    expect(await row(waiting.id)).toMatchObject({ status: "awaiting_login", desired: "running" });
+  });
+
+  it("should leave an agent waiting on a sign-in while one of its sessions is still busy", async () => {
+    const waiting = await waitingSince(ALICE, "busy-signin", "awaiting_login");
+    const session = await insertAgent(ALICE, "busy-session", { status: "busy" });
+    await prisma.virtualAgent.update({ where: { id: waiting.id }, data: { agentId: session } });
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ awaitingOwner: [], idle: [] });
+    expect((await row(waiting.id)).desired).toBe("running");
+  });
+
+  it("should stop an agent waiting on its owner long before the idle period would have", async () => {
+    const agent = await create(ALICE, "an-hour");
+    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code A1B2-C3D4", ago(60));
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(65) } });
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ awaitingOwner: [agent.id], idle: [] });
+    expect(await row(agent.id)).toMatchObject({ desired: "stopped", stopReason: "awaiting_owner" });
+  });
+
+  it("should leave an agent whose pod reported its wait only minutes ago", async () => {
+    const agent = await create(ALICE, "just-asked");
+    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code A1B2-C3D4", ago(20));
+    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(25) } });
+
+    const result = await sweepVirtualAgents(prisma, OPTIONS);
+
+    expect(result).toMatchObject({ awaitingOwner: [], idle: [] });
     expect((await row(agent.id)).desired).toBe("running");
   });
 

@@ -99,7 +99,8 @@ describe("labels", () => {
     ["evening", "Stopped for the evening"],
     ["quota", "quota"],
     ["expired", "time ran out"],
-    ["failed", "it failed"]
+    ["failed", "it failed"],
+    ["awaiting_owner", "waiting for you to sign in"]
   ] as const)("should explain a stop when its reason is %s", (reason, text) => {
     expect(stopReasonLabel(reason)).toContain(text);
   });

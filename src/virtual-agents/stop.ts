@@ -6,7 +6,7 @@ import type { Database } from "../store/prisma.ts";
  * Next traces that into an Edge bundle too, where the store's `node:crypto` is not available.
  */
 
-export type StopReason = "user" | "idle" | "evening" | "quota" | "expired" | "failed";
+export type StopReason = "user" | "idle" | "evening" | "quota" | "expired" | "failed" | "awaiting_owner";
 
 /** Tells the owner's UI streams that one of their virtual agents changed. Inside the transaction that changed it. */
 export async function announce(db: Database, virtualAgentId: string, ownerOid: string): Promise<void> {

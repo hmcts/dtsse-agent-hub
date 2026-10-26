@@ -5,7 +5,7 @@ import type { Identity } from "../users/identity.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { CLAIM_TIMEOUT_MS, diskExpiresAt } from "./cleanup.ts";
 import { hashLaunchToken, isWellFormedLaunchToken, launchTokenMatches, mintLaunchToken, withoutLaunchTokens } from "./launch-token.ts";
-import { afterApplyError, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
+import { afterApplyError, awaitsOwner, nextStatus, type Observation, type PodPhase, type VirtualAgentDesired, type VirtualAgentStatus } from "./lifecycle.ts";
 import { checkName, createRefusal } from "./limits.ts";
 import { availablePlugins, checkPlugins, samePlugins, storedPlugins } from "./plugins.ts";
 import { normalisePorts, samePorts } from "./ports.ts";
@@ -438,7 +438,13 @@ export async function callerForLaunchToken(db: Database, token: string): Promise
 
 /**
  * The pod's report of how far its boot has got. Refused with 409 when the lifecycle does not allow it, such as from
- * an agent that is being stopped. Every report counts as activity.
+ * an agent that is being stopped.
+ *
+ * A report counts as activity unless the phase is one in which the pod is blocked on its owner. A pod relaying a
+ * sign-in nobody finishes reports a fresh device code every few minutes, and each report carries a different code, so
+ * nothing about the report itself gives it away: only the phase does. Counting those as activity is what let such a
+ * pod hold a node for as long as it kept asking. What moves the agent on is its owner, and the status change that
+ * follows is activity the sweep does see.
  */
 export async function reportStatus(prisma: PrismaClient, id: string, phase: PodPhase, detail: string | null, now: Date = new Date()): Promise<VirtualAgentRow> {
   return await prisma.$transaction(async (tx) => {
@@ -460,7 +466,7 @@ export async function reportStatus(prisma: PrismaClient, id: string, phase: PodP
           status: outcome.status,
           statusDetail: outcome.detail ?? null,
           ...(outcome.status === row.status ? {} : { statusChangedAt: now }),
-          lastActiveAt: now,
+          ...(awaitsOwner(phase) ? {} : { lastActiveAt: now }),
           updatedAt: now
         },
         select: SELECT

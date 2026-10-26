@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { DISK_WARNING_DAYS, diskExpiresAt, diskWarningDays, dueEveningStop, isIdle, lastActivity, latestEveningStop, londonInstant } from "./cleanup.ts";
+import {
+  DISK_WARNING_DAYS,
+  diskExpiresAt,
+  diskWarningDays,
+  dueEveningStop,
+  inactivityRule,
+  isIdle,
+  lastActivity,
+  latestEveningStop,
+  londonInstant
+} from "./cleanup.ts";
+import { VIRTUAL_AGENT_STATUSES } from "./lifecycle.ts";
 
 const SEVEN_PM = { hour: 19, minute: 0 };
 
@@ -98,6 +109,30 @@ describe("isIdle", () => {
 
   it("should not be idle when the linked agent is busy, however long ago anything was recorded", () => {
     expect(isIdle("busy", at("2026-10-01T00:00:00.000Z"), now, 120)).toBe(false);
+  });
+});
+
+describe("inactivityRule", () => {
+  it.each([
+    ["awaiting_login", "awaiting_owner"],
+    ["awaiting_credentials", "awaiting_owner"],
+    ["running", "idle"],
+    ["cloning", "idle"]
+  ] as const)("should hold a %s agent to the %s deadline", (status, rule) => {
+    expect(inactivityRule(status)).toBe(rule);
+  });
+
+  it.each(["requested", "provisioning", "stopping", "stopped", "failed"])("should leave a %s agent to the other rules", (status) => {
+    expect(inactivityRule(status)).toBeUndefined();
+  });
+
+  it("should have an answer for every status, so a new one is a decision rather than an omission", () => {
+    expect(VIRTUAL_AGENT_STATUSES.filter((status) => inactivityRule(status) !== undefined)).toEqual([
+      "awaiting_credentials",
+      "awaiting_login",
+      "cloning",
+      "running"
+    ]);
   });
 });
 

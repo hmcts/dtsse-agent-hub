@@ -1,3 +1,4 @@
+import { awaitsOwner } from "./lifecycle.ts";
 import type { WallClock } from "./settings.ts";
 
 /**
@@ -82,7 +83,12 @@ export function latestEveningStop(now: Date, stop: WallClock): Date {
   }
 }
 
-/** Whether an agent started at `startedAt` is due its evening stop at `now`. */
+/**
+ * Whether an agent started at `startedAt` is due its evening stop at `now`. An agent started at the weekend is not
+ * due one until the Monday, which is right because the evening stop is a working-day convenience rather than a
+ * backstop: it would otherwise cut off someone working on a Saturday with no warning. What bounds an agent nobody is
+ * using is `inactivityRule`, which covers every status that holds a pod, weekend or not.
+ */
 export function dueEveningStop(startedAt: Date, now: Date, stop: WallClock): boolean {
   return startedAt.getTime() < latestEveningStop(now, stop).getTime();
 }
@@ -99,11 +105,30 @@ export function lastActivity(...times: (Date | null | undefined)[]): Date | unde
 }
 
 /**
- * Whether a running agent has been idle long enough to stop. A busy linked agent is working whatever the clock says;
- * otherwise the latest sign of activity has to be older than the idle period.
+ * Whether an agent has been inactive long enough to stop. A busy linked agent is working whatever the clock says;
+ * otherwise the latest sign of activity has to be older than the deadline its status is on.
  */
 export function isIdle(linkedStatus: string | null, lastActiveAt: Date, now: Date, idleMinutes: number): boolean {
   return linkedStatus !== "busy" && now.getTime() - lastActiveAt.getTime() >= idleMinutes * 60_000;
+}
+
+/** Which deadline a status is on, and the reason the sweep stops it for. */
+export type InactivityRule = "idle" | "awaiting_owner";
+
+/**
+ * The inactivity rule an agent meant to be running is held to, or `undefined` when there is none.
+ *
+ * Every status whose pod is up and could still get somewhere has one: `cloning` and `running` the ordinary idle
+ * period, and the two in which the pod is blocked on its owner the shorter one. The rest are left alone — `requested`
+ * and `stopped` have no pod of this generation to reclaim, `provisioning` answers to `PROVISIONING_TIMEOUT_MS`
+ * instead, `stopping` is already on its way down, and `failed` is kept as it is so its owner can still read the
+ * `status_detail` saying what went wrong.
+ */
+export function inactivityRule(status: string): InactivityRule | undefined {
+  if (awaitsOwner(status)) {
+    return "awaiting_owner";
+  }
+  return status === "cloning" || status === "running" ? "idle" : undefined;
 }
 
 export function diskExpiresAt(stoppedAt: Date, ttlDays: number): Date {

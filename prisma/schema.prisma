@@ -119,6 +119,7 @@ enum VirtualAgentStopReason {
   quota
   expired
   failed
+  awaiting_owner
 
   @@map("virtual_agent_stop_reason")
 }
