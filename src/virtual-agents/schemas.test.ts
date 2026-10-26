@@ -108,6 +108,14 @@ describe("portsBody", () => {
   ])("should refuse %s", (_label, body) => {
     expect(portsBody.safeParse(body).success).toBe(false);
   });
+
+  it("should raise one issue rather than one per port when the list is over the cap", () => {
+    // Distinct values, so the only thing wrong with the list is its length.
+    const result = portsBody.safeParse({ ports: Array.from({ length: 5000 }, (_unused, index) => `not a port ${index}`) });
+
+    expect(result.error?.issues).toHaveLength(1);
+    expect(result.error?.issues[0]?.code).toBe("too_big");
+  });
 });
 
 describe("applyFailedBody", () => {

@@ -81,10 +81,92 @@ describe("POST /api/agent/register", () => {
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills).toEqual([]);
   });
 
+  it("should register the session and keep the stored skills when the skills field is not a list", async () => {
+    const skills = [{ name: "cft-explain", description: "Explain a CFT topic" }];
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, skills } }));
+    const stored = async () => (await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills;
+    expect(await stored()).toEqual(skills);
+
+    // A hand-rolled client sending the field as `null`. Refusing it would take the whole session off the hub, which
+    // is worse than the one field the shape costs: a non-list reads as the field not being sent, so the list stands.
+    const asNull = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, skills: null } });
+    expect(asNull.status).toBe(200);
+    expect(await stored()).toEqual(skills);
+  });
+
   it("should store no skills when a new agent registers without any", async () => {
     const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: REGISTRATION }));
 
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).skills).toEqual([]);
+  });
+
+  it("should store the features the client reported, sorted and de-duplicated", async () => {
+    const body = { ...REGISTRATION, client_features: ["voice", "attachments", "voice"] };
+
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body }));
+
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures).toEqual(["attachments", "voice"]);
+  });
+
+  it("should store no features at all when a client registers without reporting any, which is how an old client is known", async () => {
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: REGISTRATION }));
+
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures).toBeNull();
+  });
+
+  it("should replace the stored features with what the latest registration reported, nothing included", async () => {
+    const withFeatures = { ...REGISTRATION, client_features: ["attachments"] };
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: withFeatures }));
+    const stored = async () => (await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures;
+
+    expect(await stored()).toEqual(["attachments"]);
+
+    // A current client that claims nothing is distinguishable from one that reported nothing at all.
+    await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, client_features: [] } });
+    expect(await stored()).toEqual([]);
+
+    // The session is running an older client now, whatever it ran before: the claim does not outlive the build.
+    await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: REGISTRATION });
+    expect(await stored()).toBeNull();
+  });
+
+  it("should keep a feature name it does not recognise, and drop one that is not a name, when a newer client registers", async () => {
+    const body = { ...REGISTRATION, client_features: ["some-later-field", "Not A Name", 7, null] };
+
+    const response = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body });
+
+    expect(response.status).toBe(200);
+    const { agent_id } = await jsonOf(response);
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures).toEqual(["some-later-field"]);
+  });
+
+  it("should register the session as reporting no features when the features field is not a list", async () => {
+    const reported = { ...REGISTRATION, client_features: ["attachments"] };
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: reported }));
+    const stored = async () => (await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).clientFeatures;
+    expect(await stored()).toEqual(["attachments"]);
+
+    // A hand-rolled client sending the field as `null`, which its neighbour `conversation_id` has always allowed. The
+    // field exists to leave a session one field short, so it must not be the thing that keeps a client off the hub.
+    const asNull = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, client_features: null } });
+    expect(asNull.status).toBe(200);
+    expect(await stored()).toBeNull();
+
+    await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: reported });
+    expect(await stored()).toEqual(["attachments"]);
+    const asText = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, client_features: "attachments" } });
+    expect(asText.status).toBe(200);
+    expect(await stored()).toBeNull();
+  });
+
+  it("should refuse a registration reporting more features than the cap, which is what bounds the column", async () => {
+    const body = { ...REGISTRATION, client_features: [...Array(51).keys()].map((index) => `f${index}`) };
+
+    const response = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body });
+
+    expect(response.status).toBe(400);
+    expect((await jsonOf(response)).error).toMatch(/client_features/);
+    expect(await prisma.agent.count()).toBe(0);
   });
 
   it("should refuse a registration when a skill name is not valid", async () => {

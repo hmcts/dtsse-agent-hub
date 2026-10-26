@@ -36,6 +36,13 @@ describe("sessionsReportBody", () => {
   ])("should refuse %j when it breaks the contract's limits", (body) => {
     expect(sessionsReportBody.safeParse(body).success).toBe(false);
   });
+
+  it("should raise one issue rather than one per session when the report is over the cap", () => {
+    const result = sessionsReportBody.safeParse({ sessions: Array.from({ length: 5000 }, () => ({})), max: 2 });
+
+    expect(result.error?.issues).toHaveLength(1);
+    expect(result.error?.issues[0]?.code).toBe("too_big");
+  });
 });
 
 describe("jiraExportReportBody", () => {

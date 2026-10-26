@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { availablePlugins, checkPlugins, MAX_PLUGINS, PluginConfigurationError, samePlugins, storedPlugins } from "./plugins.ts";
 
 describe("availablePlugins", () => {
@@ -27,30 +27,56 @@ describe("checkPlugins", () => {
   const OFFERED = ["dtsse", "pcs", "wa"];
 
   it.each([[undefined], [null], [[]]])("should tick none when the form sends %j", (raw) => {
-    expect(checkPlugins(raw, OFFERED)).toEqual({ ok: true, plugins: [] });
+    expect(checkPlugins(raw, () => OFFERED)).toEqual({ ok: true, plugins: [] });
   });
 
   it("should keep each name once, in code-point order, when the form sends them in any order and case", () => {
-    expect(checkPlugins(["wa", " PCS ", "dtsse", "pcs"], OFFERED)).toEqual({ ok: true, plugins: ["dtsse", "pcs", "wa"] });
+    expect(checkPlugins(["wa", " PCS ", "dtsse", "pcs"], () => OFFERED)).toEqual({ ok: true, plugins: ["dtsse", "pcs", "wa"] });
   });
 
   it("should refuse a name the hub does not offer", () => {
-    expect(checkPlugins(["pcs", "civil"], OFFERED)).toEqual({ ok: false, error: "civil is not a plugin this hub offers" });
+    expect(checkPlugins(["pcs", "civil"], () => OFFERED)).toEqual({ ok: false, error: "civil is not a plugin this hub offers" });
   });
 
   it.each([[["pcs team"]], [[""]], [[3]], [[{}]]])("should refuse %j when it is not a list of plugin names", (raw) => {
-    expect(checkPlugins(raw, OFFERED)).toEqual({ ok: false, error: "a plugin name is lowercase letters, digits and hyphens" });
+    expect(checkPlugins(raw, () => OFFERED)).toEqual({ ok: false, error: "a plugin name is lowercase letters, digits and hyphens" });
   });
 
   it.each(["pcs", { pcs: true }])("should refuse %j when it is not a list", (raw) => {
-    expect(checkPlugins(raw, OFFERED)).toEqual({ ok: false, error: "plugins are a list of names" });
+    expect(checkPlugins(raw, () => OFFERED)).toEqual({ ok: false, error: "plugins are a list of names" });
   });
 
   it("should refuse more than the most an agent may have when they are all offered", () => {
     const many = Array.from({ length: MAX_PLUGINS + 1 }, (_, index) => `p-${index}`);
 
-    expect(checkPlugins(many, many)).toEqual({ ok: false, error: `a virtual agent has at most ${MAX_PLUGINS} plugins` });
-    expect(checkPlugins(many.slice(1), many)).toMatchObject({ ok: true });
+    expect(checkPlugins(many, () => many)).toEqual({ ok: false, error: `a virtual agent has at most ${MAX_PLUGINS} plugins` });
+    expect(checkPlugins(many.slice(1), () => many)).toMatchObject({ ok: true });
+  });
+
+  // Creating any virtual agent checks its plugins, so reading an offer list that throws would fail everyone who
+  // ticked none — which is everyone whose assistant is created for them.
+  it.each([[undefined], [null], [[]]])("should not read the hub's offer list at all when the form sends %j", (raw) => {
+    const offered = vi.fn(() => {
+      throw new PluginConfigurationError('VIRTUAL_AGENT_PLUGINS has "Not A Plugin Name", which is not a plugin name');
+    });
+
+    expect(checkPlugins(raw, offered)).toEqual({ ok: true, plugins: [] });
+    expect(offered).not.toHaveBeenCalled();
+  });
+
+  it("should read the hub's offer list, and fail with it, once a name is actually ticked", () => {
+    const offered = () => {
+      throw new PluginConfigurationError('VIRTUAL_AGENT_PLUGINS has "Not A Plugin Name", which is not a plugin name');
+    };
+
+    expect(() => checkPlugins(["pcs"], offered)).toThrow(PluginConfigurationError);
+  });
+
+  it("should not read the hub's offer list when the form sends something that is not a list", () => {
+    const offered = vi.fn(() => OFFERED);
+
+    expect(checkPlugins("pcs", offered)).toEqual({ ok: false, error: "plugins are a list of names" });
+    expect(offered).not.toHaveBeenCalled();
   });
 });
 

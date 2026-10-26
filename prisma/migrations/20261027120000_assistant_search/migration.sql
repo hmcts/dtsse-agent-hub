@@ -1,0 +1,16 @@
+-- What the Assistant sidebar's chat search reads: an English full-text index over what was said in a direct message.
+--
+-- The search asks for each term as `to_tsquery('english', '<term>:*')`. Without this index the only way to answer
+-- that is to read every direct message in the hub and build each `tsvector` on the way past: 62ms for one term and
+-- 117ms for two over one person's 12,000 messages, and growing with everybody else's traffic. Through the index the
+-- same searches take 5-7ms, and grow with how much matches rather than with how much there is.
+--
+-- Partial on `kind = 'direct'`, so posts — the bulk of what the hub writes — pay nothing for it. A direct message
+-- pays one `tsvector` on insert, inside the transaction that was already writing the message and its deliveries.
+--
+-- An expression index has nothing for `schema.prisma` to mirror: the Prisma client never names it, and the query
+-- that uses it is raw SQL in `src/assistant/store.ts`. The partial indexes of earlier migrations are the same.
+--
+-- Not `CONCURRENTLY`: `src/store/migrate.ts` runs each migration in one transaction, which `CONCURRENTLY` may not
+-- join. The build takes a write lock on `message` for as long as it runs, which is seconds at the present size.
+CREATE INDEX "message_direct_body_search_idx" ON "message" USING GIN (to_tsvector('english', "body")) WHERE "kind" = 'direct';

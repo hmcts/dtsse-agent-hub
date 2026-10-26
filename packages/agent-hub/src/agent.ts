@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Api } from "./api.ts";
 import type { Env } from "./env.ts";
+import { CLIENT_FEATURES } from "./features.ts";
 import {
   conversationId,
   ensureStateDir,
@@ -385,7 +386,14 @@ export async function registerAgent(api: Pick<Api, "register" | "subscribe">, si
   const meta = gatherMetadata(sid, opts);
   const skills = (opts.collectSkills || collectSkillsDefault)();
   const conversation = conversationId(opts.env);
-  const res = await api.register({ ...meta, skills, ...(conversation ? { conversation_id: conversation } : {}) });
+  // `client_features` goes on every register, empty list included: it replaces what the hub has stored for this
+  // session, so the hub always knows which build is running rather than which one ran first.
+  const res = await api.register({
+    ...meta,
+    skills,
+    client_features: [...CLIENT_FEATURES],
+    ...(conversation ? { conversation_id: conversation } : {})
+  });
   ensureStateDir(sid);
   const previous = loadAgent(sid) || {};
   const agent: RegisteredAgent = {

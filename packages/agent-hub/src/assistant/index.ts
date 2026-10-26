@@ -1,5 +1,21 @@
 // The pod side of the HMCTS Assistant's conversations: one interactive Claude session per conversation, beside
 // the virtual agent's own. Gathered for the CLI and the package's public surface.
+export type { Attachment, AttachmentFs, FetchAttachmentsOptions, ReadAttachments, ReconcileUploadsOptions } from "./attachments.ts";
+export {
+  attachmentPath,
+  conversationDir,
+  fetchAttachments,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS,
+  parseAttachments,
+  readAttachments,
+  reconcileUploads,
+  removeConversationUploads,
+  safeName,
+  staleUploadDirs,
+  unfetchedAttachments,
+  uploadsRoot
+} from "./attachments.ts";
 export type { RunAssistantSupervisorOptions } from "./run.ts";
 export { runAssistantSupervisor } from "./run.ts";
 export type {
@@ -22,7 +38,8 @@ export {
   maxSessions,
   parseSavedSession,
   parseWake,
+  REFUSAL_EVERY_MS,
   REPORT_EVERY_MS
 } from "./supervisor.ts";
-export type { CreateTmuxOptions, StartSessionOptions, Tmux, TmuxExec, TmuxResult } from "./tmux.ts";
-export { claudeCommand, createTmux, PROMPT_FILE, tmuxName } from "./tmux.ts";
+export type { CreateTmuxOptions, ProgramCheck, StartSessionOptions, Tmux, TmuxExec, TmuxResult } from "./tmux.ts";
+export { canRunProgram, claudeCommand, commandProgram, createTmux, PROMPT_FILE, tmuxName } from "./tmux.ts";

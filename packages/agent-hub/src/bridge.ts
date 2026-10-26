@@ -5,11 +5,13 @@
 import fs from "node:fs";
 import { loadAgent, registerAgent, type StoredAgent } from "./agent.ts";
 import { type Api, ApiError, createApi } from "./api.ts";
+import { fetchAttachments, readAttachments, unfetchedAttachments } from "./assistant/attachments.ts";
 import { peerOf, recordDirect } from "./directs.ts";
 import type { Env } from "./env.ts";
 import {
   type AssistantFrame,
   type AssistantProduct,
+  type AttachmentOutcome,
   assistantEnvelope,
   directEnvelope,
   type EnvelopeOptions,
@@ -164,7 +166,10 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     product_label: asNullableString(raw.product_label),
     artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
     artefact_updated_by: asNullableString(raw.artefact_updated_by),
-    jira_export: parseJiraExportFrame(raw.jira_export)
+    jira_export: parseJiraExportFrame(raw.jira_export),
+    // Left as it came: `readAttachments`, at the point of delivery, is what decides which entries this client will
+    // fetch and what the envelope says about the rest, so checking them here would only do it twice.
+    attachments: raw.attachments
   };
 }
 
@@ -447,6 +452,37 @@ export async function runBridge({
     }
   }
 
+  /**
+   * The files on an assistant frame, written to this pod's disk.
+   *
+   * Empty only for a frame that names no file: an outcome missing from this list is a file the envelope says nothing
+   * about, and a message delivered without a word about the file attached to it leaves the person believing it was
+   * read. So a frame that names files this pod cannot go and get — no conversation id to build a path from, no agent
+   * id to fetch with, or entries the client will not act on — answers with an error outcome for each of them.
+   */
+  async function fetchForDelivery(messageId: string, assistant: AssistantFrame | null): Promise<AttachmentOutcome[]> {
+    const conversationId = assistant?.conversation_id;
+    const agentId = agent?.agent_id;
+    const { attachments, dropped } = readAttachments(assistant?.attachments);
+    if (attachments.length === 0) {
+      return dropped;
+    }
+    if (conversationId === undefined || agentId === undefined) {
+      const reason = conversationId === undefined ? "the frame named no conversation to fetch it for" : "this session has no agent id to fetch it with";
+      log(sid, `#${messageId}: cannot fetch ${attachments.length} attached file(s): ${reason}`);
+      return [...unfetchedAttachments(attachments, reason), ...dropped];
+    }
+    const outcomes = await fetchAttachments({
+      api,
+      agentId,
+      conversationId,
+      attachments,
+      env,
+      say: (m) => log(sid, `#${messageId}: ${m}`)
+    });
+    return [...outcomes, ...dropped];
+  }
+
   async function handleDirect(event: SseEvent): Promise<void> {
     let parsed: unknown;
     try {
@@ -483,8 +519,14 @@ export async function runBridge({
         : ownerReads
           ? ownerDirectEnvelope
           : directEnvelope;
+      // Fetched before the message is delivered, so the envelope can name the absolute path and the session has the
+      // file the moment it reads about it. Nothing here throws: a file that could not be fetched comes back as an
+      // outcome the envelope says so about, because a message delivered with the attachment silently missing would
+      // leave the person believing the agent had read it.
+      const attachments = await fetchForDelivery(message.id, assistant);
       try {
-        const content = assistant ? assistantEnvelope(message, assistant, previousProduct) : envelope(message, { skills: skillNames() });
+        const skills = skillNames();
+        const content = assistant ? assistantEnvelope(message, assistant, previousProduct, { skills, attachments }) : envelope(message, { skills });
         await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, content);
         remember(message.id);
         if (assistant) {

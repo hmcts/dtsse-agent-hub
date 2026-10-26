@@ -163,6 +163,10 @@ model User {
   credentials   Credential[]
   virtualAgents VirtualAgent[]
   assistantConversations AssistantConversation[]
+  assistantUploads       AssistantUpload[]
+  assistantTemplates     AssistantTemplate[]
+  conversationsSharedWithThem AssistantConversationShare[] @relation("shareRecipient")
+  conversationsTheyShared     AssistantConversationShare[] @relation("shareOwner")
 
   @@map("user")
 }
@@ -185,6 +189,9 @@ model Agent {
   virtualAgentId  String?     @map("virtual_agent_id") @db.Uuid
   /// The skills its session reported, as [{name, description}]. See src/agents/skills.ts.
   skills          Json        @default("[]")
+  /// What its client claimed it understands of the hub's optional wire fields, as ["name"], or null from a client
+  /// that reported nothing, which claims nothing. See src/agents/client-features.ts.
+  clientFeatures  Json?       @map("client_features")
   /// The assistant conversation this agent is a session of, if any. Visible to and messageable by its owner only.
   assistantConversationId String? @map("assistant_conversation_id") @db.Uuid
 
@@ -251,6 +258,7 @@ model Message {
   topics      MessageTopic[]
   deliveries  Delivery[]
   transcript  TranscriptEntry[]
+  uploads     AssistantUpload[]
 
   @@map("message")
 }
@@ -455,9 +463,11 @@ model AssistantConversation {
   agentId           String?   @map("agent_id") @db.Uuid
   title             String?
   /// One of src/assistant/products.ts.
-  product           String    @default("other")
+  product           String    @default("general")
   /// Every change of product, as [{product, at}].
   productHistory    Json      @default("[]") @map("product_history")
+  /// Every answer the person stopped, as [{at}].
+  stopHistory       Json      @default("[]") @map("stop_history")
   wakeRequestedAt   DateTime? @map("wake_requested_at") @db.Timestamptz(6)
   /// What the pod's supervisor last reported: starting, live or queued; null for no session.
   sessionState      String?   @map("session_state")
@@ -480,11 +490,85 @@ model AssistantConversation {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  owner        User         @relation(fields: [ownerOid], references: [oid])
-  virtualAgent VirtualAgent @relation(fields: [virtualAgentId], references: [id], onDelete: Cascade)
-  agent        Agent?       @relation("assistantConversationCurrent", fields: [agentId], references: [id], onDelete: SetNull)
-  sessions     Agent[]      @relation("assistantConversationSessions")
+  owner        User             @relation(fields: [ownerOid], references: [oid])
+  virtualAgent VirtualAgent     @relation(fields: [virtualAgentId], references: [id], onDelete: Cascade)
+  agent        Agent?           @relation("assistantConversationCurrent", fields: [agentId], references: [id], onDelete: SetNull)
+  sessions     Agent[]          @relation("assistantConversationSessions")
+  uploads      AssistantUpload[]
+  shares       AssistantConversationShare[]
 
   @@index([ownerOid, lastActiveAt(sort: Desc)], map: "assistant_conversation_owner_active_idx")
   @@map("assistant_conversation")
+}
+
+/// A read-only share of one conversation with one named person. The list of rows is the whole of the access: a link
+/// to a shared conversation resolves for the people named here and for nobody else. See src/access/rules.ts.
+model AssistantConversationShare {
+  conversationId String   @map("conversation_id") @db.Uuid
+  recipientOid   String   @map("recipient_oid")
+  /// The conversation's owner, who is the only person who can share it.
+  sharedByOid    String   @map("shared_by_oid")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  recipient    User                  @relation("shareRecipient", fields: [recipientOid], references: [oid], onDelete: Cascade)
+  sharedBy     User                  @relation("shareOwner", fields: [sharedByOid], references: [oid], onDelete: Cascade)
+
+  @@id([conversationId, recipientOid])
+  @@index([recipientOid, createdAt], map: "assistant_conversation_share_recipient_idx")
+  @@map("assistant_conversation_share")
+}
+
+/// A file attached to an Assistant message: the metadata, which outlives the bytes in `AssistantUploadPart`.
+model AssistantUpload {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  ownerOid       String   @map("owner_oid")
+  /// Stamped in the sending message's transaction; null while the person is still composing.
+  messageId      BigInt?  @map("message_id")
+  fileName       String   @map("file_name")
+  /// What the pod writes it as. Decided by the hub and constrained in SQL, never built from `fileName`.
+  storedName     String   @map("stored_name")
+  mediaType      String   @map("media_type")
+  bytes          BigInt
+  /// pending, stored, fetched or expired.
+  state          String   @default("pending")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  owner        User                  @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
+  message      Message?              @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  parts        AssistantUploadPart[]
+
+  @@index([conversationId, createdAt], map: "assistant_upload_conversation_idx")
+  @@map("assistant_upload")
+}
+
+/// One of a person's own saved prompts, offered wherever the built-in templates in src/assistant/starters.ts are.
+model AssistantTemplate {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerOid  String   @map("owner_oid")
+  name      String
+  body      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  owner User @relation(fields: [ownerOid], references: [oid])
+
+  @@unique([ownerOid, name], map: "assistant_template_owner_name_key")
+  @@index([ownerOid, name], map: "assistant_template_owner_idx")
+  @@map("assistant_template")
+}
+
+/// One 4 MiB slice of an upload. Deleted by the sweep once the retention window closes, whether a pod fetched it or not.
+model AssistantUploadPart {
+  uploadId String @map("upload_id") @db.Uuid
+  index    Int
+  data     Bytes
+
+  upload AssistantUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@id([uploadId, index])
+  @@map("assistant_upload_part")
 }

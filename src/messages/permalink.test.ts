@@ -17,6 +17,6 @@ describe("parseMessageRef", () => {
 
 describe("messageHref", () => {
   it("should point at the message page when given an id", () => {
-    expect(messageHref("42")).toBe("/m/42");
+    expect(messageHref("42")).toBe("/hub/m/42");
   });
 });

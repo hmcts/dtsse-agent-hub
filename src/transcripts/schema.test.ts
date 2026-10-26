@@ -131,4 +131,11 @@ describe("transcriptBody", () => {
   it("should accept a full batch when it holds the most entries allowed", () => {
     expect(parse(Array.from({ length: MAX_BATCH_ENTRIES }, (_, index) => entry({ key: `k${index}` }))).success).toBe(true);
   });
+
+  it("should raise one issue rather than one per entry when the batch is over the cap", () => {
+    const result = parse(Array.from({ length: 5000 }, () => ({})));
+
+    expect(result.error?.issues).toHaveLength(1);
+    expect(result.error?.issues[0]?.message).toBe(`at most ${MAX_BATCH_ENTRIES} entries per request`);
+  });
 });

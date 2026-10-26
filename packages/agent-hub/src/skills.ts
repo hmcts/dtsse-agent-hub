@@ -178,8 +178,8 @@ function pluginName(dir: string, fallback: string): string {
   return typeof name === "string" && name ? name : fallback;
 }
 
-// The plugins a virtual agent's owner ticked, which .claude/run.sh loads with --plugin-dir: each name in
-// AGENT_HUB_PLUGINS resolved through this checkout's marketplace.json. A name run.sh skips is skipped here too.
+// The plugins a virtual agent's owner ticked, which hai loads with --plugin-dir: each name in
+// AGENT_HUB_PLUGINS resolved through this checkout's marketplace.json. A name hai skips is skipped here too.
 export function hubPlugins({ project, env = process.env }: { project: string; env?: Env }): PluginInstall[] {
   const names = String(env.AGENT_HUB_PLUGINS || "")
     .split(",")

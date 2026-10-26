@@ -91,7 +91,7 @@ function readPluginFile(file: string): unknown {
   }
 }
 
-// A workspace plugin in the project's marketplace.json, as .claude/run.sh loads it with --plugin-dir.
+// A workspace plugin in the project's marketplace.json, as hai loads it with --plugin-dir.
 function marketplacePlugin(l: Layout, name: string, { manifest = true, skills: list = [] }: { manifest?: boolean; skills?: [string, string][] } = {}) {
   const dir = path.join(l.project, "apps", name, ".claude");
   if (manifest) {

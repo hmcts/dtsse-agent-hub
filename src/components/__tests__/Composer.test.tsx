@@ -123,7 +123,7 @@ describe("Composer", () => {
 
   it("should offer to sign in again, back to this page, when the call fails because the session has ended", async () => {
     sessionAnswers(401);
-    window.history.pushState({}, "", "/c?topics=a&mode=any");
+    window.history.pushState({}, "", "/hub/c?topics=a&mode=any");
     const action = vi.fn(async () => {
       throw new Error("An unexpected response was received from the server.");
     });
@@ -137,7 +137,7 @@ describe("Composer", () => {
     expect(screen.getByRole("status").textContent).toContain("Your session has ended");
     const href = new URL(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href") ?? "", "https://agent-hub.example");
     expect(href.pathname).toBe("/auth/login");
-    expect(href.searchParams.get("redirect")).toBe("/c?topics=a&mode=any");
+    expect(href.searchParams.get("redirect")).toBe("/hub/c?topics=a&mode=any");
     window.history.pushState({}, "", "/");
   });
 

@@ -27,6 +27,8 @@ export type StoredAgent = {
   host?: string;
   status?: string;
   skills?: Skill[];
+  /** As the service stores it: whatever the last register reported, and undefined when one reported nothing. */
+  client_features?: string[];
   last_heartbeat_at?: string | null;
   read_cursor?: number;
   conversation_id?: string;
@@ -112,6 +114,7 @@ function transcriptProblem(body: Body, rawBytes: number): string | null {
 }
 
 const SKILL_NAME_RE = /^[a-z0-9][a-z0-9:_-]*$/;
+const CLIENT_FEATURE_NAME_RE = /^[a-z0-9][a-z0-9:_-]*$/;
 
 function skillsProblem(skills: unknown): string | null {
   if (!Array.isArray(skills) || skills.length > 200) {
@@ -128,6 +131,22 @@ function skillsProblem(skills: unknown): string | null {
   return null;
 }
 
+/**
+ * What the service stores for a reported list: sorted, de-duplicated, with anything that is not a name dropped, and
+ * nothing at all for a register that reported none. Over the cap it refuses, like `boundedArray` does. Reproduced
+ * here so a client test cannot pass on a value the service would never have kept.
+ */
+function storedClientFeatures(features: unknown): string[] | "too many" | undefined {
+  if (features === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(features) || features.length > 50) {
+    return "too many";
+  }
+  const names = features.filter((f): f is string => typeof f === "string" && f.length <= 50 && CLIENT_FEATURE_NAME_RE.test(f));
+  return [...new Set(names)].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
 export type MockHubOptions = {
   pingMs?: number;
   maxLifetimeMs?: number;
@@ -142,6 +161,8 @@ export type MockHubOptions = {
 export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEvent = true, replayAcked = false, launchTokens = {} }: MockHubOptions = {}) {
   const options = { maxLifetimeMs, reconnectEvent, replayAcked };
   const failures: { stream: number[]; ack: number[]; transcript: number[] } = { stream: [], ack: [], transcript: [] };
+  // Set through onBeforeRespond, for a caller that keeps a copy of what the hub recorded.
+  let beforeRespond: (() => void) | null = null;
   const transcripts = new Map<string, Map<string, Record<string, unknown>>>();
   const users = new Map<string, Person>();
   const agents = new Map<string, StoredAgent>();
@@ -156,6 +177,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   // agent id → the conversation's document, for conversations' agents
   const artefacts = new Map<string, Artefact>();
   const jiraReports: Record<string, unknown>[] = [];
+  // upload id → the parts the pod may still fetch, and whether it has reported having the whole file
+  const attachments = new Map<string, { parts: Uint8Array[]; fetched: boolean }>();
   // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
   const virtuals = new Map<string, VirtualRecord>();
   // person oid → Map(kind → value), the /api/agent/credentials routes
@@ -250,6 +273,9 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   }
 
   function send(res: ServerResponse, status: number, body?: unknown) {
+    // Before the response is written, so a caller that reads the hook's record the moment its own request
+    // returns cannot be a request behind.
+    beforeRespond?.();
     res.writeHead(status, body === undefined ? {} : { "Content-Type": "application/json" });
     res.end(body === undefined ? "" : JSON.stringify(body));
   }
@@ -290,6 +316,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       v.status.push(body.detail ? { phase: body.phase, detail: body.detail } : { phase: body.phase });
       return send(res, 204);
     }
+    if (req.method === "GET" && area === "conversations" && !kind) {
+      const ids = new Set([...agents.values()].filter((a) => a.conversation_id).map((a) => a.conversation_id as string));
+      return send(res, 200, { conversations: [...ids].map((conversationId) => ({ id: conversationId })) });
+    }
     if (area === "sessions" && !kind) {
       if (req.method === "PUT") {
         const states = new Set(["starting", "live", "queued"]);
@@ -312,6 +342,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return send(res, 204);
       }
       if (req.method === "GET") {
+        beforeRespond?.();
         res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
         res.flushHeaders();
         res.write(": connected\nretry: 1000\n\n");
@@ -442,6 +473,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
           return send(res, 400, { error: problem });
         }
       }
+      const features = storedClientFeatures(body.client_features);
+      if (features === "too many") {
+        return send(res, 400, { error: "client_features: at most 50" });
+      }
       Object.assign(agent, {
         session_id: body.session_id,
         name: body.name,
@@ -449,7 +484,9 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         repo: body.repo,
         branch: body.branch,
         host: body.host,
-        status: "idle"
+        status: "idle",
+        // Replaced by every register, unlike the skills below: the service records the build that is running now.
+        client_features: features
       });
       if (body.conversation_id !== undefined) {
         if (!launch) {
@@ -559,6 +596,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       if (status) {
         return send(res, status, { error: "stream refused" });
       }
+      beforeRespond?.();
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
       res.flushHeaders();
       streams.set(agent.id, res);
@@ -725,6 +763,27 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       jiraReports.push({ agent_id: agent.id, ...body });
       return send(res, 204);
     }
+    // The pod-facing half of an Assistant attachment: one part's raw bytes, and the report that deletes them.
+    if (action === "attachments") {
+      const upload = attachments.get(parts[4] as string);
+      if (!upload) {
+        return send(res, 404, { error: "no such upload" });
+      }
+      if (req.method === "POST" && parts[5] === "fetched") {
+        upload.fetched = true;
+        upload.parts = [];
+        return send(res, 204);
+      }
+      if (req.method === "GET" && parts[5] === "parts") {
+        const part = upload.parts[Number(parts[6])];
+        if (!part) {
+          return send(res, 404, { error: "no such part of this file" });
+        }
+        beforeRespond?.();
+        res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(part.byteLength) });
+        return res.end(Buffer.from(part));
+      }
+    }
     if (action === "subscriptions") {
       const subs = subscriptions.get(agent.id) as Set<string>;
       if (req.method === "GET") {
@@ -761,6 +820,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     personCredentials,
     artefacts,
     jiraReports,
+    attachments,
     sessionStreams,
     // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session
     // registers for it.
@@ -768,6 +828,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       const v = virtuals.get(virtualId) as VirtualRecord;
       v.wakes.push(data);
       sessionStreams.get(virtualId)?.write(`event: wake\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+    // Stopping an answer. Unlike a wake it is not kept: the hub sends one once and never replays it.
+    sendInterrupt(virtualId: string, data: { conversation_id: string }) {
+      sessionStreams.get(virtualId)?.write(`event: interrupt\ndata: ${JSON.stringify(data)}\n\n`);
     },
     sendClose(virtualId: string, data: { conversation_id: string }) {
       const v = virtuals.get(virtualId) as VirtualRecord;
@@ -778,6 +842,15 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     editArtefactAsUser(agentId: string, markdown: string, title = "Draft") {
       const doc = artefacts.get(agentId);
       artefacts.set(agentId, { title, markdown, version: (doc?.version ?? 0) + 1, updated_by: "user", updated_at: new Date().toISOString() });
+    },
+    // Runs as each response is written, before the caller can see it. A test that mirrors the hub's state
+    // somewhere a process outside this one reads — `src/virtual-agent-boot.test.ts` writes a file the boot
+    // script's jq asserts on — has to write it here: a write hung on the response's `finish` lands after the
+    // data has gone to the socket, so the caller can be reading one request behind. The stream handlers call
+    // it themselves, because they write their own head rather than going through `send`; a new response that
+    // does the same has to do likewise, or whatever it mutates is missing from the record.
+    onBeforeRespond(hook: () => void) {
+      beforeRespond = hook;
     },
     // The next `count` stream requests, acks or transcript uploads answer `status` instead.
     failNextStreams(count: number, status = 500) {

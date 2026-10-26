@@ -3,6 +3,7 @@
  */
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CONNECTORS, connectionsPrompt, offeredConnections } from "@/assistant/connections";
 import { readiness } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
 import { GettingReady, OnboardingGate } from "@/components/assistant/GettingReady";
@@ -35,6 +36,8 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
     desired: "running",
     status,
     statusDetail: null,
+    statusChangedAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
     readiness: readiness(status),
     needed: ["github", "azure", "claude"],
     optional: ["jenkins", "atlassian"],
@@ -77,6 +80,13 @@ function connector(name: string): HTMLElement {
     throw new Error(`no connector ${name}`);
   }
   return item;
+}
+
+/** What a row offers the person, named, so a row offering two things to do at once is one assertion. */
+function formsIn(name: string): (string | null)[] {
+  return within(connector(name))
+    .getAllByRole("form")
+    .map((form) => form.getAttribute("aria-label"));
 }
 
 describe("GettingReady progress", () => {
@@ -186,6 +196,83 @@ describe("GettingReady connectors", () => {
   });
 });
 
+/**
+ * The one failure on this screen with no way out from the person's side: being asked for a credential the rows do
+ * not cover, or covering it with a row that connects nothing. Either way every row they can see reads as connected,
+ * the bar sits where the pod left it, and the ask never clears.
+ */
+describe("GettingReady asks the person can act on", () => {
+  it("should offer the Bedrock key the ask names when the bedrock route is missing it", () => {
+    const summary = assistant("awaiting_credentials", { needed: ["github", "azure", "bedrock"] });
+    render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
+
+    const missing = connectionsPrompt("connect", summary.needed, new Set<CredentialKind>(["github", "azure"]));
+    expect(missing?.message).toContain("AI model access");
+    const row = connector("AI model access");
+    fireEvent.click(within(row).getByRole("button", { name: "Connect" }));
+
+    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Bedrock API key" });
+    expect(within(form).getByLabelText("Bedrock API key")).toBeTruthy();
+    expect((form.querySelector('input[name="kind"]') as HTMLInputElement).value).toBe("bedrock");
+  });
+
+  // The pod gives up driving `claude setup-token` and asks the owner to paste the token, so a note about a sign-in
+  // that is never coming would leave them with the ask and nowhere to answer it.
+  it("should offer the Claude token the ask names when the own-licence route is missing it", () => {
+    const summary = assistant("awaiting_credentials", { needed: ["github", "azure", "claude"] });
+    render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
+
+    const missing = connectionsPrompt("connect", summary.needed, new Set<CredentialKind>(["github", "azure"]));
+    expect(missing?.message).toContain("Claude");
+    fireEvent.click(within(connector("Claude")).getByRole("button", { name: "Connect" }));
+
+    const form = within(connector("Claude")).getByRole("form", { name: "Save your Claude token" });
+    expect(within(form).getByLabelText("Claude token")).toBeTruthy();
+    expect((form.querySelector('input[name="kind"]') as HTMLInputElement).value).toBe("claude");
+  });
+
+  // Asking to connect and then having the pod relay its code is the usual order on the Claude row, and two password
+  // boxes posting to different places is worse than either alone: a token typed into the code box reaches the pod and
+  // comes back only as a sign-in that did not work.
+  it("should offer the relayed sign-in alone when one arrives after the person asked to connect", () => {
+    const summary = assistant("awaiting_credentials", { needed: ["github", "azure", "claude"] });
+    const { rerender } = render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
+    fireEvent.click(within(connector("Claude")).getByRole("button", { name: "Connect" }));
+
+    expect(formsIn("Claude")).toEqual(["Save your Claude token"]);
+
+    const relayed = assistant("awaiting_login", {
+      needed: ["github", "azure", "claude"],
+      logins: [login("claude", { prompt: "paste_code", userCode: null })]
+    });
+    rerender(ready({ assistant: relayed, statuses: statuses("github", "azure") }));
+
+    expect(formsIn("Claude")).toEqual(["Paste the Claude code"]);
+    expect(connector("Claude").querySelectorAll('input[type="password"]')).toHaveLength(1);
+  });
+
+  it("should offer a row for a sign-in the assistant is waiting on that it would not offer unasked", () => {
+    const summary = assistant("awaiting_login", { needed: ["github", "azure", "bedrock"], logins: [login("jenkins")] });
+    render(ready({ assistant: summary, statuses: statuses("github", "azure", "bedrock", "atlassian") }));
+
+    const jenkins = connector("Jenkins");
+    expect(within(jenkins).getByText("Waiting for you")).toBeTruthy();
+    expect(within(jenkins).getByText("ABCD-1234")).toBeTruthy();
+  });
+
+  it("should leave nothing the assistant is waiting on off the list", () => {
+    const waitingOn: CredentialKind[] = ["azure", "jenkins"];
+    const summary = assistant("awaiting_login", { needed: ["github", "azure", "bedrock"], logins: waitingOn.map((kind) => login(kind)) });
+    render(ready({ assistant: summary, statuses: statuses("github", "bedrock", "atlassian") }));
+
+    const shown = offeredConnections(summary).map((row) => String(row.kind));
+    expect(waitingOn.filter((kind) => !shown.includes(kind))).toEqual([]);
+    for (const kind of waitingOn) {
+      expect(within(connector(CONNECTORS[kind]?.name ?? kind)).getByText("Waiting for you")).toBeTruthy();
+    }
+  });
+});
+
 describe("GettingReady continue", () => {
   it("should not let the person carry on when a needed account is still to connect", () => {
     const onDone = vi.fn();
@@ -205,21 +292,216 @@ describe("GettingReady continue", () => {
 
     expect(onDone).toHaveBeenCalled();
   });
+
+  it("should offer the way out of the screen while a needed account is still to connect", () => {
+    const onLeave = vi.fn();
+    render(ready({ onLeave }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to your chats" }));
+
+    expect(onLeave).toHaveBeenCalled();
+  });
+
+  it("should offer no way out beside Start chatting once every needed account is connected", () => {
+    render(ready({ assistant: assistant("running", { onboarded: true }), statuses: statuses("github", "azure", "claude"), onLeave: vi.fn() }));
+
+    expect(screen.getByRole("button", { name: "Start chatting" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
+  });
+});
+
+/**
+ * The hub failing to read someone's credentials looks exactly like their having stored none — `onboarded` is false
+ * either way — so these pin the two apart from the person's side: nobody is asked to connect what the hub has not
+ * looked at, and the screen says which of the two it is.
+ */
+describe("GettingReady when the hub cannot read the credentials", () => {
+  const REASON = "this deployment has no credentials vault, so credentials cannot be stored here";
+
+  /** What the page passes when the credential store cannot be read: the reason, and no statuses to go on. */
+  function unreadable(props: Partial<Parameters<typeof GettingReady>[0]> = {}) {
+    return ready({ unavailable: REASON, statuses: [], ...props });
+  }
+
+  it("should say the sign-ins cannot be read, and why, when the credential store cannot be read", () => {
+    render(unreadable());
+
+    expect(screen.getByText(/cannot read your sign-ins/)).toBeTruthy();
+    expect(screen.getByText(REASON)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+  });
+
+  it("should ask for no account, and let the person past, when the hub cannot tell what they have connected", () => {
+    const onDone = vi.fn();
+    render(unreadable({ onDone }));
+
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect the accounts above to continue" })).toBeNull();
+    const carryOn = screen.getByRole("button", { name: "Carry on" }) as HTMLButtonElement;
+    expect(carryOn.disabled).toBe(false);
+
+    fireEvent.click(carryOn);
+    expect(onDone).toHaveBeenCalled();
+  });
 });
 
 describe("OnboardingGate", () => {
-  function gate(summary: AssistantSummary) {
-    return <OnboardingGate assistant={summary} statuses={[]} unavailable={null} paste={ok()} save={ok()} />;
+  function gate(summary: AssistantSummary, stored: CredentialStatus[] = [], dismissed = false) {
+    return <OnboardingGate assistant={summary} statuses={stored} unavailable={null} paste={ok()} save={ok()} dismissed={dismissed} />;
   }
 
-  it("should show nothing when the person had onboarded before the visit, even while the assistant starts", () => {
-    render(gate(assistant("stopped", { onboarded: true })));
+  it("should ask for nothing when every needed account is connected and the hub can read them", () => {
+    render(
+      <OnboardingGate
+        assistant={assistant("running", { onboarded: true })}
+        statuses={statuses("github", "azure", "claude")}
+        unavailable={null}
+        paste={ok()}
+        save={ok()}
+      />
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+  });
+
+  const UNREADABLE = "this deployment has no credentials vault, so credentials cannot be stored here";
+
+  /** What the page passes when the hub cannot read the credential store: the reason, and no statuses to go on. */
+  function unreadable(summary: AssistantSummary = assistant("running"), dismissed = false) {
+    return <OnboardingGate assistant={summary} statuses={[]} unavailable={UNREADABLE} paste={ok()} save={ok()} dismissed={dismissed} />;
+  }
+
+  it("should let the person into their chat, and ask them for nothing, when the hub cannot read the credentials", () => {
+    render(unreadable());
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect accounts" })).toBeNull();
+    const banner = screen.getByRole("region", { name: "Your sign-ins cannot be checked" });
+    expect(banner.textContent).toContain("still connected");
+    for (const name of ["GitHub", "Azure", "Claude"]) {
+      expect(banner.textContent).not.toContain(name);
+    }
+  });
+
+  it("should say why on the screen when someone the hub cannot read the credentials for opens it", () => {
+    render(unreadable());
+
+    fireEvent.click(screen.getByRole("button", { name: "Show progress" }));
+
+    expect(screen.getByText(/cannot read your sign-ins/)).toBeTruthy();
+    expect(screen.getByText(UNREADABLE)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Carry on" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  // Unlike the ask to connect, this one can be sent away: there is nothing for the person to do about it, so saying
+  // it once is enough. The same cookie carries that choice, so a navigation does not say it again.
+  it("should go when the person sends away a message about sign-ins that cannot be checked", () => {
+    render(unreadable());
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide this message" }));
+
+    expect(screen.queryByRole("region", { name: "Your sign-ins cannot be checked" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should stay gone across a navigation when the page has read that choice from the cookie", () => {
+    render(unreadable(assistant("running"), true));
+
+    expect(screen.queryByRole("region", { name: "Your sign-ins cannot be checked" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should never offer to hide the ask to connect, which is the one with something left to do", () => {
+    render(gate(assistant("awaiting_credentials")));
+
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Hide this message" })).toBeNull();
+  });
+
+  it("should show nothing when the person had onboarded before the visit and their assistant is running", () => {
+    render(gate(assistant("running", { onboarded: true })));
 
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // Nothing covers the page until the person asks for it. The connections screen is `fixed inset-0`, so showing it
+  // unbidden takes away the sidebar, every conversation and the settings that could fix whatever is missing — and
+  // whether a needed credential can be stored at all is not only up to them.
+  it("should ask on a banner, over nothing, when the person has a connection still to make", () => {
+    render(gate(assistant("awaiting_credentials"), statuses("github")));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const banner = screen.getByRole("region", { name: "Connect your accounts" });
+    expect(banner.textContent).toContain("Your assistant needs Azure and Claude before it can work for you.");
+    expect(within(banner).getByRole("button", { name: "Connect accounts" })).toBeTruthy();
+  });
+
+  it("should name every needed connection when the person has stored none of them", () => {
+    render(gate(assistant()));
+
+    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).toContain("needs GitHub, Azure and Claude");
+  });
+
+  it("should open the connections when the person asks for them from the banner", () => {
+    render(gate(assistant()));
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+  });
+
+  it("should put the banner back when the person leaves the connections with one still to make", () => {
+    render(gate(assistant()));
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to your chats" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+  });
+
+  it("should leave the connections on Escape when one is still to make", () => {
+    render(gate(assistant()));
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+  });
+
+  it("should keep asking on the banner across a navigation when the person has yet to connect everything", () => {
+    render(gate(assistant(), [], true));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+  });
+
+  // The reported shape of an ask nobody could clear: the notice reports the step the pod is stuck on, and the screen
+  // it opens listed every other connection as connected without a row for the one being waited on.
+  it("should list the sign-in the pod is waiting on when someone who has onboarded opens the progress", () => {
+    const summary = assistant("awaiting_login", {
+      needed: ["github", "azure", "bedrock"],
+      onboarded: true,
+      logins: [login("jenkins")]
+    });
+    render(gate(summary, statuses("github", "azure", "bedrock", "atlassian"), true));
+
+    expect(screen.getByRole("status").textContent).toBe("Waiting for you to connect your accounts…");
+    fireEvent.click(screen.getByRole("button", { name: "Show progress" }));
+
+    expect(within(connector("Jenkins")).getByText("Waiting for you")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("55");
+  });
+
   it("should stay until the person chooses Start chatting when they finish onboarding during the visit", () => {
     const { rerender } = render(gate(assistant()));
+    fireEvent.click(screen.getByRole("button", { name: "Connect accounts" }));
 
     expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
 
@@ -228,5 +510,6 @@ describe("OnboardingGate", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Start chatting" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Connect your accounts" })).toBeNull();
   });
 });
