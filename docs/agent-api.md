@@ -563,6 +563,14 @@ A virtual agent is a Claude Code session the hub runs for a person in the previe
 
 All of `/api/virtual/**` and `/api/orchestrator/**` answer `404` unless the service runs with `VIRTUAL_AGENTS_ENABLED=true`.
 
+**The GitHub sign-in.** A pod with no usable stored `github` token relays `gh auth login` device codes to its owner, at most three of them, whatever ended the one before: a code that reached its `expires_in` unused means they were not there yet, and a poll GitHub answered with a fault got no verdict out of them at all, so both earn the next code. Whichever it was, the sign-in ends with `POST login/github/failed` — `expired` for the first, `failed` for the rest — so the code is withdrawn from the owner's screen rather than left there to be entered to no effect.
+
+With none of them completed the pod reports `awaiting_credentials`, naming both ways on — a token pasted in the web UI, or stopping and starting the agent for another code — and then watches for a stored token rather than offering more codes, reporting again if GitHub refuses one that is pasted but not the one that was already refused when it started.
+
+Codes are a minute apart (`AGENT_HUB_GITHUB_SIGN_IN_GAP_MS`, less whatever the attempt itself took, so one that ran its code out adds nothing), because an attempt that fails on the poll is over in seconds and three of those back to back are the same fault three times rather than three chances at it.
+
+What the pod never does is report a failure the owner was never asked about: a hub it could not reach, a `gh` that would not run or could not be run to read the token it was granted, and a hub that would not take that token are all retried instead, and none of them says anybody did not sign in. The dividing line is whether a code reached the owner's screen, not what went wrong. What `gh` said goes to the pod's log, with the credential shapes that can be written as one redacted — the GitHub, Claude and Atlassian token shapes, and anything JWT-shaped — and it is not sent to the hub. `bedrock` and `jenkins` keys are any printable string, so nothing can match them; neither appears in the output of the commands quoted, which is what makes quoting it safe.
+
 **Model routes.** A virtual agent's `model_route` is fixed when it is created, from its owner's sign-in: holders of the `AIGateway.User` app role are on `bedrock`, calling Amazon Bedrock directly with their own Bedrock API key; everyone else is on `own_licence`, their own Claude licence. A `bedrock` agent needs the owner's `github`, `azure` and `bedrock` credentials; an `own_licence` one needs `github`, `azure` and `claude`. Either can also use a `jenkins` API token and an `atlassian` sign-in, both optional: the pod never waits for either.
 
 ### Lifecycle

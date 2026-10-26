@@ -1215,6 +1215,25 @@ describe("logins", () => {
     expect((await fetchCode(id, token, "claude")).status).toBe(204);
   });
 
+  // The pod withdraws a code it cannot finish reading a token for and then throws, so its next attempt completes
+  // a sign-in whose row it has already failed. A state guard added here would break that recovery silently and
+  // leave the agent with a token it never stored, so what the pod depends on is pinned rather than assumed.
+  it("should complete a login the pod has already reported failed, which is how it recovers from withdrawing one", async () => {
+    const { id, token } = await started(ALICE, "pcs-api", "own-licence");
+    await startLogin(id, token, "github", {
+      prompt: "device_code",
+      verification_uri: "https://github.com/login/device",
+      user_code: "ABCD-1234",
+      expires_in: 900
+    });
+    expect((await failed(id, token, "github", { state: "failed", detail: "github: the sign-in could not be finished" })).status).toBe(204);
+    expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("failed");
+
+    expect((await complete(id, token, "github", { account_label: "octocat" })).status).toBe(204);
+
+    expect((await prisma.virtualAgentLogin.findFirstOrThrow()).state).toBe("completed");
+  });
+
   it("should refuse a pasted code when it is from someone other than the owner, or for a login not asking for one", async () => {
     const { id, token } = await started(ALICE, "pcs-api", "own-licence");
     await startLogin(id, token, "github", {
