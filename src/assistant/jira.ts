@@ -12,18 +12,28 @@ export interface JiraBoard {
   label: string;
 }
 
-/** The backlogs a document can go to. A project has one backlog, whichever of its boards shows it. */
+/**
+ * The backlog offered when the person has set no default of their own. Any project they can reach is allowed, found by
+ * searching their own Jira (`lookups.ts`); a project has one backlog, whichever of its boards shows it.
+ */
 export const JIRA_BOARDS: readonly JiraBoard[] = [{ project: "VIBE", board: 720, label: "VIBE · Team board" }];
 
 export const DEFAULT_JIRA_PROJECT = "VIBE";
+
+/** A project as the panel shows it chosen: its key, and the name the person found it by. */
+export interface JiraProjectChoice {
+  key: string;
+  name: string;
+}
 export const JIRA_ISSUE_TYPE = "Story";
 export const JIRA_LABELS: readonly string[] = ["hmcts-assistant"];
 
 /** Long enough for a stopped assistant to start and its owner to sign in to Atlassian on the way. */
 export const JIRA_EXPORT_TIMEOUT_MS = 15 * 60_000;
 
+/** A Jira project key. Whether the person can create issues in it is for Jira to say when the session tries. */
 export function isJiraProject(value: unknown): value is string {
-  return typeof value === "string" && JIRA_BOARDS.some((board) => board.project === value);
+  return typeof value === "string" && /^[A-Z][A-Z0-9_]{1,9}$/.test(value);
 }
 
 export function jiraIssueUrl(key: string): string {

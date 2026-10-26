@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { DEFAULT_JIRA_PROJECT, JIRA_BOARDS, type JiraExportView } from "@/assistant/jira";
-import { LoginCountdown } from "@/components/virtual-agents/LoginCountdown";
+import { DEFAULT_JIRA_PROJECT, JIRA_BOARDS, type JiraExportView, type JiraProjectChoice } from "@/assistant/jira";
+import type { JiraProjectResult } from "@/assistant/lookups";
+import { AtlassianSearch } from "@/components/assistant/AtlassianSearch";
+import { SignInPrompt } from "@/components/assistant/AtlassianSignIn";
+import type { LookUp } from "@/components/assistant/lookupClient";
 import type { LoginView } from "@/virtual-agents/logins";
 import type { ActionResult } from "@/web/action";
 
@@ -18,6 +21,8 @@ export interface JiraExportProps {
   exported: JiraExportView;
   access: JiraAccess;
   exportTo: ExportToJiraAction;
+  /** The search the project picker runs; a test passes its own. */
+  lookUp?: LookUp;
 }
 
 /** Above the document once it is in Jira, so the link back is there whichever way the panel is scrolled. */
@@ -40,24 +45,6 @@ export function JiraBanner({ exported }: { exported: JiraExportView }) {
   );
 }
 
-/** The Atlassian sign-in the assistant needs before it can create the ticket, as a code to enter on a page. */
-function SignInPrompt({ login }: { login: LoginView }) {
-  if (login.prompt !== "device_code" || login.userCode === null) {
-    return <p className="basis-full text-xs text-asst-muted">Your assistant is waiting for you to sign in to Atlassian.</p>;
-  }
-  return (
-    <p className="basis-full text-[13px] text-asst-body">
-      To finish, open{" "}
-      <a href={login.verificationUri} target="_blank" rel="noreferrer noopener" className="text-asst-accent underline">
-        the Atlassian sign-in page
-      </a>{" "}
-      and enter{" "}
-      <code className="rounded-md border border-asst-strong bg-asst-field px-2 py-0.5 font-plex-mono tracking-widest text-asst-text">{login.userCode}</code>{" "}
-      <LoginCountdown expiresAt={login.expiresAt} />
-    </p>
-  );
-}
-
 /** Why the button waits, if it does: there is nothing written yet, or changes Jira would not get. */
 function blockedBy(written: boolean, saved: boolean): string | null {
   if (!written) {
@@ -74,24 +61,69 @@ function footerHint(idle: boolean, blocked: string | null, connected: boolean): 
   return blocked ?? (connected ? null : "You'll be asked to sign in to Atlassian, so the ticket is created as you.");
 }
 
-function BoardPicker({ project, onChange, disabled }: { project: string; onChange: (project: string) => void; disabled: boolean }) {
+/** The project offered before the person picks one: the one the export went to, else the hub's. */
+function startingProject(exported: JiraExportView): JiraProjectChoice {
+  if (exported.status !== "none" && exported.project !== null) {
+    return { key: exported.project, name: exported.project };
+  }
+  const board = JIRA_BOARDS.find((entry) => entry.project === DEFAULT_JIRA_PROJECT);
+  // The label leads with the key, which the picker already shows.
+  return { key: DEFAULT_JIRA_PROJECT, name: board?.label.replace(`${DEFAULT_JIRA_PROJECT} · `, "") ?? DEFAULT_JIRA_PROJECT };
+}
+
+/**
+ * The backlog the ticket goes to: the one chosen, with a way to search the person's own Jira for another. Any project
+ * they can reach can be picked, and the change is for this document only.
+ */
+export function ProjectPicker({
+  project,
+  onChange,
+  disabled,
+  access,
+  lookUp
+}: {
+  project: JiraProjectChoice;
+  onChange: (project: JiraProjectChoice) => void;
+  disabled: boolean;
+  access: JiraAccess;
+  lookUp?: LookUp;
+}) {
+  const [searching, setSearching] = useState(false);
+  if (searching) {
+    return (
+      <AtlassianSearch
+        kind="jira_project"
+        label="Search your Jira projects"
+        placeholder="Type a project's name or key"
+        access={access}
+        lookUp={lookUp}
+        onCancel={() => setSearching(false)}
+        onPick={(result) => {
+          const picked = result as JiraProjectResult;
+          onChange({ key: picked.key, name: picked.name });
+          setSearching(false);
+        }}
+      />
+    );
+  }
   return (
-    <label className="flex min-w-0 flex-[1_1_220px] items-center overflow-hidden rounded-[9px] border border-asst-strong bg-asst-field focus-within:border-asst-accent-line">
-      <span className="shrink-0 whitespace-nowrap border-r border-asst-strong py-[7px] pl-3 pr-2.5 text-xs font-medium text-asst-muted">Target board</span>
-      <select
-        value={project}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        aria-label="Jira board"
-        className="min-w-0 flex-1 cursor-pointer bg-transparent px-2.5 py-[7px] text-[13px] font-medium text-asst-text outline-none disabled:cursor-default"
-      >
-        {JIRA_BOARDS.map((board) => (
-          <option key={board.project} value={board.project} className="bg-asst-field">
-            {board.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="flex min-w-0 flex-[1_1_220px] items-center overflow-hidden rounded-[9px] border border-asst-strong bg-asst-field">
+      <span className="shrink-0 whitespace-nowrap border-r border-asst-strong py-[7px] pl-3 pr-2.5 text-xs font-medium text-asst-muted">Backlog</span>
+      <span className="min-w-0 flex-1 truncate px-2.5 py-[7px] text-[13px] font-medium text-asst-text">
+        <span className="font-plex-mono">{project.key}</span>
+        {project.name === project.key ? null : <span className="font-normal text-asst-body"> · {project.name}</span>}
+      </span>
+      {disabled ? null : (
+        <button
+          type="button"
+          onClick={() => setSearching(true)}
+          aria-label={`Change the Jira project, now ${project.key}`}
+          className="shrink-0 px-2.5 text-xs text-asst-accent underline"
+        >
+          Change
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -147,19 +179,21 @@ function JiraAction({
 }
 
 /**
- * Below the document: the board to send it to and the button that does, then the ticket it became. A document goes
- * to Jira once; after that this shows the ticket instead. `saved` is false while the panel has changes Jira would
- * not get, so the button waits for them.
+ * The Jira half of the export footer: the backlog to send it to and the button that does, then the ticket it became.
+ * A document goes to Jira once; after that this shows the ticket instead. `saved` is false while the panel has
+ * changes Jira would not get, so the button waits for them.
  */
 export function JiraFooter({
   conversationId,
   exported,
   access,
   exportTo,
+  lookUp,
   saved,
   written
 }: JiraExportProps & { conversationId: string; saved: boolean; written: boolean }) {
-  const [project, setProject] = useState(exported.status === "none" || exported.project === null ? DEFAULT_JIRA_PROJECT : exported.project);
+  const [chosen, setChosen] = useState(() => startingProject(exported));
+  const project = chosen.key;
   // The export as the page showed it when the person clicked: until the page shows it changed, the click is what
   // is pending, so the button does not come back in the moment before the page catches up.
   const shownExport = exported.status === "failed" ? `failed:${exported.error}` : exported.status;
@@ -185,8 +219,8 @@ export function JiraFooter({
   const hintId = `jira-hint-${conversationId}`;
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2.5 border-t border-asst-line bg-asst-panel px-4 py-3">
-      <BoardPicker project={project} onChange={setProject} disabled={pending || exported.status === "done"} />
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
+      <ProjectPicker project={chosen} onChange={setChosen} disabled={pending || exported.status === "done"} access={access} lookUp={lookUp} />
       <JiraAction
         exported={exported}
         pending={pending}

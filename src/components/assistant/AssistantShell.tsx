@@ -295,7 +295,14 @@ export function AssistantShell({
             {/* The name takes whatever room is left between the two, so the cog sits at the end of the row rather
                 than against a short name. */}
             <span className="min-w-0 flex-1 truncate text-sm font-medium">{viewerName}</span>
-            <AssistantSettings theme={theme} connections={connections} plugins={plugins} claudeMd={claudeMd} templates={templates} files={files} />
+            <AssistantSettings
+              theme={theme}
+              connections={connections}
+              plugins={plugins}
+              claudeMd={claudeMd}
+              templates={templates}
+              files={files}
+            />
           </div>
           {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,
               and the width dragged here is the one it comes back to. */}

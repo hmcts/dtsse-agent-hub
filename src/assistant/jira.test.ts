@@ -53,9 +53,10 @@ describe("isJiraProject", () => {
   it.each([
     ["VIBE", true],
     ["vibe", false],
-    ["CCD", false],
+    ["CCD", true],
+    ["VIBE; rm", false],
     [undefined, false]
-  ])("should answer %j as %s when checking it against the boards on offer", (value, expected) => {
+  ])("should answer %j as %s when checking it is a project key", (value, expected) => {
     expect(isJiraProject(value)).toBe(expected);
   });
 });

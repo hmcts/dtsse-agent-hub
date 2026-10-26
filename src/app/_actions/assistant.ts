@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { canStopAssistantAnswer } from "@/access/rules";
 import { HttpError } from "@/agent-api/http";
+import { confluenceExportRequest } from "@/assistant/confluence";
+import { requestConfluenceExport } from "@/assistant/confluence-store";
 import { requestJiraExport } from "@/assistant/jira-store";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import {
@@ -311,6 +313,27 @@ export async function exportArtefactToJira(input: { conversationId: unknown; pro
     }
     await requestJiraExport(prisma, conversation, input.project);
     await send(viewer.oid, conversation, `Please export this document to the ${String(input.project)} backlog in Jira.`);
+    return { ok: true };
+  });
+}
+
+/**
+ * Asks the person's assistant to publish the conversation's saved document to Confluence, as a new page under
+ * `parent`, which it creates with `twg` and their Atlassian sign-in. As with Jira, the request is an ordinary message
+ * in the chat and how to carry it out goes to the session in the message's frame.
+ */
+export async function exportArtefactToConfluence(input: { conversationId: unknown; parent: unknown }): Promise<ActionResult> {
+  return await runAction("export artefact to confluence", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+    if (conversation === undefined) {
+      return MISSING;
+    }
+    const parent = await requestConfluenceExport(prisma, conversation, input.parent);
+    await send(viewer.oid, conversation, confluenceExportRequest(parent));
     return { ok: true };
   });
 }

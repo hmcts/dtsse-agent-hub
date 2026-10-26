@@ -161,6 +161,25 @@ export type SessionsBody = {
 /** A conversation's Jira export result, as its session reports it: the issue key it created, or why it could not. */
 export type JiraExportReport = { export_id: string; key: string } | { export_id: string; error: string };
 
+/** A conversation's Confluence export result: the page it created and the title it was created with, or why it could not. */
+export type ConfluenceExportReport = { export_id: string; page_id: string; title?: string } | { export_id: string; error: string };
+
+/** One Jira project a lookup found: only what the person picks it by. */
+export type JiraProjectFound = { key: string; name: string };
+
+/** One Confluence page a lookup found: the ids an export needs, and the titles that say where it is. */
+export type ConfluencePageFound = {
+  id: string;
+  title: string;
+  space_id: string;
+  space_key: string;
+  space_name: string;
+  ancestors: string[];
+};
+
+/** The answer to one lookup: what twg found, or why it found nothing. */
+export type LookupAnswer = { results: JiraProjectFound[] | ConfluencePageFound[] } | { error: "signed_out" | "failed" | "superseded"; detail?: string };
+
 /** A conversation's one markdown document, which the person and the session both edit. */
 export type Artefact = {
   title: string | null;
@@ -336,6 +355,9 @@ export type Api = {
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
   putJiraExport: (agentId: string, body: JiraExportReport) => Promise<null>;
+  putConfluenceExport: (agentId: string, body: ConfluenceExportReport) => Promise<null>;
+  /** The supervisor's answer to one of its owner's Jira or Confluence lookups. */
+  putLookup: (virtualId: string, lookupId: string, body: LookupAnswer) => Promise<null>;
   /** One part of a file attached to a message in this agent's conversation. One part, never the whole file. */
   attachmentPart: (agentId: string, uploadId: string, index: number) => Promise<Uint8Array>;
   /** The whole file is on this pod's disk, which is what makes the hub delete its part rows. */
@@ -497,6 +519,8 @@ export function createApi({
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
+    putConfluenceExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/confluence`, body),
+    putLookup: (virtualId, lookupId, body) => request<null>("PUT", v(virtualId, `lookups/${encodeURIComponent(lookupId)}`), body),
     attachmentPart: (agentId, uploadId, index) => requestBytes(`${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/parts/${index}`),
     attachmentFetched: (agentId, uploadId) => request<null>("POST", `${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/fetched`),
     stream: (id, opts) => openStream(`${a(id)}/stream`, opts)

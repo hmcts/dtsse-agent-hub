@@ -427,6 +427,7 @@ model VirtualAgent {
   sessions Agent[]             @relation("virtualAgentSessions")
   logins   VirtualAgentLogin[]
   conversations AssistantConversation[]
+  lookups       AssistantLookup[]
 
   @@unique([ownerOid, name], map: "virtual_agent_owner_oid_name_key")
   @@index([ownerOid])
@@ -496,6 +497,19 @@ model AssistantConversation {
   jiraError         String?   @map("jira_error")
   jiraRequestedAt   DateTime? @map("jira_requested_at") @db.Timestamptz(6)
   jiraExportedAt    DateTime? @map("jira_exported_at") @db.Timestamptz(6)
+  confluenceExportId    String?   @map("confluence_export_id") @db.Uuid
+  confluenceSpaceId     String?   @map("confluence_space_id")
+  confluenceSpaceKey    String?   @map("confluence_space_key")
+  confluenceSpaceName   String?   @map("confluence_space_name")
+  confluenceParentId    String?   @map("confluence_parent_id")
+  confluenceParentTitle String?   @map("confluence_parent_title")
+  /// pending, done or failed; null before the first export.
+  confluenceStatus      String?   @map("confluence_status")
+  confluencePageId      String?   @map("confluence_page_id")
+  confluencePageTitle   String?   @map("confluence_page_title")
+  confluenceError       String?   @map("confluence_error")
+  confluenceRequestedAt DateTime? @map("confluence_requested_at") @db.Timestamptz(6)
+  confluenceExportedAt  DateTime? @map("confluence_exported_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
@@ -571,6 +585,30 @@ model AssistantTemplate {
   @@unique([ownerOid, name], map: "assistant_template_owner_name_key")
   @@index([ownerOid, name], map: "assistant_template_owner_idx")
   @@map("assistant_template")
+}
+
+/// One search of a person's Jira or Confluence, answered by their pod. See "Atlassian lookups" in docs/agent-api.md.
+model AssistantLookup {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  virtualAgentId String    @map("virtual_agent_id") @db.Uuid
+  /// jira_project or confluence_page.
+  kind           String
+  query          String
+  spaceKey       String?   @map("space_key")
+  signIn         Boolean   @default(false) @map("sign_in")
+  /// pending, done or failed.
+  status         String    @default("pending")
+  results        Json?
+  /// signed_out, failed or superseded, when status is failed.
+  error          String?
+  detail         String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  answeredAt     DateTime? @map("answered_at") @db.Timestamptz(6)
+
+  virtualAgent VirtualAgent @relation(fields: [virtualAgentId], references: [id], onDelete: Cascade)
+
+  @@index([virtualAgentId, createdAt], map: "assistant_lookup_agent_idx")
+  @@map("assistant_lookup")
 }
 
 /// One 4 MiB slice of an upload. Deleted by the sweep once the retention window closes, whether a pod fetched it or not.

@@ -645,7 +645,10 @@ export function AssistantSettings({
       </button>
       {open
         ? createPortal(
-            <Dialog view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, claudeMd, templates, files }} onClose={close} />,
+            <Dialog
+              view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, claudeMd, templates, files }}
+              onClose={close}
+            />,
             themeRoot()
           )
         : null}

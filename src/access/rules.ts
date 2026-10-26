@@ -472,3 +472,12 @@ export function canViewConversation(viewerOid: string, conversation: Conversatio
 export function canStopAssistantAnswer(actorOid: string, conversation: ConversationRef): boolean {
   return actorOid === conversation.ownerOid;
 }
+
+/**
+ * Whether `viewerOid` may search Jira or Confluence through a virtual agent: its owner, and nobody else. The search
+ * runs with the owner's own Atlassian sign-in, so anyone else asking would be reading Atlassian as them; and the
+ * answer goes back only to whoever asked. No grant reaches it, not even a `write` one.
+ */
+export function canLookUpAtlassian(viewerOid: string, virtualAgent: { ownerOid: string }): boolean {
+  return viewerOid === virtualAgent.ownerOid;
+}
