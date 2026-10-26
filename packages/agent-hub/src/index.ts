@@ -77,7 +77,17 @@ export type {
   TranscriptResponse,
   VirtualPhase
 } from "./api.ts";
-export { ApiError, CREDENTIAL_KINDS, createApi, createTokenProvider, DEFAULT_SCOPE, DEFAULT_URL, parseAzToken, requireAzureLogin } from "./api.ts";
+export {
+  ApiError,
+  CREDENTIAL_KINDS,
+  createApi,
+  createTokenProvider,
+  DEFAULT_SCOPE,
+  DEFAULT_URL,
+  isMissingRoute,
+  parseAzToken,
+  requireAzureLogin
+} from "./api.ts";
 export type {
   AssistantSupervisor,
   Attachment,

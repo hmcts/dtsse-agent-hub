@@ -8,8 +8,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Api } from "../api.ts";
-import { createApi } from "../api.ts";
+import { createApi, isMissingRoute } from "../api.ts";
 import type { Env } from "../env.ts";
+import type { RetryOptions } from "../retry.ts";
 import { withRetry } from "../retry.ts";
 import { readText, sha256 } from "../session.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
@@ -81,6 +82,8 @@ export type SyncAtlassianAuthOptions = {
   env?: Env;
   force?: boolean;
   refresh?: boolean;
+  /** How the store's retries wait between attempts; only a test moves it, to avoid waiting out the real backoff. */
+  wait?: RetryOptions["wait"];
 };
 
 export type SyncAtlassianAuthResult = "not-signed-in" | "no-login" | "unchanged" | "stored";
@@ -93,6 +96,8 @@ export type AtlassianLoginOptions = {
   /** How long each relayed code is offered for, and how many are offered; both only a test moves. */
   expiresIn?: number;
   codes?: number;
+  /** How this call's retries of the hub wait between attempts; only a test moves it. */
+  wait?: RetryOptions["wait"];
 };
 
 export function twgDir(env: Env = process.env): string {
@@ -221,7 +226,8 @@ export async function syncAtlassianAuth({
   id,
   env = process.env,
   force = false,
-  refresh = false
+  refresh = false,
+  wait
 }: SyncAtlassianAuthOptions): Promise<SyncAtlassianAuthResult> {
   if (!force && !readText(atlassianShaFile())) {
     return "not-signed-in";
@@ -246,7 +252,22 @@ export async function syncAtlassianAuth({
   if (!force && readText(atlassianShaFile()) === sha) {
     return "unchanged";
   }
-  await withRetry(() => api.putCredential(id, "atlassian", value), { attempts: 3 });
+  // The whole module's retry budget, not a shorter one: the token just read off disk has already replaced the one
+  // the hub holds, and Atlassian will take nothing else, so a store that gives up early leaves a spent token
+  // behind for the next pod to be refused.
+  //
+  // What that budget is depends on how the hub is failing. Refusing fast — a connection reset, or the 503 an
+  // ingress gives while a replica rolls — it is the 31 seconds of backoff alone, which is the case this is for.
+  // Hanging instead, every attempt also waits out `REQUEST_TIMEOUT_MS`, and an aborted fetch carries no numeric
+  // status so `retryableByStatus` keeps going: six attempts, up to ~121 seconds.
+  //
+  // One figure for two deadlines, and they disagree. A cache-sync pass between the periodic runs has no ceiling
+  // and wants every one of those 121 seconds; the pass on SIGTERM has whatever is left of the pod's 60 and will
+  // be SIGKILLed mid-attempt. Nothing here reads the clock, so the longer deadline is the one served — a shorter
+  // budget would not save a store that needs longer than the grace period anyway, and would give up on a hub
+  // that was about to answer. What the SIGTERM pass can do instead is spend its time on this store rather than
+  // another, which is `cache-sync.ts`'s business and is where that reasoning lives.
+  await withRetry(() => api.putCredential(id, "atlassian", value), { wait });
   fs.writeFileSync(atlassianShaFile(), `${sha}\n`);
   return "stored";
 }
@@ -285,7 +306,17 @@ export function twgRefreshRejected({ code, stdout }: Pick<RunResult, "code" | "s
  * Refreshes the sign-in now, which also gives the restored one an access token, and stores the rotated refresh
  * token before anything else can fail. False when Atlassian rejects it.
  */
-async function refreshAtlassian({ api, id, env }: { api: Pick<Api, "putCredential">; id: string; env: Env }): Promise<boolean> {
+async function refreshAtlassian({
+  api,
+  id,
+  env,
+  wait
+}: {
+  api: Pick<Api, "putCredential">;
+  id: string;
+  env: Env;
+  wait?: RetryOptions["wait"];
+}): Promise<boolean> {
   const r = await run("twg", ["auth", "refresh", "--force", "-o", "json"], { env, timeoutMs: 60000 });
   if (twgRefreshRejected(r)) {
     return false;
@@ -293,7 +324,7 @@ async function refreshAtlassian({ api, id, env }: { api: Pick<Api, "putCredentia
   if (r.code !== 0) {
     throw new Error(`twg auth refresh exited ${r.code}`);
   }
-  await syncAtlassianAuth({ api, id, env, force: true });
+  await syncAtlassianAuth({ api, id, env, force: true, wait });
   if (!(await twgOk(env))) {
     throw new Error("twg doctor cannot reach Atlassian after a refresh");
   }
@@ -310,7 +341,8 @@ export async function atlassianLogin({
   api = createApi(),
   env = process.env,
   expiresIn = TWG_DEVICE_CODE_EXPIRES_S,
-  codes = ATLASSIAN_SIGN_IN_CODES
+  codes = ATLASSIAN_SIGN_IN_CODES,
+  wait
 }: AtlassianLoginOptions = {}): Promise<AtlassianLoginResult> {
   const { id } = requireVirtualAgent(env);
   fs.rmSync(atlassianShaFile(), { force: true });
@@ -321,11 +353,11 @@ export async function atlassianLogin({
     const text = readAtlassianAuth(env);
     local = text && packAtlassianAuth(text).value;
   } catch {}
-  if (local && (await refreshAtlassian({ api, id, env }))) {
+  if (local && (await refreshAtlassian({ api, id, env, wait }))) {
     say("atlassian: kept the current sign-in");
     return "restored";
   }
-  const stored = await withRetry(() => api.getCredential(id, "atlassian"));
+  const stored = await withRetry(() => api.getCredential(id, "atlassian"), { wait });
   if (stored && stored === local) {
     say("atlassian: the stored sign-in no longer works; signing in again");
   }
@@ -338,7 +370,7 @@ export async function atlassianLogin({
       say(`atlassian: could not restore the stored sign-in (${(e as Error).message}); signing in again`);
     }
     if (restored) {
-      if (await refreshAtlassian({ api, id, env })) {
+      if (await refreshAtlassian({ api, id, env, wait })) {
         say("atlassian: restored the stored sign-in");
         return "restored";
       }
@@ -382,8 +414,8 @@ export async function atlassianLogin({
       const text = readAtlassianAuth(env);
       if (last.code === 0 && text) {
         const { user } = packAtlassianAuth(text);
-        await withRetry(() => api.loginComplete(id, "atlassian", user ? { account_label: user } : {}));
-        await syncAtlassianAuth({ api, id, env, force: true });
+        await withRetry(() => api.loginComplete(id, "atlassian", user ? { account_label: user } : {}), { wait });
+        await syncAtlassianAuth({ api, id, env, force: true, wait });
         say(`atlassian: signed in${user ? ` as ${user}` : ""}`);
         return "signed-in";
       }
@@ -407,8 +439,15 @@ export async function atlassianLogin({
   say(detail);
   // The owner is otherwise left holding a code that no longer works, with nothing but this pod's stderr saying so.
   // Few attempts: nothing here is fatal, and a hub that cannot be told is not worth half a minute of the pod.
-  await withRetry(() => api.loginFailed(id, "atlassian", { state: expired ? "expired" : "failed", detail }), { attempts: 3 }).catch((e: unknown) => {
-    say(`atlassian: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`);
+  await withRetry(() => api.loginFailed(id, "atlassian", { state: expired ? "expired" : "failed", detail }), { attempts: 3, wait }).catch((e: unknown) => {
+    // A hub with no route for this report is older than this client, which the deploy behind it puts right on its
+    // own, so it is said plainly and once. Everything else — a refusal, a fault, a hub that cannot be reached at
+    // all — is a report that will not arrive, and is said as the failure it is.
+    say(
+      isMissingRoute(e)
+        ? "atlassian: agent-hub is older than this client and has no route for a sign-in that was not completed"
+        : `atlassian: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`
+    );
   });
   if (thrown !== undefined) {
     throw thrown;

@@ -85,6 +85,8 @@ const rotatedTo = (n: number) => new RegExp(`^oauth-refresh-token=${TWG_REFRESH}
 const v139 = (extra: Record<string, string> = {}) => pod.env({ FAKE_TWG_VERSION: "1.3.9", ...extra });
 type StoredProfiles = { profiles: { createdAt?: string; credentials: { primary: { oauthAccessToken: string; oauthRefreshToken: string } } }[] };
 const storedProfile = () => (JSON.parse(storedAtlassian()) as StoredProfiles).profiles[0];
+/** Takes the real backoff out of a test that is about how many attempts are made, not how long they take. */
+const noWait = () => Promise.resolve();
 
 describe("parseTwgDeviceCode", () => {
   it("should read the code through the colour codes and box drawing twg prints it inside", () => {
@@ -340,6 +342,33 @@ describe("syncAtlassianAuth", () => {
     expect(noTwgSecret(stderr)).toBe(true);
   });
 
+  it("should go on storing a rotated token while the hub is between replicas, rather than leave it a spent one", async () => {
+    // Arrange: the token twg has just rotated to is the only one Atlassian will take, so a store that gives up
+    // leaves the hub a token the next boot is refused on. Three refusals outlast the budget this store once had.
+    const env = pod.env();
+    pod.seedTwg(env);
+    await syncAtlassianAuth({ api: api(), id: VID, env, force: true });
+    fs.writeFileSync(path.join(pod.stateDir, "twg-due"), "");
+    const hubApi = api();
+    let puts = 0;
+    const rolling = {
+      putCredential: (id: string, kind: CredentialKind, value: string) => {
+        puts += 1;
+        return puts <= 3
+          ? Promise.reject(new ApiError(503, { error: "no ready replica" }, "PUT", `/api/virtual/${id}/credentials/${kind}`))
+          : hubApi.putCredential(id, kind, value);
+      }
+    };
+
+    // Act
+    const result = await syncAtlassianAuth({ api: rolling, id: VID, env, refresh: true, wait: noWait });
+
+    // Assert
+    expect(result).toBe("stored");
+    expect(puts).toBe(4);
+    expect(storedAtlassian()).toMatch(rotatedTo(1));
+  });
+
   it("should report no login when forced with nothing on disk", async () => {
     // Act & Assert
     expect(await syncAtlassianAuth({ api: api(), id: VID, env: pod.env(), force: true })).toBe("no-login");
@@ -567,6 +596,40 @@ describe("atlassianLogin", () => {
     // Assert
     expect(result).toBe("not-signed-in");
     expect(stderr).toMatch(/could not tell agent-hub the sign-in was not completed/);
+  });
+
+  it("should say an agent-hub that has no route for the report is older than this client, and say it quietly", async () => {
+    // Arrange: a client published ahead of the deploy carrying its route gets the hub's own not-found page. The
+    // deploy behind it puts this right, so it is worth one plain sentence and none of the document.
+    const page = '<!DOCTYPE html><html lang="en" class="dark h-full"><head><meta charSet="utf-8"/>';
+    const older: Api = {
+      ...api(),
+      loginFailed: () => Promise.reject(new ApiError(404, { error: page }, "POST", `/api/virtual/${VID}/login/atlassian/failed`))
+    };
+
+    // Act
+    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: older, env: pod.env({ FAKE_TWG_LOGIN: "deny" }), wait: noWait }));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(stderr.match(/older than this client/g)).toHaveLength(1);
+    expect(stderr).not.toMatch(/could not tell agent-hub/);
+    expect(stderr).not.toMatch(/DOCTYPE|<html|charSet/);
+  });
+
+  it("should still say loudly that the report did not land when agent-hub answers with a fault", async () => {
+    // Arrange
+    const broken: Api = {
+      ...api(),
+      loginFailed: () => Promise.reject(new ApiError(500, { error: "could not record the sign-in" }, "POST", `/api/virtual/${VID}/login/atlassian/failed`))
+    };
+
+    // Act
+    const { stderr } = await captureStderr(() => atlassianLogin({ api: broken, env: pod.env({ FAKE_TWG_LOGIN: "deny" }), wait: noWait }));
+
+    // Assert
+    expect(stderr).toMatch(/could not tell agent-hub the sign-in was not completed \(.*500 could not record the sign-in\)/);
+    expect(stderr).not.toMatch(/older than this client/);
   });
 
   it("should fail without failing the agent when twg prints no code at all", async () => {
