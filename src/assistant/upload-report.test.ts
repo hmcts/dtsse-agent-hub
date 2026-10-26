@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { describeSize, isDiskSize, MAX_REPORTED_FILES, readReportedFiles, type UploadsReportRow, uploadsDisk } from "./upload-report.ts";
+import {
+  describeSize,
+  isDiskSize,
+  MAX_DELETED_PER_FRAME,
+  MAX_REPORTED_FILES,
+  readAcknowledged,
+  readReportedFiles,
+  type UploadsReportRow,
+  uploadsDisk
+} from "./upload-report.ts";
 
 const ID = "0f8a6a1e-0000-4000-8000-000000000001";
 const OTHER = "0f8a6a1e-0000-4000-8000-000000000002";
@@ -126,8 +135,10 @@ describe("uploadsDisk", () => {
     });
   });
 
-  it("should say nothing has looked when the pod is stopped and has never reported", () => {
-    expect(uploadsDisk(row({ uploadsReportedAt: null, uploadsBytes: null, volumeUsedBytes: null, volumeTotalBytes: null, running: false }))).toEqual({
+  // An assistant that is not running has no session at all, so there is no client to have a claim either way, and
+  // "running an older version" would be a guess about a pod that may never have been up.
+  it.each([[true], [false]])("should say nothing has looked when the pod is stopped and has never reported, reports=%s", (reports) => {
+    expect(uploadsDisk(row({ uploadsReportedAt: null, uploadsBytes: null, volumeUsedBytes: null, volumeTotalBytes: null, running: false, reports }))).toEqual({
       reported: false,
       reason: "not_running"
     });
@@ -143,5 +154,39 @@ describe("uploadsDisk", () => {
   // A half-written report is no report. Showing one figure and a zero beside it would read as a volume that is empty.
   it.each(["uploadsBytes", "volumeUsedBytes", "volumeTotalBytes"] as const)("should report nothing when %s is missing from the stored report", (missing) => {
     expect(uploadsDisk(row({ [missing]: null }))).toEqual({ reported: false, reason: "waiting" });
+  });
+});
+
+describe("readAcknowledged", () => {
+  it("should read the ids the pod says are gone when it acknowledges a deletion", () => {
+    expect(readAcknowledged([ID, OTHER])).toEqual([ID, OTHER]);
+  });
+
+  it("should read an id in capitals as the lower-case one the hub holds", () => {
+    expect(readAcknowledged([ID.toUpperCase()])).toEqual([ID]);
+  });
+
+  it("should acknowledge an id once when a pod names it twice", () => {
+    expect(readAcknowledged([ID, ID])).toEqual([ID]);
+  });
+
+  // Dropped rather than refused, as a file entry is: one unreadable id must not lose a whole report, and an id that
+  // is not an id matches no row, so acting on the rest is both safe and the useful thing to do.
+  it.each([["not-a-uuid"], [7], [null], [{ upload_id: ID }]] as const)("should drop %s, which names no upload, and keep the rest", (bad) => {
+    expect(readAcknowledged([bad, OTHER])).toEqual([OTHER]);
+  });
+
+  it.each([
+    ["a string", "all of them"],
+    ["nothing", undefined],
+    ["null", null]
+  ] as const)("should acknowledge nothing when %s arrives in place of the list", (_what, value) => {
+    expect(readAcknowledged(value)).toEqual([]);
+  });
+
+  it("should take no more ids than one frame can have asked about", () => {
+    const many = Array.from({ length: MAX_DELETED_PER_FRAME + 5 }, (_, index) => `0f8a6a1e-0000-4000-8000-${String(index).padStart(12, "0")}`);
+
+    expect(readAcknowledged(many)).toHaveLength(MAX_DELETED_PER_FRAME);
   });
 });

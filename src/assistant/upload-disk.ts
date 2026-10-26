@@ -1,9 +1,8 @@
-import { canManageUploadsOnDisk, canRemoveUploadFromDisk } from "../access/rules.ts";
+import { canManageUploadsOnDisk, canRemoveUploadFromDisk, type UploadState } from "../access/rules.ts";
 import { clientSupports } from "../agents/client-features.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { MAX_DELETED_PER_FRAME, MAX_REPORTED_FILES, type PodFile, readReportedFiles, type UploadsDisk, uploadsDisk } from "./upload-report.ts";
-import { findUpload } from "./upload-store.ts";
+import { MAX_DELETED_PER_FRAME, type PodFile, readAcknowledged, readReportedFiles, type UploadsDisk, uploadsDisk } from "./upload-report.ts";
 import { UNTITLED } from "./views.ts";
 
 /**
@@ -24,52 +23,64 @@ export interface UploadsOnDisk {
   disk: UploadsDisk;
   /** Largest first, as the pod sent them. Only files the hub still has a row for; see `readReportedFiles`. */
   files: PodFile[];
-  /** The pod holds more than one report names, so the list is the largest `MAX_REPORTED_FILES` and says so. */
-  truncated: boolean;
+  /** How many the pod says it holds, which is more than it names when it holds more than `MAX_REPORTED_FILES`. */
+  filesTotal: number;
   /** Deletions asked for and not yet confirmed by a report, counted across every file including unlisted ones. */
   deleting: number;
 }
 
+/** The report as the route's schema has already checked its figures. The lists are read leniently from here. */
+export interface UploadsReportBody {
+  uploads_bytes: number;
+  volume_used_bytes: number;
+  volume_total_bytes: number;
+  files_total: number;
+  files: unknown[];
+  deleted: unknown[];
+}
+
 /**
- * Replaces the virtual agent's report, and clears every deletion request the report does not name.
+ * Replaces the virtual agent's report, and ends every deletion request the pod says it has carried out.
  *
- * That clearing is the whole handshake: a requested upload the pod no longer lists is one it has deleted, and one it
- * never had is a request there was never anything to carry out. Both end the same way, so nothing has to be
- * acknowledged and the `delete_uploads` frame stops being replayed without the pod saying anything about it.
+ * **Only `deleted` ends a request.** Absence from `files` means nothing: that list is the largest
+ * `MAX_REPORTED_FILES`, so a file outside it is unnamed while sitting on the volume, and a report that named none at
+ * all would otherwise mark every outstanding request done — leaving the owner told a file was deleted, the hub's own
+ * bytes gone, and the pod's copy still there. The pod leaves out of `deleted` anything whose removal failed, so such
+ * a request stays outstanding and is sent again on its next connect.
  *
- * In one transaction with the NOTIFY, so a UI watching the section redraws on what was actually written.
+ * It **notifies nobody**. A report is read by the owner's own page, which the action they took revalidates; nothing
+ * streams it to a browser, and the pod that reported is the pod that already knows. A NOTIFY here would be a frame
+ * for whatever is still pending, and a file the pod cannot delete would then loop between the two with no backoff
+ * and nothing giving up — a retry on its next stream connect is the right cadence for that.
  */
-export async function reportUploadsOnDisk(prisma: PrismaClient, virtualAgentId: string, report: unknown, now: Date = new Date()): Promise<void> {
-  const body = report as { uploads_bytes: number; volume_used_bytes: number; volume_total_bytes: number; files?: unknown };
-  const files = readReportedFiles(body.files);
+export async function reportUploadsOnDisk(prisma: PrismaClient, virtualAgentId: string, report: UploadsReportBody, now: Date = new Date()): Promise<void> {
+  const files = readReportedFiles(report.files);
+  const acknowledged = readAcknowledged(report.deleted);
   await prisma.$transaction(async (tx) => {
-    const agent = await tx.virtualAgent.findUnique({ where: { id: virtualAgentId }, select: { ownerOid: true } });
-    if (agent === null) {
-      return;
-    }
-    await tx.virtualAgent.update({
+    const updated = await tx.virtualAgent.updateMany({
       where: { id: virtualAgentId },
       data: {
-        uploadsBytes: BigInt(body.uploads_bytes),
-        volumeUsedBytes: BigInt(body.volume_used_bytes),
-        volumeTotalBytes: BigInt(body.volume_total_bytes),
+        uploadsBytes: BigInt(report.uploads_bytes),
+        volumeUsedBytes: BigInt(report.volume_used_bytes),
+        volumeTotalBytes: BigInt(report.volume_total_bytes),
         uploadsFiles: files,
+        uploadsFilesTotal: report.files_total,
         uploadsReportedAt: now,
         updatedAt: now
       }
     });
+    if (updated.count === 0 || acknowledged.length === 0) {
+      return;
+    }
+    // Scoped to this pod's own conversations, so a launch token can only ever end requests of the assistant it is for.
     await tx.assistantUpload.updateMany({
-      where: {
-        conversation: { virtualAgentId },
-        podDeleteRequestedAt: { not: null },
-        podDeletedAt: null,
-        id: { notIn: files.map((file) => file.upload_id) }
-      },
+      where: { conversation: { virtualAgentId }, podDeleteRequestedAt: { not: null }, podDeletedAt: null, id: { in: acknowledged } },
       data: { podDeletedAt: now, updatedAt: now }
     });
-    await notify(tx, { type: "assistant_uploads", virtual_agent_id: virtualAgentId, owner_oid: agent.ownerOid });
   });
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface StoredFile {
   upload_id: string;
@@ -99,6 +110,7 @@ export async function uploadsOnDisk(prisma: PrismaClient, viewerOid: string, vir
       volumeUsedBytes: true,
       volumeTotalBytes: true,
       uploadsFiles: true,
+      uploadsFilesTotal: true,
       uploadsReportedAt: true,
       agent: { select: { clientFeatures: true } }
     }
@@ -141,7 +153,9 @@ export async function uploadsOnDisk(prisma: PrismaClient, viewerOid: string, vir
   return {
     disk,
     files,
-    truncated: reported.length >= MAX_REPORTED_FILES,
+    // The pod's own count, not the length of what it named: at exactly `MAX_REPORTED_FILES` nothing was cut, and
+    // claiming a shortened list there would be a sentence about files that are all already on the screen.
+    filesTotal: Math.max(agent.uploadsFilesTotal ?? reported.length, reported.length),
     deleting: await prisma.assistantUpload.count({
       where: { conversation: { virtualAgentId }, ownerOid: viewerOid, podDeleteRequestedAt: { not: null }, podDeletedAt: null }
     })
@@ -150,6 +164,15 @@ export async function uploadsOnDisk(prisma: PrismaClient, viewerOid: string, vir
 
 /** Why a deletion was not asked for. The pod's client is the one refusal a person can do something about. */
 export type RemoveOutcome = "requested" | "no_such_upload" | "unsupported_client";
+
+/**
+ * What was asked for: the outcome, and how many files it covered. The count is what a confirmation may claim, and is
+ * of the rows the rules admitted rather than of the ids the caller named, which are not always the same number.
+ */
+export interface RemoveResult {
+  outcome: RemoveOutcome;
+  count: number;
+}
 
 /**
  * Asks for the pod's copies of `uploadIds` to go, and drops the hub's own part rows for them in the same breath.
@@ -169,41 +192,53 @@ export async function requestUploadRemoval(
   virtualAgentId: string,
   uploadIds: readonly string[],
   now: Date = new Date()
-): Promise<RemoveOutcome> {
-  if (uploadIds.length === 0) {
-    return "no_such_upload";
+): Promise<RemoveResult> {
+  const refused: RemoveResult = { outcome: "no_such_upload", count: 0 };
+  const ids = [...new Set(uploadIds)].filter((id) => UUID.test(id));
+  if (ids.length === 0) {
+    return refused;
   }
   const agent = await prisma.virtualAgent.findUnique({
     where: { id: virtualAgentId },
     select: { ownerOid: true, agent: { select: { clientFeatures: true } } }
   });
   if (agent === null || !canManageUploadsOnDisk(viewerOid, agent.ownerOid)) {
-    return "no_such_upload";
+    return refused;
   }
   if (!clientSupports(agent.agent?.clientFeatures, "files")) {
-    return "unsupported_client";
+    return { outcome: "unsupported_client", count: 0 };
   }
-  const allowed: string[] = [];
-  for (const uploadId of uploadIds) {
-    const upload = await findUpload(prisma, uploadId);
-    if (upload !== undefined && canRemoveUploadFromDisk(viewerOid, upload)) {
-      allowed.push(uploadId);
-    }
-  }
+  // One read for the whole set, since "delete everything" names as many as a report does, and constrained to this
+  // assistant's own conversations — an upload of this person's on another of their virtual agents is not something
+  // this pod could delete. `canRemoveUploadFromDisk` still decides each row, so the rule is not the query's shape.
+  const rows = await prisma.assistantUpload.findMany({
+    where: { id: { in: ids }, conversation: { virtualAgentId } },
+    select: { id: true, conversationId: true, ownerOid: true, messageId: true, state: true }
+  });
+  const allowed = rows
+    .filter((row) =>
+      canRemoveUploadFromDisk(viewerOid, {
+        conversationId: row.conversationId,
+        ownerOid: row.ownerOid,
+        messageId: row.messageId === null ? null : row.messageId.toString(),
+        state: row.state as UploadState
+      })
+    )
+    .map((row) => row.id);
   if (allowed.length === 0) {
-    return "no_such_upload";
+    return refused;
   }
   await prisma.$transaction(async (tx) => {
     await tx.assistantUploadPart.deleteMany({ where: { uploadId: { in: allowed } } });
     await tx.assistantUpload.updateMany({
-      where: { id: { in: allowed }, ownerOid: viewerOid },
+      where: { id: { in: allowed } },
       // `podDeletedAt` is cleared as well, so asking again for a file the pod reported back — which is how a pod
       // that failed its deletion shows up — is a fresh request rather than one already counted as done.
       data: { state: "expired", podDeleteRequestedAt: now, podDeletedAt: null, updatedAt: now }
     });
     await notify(tx, { type: "assistant_uploads", virtual_agent_id: virtualAgentId, owner_oid: viewerOid });
   });
-  return "requested";
+  return { outcome: "requested", count: allowed.length };
 }
 
 /** Every upload of the viewer's that the pod's last report named, for "delete everything". */

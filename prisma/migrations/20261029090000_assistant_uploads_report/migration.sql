@@ -7,6 +7,8 @@ ALTER TABLE "virtual_agent"
   ADD COLUMN "volume_total_bytes"  BIGINT CHECK ("volume_total_bytes" >= 0),
   -- The largest files it holds, as [{upload_id, bytes}], at most 200 and in the order the pod sent them.
   ADD COLUMN "uploads_files"       JSONB NOT NULL DEFAULT '[]',
+  -- How many it holds in all, so a list cut down to the largest 200 is only said to be cut when it was.
+  ADD COLUMN "uploads_files_total" INTEGER CHECK ("uploads_files_total" >= 0),
   ADD COLUMN "uploads_reported_at" TIMESTAMPTZ(6);
 
 -- When the owner asked for the pod's copy of a file to go, and when a report of the pod's confirmed it had. A request

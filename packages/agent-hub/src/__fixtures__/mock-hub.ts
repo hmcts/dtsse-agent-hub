@@ -324,7 +324,15 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     }
     if (req.method === "PUT" && area === "uploads" && !kind) {
       const whole = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 0;
-      if (!whole(body.uploads_bytes) || !whole(body.volume_used_bytes) || !whole(body.volume_total_bytes)) {
+      // The hub requires both lists to be present, since a missing one would read as an authoritative empty list.
+      if (
+        !whole(body.uploads_bytes) ||
+        !whole(body.volume_used_bytes) ||
+        !whole(body.volume_total_bytes) ||
+        !whole(body.files_total) ||
+        !Array.isArray(body.files) ||
+        !Array.isArray(body.deleted)
+      ) {
         return send(res, 400, { error: "bad uploads report" });
       }
       v.uploadsReports.push(body);

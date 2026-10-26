@@ -1,7 +1,8 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import type { UploadsOnDisk } from "@/assistant/upload-disk";
-import { describeSize, MAX_REPORTED_FILES, type PodFile, UPLOADS_REPORT_INTERVAL_MINUTES, type UploadsDisk } from "@/assistant/upload-report";
+import { describeSize, type PodFile, UPLOADS_REPORT_INTERVAL_MINUTES, type UploadsDisk } from "@/assistant/upload-report";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { Timestamp } from "@/components/time/Timestamp";
 
@@ -17,6 +18,9 @@ export interface AssistantFiles {
 }
 
 const LINK = "text-xs text-asst-muted underline hover:text-asst-text";
+
+/** Named once, because the confirmation form and the test that posts it have to agree. */
+const DELETE_EVERYTHING = "Delete every file your assistant is holding";
 
 /** Why there are no figures, in words that do not read as "you have no files". */
 const NO_REPORT: Record<Exclude<UploadsDisk, { reported: true }>["reason"], string> = {
@@ -77,6 +81,62 @@ function Row({ file, remove }: { file: PodFile; remove: FormAction }) {
 }
 
 /**
+ * Deleting the lot, behind a confirmation.
+ *
+ * Asked for rather than done on one click, in the shape `ChatMenu` asks before deleting a single chat: this drops the
+ * hub's bytes for every one of these files at once and cannot be undone, and the dialog is something people arrow
+ * and tab around. The count is in the question, because "all of them" is the part worth being sure about.
+ *
+ * The explanation sits above the first button rather than only inside the confirmation, so what deleting does is
+ * readable before anyone commits to finding out.
+ *
+ * The question stays open after a successful post, because closing it would unmount the confirmation the form had
+ * just been given. What takes it away is the section re-rendering with every row waiting for the assistant.
+ */
+function DeleteEverything({ count, removeAll }: { count: number; removeAll: FormAction }) {
+  const [asking, setAsking] = useState(false);
+  const confirm = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (asking) {
+      confirm.current?.focus();
+    }
+  }, [asking]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-pretty text-[13px] text-asst-body">
+        Deleting removes your assistant's copy, which is what takes up the space. Each chat still shows that a file was attached, and the hub drops any copy of
+        its own, so a recent file can no longer be downloaded back from the chat.
+      </p>
+      {asking ? (
+        <ActionForm action={removeAll} label={DELETE_EVERYTHING} className="flex flex-col gap-2">
+          <p className="text-[13px] font-semibold">
+            Delete {count === 1 ? "the one file" : `all ${count.toLocaleString("en-GB")} files`} your assistant is holding? This cannot be undone.
+          </p>
+          <div className="flex items-center gap-3">
+            <button ref={confirm} type="submit" className="rounded-[10px] bg-asst-error px-3.5 py-2 text-[13px] font-semibold text-asst-ink">
+              Delete every file
+            </button>
+            <button type="button" onClick={() => setAsking(false)} className={LINK}>
+              Cancel
+            </button>
+          </div>
+        </ActionForm>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAsking(true)}
+          className="self-start rounded-[10px] border border-asst-error px-3.5 py-2 text-[13px] font-semibold text-asst-error hover:bg-asst-active"
+        >
+          Delete every file
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * The Files section of the Assistant's settings.
  *
  * It is about the copies on the assistant's own disk, which are what accumulate: the hub holds an attached file's
@@ -89,6 +149,9 @@ function Row({ file, remove }: { file: PodFile; remove: FormAction }) {
  */
 export function Files({ files }: { files: AssistantFiles }) {
   const { view, remove, removeAll } = files;
+  // Read off the size rather than off the list: the list drops reported ids the hub has no row for, so "holding no
+  // files" would otherwise sit directly under a byte total.
+  const empty = view.disk.reported && view.disk.uploadsBytes === 0;
   return (
     <section aria-labelledby="assistant-settings-files" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-files" className="text-sm font-semibold">
@@ -99,32 +162,30 @@ export function Files({ files }: { files: AssistantFiles }) {
         chat.
       </p>
       <Disk disk={view.disk} />
-      {view.files.length === 0 ? (
-        view.disk.reported ? (
-          <p className="text-[13px] text-asst-muted">Your assistant is holding no files.</p>
-        ) : null
-      ) : (
+      {empty ? <p className="text-[13px] text-asst-muted">Your assistant is holding no files.</p> : null}
+      {/*
+       * Reported bytes with nothing to name them: the rows went with a chat that was deleted, and the assistant
+       * removes the files themselves when it is told the chat has gone. Said rather than left as a size above a
+       * sentence claiming no files, which is the contradiction this section exists to avoid.
+       */}
+      {view.disk.reported && view.disk.uploadsBytes > 0 && view.files.length === 0 ? (
+        <p className="text-[13px] text-asst-muted">
+          These are files from chats you have deleted. Your assistant removes them itself; there is nothing to do here.
+        </p>
+      ) : null}
+      {view.files.length === 0 ? null : (
         <>
           <ul aria-label="Files on your assistant" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
             {view.files.map((file) => (
               <Row key={file.uploadId} file={file} remove={remove} />
             ))}
           </ul>
-          {view.truncated ? (
-            <p className="text-xs text-asst-muted">The largest {MAX_REPORTED_FILES.toLocaleString("en-GB")} are listed. The size above is of everything.</p>
-          ) : null}
-          <ActionForm action={removeAll} label="Delete every file your assistant is holding" className="flex flex-col gap-2">
-            <p className="text-pretty text-[13px] text-asst-body">
-              Deleting removes your assistant's copy, which is what takes up the space. Each chat still shows that a file was attached, and the hub drops any
-              copy of its own, so a recent file can no longer be downloaded back from the chat.
+          {view.filesTotal > view.files.length ? (
+            <p className="text-xs text-asst-muted">
+              The largest {view.files.length.toLocaleString("en-GB")} of {view.filesTotal.toLocaleString("en-GB")} are listed. The size above is of everything.
             </p>
-            <button
-              type="submit"
-              className="self-start rounded-[10px] border border-asst-error px-3.5 py-2 text-[13px] font-semibold text-asst-error hover:bg-asst-active"
-            >
-              Delete every file
-            </button>
-          </ActionForm>
+          ) : null}
+          <DeleteEverything count={view.files.length} removeAll={removeAll} />
         </>
       )}
       {view.deleting === 0 ? null : (

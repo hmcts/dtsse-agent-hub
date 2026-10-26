@@ -57,19 +57,27 @@ export async function runAssistantSupervisor({
   };
 
   /**
-   * The files the person asked to be deleted, and a fresh report straight after.
+   * The files the person asked to be deleted, and a report acknowledging the ones that are gone.
    *
-   * The report is what clears the request: the hub replays the frame until a report stops naming the file, so
-   * reporting here rather than waiting for the next reconcile is the difference between the section saying "waiting
-   * for your assistant" for seconds and for ten minutes.
+   * That report is what ends the request, so sending it here rather than waiting for the next reconcile is the
+   * difference between the settings saying "waiting for your assistant" for seconds and for ten minutes.
+   *
+   * Nothing is sent when it deleted nothing. There would be nothing to acknowledge, and a report for every frame
+   * would be a loop between the two ends with no backoff and nothing giving up: the hub asks again when this pod's
+   * stream next opens, which is the right cadence for a file that cannot be removed at all.
    */
   async function removeUploads(data: unknown): Promise<void> {
     const asked = readDeleteUploads(data);
     if (asked === undefined) {
       return;
     }
-    deleteUploads({ ...uploads, conversationId: asked.conversationId, uploadIds: asked.uploadIds });
-    await reportUploads(uploads);
+    const { deleted, failed } = deleteUploads({ ...uploads, conversationId: asked.conversationId, uploadIds: asked.uploadIds });
+    if (failed.length > 0) {
+      say(`conversation ${asked.conversationId}: ${failed.length} file(s) could not be deleted; the hub will ask again`);
+    }
+    if (deleted.length > 0) {
+      await reportUploads({ ...uploads, deleted });
+    }
   }
 
   let stopping = false;

@@ -1272,7 +1272,7 @@ const ON_DISK: UploadsDisk = {
 
 function files(overrides: Partial<UploadsOnDisk> = {}, actions: Partial<Pick<AssistantFiles, "remove" | "removeAll">> = {}): AssistantFiles {
   return {
-    view: { disk: ON_DISK, files: [podFile()], truncated: false, deleting: 0, ...overrides },
+    view: { disk: ON_DISK, files: [podFile()], filesTotal: 1, deleting: 0, ...overrides },
     remove: vi.fn(async () => ({ ok: true as const, confirmation: "Your assistant deletes that file within 10 minutes, the next time it checks." })),
     removeAll: vi.fn(async () => ({
       ok: true as const,
@@ -1326,32 +1326,73 @@ describe("the Assistant's files", () => {
     expect(screen.getByRole("status").textContent).toContain("within 10 minutes");
   });
 
-  it("should post to the delete-everything action, and confirm it, when the person deletes them all", async () => {
-    const removeAll = vi.fn(async () => ({ ok: true as const, confirmation: "Your assistant deletes all 1 of its files within 10 minutes." }));
+  // Irreversible in one submit — the hub's bytes for every one of these files go with it — so it is asked for, in the
+  // shape this repo already asks before deleting a single chat.
+  it("should post nothing until the person confirms deleting them all", () => {
+    const removeAll = vi.fn(async () => ({ ok: true as const, confirmation: "done" }));
     open({ files: files({}, { removeAll }) }, "Files");
+
+    expect(screen.queryByRole("form", { name: DELETE_ALL })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delete every file" }));
+
+    expect(removeAll).not.toHaveBeenCalled();
+    expect(screen.getByRole("form", { name: DELETE_ALL })).toBeTruthy();
+  });
+
+  it("should name how many files it is about, and take the decision, when it asks", async () => {
+    const removeAll = vi.fn(async () => ({ ok: true as const, confirmation: "Your assistant deletes all 2 of its files within 10 minutes." }));
+    open({ files: files({ files: [podFile(), podFile({ uploadId: "u2", name: "notes.txt" })] }, { removeAll }) }, "Files");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete every file" }));
+
+    expect(screen.getByText("Delete all 2 files your assistant is holding? This cannot be undone.")).toBeTruthy();
+    expect(document.activeElement).toBe(within(screen.getByRole("form", { name: DELETE_ALL })).getByRole("button", { name: "Delete every file" }));
 
     await submit(DELETE_ALL);
 
     expect(removeAll).toHaveBeenCalled();
-    expect(screen.getByRole("status").textContent).toContain("deletes all 1 of its files");
+    expect(screen.getByRole("status").textContent).toContain("deletes all 2 of its files");
+  });
+
+  it("should put the question away, having posted nothing, when the person cancels", () => {
+    const removeAll = vi.fn(async () => ({ ok: true as const, confirmation: "done" }));
+    open({ files: files({}, { removeAll }) }, "Files");
+    fireEvent.click(screen.getByRole("button", { name: "Delete every file" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("form", { name: DELETE_ALL })).toBeNull();
+    expect(removeAll).not.toHaveBeenCalled();
   });
 
   // A "delete all" that quietly left gigabytes on the assistant's volume, or that implied the chat's own download
-  // still worked, would be worse than no button: the copy has to say which copy goes and which stays.
-  it("should say which copy is removed and what the chat keeps, beside the delete-everything button", () => {
+  // still worked, would be worse than no button: the copy has to say which copy goes and which stays — and it says
+  // so before the button, so it can be read without committing to find out.
+  it("should say which copy is removed and what the chat keeps, before the delete-everything button", () => {
     open({ files: files() }, "Files");
-    const form = screen.getByRole("form", { name: DELETE_ALL });
+    const section = screen.getByRole("region", { name: "Files" });
 
-    expect(form.textContent).toContain("removes your assistant's copy, which is what takes up the space");
-    expect(form.textContent).toContain("Each chat still shows that a file was attached");
-    expect(form.textContent).toContain("can no longer be downloaded back from the chat");
+    expect(section.textContent).toContain("removes your assistant's copy, which is what takes up the space");
+    expect(section.textContent).toContain("Each chat still shows that a file was attached");
+    expect(section.textContent).toContain("can no longer be downloaded back from the chat");
   });
 
   it("should offer no delete-everything button when the assistant is holding nothing", () => {
-    open({ files: files({ files: [] }) }, "Files");
+    open({ files: files({ files: [], filesTotal: 0, disk: { ...ON_DISK, uploadsBytes: 0 } }) }, "Files");
 
     expect(screen.getByText("Your assistant is holding no files.")).toBeTruthy();
-    expect(screen.queryByRole("form", { name: DELETE_ALL })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete every file" })).toBeNull();
+  });
+
+  // A size with nothing to name it is the rows having gone with a deleted chat. Saying "holding no files" under a
+  // byte total would be the contradiction this section exists to avoid.
+  it("should explain a size it cannot name, rather than claim no files, when the rows have gone", () => {
+    open({ files: files({ files: [], filesTotal: 3 }) }, "Files");
+    const section = screen.getByRole("region", { name: "Files" });
+
+    expect(section.textContent).toContain("2.1 GB of files");
+    expect(section.textContent).toContain("files from chats you have deleted");
+    expect(section.textContent).not.toContain("holding no files");
   });
 
   // Not "deleted": until the assistant's next report says the file is gone, all the hub knows is that it asked.
@@ -1390,10 +1431,18 @@ describe("the Assistant's files", () => {
     expect(screen.getByRole("region", { name: "Files" }).textContent).toContain("Your assistant is stopped. Last reported");
   });
 
-  it("should say the list is only the largest files when the assistant holds more than a report carries", () => {
-    open({ files: files({ truncated: true }) }, "Files");
+  it("should say how much of the list it is showing when the assistant holds more than a report carries", () => {
+    open({ files: files({ filesTotal: 231 }) }, "Files");
 
-    expect(screen.getByText(`The largest ${MAX_REPORTED_FILES} are listed. The size above is of everything.`)).toBeTruthy();
+    expect(screen.getByText("The largest 1 of 231 are listed. The size above is of everything.")).toBeTruthy();
+  });
+
+  // At exactly the cap nothing was cut, so a sentence about a shortened list would be about files all on the screen.
+  it("should claim no shortened list when the assistant holds exactly as many as a report carries", () => {
+    const many = Array.from({ length: MAX_REPORTED_FILES }, (_, index) => podFile({ uploadId: `u${index}` }));
+    open({ files: files({ files: many, filesTotal: MAX_REPORTED_FILES }) }, "Files");
+
+    expect(screen.queryByText(/are listed/)).toBeNull();
   });
 
   it("should show the action's own refusal, rather than deciding for itself, when a delete is refused", async () => {

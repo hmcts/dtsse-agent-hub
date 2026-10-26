@@ -396,8 +396,11 @@ describe("runAssistantSupervisor and the uploads on its volume", () => {
 
       expect(fs.existsSync(going), "the file the person asked to delete").toBe(false);
       expect(fs.existsSync(staying), "a file they did not ask about").toBe(true);
-      expect(reports()[0]).toMatchObject({ uploads_bytes: 16, volume_used_bytes: 512 * 4096, volume_total_bytes: 1024 * 4096 });
+      expect(reports()[0]).toMatchObject({ uploads_bytes: 16, volume_used_bytes: 512 * 4096, volume_total_bytes: 1024 * 4096, files_total: 1 });
       expect((reports()[0]?.files as { upload_id: string }[]).map((file) => file.upload_id)).toEqual([KEEP]);
+      // The acknowledgement, which is the only thing that ends the hub's request. Absence from `files` says nothing:
+      // that list is the largest 200, so a file outside it is unnamed while still sitting on the volume.
+      expect(reports()[0]?.deleted).toEqual([UPLOAD]);
     } finally {
       stop.abort();
       await running;
@@ -430,6 +433,61 @@ describe("runAssistantSupervisor and the uploads on its volume", () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
 
       expect(hub.virtuals.get(VID)?.uploadsReports ?? []).toEqual([]);
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("runAssistantSupervisor and a file it cannot delete", () => {
+  const CONVERSATION = "11111111-2222-3333-4444-555555555555";
+  const UPLOAD = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+  // The frame asks, the deletion fails, and a report would say so by acknowledging nothing — which the hub answers
+  // with another frame. That is a loop between the two ends with no backoff and nothing giving up, so the pod sends
+  // nothing at all and the hub asks again when the stream next opens.
+  it("should send no report, and leave the file, when every deletion the hub asked for failed", async () => {
+    const hub = createMockHub({ pingMs: 5000, maxLifetimeMs: 60_000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const stop = new AbortController();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-hub-run-stuck-"));
+    const file = path.join(root, CONVERSATION, `${UPLOAD}-letter.pdf`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, Buffer.alloc(16));
+    const said: string[] = [];
+    const uploadsFs = {
+      ...fs,
+      statfsSync: () => ({ type: 0, bsize: 4096, blocks: 1024, bfree: 512, bavail: 512, files: 0, ffree: 0 }),
+      rmSync: () => {
+        throw new Error("read-only volume");
+      }
+    };
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50,
+      uploadsDir: root,
+      uploadsFs: uploadsFs as never,
+      say: (message) => said.push(message)
+    });
+
+    try {
+      await hub.waitFor((call) => call.method === "GET" && call.path === `/api/virtual/${VID}/sessions`);
+      hub.sendDeleteUploads(VID, { conversation_id: CONVERSATION, upload_ids: [UPLOAD] });
+      await waitUntil(() => said.some((message) => message.includes("could not be deleted")), "the pod to give up on the deletion");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(hub.virtuals.get(VID)?.uploadsReports ?? [], "no report, so the hub keeps asking rather than being told it is done").toEqual([]);
+      expect(fs.existsSync(file), "the file the person asked about is still there").toBe(true);
+      expect(said.join("\n")).toContain("the hub will ask again");
     } finally {
       stop.abort();
       await running;

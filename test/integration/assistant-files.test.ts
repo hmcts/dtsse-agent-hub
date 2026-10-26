@@ -6,6 +6,9 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
 import { pendingUploadDeletions, reportedUploadIds, reportUploadsOnDisk, requestUploadRemoval, uploadsOnDisk } from "../../src/assistant/upload-disk.ts";
+import { createEventHub } from "../../src/realtime/hub.ts";
+import { startListener } from "../../src/realtime/listener.ts";
+import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
 import { devIdentity, type Viewer } from "../../src/viewer/identity.ts";
 import { assistantFiles } from "../../src/web/data.ts";
 import { connect, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
@@ -47,9 +50,19 @@ beforeEach(async () => {
  * The person's assistant, running, with its own session registered as its current agent — which is where the `files`
  * claim lives, because the supervisor is what reports and what deletes, not a conversation's session.
  */
-async function assistantOf(who: Person, features: string[] | null = ["files"], status: "running" | "stopped" = "running"): Promise<string> {
+async function assistantOf(
+  who: Person,
+  features: string[] | null = ["files"],
+  status: "running" | "stopped" = "running",
+  { session = true } = {}
+): Promise<string> {
   await insertUser(who);
   const assistant = await ensureAssistant(prisma, viewer(who));
+  if (!session) {
+    // An assistant whose supervisor has never registered, so there is no client to have claimed anything.
+    await prisma.virtualAgent.update({ where: { id: assistant.id }, data: { status } });
+    return assistant.id;
+  }
   const agent = await prisma.agent.create({
     data: {
       ownerOid: who.oid,
@@ -92,8 +105,19 @@ async function chat(who: Person, title: string): Promise<string> {
   return conversation.id;
 }
 
-function report(files: { upload_id: string; bytes: number }[], uploadsBytes = files.reduce((total, file) => total + file.bytes, 0)) {
-  return { uploads_bytes: uploadsBytes, volume_used_bytes: 30 * 1024 ** 3, volume_total_bytes: 32 * 1024 ** 3, files };
+/**
+ * A report of `files`, acknowledging `deleted`. `filesTotal` defaults to what it names, as a pod holding no more
+ * than the cap sends; a test of a cut-down list passes a larger one.
+ */
+function report(files: { upload_id: string; bytes: number }[], options: { deleted?: string[]; uploadsBytes?: number; filesTotal?: number } = {}) {
+  return {
+    uploads_bytes: options.uploadsBytes ?? files.reduce((total, file) => total + file.bytes, 0),
+    volume_used_bytes: 30 * 1024 ** 3,
+    volume_total_bytes: 32 * 1024 ** 3,
+    files_total: options.filesTotal ?? files.length,
+    files,
+    deleted: options.deleted ?? []
+  };
 }
 
 async function uploadRow(id: string) {
@@ -149,6 +173,14 @@ describe("the files on an assistant's disk", () => {
     expect((await uploadsOnDisk(prisma, ALICE.oid, assistant))?.disk).toEqual({ reported: false, reason: "not_running" });
   });
 
+  // No session has ever registered, so nothing has claimed anything either way. Calling that an older version would
+  // be a guess about a pod that has never been up.
+  it("should say nothing has looked, not that the client is old, when no supervisor has ever registered", async () => {
+    const assistant = await assistantOf(ALICE, null, "stopped", { session: false });
+
+    expect((await uploadsOnDisk(prisma, ALICE.oid, assistant))?.disk).toEqual({ reported: false, reason: "not_running" });
+  });
+
   it("should replace the last report, not add to it, when the pod reports again", async () => {
     const assistant = await assistantOf(ALICE);
     const conversation = await chat(ALICE, "Possession claim");
@@ -168,7 +200,7 @@ describe("asking an assistant to delete its files", () => {
     const upload = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
     await reportUploadsOnDisk(prisma, assistant, report([{ upload_id: upload, bytes: 2048 }]));
 
-    expect(await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload])).toBe("requested");
+    expect(await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload])).toEqual({ outcome: "requested", count: 1 });
 
     // The hub's copy is gone for good, which is what stops the thread offering a download back.
     expect(await uploadRow(upload)).toMatchObject({ state: "expired", podDeletedAt: null, _count: { parts: 0 } });
@@ -177,31 +209,79 @@ describe("asking an assistant to delete its files", () => {
   });
 
   // The row stays whatever happens: the thread goes on saying a file was attached.
-  it("should keep the upload row when the pod confirms the file is gone", async () => {
+  it("should keep the upload row, and end the request, when the pod acknowledges the file is gone", async () => {
     const assistant = await assistantOf(ALICE);
     const conversation = await chat(ALICE, "Possession claim");
     const upload = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
     await reportUploadsOnDisk(prisma, assistant, report([{ upload_id: upload, bytes: 2048 }]));
     await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload]);
 
-    await reportUploadsOnDisk(prisma, assistant, report([]));
+    await reportUploadsOnDisk(prisma, assistant, report([], { deleted: [upload] }));
 
     expect(await uploadRow(upload)).toMatchObject({ state: "expired" });
     expect((await uploadRow(upload)).podDeletedAt).not.toBeNull();
     expect(await pendingUploadDeletions(prisma, assistant)).toEqual([]);
+    expect((await uploadsOnDisk(prisma, ALICE.oid, assistant))?.deleting).toBe(0);
   });
 
-  // A request for a file the pod never had has nothing to carry out, and would otherwise be replayed for ever.
-  it("should end a request the pod's next report does not name at all, whether it deleted it or never had it", async () => {
+  // The heart of it. A report names the largest 200 files, so a file outside that list is unnamed while sitting on
+  // the volume — and a pod whose own deletion failed reports exactly that. Clearing by omission would tell the owner
+  // the file was deleted, with the hub's bytes really gone and the pod's copy still there.
+  it("should leave a request outstanding when the pod reports without acknowledging it", async () => {
     const assistant = await assistantOf(ALICE);
     const conversation = await chat(ALICE, "Possession claim");
     const upload = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
     await reportUploadsOnDisk(prisma, assistant, report([{ upload_id: upload, bytes: 2048 }]));
     await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload]);
 
-    await reportUploadsOnDisk(prisma, assistant, report([]));
+    // A report whose `files` names neither this nor anything else: the pod holding more than it can name, or a
+    // deletion that threw. Under either reading the request has not been carried out.
+    await reportUploadsOnDisk(prisma, assistant, report([], { filesTotal: 500 }));
 
-    expect((await uploadsOnDisk(prisma, ALICE.oid, assistant))?.deleting).toBe(0);
+    expect((await uploadRow(upload)).podDeletedAt).toBeNull();
+    expect(await pendingUploadDeletions(prisma, assistant)).toEqual([{ conversation_id: conversation, upload_ids: [upload] }]);
+    expect((await uploadsOnDisk(prisma, ALICE.oid, assistant))?.deleting).toBe(1);
+  });
+
+  // The route's schema is what stops this, and it matters because a missing list would otherwise read as an
+  // authoritative empty one. `reportUploadsOnDisk` is written so that even then it would clear nothing.
+  it.each([
+    ["no deleted list at all", { deleted: undefined }],
+    ["a deleted list that is not an array", { deleted: "all of them" }],
+    ["no files list at all", { files: undefined }]
+  ])("should clear no request when a report arrives with %s", async (_what, broken) => {
+    const assistant = await assistantOf(ALICE);
+    const conversation = await chat(ALICE, "Possession claim");
+    const upload = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
+    await reportUploadsOnDisk(prisma, assistant, report([{ upload_id: upload, bytes: 2048 }]));
+    await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload]);
+
+    await reportUploadsOnDisk(prisma, assistant, { ...report([]), ...broken } as never);
+
+    expect((await uploadRow(upload)).podDeletedAt).toBeNull();
+    expect(await pendingUploadDeletions(prisma, assistant)).toEqual([{ conversation_id: conversation, upload_ids: [upload] }]);
+  });
+
+  it("should acknowledge only the ids the pod names, leaving the rest of a batch outstanding", async () => {
+    const assistant = await assistantOf(ALICE);
+    const conversation = await chat(ALICE, "Possession claim");
+    const gone = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
+    const stuck = await sentUpload(ALICE, conversation, "notes.txt", 64);
+    await reportUploadsOnDisk(
+      prisma,
+      assistant,
+      report([
+        { upload_id: gone, bytes: 2048 },
+        { upload_id: stuck, bytes: 64 }
+      ])
+    );
+    await requestUploadRemoval(prisma, ALICE.oid, assistant, [gone, stuck]);
+
+    await reportUploadsOnDisk(prisma, assistant, report([{ upload_id: stuck, bytes: 64 }], { deleted: [gone] }));
+
+    expect((await uploadRow(gone)).podDeletedAt).not.toBeNull();
+    expect((await uploadRow(stuck)).podDeletedAt).toBeNull();
+    expect(await pendingUploadDeletions(prisma, assistant)).toEqual([{ conversation_id: conversation, upload_ids: [stuck] }]);
   });
 
   // A pod that failed its deletion reports the file again, and asking a second time has to mean something.
@@ -211,12 +291,27 @@ describe("asking an assistant to delete its files", () => {
     const upload = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
     await reportUploadsOnDisk(prisma, assistant, report([{ upload_id: upload, bytes: 2048 }]));
     await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload]);
-    await reportUploadsOnDisk(prisma, assistant, report([]));
+    await reportUploadsOnDisk(prisma, assistant, report([], { deleted: [upload] }));
     await reportUploadsOnDisk(prisma, assistant, report([{ upload_id: upload, bytes: 2048 }]));
 
     await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload]);
 
     expect(await pendingUploadDeletions(prisma, assistant)).toEqual([{ conversation_id: conversation, upload_ids: [upload] }]);
+  });
+
+  // The hub would otherwise ask a pod to delete somebody else's file on the strength of its own launch token.
+  it("should acknowledge nothing outside the reporting assistant's own conversations", async () => {
+    const hers = await assistantOf(ALICE);
+    const conversation = await chat(ALICE, "Possession claim");
+    const upload = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
+    await reportUploadsOnDisk(prisma, hers, report([{ upload_id: upload, bytes: 2048 }]));
+    await requestUploadRemoval(prisma, ALICE.oid, hers, [upload]);
+    const his = await assistantOf(BOB);
+
+    await reportUploadsOnDisk(prisma, his, report([], { deleted: [upload] }));
+
+    expect((await uploadRow(upload)).podDeletedAt).toBeNull();
+    expect(await pendingUploadDeletions(prisma, hers)).toEqual([{ conversation_id: conversation, upload_ids: [upload] }]);
   });
 
   it("should group the outstanding requests by conversation, as one frame each, when they span chats", async () => {
@@ -248,7 +343,7 @@ describe("asking an assistant to delete its files", () => {
     const conversation = await chat(ALICE, "Possession claim");
     const upload = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
 
-    expect(await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload])).toBe("unsupported_client");
+    expect(await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload])).toEqual({ outcome: "unsupported_client", count: 0 });
     expect(await uploadRow(upload)).toMatchObject({ state: "fetched", podDeleteRequestedAt: null, _count: { parts: 1 } });
     expect(await pendingUploadDeletions(prisma, assistant)).toEqual([]);
   });
@@ -270,14 +365,14 @@ describe("asking an assistant to delete its files", () => {
       select: { id: true }
     });
 
-    expect(await requestUploadRemoval(prisma, ALICE.oid, assistant, [unsent.id])).toBe("no_such_upload");
+    expect(await requestUploadRemoval(prisma, ALICE.oid, assistant, [unsent.id])).toEqual({ outcome: "no_such_upload", count: 0 });
     expect(await uploadRow(unsent.id)).toMatchObject({ state: "stored", podDeleteRequestedAt: null });
   });
 
   it("should refuse an id that names nothing at all", async () => {
     const assistant = await assistantOf(ALICE);
 
-    expect(await requestUploadRemoval(prisma, ALICE.oid, assistant, ["0f8a6a1e-0000-4000-8000-00000000dead"])).toBe("no_such_upload");
+    expect(await requestUploadRemoval(prisma, ALICE.oid, assistant, ["0f8a6a1e-0000-4000-8000-00000000dead"])).toEqual({ outcome: "no_such_upload", count: 0 });
   });
 });
 
@@ -304,7 +399,7 @@ describe("who may see and clear an assistant's files", () => {
     const { assistant, upload } = await alicesFile();
     await insertUser(BOB);
 
-    expect(await requestUploadRemoval(prisma, BOB.oid, assistant, [upload])).toBe("no_such_upload");
+    expect(await requestUploadRemoval(prisma, BOB.oid, assistant, [upload])).toEqual({ outcome: "no_such_upload", count: 0 });
     expect(await uploadRow(upload)).toMatchObject({ state: "fetched", podDeleteRequestedAt: null, _count: { parts: 1 } });
   });
 
@@ -366,6 +461,27 @@ describe("who may see and clear an assistant's files", () => {
     expect((result as { confirmation: string }).confirmation).toContain("stopped, so it deletes that file the next time it starts");
   });
 
+  // The report can name ids the hub has no row for, and the rules admit none of them. A confirmation counted from
+  // what was asked about would claim more files than were actually marked.
+  it("should count only the files it marked, not the ids it was given, when it confirms deleting them all", async () => {
+    const assistant = await assistantOf(ALICE);
+    const conversation = await chat(ALICE, "Possession claim");
+    const upload = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
+    await reportUploadsOnDisk(
+      prisma,
+      assistant,
+      report([
+        { upload_id: upload, bytes: 2048 },
+        { upload_id: "0f8a6a1e-0000-4000-8000-00000000dead", bytes: 64 }
+      ])
+    );
+
+    const result = await actions.deleteAllAssistantFiles(new FormData());
+
+    expect((result as { confirmation: string }).confirmation).toContain("its one file");
+    expect((result as { confirmation: string }).confirmation).not.toContain("all 2");
+  });
+
   it("should refuse the delete-everything action, saying so, when the pod has reported no files", async () => {
     await assistantOf(ALICE);
 
@@ -374,5 +490,53 @@ describe("who may see and clear an assistant's files", () => {
 
   it("should ignore a report for a virtual agent that does not exist", async () => {
     await expect(reportUploadsOnDisk(prisma, "0f8a6a1e-0000-4000-8000-00000000dead", report([]))).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * A report tells nobody; a request tells the pod.
+ *
+ * A NOTIFY on every report would be a frame for whatever is still pending, so a file the pod cannot delete would
+ * loop between the two ends — frame, failed delete, report, frame — as fast as the round trips allow, with no
+ * backoff and nothing giving up. The pod's own half of that is in the client's `assistant/run.test.ts`.
+ */
+describe("what a report and a request tell other pods", () => {
+  async function heard(work: () => Promise<void>): Promise<string[]> {
+    const events: string[] = [];
+    const hub = createEventHub();
+    hub.subscribe((event) => events.push(event.type));
+    const listener = startListener({ connectionString: resolveDatabaseUrl(), hub, minBackoffMs: 20, maxBackoffMs: 100 });
+    await listener.ready();
+    try {
+      await work();
+      // Long enough for a NOTIFY committed by `work` to have arrived, since the point is that none does.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    } finally {
+      await listener.stop();
+    }
+    return events;
+  }
+
+  it("should tell the pod to go and delete when the owner asks for a file to go", async () => {
+    const assistant = await assistantOf(ALICE);
+    const conversation = await chat(ALICE, "Possession claim");
+    const upload = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
+    await reportUploadsOnDisk(prisma, assistant, report([{ upload_id: upload, bytes: 2048 }]));
+
+    expect(await heard(() => requestUploadRemoval(prisma, ALICE.oid, assistant, [upload]).then(() => undefined))).toContain("assistant_uploads");
+  });
+
+  it("should tell nobody at all when the pod reports, whether it acknowledged a deletion or not", async () => {
+    const assistant = await assistantOf(ALICE);
+    const conversation = await chat(ALICE, "Possession claim");
+    const upload = await sentUpload(ALICE, conversation, "bundle.pdf", 2048);
+    await requestUploadRemoval(prisma, ALICE.oid, assistant, [upload]);
+
+    const events = await heard(async () => {
+      await reportUploadsOnDisk(prisma, assistant, report([{ upload_id: upload, bytes: 2048 }]));
+      await reportUploadsOnDisk(prisma, assistant, report([], { deleted: [upload] }));
+    });
+
+    expect(events).toEqual([]);
   });
 });

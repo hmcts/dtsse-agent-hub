@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { findAssistant } from "@/assistant/store";
-import { type RemoveOutcome, reportedUploadIds, requestUploadRemoval } from "@/assistant/upload-disk";
+import { type RemoveResult, reportedUploadIds, requestUploadRemoval } from "@/assistant/upload-disk";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { type ActionResult, runAction, text } from "@/web/action";
@@ -29,18 +29,21 @@ function revalidate(): void {
  * What to tell the person, in the words the pod's state earns. Nothing here says the file *is* gone: the pod is what
  * deletes its own copy, so the confirmation promises when rather than claiming it has already happened.
  */
-function confirmation(outcome: RemoveOutcome, subject: string, running: boolean): ActionResult<{ confirmation: string }> {
-  if (outcome === "unsupported_client") {
+function confirmation(result: RemoveResult, subject: (count: number) => string, running: boolean): ActionResult<{ confirmation: string }> {
+  if (result.outcome === "unsupported_client") {
     return { ok: false, error: UNSUPPORTED };
   }
-  if (outcome === "no_such_upload") {
+  if (result.outcome === "no_such_upload") {
     return { ok: false, error: "that is not one of your assistant's files" };
   }
+  // The store's count, not the number of ids asked about: it admits only the rows the rules allow, so a confirmation
+  // built from what was asked for could claim more files than were actually marked.
+  const what = subject(result.count);
   return {
     ok: true,
     confirmation: running
-      ? `Your assistant deletes ${subject} within 10 minutes, the next time it checks. ${HUB_COPY}`
-      : `Your assistant is stopped, so it deletes ${subject} the next time it starts. ${HUB_COPY}`
+      ? `Your assistant deletes ${what} within 10 minutes, the next time it checks. ${HUB_COPY}`
+      : `Your assistant is stopped, so it deletes ${what} the next time it starts. ${HUB_COPY}`
   };
 }
 
@@ -51,9 +54,9 @@ export async function deleteAssistantFile(form: FormData): Promise<ActionResult<
     if (assistant === undefined) {
       return { ok: false, error: "you have no assistant" };
     }
-    const outcome = await requestUploadRemoval(prisma, viewer.oid, assistant.id, [text(form.get("id"))]);
+    const result = await requestUploadRemoval(prisma, viewer.oid, assistant.id, [text(form.get("id"))]);
     revalidate();
-    return confirmation(outcome, "that file", assistant.status === "running");
+    return confirmation(result, () => "that file", assistant.status === "running");
   });
 }
 
@@ -73,8 +76,12 @@ export async function deleteAllAssistantFiles(_form: FormData): Promise<ActionRe
     if (ids.length === 0) {
       return { ok: false, error: "your assistant has not reported any files to delete" };
     }
-    const outcome = await requestUploadRemoval(prisma, viewer.oid, assistant.id, ids);
+    const result = await requestUploadRemoval(prisma, viewer.oid, assistant.id, ids);
     revalidate();
-    return confirmation(outcome, `all ${ids.length.toLocaleString("en-GB")} of its files`, assistant.status === "running");
+    return confirmation(
+      result,
+      (count) => (count === 1 ? "its one file" : `all ${count.toLocaleString("en-GB")} of its files`),
+      assistant.status === "running"
+    );
   });
 }

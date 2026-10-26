@@ -619,7 +619,7 @@ describe("deleteUploads", () => {
     const going = written(root, UPLOAD);
     const staying = written(root, OTHER_UPLOAD);
 
-    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD] })).toBe(1);
+    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD] })).toEqual({ deleted: [UPLOAD], failed: [] });
     expect(fs.existsSync(going)).toBe(false);
     expect(fs.existsSync(staying)).toBe(true);
   });
@@ -635,16 +635,21 @@ describe("deleteUploads", () => {
     expect(fs.existsSync(conversationDir(root, CONVERSATION))).toBe(true);
   });
 
-  // The request is replayed until a report shows the file gone, so acting on one twice has to be as good as once.
-  it("should count nothing, and raise nothing, when the file is already gone", () => {
+  // Acknowledged all the same: the request is replayed until a report names it, so acting on one twice has to be as
+  // good as acting on it once, and a file that is not there is a deletion that has already happened.
+  it("should acknowledge a file that is already gone, and raise nothing", () => {
     const root = tempRoot();
     fs.mkdirSync(conversationDir(root, CONVERSATION), { recursive: true });
 
-    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD] })).toBe(0);
+    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD] })).toEqual({ deleted: [UPLOAD], failed: [] });
   });
 
-  it("should do nothing when the conversation has no directory at all", () => {
-    expect(deleteUploads({ root: tempRoot(), conversationId: CONVERSATION, uploadIds: [UPLOAD] })).toBe(0);
+  // Otherwise the hub would ask for ever: nothing on this disk will ever name the file, so nothing would answer.
+  it("should acknowledge every id when the conversation has no directory at all", () => {
+    expect(deleteUploads({ root: tempRoot(), conversationId: CONVERSATION, uploadIds: [UPLOAD, OTHER_UPLOAD] })).toEqual({
+      deleted: [UPLOAD, OTHER_UPLOAD],
+      failed: []
+    });
   });
 
   // Matched on the id prefix rather than by rebuilding the name, because the name came from a frame sent when the
@@ -653,11 +658,13 @@ describe("deleteUploads", () => {
     const root = tempRoot();
     const odd = written(root, UPLOAD, "a_quite_different_name.txt");
 
-    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD] })).toBe(1);
+    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD] })).toEqual({ deleted: [UPLOAD], failed: [] });
     expect(fs.existsSync(odd)).toBe(false);
   });
 
-  it("should carry on with the rest, saying so, when one file cannot be deleted", () => {
+  // The one id it must not acknowledge: the copy the person asked about is still on the volume, so the hub has to
+  // keep the request and ask again rather than tell them it was deleted.
+  it("should leave a file it could not delete unacknowledged, and carry on with the rest", () => {
     const root = tempRoot();
     written(root, UPLOAD);
     const second = written(root, OTHER_UPLOAD);
@@ -672,7 +679,10 @@ describe("deleteUploads", () => {
       }
     };
 
-    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD, OTHER_UPLOAD], fs: broken, say: (m) => said.push(m) })).toBe(1);
+    expect(deleteUploads({ root, conversationId: CONVERSATION, uploadIds: [UPLOAD, OTHER_UPLOAD], fs: broken, say: (m) => said.push(m) })).toEqual({
+      deleted: [OTHER_UPLOAD],
+      failed: [UPLOAD]
+    });
     expect(fs.existsSync(second)).toBe(false);
     expect(said.join("\n")).toContain("read-only volume");
   });

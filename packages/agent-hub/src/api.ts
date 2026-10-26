@@ -180,12 +180,20 @@ export type ConversationSummary = { id: string };
 
 export type ConversationsResponse = { conversations: ConversationSummary[] };
 
-/** What this pod holds on its own volume: the uploads' share, the whole volume, and the largest files by id. */
+/**
+ * What this pod holds on its own volume, and which deletions it has carried out: the uploads' share, the whole
+ * volume, how many files there are, the largest of them by id, and the ids whose copies are now gone.
+ *
+ * `deleted` is the only thing that ends a deletion request. Absence from `files` means nothing, since that list is
+ * capped at the largest `MAX_REPORTED_FILES`.
+ */
 export type UploadsReportBody = {
   uploads_bytes: number;
   volume_used_bytes: number;
   volume_total_bytes: number;
+  files_total: number;
   files: { upload_id: string; bytes: number }[];
+  deleted: string[];
 };
 
 export type RegisterResponse = { agent_id: string; name: string };

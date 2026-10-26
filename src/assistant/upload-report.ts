@@ -62,6 +62,27 @@ export function readReportedFiles(value: unknown): ReportedFile[] {
   return files;
 }
 
+/**
+ * The deletions a report acknowledges: the ids whose copies the pod has confirmed are gone.
+ *
+ * This and nothing else is what ends a deletion request. A file's **absence from `files`** means nothing, because
+ * that list is the largest `MAX_REPORTED_FILES` and a file outside it is unnamed while sitting on the volume — so
+ * clearing by omission would mark a request done for a file the pod still has, and a report that named no files at
+ * all would mark every one of them done. Positive acknowledgement is the one rule here that cannot rot.
+ */
+export function readAcknowledged(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const ids = new Set<string>();
+  for (const entry of value.slice(0, MAX_DELETED_PER_FRAME)) {
+    if (typeof entry === "string" && UUID.test(entry)) {
+      ids.add(entry.toLowerCase());
+    }
+  }
+  return [...ids];
+}
+
 const UNITS = ["bytes", "KB", "MB", "GB", "TB"] as const;
 
 /**
@@ -117,8 +138,10 @@ export interface UploadsReportRow {
  * What to show for the pod's disk. A report is shown whenever there is one, even from a stopped pod — the files are
  * still on the volume — but it says so, because nothing will move the figures until the pod is back.
  *
- * Without one the reason is the client first and the pod's state second: a pod running an older client would
- * otherwise read as one that is merely slow to answer, and the person would wait for a report that cannot come.
+ * Without one the pod's state is asked first and its client second. An assistant that is not running has no session
+ * at all, so there is no client to have a claim either way, and "running an older version" would be a guess about a
+ * pod that has never been up. Once it *is* running, the client comes first: a pod on an older build would otherwise
+ * read as one that is merely slow to answer, and the person would wait for a report that cannot come.
  */
 export function uploadsDisk(row: UploadsReportRow): UploadsDisk {
   if (row.uploadsReportedAt !== null && row.uploadsBytes !== null && row.volumeUsedBytes !== null && row.volumeTotalBytes !== null) {
@@ -131,10 +154,10 @@ export function uploadsDisk(row: UploadsReportRow): UploadsDisk {
       stopped: !row.running
     };
   }
-  if (!row.reports) {
-    return { reported: false, reason: "older_client" };
+  if (!row.running) {
+    return { reported: false, reason: "not_running" };
   }
-  return { reported: false, reason: row.running ? "waiting" : "not_running" };
+  return { reported: false, reason: row.reports ? "waiting" : "older_client" };
 }
 
 /** One of the pod's files as the Files section lists it. */

@@ -66,10 +66,13 @@ describe("measureUploads", () => {
       uploads_bytes: 12288,
       volume_used_bytes: 30 * 1024 ** 3,
       volume_total_bytes: 32 * 1024 ** 3,
+      files_total: 2,
       files: [
         { upload_id: UPLOAD, bytes: 8192 },
         { upload_id: OTHER_UPLOAD, bytes: 4096 }
-      ]
+      ],
+      // A measurement acknowledges nothing; `reportUploads` is given whatever a deletion confirmed.
+      deleted: []
     });
   });
 
@@ -101,13 +104,18 @@ describe("measureUploads", () => {
     expect(measureUploads({ root, fs: withVolume(0, 1024 ** 3) })).toMatchObject({ uploads_bytes: 512, files: [] });
   });
 
-  it("should keep only as many files as one report carries when the pod holds more", () => {
+  // The cap is on what it names, not on what it counts: the hub needs the total to say a list was cut only when it
+  // was, and the byte figures are of everything either way.
+  it("should name only as many files as one report carries, and still count them all, when the pod holds more", () => {
     const root = tempRoot();
     for (let index = 0; index < MAX_REPORTED_FILES + 3; index += 1) {
       write(root, CONVERSATION, `aaaaaaaa-bbbb-cccc-dddd-${String(index).padStart(12, "0")}`, index + 1);
     }
 
-    expect(measureUploads({ root, fs: withVolume(0, 1024 ** 3) })?.files).toHaveLength(MAX_REPORTED_FILES);
+    const report = measureUploads({ root, fs: withVolume(0, 1024 ** 3) });
+
+    expect(report?.files).toHaveLength(MAX_REPORTED_FILES);
+    expect(report?.files_total).toBe(MAX_REPORTED_FILES + 3);
   });
 
   // A volume of zero shown as fact would have the hub report a full disk as empty, with nothing saying it was a
@@ -149,7 +157,24 @@ describe("reportUploads", () => {
     const report = await reportUploads({ api, id: "va-1", root, fs: withVolume(1024, 4096) });
 
     expect(sent).toEqual([["va-1", report]]);
-    expect(report).toMatchObject({ uploads_bytes: 2048, volume_used_bytes: 1024, volume_total_bytes: 4096 });
+    expect(report).toMatchObject({ uploads_bytes: 2048, volume_used_bytes: 1024, volume_total_bytes: 4096, deleted: [] });
+  });
+
+  // The hub clears a deletion request on this and nothing else, so it has to be what the pod was given rather than
+  // anything inferred from the files it happens to be naming.
+  it("should carry the deletions it was given, beside the measurement, when it reports", async () => {
+    const sent: UploadsReportBody[] = [];
+    const api = {
+      putUploads: async (_id: string, body: UploadsReportBody) => {
+        sent.push(body);
+        return null;
+      }
+    };
+
+    await reportUploads({ api, id: "va-1", root: tempRoot(), fs: withVolume(0, 4096), deleted: [UPLOAD, OTHER_UPLOAD] });
+
+    expect(sent[0]?.deleted).toEqual([UPLOAD, OTHER_UPLOAD]);
+    expect(sent[0]?.files).toEqual([]);
   });
 
   it("should send nothing when there was nothing it could measure", async () => {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
+import { MAX_DELETED_PER_FRAME, MAX_REPORTED_FILES } from "./upload-report.ts";
 
 /** Request bodies of the Assistant mode section of `docs/agent-api.md`, and the limits the web UI shares. */
 
@@ -31,14 +32,22 @@ export const sessionsReportBody = z.object({
 
 export type SessionsReport = z.infer<typeof sessionsReportBody>;
 
+const wholeCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
 /**
- * What the pod says its own volume holds. The figures are refused when they are not whole non-negative byte counts,
- * because a wrong number shown as fact is worse than none; the `files` list is read leniently in
- * `readReportedFiles`, since the totals are what the person is told and one unreadable entry must not lose them.
+ * What the pod says its own volume holds, and which deletions it has carried out.
+ *
+ * Every figure is refused when it is not a whole non-negative count, because a wrong number shown as fact is worse
+ * than none. `files` and `deleted` have to be **present arrays** for the same reason: leaving one out would read as
+ * an authoritative empty list, and `deleted` empty is what tells the hub a deletion is still outstanding. Their
+ * entries are read leniently in `readReportedFiles` and `readAcknowledged`, since one unreadable id must not lose a
+ * whole report.
  */
 export const uploadsReportBody = z.object({
-  uploads_bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  volume_used_bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  volume_total_bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  files: z.unknown().nullish()
+  uploads_bytes: wholeCount,
+  volume_used_bytes: wholeCount,
+  volume_total_bytes: wholeCount,
+  files_total: wholeCount,
+  files: z.array(z.unknown()).max(MAX_REPORTED_FILES),
+  deleted: z.array(z.unknown()).max(MAX_DELETED_PER_FRAME)
 });

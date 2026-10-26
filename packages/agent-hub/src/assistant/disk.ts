@@ -83,28 +83,37 @@ export function measureUploads({ root, fs = nodeFs as DiskFs, env = process.env,
     uploads_bytes: uploadsBytes,
     volume_used_bytes: volume.used,
     volume_total_bytes: volume.total,
-    files: files.slice(0, MAX_REPORTED_FILES)
+    // How many there are, so the hub says a list was cut only when it was. The cap is on what is named, not counted.
+    files_total: files.length,
+    files: files.slice(0, MAX_REPORTED_FILES),
+    deleted: []
   };
 }
 
 export type ReportUploadsOptions = UploadsDiskOptions & {
   api: { putUploads: (virtualId: string, body: UploadsReportBody) => Promise<null> };
   id: string;
+  /** The deletions to acknowledge with this report: the ids whose copies this pod has confirmed are gone. */
+  deleted?: readonly string[];
 };
 
 /**
- * Measures and reports. Answers what it sent, or `undefined` when there was nothing to send or the hub refused it.
+ * Measures and reports, acknowledging whatever deletions it is given. Answers what it sent, or `undefined` when
+ * there was nothing to send or the hub refused it.
  *
  * A failed report is not retried here: the next reconcile measures again, and figures 10 minutes old are better than
  * figures from a retry of a measurement that is by then stale. The hub's own wording is what keeps that honest — it
- * always says when the pod last reported rather than presenting the numbers as current.
+ * always says when the pod last reported rather than presenting the numbers as current. A lost acknowledgement costs
+ * nothing either: the hub asks for the deletion again when this pod's stream next opens, and deleting a file that is
+ * already gone is a deletion that has happened.
  */
-export async function reportUploads({ api, id, ...options }: ReportUploadsOptions): Promise<UploadsReportBody | undefined> {
+export async function reportUploads({ api, id, deleted = [], ...options }: ReportUploadsOptions): Promise<UploadsReportBody | undefined> {
   const say = options.say ?? (() => {});
-  const report = measureUploads(options);
-  if (report === undefined) {
+  const measured = measureUploads(options);
+  if (measured === undefined) {
     return undefined;
   }
+  const report = { ...measured, deleted: [...deleted] };
   try {
     await api.putUploads(id, report);
     return report;
