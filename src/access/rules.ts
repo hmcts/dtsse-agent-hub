@@ -16,9 +16,9 @@
  *   as its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.
  * - An HMCTS Assistant conversation, and the agent its sessions run as, are its owner's alone: no grant extends to
  *   either, since the conversation is a private chat rather than a session they chose to share. Nor to a file
- *   attached to one of its messages: only the person who uploaded it may add parts to it or discard it, and only the
- *   session of the conversation it was attached to may fetch its bytes. Nor to the person's saved Assistant
- *   templates, which only they read or change.
+ *   attached to one of its messages: only the person who uploaded it may add parts to it, discard it or download it
+ *   back, and only the session of the conversation it was attached to may fetch its bytes. Nor to the person's saved
+ *   Assistant templates, which only they read or change.
  * - A conversation its owner may nonetheless share, read-only, with people they name one at a time. A recipient
  *   reads the thread and the document on the share's own page and can do nothing else: not send, stop an answer,
  *   rename, delete, edit the document, download an attachment, search for the chat, or watch it live. The share does
@@ -234,6 +234,39 @@ export function canSessionUseAttachment(conversationId: string | null, upload: U
     return false;
   }
   return use === "part" ? upload.state === "stored" : upload.state === "stored" || upload.state === "fetched";
+}
+
+/**
+ * Whether the person may download their file back, and when not, which of the two refusals they get.
+ *
+ * `not_yours` is the same answer an upload that never existed gets, as every other upload rule gives: an id is not
+ * worth confirming. `not_held` is the opposite — it is this person's own file, so they are told plainly that the hub
+ * no longer has the bytes, and `src/components/assistant/MessageAttachments.tsx` offers no download when it would
+ * come back this way.
+ */
+export type AttachmentDownload = "ok" | "not_yours" | "not_held";
+
+/**
+ * Whether `viewerOid` may download an upload's bytes back. Their own file, in a state whose bytes are complete and
+ * still in Postgres, and inside the retention window that `heldUntil` closes.
+ *
+ * A third rule rather than a third `AttachmentUse`: that one is the conversation's session asking, and it refuses
+ * `fetched` because a pod has no business re-reading a file it has already written to its own disk. This is the
+ * person asking, and `fetched` is the state nearly every download is served in — the bytes outlive the pod's report
+ * now, and only the window takes them.
+ *
+ * The window decides rather than the state, because the sweep that sets `expired` runs on a timer: a row it has not
+ * reached yet is past its window and is refused as though it had.
+ */
+export function attachmentDownload(viewerOid: string, upload: UploadRef, heldUntil: Date, now: Date): AttachmentDownload {
+  if (viewerOid !== upload.ownerOid) {
+    return "not_yours";
+  }
+  // `pending` is here too: its parts are incomplete, so what it would serve is a file with holes in it.
+  if ((upload.state !== "stored" && upload.state !== "fetched") || now.getTime() >= heldUntil.getTime()) {
+    return "not_held";
+  }
+  return "ok";
 }
 
 export type AgentAccess = "owner" | "write" | "read" | "none";

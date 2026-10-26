@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { sharedThreadItems } from "./sharing.ts";
 import type { ThreadItem } from "./thread.ts";
 
-const ATTACHMENT = { id: "upload-1", name: "medical-report.pdf", bytes: 2048, media_type: "application/pdf" };
+const ATTACHMENT = {
+  id: "upload-1",
+  name: "medical-report.pdf",
+  bytes: 2048,
+  media_type: "application/pdf",
+  available_until: "2026-10-26T09:00:00.000Z"
+};
 
 const user = (overrides: Partial<Extract<ThreadItem, { type: "user" }>> = {}): ThreadItem => ({
   type: "user",
@@ -49,7 +55,13 @@ describe("sharedThreadItems", () => {
     expect(sharedThreadItems([user({ delivery: "expired" })])[0]).not.toHaveProperty("delivery");
   });
 
-  it("should carry nothing of an upload's size or type, whatever was attached", () => {
-    expect(JSON.stringify(sharedThreadItems([user({ attachments: [ATTACHMENT] })]))).not.toContain("application/pdf");
+  // Every field of the attachment, not a chosen few: a count is all a share carries, so a field the attachment grows
+  // has nowhere to arrive. `available_until` is one such — it is how long the owner may still download the file.
+  it("should carry no field of an upload at all, whatever was attached", () => {
+    const shared = JSON.stringify(sharedThreadItems([user({ attachments: [ATTACHMENT] })]));
+
+    for (const value of Object.values(ATTACHMENT)) {
+      expect(shared).not.toContain(String(value));
+    }
   });
 });

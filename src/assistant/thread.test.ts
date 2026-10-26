@@ -100,7 +100,7 @@ describe("activityLabel", () => {
 describe("threadItems attachments", () => {
   it("should carry the files on a message through to its user item", () => {
     // Arrange
-    const attachments = [{ id: "u1", name: "letter.pdf", bytes: 1024, media_type: "application/pdf" }];
+    const attachments = [{ id: "u1", name: "letter.pdf", bytes: 1024, media_type: "application/pdf", available_until: "2026-10-21T12:00:00.000Z" }];
     const asked: ThreadMessage = { ...person("What does this say?", T(1)), attachments };
 
     // Act

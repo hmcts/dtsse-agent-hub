@@ -4,6 +4,7 @@ import { setGrant } from "../../src/access/load.ts";
 import { GET as agentsRoster } from "../../src/app/api/agent/agents/route.ts";
 import { GET as people } from "../../src/app/api/ui/people/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
+import { GET as attachmentContent } from "../../src/app/api/ui/uploads/[uploadId]/content/route.ts";
 import { shareRecipients } from "../../src/assistant/shares.ts";
 import { ensureAssistant, readArtefact, writeArtefact } from "../../src/assistant/store.ts";
 import { conversationMatches } from "../../src/assistant/views.ts";
@@ -52,6 +53,11 @@ function settle(): Promise<void> {
 
 function request(as: string, path: string): NextRequest {
   return new NextRequest(`http://localhost:3000${path}`, { headers: { cookie: `ah_dev_persona=${as}` } });
+}
+
+/** One person asking `GET /api/ui/uploads/{id}/content` for an attachment's bytes. */
+function download(uploadId: string, as: string): Promise<Response> {
+  return attachmentContent(request(as, `/api/ui/uploads/${uploadId}/content`), { params: Promise.resolve({ uploadId }) });
 }
 
 /** Alice's chat, with one question, one answer and a document. */
@@ -257,27 +263,57 @@ describe("reading a shared conversation", () => {
     expect(shown).not.toContain("the contents of the private notes");
   });
 
-  it("should name no attachment of a shared message, only how many there were", async () => {
-    const { id, agentId } = await chat();
+  /** A file on the chat's first message, as a person's attachment reaches the thread. */
+  async function attach(conversationId: string, agentId: string, mediaType = "application/pdf"): Promise<string> {
     const message = await prisma.message.findFirstOrThrow({ where: { targetAgentId: agentId }, select: { id: true } });
-    await prisma.assistantUpload.create({
+    const upload = await prisma.assistantUpload.create({
       data: {
-        conversationId: id,
+        conversationId,
         ownerOid: ALICE.oid,
         messageId: message.id,
         fileName: "medical-report.pdf",
         storedName: "medical-report.pdf",
-        mediaType: "application/pdf",
+        mediaType,
         bytes: 2048,
         state: "fetched"
-      }
+      },
+      select: { id: true }
     });
+    return upload.id;
+  }
+
+  it("should name no attachment of a shared message, only how many there were", async () => {
+    const { id, agentId } = await chat();
+    await attach(id, agentId);
     await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
 
     const view = await sharedChat(viewerOf(BOB), id);
 
     expect(view?.thread[0]).toMatchObject({ type: "user", attachmentCount: 1 });
     expect(JSON.stringify(view)).not.toContain("medical-report.pdf");
+  });
+
+  /**
+   * Sharing and the download of an attached file were built separately, and this is the pair that matters most: the
+   * download echoes back the media type the uploading browser claimed, which is safe only while the one person who
+   * can ask for it is the person who chose the file. A recipient reaching it with a `text/html` attachment would be
+   * stored scripting against them, from this origin. `attachmentDownload` keeps the route the owner's, and the shared
+   * view offers no link to it.
+   */
+  it("should refuse a recipient the bytes of a file attached to the chat they can read", async () => {
+    const { id, agentId } = await chat();
+    const uploadId = await attach(id, agentId, "text/html");
+    await prisma.assistantUploadPart.create({ data: { uploadId, index: 0, data: Buffer.from("<script>alert(1)</script>") } });
+    await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
+
+    const asOwner = await download(uploadId, "alice");
+    const asRecipient = await download(uploadId, "bob");
+    const asStranger = await download(uploadId, "carol");
+
+    expect(asOwner.status).toBe(200);
+    expect(asRecipient.status).toBe(404);
+    expect(asStranger.status).toBe(404);
+    expect(await asRecipient.text()).not.toContain("script");
   });
 });
 
