@@ -23,7 +23,7 @@ const AT = new Date("2026-10-30T09:00:00.000Z");
 const LIMIT = 8 * 1024 ** 3;
 
 /** A `SizeResources` memory figure as bytes, so the checks below compare it against the constants in their own unit. */
-const requestedBytes = (gi: string) => Number(gi.replace("Gi", "")) * 1024 ** 3;
+const giBytes = (gi: string) => Number(gi.replace("Gi", "")) * 1024 ** 3;
 
 function row(overrides: Partial<MemoryReportRow> = {}): MemoryReportRow {
   return {
@@ -111,6 +111,28 @@ describe("memoryUse", () => {
   });
 });
 
+/** A size's memory limit in bytes, out of the table the orchestrator applies rather than written out here. */
+function limitOf(size: (typeof VIRTUAL_AGENT_SIZES)[number]): number {
+  return giBytes(SIZE_RESOURCES[size].limits.memory);
+}
+
+/**
+ * A report from a pod of `size` holding `chats` conversations and nothing unusual, with both figures that count page
+ * cache pinned at the limit so neither of them can be what decides.
+ */
+function holdingChats(size: (typeof VIRTUAL_AGENT_SIZES)[number], chats: number): MemoryUse {
+  const limit = limitOf(size);
+  return {
+    reported: true,
+    limitBytes: limit,
+    currentBytes: limit,
+    peakBytes: limit,
+    anonBytes: POD_BASELINE_MEMORY_BYTES + chats * CONVERSATION_MEMORY_BYTES,
+    at: AT.toISOString(),
+    stopped: false
+  };
+}
+
 describe("memoryPressure", () => {
   // In bytes rather than through the constant, because the threshold is a measured cost: a test that reads it back
   // from `CONVERSATION_MEMORY_BYTES` holds either side of the boundary wherever the constant happens to sit.
@@ -134,18 +156,24 @@ describe("memoryPressure", () => {
    */
   it.each(VIRTUAL_AGENT_SIZES)("should stay quiet for a %s pod holding its whole complement of chats", (size) => {
     const chats = CONVERSATION_SESSIONS[size];
-    const limit = requestedBytes(SIZE_RESOURCES[size].limits.memory);
-    const full: MemoryUse = {
-      reported: true,
-      limitBytes: limit,
-      currentBytes: limit,
-      peakBytes: limit,
-      anonBytes: POD_BASELINE_MEMORY_BYTES + chats * CONVERSATION_MEMORY_BYTES,
-      at: AT.toISOString(),
-      stopped: false
-    };
 
-    expect(memoryPressure(full, chats, size)).toBeUndefined();
+    expect(memoryPressure(holdingChats(size, chats), chats, size)).toBeUndefined();
+  });
+
+  /**
+   * **Where the two actually meet**, which is what `memoryPressure`'s comment states as a formula.
+   *
+   * The comment above only pins today's caps, and a wrong formula sat beside it for a round because of that: it had
+   * `limit − 2 × CONVERSATION_MEMORY_BYTES` where the algebra gives `limit − POD_BASELINE_MEMORY_BYTES −
+   * CONVERSATION_MEMORY_BYTES`, which overstates at every size, and no cap is anywhere near the bound so nothing
+   * failed. This computes the bound the same way the comment claims it and checks both sides of it, so the formula is
+   * pinned rather than the caps — a cap rise cannot invalidate it, and a wrong formula cannot survive it.
+   */
+  it.each(VIRTUAL_AGENT_SIZES)("should start warning a %s pod one chat past the bound in memoryPressure", (size) => {
+    const bound = Math.floor((limitOf(size) - POD_BASELINE_MEMORY_BYTES - CONVERSATION_MEMORY_BYTES) / CONVERSATION_MEMORY_BYTES);
+
+    expect(memoryPressure(holdingChats(size, bound), bound, size)).toBeUndefined();
+    expect(memoryPressure(holdingChats(size, bound + 1), bound + 1, size)).toBeDefined();
   });
 
   // Page cache is reclaimed at the limit rather than given back, so a pod that has read its 6.8GiB workspace clone
@@ -293,7 +321,7 @@ describe("sizeOffers", () => {
   // constants rather than restating them — a figure written in here passes at whatever they are later re-measured
   // to, which is the failure the worked tables elsewhere already had.
   it.each(sizeOffers())("should keep $size's full complement of chats inside the memory it requests", ({ chats, requests }) => {
-    expect(POD_BASELINE_MEMORY_BYTES + chats * CONVERSATION_MEMORY_BYTES).toBeLessThanOrEqual(requestedBytes(requests));
+    expect(POD_BASELINE_MEMORY_BYTES + chats * CONVERSATION_MEMORY_BYTES).toBeLessThanOrEqual(giBytes(requests));
   });
 
   // The other side of it for `small` alone, which is what makes 4 a ceiling there and not a bound that happens to
@@ -303,7 +331,7 @@ describe("sizeOffers", () => {
   it("should have no room inside small's request for a chat beyond its cap", () => {
     const { chats, requests } = sizeOffer("small");
 
-    expect(POD_BASELINE_MEMORY_BYTES + (chats + 1) * CONVERSATION_MEMORY_BYTES).toBeGreaterThan(requestedBytes(requests));
+    expect(POD_BASELINE_MEMORY_BYTES + (chats + 1) * CONVERSATION_MEMORY_BYTES).toBeGreaterThan(giBytes(requests));
   });
 });
 

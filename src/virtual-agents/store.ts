@@ -730,10 +730,17 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
       let launchToken: string | undefined;
       if (row.desired === "running" && (!row.has_token || STARTING_FROM.includes(row.status) || failedToApply(row))) {
         const minted = mintLaunchToken();
-        // The memory report goes with the token. Every reason to mint one is a new pod coming up, and two of them —
-        // an agent with no token, and `failedToApply`, which makes the reconcile apply afresh rather than leave the
-        // pod it has — reach here without any owner request to have cleared the figures first. Clearing again on the
-        // paths that did is free, and makes "a token this pod minted" and "figures this pod reported" the same thing.
+        // The memory report goes with the token, so that "a token this pod minted" and "figures this pod reported"
+        // are the same thing. A pod can only boot with a token, so nothing brings one up without passing here, which
+        // is what makes that invariant hold rather than depending on every owner-facing path remembering to clear.
+        //
+        // Not every mint is a replacement, and this clears either way. `failedToApply` is reached by an apply that
+        // failed before it touched the pod at all — `expose` runs first, so a `403` listing services fails the apply
+        // with the pod still running — and five of those make the next claim mint for a pod nobody is replacing. The
+        // clear is near enough inert there: the mint itself, which predates this, has already cut that pod off from
+        // the hub, since there is one `launchTokenHash` and no grace for the value before it. So "we have not heard"
+        // is exactly what the hub will accept from it from now on, where keeping the figures would freeze the last
+        // ones and any warning computed from them.
         await tx.virtualAgent.update({
           where: { id: row.id },
           data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now, ...NO_MEMORY_REPORT }

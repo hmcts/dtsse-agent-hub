@@ -121,9 +121,9 @@ export interface MemoryReportRow {
  * **Nothing here can tell whose pod a report came from**, so nothing here tries. What keeps a report this pod's is in
  * `virtual-agents/store.ts`: every path that asks for a new or replacement pod drops the report (`NO_MEMORY_REPORT`),
  * and wherever the pod being replaced is still running it drops that pod's launch token too (`NO_TOKEN`), so the old
- * figures go and nothing can put them back. Stopping is not one of those paths and keeps the figures deliberately,
- * even though it bumps `pod_generation` as well. A pod reports phase `running` before its supervisor starts, so what
- * is left is a gap with no report rather than one with the wrong report.
+ * figures go and nothing can put them back. Stopping, deleting and the sweep's auto-stop are not those paths and keep
+ * the figures deliberately, though all three bump `pod_generation` too. A pod reports phase `running` before its
+ * supervisor starts, so what is left is a gap with no report rather than one with the wrong report.
  *
  * The case none of that covers is a pod replaced without the hub asking — the kubelet restarting one after the OOM
  * kill this warning is about, where no row changed at all. The pod's report as it boots bounds that to the new
