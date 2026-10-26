@@ -726,7 +726,7 @@ describe("createApi stream", () => {
     expect(error.body).toEqual({ error: "stream refused" });
   });
 
-  it("should throw with no body when the refusal is not JSON", async () => {
+  it("should throw holding the text when the refusal is not JSON", async () => {
     // Arrange
     const { fetchImpl } = recordingFetch(() => new Response("nope", { status: 500 }));
     const stubbed = createApi({ env: {}, baseUrl: "https://hub.example.net", devUser: DEV_USER, fetchImpl });
@@ -736,6 +736,20 @@ describe("createApi stream", () => {
 
     // Assert
     expect(error.status).toBe(500);
-    expect(error.body).toBeNull();
+    expect(error.body).toEqual({ error: "nope" });
+  });
+
+  it("should let a stream opened against a service without the route be recognised as one", async () => {
+    // Arrange: a client newer than the service it is talking to meets this on a stream as readily as anywhere
+    // else, so the stream has to read an unparseable body rather than discard it.
+    const { fetchImpl } = recordingFetch(() => new Response(ERROR_PAGE, { status: 404 }));
+    const stubbed = createApi({ env: {}, baseUrl: "https://hub.example.net", devUser: DEV_USER, fetchImpl });
+
+    // Act
+    const error = await stubbed.stream(agentId).catch((e) => e);
+
+    // Assert
+    expect(isMissingRoute(error)).toBe(true);
+    expect(error.message).toBe(`GET /api/agent/${agentId}/stream failed: 404`);
   });
 });

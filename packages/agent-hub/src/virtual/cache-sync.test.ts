@@ -91,6 +91,25 @@ describe("cacheSync --once", () => {
     expect(storedAtlassian()).toMatch(new RegExp(`^oauth-refresh-token=${TWG_REFRESH}-by-claude$`, "m"));
   });
 
+  it("should store the twg sign-in before the Azure cache, so the one that cannot be recovered goes first", async () => {
+    // Arrange: on SIGTERM the pass shares the pod's last 60 seconds, and only the twg sign-in is unrecoverable
+    // if it is lost — Atlassian takes only the newest refresh token, where a stale MSAL cache still refreshes.
+    const env = pod.env();
+    pod.seedTwg(env);
+    await syncAtlassianAuth({ api: api(), id: VID, env, force: true });
+    writeAzureCache(env, JSON.stringify(msalCache()));
+    fs.writeFileSync(path.join(env.TWG_CONFIG_DIR as string, "auth.conf"), twgAuthConf({ refresh: `${TWG_REFRESH}-by-claude` }));
+    hub.calls.length = 0;
+
+    // Act
+    const result = await cacheSync({ api: api(), env, once: true });
+
+    // Assert
+    expect(result).toEqual({ azure: "stored", atlassian: "stored" });
+    const stores = hub.calls.filter((c) => c.method === "PUT" && /\/credentials\/(atlassian|azure)$/.test(c.path)).map((c) => c.path.split("/").pop());
+    expect(stores).toEqual(["atlassian", "azure"]);
+  });
+
   it("should report the twg sign-in as an error when auth.conf has lost its refresh token", async () => {
     // Arrange
     const env = pod.env();

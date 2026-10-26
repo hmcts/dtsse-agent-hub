@@ -228,6 +228,23 @@ export type TranscriptResponse = { accepted: number };
 export type CredentialResponse = { value: string };
 export type LoginCodeResponse = { code: string };
 
+/**
+ * How every call in this module reads a response body: the service's JSON, or — when it sent something that is
+ * not JSON at all, such as a page — the first of that text under `error`. Streams read theirs this way too,
+ * rather than discarding a body they cannot parse, because a client talking to a service older than itself meets
+ * an unmatched path on a stream as readily as anywhere else and `isMissingRoute` has to be able to tell.
+ */
+const readBody = (text: string): ApiErrorBody | null => {
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text) as ApiErrorBody;
+  } catch {
+    return { error: text.slice(0, 200) };
+  }
+};
+
 // A body that came back as a page rather than this service's JSON: whatever a route of its own answers with, it
 // is never markup. Kept off the message, because a Next.js error document says nothing the status does not and
 // any slice of one is markup in a log; the body is still on the error for a caller that wants it.
@@ -247,9 +264,9 @@ export class ApiError extends Error {
 
 /**
  * Whether the service has no such route at all, rather than a route of its own that refused: an unmatched path
- * answers with the app's own not-found page, where a route sends `{ error }`. A client published ahead of the
- * deploy that carries its route sees this from every hub still on the older image, which is a deploy catching
- * up rather than a fault.
+ * answers with the app's own not-found page, where a route sends `{ error }` (`docs/agent-api.md`). A client
+ * published ahead of the deploy that carries its route sees this from every hub still on the older image, which
+ * is a deploy catching up rather than a fault.
  */
 export const isMissingRoute = (error: unknown): boolean => error instanceof ApiError && error.status === 404 && isErrorPage(error.body);
 
@@ -422,15 +439,7 @@ export function createApi({
       init.body = JSON.stringify(body);
     }
     const res = await fetchImpl(`${base}${path}`, init);
-    const text = await res.text();
-    let json: unknown = null;
-    if (text) {
-      try {
-        json = JSON.parse(text);
-      } catch {
-        json = { error: text.slice(0, 200) };
-      }
-    }
+    const json: unknown = readBody(await res.text());
     if (!res.ok) {
       throw new ApiError(res.status, json as ApiErrorBody | null, method, path);
     }
@@ -459,11 +468,11 @@ export function createApi({
   async function requestBytes(path: string, timeoutMs = PART_TIMEOUT_MS): Promise<Uint8Array> {
     const res = await fetchImpl(`${base}${path}`, { headers: await headers(), signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) {
-      let json: ApiErrorBody | null = null;
+      let text = "";
       try {
-        json = { error: (await res.text()).slice(0, 200) };
+        text = await res.text();
       } catch {}
-      throw new ApiError(res.status, json, "GET", path);
+      throw new ApiError(res.status, readBody(text), "GET", path);
     }
     return new Uint8Array(await res.arrayBuffer());
   }
@@ -475,11 +484,11 @@ export function createApi({
     }
     const res = await fetchImpl(`${base}${path}`, { headers: h, signal });
     if (!res.ok) {
-      let json: ApiErrorBody | null = null;
+      let text = "";
       try {
-        json = (await res.json()) as ApiErrorBody;
+        text = await res.text();
       } catch {}
-      throw new ApiError(res.status, json, "GET", path);
+      throw new ApiError(res.status, readBody(text), "GET", path);
     }
     return res;
   }

@@ -85,6 +85,8 @@ const rotatedTo = (n: number) => new RegExp(`^oauth-refresh-token=${TWG_REFRESH}
 const v139 = (extra: Record<string, string> = {}) => pod.env({ FAKE_TWG_VERSION: "1.3.9", ...extra });
 type StoredProfiles = { profiles: { createdAt?: string; credentials: { primary: { oauthAccessToken: string; oauthRefreshToken: string } } }[] };
 const storedProfile = () => (JSON.parse(storedAtlassian()) as StoredProfiles).profiles[0];
+/** Takes the real backoff out of a test that is about how many attempts are made, not how long they take. */
+const noWait = () => Promise.resolve();
 
 describe("parseTwgDeviceCode", () => {
   it("should read the code through the colour codes and box drawing twg prints it inside", () => {
@@ -359,7 +361,7 @@ describe("syncAtlassianAuth", () => {
     };
 
     // Act
-    const result = await syncAtlassianAuth({ api: rolling, id: VID, env, refresh: true });
+    const result = await syncAtlassianAuth({ api: rolling, id: VID, env, refresh: true, wait: noWait });
 
     // Assert
     expect(result).toBe("stored");
@@ -606,7 +608,7 @@ describe("atlassianLogin", () => {
     };
 
     // Act
-    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: older, env: pod.env({ FAKE_TWG_LOGIN: "deny" }) }));
+    const { result, stderr } = await captureStderr(() => atlassianLogin({ api: older, env: pod.env({ FAKE_TWG_LOGIN: "deny" }), wait: noWait }));
 
     // Assert
     expect(result).toBe("not-signed-in");
@@ -623,7 +625,7 @@ describe("atlassianLogin", () => {
     };
 
     // Act
-    const { stderr } = await captureStderr(() => atlassianLogin({ api: broken, env: pod.env({ FAKE_TWG_LOGIN: "deny" }) }));
+    const { stderr } = await captureStderr(() => atlassianLogin({ api: broken, env: pod.env({ FAKE_TWG_LOGIN: "deny" }), wait: noWait }));
 
     // Assert
     expect(stderr).toMatch(/could not tell agent-hub the sign-in was not completed \(.*500 could not record the sign-in\)/);
