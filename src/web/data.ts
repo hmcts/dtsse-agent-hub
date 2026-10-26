@@ -5,9 +5,10 @@ import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
-import { conversationAgent, ensureAssistant, findConversation } from "../assistant/store.ts";
+import { conversationAgent, ensureAssistant, findAssistant, findConversation } from "../assistant/store.ts";
 import { listTemplates } from "../assistant/template-store.ts";
 import type { SavedTemplate } from "../assistant/templates.ts";
+import { type UploadsOnDisk, uploadsOnDisk } from "../assistant/upload-disk.ts";
 import {
   type AssistantSummary,
   assistantSummary,
@@ -329,6 +330,18 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
  */
 export async function unsentNewChat(viewer: Viewer): Promise<UnsentChat | undefined> {
   return await unsentChat(prisma, viewer.oid);
+}
+
+/**
+ * What the viewer's assistant holds on its own volume, for the settings dialog's Files section. `undefined` when
+ * they have no assistant at all, which is the one case the section is not offered.
+ *
+ * Its own read rather than part of `openAssistant`, because only the settings dialog uses it and it costs a second
+ * query over the viewer's uploads. The owner check is the store's, through `canManageUploadsOnDisk`.
+ */
+export async function assistantFiles(viewer: Viewer): Promise<UploadsOnDisk | undefined> {
+  const assistant = await findAssistant(prisma, viewer.oid);
+  return assistant === undefined ? undefined : await uploadsOnDisk(prisma, viewer.oid, assistant.id);
 }
 
 /**

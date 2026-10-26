@@ -30,3 +30,15 @@ export const sessionsReportBody = z.object({
 });
 
 export type SessionsReport = z.infer<typeof sessionsReportBody>;
+
+/**
+ * What the pod says its own volume holds. The figures are refused when they are not whole non-negative byte counts,
+ * because a wrong number shown as fact is worse than none; the `files` list is read leniently in
+ * `readReportedFiles`, since the totals are what the person is told and one unreadable entry must not lose them.
+ */
+export const uploadsReportBody = z.object({
+  uploads_bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  volume_used_bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  volume_total_bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  files: z.unknown().nullish()
+});

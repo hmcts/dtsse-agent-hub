@@ -265,6 +265,30 @@ export function attachmentDownload(viewerOid: string, upload: UploadRef, heldUnt
   return "ok";
 }
 
+/**
+ * Whether `viewerOid` may see what a virtual agent's volume holds, and ask for files on it to be deleted. Its owner
+ * alone.
+ *
+ * Its own rule rather than `canViewAgent`'s: a grant is over sessions a person chose to share, and what is on their
+ * assistant's disk is neither a session nor something they shared. Reading is the same decision as deleting, because
+ * the list is of their own attachments and there is nothing about it a reader is entitled to that a deleter is not —
+ * the same reasoning as `canManageTemplate`.
+ */
+export function canManageUploadsOnDisk(viewerOid: string, ownerOid: string): boolean {
+  return viewerOid === ownerOid;
+}
+
+/**
+ * Whether `viewerOid` may ask for the pod's copy of an upload to be deleted: their own upload, and one that reached a
+ * message, since that is the only kind a pod ever fetched.
+ *
+ * Answers the same `false` for someone else's upload as for one the pod could never have had, so the action that asks
+ * it refuses both alike and confirms nothing about an id.
+ */
+export function canRemoveUploadFromDisk(viewerOid: string, upload: UploadRef): boolean {
+  return viewerOid === upload.ownerOid && upload.messageId !== null;
+}
+
 export type AgentAccess = "owner" | "write" | "read" | "none";
 
 /** What the viewer may do with an agent, for the UI to decide what to show: the same answers as the checks above. */

@@ -1,6 +1,7 @@
 import type { EventHub } from "../realtime/hub.ts";
 import { type OnOpen, sseEvent } from "../realtime/sse.ts";
 import type { Wake } from "./store.ts";
+import type { UploadDeletion } from "./upload-disk.ts";
 
 export interface SessionStreamSources {
   hub: EventHub;
@@ -10,6 +11,8 @@ export interface SessionStreamSources {
   wakes: () => Promise<Wake[]>;
   /** The conversation's pending wake, `undefined` when it has none, or `null` when the conversation is gone. */
   wake: (conversationId: string) => Promise<Wake | undefined | null>;
+  /** The files the owner has asked the pod to delete and it has not yet reported gone, grouped by conversation. */
+  deletions: () => Promise<UploadDeletion[]>;
 }
 
 export function wakeFrame(wake: Wake): string {
@@ -24,14 +27,23 @@ export function interruptFrame(conversationId: string): string {
   return sseEvent({ event: "interrupt", data: JSON.stringify({ conversation_id: conversationId }) });
 }
 
+export function deleteUploadsFrame(deletion: UploadDeletion): string {
+  return sseEvent({ event: "delete_uploads", data: JSON.stringify(deletion) });
+}
+
 /**
- * What `GET /api/virtual/{id}/sessions` sends an assistant's pod: every pending wake on connect, then a wake as each
- * conversation needs a session, an interrupt as the person stops an answer, and a close as each is deleted.
+ * What `GET /api/virtual/{id}/sessions` sends an assistant's pod: every pending wake and every outstanding file
+ * deletion on connect, then a wake as each conversation needs a session, an interrupt as the person stops an answer,
+ * a deletion as each is asked for, and a close as each conversation is deleted.
  *
  * Opened in the same order as the agent stream (subscribe, wait for `LISTEN`, then replay), so nothing committed
  * around the replay is missed. A wake is sent at most once per connection for each session id, and again on the
  * next connection until a session registers, which is what clears it. A `resync` replays, since NOTIFYs sent while
  * the listener was down are gone. A failed read ends the stream, and the pod's reconnect replays.
+ *
+ * A deletion replays on both, unlike a wake only in that nothing de-duplicates it: it names a state to reach, it is
+ * idempotent — a file that is not there is a deletion that has already happened — and the pod's next report is what
+ * stops it being read at all. A file somebody asked to delete while the pod was restarting must still go.
  *
  * An interrupt is the exception to all of that: it is neither replayed on connect nor resent on a `resync`, because
  * it names no state to reach but a turn to end, and the turn a missed one would have ended is over by the time
@@ -64,10 +76,19 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
         });
     }
 
+    const sendDeletions = async () => {
+      for (const deletion of await sources.deletions()) {
+        if (open) {
+          send(deleteUploadsFrame(deletion));
+        }
+      }
+    };
+
     const replay = async () => {
       for (const wake of await sources.wakes()) {
         emit(wake);
       }
+      await sendDeletions();
     };
 
     const unsubscribe = sources.hub.subscribe((event) => {
@@ -88,6 +109,8 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
         if (open) {
           send(interruptFrame(event.conversation_id));
         }
+      } else if (event.type === "assistant_uploads" && event.virtual_agent_id === virtualAgentId) {
+        enqueue(sendDeletions);
       } else if (event.type === "resync") {
         enqueue(replay);
       }

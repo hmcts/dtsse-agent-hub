@@ -304,6 +304,67 @@ async function writeParts({
   }
 }
 
+/** `<upload_id>-<anything>` inside a conversation's directory: what one attachment was written as. */
+function isCopyOf(name: string, uploadId: string): boolean {
+  return name.toLowerCase().startsWith(`${uploadId.toLowerCase()}-`);
+}
+
+/**
+ * The upload ids a `delete_uploads` frame names, as this client will act on them. Pure, so the decision is testable
+ * without a filesystem. Anything that is not a conversation id or an upload id is dropped: a path is the one thing a
+ * pod must not take from the network on trust, and `attachmentPath` would refuse it a second time anyway.
+ */
+export function readDeleteUploads(value: unknown): { conversationId: string; uploadIds: string[] } | undefined {
+  const raw = asRecord(value);
+  if (raw === null || typeof raw.conversation_id !== "string" || !UUID.test(raw.conversation_id)) {
+    return undefined;
+  }
+  const ids = Array.isArray(raw.upload_ids) ? raw.upload_ids : [];
+  const uploadIds = ids.filter((id): id is string => typeof id === "string" && UUID.test(id)).map((id) => id.toLowerCase());
+  return uploadIds.length === 0 ? undefined : { conversationId: raw.conversation_id.toLowerCase(), uploadIds };
+}
+
+export type DeleteUploadsOptions = {
+  conversationId: string;
+  uploadIds: readonly string[];
+  root?: string;
+  fs?: AttachmentFs;
+  env?: Env;
+  say?: (message: string) => void;
+};
+
+/**
+ * Deletes this pod's copies of the uploads the hub named, because the person asked for them. Answers how many files
+ * it removed.
+ *
+ * A file that is not there is counted as removed: the request is replayed until the pod's next report shows it gone,
+ * so acting on one twice has to be as good as acting on it once. The directory itself is left alone — the
+ * conversation still exists, and `close` is what empties it.
+ *
+ * It matches on the `<upload_id>-` prefix rather than rebuilding the name from the frame, because the name the file
+ * was written with came from a frame sent at upload time and `storedNameOf` may since have been changed.
+ */
+export function deleteUploads({ conversationId, uploadIds, root, fs = nodeFs, env = process.env, say = () => {} }: DeleteUploadsOptions): number {
+  const dir = conversationDir(root ?? uploadsRoot(env), conversationId);
+  if (!fs.existsSync(dir)) {
+    return 0;
+  }
+  let removed = 0;
+  const present = fs.readdirSync(dir) as string[];
+  for (const uploadId of uploadIds) {
+    for (const name of present.filter((file) => isCopyOf(file, uploadId))) {
+      try {
+        fs.rmSync(path.join(dir, name), { force: true });
+        removed += 1;
+      } catch (e) {
+        say(`could not delete ${name} of conversation ${conversationId}: ${(e as Error).message}`);
+      }
+    }
+  }
+  say(`conversation ${conversationId}: deleted ${removed} file(s) the person asked to remove`);
+  return removed;
+}
+
 /** Removes a conversation's attachments, for a conversation that has been deleted. Missing is success. */
 export function removeConversationUploads(root: string, conversationId: string, fs: Pick<AttachmentFs, "rmSync"> = nodeFs): void {
   fs.rmSync(conversationDir(root, conversationId), { recursive: true, force: true });

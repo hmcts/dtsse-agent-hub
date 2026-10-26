@@ -151,6 +151,10 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     // conversation in the same transaction, and the `assistant_conversation` beside it is what redraws the thread.
     case "assistant_stop":
       return undefined;
+    // Also an instruction to the pod. The settings dialog is rendered by the page, and both the request and the
+    // pod's report revalidate `/assistant`, so there is nothing for an open stream to tell a browser about.
+    case "assistant_uploads":
+      return undefined;
     case "resync":
       return RESYNC;
   }

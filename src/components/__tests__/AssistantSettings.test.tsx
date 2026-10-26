@@ -6,7 +6,10 @@ import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionsData } from "@/assistant/connections";
 import { MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } from "@/assistant/templates";
+import type { UploadsOnDisk } from "@/assistant/upload-disk";
+import { MAX_REPORTED_FILES, type PodFile, type UploadsDisk } from "@/assistant/upload-report";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
+import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
@@ -880,7 +883,7 @@ describe("the Assistant's CLAUDE.md", () => {
 
 /** The whole dialog, which is what a person has when they open it: the navigation and every section it offers. */
 function everything(): Partial<Parameters<typeof AssistantSettings>[0]> {
-  return { plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }) };
+  return { plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }), files: files() };
 }
 
 function tabs(): HTMLElement[] {
@@ -919,8 +922,8 @@ describe("the Assistant's settings navigation", () => {
   it("should gather the sections under the headings they belong to when it opens", () => {
     open(everything());
 
-    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates"]);
-    expect(nav().textContent).toBe("GeneralAppearanceAgentClaude.mdToolsConnectionsTemplates");
+    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates", "Files"]);
+    expect(nav().textContent).toBe("GeneralAppearanceAgentClaude.mdToolsConnectionsTemplatesFiles");
   });
 
   // A tablist owns tabs and nothing else, so the two group headings are shown rather than announced, and the panel's
@@ -928,7 +931,7 @@ describe("the Assistant's settings navigation", () => {
   it("should keep its group headings out of what a screen reader is read when it opens", () => {
     open(everything());
 
-    expect(within(nav()).getAllByRole("tab")).toHaveLength(5);
+    expect(within(nav()).getAllByRole("tab")).toHaveLength(6);
     for (const group of ["General", "Agent"]) {
       expect(within(nav()).getByText(group).getAttribute("aria-hidden")).toBe("true");
     }
@@ -955,7 +958,7 @@ describe("the Assistant's settings navigation", () => {
 
   it.each([
     ["ArrowDown", "Claude.md"],
-    ["End", "Templates"]
+    ["End", "Files"]
   ] as const)("should move focus down the navigation with %s when a section has focus", (key, expected) => {
     open(everything());
 
@@ -978,9 +981,9 @@ describe("the Assistant's settings navigation", () => {
 
   it("should wrap from the last section to the first when the person arrows off the end", () => {
     open(everything());
-    tabs()[4]?.focus();
+    tabs()[5]?.focus();
 
-    fireEvent.keyDown(tabs()[4]!, { key: "ArrowDown" });
+    fireEvent.keyDown(tabs()[5]!, { key: "ArrowDown" });
 
     expect(document.activeElement?.textContent).toBe("Appearance");
   });
@@ -990,7 +993,7 @@ describe("the Assistant's settings navigation", () => {
 
     fireEvent.keyDown(tabs()[0]!, { key: "ArrowUp" });
 
-    expect(document.activeElement?.textContent).toBe("Templates");
+    expect(document.activeElement?.textContent).toBe("Files");
   });
 
   // Every panel here is a form. Opening whichever section the arrows reach would throw away half-typed notes on the
@@ -1050,7 +1053,7 @@ describe("the Assistant's settings on a narrow screen", () => {
       within(screen.getByRole("list", { name: "Settings sections" }))
         .getAllByRole("button")
         .map((item) => item.textContent)
-    ).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates"]);
+    ).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates", "Files"]);
     expect(screen.queryByRole("radiogroup", { name: "Appearance" })).toBeNull();
   });
 
@@ -1139,5 +1142,177 @@ describe("the Assistant's settings accessibility", () => {
     narrow();
     await auditOpenDialog();
     wideAgain();
+  }, 20_000);
+});
+
+const REPORTED_AT = "2026-10-29T09:00:00.000Z";
+
+function podFile(overrides: Partial<PodFile> = {}): PodFile {
+  return {
+    uploadId: "0f8a6a1e-0000-4000-8000-000000000001",
+    name: "bundle.pdf",
+    bytes: 2 * 1024 * 1024,
+    conversationId: "0f8a6a1e-0000-4000-8000-0000000000c1",
+    conversationTitle: "Possession claim",
+    deleting: false,
+    ...overrides
+  };
+}
+
+const ON_DISK: UploadsDisk = {
+  reported: true,
+  uploadsBytes: 2_254_857_830,
+  volumeUsedBytes: 30_477_004_800,
+  volumeTotalBytes: 34_359_738_368,
+  at: REPORTED_AT,
+  stopped: false
+};
+
+function files(overrides: Partial<UploadsOnDisk> = {}, actions: Partial<Pick<AssistantFiles, "remove" | "removeAll">> = {}): AssistantFiles {
+  return {
+    view: { disk: ON_DISK, files: [podFile()], truncated: false, deleting: 0, ...overrides },
+    remove: vi.fn(async () => ({ ok: true as const, confirmation: "Your assistant deletes that file within 10 minutes, the next time it checks." })),
+    removeAll: vi.fn(async () => ({
+      ok: true as const,
+      confirmation: "Your assistant deletes all 1 of its files within 10 minutes, the next time it checks."
+    })),
+    ...actions
+  };
+}
+
+const DELETE_ALL = "Delete every file your assistant is holding";
+
+describe("the Assistant's files", () => {
+  it("should show nothing at all when the page passes no files", () => {
+    open({ files: undefined });
+
+    expect(sections()).not.toContain("Files");
+    expect(screen.queryByRole("heading", { name: "Files" })).toBeNull();
+  });
+
+  it("should offer Files as its own section, after the templates, when the page passes it", () => {
+    open({ ...everything(), files: files() });
+
+    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates", "Files"]);
+  });
+
+  // Two figures, never one: the uploads are a share of a volume the repository clones are on too, and the second
+  // number is the one that explains why something has started going wrong.
+  it("should give the files' size and the whole disk's, dated, when the assistant has reported", () => {
+    open({ files: files() }, "Files");
+    const section = screen.getByRole("region", { name: "Files" });
+
+    expect(section.textContent).toContain("2.1 GB of files");
+    expect(section.textContent).toContain("On a disk that is 28.4 GB of 32 GB full");
+    expect(section.textContent).toContain("Last reported");
+  });
+
+  it("should list each file with its size and the chat it belongs to when it opens", () => {
+    open({ files: files({ files: [podFile(), podFile({ uploadId: "u2", name: "notes.txt", bytes: 4096, conversationTitle: "Rent arrears" })] }) }, "Files");
+    const rows = within(screen.getByRole("list", { name: "Files on your assistant" })).getAllByRole("listitem");
+
+    expect(rows.map((row) => row.textContent)).toEqual(["bundle.pdf2 MB · Possession claimDelete", "notes.txt4 KB · Rent arrearsDelete"]);
+  });
+
+  it("should send the file's id to the delete action when the person deletes one", async () => {
+    const remove = vi.fn(async () => ({ ok: true as const, confirmation: "Your assistant deletes that file within 10 minutes, the next time it checks." }));
+    open({ files: files({}, { remove }) }, "Files");
+
+    await submit("Delete bundle.pdf");
+
+    expect((remove.mock.calls[0] as unknown as [FormData])[0].get("id")).toBe("0f8a6a1e-0000-4000-8000-000000000001");
+    expect(screen.getByRole("status").textContent).toContain("within 10 minutes");
+  });
+
+  it("should post to the delete-everything action, and confirm it, when the person deletes them all", async () => {
+    const removeAll = vi.fn(async () => ({ ok: true as const, confirmation: "Your assistant deletes all 1 of its files within 10 minutes." }));
+    open({ files: files({}, { removeAll }) }, "Files");
+
+    await submit(DELETE_ALL);
+
+    expect(removeAll).toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("deletes all 1 of its files");
+  });
+
+  // A "delete all" that quietly left gigabytes on the assistant's volume, or that implied the chat's own download
+  // still worked, would be worse than no button: the copy has to say which copy goes and which stays.
+  it("should say which copy is removed and what the chat keeps, beside the delete-everything button", () => {
+    open({ files: files() }, "Files");
+    const form = screen.getByRole("form", { name: DELETE_ALL });
+
+    expect(form.textContent).toContain("removes your assistant's copy, which is what takes up the space");
+    expect(form.textContent).toContain("Each chat still shows that a file was attached");
+    expect(form.textContent).toContain("can no longer be downloaded back from the chat");
+  });
+
+  it("should offer no delete-everything button when the assistant is holding nothing", () => {
+    open({ files: files({ files: [] }) }, "Files");
+
+    expect(screen.getByText("Your assistant is holding no files.")).toBeTruthy();
+    expect(screen.queryByRole("form", { name: DELETE_ALL })).toBeNull();
+  });
+
+  // Not "deleted": until the assistant's next report says the file is gone, all the hub knows is that it asked.
+  it("should say a file is waiting for the assistant, and offer no second delete, once one is asked for", () => {
+    open({ files: files({ files: [podFile({ deleting: true })], deleting: 1 }) }, "Files");
+    const row = within(screen.getByRole("list", { name: "Files on your assistant" })).getByRole("listitem");
+
+    expect(row.textContent).toContain("Waiting for your assistant");
+    expect(screen.queryByRole("button", { name: "Delete bundle.pdf" })).toBeNull();
+    expect(screen.getByText("1 file is waiting for your assistant to delete.")).toBeTruthy();
+  });
+
+  it("should say how many are waiting when more than one has been asked for", () => {
+    open({ files: files({ deleting: 3 }) }, "Files");
+
+    expect(screen.getByText("3 files are waiting for your assistant to delete.")).toBeTruthy();
+  });
+
+  // Zero would read as "you have no files", which is the one thing the section must never say when it cannot tell.
+  it.each([
+    ["older_client", "running an older version that cannot tell us what it is holding"],
+    ["not_running", "stopped, so nothing has been able to look at its disk"],
+    ["waiting", "has not reported yet"]
+  ] as const)("should say it cannot tell, rather than show an empty disk, when the reason is %s", (reason, said) => {
+    open({ files: files({ disk: { reported: false, reason }, files: [] }) }, "Files");
+    const section = screen.getByRole("region", { name: "Files" });
+
+    expect(section.textContent).toContain(said);
+    expect(section.textContent).not.toContain("0 bytes");
+    expect(section.textContent).not.toContain("holding no files");
+  });
+
+  it("should still say the figures are from a stopped assistant when it has stopped since reporting", () => {
+    open({ files: files({ disk: { ...ON_DISK, stopped: true } }) }, "Files");
+
+    expect(screen.getByRole("region", { name: "Files" }).textContent).toContain("Your assistant is stopped. Last reported");
+  });
+
+  it("should say the list is only the largest files when the assistant holds more than a report carries", () => {
+    open({ files: files({ truncated: true }) }, "Files");
+
+    expect(screen.getByText(`The largest ${MAX_REPORTED_FILES} are listed. The size above is of everything.`)).toBeTruthy();
+  });
+
+  it("should show the action's own refusal, rather than deciding for itself, when a delete is refused", async () => {
+    const refused = "Your assistant is running an older version that cannot delete its files yet. It can the next time it starts.";
+    const remove = vi.fn(async () => ({ ok: false as const, error: refused }));
+    open({ files: files({}, { remove }) }, "Files");
+
+    await submit("Delete bundle.pdf");
+
+    expect(screen.getByRole("alert").textContent).toBe(refused);
+  });
+
+  it("should keep its own controls in the dialog's focus trap when it is open", () => {
+    open({ files: files() }, "Files");
+    const items = stops();
+
+    expect(items).toContain(screen.getByRole("button", { name: "Delete bundle.pdf" }));
+    expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Delete every file" }));
+  });
+
+  it("should raise no WCAG A or AA violations with Files open", async () => {
+    await auditOpenDialog("Files");
   }, 20_000);
 });

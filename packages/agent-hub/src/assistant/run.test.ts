@@ -1,5 +1,6 @@
 // The supervisor on a real sessions stream: the mock hub's wakes and closes, and how it reconnects.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home.ts";
@@ -154,6 +155,7 @@ describe("runAssistantSupervisor", () => {
     const api = {
       putSessions: async () => null,
       conversations: async () => ({ conversations: [] }),
+      putUploads: async () => null,
       sessionsStream: async (): Promise<Response> => {
         opens.push(Date.now());
         throw new ApiError(403, { error: "forbidden" }, "GET", `/api/virtual/${VID}/sessions`);
@@ -200,6 +202,7 @@ describe("runAssistantSupervisor", () => {
       api: {
         putSessions: async () => null,
         conversations: async () => ({ conversations: [] }),
+        putUploads: async () => null,
         sessionsStream: async () => new Response("", { status: 200 })
       },
       id: VID,
@@ -233,6 +236,7 @@ describe("runAssistantSupervisor", () => {
     const api = {
       putSessions: async () => null,
       conversations: async () => ({ conversations: [] }),
+      putUploads: async () => null,
       sessionsStream: async () => new Response("", { status: 200 })
     };
     const running = runAssistantSupervisor({
@@ -273,6 +277,7 @@ describe("runAssistantSupervisor", () => {
     const api = {
       putSessions: async () => null,
       conversations: async () => ({ conversations: [] }),
+      putUploads: async () => null,
       sessionsStream: async (_id: string, opts: { signal?: AbortSignal } = {}): Promise<Response> => {
         opens += 1;
         const body = new ReadableStream<Uint8Array>({
@@ -316,6 +321,7 @@ describe("runAssistantSupervisor", () => {
     const api = {
       putSessions: async () => null,
       conversations: async () => ({ conversations: [] }),
+      putUploads: async () => null,
       sessionsStream: async () => new Response("event: wake\ndata: {oops\n\nevent: close\ndata: nope\n\nevent: reconnect\ndata: {}\n\n", { status: 200 })
     };
     const running = runAssistantSupervisor({
@@ -339,6 +345,96 @@ describe("runAssistantSupervisor", () => {
     } finally {
       stop.abort();
       await running;
+    }
+  });
+});
+
+describe("runAssistantSupervisor and the uploads on its volume", () => {
+  const CONVERSATION = "11111111-2222-3333-4444-555555555555";
+  const UPLOAD = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const KEEP = "11112222-3333-4444-5555-666677778888";
+
+  /** A `statfs` that answers for any path, so the measurement does not depend on the test machine's own volume. */
+  function volume(): { statfsSync: () => ReturnType<typeof fs.statfsSync> } {
+    return { statfsSync: () => ({ type: 0, bsize: 4096, blocks: 1024, bfree: 512, bavail: 512, files: 0, ffree: 0 }) };
+  }
+
+  function written(root: string, uploadId: string): string {
+    const file = path.join(root, CONVERSATION, `${uploadId}-letter.pdf`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, Buffer.alloc(16));
+    return file;
+  }
+
+  // The delete is replayed until a report stops naming the file, so the report straight after the deletion is what
+  // ends it — without it the settings would say "waiting for your assistant" for ten minutes rather than seconds.
+  it("should delete the files the hub names and report its volume straight after, when the person asks", async () => {
+    const hub = createMockHub({ pingMs: 5000, maxLifetimeMs: 60_000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const stop = new AbortController();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-hub-run-uploads-"));
+    const going = written(root, UPLOAD);
+    const staying = written(root, KEEP);
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50,
+      uploadsDir: root,
+      uploadsFs: { ...fs, ...volume() } as never
+    });
+    const reports = () => hub.virtuals.get(VID)?.uploadsReports ?? [];
+
+    try {
+      await hub.waitFor((call) => call.method === "GET" && call.path === `/api/virtual/${VID}/sessions`);
+      hub.sendDeleteUploads(VID, { conversation_id: CONVERSATION, upload_ids: [UPLOAD] });
+      await waitUntil(() => reports().length > 0, "a report after the deletion");
+
+      expect(fs.existsSync(going), "the file the person asked to delete").toBe(false);
+      expect(fs.existsSync(staying), "a file they did not ask about").toBe(true);
+      expect(reports()[0]).toMatchObject({ uploads_bytes: 16, volume_used_bytes: 512 * 4096, volume_total_bytes: 1024 * 4096 });
+      expect((reports()[0]?.files as { upload_id: string }[]).map((file) => file.upload_id)).toEqual([KEEP]);
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("should report nothing and carry on when the frame names no file this pod could act on", async () => {
+    const hub = createMockHub({ pingMs: 5000, maxLifetimeMs: 60_000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const stop = new AbortController();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-hub-run-uploads-"));
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50,
+      uploadsDir: root,
+      uploadsFs: { ...fs, ...volume() } as never
+    });
+
+    try {
+      await hub.waitFor((call) => call.method === "GET" && call.path === `/api/virtual/${VID}/sessions`);
+      hub.sendDeleteUploads(VID, { conversation_id: "not-a-conversation", upload_ids: [UPLOAD] });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(hub.virtuals.get(VID)?.uploadsReports ?? []).toEqual([]);
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });

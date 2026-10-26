@@ -402,6 +402,13 @@ model VirtualAgent {
   plugins             Json                    @default("[]")
   /// Stamped on the pod template; moved with `generation` by everything but a change of ports.
   podGeneration       Int                     @default(1) @map("pod_generation")
+  /// What the pod last reported its volume holds. Null means it has not said, which is not the same as nothing.
+  uploadsBytes        BigInt?                 @map("uploads_bytes")
+  volumeUsedBytes     BigInt?                 @map("volume_used_bytes")
+  volumeTotalBytes    BigInt?                 @map("volume_total_bytes")
+  /// The largest uploads it holds, as [{upload_id, bytes}], at most 200. See src/assistant/upload-report.ts.
+  uploadsFiles        Json                    @default("[]") @map("uploads_files")
+  uploadsReportedAt   DateTime?               @map("uploads_reported_at") @db.Timestamptz(6)
   startedAt           DateTime                @default(now()) @map("started_at") @db.Timestamptz(6)
   lastActiveAt        DateTime?               @map("last_active_at") @db.Timestamptz(6)
   stoppedAt           DateTime?               @map("stopped_at") @db.Timestamptz(6)
@@ -504,6 +511,9 @@ model AssistantUpload {
   bytes          BigInt
   /// pending, stored, fetched or expired.
   state          String   @default("pending")
+  /// When the owner asked for the pod's own copy to go, and when a report of the pod's confirmed it had.
+  podDeleteRequestedAt DateTime? @map("pod_delete_requested_at") @db.Timestamptz(6)
+  podDeletedAt         DateTime? @map("pod_deleted_at") @db.Timestamptz(6)
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 

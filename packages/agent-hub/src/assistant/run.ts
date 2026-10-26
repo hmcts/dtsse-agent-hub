@@ -4,17 +4,25 @@
 import type { Api } from "../api.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../bridge.ts";
 import { createSseParser, type SseEvent } from "../sse.ts";
-import { reconcileUploads } from "./attachments.ts";
+import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
+import { type DiskFs, reportUploads } from "./disk.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
 
 const TICK_MS = 2000;
 const STREAM_IDLE_MS = 45000;
-/** How often the uploads on disk are reconciled against the hub's conversations. Rare: it is only a backstop. */
+/**
+ * How often the uploads on disk are reconciled against the hub's conversations, and reported to it.
+ *
+ * Rare, because the reconciliation is only a backstop and the report is of figures nobody watches change. It is also
+ * the interval the hub's wording promises a deletion within, so moving it means moving that too.
+ */
 const RECONCILE_MS = 10 * 60 * 1000;
 
 export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOptions, "api" | "id"> & {
-  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations">;
+  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations" | "putUploads">;
   id: string;
+  /** The filesystem the uploads report and the deletions use; a test passes its own. */
+  uploadsFs?: DiskFs;
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
   signal?: AbortSignal;
   tickMs?: number;
@@ -35,9 +43,35 @@ export async function runAssistantSupervisor({
   tickMs = Number(env.AGENT_HUB_SUPERVISOR_TICK_MS) || TICK_MS,
   idleTimeoutMs = Number(env.AGENT_HUB_STREAM_IDLE_MS) || STREAM_IDLE_MS,
   reconcileMs = Number(env.AGENT_HUB_UPLOAD_RECONCILE_MS) || RECONCILE_MS,
+  uploadsFs,
   ...options
 }: RunAssistantSupervisorOptions): Promise<void> {
   const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, ...options });
+  const uploads = {
+    api,
+    id,
+    env,
+    say,
+    ...(options.uploadsDir === undefined ? {} : { root: options.uploadsDir }),
+    ...(uploadsFs === undefined ? {} : { fs: uploadsFs })
+  };
+
+  /**
+   * The files the person asked to be deleted, and a fresh report straight after.
+   *
+   * The report is what clears the request: the hub replays the frame until a report stops naming the file, so
+   * reporting here rather than waiting for the next reconcile is the difference between the section saying "waiting
+   * for your assistant" for seconds and for ten minutes.
+   */
+  async function removeUploads(data: unknown): Promise<void> {
+    const asked = readDeleteUploads(data);
+    if (asked === undefined) {
+      return;
+    }
+    deleteUploads({ ...uploads, conversationId: asked.conversationId, uploadIds: asked.uploadIds });
+    await reportUploads(uploads);
+  }
+
   let stopping = false;
   let controller: AbortController | null = null;
   let wake: (() => void) | null = null;
@@ -80,6 +114,8 @@ export async function runAssistantSupervisor({
           handle(supervisor.interrupt, event);
         } else if (event.event === "close") {
           handle(supervisor.close, event);
+        } else if (event.event === "delete_uploads") {
+          handle(removeUploads, event);
         } else if (event.event === "reconnect") {
           reconnect = true;
         }
@@ -105,9 +141,11 @@ export async function runAssistantSupervisor({
   // A conversation deleted while this pod was stopped left its attachments on the volume and sent no `close` anybody
   // was there to hear, so the directories are swept against the hub's list from time to time.
   const reconciler = setInterval(() => {
-    reconcileUploads({ api, id, env, say, ...(options.uploadsDir === undefined ? {} : { root: options.uploadsDir }) }).catch((e) =>
-      say(`reconciling uploads failed: ${(e as Error).message}`)
-    );
+    reconcileUploads(uploads)
+      // On the same timer, because the hub has no other way to learn what this volume holds and the figures it shows
+      // are dated with the report rather than presented as current.
+      .then(() => reportUploads(uploads))
+      .catch((e) => say(`reconciling uploads failed: ${(e as Error).message}`));
   }, reconcileMs);
   try {
     await supervisor.adopt();
