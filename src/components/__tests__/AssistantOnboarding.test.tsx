@@ -3,6 +3,7 @@
  */
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CONNECTORS, connectionsPrompt, offeredConnections } from "@/assistant/connections";
 import { readiness } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
 import { GettingReady, OnboardingGate } from "@/components/assistant/GettingReady";
@@ -79,6 +80,13 @@ function connector(name: string): HTMLElement {
     throw new Error(`no connector ${name}`);
   }
   return item;
+}
+
+/** What a row offers the person, named, so a row offering two things to do at once is one assertion. */
+function formsIn(name: string): (string | null)[] {
+  return within(connector(name))
+    .getAllByRole("form")
+    .map((form) => form.getAttribute("aria-label"));
 }
 
 describe("GettingReady progress", () => {
@@ -185,6 +193,83 @@ describe("GettingReady connectors", () => {
 
     const form = within(connector("AI model access")).getByRole("form", { name: "Save your Bedrock API key" });
     expect((within(form).getByLabelText("Bedrock API key") as HTMLInputElement).type).toBe("password");
+  });
+});
+
+/**
+ * The one failure on this screen with no way out from the person's side: being asked for a credential the rows do
+ * not cover, or covering it with a row that connects nothing. Either way every row they can see reads as connected,
+ * the bar sits where the pod left it, and the ask never clears.
+ */
+describe("GettingReady asks the person can act on", () => {
+  it("should offer the Bedrock key the ask names when the bedrock route is missing it", () => {
+    const summary = assistant("awaiting_credentials", { needed: ["github", "azure", "bedrock"] });
+    render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
+
+    const missing = connectionsPrompt("connect", summary.needed, new Set<CredentialKind>(["github", "azure"]));
+    expect(missing?.message).toContain("AI model access");
+    const row = connector("AI model access");
+    fireEvent.click(within(row).getByRole("button", { name: "Connect" }));
+
+    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Bedrock API key" });
+    expect(within(form).getByLabelText("Bedrock API key")).toBeTruthy();
+    expect((form.querySelector('input[name="kind"]') as HTMLInputElement).value).toBe("bedrock");
+  });
+
+  // The pod gives up driving `claude setup-token` and asks the owner to paste the token, so a note about a sign-in
+  // that is never coming would leave them with the ask and nowhere to answer it.
+  it("should offer the Claude token the ask names when the own-licence route is missing it", () => {
+    const summary = assistant("awaiting_credentials", { needed: ["github", "azure", "claude"] });
+    render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
+
+    const missing = connectionsPrompt("connect", summary.needed, new Set<CredentialKind>(["github", "azure"]));
+    expect(missing?.message).toContain("Claude");
+    fireEvent.click(within(connector("Claude")).getByRole("button", { name: "Connect" }));
+
+    const form = within(connector("Claude")).getByRole("form", { name: "Save your Claude token" });
+    expect(within(form).getByLabelText("Claude token")).toBeTruthy();
+    expect((form.querySelector('input[name="kind"]') as HTMLInputElement).value).toBe("claude");
+  });
+
+  // Asking to connect and then having the pod relay its code is the usual order on the Claude row, and two password
+  // boxes posting to different places is worse than either alone: a token typed into the code box reaches the pod and
+  // comes back only as a sign-in that did not work.
+  it("should offer the relayed sign-in alone when one arrives after the person asked to connect", () => {
+    const summary = assistant("awaiting_credentials", { needed: ["github", "azure", "claude"] });
+    const { rerender } = render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
+    fireEvent.click(within(connector("Claude")).getByRole("button", { name: "Connect" }));
+
+    expect(formsIn("Claude")).toEqual(["Save your Claude token"]);
+
+    const relayed = assistant("awaiting_login", {
+      needed: ["github", "azure", "claude"],
+      logins: [login("claude", { prompt: "paste_code", userCode: null })]
+    });
+    rerender(ready({ assistant: relayed, statuses: statuses("github", "azure") }));
+
+    expect(formsIn("Claude")).toEqual(["Paste the Claude code"]);
+    expect(connector("Claude").querySelectorAll('input[type="password"]')).toHaveLength(1);
+  });
+
+  it("should offer a row for a sign-in the assistant is waiting on that it would not offer unasked", () => {
+    const summary = assistant("awaiting_login", { needed: ["github", "azure", "bedrock"], logins: [login("jenkins")] });
+    render(ready({ assistant: summary, statuses: statuses("github", "azure", "bedrock", "atlassian") }));
+
+    const jenkins = connector("Jenkins");
+    expect(within(jenkins).getByText("Waiting for you")).toBeTruthy();
+    expect(within(jenkins).getByText("ABCD-1234")).toBeTruthy();
+  });
+
+  it("should leave nothing the assistant is waiting on off the list", () => {
+    const waitingOn: CredentialKind[] = ["azure", "jenkins"];
+    const summary = assistant("awaiting_login", { needed: ["github", "azure", "bedrock"], logins: waitingOn.map((kind) => login(kind)) });
+    render(ready({ assistant: summary, statuses: statuses("github", "bedrock", "atlassian") }));
+
+    const shown = offeredConnections(summary).map((row) => String(row.kind));
+    expect(waitingOn.filter((kind) => !shown.includes(kind))).toEqual([]);
+    for (const kind of waitingOn) {
+      expect(within(connector(CONNECTORS[kind]?.name ?? kind)).getByText("Waiting for you")).toBeTruthy();
+    }
   });
 });
 
@@ -395,6 +480,23 @@ describe("OnboardingGate", () => {
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("region", { name: "Connect your accounts" })).toBeTruthy();
+  });
+
+  // The reported shape of an ask nobody could clear: the notice reports the step the pod is stuck on, and the screen
+  // it opens listed every other connection as connected without a row for the one being waited on.
+  it("should list the sign-in the pod is waiting on when someone who has onboarded opens the progress", () => {
+    const summary = assistant("awaiting_login", {
+      needed: ["github", "azure", "bedrock"],
+      onboarded: true,
+      logins: [login("jenkins")]
+    });
+    render(gate(summary, statuses("github", "azure", "bedrock", "atlassian"), true));
+
+    expect(screen.getByRole("status").textContent).toBe("Waiting for you to connect your accounts…");
+    fireEvent.click(screen.getByRole("button", { name: "Show progress" }));
+
+    expect(within(connector("Jenkins")).getByText("Waiting for you")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("55");
   });
 
   it("should stay until the person chooses Start chatting when they finish onboarding during the visit", () => {

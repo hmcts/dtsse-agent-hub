@@ -40,23 +40,44 @@ export interface Connector {
   /** The letters the dialog shows in place of a logo. */
   initial: string;
   desc: string;
+  /**
+   * What the person pastes to connect it, or `null` when their assistant signs in for them and relays a code. The
+   * screen offers a field for the first and a note about the sign-in to come for the second, so getting this wrong
+   * is a row with nothing on it that connects anything.
+   */
+  paste: string | null;
 }
 
-export const CONNECTORS: Partial<Record<CredentialKind, Connector>> = {
-  github: { name: "GitHub", initial: "G", desc: "Read repositories and open pull requests" },
-  azure: { name: "Azure", initial: "Az", desc: "Your HMCTS account, for pipelines and environments" },
-  atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)" },
-  jenkins: { name: "Jenkins", initial: "J", desc: "Builds and pipelines on Jenkins (optional)" },
-  claude: { name: "Claude", initial: "C", desc: "Your Claude licence" },
-  bedrock: { name: "AI model access", initial: "AI", desc: "Your Amazon Bedrock API key" }
-};
+/**
+ * Every kind of credential in the Assistant's words, or `null` for one that is not a connection. The Assistant's
+ * only copy of this: the getting-ready screen and the settings dialog both read it, and a second list behind one of
+ * them drifts from the wording of the ask that sent the person there.
+ *
+ * Total over `CredentialKind` so the compiler, and not a person reading a screen, finds the next kind added: a
+ * missing entry here is a credential the hub can wait for and no surface can show.
+ */
+export const CONNECTORS = {
+  github: { name: "GitHub", initial: "G", desc: "Read repositories and open pull requests", paste: null },
+  azure: { name: "Azure", initial: "Az", desc: "Your HMCTS account, for pipelines and environments", paste: null },
+  atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)", paste: null },
+  jenkins: { name: "Jenkins", initial: "J", desc: "Builds and pipelines on Jenkins (optional)", paste: "Jenkins API token" },
+  claude: { name: "Claude", initial: "C", desc: "Your Claude licence", paste: "Claude token" },
+  bedrock: { name: "AI model access", initial: "AI", desc: "Your Amazon Bedrock API key", paste: "Bedrock API key" },
+  // Neither is a sign-in: both are kept beside them because they may hold private context, and there is nothing to
+  // connect for either, so no surface offers a row for them.
+  claude_md: null,
+  git_identity: null
+} as const satisfies Record<CredentialKind, Connector | null>;
+
+/** The kinds `CONNECTORS` words, so reading one of those needs no cast and no fallback for a kind it does not. */
+export type ConnectionKind = { [K in CredentialKind]: (typeof CONNECTORS)[K] extends null ? never : K }[CredentialKind];
 
 /**
  * A kind is a connection when it is something the person signs in to. Their CLAUDE.md and their git identity are
  * kept beside the sign-ins but are neither, so settings never shows them as one.
  */
-export function isConnection(kind: CredentialKind): boolean {
-  return CONNECTORS[kind] !== undefined;
+export function isConnection(kind: CredentialKind): kind is ConnectionKind {
+  return Object.hasOwn(CONNECTORS, kind) && CONNECTORS[kind] !== null;
 }
 
 /**
@@ -131,8 +152,50 @@ export function connections(data: ConnectionsData | undefined, checklist: (store
     const login = data.logins.find((candidate) => candidate.kind === kind);
     const stored = status?.stored === true;
     const state = connectionState(checklist(stored, login), login, stored);
-    return { kind, ...(CONNECTORS[kind] as Connector), state, detail: DETAILS[state], accountLabel: status?.accountLabel ?? null };
+    return { kind, ...CONNECTORS[kind], state, detail: DETAILS[state], accountLabel: status?.accountLabel ?? null };
   });
+}
+
+/**
+ * The one optional connection the Assistant offers unasked. A Jenkins API token is an engineer's thing, and the
+ * place for it is the hub's own credentials page rather than in front of somebody who came to start a chat.
+ */
+export const OFFERED_OPTIONAL: readonly CredentialKind[] = ["atlassian"];
+
+/** One row of the getting-ready screen: the kind, and the Assistant's words for it. */
+export interface OfferedConnection {
+  kind: ConnectionKind;
+  connector: Connector;
+}
+
+/**
+ * The connections the getting-ready screen lists: every one the assistant needs, every one its pod has stopped to ask
+ * the person for, and the optional one it offers unasked. Needed first, so the ask reads in the order the banner
+ * names it in, and each kind once however many of the three it is.
+ *
+ * Every pending sign-in is here whatever kind it is for, and not only the ones some list expected. A pod relays a
+ * sign-in through `startLogin`, which takes any `CredentialKind` and puts the assistant in `awaiting_login` for it —
+ * so a sign-in this screen left out would be an ask with nothing on the screen to act on: the bar sitting at 55%
+ * under "Waiting for you to connect your accounts…", every row shown reading as connected, and no way to clear it.
+ * Which kinds a pod relays today is decided in another repo, and this must not depend on that answer.
+ *
+ * A pending sign-in whose code has run out is asked about too, and no clock is needed to decide it: the assistant
+ * stays `awaiting_login` until its pod reports its next step, so the row is still the only thing to act on.
+ */
+export function offeredConnections(assistant: {
+  needed: readonly CredentialKind[];
+  optional: readonly CredentialKind[];
+  logins: readonly LoginView[];
+}): OfferedConnection[] {
+  const asked = assistant.logins.filter((login) => login.state === "pending").map((login) => login.kind);
+  const unasked = assistant.optional.filter((kind) => OFFERED_OPTIONAL.includes(kind));
+  const rows: OfferedConnection[] = [];
+  for (const kind of [...assistant.needed, ...asked, ...unasked]) {
+    if (isConnection(kind) && !rows.some((row) => row.kind === kind)) {
+      rows.push({ kind, connector: CONNECTORS[kind] });
+    }
+  }
+  return rows;
 }
 
 /** "A", "A and B", "A, B and C". */

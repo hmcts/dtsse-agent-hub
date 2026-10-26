@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { type ConnectionsPrompt, connectionsPrompt } from "@/assistant/connections";
+import { type ConnectionsPrompt, type Connector, connectionsPrompt, offeredConnections } from "@/assistant/connections";
 import { type ConnectionsAsk, connectionsAsk } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
@@ -26,18 +26,6 @@ import { checklistState } from "@/components/virtual-agents/OnboardingChecklist"
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { LoginView } from "@/virtual-agents/logins";
-
-/** Each connection in words for someone who has never configured one. */
-const CONNECTORS: Partial<Record<CredentialKind, { name: string; initial: string; desc: string }>> = {
-  github: { name: "GitHub", initial: "G", desc: "Read repositories and open pull requests" },
-  azure: { name: "Azure", initial: "Az", desc: "Your HMCTS account, for pipelines and environments" },
-  atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)" },
-  claude: { name: "Claude", initial: "C", desc: "Your Claude licence" },
-  bedrock: { name: "AI model access", initial: "AI", desc: "Your Amazon Bedrock API key" }
-};
-
-/** An Atlassian sign-in is the one optional connection worth offering here; a Jenkins token is for engineers. */
-const OFFERED_OPTIONAL: readonly CredentialKind[] = ["atlassian"];
 
 const INPUT =
   "min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 font-plex-mono text-sm text-asst-text outline-none focus:border-asst-accent-line";
@@ -151,8 +139,9 @@ function SignIn({ assistantId, login, name, paste }: { assistantId: string; logi
   );
 }
 
-function Connector({
+function ConnectionRow({
   kind,
+  connector,
   stored,
   login,
   assistantId,
@@ -163,6 +152,7 @@ function Connector({
   first
 }: {
   kind: CredentialKind;
+  connector: Connector;
   stored: boolean;
   login: LoginView | undefined;
   assistantId: string;
@@ -173,10 +163,10 @@ function Connector({
   first: boolean;
 }) {
   const [connecting, setConnecting] = useState(false);
-  const connector = CONNECTORS[kind] ?? { name: kind, initial: kind.slice(0, 1).toUpperCase(), desc: "" };
   const state = checklistState(stored, login, now);
-  // A Bedrock key is the one connection with no sign-in: the person pastes it.
-  const pasted = kind === "bedrock";
+  // What the person pastes to connect this one, or `null` when their assistant signs in and relays a code. The
+  // connector's own answer, so a kind with no sign-in behind it is never offered a note about one never coming.
+  const pasted = connector.paste;
   let right: React.ReactNode;
   if (state === "stored") {
     right = <span className="shrink-0 text-[13px] font-medium text-asst-ok">✓ Connected</span>;
@@ -193,6 +183,27 @@ function Connector({
       </button>
     );
   }
+  // One thing to do at a time, chosen here rather than by three conditions that have to agree: a relayed sign-in and
+  // a field for the same credential, side by side, is two password boxes posting to different places, and a token
+  // typed into the code box reaches the pod and comes back only as a sign-in that did not work.
+  let below: React.ReactNode = null;
+  if (state === "login" && login !== undefined) {
+    // The live sign-in wins over anything the person clicked before it arrived, which on the Claude row is the usual
+    // order: they ask to connect, and the pod relays its code a moment later.
+    below = <SignIn assistantId={assistantId} login={login} name={connector.name} paste={paste} />;
+  } else if (state !== "stored" && connecting && pasted !== null) {
+    below = (
+      <ActionForm action={save} label={`Save your ${pasted}`} className="flex flex-wrap items-center gap-2">
+        <input type="hidden" name="kind" value={kind} />
+        <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label={pasted} className={INPUT} />
+        <button type="submit" className={PRIMARY}>
+          Save
+        </button>
+      </ActionForm>
+    );
+  } else if (state !== "stored" && connecting) {
+    below = <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>;
+  }
   return (
     <li className={`flex flex-col gap-2.5 bg-asst-bg px-4 py-3.5 ${first ? "" : "border-t border-asst-line"}`}>
       <div className="flex items-center gap-3.5">
@@ -205,19 +216,7 @@ function Connector({
         </div>
         {right}
       </div>
-      {state === "login" && login !== undefined ? <SignIn assistantId={assistantId} login={login} name={connector.name} paste={paste} /> : null}
-      {state !== "stored" && pasted && connecting ? (
-        <ActionForm action={save} label="Save your Bedrock API key" className="flex flex-wrap items-center gap-2">
-          <input type="hidden" name="kind" value="bedrock" />
-          <input name="value" type="password" required autoComplete="off" spellCheck={false} aria-label="Bedrock API key" className={INPUT} />
-          <button type="submit" className={PRIMARY}>
-            Save
-          </button>
-        </ActionForm>
-      ) : null}
-      {state !== "stored" && !pasted && connecting && state !== "login" ? (
-        <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>
-      ) : null}
+      {below}
       {state !== "login" && login?.state === "failed" ? (
         <p role="alert" className="text-xs text-asst-error">
           That sign-in did not work. Your assistant will ask again.
@@ -341,7 +340,7 @@ export function GettingReady({
   const now = useNow();
   const ask = connectionsAsk(assistant.onboarded, unavailable);
   const stored = (kind: CredentialKind) => statuses.some((status) => status.kind === kind && status.stored);
-  const kinds = [...assistant.needed, ...assistant.optional.filter((kind) => OFFERED_OPTIONAL.includes(kind))];
+  const offered = offeredConnections(assistant);
   const starting = !assistant.readiness.failed && assistant.status !== "running";
   return (
     <ReadyShell assistant={assistant} unavailable={unavailable} theme={theme} subtitle={subtitleFor(ask, returning)}>
@@ -352,10 +351,11 @@ export function GettingReady({
         </p>
       ) : (
         <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[14px] border border-asst-line">
-          {kinds.map((kind, index) => (
-            <Connector
+          {offered.map(({ kind, connector }, index) => (
+            <ConnectionRow
               key={kind}
               kind={kind}
+              connector={connector}
               stored={stored(kind)}
               login={assistant.logins.find((login) => login.kind === kind)}
               assistantId={assistant.id}
