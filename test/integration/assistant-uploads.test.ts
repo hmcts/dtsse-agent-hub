@@ -16,6 +16,7 @@ import * as streamRoute from "../../src/app/api/agent/[agentId]/stream/route.ts"
 import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
+import * as contentRoute from "../../src/app/api/ui/uploads/[uploadId]/content/route.ts";
 import * as partRoute from "../../src/app/api/ui/uploads/[uploadId]/parts/[index]/route.ts";
 import * as discardRoute from "../../src/app/api/ui/uploads/[uploadId]/route.ts";
 import * as uploadRoute from "../../src/app/api/ui/uploads/route.ts";
@@ -43,6 +44,7 @@ vi.mock("next/cache", async () => {
 
 const { actAs } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/assistant.ts");
+const { assistantConversation } = await import("../../src/web/data.ts");
 
 const ALICE: Person = { oid: "dev-alice", name: "Dev alice (sign-in disabled)", email: "alice@dev.invalid" };
 const BOB: Person = { oid: "dev-bob", name: "Dev bob (sign-in disabled)", email: "bob@dev.invalid" };
@@ -414,9 +416,12 @@ describe("sending a message with attachments", () => {
     expect(result).toMatchObject({ ok: true });
     const sent = (result as { message: { id: string; attachments?: unknown } }).message;
     expect(sent.attachments).toEqual([
-      { id: first, name: "letter.pdf", bytes: 6, media_type: "application/pdf" },
-      { id: second, name: "scan.png", bytes: 3, media_type: "application/pdf" }
+      { id: first, name: "letter.pdf", bytes: 6, media_type: "application/pdf", available_until: expect.any(String) },
+      { id: second, name: "scan.png", bytes: 3, media_type: "application/pdf", available_until: expect.any(String) }
     ]);
+    // The window the chip reads to decide whether it can offer the file back, from the hub rather than the browser.
+    const held = (sent.attachments as { available_until: string }[])[0]!.available_until;
+    expect(Date.parse(held)).toBeGreaterThan(Date.now());
     expect(await prisma.assistantUpload.findMany({ where: { messageId: BigInt(sent.id) }, select: { id: true } })).toHaveLength(2);
   });
 
@@ -602,7 +607,9 @@ describe("the pod fetching an attachment", () => {
     expect([...tail]).toEqual([...bytes.subarray(PART_BYTES)]);
   });
 
-  it("should delete every part row when the pod reports it has the file, and keep the metadata", async () => {
+  it("should mark the upload fetched and keep its parts, which the owner's download needs, when the pod reports it", async () => {
+    // The report no longer takes the bytes: the retention window does, on one clock for every upload, and until it
+    // closes these part rows are the person's only copy of a file they attached from a browser that has moved on.
     // Arrange
     const { token, agentId, uploadId } = await attached();
 
@@ -611,7 +618,7 @@ describe("the pod fetching an attachment", () => {
 
     // Assert
     expect(response.status).toBe(204);
-    expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(0);
+    expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(2);
     expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: uploadId } })).toMatchObject({ state: "fetched", fileName: "letter.pdf" });
   });
 
@@ -629,7 +636,7 @@ describe("the pod fetching an attachment", () => {
     expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: uploadId } })).toMatchObject({ state: "fetched" });
   });
 
-  it("should stop serving parts once they have been reported fetched", async () => {
+  it("should stop serving parts to the pod once they have been reported fetched, though the rows are still there", async () => {
     // Arrange
     const { token, agentId, uploadId } = await attached();
     await pod(attachmentFetchedRoute.POST, token, `/api/agent/${agentId}/attachments/${uploadId}/fetched`, { agentId, uploadId }, "POST");
@@ -695,6 +702,230 @@ describe("the pod fetching an attachment", () => {
     // Assert
     const { conversations } = await jsonOf<{ conversations: { id: string }[] }>(response);
     expect(conversations.map((conversation) => conversation.id).sort(byCodePoint)).toEqual([one.id, two.id].sort(byCodePoint));
+  });
+});
+
+/**
+ * The person downloading their own file back, which is the only way they ever see it again: the browser that picked
+ * it has moved on, and the pod's copy is on a volume they have no route to.
+ */
+describe("downloading an attachment back", () => {
+  function download(uploadId: string, as = "alice"): Promise<Response> {
+    return ui(contentRoute.GET, { path: `/api/ui/uploads/${uploadId}/content`, params: { uploadId }, as });
+  }
+
+  /**
+   * A file on a sent message, with the bytes it went up as, in a conversation of its own. The assistant is started
+   * here only the first time: a claim answers for an unclaimed virtual agent, so a second call would find nothing.
+   */
+  async function sentFile(name: string, bytes: Uint8Array<ArrayBuffer>, mediaType = "application/pdf") {
+    if ((await prisma.virtualAgent.count()) === 0) {
+      await startedAssistant();
+    }
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const created = await jsonOf<Created>(await startUpload(conversation.id, { name, size: bytes.byteLength, mediaType }));
+    for (let index = 0; index < created.parts; index += 1) {
+      const slice = bytes.subarray(index * created.partBytes, Math.min(bytes.byteLength, (index + 1) * created.partBytes));
+      expect((await putPart(created.uploadId, index, slice)).ok, `part ${index}`).toBe(true);
+    }
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "read this", uploadIds: [created.uploadId] });
+    return { conversationId: conversation.id, uploadId: created.uploadId };
+  }
+
+  it("should answer the exact bytes that went in, every one of them, for a file of several parts", async () => {
+    // Compared byte for byte rather than sampled: a stream that reads part rows in turn can drop one, repeat one or
+    // put them back in the wrong order, and every one of those shows up only in the whole file.
+    // Arrange
+    const sent = new Uint8Array(PART_BYTES * 2 + 1234);
+    for (let at = 0; at < sent.byteLength; at += 1) {
+      sent[at] = (at * 31 + (at >> 11)) & 0xff;
+    }
+    const { uploadId } = await sentFile("my letter (final).pdf", sent);
+
+    // Act
+    const response = await download(uploadId);
+
+    // Assert
+    expect(response.status).toBe(200);
+    const back = new Uint8Array(await response.arrayBuffer());
+    expect(back.byteLength).toBe(sent.byteLength);
+    expect(Buffer.compare(Buffer.from(back), Buffer.from(sent))).toBe(0);
+  });
+
+  it("should still answer the file after the pod has fetched it, which is when every real download happens", async () => {
+    // Arrange
+    const { token } = await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const sent = filled(PART_BYTES + 7, 3);
+    const uploadId = await upload(conversation.id, "letter.pdf", sent);
+    await actions.sendAssistantMessage({ conversationId: conversation.id, body: "read this", uploadIds: [uploadId] });
+    const { agentId, sessionId } = await sessionOf(conversation.id);
+    await register(token, sessionId, conversation.id);
+    await pod(attachmentFetchedRoute.POST, token, `/api/agent/${agentId}/attachments/${uploadId}/fetched`, { agentId, uploadId }, "POST");
+
+    // Act
+    const response = await download(uploadId);
+
+    // Assert
+    expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: uploadId } })).toMatchObject({ state: "fetched" });
+    expect(Buffer.compare(Buffer.from(new Uint8Array(await response.arrayBuffer())), Buffer.from(sent))).toBe(0);
+  });
+
+  it("should name the sanitised file and tell the browser to save rather than render it", async () => {
+    // Arrange
+    const { uploadId } = await sentFile("my report <script>.html", filled(9, 4), "text/html");
+
+    // Act
+    const response = await download(uploadId);
+
+    // Assert: the `stored_name`, which the CHECK constrains, never the person's own name in a header.
+    expect(response.headers.get("content-disposition")).toBe('attachment; filename="my_report_script_.html"');
+    expect(response.headers.get("content-type")).toBe("text/html");
+    // Which is why the type they claimed is safe to answer: saved, not rendered as a page of this origin.
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("content-length")).toBe("9");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("should give someone else nothing, and say no more than it says about an upload that never existed", async () => {
+    // Arrange
+    const { uploadId } = await sentFile("letter.pdf", filled(12, 5));
+    await insertUser(BOB);
+    await createVirtualAgent(prisma, { owner: BOB, modelRoute: "bedrock", name: "bobs" });
+
+    // Act
+    const theirs = await download(uploadId, "bob");
+    const invented = await download("11111111-2222-3333-4444-555555555555", "bob");
+    const nonsense = await download("not-a-uuid", "bob");
+
+    // Assert
+    expect([theirs.status, invented.status, nonsense.status]).toEqual([404, 404, 404]);
+    expect(await jsonOf(theirs)).toEqual({ reason: "no_such_upload", error: "no such upload" });
+    expect(await jsonOf(invented)).toEqual({ reason: "no_such_upload", error: "no such upload" });
+  });
+
+  it("should refuse a signed-out caller before it looks the upload up at all", async () => {
+    // Arrange
+    const { uploadId } = await sentFile("letter.pdf", filled(12, 5));
+    vi.stubEnv("AUTH_DISABLED", "false");
+
+    // Act
+    const response = await download(uploadId);
+
+    // Assert
+    expect(response.status).toBe(401);
+  });
+
+  it("should tell the owner plainly that a file the sweep has taken is no longer held", async () => {
+    // Arrange
+    const { uploadId } = await sentFile("letter.pdf", filled(12, 6));
+    await prisma.assistantUpload.update({ where: { id: uploadId }, data: { createdAt: new Date(Date.now() - 99 * 3_600_000) } });
+    await sweepUploads(prisma, { retentionHours: 3 });
+
+    // Act
+    const response = await download(uploadId);
+
+    // Assert
+    expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: uploadId } })).toMatchObject({ state: "expired" });
+    expect(response.status).toBe(410);
+    expect(await jsonOf(response)).toEqual({ reason: "no_longer_held", error: "that file is no longer held here" });
+  });
+
+  it("should refuse a file past its window even before the sweep has reached it, and say so in the thread", async () => {
+    // The sweep runs every ten minutes, so there is always a slice of time where the bytes are there and the window
+    // has gone. The window decides, in the route and in the chip alike.
+    // Arrange
+    const { conversationId, uploadId } = await sentFile("letter.pdf", filled(12, 7));
+    await prisma.assistantUpload.update({ where: { id: uploadId }, data: { createdAt: new Date(Date.now() - 99 * 3_600_000) } });
+
+    // Act
+    const response = await download(uploadId);
+
+    // Assert
+    expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(1);
+    expect(response.status).toBe(410);
+    // And the chip the person is looking at says so without being asked: its window is already in the past.
+    const page = await assistantConversation(VIEWER, conversationId);
+    const attachments = page!.page.messages.flatMap((message) => message.attachments ?? []);
+    expect(attachments).toHaveLength(1);
+    expect(Date.parse(attachments[0]!.available_until!)).toBeLessThan(Date.now());
+  });
+
+  it("should offer no window at all on a file whose bytes have gone, so the chip cannot offer a download", async () => {
+    // Arrange
+    const { conversationId, uploadId } = await sentFile("letter.pdf", filled(12, 8));
+    await prisma.assistantUpload.update({ where: { id: uploadId }, data: { state: "expired" } });
+
+    // Act
+    const page = await assistantConversation(VIEWER, conversationId);
+
+    // Assert
+    const attachments = page!.page.messages.flatMap((message) => message.attachments ?? []);
+    expect(attachments).toEqual([{ id: uploadId, name: "letter.pdf", bytes: 12, media_type: "application/pdf", available_until: null }]);
+  });
+
+  it("should refuse an upload still arriving, whose parts would make a file with holes in it", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const created = await jsonOf<Created>(await startUpload(conversation.id, { name: "half.pdf", size: PART_BYTES + 10 }));
+    await putPart(created.uploadId, 0, filled(PART_BYTES, 1));
+
+    // Act
+    const response = await download(created.uploadId);
+
+    // Assert
+    expect(response.status).toBe(410);
+  });
+
+  it("should answer 404 on a deployment without virtual agents, as every other upload route does", async () => {
+    // Arrange
+    const { uploadId } = await sentFile("letter.pdf", filled(12, 9));
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "false");
+
+    // Act
+    const response = await download(uploadId);
+
+    // Assert
+    expect(response.status).toBe(404);
+    expect(await jsonOf(response)).toMatchObject({ reason: "unavailable" });
+  });
+
+  it("should answer a large file in parts rather than in one piece, which is what keeps it off the heap", async () => {
+    // The outbound counterpart of "should not take a whole file into memory when a client streams one at a single
+    // part". What is asserted is the *shape* of the response rather than a memory reading, because the reading cannot
+    // tell one part from six through undici, Prisma and an allocator that keeps freed external memory for reuse: it
+    // was tried, and two runs of the same 24 MB download differed by more than the whole file.
+    //
+    // A route that read the part rows into one buffer would answer 24 MB as a single chunk, which is what this
+    // refuses. How many rows are read before a chunk is taken is counted exactly, against a database that answers
+    // one row at a time, in `src/assistant/upload-store.test.ts`.
+    // Arrange
+    const sent = filled(PART_BYTES * 6, 7);
+    const { uploadId } = await sentFile("large.pdf", sent);
+
+    // Act
+    const response = await download(uploadId);
+    const reader = response.body!.getReader();
+    const chunks: number[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      chunks.push(value.byteLength);
+    }
+
+    // Assert
+    const measured = `a ${(sent.byteLength / MB).toFixed(0)} MB download arrived in ${chunks.length} chunks, the largest ${(Math.max(...chunks) / MB).toFixed(1)} MB`;
+    // Printed as well as asserted, as the inbound measurements are: this is the figure the direction was accepted on.
+    console.info(measured);
+    expect(
+      chunks.reduce((total, length) => total + length, 0),
+      measured
+    ).toBe(sent.byteLength);
+    expect(Math.max(...chunks), measured).toBeLessThanOrEqual(PART_BYTES);
+    expect(chunks.length, measured).toBeGreaterThan(1);
   });
 });
 
@@ -779,17 +1010,37 @@ describe("the upload sweep", () => {
     expect(await prisma.assistantUpload.count()).toBe(1);
   });
 
-  it("should do nothing at all when every upload was fetched or is recent", async () => {
+  it("should take a fetched upload's bytes on the same clock as any other, since the window is what bounds them", async () => {
+    // The window, not the pod's report, is what ends an upload's time in Postgres: holding a fetched one for longer
+    // would keep the owner's download alive past what the retention design pays for.
     // Arrange
     await startedAssistant();
     const conversationId = await spokenIn();
-    await stale(conversationId, 99, "fetched");
+    const old = await stale(conversationId, 99, "fetched");
+    const recent = await stale(conversationId, 1, "fetched");
+
+    // Act
+    const result = await sweepUploads(prisma, { retentionHours: 3 });
+
+    // Assert
+    expect(result).toEqual({ expired: 1, parts: 1, conversations: 0 });
+    expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: old } })).toMatchObject({ state: "expired" });
+    expect(await prisma.assistantUploadPart.findMany({ select: { uploadId: true } })).toEqual([{ uploadId: recent }]);
+  });
+
+  it("should do nothing at all when every upload is still inside its window", async () => {
+    // Arrange
+    await startedAssistant();
+    const conversationId = await spokenIn();
+    await stale(conversationId, 1, "fetched");
+    await stale(conversationId, 1, "stored");
 
     // Act
     const result = await sweepUploads(prisma, { retentionHours: 3 });
 
     // Assert
     expect(result).toEqual({ expired: 0, parts: 0, conversations: 0 });
+    expect(await prisma.assistantUploadPart.count()).toBe(2);
   });
 
   it("should take only a batch at a time, so a backlog drains over several ticks", async () => {
@@ -1055,9 +1306,10 @@ describe("a file from the browser to the session's envelope", () => {
     expect(content).toContain("already saved on this machine");
     expect(content).toContain("What does this letter say?");
 
-    // And the fetched report the client sent through the real route is what emptied Postgres of the bytes.
-    expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(0);
+    // And the fetched report the client sent through the real route marked the upload without taking its bytes: the
+    // pod has the file and so, until the window closes, does the person who attached it.
     expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: uploadId } })).toMatchObject({ state: "fetched" });
+    expect(await prisma.assistantUploadPart.count({ where: { uploadId } })).toBe(2);
   });
 
   it("should tell the session the file could not be retrieved, and still deliver the message, when the parts have gone", async () => {
@@ -1158,7 +1410,10 @@ describe("a file from the browser to the session's envelope", () => {
       expect(content).toContain(written);
     }
     expect(content).toContain("The user attached 4 files to this message");
-    expect(await prisma.assistantUploadPart.count()).toBe(0);
+    // Every one reported fetched, and every one's bytes still in Postgres for the owner's download until the window
+    // closes on them.
+    expect(await prisma.assistantUpload.count({ where: { state: "fetched" } })).toBe(4);
+    expect(await prisma.assistantUploadPart.count()).toBe(4);
   });
 
   it("should name the real path above the skill line when the message is both a slash command and a file", async () => {
@@ -1608,8 +1863,8 @@ describe("the unsent new chat the screen comes back to", () => {
       id,
       product: "pcs",
       attachments: [
-        { id: first, name: "scanned letter.pdf", bytes: 6, media_type: "application/pdf" },
-        { id: second, name: "notes.txt", bytes: 3, media_type: "application/pdf" }
+        { id: first, name: "scanned letter.pdf", bytes: 6, media_type: "application/pdf", available_until: expect.any(String) },
+        { id: second, name: "notes.txt", bytes: 3, media_type: "application/pdf", available_until: expect.any(String) }
       ]
     });
   });

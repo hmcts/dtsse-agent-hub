@@ -123,6 +123,8 @@ export type UploadRefusal =
   | "no_such_conversation"
   /** No such upload, or someone else's: the two are deliberately indistinguishable. */
   | "no_such_upload"
+  /** The person's own file, but past the window Postgres holds its bytes for, so there is nothing to download. */
+  | "no_longer_held"
   | "file_too_big"
   /** `MAX_ATTACHMENTS_PER_MESSAGE` files are already waiting on this conversation's next message. */
   | "too_many_files"

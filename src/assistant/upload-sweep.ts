@@ -2,24 +2,40 @@ import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 
 /**
- * The backstop that stops Postgres filling with upload bytes, and that tidies away the conversations attaching a file
- * on the new-chat screen creates and nobody sends.
+ * The one thing that stops Postgres filling with upload bytes, and that tidies away the conversations attaching a
+ * file on the new-chat screen creates and nobody sends.
  *
- * Normally a pod reports an attachment fetched within seconds of the message and `reportFetched` deletes its parts.
- * This covers the cases where that never happens: a pod that could not start, a browser that uploaded and then closed
- * the tab, and a fetched-report path that is broken. Without it, nothing complains while the database grows by 25 MB
- * an upload, which is why this has a test of its own.
+ * It is not a backstop: every upload's bytes leave through here, whether a pod fetched them or not. The pod's fetched
+ * report marks the upload and leaves the parts, so the person can download their own file back for the rest of the
+ * window (`uploadHeldUntil` in `upload-store.ts`), and this is what then takes them. Without it the database grows by
+ * 25 MB an upload for ever, which is why this has a test of its own.
  *
  * Only the parts go. The metadata row stays, marked `expired`, so the thread can still say a file was attached.
  */
 
-/** Uploads are swept at about the rate the transcripts are, for the same reason: they grow slowly. */
+/** How often the sweep runs. With `UPLOAD_SWEEP_BATCH` this is the drain rate for every upload; see that constant. */
 export const UPLOAD_SWEEP_INTERVAL_MS = 10 * 60_000;
 
-/** How long an upload nobody fetched keeps its bytes. Long enough for a stopped pod to be started and catch up. */
+/**
+ * How long an upload keeps its bytes in Postgres, from the moment it was started.
+ *
+ * Long enough for a stopped pod to be started and catch up, which is what set it, and short enough that the bytes are
+ * a window rather than a store. It doubles as the window in which the owner can download their own file back, and
+ * deliberately so: one clock, and no second window to reason about.
+ */
 export const UPLOAD_RETENTION_HOURS = 3;
 
-/** Uploads expired per sweep. Small, because each one is up to 25 MB of part rows in one transaction. */
+/**
+ * Uploads expired per sweep. Kept small because each one is up to 25 MB of part rows deleted in one transaction, and
+ * all of a batch's are deleted in the same one.
+ *
+ * **With the interval this is the drain rate for every upload, not just for the ones nobody fetched**, since nothing
+ * else deletes a part row any more. 20 every 10 minutes is 120 uploads an hour: at 25 MB each the resident part bytes
+ * settle around 9 GB of the 32 GB in `infrastructure/postgres.tf`, with up to 500 MB of dead tuples per tick for
+ * autovacuum to catch up on. Sustained above 120 uploads an hour the backlog grows without bound and bytes outlive
+ * their window, so this and the interval are what to raise first — before the per-file or per-conversation caps, which
+ * bound one person's share and say nothing about the whole database's.
+ */
 export const UPLOAD_SWEEP_BATCH = 20;
 
 /** "upldswep". Distinct from the migration, offline-sweep and transcript-sweep locks. */
@@ -40,14 +56,16 @@ export interface UploadSweepResult {
 }
 
 /**
- * Deletes the parts of a batch of the uploads that nobody fetched within `retentionHours`, and marks those uploads
- * `expired`. Nothing is announced: a page showing the chip keeps it, which is right — the file was attached.
+ * Deletes the parts of a batch of the uploads older than `retentionHours`, and marks those uploads `expired`. Nothing
+ * is announced: a page showing the chip keeps it, which is right — the file was attached, and the chip works out for
+ * itself when the window closes.
  *
- * An upload already on a sent message is taken on the same clock as one still in a composer. The bytes are what the
- * window bounds, and a file nobody fetched costs the same 25 MB whichever it is; a longer window for the sent ones
- * would only move the same expiry later while holding the bytes past what the retention design intends. What the
- * expiry must not be is silent, and that is `frameAttachments`' job: it still names an `expired` upload, so the pod's
- * fetch fails and the envelope tells the session the file could not be retrieved and to ask for it again.
+ * Every state that still has bytes is taken on the one clock: still arriving, finished and waiting for a pod, and
+ * already on the pod's disk. The bytes are what the window bounds and they cost the same 25 MB whichever it is, so a
+ * `fetched` upload is swept at the same instant a `pending` one is rather than being kept for as long as the thread
+ * shows it. What the expiry must not be is silent, and that is two other things' job: `frameAttachments` still names
+ * an `expired` upload, so a pod's fetch fails and the envelope tells the session the file could not be retrieved; and
+ * the thread's chip stops offering a download the moment the window closes.
  *
  * The same transaction-scoped `pg_try_advisory_xact_lock` as the other sweeps, so one pod sweeps per tick.
  * `undefined` means another pod held the lock.
@@ -62,7 +80,7 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
     const stale = await tx.$queryRaw<{ id: string }[]>`
       SELECT id::text AS id
         FROM assistant_upload
-       WHERE state IN ('pending', 'stored')
+       WHERE state IN ('pending', 'stored', 'fetched')
          AND created_at < now() - make_interval(hours => ${retentionHours}::int)
        ORDER BY created_at
        LIMIT ${batch}::int
@@ -146,7 +164,7 @@ export function startUploadSweep(prisma: PrismaClient, intervalMs: number = UPLO
     sweepUploads(prisma)
       .then((result) => {
         if (result !== undefined && result.expired > 0) {
-          console.info(`upload sweep: ${result.expired} uploads nothing fetched expired, ${result.parts} part rows deleted`);
+          console.info(`upload sweep: ${result.expired} uploads past their window expired, ${result.parts} part rows deleted`);
         }
         if (result !== undefined && result.conversations > 0) {
           console.info(`upload sweep: ${result.conversations} conversations deleted, having only ever held an attachment nobody sent`);

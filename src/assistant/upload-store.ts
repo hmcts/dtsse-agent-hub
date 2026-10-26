@@ -1,6 +1,7 @@
-import { canAttachUpload, canSessionUseAttachment, canWriteUpload, type UploadRef, type UploadState } from "../access/rules.ts";
+import { attachmentDownload, canAttachUpload, canSessionUseAttachment, canWriteUpload, type UploadRef, type UploadState } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { UPLOAD_RETENTION_HOURS } from "./upload-sweep.ts";
 import {
   DEFAULT_MEDIA_TYPE,
   describeBytes,
@@ -18,11 +19,19 @@ import {
 } from "./uploads.ts";
 
 /**
- * The files attached to Assistant messages: the metadata rows, and the parts the browser sends and the pod pulls.
+ * The files attached to Assistant messages: the metadata rows, and the parts the browser sends, the pod pulls and the
+ * person can pull back.
  *
- * Postgres holds the bytes only between the two: the browser's last part makes an upload `stored`, the pod's fetched
- * report deletes every part row, and the sweep deletes the parts of anything nobody fetched. Nothing here ever holds
- * more than one part in memory, which is what keeps a 25 MB file off a 768 MB heap.
+ * Postgres holds the bytes for one bounded window and no longer: `UPLOAD_RETENTION_HOURS` from the moment the upload
+ * was started, after which the sweep deletes every part row whether a pod fetched it or not. The pod's fetched report
+ * marks the upload but no longer takes the bytes, so within that window the owner can download their own file back
+ * — see `uploadHeldUntil` for why the window did not have to grow to pay for it.
+ *
+ * Nothing here ever holds more than one part in memory, in either direction. **The limit that bounds is the
+ * container's, not V8's**: a part arrives from Prisma as a `Bytes` whose backing store is external memory, which
+ * `--max-old-space-size=768` does not count and V8 will not collect under pressure from. What a buffered 25 MB file
+ * runs into is the 1 GiB `memoryLimits` in `charts/dtsse-agent-hub/values.yaml`, and the failure is the kernel
+ * OOM-killing the pod rather than a heap error anything could log.
  */
 
 /** What Prisma's `Bytes` resolves to: a view onto its own buffer, never a shared one. */
@@ -34,6 +43,7 @@ export interface UploadRow extends UploadRef {
   storedName: string;
   mediaType: string;
   bytes: number;
+  createdAt: Date;
 }
 
 /** An attachment as the thread shows it: the person's own file name, so the chip matches what they picked. */
@@ -42,6 +52,12 @@ export interface MessageAttachment {
   name: string;
   bytes: number;
   media_type: string;
+  /**
+   * When the hub stops holding the bytes, as an ISO instant, or `null` for an upload whose bytes it does not hold at
+   * all. The chip reads this to decide whether to offer a download, so it is sent rather than worked out in the
+   * browser: the retention window is the hub's, and a second answer to it would be the one that went wrong.
+   */
+  available_until: string | null;
 }
 
 /** An attachment as a `direct` frame carries it: `name` is the stored name, which is what the pod writes. */
@@ -63,7 +79,8 @@ const SELECT = {
   storedName: true,
   mediaType: true,
   bytes: true,
-  state: true
+  state: true,
+  createdAt: true
 } as const;
 
 function toRow(row: {
@@ -76,6 +93,7 @@ function toRow(row: {
   mediaType: string;
   bytes: bigint;
   state: string;
+  createdAt: Date;
 }): UploadRow {
   return {
     id: row.id,
@@ -86,9 +104,39 @@ function toRow(row: {
     storedName: row.storedName,
     mediaType: row.mediaType,
     bytes: Number(row.bytes),
-    state: row.state as UploadState
+    state: row.state as UploadState,
+    createdAt: row.createdAt
   };
 }
+
+/**
+ * When the hub stops holding an upload's bytes: `UPLOAD_RETENTION_HOURS` from when it was started, the same clock and
+ * the same window the sweep works to, so there is one answer rather than a download window beside a retention one.
+ *
+ * That the window did not have to be widened for downloads is the whole reason this is affordable. The sweep's window
+ * was always the ceiling — an upload no pod fetched held its bytes for every hour of it — and `createUpload` already
+ * counts a `fetched` upload's bytes against `MAX_CONVERSATION_BYTES`, so a conversation's share of Postgres was
+ * already budgeted as though the parts stayed. Keeping them to the same instant raises what is *typically* held
+ * without moving what *can* be.
+ */
+export function uploadHeldUntil(createdAt: Date): Date {
+  return new Date(createdAt.getTime() + UPLOAD_RETENTION_HOURS * 3_600_000);
+}
+
+/** One upload as the thread and the composer show it, from the columns every list of them selects. */
+export function attachmentView(row: { id: string; fileName: string; bytes: bigint; mediaType: string; state: string; createdAt: Date }): MessageAttachment {
+  const held = row.state === "stored" || row.state === "fetched";
+  return {
+    id: row.id,
+    name: row.fileName,
+    bytes: Number(row.bytes),
+    media_type: row.mediaType,
+    available_until: held ? uploadHeldUntil(row.createdAt).toISOString() : null
+  };
+}
+
+/** The columns `attachmentView` reads, for the `select` of every query that builds one. */
+export const ATTACHMENT_SELECT = { id: true, fileName: true, bytes: true, mediaType: true, state: true, createdAt: true } as const;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -285,10 +333,10 @@ export async function uploadNames(db: Database, viewerOid: string, conversationI
 export async function unsentAttachments(db: Database, conversationId: string): Promise<MessageAttachment[]> {
   const rows = await db.assistantUpload.findMany({
     where: { conversationId, messageId: null, state: "stored" },
-    select: { id: true, fileName: true, bytes: true, mediaType: true },
+    select: ATTACHMENT_SELECT,
     orderBy: { createdAt: "asc" }
   });
-  return rows.map((row) => ({ id: row.id, name: row.fileName, bytes: Number(row.bytes), media_type: row.mediaType }));
+  return rows.map(attachmentView);
 }
 
 /**
@@ -327,12 +375,76 @@ export async function readUploadPart(db: Database, uploadId: string, index: numb
 }
 
 /**
- * The pod has the whole file on its disk. **Deletes every part row**, which is what stops Postgres holding bytes, and
- * keeps the metadata row so the thread can still show the file. Already `fetched` changes nothing.
+ * The pod has the whole file on its disk. Marks the upload and nothing else; already `fetched` changes nothing.
+ *
+ * **It deliberately does not delete the parts.** What stops Postgres holding bytes is the window in
+ * `uploadHeldUntil`, which the sweep enforces for every upload on one clock, fetched or not. Deleting them here as
+ * well would take the bytes seconds after the message was sent and leave the person's own file unreachable to them
+ * for the rest of a window the database is paying for anyway.
  */
 export async function reportFetched(prisma: PrismaClient, uploadId: string): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    await tx.assistantUploadPart.deleteMany({ where: { uploadId } });
-    await tx.assistantUpload.update({ where: { id: uploadId }, data: { state: "fetched", updatedAt: new Date() } });
+  await prisma.assistantUpload.update({ where: { id: uploadId }, data: { state: "fetched", updatedAt: new Date() } });
+}
+
+export class UploadNoLongerHeld extends HttpError {
+  constructor() {
+    super(410, "that file is no longer held here", { reason: "no_longer_held" satisfies UploadRefusal });
+  }
+}
+
+/**
+ * The upload the person may download back, or the refusal. The owner-facing counterpart of `sessionAttachment`.
+ *
+ * The two refusals are different on purpose. Someone else's upload is a 404, exactly as an id that never existed is,
+ * so the route confirms nothing. The person's own file whose bytes have gone is a 410 saying so, because that is
+ * something they need to be told rather than something to hide.
+ */
+export async function downloadableUpload(prisma: PrismaClient, viewerOid: string, uploadId: string, now: Date = new Date()): Promise<UploadRow> {
+  const upload = await findUpload(prisma, uploadId);
+  if (upload === undefined) {
+    throw new UploadNotFound();
+  }
+  const verdict = attachmentDownload(viewerOid, upload, uploadHeldUntil(upload.createdAt), now);
+  if (verdict === "not_yours") {
+    throw new UploadNotFound();
+  }
+  if (verdict === "not_held") {
+    throw new UploadNoLongerHeld();
+  }
+  return upload;
+}
+
+/**
+ * An upload's bytes, in order, as a stream that reads one part row at a time.
+ *
+ * The outbound half of the rule the upload routes keep: `pull` is called again only once the part it enqueued has
+ * been taken, so the most this ever holds is the part being read plus the one queued behind it — the same two parts
+ * the inbound measurement in `test/integration/assistant-uploads.test.ts` allows per upload in flight. **Reading the
+ * rows into one buffer and answering that** would cost 25 MB of external memory per download, against the container
+ * limit this module's own comment names, and is the whole reason the file is in parts to begin with.
+ *
+ * A missing part errors the stream rather than closing it short, so the browser sees a broken download instead of a
+ * truncated file it would keep. The reachable way in is not a race with the sweep but a `DELETE /api/ui/uploads/{id}`
+ * on an unsent composer upload while this is streaming it: the part rows cascade from the upload row, so the next
+ * `pull` finds nothing. The browser gets a failed download and the pod's log a broken pipe, which is the right
+ * outcome — a short file that looked complete is the one thing worth refusing to produce.
+ */
+export function uploadBytes(db: Database, upload: UploadRow): ReadableStream<UploadBytes> {
+  const parts = partCount(upload.bytes);
+  let index = 0;
+  return new ReadableStream<UploadBytes>({
+    async pull(controller) {
+      if (index >= parts) {
+        controller.close();
+        return;
+      }
+      const data = await readUploadPart(db, upload.id, index);
+      if (data === undefined) {
+        controller.error(new Error(`part ${index} of upload ${upload.id} is no longer there`));
+        return;
+      }
+      index += 1;
+      controller.enqueue(data);
+    }
   });
 }

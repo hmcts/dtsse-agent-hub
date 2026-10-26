@@ -532,7 +532,7 @@ model AssistantTemplate {
   @@map("assistant_template")
 }
 
-/// One 4 MiB slice of an upload. Deleted as soon as the pod says it has the file, or by the sweep if it never does.
+/// One 4 MiB slice of an upload. Deleted by the sweep once the retention window closes, whether a pod fetched it or not.
 model AssistantUploadPart {
   uploadId String @map("upload_id") @db.Uuid
   index    Int
