@@ -164,7 +164,12 @@ export type MockHubOptions = {
 // the ack would.
 export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEvent = true, replayAcked = false, launchTokens = {} }: MockHubOptions = {}) {
   const options = { maxLifetimeMs, reconnectEvent, replayAcked };
-  const failures: { stream: number[]; ack: number[]; transcript: number[] } = { stream: [], ack: [], transcript: [] };
+  const failures: { stream: number[]; ack: number[]; transcript: number[]; credential: number[] } = {
+    stream: [],
+    ack: [],
+    transcript: [],
+    credential: []
+  };
   // Set through onBeforeRespond, for a caller that keeps a copy of what the hub recorded.
   let beforeRespond: (() => void) | null = null;
   const transcripts = new Map<string, Map<string, Record<string, unknown>>>();
@@ -412,6 +417,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return kind === "claude_md" ? send(res, 200, { value: DEFAULT_CLAUDE_MD }) : send(res, 404, { error: "no credential" });
       }
       if (req.method === "PUT") {
+        const refused = failures.credential.shift();
+        if (refused !== undefined) {
+          return send(res, refused, { error: "credential refused" });
+        }
         if (kind === "claude_md" || kind === "git_identity") {
           return send(res, 403, { error: "only its owner can change this credential" });
         }
@@ -886,7 +895,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     onBeforeRespond(hook: () => void) {
       beforeRespond = hook;
     },
-    // The next `count` stream requests, acks or transcript uploads answer `status` instead.
+    // The next `count` stream requests, acks, transcript uploads or credential saves answer `status` instead.
     failNextStreams(count: number, status = 500) {
       for (let i = 0; i < count; i++) {
         failures.stream.push(status);
@@ -900,6 +909,11 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     failNextTranscripts(count: number, status = 500) {
       for (let i = 0; i < count; i++) {
         failures.transcript.push(status);
+      }
+    },
+    failNextCredentialPuts(count: number, status = 500) {
+      for (let i = 0; i < count; i++) {
+        failures.credential.push(status);
       }
     },
     async listen(): Promise<string> {

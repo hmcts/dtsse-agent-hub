@@ -18,7 +18,7 @@
 # shellcheck disable=SC2015,SC2016
 set -u
 
-CASES=(no-token refused-token sign-in-not-completed stored-token-no-access checkout-client broken-checkout-client no-client trailing-slash
+CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure stored-token-no-access checkout-client broken-checkout-client no-client trailing-slash
     client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint client-upgrade-ships-entrypoint
     checkout-entrypoint)
 
@@ -217,31 +217,76 @@ case_refused_token() {
     [ "$(hub '.github')" = "$GOOD_TOKEN" ] && ok "replaces the token on the hub" || no "the token was not replaced"
 }
 
-# A sign-in nobody completes is asked for a bounded number of times and then reported, rather than minting a
-# fresh code every few minutes for as long as the pod runs. A stored token is the other way in, so that is what
-# the pod waits for once it has stopped asking.
+# seed_github_when_asked DETAIL TOKEN: waits up to 30s for the hub's last status detail to hold DETAIL, then
+# stores TOKEN, as the owner does when they read what it asks them for. Backgrounded by the case that needs it,
+# because the boot it is waiting on runs in the foreground.
+seed_github_when_asked() {
+    local n=0
+    while [ "$n" -lt 300 ]; do
+        if jq -r '.status[-1].detail // empty' "$HUB_STATE" 2>/dev/null | grep -q "$1"; then
+            seed_github "$2"
+            return 0
+        fi
+        "$REAL_SLEEP" 0.1
+        n=$((n + 1))
+    done
+    return 1
+}
+
+# The whole of what an owner who does not complete the sign-in goes through: it is asked for a bounded number of
+# times and then reported, rather than minting a fresh code every few minutes for as long as the pod runs; the
+# pod waits in `awaiting_credentials`, the phase that puts the owner on the screen with the box to paste a token
+# into; the first token they paste is one GitHub refuses, which has to be reported or they are left watching the
+# message that asked for the token they just gave; and the second gets the pod booting.
 case_sign_in_not_completed() {
     setup sign-in-not-completed
-    # The owner pastes a token once they see the agent has failed, which is what the detail asks them to do.
     (
-        n=0
-        while [ "$n" -lt 300 ]; do
-            [ "$(jq -r '.status[-1].phase' "$HUB_STATE" 2>/dev/null)" = failed ] && { seed_github "$GOOD_TOKEN"; break; }
-            "$REAL_SLEEP" 0.1
-            n=$((n + 1))
-        done
+        seed_github_when_asked 'Paste a GitHub token at' "$STALE_TOKEN" &&
+            seed_github_when_asked 'refused the stored token' "$GOOD_TOKEN"
     ) &
     local seeder=$!
     boot FAKE_GH_LOGIN_FAILS="error: HTTP 429"
     kill "$seeder" 2>/dev/null
     wait "$seeder" 2>/dev/null
     [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh login-with-token gh setup-git gh setup-git git clone npm install entrypoint " &&
-        ok "stops asking, signs in with the stored token and boots on" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
-    [ "$(hub '.prompts | length')" -eq 1 ] && ok "relays one code only" || no "prompts: $(hub -c '.prompts')"
+        ok "stops asking, signs in with the token that works and boots on" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(hub '.prompts | length')" -eq 1 ] && ok "relays one code only, and none while waiting" || no "prompts: $(hub -c '.prompts')"
     [ "$(hub '.loginFailures[0].state')" = failed ] && ok "tells the hub the sign-in did not complete" || no "loginFailures: $(hub -c '.loginFailures')"
-    hub '.status[] | select(.phase == "failed") | .detail' | grep -q 'Paste a GitHub token at' &&
-        ok "fails the agent with what the owner can do about it" || no "status: $(hub -c '.status')"
+    # `failed` would route an onboarded owner to the warming-up screen, which offers no box to paste a token in.
+    [ "$(hub '[.status[] | select(.phase == "failed")] | length')" -eq 0 ] &&
+        ok "never fails the agent, which would route the owner off the screen that has the token form" || no "status: $(hub -c '.status')"
+    hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'Paste a GitHub token at' &&
+        ok "asks for a token in the phase that offers one" || no "status: $(hub -c '.status')"
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("refused the stored token"))] | length')" -ge 1 ] &&
+        ok "tells the owner the token they pasted was refused" || no "status: $(hub -c '.status')"
     grep -q 'gh said:.*error: HTTP 429' "$C/out" && ok "logs what gh said" || no "gh output not logged: $(grep 'gh auth login' "$C/out")"
+}
+
+# Only "the owner did not complete the sign-in" stops the asking. A client that fails for any other reason is a
+# fault to ride out: the old behaviour reported it as owner inaction and never tried again.
+case_sign_in_transient_failure() {
+    setup sign-in-transient-failure
+    # A client that fails twice with an exit code of its own, then hands over to the real one. `setup` linked the
+    # real client here, so the link goes first: writing the path would write through it and clobber the client.
+    rm -f "$C/bin/agent-hub"
+    cat >"$C/bin/agent-hub" <<EOF
+#!/usr/bin/env bash
+n=\$(cat "\$FAKE_DIR/client-calls" 2>/dev/null || echo 0)
+echo \$((n + 1)) >"\$FAKE_DIR/client-calls"
+if [ "\$n" -lt 2 ]; then
+    echo "virtual-agent: the sign-in could not be relayed (hub unreachable)" >&2
+    exit 1
+fi
+exec "$CLIENT" "\$@"
+EOF
+    chmod +x "$C/bin/agent-hub"
+    boot
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh setup-git git clone npm install entrypoint " &&
+        ok "rides out a client failure that is not the owner's and signs in after it" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(cat "$C/client-calls")" -eq 3 ] && ok "retries the sign-in rather than giving up on the first failure" || no "client calls: $(cat "$C/client-calls")"
+    grep -q 'github sign-in failed (exit 1); retrying in 30s' "$C/out" && ok "logs the exit code it is retrying" || no "retry not logged: $(grep 'github sign-in' "$C/out")"
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("Paste a GitHub token"))] | length')" -eq 0 ] &&
+        ok "never asks the owner for a token over a fault of its own" || no "status: $(hub -c '.status')"
 }
 
 case_stored_token_no_access() {
@@ -422,6 +467,7 @@ run_case() {
         no-token) case_no_token ;;
         refused-token) case_refused_token ;;
         sign-in-not-completed) case_sign_in_not_completed ;;
+        sign-in-transient-failure) case_sign_in_transient_failure ;;
         stored-token-no-access) case_stored_token_no_access ;;
         checkout-client) case_checkout_client ;;
         broken-checkout-client) case_broken_checkout_client ;;

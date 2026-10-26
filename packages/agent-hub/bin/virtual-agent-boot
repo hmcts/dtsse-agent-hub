@@ -42,6 +42,9 @@ HUB="$AGENT_HUB_URL"
 while [ "${HUB%/}" != "$HUB" ]; do HUB="${HUB%/}"; done
 : "${HUB:?AGENT_HUB_URL is only slashes}"
 export GIT_TERMINAL_PROMPT=0
+# The client's exit code for "the owner did not complete the sign-in", which is the one outcome this script must
+# not retry. It is `EXIT_NO_CREDENTIAL` in src/virtual/phases.ts; src/bin.test.ts holds the two in step.
+EXIT_NO_CREDENTIAL=4
 
 log() { printf '%s virtual-agent-boot: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
 
@@ -273,18 +276,38 @@ if [[ -n "$github_missing" ]]; then
     client=$(agent_hub_client) ||
         { report failed "the image has no agent-hub client: neither $WORKSPACE/scripts/agent-hub nor an agent-hub on PATH"; exit 1; }
     log "signing in to GitHub with $client"
-    # One call, which relays a bounded number of codes itself and tells the hub when none of them was completed.
-    # There is no loop around it on purpose: each code replaces the one before it on the owner's screen, so an
-    # owner who is not going to sign in should be asked once and then told, not handed a fresh code every few
-    # minutes for as long as the pod runs. A stored token is the other way in, so that is what the pod waits for,
-    # and waiting costs one GET rather than another device code nobody uses.
-    if ! "$client" virtual github-login; then
-        report failed "github: nobody completed the sign-in. Paste a GitHub token at $HUB/hub/settings/credentials, or stop and start this agent to be sent another code."
+    # The client relays a bounded number of codes itself, so the two outcomes are told apart by exit code rather
+    # than by retrying both: $EXIT_NO_CREDENTIAL means the codes are spent and only the owner can act now, and
+    # asking again would hand them a fresh code every few minutes for as long as the pod runs. Anything else is a
+    # fault to ride out unattended — an unreachable hub, a gh that will not run — and the backoff is for those.
+    delay=30
+    asked=0
+    while :; do
+        rc=0
+        "$client" virtual github-login || rc=$?
+        [[ "$rc" -eq 0 ]] && break
+        [[ "$rc" -eq "$EXIT_NO_CREDENTIAL" ]] && { asked=1; break; }
+        log "github sign-in failed (exit $rc); retrying in ${delay}s"
+        sleep "$delay"
+        delay=$((delay * 2 > 300 ? 300 : delay * 2))
+    done
+    # A stored token is the other way in, so that is what the pod waits for, and waiting costs one GET rather
+    # than a device code nobody uses. `awaiting_credentials`, not `failed`: it is the phase that puts the owner
+    # on the screen with the box to paste a token into, and it is the truth about a pod watching for one.
+    if [[ "$asked" -eq 1 ]]; then
+        report awaiting_credentials "github: nobody completed the sign-in. Paste a GitHub token at $HUB/hub/settings/credentials, or stop and start this agent to be sent another code."
         log "github sign-in did not complete; waiting for a stored GitHub token rather than asking again"
+        refused=""
         until token=$(github_credential) && [[ -n "$token" ]] && gh_login_with_token "$token"; do
+            # Keyed on the value, so each token pasted is reported once and a second bad one is reported too.
+            # Without this the owner is left watching the message that asked them for the token they just gave.
+            if [[ -n "${token:-}" && "$refused" != "$token" ]]; then
+                report awaiting_credentials "github: GitHub refused the stored token. Paste a current one with the user:email scope at $HUB/hub/settings/credentials."
+                refused="$token"
+            fi
             sleep 30
         done
-        unset token
+        unset token refused
         log "signed in with the GitHub token the owner stored"
     fi
     gh auth setup-git --hostname github.com

@@ -1,6 +1,7 @@
-// Guards on what npm ships and on the one piece of logic that exists twice: `bin/agent-hub` repeats the
-// virtual-agent predicate in bash, because the fast-path gate must decide whether to start Node without
-// starting Node. Nothing else can keep the two copies in step.
+// Guards on what npm ships and on the logic that exists twice in bash as well as TypeScript: `bin/agent-hub`
+// repeats the virtual-agent predicate, because the fast-path gate must decide whether to start Node without
+// starting Node, and `bin/virtual-agent-boot` repeats the one exit code it branches on. Nothing else can keep
+// those copies in step.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -8,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
+import { EXIT_NO_CREDENTIAL } from "./virtual/phases.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -195,6 +197,14 @@ describe("bin/virtual-agent-boot", () => {
     const result = spawnSync("bash", ["-n", BOOT], { encoding: "utf8", timeout: 20000 });
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
+  });
+
+  // The script tells "the owner did not complete the sign-in" from every other failure by this code alone: it
+  // waits for a pasted token on this one and retries the rest. Its bash copy drifting would make it retry the
+  // outcome the bound exists to stop, or wait for ever on a hub it should have ridden out.
+  it("should hold its copy of EXIT_NO_CREDENTIAL in step with the client's", () => {
+    // Act & Assert
+    expect(fs.readFileSync(BOOT, "utf8")).toContain(`\nEXIT_NO_CREDENTIAL=${EXIT_NO_CREDENTIAL}\n`);
   });
 
   // Under `set -u` an expansion of an unset variable aborts before any `:?` further down can explain itself, so

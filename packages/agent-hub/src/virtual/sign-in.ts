@@ -178,10 +178,13 @@ export function findClaudeToken(raw: string): string | null {
 export const REDACTED = "[redacted]";
 
 /**
- * The GitHub token shapes: the prefixed tokens GitHub issues now, and the 40-hex classic token. A git SHA
- * matches the second and goes with them, which costs nothing — no SHA is why a sign-in failed.
+ * Every GitHub token shape, so that redacting cannot be narrower than storing: the first two are the hub's own
+ * `GITHUB_TOKEN` check in `src/credentials/validate.ts` — a prefixed token and a fine-grained PAT — widened by
+ * `r` for the refresh tokens `gh` also writes. The third is the 40-hex classic token. A git SHA matches the
+ * third and goes with it, which costs nothing: no SHA is why a sign-in failed. Add a shape to both or to
+ * neither; a value the hub would store and this would print is the one thing that must not happen.
  */
-const GITHUB_TOKEN_SHAPES: readonly RegExp[] = [/gh[pousr]_[A-Za-z0-9]{20,}/g, /\b[0-9a-f]{40}\b/g];
+const GITHUB_TOKEN_SHAPES: readonly RegExp[] = [/gh[pousr]_[A-Za-z0-9]{20,}/g, /github_pat_[A-Za-z0-9_]{20,}/g, /\b[0-9a-f]{40}\b/g];
 
 /**
  * Replaces every GitHub-token-shaped run, so a command's own words can be logged. A device code is left alone:
@@ -270,7 +273,9 @@ export function relayDeviceLogin({
         return;
       }
       if (!relayed) {
-        reject(new Error(`${cmd} printed no sign-in code (exit ${code})`));
+        // The one failure whose output may be quoted: a command that printed no code never reached a signed-in
+        // state, so it has no token to have printed, and what it said instead is the only diagnosis there is.
+        reject(new Error(`${cmd} printed no sign-in code (exit ${code}): ${outputTail(output)}`));
         return;
       }
       const ranOut = Date.now() - relayedAt >= Math.max(0, expiresIn - EXPIRY_TOLERANCE_S) * 1000;
@@ -340,77 +345,117 @@ const GH_CLEAN = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"];
  */
 export const GITHUB_SIGN_IN_CODES = 3;
 
+/**
+ * Whether gh's output says it gave up waiting for the code rather than the sign-in breaking. `ErrTimeout` is
+ * what it prints when the code reaches its `expires_in` unused; `expired_token` is GitHub retiring the code
+ * first. Read before the clock, which can only under-count: `relayedAt` is when the code was parsed off gh's
+ * stderr, which is after gh started its own timer, so a busy node makes a genuine expiry look like a break.
+ */
+export const ghLoginExpired = (raw: string): boolean => /authentication timed out|\bexpired_token\b|device code has expired/i.test(stripAnsi(raw));
+
 export type GithubLoginOptions = LoginOptions & {
   /** How long each relayed code is offered for, and how many are offered; both only a test moves. */
   expiresIn?: number;
   codes?: number;
 };
 
+export type GithubLoginResult = "signed-in" | "not-signed-in";
+
+const ghToken = async (env: NodeJS.ProcessEnv): Promise<string> => (await run("gh", ["auth", "token", "--hostname", "github.com"], { env })).stdout.trim();
+
 /**
  * Relays `gh auth login` device codes to the owner and stores the token the sign-in grants, up to `codes` of
- * them. Throws when none was completed, having told the hub so: the owner's screen then says the sign-in needs
- * starting again rather than showing a code that no longer works.
+ * them. Returns 'not-signed-in' when the owner completed none of them, having told the hub so, which is the one
+ * outcome its caller must not retry: the codes are spent and only the owner can act now.
  *
- * Only a code that reached its expiry unused earns another. A sign-in that broke under the owner leaves their
- * code alive at GitHub for the rest of its fifteen minutes, and a fresh one would replace the code they may be
- * part way through entering, so that case stops at the first failure.
+ * Anything else that goes wrong throws, so that a caller retries it. The two are not the same thing — a hub that
+ * cannot be reached, a `gh` that will not run and a GitHub that answers the poll with a fault are all faults to
+ * ride out, not evidence about the owner — and reporting one as the other is what leaves somebody told they did
+ * not sign in when they were never asked.
+ *
+ * Only a code that reached its expiry unused earns another. A code is completable only while gh is polling for
+ * it, so a sign-in that broke took the code with it: offering another repeats the fault, where an expiry means
+ * the mechanism worked and the owner merely was not there.
  */
 export async function githubLogin({
   api = createApi(),
   env = process.env,
   expiresIn = DEVICE_CODE_EXPIRES_S,
   codes = GITHUB_SIGN_IN_CODES
-}: GithubLoginOptions = {}): Promise<"signed-in"> {
+}: GithubLoginOptions = {}): Promise<GithubLoginResult> {
   const { id } = requireVirtualAgent(env);
   // gh opens the device page with $GH_BROWSER/$BROWSER; `true` makes that a no-op in a pod with no browser.
   const ghEnv = { ...childEnv(env, GH_CLEAN), GH_BROWSER: "true", BROWSER: "true", GH_PROMPT_DISABLED: "1" };
   // user:email lets git-identity check that the owner's HMCTS email is on their GitHub account.
   const args = ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--scopes", "user:email", "--web"];
+  // An earlier call in this pod may have signed gh in and failed only to store what it got. gh's config is a
+  // memory-backed emptyDir, so a token here is one this pod was granted, and relaying another code for it would
+  // ask the owner to authorise what they have authorised already.
+  let token = await ghToken(ghEnv);
   let last: RelayDeviceLoginResult | null = null;
   let thrown: unknown;
-  // `relayDeviceLogin` throws when the relay itself fails or gh prints no code at all. Caught here rather than let
-  // out, because the hub has been promised one of `complete` or `failed` for every sign-in shown to the owner, and
-  // an attempt that throws has usually already shown them one.
-  try {
-    for (let attempt = 1; attempt <= codes; attempt++) {
-      last = await relayDeviceLogin({ api, id, kind: "github", cmd: "gh", args, env: ghEnv, parse: parseGhDeviceCode, expiresIn, label: "github" });
-      const token = (await run("gh", ["auth", "token", "--hostname", "github.com"], { env: ghEnv })).stdout.trim();
-      if (token) {
-        const login = (await run("gh", ["api", "user", "--jq", ".login"], { env: ghEnv })).stdout.trim();
-        await withRetry(() => api.loginComplete(id, "github", login ? { account_label: login } : {}));
-        await withRetry(() => api.putCredential(id, "github", token));
-        say(`github: signed in${login ? ` as ${login}` : ""}`);
-        return "signed-in";
+  if (token) {
+    say("github: gh is already signed in; storing the token it holds");
+  } else {
+    // `relayDeviceLogin` throws when the relay itself fails or gh prints no code at all. Caught here rather than let
+    // out, because the hub has been promised one of `complete` or `failed` for every sign-in shown to the owner, and
+    // an attempt that throws has usually already shown them one.
+    try {
+      for (let attempt = 1; attempt <= codes; attempt++) {
+        last = await relayDeviceLogin({
+          api,
+          id,
+          kind: "github",
+          cmd: "gh",
+          args,
+          env: ghEnv,
+          parse: parseGhDeviceCode,
+          expiresIn,
+          isExpiry: ghLoginExpired,
+          label: "github"
+        });
+        token = await ghToken(ghEnv);
+        if (token || !last.expired) {
+          break;
+        }
+        // The log is where every attempt but the last says what gh said; the last one says it in the error below.
+        if (attempt < codes) {
+          say(`github: the sign-in code ran out before it was used (gh said: ${outputTail(last.output)}); relaying a fresh one, which replaces it`);
+        }
       }
-      if (!last.expired) {
-        break;
-      }
-      // The log is where every attempt but the last says what gh said; the last one says it in the error below.
-      if (attempt < codes) {
-        say(`github: the sign-in code ran out before it was used (gh said: ${outputTail(last.output)}); relaying a fresh one, which replaces it`);
-      }
+    } catch (e) {
+      thrown = e;
     }
-  } catch (e) {
-    thrown = e;
   }
 
-  const expired = thrown === undefined && last?.expired === true;
+  // The sign-in itself is over by here, so a hub that cannot be told throws rather than reporting a sign-in that
+  // failed: gh is signed in in this pod either way, and the owner has nothing left to do about it.
+  if (token) {
+    const login = (await run("gh", ["api", "user", "--jq", ".login"], { env: ghEnv })).stdout.trim();
+    await withRetry(() => api.loginComplete(id, "github", login ? { account_label: login } : {}));
+    await withRetry(() => api.putCredential(id, "github", token));
+    say(`github: signed in${login ? ` as ${login}` : ""}`);
+    return "signed-in";
+  }
+
+  // Thrown rather than reported: nobody has been told they did not sign in, because this is not about them. The
+  // message carries whatever gh said, so `runVirtual` logs it for the pod on its way out.
+  if (thrown !== undefined) {
+    throw thrown;
+  }
+  const expired = last?.expired === true;
   const detail = expired
-    ? "github: the sign-in code ran out before it was used"
-    : thrown !== undefined
-      ? `github: the sign-in could not be relayed (${(thrown as Error).message})`
-      : `github: gh auth login exited ${last?.code} without a token`;
+    ? "github: the sign-in code ran out before it was used; start the agent again to be sent another"
+    : "github: GitHub stopped the sign-in before it could be completed, so the code is no longer any use";
   // The owner is otherwise left holding a code that no longer works, with nothing but this pod's stderr saying so.
   // Few attempts: the detail is worth telling the hub, and a hub that cannot be told is not worth half a minute.
   await withRetry(() => api.loginFailed(id, "github", { state: expired ? "expired" : "failed", detail }), { attempts: 3 }).catch((e: unknown) => {
     say(`github: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`);
   });
-  if (thrown !== undefined) {
-    throw thrown;
-  }
-  // gh's own words, redacted, are the only thing that says why it stopped polling, so they go in the error as
-  // well as the log: a sign-in that fails in a pod is diagnosed from what this throws and nothing else.
-  throw new Error(`${detail}; gh said: ${outputTail(last?.output ?? "")}`);
+  // gh's own words, redacted, are the only thing that says why it stopped polling: a sign-in that fails in a pod
+  // is diagnosed from this line and nothing else.
+  say(`${detail} (gh auth login exited ${last?.code}); gh said: ${outputTail(last?.output ?? "")}`);
+  return "not-signed-in";
 }
 
 const CLAUDE_CLEAN = [

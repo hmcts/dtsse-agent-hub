@@ -28,6 +28,7 @@ const CASES = [
   "no-token",
   "refused-token",
   "sign-in-not-completed",
+  "sign-in-transient-failure",
   "stored-token-no-access",
   "checkout-client",
   "broken-checkout-client",
