@@ -495,20 +495,33 @@ export async function linkSession(
  * What the pod's supervisor runs, replacing its last report: every conversation of the assistant it leaves out has
  * no session. Only conversations whose state changed are announced. Not activity for the idle stop, which a pod
  * reporting every minute would otherwise never reach.
+ *
+ * A session reported `live` answers the conversation's wake, as a registration does. A registration cannot be
+ * relied on for that: a conversation resumed on a new pod never registers again, because its session finds the
+ * `enabled` file the pod before it left on the volume and skips the enable that would have. Left pending, its wake
+ * is replayed on every sessions stream the pod opens, and `fill()` takes the oldest wake first — so a handful of
+ * resumed conversations take each other's slots in turn for ever and no one of them keeps a session long enough to
+ * answer. Nothing is stranded by clearing it: a pod that loses its sessions leaves their agents silent, and the
+ * offline sweep is what the person's next message and the warm on opening a conversation ask for a wake on.
  */
 export async function reportSessions(prisma: PrismaClient, virtualAgentId: string, report: SessionsReport, now: Date = new Date()): Promise<void> {
   const reported = new Map(report.sessions.map((session) => [session.conversation_id, session]));
   await prisma.$transaction(async (tx) => {
     const rows = await tx.assistantConversation.findMany({
       where: { virtualAgentId },
-      select: { id: true, ownerOid: true, virtualAgentId: true, sessionState: true, sessionDetail: true }
+      select: { id: true, ownerOid: true, virtualAgentId: true, sessionState: true, sessionDetail: true, wakeRequestedAt: true }
     });
     for (const row of rows) {
       const session = reported.get(row.id);
       const state = session?.state ?? null;
       const detail = session?.detail ?? null;
-      if (row.sessionState !== state || row.sessionDetail !== detail) {
-        await tx.assistantConversation.update({ where: { id: row.id }, data: { sessionState: state, sessionDetail: detail, updatedAt: now } });
+      // Only `live`, not `starting`: a session still starting may yet fail, and its wake is what starts it again.
+      const woken = state === "live" && row.wakeRequestedAt !== null;
+      if (row.sessionState !== state || row.sessionDetail !== detail || woken) {
+        await tx.assistantConversation.update({
+          where: { id: row.id },
+          data: { sessionState: state, sessionDetail: detail, ...(woken ? { wakeRequestedAt: null } : {}), updatedAt: now }
+        });
         await announce(tx, row);
       }
     }
