@@ -10,7 +10,7 @@ import type { DefaultConfluencePage } from "@/assistant/export-defaults";
 import type { LookupResponse } from "@/assistant/lookups";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
 import { AtlassianSearch, LOOKUP_AFTER_MS, shortCrumb, WAKING_RETRY_MS } from "@/components/assistant/AtlassianSearch";
-import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import { confluenceBannerText, type ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
 import { openingDestination } from "@/components/assistant/ExportFooter";
 import type { JiraAccess } from "@/components/assistant/JiraExport";
 import type { LookUp } from "@/components/assistant/lookupClient";
@@ -165,6 +165,7 @@ describe("Confluence export in the document panel", () => {
     expect(screen.getByText("✓ Created Story")).toBeTruthy();
     expect(screen.getByRole("link", { name: "View in Confluence" }).getAttribute("href")).toBe("https://hmcts.atlassian.net/wiki/spaces/CCD/pages/9");
     expect(screen.getByText("In Confluence")).toBeTruthy();
+    expect(screen.getByText("Story · under Guides")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Publish to Confluence/ })).toBeNull();
   });
 
@@ -180,6 +181,43 @@ describe("Confluence export in the document panel", () => {
 
     expect(screen.queryByRole("radio")).toBeNull();
     expect(publishButton()).toBeTruthy();
+  });
+});
+
+describe("switching destination", () => {
+  function rows(container: HTMLElement) {
+    return [...container.querySelectorAll<HTMLElement>("[data-destination]")].map((row) => [row.dataset.destination, row.style.visibility || "visible"]);
+  }
+
+  it("should keep both rows mounted in one grid cell, hiding the other by visibility, so the footer keeps its size", () => {
+    const { container } = render(panel({ jira: true }));
+    const before = [...container.querySelectorAll("[data-destination]")];
+
+    expect(rows(container)).toEqual([
+      ["jira", "hidden"],
+      ["confluence", "visible"]
+    ]);
+    fireEvent.click(screen.getByRole("radio", { name: /Jira backlog/ }));
+
+    expect(rows(container)).toEqual([
+      ["jira", "visible"],
+      ["confluence", "hidden"]
+    ]);
+    expect([...container.querySelectorAll("[data-destination]")]).toEqual(before);
+    for (const row of before) {
+      expect(row.className).toContain("col-start-1 row-start-1");
+    }
+    expect(screen.queryByRole("button", { name: /Publish to Confluence/ })).toBeNull();
+  });
+});
+
+describe("confluenceBannerText", () => {
+  it("should name the page and where it went, falling back when a title is missing", () => {
+    expect(confluenceBannerText({ pageTitle: "Case flags guide", parentTitle: "AI Resources", spaceName: "CaTH" })).toBe(
+      "Case flags guide · under AI Resources"
+    );
+    expect(confluenceBannerText({ pageTitle: null, parentTitle: "AI Resources", spaceName: "CaTH" })).toBe("New page · under AI Resources");
+    expect(confluenceBannerText({ pageTitle: "Guide", parentTitle: "", spaceName: "CaTH" })).toBe("Guide · in CaTH");
   });
 });
 

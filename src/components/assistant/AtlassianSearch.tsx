@@ -225,7 +225,8 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
 
   const login = access.login?.kind === "atlassian" && access.login.state === "pending" ? access.login : null;
   return (
-    <div className="flex basis-full flex-col gap-2">
+    // `min-w-0` all the way down, so the box and a long result truncate within the panel rather than run past it.
+    <div className="flex min-w-0 basis-full flex-col gap-2">
       <div className="flex items-center gap-2">
         <input
           ref={box}
@@ -272,7 +273,7 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
         role="listbox"
         aria-label={kind === "jira_project" ? "Jira projects found" : "Confluence pages found"}
         hidden={results.length === 0}
-        className="flex max-h-56 flex-col gap-0.5 overflow-y-auto rounded-[9px] border border-asst-line bg-asst-field p-1"
+        className="flex max-h-56 min-w-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden rounded-[9px] border border-asst-line bg-asst-field p-1"
       >
         {results.map((result, index) => (
           <div
@@ -289,7 +290,7 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
                 onPick(result);
               }
             }}
-            className={`cursor-pointer rounded-md px-2.5 py-1.5 ${index === current ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"}`}
+            className={`min-w-0 cursor-pointer rounded-md px-2.5 py-1.5 ${index === current ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"}`}
           >
             <Option result={result} />
           </div>

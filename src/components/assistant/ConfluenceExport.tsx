@@ -24,6 +24,15 @@ export interface ConfluenceExportProps {
   lookUp?: LookUp;
 }
 
+/**
+ * What the banner says the document became, as the Jira one names the ticket and its backlog: the page, then where it
+ * went. A page reported without its title, or a parent with none, falls back to what is known.
+ */
+export function confluenceBannerText(done: Pick<Extract<ConfluenceExportView, { status: "done" }>, "pageTitle" | "parentTitle" | "spaceName">): string {
+  const page = done.pageTitle ?? "New page";
+  return done.parentTitle === "" ? `${page} · in ${done.spaceName}` : `${page} · under ${done.parentTitle}`;
+}
+
 /** Above the document once it is in Confluence, so the link back is there whichever way the panel is scrolled. */
 export function ConfluenceBanner({ exported }: { exported: ConfluenceExportView }) {
   if (exported.status !== "done") {
@@ -34,10 +43,7 @@ export function ConfluenceBanner({ exported }: { exported: ConfluenceExportView 
       <span className="shrink-0 rounded-md bg-asst-accent px-[7px] py-[3px] font-plex-mono text-[11px] font-medium uppercase leading-none tracking-wider text-asst-ink">
         In Confluence
       </span>
-      <span className="min-w-0 flex-1 truncate text-asst-body">
-        {exported.spaceName}
-        {exported.parentTitle === "" ? null : ` › ${exported.parentTitle}`}
-      </span>
+      <span className="min-w-0 flex-1 truncate text-asst-body">{confluenceBannerText(exported)}</span>
       <a href={exported.url} target="_blank" rel="noreferrer noopener" className="shrink-0 text-asst-accent underline">
         Open page
       </a>
@@ -167,7 +173,7 @@ export function ConfluenceFooter({
   const hintId = `confluence-hint-${conversationId}`;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2.5">
       {done === null ? (
         <ParentPicker parent={parent} onChange={setParent} disabled={pending} access={access} lookUp={lookUp} />
       ) : (
