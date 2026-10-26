@@ -73,5 +73,6 @@ export {
   redactTokens,
   relayDeviceLogin,
   run,
+  SIGKILL_AFTER_MS,
   stripAnsi
 } from "./sign-in.ts";

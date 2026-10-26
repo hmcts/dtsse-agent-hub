@@ -65,6 +65,13 @@ export type RelayDeviceLoginOptions = {
  */
 export const EXPIRY_TOLERANCE_S = 15;
 
+/**
+ * How long a sign-in command gets to end on its own after SIGTERM before it is killed. Long enough for one that
+ * is writing its credential file to finish, short enough that nothing waits on it: the caller above has no
+ * timeout of its own, so a child that never closes is a pod that never gets any further.
+ */
+export const SIGKILL_AFTER_MS = 5000;
+
 export type RelayDeviceLoginResult = {
   code: number;
   output: string;
@@ -203,8 +210,10 @@ const CREDENTIAL_SHAPES: readonly RegExp[] = [
   /github_pat_[A-Za-z0-9_]{20,}/g,
   /\b[0-9a-f]{40}\b/g,
   /sk-ant-[A-Za-z0-9_-]{20,}/g,
-  // A lookbehind rather than a group, so every shape here replaces whole and the key is left to read.
-  /(?<=\b(?:oauth-access-token|oauth-refresh-token|access_token|refresh_token)[=:]\s?"?)[A-Za-z0-9._~+/=-]{8,}/g,
+  // A lookbehind rather than a group, so every shape here replaces whole and the key is left to read. The value
+  // class takes `%` as well, because a token under one of these keys is as likely to be percent-encoded in a
+  // redirect or a form body as it is to be raw, and stopping at the escape printed the rest of it.
+  /(?<=\b(?:oauth-access-token|oauth-refresh-token|access_token|refresh_token)[=:]\s?"?)[A-Za-z0-9._~+/=%-]{8,}/g,
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.?[A-Za-z0-9_-]*/g
 ];
 
@@ -228,7 +237,10 @@ export const OUTPUT_TAIL_CHARS = 400;
  * `max` characters kept. The tail rather than the head, because the reason a command stopped is its last word.
  */
 export function outputTail(text: string, max = OUTPUT_TAIL_CHARS): string {
-  const line = redactTokens(stripAnsi(text)).replace(/\s+/g, " ").trim();
+  // Whitespace is collapsed before anything is matched, not after: the shapes that read a key before their value
+  // allow one space after it, and a command that wrapped the line or indented it would otherwise slip the value
+  // past them and have this print it on one tidy line.
+  const line = redactTokens(stripAnsi(text).replace(/\s+/g, " ")).trim();
   return line.length <= max ? line : `…${line.slice(line.length - max)}`;
 }
 
@@ -278,7 +290,36 @@ export function relayDeviceLogin({
     let shown = false;
     const child = spawn(cmd, args, { env, stdio: [respond ? "pipe" : "ignore", "pipe", "pipe"] });
     child.stdin?.on("error", () => {});
-    const timer = setTimeout(() => child.kill("SIGTERM"), (expiresIn + 30) * 1000);
+    let escalation: NodeJS.Timeout | null = null;
+    let abandon: NodeJS.Timeout | null = null;
+    let settled = false;
+    // Every end of this promise goes through here, so that the last resort below cannot settle it twice.
+    const settle = (fn: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (escalation) {
+        clearTimeout(escalation);
+      }
+      if (abandon) {
+        clearTimeout(abandon);
+      }
+      fn();
+    };
+    // SIGTERM asks, SIGKILL insists, and the third step is to stop waiting. A child can ignore the first —
+    // `trap '' TERM` survives `exec` — and surviving the second is enough if it forked, because the children it
+    // leaves behind hold these pipes open and `close` then never comes at all. Nothing above this has a timeout
+    // of its own, so without the last step the pod sits in `awaiting_login` for as long as it runs.
+    const endChild = () => {
+      child.kill("SIGTERM");
+      escalation ??= setTimeout(() => {
+        child.kill("SIGKILL");
+        abandon ??= setTimeout(() => finish(null), SIGKILL_AFTER_MS);
+      }, SIGKILL_AFTER_MS);
+    };
+    const timer = setTimeout(endChild, (expiresIn + 30) * 1000);
     const onData = (d: unknown) => {
       output += d;
       respond?.(output, child.stdin);
@@ -298,39 +339,41 @@ export function relayDeviceLogin({
         () => say(`${label}: sign-in code relayed to the owner through agent-hub`),
         (e) => {
           failed = e as Error;
-          child.kill("SIGTERM");
+          endChild();
         }
       );
     };
     child.stdout?.on("data", onData);
     child.stderr?.on("data", onData);
-    child.on("error", (e) => {
-      clearTimeout(timer);
-      reject(new DeviceLoginError(`${cmd} could not start: ${e.message}`, shown));
-    });
-    child.on("close", async (code) => {
-      clearTimeout(timer);
+    // `null` is the command having been given up on rather than seen to exit, which `run` also reports as 1.
+    const finish = async (code: number | null) => {
       await relayed;
       const relayError: Error | null = failed;
-      // The command's own exit is read before the relay's, because a sign-in it completed is completed whatever
-      // the relay did: the token is in its config by now. Rejecting here would throw that away and leave the
-      // owner told they had not signed in, where `loginComplete` puts the hub's record right by itself.
-      if (relayError && code !== 0) {
-        reject(new DeviceLoginError(`could not relay the ${label} sign-in code: ${relayError.message}`, shown));
-        return;
-      }
-      if (relayError) {
-        say(`${label}: the sign-in completed although its code could not be relayed (${relayError.message})`);
-      }
-      if (!relayed) {
-        // Quoting output is safe here: a command that printed no code never reached a signed-in state, so it has
-        // no token to have printed, and `outputTail` redacts every credential shape regardless.
-        reject(new DeviceLoginError(`${cmd} printed no sign-in code (exit ${code}): ${outputTail(output)}`, false));
-        return;
-      }
-      const ranOut = Date.now() - relayedAt >= Math.max(0, expiresIn - EXPIRY_TOLERANCE_S) * 1000;
-      resolve({ code: code ?? 1, output, expired: isExpiry?.(output) === true || ranOut });
+      settle(() => {
+        // The command's own exit is read before the relay's, because a sign-in it completed is completed whatever
+        // the relay did: the token is in its config by now. Rejecting here would throw that away and leave the
+        // owner told they had not signed in, where `loginComplete` puts the hub's record right by itself.
+        if (relayError && code !== 0) {
+          reject(new DeviceLoginError(`could not relay the ${label} sign-in code: ${relayError.message}`, shown));
+          return;
+        }
+        if (relayError) {
+          say(`${label}: the sign-in completed although its code could not be relayed (${relayError.message})`);
+        }
+        if (!relayed) {
+          // Quoting output is safe here: a command that printed no code never reached a signed-in state, so it
+          // has no token to have printed, and `outputTail` redacts every credential shape regardless.
+          reject(new DeviceLoginError(`${cmd} printed no sign-in code (exit ${code}): ${outputTail(output)}`, false));
+          return;
+        }
+        const ranOut = Date.now() - relayedAt >= Math.max(0, expiresIn - EXPIRY_TOLERANCE_S) * 1000;
+        resolve({ code: code ?? 1, output, expired: isExpiry?.(output) === true || ranOut });
+      });
+    };
+    child.on("error", (e) => {
+      settle(() => reject(new DeviceLoginError(`${cmd} could not start: ${e.message}`, shown)));
     });
+    child.on("close", finish);
   });
 }
 
@@ -410,13 +453,27 @@ export const GITHUB_SIGN_IN_CODES = 3;
 export const GITHUB_SIGN_IN_GAP_MS = 60_000;
 
 /**
+ * The longest gap `setTimeout` can keep: past a signed 32-bit millisecond count it fires after 1ms instead, so a
+ * number beyond this would remove the gap rather than lengthen it.
+ */
+const MAX_GAP_MS = 2 ** 31 - 1;
+
+/**
  * The gap `AGENT_HUB_GITHUB_SIGN_IN_GAP_MS` asks for, or the default. A pod being watched through a sign-in is
- * the reason this is settable at all: three codes a minute apart is three minutes before anyone sees the end of
- * it. Anything that is not a whole number of milliseconds is ignored rather than argued with.
+ * the reason this is settable at all: three codes a minute apart is three minutes before anyone sees the end.
+ *
+ * Anything that is not a whole number of milliseconds in range gives the default rather than being argued with,
+ * and that has to include the empty string: `Number("")` is 0, so a Helm value that rendered to nothing, or an
+ * `env` entry with `value: ""`, would otherwise read as a deliberate request for no gap at all — the one setting
+ * that brings back what the gap exists to stop, asked for by a variable nobody set.
  */
 export function githubSignInGapMs(env: Env = process.env): number {
-  const asked = Number(env.AGENT_HUB_GITHUB_SIGN_IN_GAP_MS);
-  return Number.isInteger(asked) && asked >= 0 ? asked : GITHUB_SIGN_IN_GAP_MS;
+  const raw = env.AGENT_HUB_GITHUB_SIGN_IN_GAP_MS;
+  if (raw === undefined || raw.trim() === "") {
+    return GITHUB_SIGN_IN_GAP_MS;
+  }
+  const asked = Number(raw);
+  return Number.isInteger(asked) && asked >= 0 && asked <= MAX_GAP_MS ? asked : GITHUB_SIGN_IN_GAP_MS;
 }
 
 /**
@@ -446,15 +503,24 @@ const storedGhToken = async (env: NodeJS.ProcessEnv): Promise<string> =>
   (await run("gh", ["auth", "token", "--hostname", "github.com"], { env })).stdout.trim();
 
 /**
- * The token a `gh auth login` that exited 0 was granted. It exited 0, so there is one, and failing to read it is
- * a fault of this pod's rather than a sign-in the owner did not finish — `run` answers 127 for a gh it could not
- * spawn and 1 for one it killed at the timeout, neither of which is an answer about the owner.
+ * The token a `gh auth login` that exited 0 was granted, or `""` when gh ran and had none to give.
+ *
+ * Throws when gh could not be run at all — `run` answers 127 for a spawn it could not make and 1 for a child it
+ * killed at the timeout. That is this pod's fault and not an answer about the owner, and it is safe to throw
+ * past the report below because the token gh wrote is still in its config: the caller's next attempt finds it
+ * through `storedGhToken`, skips the loop and finishes the sign-in without asking for anything again.
+ *
+ * Exit 0 with nothing to say is the other thing entirely. gh ran and holds no token, so a next attempt would
+ * relay a fresh code, and the owner is the one who has to end it.
  */
 async function grantedGhToken(env: NodeJS.ProcessEnv): Promise<string> {
   const r = await run("gh", ["auth", "token", "--hostname", "github.com"], { env });
   const token = r.stdout.trim();
+  if (!token && r.code !== 0) {
+    throw new Error(`gh auth token could not be run (exit ${r.code}): ${outputTail(r.stderr)}`);
+  }
   if (!token) {
-    throw new Error(`gh auth login exited 0 but gh auth token gave no token (exit ${r.code}): ${outputTail(r.stderr)}`);
+    say(`github: gh auth login exited 0 but gh auth token gave no token (exit ${r.code}): ${outputTail(r.stderr)}`);
   }
   return token;
 }
@@ -509,7 +575,7 @@ export async function githubLogin({
       const gapLeft = () => Math.max(0, gapMs - (Date.now() - startedAt));
       // Each attempt's failure is caught here rather than around the loop, because a code the owner never
       // answered and a relay that could not be completed are the same thing to the budget: one code gone, and
-      // the next one earned. Aborting on the first meant a single hub blip spent one code and stopped.
+      // the next one earned. A single hub blip costs one code, not the call.
       try {
         last = await relayDeviceLogin({
           api,
@@ -560,15 +626,11 @@ export async function githubLogin({
     }
   }
 
-  // Caught rather than let out, because a code has been shown by the time this can fail and the hub is owed a
-  // `failed` for it below. Reported honestly: it is this pod's fault and not the owner's, and what asks them to
-  // paste a token is the right end for it, because another device code cannot fix a gh that will not answer.
+  // Let out, not caught: a gh that could not be run leaves the token it was granted in its config, so the
+  // caller's next attempt finds it and finishes without relaying anything. The code on the owner's screen is one
+  // they have already used, and that attempt's `loginComplete` is what clears it.
   if (granted) {
-    try {
-      token = await grantedGhToken(ghEnv);
-    } catch (e) {
-      thrown ??= e;
-    }
+    token = await grantedGhToken(ghEnv);
   }
   // The owner's part is done, so a hub that will not take what they granted throws from here rather than being
   // reported as a sign-in that failed. `loginComplete` goes first, so the usual case clears the pending row; one

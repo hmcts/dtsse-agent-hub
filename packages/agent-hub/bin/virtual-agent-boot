@@ -156,7 +156,7 @@ checkout_workspace() {
                 reported="$err"
             fi
             rm -rf "$WORKSPACE"
-            sleep "$delay"
+            sleep_interruptibly "$delay"
             delay=$((delay * 2 > 120 ? 120 : delay * 2))
         done
         log "cloned $REPO_URL into $WORKSPACE"

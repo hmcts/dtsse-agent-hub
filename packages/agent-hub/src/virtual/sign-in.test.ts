@@ -31,6 +31,7 @@ import {
   type GithubLoginOptions,
   ghLoginExpired,
   githubLogin,
+  githubSignInGapMs,
   OUTPUT_TAIL_CHARS,
   outputTail,
   parseAzDeviceCode,
@@ -41,6 +42,7 @@ import {
   redactTokens,
   relayDeviceLogin,
   run,
+  SIGKILL_AFTER_MS,
   stripAnsi
 } from "./sign-in.ts";
 
@@ -202,6 +204,11 @@ describe("redactTokens", () => {
     expect(redactTokens("error: HTTP 429 (slow_down)")).toBe("error: HTTP 429 (slow_down)");
   });
 
+  it("should replace a percent-encoded value, which is how one of these keys usually carries a token", () => {
+    // Act & Assert: stopping at the escape printed the rest of the token.
+    expect(redactTokens("access_token=abc12345%2Fdefghijkl")).toBe(`access_token=${REDACTED}`);
+  });
+
   it("should replace every other kind the hub stores, because relayDeviceLogin quotes output for all of them", () => {
     // Arrange: `az` and `twg` go through the same helper as `gh`, so a list that knew GitHub's shapes alone
     // would be a safety net for one caller in three.
@@ -212,6 +219,33 @@ describe("redactTokens", () => {
     expect(redactTokens(`oauth-refresh-token=${podSecrets.twgRefresh}`)).toBe(`oauth-refresh-token=${REDACTED}`);
     expect(redactTokens(`oauth-access-token=${podSecrets.twgAccess}`)).toBe(`oauth-access-token=${REDACTED}`);
     expect(redactTokens(`Bearer ${jwt}`)).toBe(`Bearer ${REDACTED}`);
+  });
+});
+
+describe("githubSignInGapMs", () => {
+  it("should take a whole number of milliseconds in range when one is asked for", () => {
+    // Act & Assert
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "250" })).toBe(250);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "0" })).toBe(0);
+  });
+
+  it("should keep the gap for a value nobody meant to set, which an empty one is", () => {
+    // Arrange: `Number("")` is 0, so an unset Helm value or an `env` entry with `value: ""` would otherwise read
+    // as a deliberate request for no gap at all — the one setting that brings back what the gap exists to stop.
+    // Act & Assert
+    expect(githubSignInGapMs({})).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: " " })).toBe(GITHUB_SIGN_IN_GAP_MS);
+  });
+
+  it("should keep the gap for anything that is not a millisecond count it can wait", () => {
+    // Arrange: `setTimeout` fires after 1ms for anything past a signed 32-bit count, so the far end removes the
+    // gap exactly as the empty string does.
+    // Act & Assert
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "soon" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "-1" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: "1.5" })).toBe(GITHUB_SIGN_IN_GAP_MS);
+    expect(githubSignInGapMs({ AGENT_HUB_GITHUB_SIGN_IN_GAP_MS: String(2 ** 31) })).toBe(GITHUB_SIGN_IN_GAP_MS);
   });
 });
 
@@ -229,6 +263,16 @@ describe("outputTail", () => {
   it("should give one line with the escapes gone and the whitespace collapsed", () => {
     // Act & Assert
     expect(outputTail("\x1b[1m! First copy\x1b[22m\n\n  your code\n")).toBe("! First copy your code");
+  });
+
+  it("should redact a value the command wrapped or indented away from its key", () => {
+    // Arrange: the key-and-value shapes allow one space, and collapsing the whitespace afterwards would have
+    // tidied these onto one line with the token still in them.
+    const token = `${"Zy3_"}AbCdEfGh12345678`;
+
+    // Act & Assert
+    expect(outputTail(`refresh_token:    ${token}`)).toBe(`refresh_token: ${REDACTED}`);
+    expect(outputTail(`refresh_token:\n  ${token}`)).toBe(`refresh_token: ${REDACTED}`);
   });
 
   it("should keep the end when the output is longer than the limit, because the reason is its last word", () => {
@@ -259,6 +303,33 @@ describe("relayDeviceLogin", () => {
     // Assert
     expect((error as Error).message).toMatch(/definitely-not-a-command could not start: .*ENOENT/);
   });
+
+  it("should kill a command that ignores the signal, rather than wait on it for ever", async () => {
+    // Arrange: `trap '' TERM` is ignored across `exec`, so the sleep this starts inherits it and nothing but a
+    // kill ends the child. Nothing above this has a timeout of its own, so a promise that never settled here
+    // would leave the pod in `awaiting_login` for as long as it ran.
+    pod.shim("stubborn", `trap '' TERM\nprintf '%s' "$1" >&2\nsleep 60`);
+    const expiresIn = -29;
+
+    // Act: `expiresIn + 30` is the kill timer, so one second in, and the escalation follows it.
+    const started = Date.now();
+    const result = await relayDeviceLogin({
+      api: api(),
+      id: VID,
+      kind: "github",
+      cmd: "stubborn",
+      args: [GH_OUTPUT],
+      env: pod.env(),
+      parse: parseGhDeviceCode,
+      expiresIn,
+      label: "github"
+    });
+
+    // Assert: killed rather than exited, which `run` reports as 1, and inside the escalation rather than the
+    // minute the child asked for.
+    expect(result.code).toBe(1);
+    expect(Date.now() - started).toBeLessThan(SIGKILL_AFTER_MS * 3);
+  }, 30_000);
 
   it("should stop the command and reject when the code cannot be relayed to the hub", async () => {
     // Arrange: the hub refuses the relay outright, so the owner would never see the code. A 400 is not a
@@ -457,10 +528,13 @@ describe("githubLogin", () => {
     // Act
     const { result, stderr } = await captureStderr(() => signIn());
 
-    // Assert
+    // Assert: the owner's to end, because gh ran and has nothing, so a next attempt would relay a fresh code.
     expect(result).toBe("not-signed-in");
     expect(stderr).toMatch(/gh auth login exited 0 but gh auth token gave no token \(exit 0\)/);
     expect(virtual().credentials.has("github")).toBe(false);
+    expect(virtual().loginFailures).toEqual([
+      { kind: "github", state: "failed", detail: "github: GitHub stopped the sign-in before it could be completed, so the code is no longer any use" }
+    ]);
   });
 
   it("should relay a fresh code on a later call, which is what keeps a dead one off the owner's screen", async () => {
@@ -535,8 +609,9 @@ describe("githubLogin", () => {
     // Act
     const { result, stderr } = await captureStderr(() => signIn({ FAKE_GH_TOKEN: GH_TOKEN, FAKE_GH_LOGIN_IGNORES_TERM: "1" }));
 
-    // Assert
+    // Assert: on the first code, so this is the attempt that was discarded and not a later one succeeding.
     expect(result).toBe("signed-in");
+    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(1);
     expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
     expect(virtual().completes).toEqual([{ kind: "github", account_label: "octocat" }]);
     expect(virtual().loginFailures).toEqual([]);
@@ -575,21 +650,32 @@ describe("githubLogin", () => {
     expect(stderr).not.toMatch(/could not tell agent-hub/);
   });
 
-  it("should withdraw the code and stop asking when gh auth token cannot be run at all", async () => {
+  it("should throw rather than blame the owner when gh auth token cannot be run at all", async () => {
     // Arrange: exit 127 is what `run` answers for a command it could not spawn, and 1 for one it killed at the
-    // timeout. A code was relayed and gh exited 0, so the hub is owed a `failed` for it whatever the reason, and
-    // another device code cannot fix a gh that will not answer — the token form is the right end for it.
+    // timeout. gh exited 0, so the token it was granted is in its config, and the caller's next attempt finds it
+    // through the reuse check and finishes without asking for anything — so there is nothing here to end on the
+    // owner, and `not-signed-in` would park the pod on a pasted token with a working one sitting unread.
     // Act
-    const { result, stderr } = await captureStderr(() => signIn({ FAKE_GH_TOKEN_UNREADABLE: "1" }));
+    const { error } = await captureStderrOfFailure(() => signIn({ FAKE_GH_TOKEN_UNREADABLE: "1" }));
 
     // Assert
-    expect(result).toBe("not-signed-in");
-    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(1);
-    expect(virtual().loginFailures).toEqual([
-      { kind: "github", state: "failed", detail: "github: the sign-in could not be finished; start the agent again to be sent another code" }
-    ]);
+    expect((error as Error).message).toMatch(/gh auth token could not be run \(exit 127\)/);
+    expect(virtual().loginFailures).toEqual([]);
     expect(virtual().credentials.has("github")).toBe(false);
-    expect(stderr).toMatch(/gh auth token gave no token \(exit 127\)/);
+  });
+
+  it("should finish a sign-in on the next call when the token was unreadable on this one", async () => {
+    // Arrange: what the throw above is for. The first call signs in and cannot read the token; the second finds
+    // it where gh left it. No second code, which is the whole reason throwing is safe there.
+    await captureStderrOfFailure(() => signIn({ FAKE_GH_TOKEN: GH_TOKEN, FAKE_GH_TOKEN_UNREADABLE: "1" }));
+
+    // Act
+    const { result } = await captureStderr(() => signIn());
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
+    expect(virtual().prompts.filter((prompt) => prompt.kind === "github")).toHaveLength(1);
   });
 
   it("should wait between codes, so a fault that may not last is given the time not to", async () => {

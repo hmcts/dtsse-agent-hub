@@ -13,7 +13,7 @@ import { atlassianLogin } from "./atlassian.ts";
 import { cacheSync } from "./cache-sync.ts";
 import { readStdinText, runCredentialCommand } from "./credentials.ts";
 import { EXIT_FATAL, EXIT_NO_CREDENTIAL, FatalError, isVirtualPhase, PHASES, say } from "./phases.ts";
-import { azureLogin, claudeLogin, githubLogin, run } from "./sign-in.ts";
+import { azureLogin, claudeLogin, GITHUB_SIGN_IN_GAP_MS, githubLogin, run } from "./sign-in.ts";
 
 export const VIRTUAL_USAGE = `usage: ${CLI} virtual <command>
 
@@ -37,7 +37,7 @@ Kinds: ${CREDENTIAL_KINDS.join(", ")}. Exit ${EXIT_FATAL} means the hub failed t
 Environment: AGENT_HUB_URL, AGENT_HUB_VIRTUAL_AGENT_ID, AGENT_HUB_LAUNCH_TOKEN, AZURE_TENANT_ID,
 VIRTUAL_AGENT_IGNORE_PORTS (ports watch-ports never reports), AGENT_HUB_MAX_SESSIONS (conversation sessions at
 once, 2 by default), AGENT_HUB_SESSION_IDLE_MINUTES (20 by default) and AGENT_HUB_GITHUB_SIGN_IN_GAP_MS (the
-wait between relayed GitHub codes, 60000 by default).`;
+wait between relayed GitHub codes, ${GITHUB_SIGN_IN_GAP_MS} by default).`;
 
 export type RunVirtualOptions = {
   api?: Api;
