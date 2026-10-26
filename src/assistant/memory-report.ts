@@ -1,10 +1,12 @@
 import { CONVERSATION_SESSIONS } from "../orchestrator/manifests.ts";
 import { SIZE_RESOURCES, VIRTUAL_AGENT_SIZES, type VirtualAgentSize } from "../virtual-agents/size.ts";
+import { describeSize } from "./upload-report.ts";
 
 /**
- * What the pod says about its own memory, and whether that is close enough to its ceiling to be worth telling the
- * person about. Pure, and shared by the pod-facing route, the store and the UI, so there is one answer to every
- * question about the pod's memory.
+ * What the pod says about its own memory, whether that is close enough to its ceiling to be worth telling the person
+ * about, and the sentences the settings' Size section says either way. Pure, and shared by the pod-facing route, the
+ * store and the UI, so there is one answer to every question about the pod's memory — and the words are here beside
+ * the rules they describe, so a threshold and the sentence about it cannot drift.
  *
  * The hub cannot see a pod's memory — every call between the two is pod to hub — so everything here is *as of* a
  * report, and the states below exist so that "we have not heard" is never shown as an idle pod. This is the same
@@ -168,4 +170,46 @@ export function memoryPressure(use: MemoryUse, openChats: number, size: VirtualA
  */
 export function memoryWarning(pressure: MemoryPressure | undefined): string | null {
   return pressure === undefined ? null : "Your assistant is low on memory";
+}
+
+/**
+ * The warning in full: where the pod got to, and what to do about it.
+ *
+ * Both answers are offered when there is a bigger size and more than one chat open. On the largest size there is no
+ * bigger one, and with a single chat open "close a chat" would be an instruction to stop working — so neither is
+ * offered where it would be no use. Telling someone memory is low and leaving them nowhere to go is the thing this
+ * section exists not to do, which is why the advice is part of the same sentence rather than a separate kindness.
+ */
+export function memoryAdvice(pressure: MemoryPressure): string {
+  const reached = `It has reached ${describeSize(pressure.peakBytes)} of its ${describeSize(pressure.limitBytes)}, which leaves no room for another chat.`;
+  const bigger = pressure.nextSize;
+  if (bigger === undefined) {
+    return `${reached} This is the largest size there is, so close a chat you have finished with before you start another.`;
+  }
+  const orClose = pressure.openChats > 1 ? ", or close a chat you have finished with" : "";
+  return `${reached} Move up to ${bigger.size} below for ${bigger.chats} chats at once and ${bigger.limit} of memory${orClose}.`;
+}
+
+/** The chats a change of size would stop, as the question names them. */
+function chatsStopped(openChats: number): string {
+  if (openChats === 0) {
+    return "whatever it is working on";
+  }
+  if (openChats === 1) {
+    return "the one chat you have open";
+  }
+  return `all ${openChats} chats you have open`;
+}
+
+/**
+ * What a change of size is going to do, asked before it is made.
+ *
+ * Size is in the pod template, so a change replaces a running pod and every conversation session on it stops where it
+ * is. `rollsPod` is the difference between that and a pod the orchestrator has not made yet, which simply starts at
+ * the new size — and saying the first of those as if it were the second is the one thing this must not do.
+ */
+export function sizeChangeQuestion(size: string, rollsPod: boolean, openChats: number): string {
+  return rollsPod
+    ? `Change to ${size}? Your assistant restarts, which stops ${chatsStopped(openChats)}.`
+    : `Change to ${size}? Your assistant starts at the new size the next time you use it.`;
 }

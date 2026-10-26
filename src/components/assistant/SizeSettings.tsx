@@ -2,7 +2,16 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { AssistantMemory } from "@/assistant/memory";
-import { MEMORY_REPORT_INTERVAL_MINUTES, type MemoryPressure, type MemoryUse, memoryPressure, sizeOffers } from "@/assistant/memory-report";
+import {
+  MEMORY_REPORT_INTERVAL_MINUTES,
+  type MemoryPressure,
+  type MemoryUse,
+  memoryAdvice,
+  memoryPressure,
+  memoryWarning,
+  sizeChangeQuestion,
+  sizeOffers
+} from "@/assistant/memory-report";
 import { describeSize } from "@/assistant/upload-report";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { Timestamp } from "@/components/time/Timestamp";
@@ -39,7 +48,7 @@ const NO_REPORT: Record<Exclude<MemoryUse, { reported: true }>["reason"], string
  * twice come within a hair of being killed reads as idle whenever nobody is mid-answer. It is never presented as
  * current — the hub cannot see a pod's memory between reports.
  */
-function Use({ use }: { use: MemoryUse }) {
+function Use({ use }: Readonly<{ use: MemoryUse }>) {
   if (!use.reported) {
     return <p className="text-pretty text-[13px] text-asst-warn">{NO_REPORT[use.reason]}</p>;
   }
@@ -57,25 +66,50 @@ function Use({ use }: { use: MemoryUse }) {
   );
 }
 
-/**
- * The warning, which names what to do about it and nothing else.
- *
- * Both answers are offered when there is a bigger size and a chat to close; on the largest size there is only one,
- * and with a single chat open "close some chats" would be an instruction to stop working. Telling someone memory is
- * low and leaving them nowhere to go is the thing this section exists not to do.
- */
-function Warning({ pressure }: { pressure: MemoryPressure }) {
-  const bigger = pressure.nextSize;
+/** The warning. Which sentence it carries is `memoryAdvice`'s, so the words sit beside the rule they come from. */
+function Warning({ pressure }: Readonly<{ pressure: MemoryPressure }>) {
   return (
     <div className="flex flex-col gap-1 rounded-[10px] border border-asst-warn bg-asst-raised px-3.5 py-3">
-      <p className="text-[13px] font-semibold text-asst-text">Your assistant is low on memory</p>
-      <p className="text-pretty text-[13px] text-asst-body">
-        It has reached {describeSize(pressure.peakBytes)} of its {describeSize(pressure.limitBytes)}, which leaves no room for another chat.{" "}
-        {bigger === undefined
-          ? "This is the largest size there is, so close a chat you have finished with before you start another."
-          : `Move up to ${bigger.size} below for ${bigger.chats} chats at once and ${bigger.limit} of memory${pressure.openChats > 1 ? ", or close a chat you have finished with" : ""}.`}
-      </p>
+      <p className="text-[13px] font-semibold text-asst-text">{memoryWarning(pressure)}</p>
+      <p className="text-pretty text-[13px] text-asst-body">{memoryAdvice(pressure)}</p>
     </div>
+  );
+}
+
+/**
+ * The question, and the two ways out of it.
+ *
+ * Its own component because it mounts exactly when the person asks, which is what puts focus on the confirming
+ * button: a dialog people arrow and tab around has to say where the answer went.
+ */
+function Confirm({ chosen, rollsPod, openChats, onCancel }: Readonly<{ chosen: string; rollsPod: boolean; openChats: number; onCancel: () => void }>) {
+  const confirm = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    confirm.current?.focus();
+  }, []);
+
+  return (
+    <>
+      <p className="text-[13px] font-semibold">{sizeChangeQuestion(chosen, rollsPod, openChats)}</p>
+      {rollsPod ? (
+        <p className="text-pretty text-[13px] text-asst-body">
+          Your chats are all kept and carry on where they left off. Only what one of them was working on at the moment you change is lost.
+        </p>
+      ) : null}
+      <div className="flex items-center gap-3">
+        <button
+          ref={confirm}
+          type="submit"
+          className="rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover"
+        >
+          {rollsPod ? "Change size and restart" : "Change size"}
+        </button>
+        <button type="button" onClick={onCancel} className={LINK}>
+          Cancel
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -99,25 +133,36 @@ function Change({
   save,
   rollsPod,
   openChats
-}: {
+}: Readonly<{
   size: string;
   assistantId: string;
   save: FormAction;
   rollsPod: boolean;
   openChats: number;
-}) {
+}>) {
   const [chosen, setChosen] = useState(size);
   const [asking, setAsking] = useState(false);
-  const confirm = useRef<HTMLButtonElement>(null);
   const id = useId();
 
-  useEffect(() => {
-    if (asking) {
-      confirm.current?.focus();
+  /** What sits under the picker: nothing to do, the question, or the way into it. */
+  function below() {
+    if (chosen === size) {
+      return <p className="text-[13px] text-asst-muted">This is the size you are on.</p>;
     }
-  }, [asking]);
+    if (asking) {
+      return <Confirm chosen={chosen} rollsPod={rollsPod} openChats={openChats} onCancel={() => setAsking(false)} />;
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => setAsking(true)}
+        className="self-start rounded-[10px] border border-asst-strong px-3.5 py-2 text-[13px] font-semibold text-asst-text hover:bg-asst-active"
+      >
+        Change to {chosen}
+      </button>
+    );
+  }
 
-  const offers = sizeOffers();
   return (
     <ActionForm action={save} label="Change the size of your assistant" keepValues className="flex flex-col gap-2.5">
       <input type="hidden" name="id" value={assistantId} />
@@ -137,48 +182,13 @@ function Change({
         }}
         className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-2 text-[13px] text-asst-text outline-none focus:border-asst-accent-line"
       >
-        {offers.map((offer) => (
+        {sizeOffers().map((offer) => (
           <option key={offer.size} value={offer.size}>
             {offer.size} — {offer.chats} chats at once, {offer.limit} of memory
           </option>
         ))}
       </select>
-      {chosen === size ? (
-        <p className="text-[13px] text-asst-muted">This is the size you are on.</p>
-      ) : asking ? (
-        <>
-          <p className="text-[13px] font-semibold">
-            {rollsPod
-              ? `Change to ${chosen}? Your assistant restarts, which stops ${openChats === 0 ? "whatever it is working on" : openChats === 1 ? "the one chat you have open" : `all ${openChats} chats you have open`}.`
-              : `Change to ${chosen}? Your assistant starts at the new size the next time you use it.`}
-          </p>
-          {rollsPod ? (
-            <p className="text-pretty text-[13px] text-asst-body">
-              Your chats are all kept and carry on where they left off. Only what one of them was working on at the moment you change is lost.
-            </p>
-          ) : null}
-          <div className="flex items-center gap-3">
-            <button
-              ref={confirm}
-              type="submit"
-              className="rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover"
-            >
-              {rollsPod ? "Change size and restart" : "Change size"}
-            </button>
-            <button type="button" onClick={() => setAsking(false)} className={LINK}>
-              Cancel
-            </button>
-          </div>
-        </>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setAsking(true)}
-          className="self-start rounded-[10px] border border-asst-strong px-3.5 py-2 text-[13px] font-semibold text-asst-text hover:bg-asst-active"
-        >
-          Change to {chosen}
-        </button>
-      )}
+      {below()}
     </ActionForm>
   );
 }
@@ -189,7 +199,7 @@ function Change({
  * It is the one place the Assistant says how much its pod has and how much of it is gone, and the one place a person
  * can do anything about either. The warning above the choice is deliberately next to the thing that answers it.
  */
-export function Size({ size }: { size: AssistantSize }) {
+export function Size({ size }: Readonly<{ size: AssistantSize }>) {
   const { view, assistantId, save } = size;
   const pressure = memoryPressure(view.use, view.openChats, view.size);
   const current = sizeOffers().find((offer) => offer.size === view.size);

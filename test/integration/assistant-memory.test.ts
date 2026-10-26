@@ -3,43 +3,21 @@
 //
 // The pod's own half — reading the cgroup — is in the client package's `src/assistant/memory.test.ts`; the threshold
 // and the three "we cannot tell" states are in `src/assistant/memory-report.test.ts`.
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as memoryRoute from "../../src/app/api/virtual/[virtualAgentId]/memory/route.ts";
 import { assistantMemory, reportMemoryUse } from "../../src/assistant/memory.ts";
 import { CONVERSATION_MEMORY_BYTES, memoryPressure } from "../../src/assistant/memory-report.ts";
-import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
-import { devIdentity, type Viewer } from "../../src/viewer/identity.ts";
+import { createConversation } from "../../src/assistant/store.ts";
 import { claimVirtualAgents, observeVirtualAgent } from "../../src/virtual-agents/store.ts";
 import { assistantSize } from "../../src/web/data.ts";
-import { connect, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { ALICE, BOB, form, podFixture, viewer } from "./assistant-pod.ts";
+import { type Person, prisma, resetDatabase } from "./database.ts";
 
-vi.mock("next/headers", async () => {
-  const { jar } = await import("./web-session.ts");
-  return { cookies: async () => ({ get: (name: string) => (jar.has(name) ? { name, value: jar.get(name)! } : undefined) }) };
-});
-vi.mock("next/cache", async () => {
-  const { revalidated } = await import("./web-session.ts");
-  return { revalidatePath: (path: string) => void revalidated.push(path) };
-});
+vi.mock("next/headers", async () => (await import("./web-session.ts")).nextHeadersMock());
+vi.mock("next/cache", async () => (await import("./web-session.ts")).nextCacheMock());
 
 const { actAs } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/virtual-agents.ts");
-
-function persona(name: string): Person {
-  const identity = devIdentity(name);
-  return { oid: identity.oid, name: identity.name, email: identity.email! };
-}
-
-const ALICE = persona("alice");
-const BOB = persona("bob");
-
-const viewer = (who: Person): Viewer => ({ ...who, tid: "dev", modelRoute: "own-licence" });
-
-const client = await connect();
-
-afterAll(async () => {
-  await client.end();
-});
 
 beforeEach(async () => {
   await resetDatabase();
@@ -55,35 +33,8 @@ function report(headroom: number) {
   return { limit_bytes: LIMIT, current_bytes: 3 * 1024 ** 3, peak_bytes: LIMIT - headroom };
 }
 
-/**
- * The person's assistant, running, with its own session registered as its current agent — which is where the `memory`
- * claim lives, because the supervisor is what reads the cgroup, not a conversation's session.
- */
-async function assistantOf(
-  who: Person,
-  features: string[] | null = ["memory"],
-  status: "running" | "stopped" = "running",
-  { session = true } = {}
-): Promise<string> {
-  await insertUser(who);
-  const assistant = await ensureAssistant(prisma, viewer(who));
-  if (!session) {
-    await prisma.virtualAgent.update({ where: { id: assistant.id }, data: { status } });
-    return assistant.id;
-  }
-  const agent = await prisma.agent.create({
-    data: {
-      ownerOid: who.oid,
-      sessionId: `${who.oid}-pod`,
-      name: "assistant",
-      virtualAgentId: assistant.id,
-      ...(features === null ? {} : { clientFeatures: features })
-    },
-    select: { id: true }
-  });
-  await prisma.virtualAgent.update({ where: { id: assistant.id }, data: { status, agentId: agent.id } });
-  return assistant.id;
-}
+/** The shared fixture, bound to the claim this suite is about: the pod's own session reports its memory. */
+const assistantOf = podFixture(["memory"]);
 
 /** A chat with a session the pod says is running, which is what a change of size would end. */
 async function openChat(who: Person, title: string, sessionState: string | null = "live"): Promise<string> {
@@ -110,14 +61,6 @@ async function put(id: string, token: string, body: unknown): Promise<Response> 
     body: JSON.stringify(body)
   });
   return await memoryRoute.PUT(request, { params: Promise.resolve({ virtualAgentId: id }) });
-}
-
-function form(values: Record<string, string>): FormData {
-  const data = new FormData();
-  for (const [key, value] of Object.entries(values)) {
-    data.set(key, value);
-  }
-  return data;
 }
 
 describe("the memory an assistant reports", () => {

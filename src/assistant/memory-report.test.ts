@@ -5,10 +5,12 @@ import {
   CONVERSATION_MEMORY_BYTES,
   type MemoryReportRow,
   type MemoryUse,
+  memoryAdvice,
   memoryPressure,
   memoryUse,
   memoryWarning,
   nextSizeUp,
+  sizeChangeQuestion,
   sizeOffer,
   sizeOffers
 } from "./memory-report.ts";
@@ -124,6 +126,44 @@ describe("memoryWarning", () => {
 
   it("should carry nothing when it is not", () => {
     expect(memoryWarning(undefined)).toBeNull();
+  });
+});
+
+describe("memoryAdvice", () => {
+  it("should say where the pod got to and offer both answers when a chat could be closed and a bigger size exists", () => {
+    const pressure = memoryPressure(reported(0), 3, "small");
+
+    expect(memoryAdvice(pressure!)).toBe(
+      `It has reached 8 GB of its 8 GB, which leaves no room for another chat. Move up to medium below for ${CONVERSATION_SESSIONS.medium} chats at once and ${SIZE_RESOURCES.medium.limits.memory} of memory, or close a chat you have finished with.`
+    );
+  });
+
+  // Telling someone with one chat open to close a chat is telling them to stop working.
+  it("should offer only the bigger size when a single chat is open", () => {
+    expect(memoryAdvice(memoryPressure(reported(0), 1, "small")!)).not.toContain("or close a chat");
+  });
+
+  it("should offer only closing a chat on the largest size there is", () => {
+    const advice = memoryAdvice(memoryPressure(reported(0), 3, "large")!);
+
+    expect(advice).toContain("This is the largest size there is, so close a chat you have finished with before you start another.");
+    expect(advice).not.toContain("Move up to");
+  });
+});
+
+describe("sizeChangeQuestion", () => {
+  it.each([
+    [0, "whatever it is working on"],
+    [1, "the one chat you have open"],
+    [3, "all 3 chats you have open"]
+  ])("should count the chats a change ends when %i are open", (openChats, said) => {
+    expect(sizeChangeQuestion("medium", true, openChats)).toBe(`Change to medium? Your assistant restarts, which stops ${said}.`);
+  });
+
+  // A pod the orchestrator has not made yet is not restarted by this, and saying it is would be a cost that is not
+  // being paid.
+  it("should promise the new size at the next start when no pod is up", () => {
+    expect(sizeChangeQuestion("large", false, 3)).toBe("Change to large? Your assistant starts at the new size the next time you use it.");
   });
 });
 
