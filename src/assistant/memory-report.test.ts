@@ -162,6 +162,10 @@ describe("memoryPressure", () => {
    * CONVERSATION_MEMORY_BYTES`, which overstates at every size, and no cap is anywhere near the bound so nothing
    * failed. This computes the bound the same way the comment claims it and checks both sides of it, so the formula is
    * pinned rather than the caps — a cap rise cannot invalidate it, and a wrong formula cannot survive it.
+   *
+   * **Every size, not one worked example.** Putting that wrong form back fails `small` and `large` and *passes*
+   * `medium`, because 22.62 and 22.15 both floor to 22. Simplified down to a single size this would have had a
+   * one-in-three chance of missing the exact error it exists to catch.
    */
   it.each(VIRTUAL_AGENT_SIZES)("should start warning a %s pod one chat past the bound in memoryPressure", (size) => {
     const bound = Math.floor((limitOf(size) - POD_BASELINE_MEMORY_BYTES - CONVERSATION_MEMORY_BYTES) / CONVERSATION_MEMORY_BYTES);
