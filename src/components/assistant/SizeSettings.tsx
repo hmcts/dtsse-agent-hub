@@ -10,6 +10,7 @@ import {
   memoryAdvice,
   memoryPressure,
   memoryWarning,
+  offerMemory,
   sizeChangeQuestion,
   sizeOffers
 } from "@/assistant/memory-report";
@@ -187,9 +188,11 @@ function Change({
         }}
         className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-2 text-[13px] text-asst-text outline-none focus:border-asst-accent-line"
       >
+        {/* Each size as it would be after the change, so these are the constants rather than what the pod in front
+            of the person enforces now; the sentence above the section says that where the two differ. */}
         {sizeOffers().map((offer) => (
           <option key={offer.size} value={offer.size}>
-            {offer.size} — {offer.chats} chats at once, {offer.limit} of memory
+            {offer.size} — {offer.chats} chats at once, {offerMemory(offer)} of memory
           </option>
         ))}
       </select>
@@ -216,7 +219,10 @@ export function Size({ size }: Readonly<{ size: AssistantSize }>) {
       <p className="text-pretty text-[13px] text-asst-muted">
         How much your assistant has to work with. A bigger assistant holds more chats at once and has more memory for each of them; it costs more to run, so
         take the size you need.
-        {current === undefined ? null : ` You are on ${current.size}: ${current.chats} chats at once, ${current.limit} of memory.`}
+        {/* `view.chats` rather than the size's cap: a running pod holds the number it started with, and opening a
+            chat beyond that stops one the person did not close. */}
+        {current === undefined ? null : ` You are on ${current.size}: ${view.chats} chats at once, ${offerMemory(current)} of memory.`}
+        {view.chatsAfterRestart === undefined ? null : ` It holds ${view.chatsAfterRestart} the next time it restarts.`}
       </p>
       <Use use={view.use} />
       {pressure === undefined ? null : <Warning pressure={pressure} />}

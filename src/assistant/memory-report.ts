@@ -118,6 +118,39 @@ export function sizeOffer(size: VirtualAgentSize): SizeOffer {
   return { size, chats: CONVERSATION_SESSIONS[size], requests: resources.requests.memory, limit: resources.limits.memory };
 }
 
+/**
+ * The memory a size offers, as the person reads it: the request it is guaranteed through to the limit the kernel
+ * kills it at. Both, because each answers a different question — the cap below comes from the request, and the
+ * warning above measures the pod's peak against the limit, so naming only one leaves the other figure unexplained
+ * where it appears.
+ */
+export function offerMemory(offer: SizeOffer): string {
+  return `${offer.requests}–${offer.limit}`;
+}
+
+/**
+ * How many chats the pod in front of the person actually runs at once: the figure it reported, and the size's
+ * constant only until it has reported one.
+ *
+ * **The constant on its own would be a lie with a cost.** A cap is baked into the pod template as
+ * `AGENT_HUB_MAX_SESSIONS`, and nothing claims an agent whose generation has not moved, so raising the constant
+ * reaches a running pod when it next rolls and not before. A pod already at its cap does not queue the next wake: its
+ * supervisor stops the least recently active idle session to make room. So a figure read from the constant during
+ * that window invites someone to open a chat that silently ends one they never closed.
+ *
+ * The pod sends `max` with every sessions report, at least once a minute, so the fallback is the first minute of a
+ * pod's life and pods too old to report sessions at all.
+ */
+export function podChats(reportedMax: number | null, size: VirtualAgentSize): number {
+  return reportedMax ?? CONVERSATION_SESSIONS[size];
+}
+
+/** What a pod will hold once it next restarts, or `undefined` when that is what it holds already. */
+export function chatsAfterRestart(reportedMax: number | null, size: VirtualAgentSize): number | undefined {
+  const cap = CONVERSATION_SESSIONS[size];
+  return podChats(reportedMax, size) === cap ? undefined : cap;
+}
+
 /** Every size, smallest first, as the setting offers them. */
 export function sizeOffers(): SizeOffer[] {
   return VIRTUAL_AGENT_SIZES.map(sizeOffer);
@@ -201,7 +234,7 @@ export function memoryAdvice(pressure: MemoryPressure): string {
     return `${reached} This is the largest size there is, so close a chat you have finished with before you start another.`;
   }
   const orClose = pressure.openChats > 1 ? ", or close a chat you have finished with" : "";
-  return `${reached} Move up to ${bigger.size} below for ${bigger.chats} chats at once and ${bigger.limit} of memory${orClose}.`;
+  return `${reached} Move up to ${bigger.size} below for ${bigger.chats} chats at once and ${offerMemory(bigger)} of memory${orClose}.`;
 }
 
 /** The chats a change of size would stop, as the question names them. */

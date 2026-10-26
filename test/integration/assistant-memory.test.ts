@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as memoryRoute from "../../src/app/api/virtual/[virtualAgentId]/memory/route.ts";
 import { assistantMemory, reportMemoryUse } from "../../src/assistant/memory.ts";
 import { CONVERSATION_MEMORY_BYTES, memoryPressure } from "../../src/assistant/memory-report.ts";
-import { createConversation } from "../../src/assistant/store.ts";
+import { createConversation, reportSessions } from "../../src/assistant/store.ts";
 import { claimVirtualAgents, observeVirtualAgent } from "../../src/virtual-agents/store.ts";
 import { assistantSize } from "../../src/web/data.ts";
 import { ALICE, BOB, form, podFixture, viewer } from "./assistant-pod.ts";
@@ -189,6 +189,46 @@ describe("the memory route a pod reports on", () => {
     const token = await launchToken(assistant);
 
     expect((await put(assistant, token, { limit_bytes: LIMIT, current_bytes: 2048, peak_bytes: 1024 })).status).toBe(204);
+  });
+});
+
+describe("how many chats an assistant says it runs", () => {
+  // The figure the pod enforces, not the size's cap. A cap is in the pod template and `CONVERSATION_SESSIONS` is a
+  // code constant, so a deploy that raises it bumps no agent's generation and every running pod keeps the figure it
+  // booted with — and at its cap the pod stops an idle session to make room rather than queueing, so showing the
+  // higher figure would invite someone to end a chat they never closed.
+  it("should show what the pod reported, and what a restart would change it to", async () => {
+    const assistant = await assistantOf(ALICE);
+
+    await reportSessions(prisma, assistant, { sessions: [], max: 3 });
+    const view = await assistantMemory(prisma, ALICE.oid, assistant);
+
+    expect(view?.chats).toBe(3);
+    expect(view?.chatsAfterRestart).toBe(4);
+  });
+
+  it("should offer nothing about a restart once the pod reports its size's cap", async () => {
+    const assistant = await assistantOf(ALICE);
+
+    await reportSessions(prisma, assistant, { sessions: [], max: 4 });
+
+    expect(await assistantMemory(prisma, ALICE.oid, assistant)).toMatchObject({ chats: 4, chatsAfterRestart: undefined });
+  });
+
+  // Before the first report there is no second figure to reconcile, and the pod sends one within a minute.
+  it("should fall back to the size's cap before the pod has reported", async () => {
+    const assistant = await assistantOf(ALICE);
+
+    expect(await assistantMemory(prisma, ALICE.oid, assistant)).toMatchObject({ chats: 4, chatsAfterRestart: undefined });
+  });
+
+  it("should keep the newest figure when a pod rolls onto a different cap", async () => {
+    const assistant = await assistantOf(ALICE);
+
+    await reportSessions(prisma, assistant, { sessions: [], max: 3 });
+    await reportSessions(prisma, assistant, { sessions: [], max: 4 });
+
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.chats).toBe(4);
   });
 });
 

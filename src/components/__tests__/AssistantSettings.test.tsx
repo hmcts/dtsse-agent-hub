@@ -1485,7 +1485,17 @@ const CHANGE_FORM = "Change the size of your assistant";
 
 function size(overrides: Partial<AssistantMemory> = {}, save: FormAction = vi.fn(async () => ({ ok: true as const, confirmation: "done" }))): AssistantSize {
   return {
-    view: { use: use(4 * CONVERSATION_MEMORY_BYTES), size: "small", openChats: 1, rollsPod: true, refusal: undefined, ...overrides },
+    view: {
+      use: use(4 * CONVERSATION_MEMORY_BYTES),
+      size: "small",
+      // A pod reporting the cap of the size it is on, which is the ordinary case; the tests that care pass their own.
+      chats: 4,
+      chatsAfterRestart: undefined,
+      openChats: 1,
+      rollsPod: true,
+      refusal: undefined,
+      ...overrides
+    },
     assistantId: "0f8a6a1e-0000-4000-8000-0000000000aa",
     save
   };
@@ -1513,7 +1523,18 @@ describe("the Assistant's size", () => {
   it("should say the size it is on with what that size gives", () => {
     open({ size: size() }, "Size");
 
-    expect(panel().textContent).toContain("You are on small: 4 chats at once, 8Gi of memory.");
+    expect(panel().textContent).toContain("You are on small: 4 chats at once, 4Gi–8Gi of memory.");
+    expect(panel().textContent).not.toContain("the next time it restarts");
+  });
+
+  // The figure the pod enforces, not the size's cap. A cap is in the pod template, so a deploy that raises it leaves
+  // every running pod on the old one, and at its cap the pod stops an idle session to make room rather than queueing
+  // — so offering the higher figure here would invite someone to end a chat they never closed.
+  it("should say what the pod runs now, and what a restart would change it to, when it is behind its size's cap", () => {
+    open({ size: size({ chats: 3, chatsAfterRestart: 4 }) }, "Size");
+
+    expect(panel().textContent).toContain("You are on small: 3 chats at once, 4Gi–8Gi of memory.");
+    expect(panel().textContent).toContain("It holds 4 the next time it restarts.");
   });
 
   // The peak leads, because that is what the warning is about: the live figure dips between turns, so a pod that has
@@ -1570,7 +1591,7 @@ describe("the Assistant's size", () => {
     open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES - 1), openChats: 3 }) }, "Size");
 
     expect(panel().textContent).toContain("Your assistant is low on memory");
-    expect(panel().textContent).toContain("Move up to medium below for 6 chats at once and 16Gi of memory, or close a chat you have finished with.");
+    expect(panel().textContent).toContain("Move up to medium below for 6 chats at once and 8Gi–16Gi of memory, or close a chat you have finished with.");
   });
 
   // Telling someone with one chat open to close some chats is telling them to stop working.
@@ -1608,9 +1629,9 @@ describe("the Assistant's size", () => {
     const select = screen.getByLabelText("Choose a size") as HTMLSelectElement;
 
     expect([...select.options].map((option) => option.textContent)).toEqual([
-      "small — 4 chats at once, 8Gi of memory",
-      "medium — 6 chats at once, 16Gi of memory",
-      "large — 8 chats at once, 32Gi of memory"
+      "small — 4 chats at once, 4Gi–8Gi of memory",
+      "medium — 6 chats at once, 8Gi–16Gi of memory",
+      "large — 8 chats at once, 16Gi–32Gi of memory"
     ]);
     expect(select.value).toBe("small");
     expect(panel().textContent).toContain("This is the size you are on.");

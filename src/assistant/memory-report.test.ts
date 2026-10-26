@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CONVERSATION_MEMORY_BYTES,
+  chatsAfterRestart,
   type MemoryReportRow,
   type MemoryUse,
   memoryAdvice,
@@ -8,6 +9,8 @@ import {
   memoryUse,
   memoryWarning,
   nextSizeUp,
+  offerMemory,
+  podChats,
   sizeChangeQuestion,
   sizeOffer,
   sizeOffers
@@ -141,7 +144,7 @@ describe("memoryAdvice", () => {
     const pressure = memoryPressure(reported(0), 3, "small");
 
     expect(memoryAdvice(pressure!)).toBe(
-      "It has reached 8 GB of its 8 GB, which leaves no room for another chat. Move up to medium below for 6 chats at once and 16Gi of memory, or close a chat you have finished with."
+      "It has reached 8 GB of its 8 GB, which leaves no room for another chat. Move up to medium below for 6 chats at once and 8Gi–16Gi of memory, or close a chat you have finished with."
     );
   });
 
@@ -197,6 +200,48 @@ describe("sizeOffers", () => {
     const { chats, requests } = sizeOffer("small");
 
     expect(0.95 + 0.65 * (chats + 1)).toBeGreaterThan(Number.parseInt(requests, 10));
+  });
+});
+
+describe("offerMemory", () => {
+  // Both figures: the cap comes from the request and the warning measures the peak against the limit, so naming one
+  // leaves the other unexplained where it appears in the same panel.
+  it.each([
+    ["small", "4Gi–8Gi"],
+    ["medium", "8Gi–16Gi"],
+    ["large", "16Gi–32Gi"]
+  ] as const)("should give %s the memory it is guaranteed through to the memory it is killed at", (size, said) => {
+    expect(offerMemory(sizeOffer(size))).toBe(said);
+  });
+});
+
+describe("podChats", () => {
+  // The pod's own figure, because a cap is in the pod template: raising the constant reaches a running pod only when
+  // it next rolls, and at its cap the pod stops an idle session to make room rather than queueing. Offering a chat
+  // the pod has no slot for would end one the person did not close.
+  it("should take what the pod reported over the size's cap when the two disagree", () => {
+    expect(podChats(3, "small")).toBe(3);
+    expect(podChats(8, "small")).toBe(8);
+  });
+
+  it("should fall back to the size's cap when the pod has reported nothing", () => {
+    expect([podChats(null, "small"), podChats(null, "medium"), podChats(null, "large")]).toEqual([4, 6, 8]);
+  });
+});
+
+describe("chatsAfterRestart", () => {
+  it("should say what a restart would change the figure to when the pod is behind the cap", () => {
+    expect(chatsAfterRestart(3, "small")).toBe(4);
+  });
+
+  it("should say nothing when the pod already holds its size's cap", () => {
+    expect(chatsAfterRestart(4, "small")).toBeUndefined();
+  });
+
+  // Nothing is promised about a pod that has not reported: the fallback already shows the cap, so there is no second
+  // figure to reconcile.
+  it("should say nothing when the pod has reported nothing", () => {
+    expect(chatsAfterRestart(null, "small")).toBeUndefined();
   });
 });
 

@@ -110,19 +110,22 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
  * **Both constraints are read against the size's requests, not its limits.** An awake pod with no conversations holds
  * about 0.95Gi of `anon` — its own session, the three agent-hub daemons and the entrypoint — so a cap of N costs
  * 0.95 + 0.65N Gi, and a pod over its memory request is an eviction candidate when the node comes under pressure,
- * whatever headroom its limit leaves. CPU has no limit at all (`SIZE_RESOURCES` says why), so the request is also the
- * whole of the CPU ceiling worth reasoning about: it is what the pod is guaranteed under contention and what its
- * bursts borrow above. A session draws 25–30m idle and 139–186m over a working 150s window, so a cap of N draws
- * (N + 1) × 186m sustained with the pod's own session counted.
+ * whatever headroom its limit leaves. **Memory is the only hard constraint.** CPU has no limit at all
+ * (`SIZE_RESOURCES` says why), so a pod over its CPU request is not in breach of anything — the request is a floor
+ * its bursts borrow above, not a ceiling — and keeping a cap's sustained draw inside it, (N + 1) × 186m on the
+ * 139–186m working mean with the pod's own session counted, is a convention this chooses rather than a rule the
+ * cluster imposes. It is worth keeping as a sanity check on whether a pod would be contending with its own
+ * guarantee while merely working.
  *
- * `small` is bound by both at the same figure: 4 chats is 3.55Gi of the 4Gi it requests and 0.93 of its one CPU,
- * where a fifth would be 4.20Gi, outside the request. `medium` and `large` are bound by neither — their requests
- * would arithmetically hold 9 and 20 chats on CPU, 10 and 23 on memory — but by the evidence. No pod has been
- * measured above two concurrent sessions, and the one burst figure there is, 568m mean over a session's busiest 30s
- * window with 26 throttled periods in it, is of a single session alone. So they sit deliberately well inside both
- * requests, 6 taking 65% of `medium`'s CPU and 8 taking 42% of `large`'s at the working mean, which leaves the
- * guaranteed share room for sessions working harder than that mean. Raising them wants a pod driven deliberately
- * with its full complement busy at once, which is the measurement nobody has.
+ * `small` is bound at 4 by its **memory** request: 4 chats is 3.55Gi of the 4Gi it requests and a fifth would be
+ * 4.20Gi, outside it. The CPU convention happens to land on the same figure — 5 sessions at 0.93 of its one CPU, a
+ * sixth at 1.12 — but that agreement is a coincidence of the two formulas at this one size and is not what fixes the
+ * cap. `medium` and `large` are bound by neither: their memory requests would hold 10 and 23 chats, the CPU
+ * convention 9 and 20. What binds those two is the evidence. No pod has been measured above two concurrent sessions,
+ * and the one burst figure there is, 568m mean over a session's busiest 30s window with 26 throttled periods in it,
+ * is of a single session alone. So they sit deliberately well inside both, 6 taking 65% of `medium`'s CPU request
+ * and 8 taking 42% of `large`'s at the working mean. Raising them wants a pod driven deliberately with its full
+ * complement busy at once, which is the measurement nobody has.
  */
 export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 4, medium: 6, large: 8 };
 

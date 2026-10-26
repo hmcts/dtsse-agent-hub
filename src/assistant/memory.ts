@@ -2,7 +2,7 @@ import { canSeeAssistantMemory } from "../access/rules.ts";
 import { clientSupports } from "../agents/client-features.ts";
 import type { PrismaClient } from "../store/prisma.ts";
 import { DEFAULT_SIZE, isVirtualAgentSize, sizeChangeRefusal, sizeChangeRollsPod, type VirtualAgentSize } from "../virtual-agents/size.ts";
-import { type MemoryReport, type MemoryUse, memoryUse } from "./memory-report.ts";
+import { chatsAfterRestart, type MemoryReport, type MemoryUse, memoryUse, podChats } from "./memory-report.ts";
 
 /**
  * The memory of a person's assistant's pod: what the pod reported, and the two other facts the Size section needs to
@@ -17,6 +17,10 @@ import { type MemoryReport, type MemoryUse, memoryUse } from "./memory-report.ts
 export interface AssistantMemory {
   use: MemoryUse;
   size: VirtualAgentSize;
+  /** How many chats at once the pod in front of the person enforces, which is `podChats`'s answer and not the cap. */
+  chats: number;
+  /** What it will hold once it next restarts, or `undefined` when that is what it holds now. */
+  chatsAfterRestart: number | undefined;
   /** Chats whose session the pod says is starting or live, which a change of size would end. */
   openChats: number;
   /** A change of size would replace a pod that is already up, so the section says what that ends. */
@@ -62,6 +66,7 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
       desired: true,
       status: true,
       size: true,
+      sessionsMax: true,
       memoryLimitBytes: true,
       memoryCurrentBytes: true,
       memoryPeakBytes: true,
@@ -72,6 +77,7 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
   if (agent === null || !canSeeAssistantMemory(viewerOid, agent.ownerOid)) {
     return undefined;
   }
+  const size = isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE;
   return {
     use: memoryUse({
       memoryLimitBytes: agent.memoryLimitBytes,
@@ -81,7 +87,9 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
       running: agent.status === "running",
       reports: clientSupports(agent.agent?.clientFeatures, "memory")
     }),
-    size: isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE,
+    size,
+    chats: podChats(agent.sessionsMax, size),
+    chatsAfterRestart: chatsAfterRestart(agent.sessionsMax, size),
     openChats: await prisma.assistantConversation.count({
       where: { virtualAgentId, ownerOid: viewerOid, sessionState: { in: ["starting", "live"] } }
     }),

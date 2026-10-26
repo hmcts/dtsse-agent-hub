@@ -4,12 +4,16 @@ import type { VirtualAgentDesired, VirtualAgentStatus } from "./lifecycle.ts";
  * How much CPU and memory a virtual agent's pod gets. The orchestrator turns a size into the container's resources;
  * the page describes each size from the same table.
  *
- * **There is no CPU limit.** A CFS quota is CPU-seconds per 100ms period, and everything measured about a session is
- * a mean over a window of seconds: one session alone averaged 568m over its busiest 30s and was still throttled in 26
- * of that window's periods against a four-CPU quota, so those means cannot size a quota and any figure taken from
- * them would be a round number dressed as a measurement. Leaving it off gives up nothing — throttling is latency and
- * has no OOM-kill equivalent, and what a pod is guaranteed when a node is contended comes from its CPU **request**,
- * which is kept. Memory keeps its limit, because that is the one the kernel enforces by killing.
+ * **There is no CPU limit.** What a pod is guaranteed when a node is contended comes from `cpu.shares`, which the
+ * CPU **request** sets and which is kept; a quota adds nothing to that floor and only clips the bursts above it. One
+ * session alone averaged 568m over its busiest 30s and was still throttled in 26 of that window's periods against a
+ * four-CPU quota, so every Assistant conversation was paying latency for a ceiling that protected nothing — unlike
+ * memory, which keeps its limit, throttling has no OOM-kill equivalent to be protected from.
+ *
+ * A quota is not thereby wrong in principle: its job is to bound the blast radius of a runaway pod, and a round
+ * multiple of the request would be a defensible way to pick one. It is set aside rather than refuted, because
+ * nothing measured here can size it — a CFS quota is CPU-seconds per 100ms period and every figure measured is a
+ * mean over a window of seconds, which is why a session averaging 0.57 CPU was throttled against 4.0.
  *
  * So a size steps up what it guarantees rather than what it may borrow, and `CONVERSATION_SESSIONS` sets how many
  * Assistant conversations each size's pod runs against those requests.
