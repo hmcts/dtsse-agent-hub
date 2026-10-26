@@ -270,11 +270,11 @@ describe("chatCapacity", () => {
   // it next rolls, and at its cap the pod stops an idle session to make room rather than queueing. A chat offered
   // beyond what the pod has a slot for would end one the person did not close.
   it("should take what the pod reported, and name the cap a restart would give it, when the two disagree", () => {
-    expect(chatCapacity(3, "small")).toEqual({ now: 3, fromRestart: 4 });
+    expect(chatCapacity(3, "small", true)).toEqual({ now: 3, fromRestart: 4 });
   });
 
   it("should name no restart when the pod already reports its size's cap", () => {
-    expect(chatCapacity(4, "small")).toEqual({ now: 4, fromRestart: undefined });
+    expect(chatCapacity(4, "small", true)).toEqual({ now: 4, fromRestart: undefined });
   });
 
   // **No `now` at all** rather than the cap as a fallback: the hub cannot see a pod's supervisor, so the cap is what
@@ -285,25 +285,43 @@ describe("chatCapacity", () => {
     ["medium", 6],
     ["large", 8]
   ] as const)("should claim nothing about %s's current chats, and name its cap, when the pod has reported nothing", (size, cap) => {
-    expect(chatCapacity(null, size)).toEqual({ now: undefined, fromRestart: cap });
+    expect(chatCapacity(null, size, true)).toEqual({ now: undefined, fromRestart: cap });
+  });
+
+  // A stopped pod runs no chats, so a figure in the present tense is false whatever it last reported. Nothing clears
+  // `sessions_max`, so that last figure outlives the pod that sent it.
+  it("should claim nothing about a stopped pod's current chats, however recently it reported", () => {
+    expect(chatCapacity(4, "small", false)).toEqual({ now: undefined, fromRestart: 4 });
+  });
+
+  // The trap the stopped case exists for: the dead `small` pod's 4 would otherwise be read back as `medium`'s.
+  it("should not attribute a stopped pod's cap to a size it was resized to while stopped", () => {
+    expect(chatCapacity(4, "medium", false)).toEqual({ now: undefined, fromRestart: 6 });
   });
 });
 
 describe("sizeSentence", () => {
   it("should say the chats and memory when the pod reports its size's cap", () => {
-    expect(sizeSentence("small", chatCapacity(4, "small"))).toBe("You are on small: 4 chats at once, 4Gi–8Gi of memory.");
+    expect(sizeSentence("small", chatCapacity(4, "small", true))).toBe("You are on small: 4 chats at once, 4Gi–8Gi of memory.");
   });
 
   it("should say both figures when the pod is behind its size's cap", () => {
-    expect(sizeSentence("small", chatCapacity(3, "small"))).toBe(
+    expect(sizeSentence("small", chatCapacity(3, "small", true))).toBe(
       "You are on small: 3 chats at once, 4Gi–8Gi of memory. It holds 4 chats at once from its next restart."
     );
   });
 
   // The sentence has to be sayable without a current figure, which is the whole reason it lives here.
   it("should name no current figure when the pod has reported nothing", () => {
-    expect(sizeSentence("medium", chatCapacity(null, "medium"))).toBe(
+    expect(sizeSentence("medium", chatCapacity(null, "medium", true))).toBe(
       "You are on medium, with 8Gi–16Gi of memory. It holds 6 chats at once from its next restart."
+    );
+  });
+
+  // It would otherwise read "You are on small: 4 chats at once" directly above "Your assistant is stopped."
+  it("should name no current figure for a stopped pod, whatever it last reported", () => {
+    expect(sizeSentence("small", chatCapacity(4, "small", false))).toBe(
+      "You are on small, with 4Gi–8Gi of memory. It holds 4 chats at once from its next restart."
     );
   });
 });

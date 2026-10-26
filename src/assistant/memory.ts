@@ -78,6 +78,8 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
     return undefined;
   }
   const size = isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE;
+  // One reading of the status for both: a stopped pod neither reports nor runs the chats it last reported.
+  const running = agent.status === "running";
   return {
     use: memoryUse({
       memoryLimitBytes: agent.memoryLimitBytes,
@@ -85,11 +87,11 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
       memoryPeakBytes: agent.memoryPeakBytes,
       memoryAnonBytes: agent.memoryAnonBytes,
       memoryReportedAt: agent.memoryReportedAt,
-      running: agent.status === "running",
+      running,
       reports: clientSupports(agent.agent?.clientFeatures, "memory-anon")
     }),
     size,
-    capacity: chatCapacity(agent.sessionsMax, size),
+    capacity: chatCapacity(agent.sessionsMax, size, running),
     openChats: await prisma.assistantConversation.count({
       where: { virtualAgentId, ownerOid: viewerOid, sessionState: { in: ["starting", "live"] } }
     }),

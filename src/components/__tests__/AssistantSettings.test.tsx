@@ -1585,6 +1585,17 @@ describe("the Assistant's size", () => {
     expect(panel().textContent).toContain("Your assistant is stopped. Last reported");
   });
 
+  // The section must not say "4 chats at once" in the same breath as "Your assistant is stopped", which is what
+  // `chatCapacity` giving a stopped pod no `now` is for.
+  it("should claim no current chats beside the sentence saying the assistant is stopped", () => {
+    const stopped = { use: use(4 * CONVERSATION_MEMORY_BYTES, { stopped: true }), capacity: { now: undefined, fromRestart: 4 } };
+    open({ size: size(stopped) }, "Size");
+
+    expect(panel().textContent).toContain("Your assistant is stopped. Last reported");
+    expect(panel().textContent).toContain("You are on small, with 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
+    expect(panel().textContent).not.toContain("You are on small:");
+  });
+
   // Zero would read as an idle pod, which is the one thing the section must never say when it cannot tell.
   it.each([
     ["older_client", "running an older version that cannot tell us how much memory it is using"],

@@ -155,16 +155,17 @@ export function offerMemory(offer: SizeOffer): string {
   return `${offer.requests}–${offer.limit}`;
 }
 
-/** How many chats a pod runs at once: what it is doing now, and what a restart would change that to. */
+/** How many chats a pod runs at once: what it is running now, and what a restart would change that to. */
 export interface ChatCapacity {
-  /** The figure the pod reported, or `undefined` when it has not reported one and the hub cannot know. */
+  /** What it is running now, or `undefined` when there is no answer the hub can honestly give. */
   now: number | undefined;
-  /** What its size's cap will give it from its next restart, or `undefined` when that is what it reports already. */
+  /** What its size's cap will give it from its next restart, or `undefined` when that is what it runs already. */
   fromRestart: number | undefined;
 }
 
 /**
- * What may be said about how many chats a pod runs, from the `max` it reports and its size's cap.
+ * What may be said about how many chats a pod runs, from the `max` it reports, whether it is running, and its size's
+ * cap. Both facts come back together so that no surface has to invent the one it is missing.
  *
  * **The cap alone would be a figure with a cost behind it.** A cap is baked into the pod template as
  * `AGENT_HUB_MAX_SESSIONS`, and nothing claims an agent whose generation has not moved, so raising
@@ -172,16 +173,21 @@ export interface ChatCapacity {
  * queue the next wake: its supervisor stops the least recently active idle session to make room. So a cap shown as
  * what a pod runs now invites someone to open a chat that silently ends one they never closed.
  *
- * **A pod that has not reported gets no `now` at all**, rather than the cap as a fallback. The hub cannot see a pod's
- * supervisor, so there is nothing to fall back *to*: the cap is what the pod will be given, not what it was given,
- * and the two differ for exactly as long as the mismatch above lasts. `fromRestart` is what such a pod can honestly
- * be said to hold, which is why both facts are returned together — no surface has to invent the one it is missing.
- * The pod sends `max` with every sessions report, at least once a minute, so this is the first minute of a pod's life
- * and pods on a client too old to report sessions at all.
+ * **There is no `now` for a pod that has not reported one.** The hub cannot see a pod's supervisor, so there is
+ * nothing to fall back *to*: the cap is what the pod will be given, not what it was given, and the two differ for
+ * exactly as long as the mismatch above lasts. The pod sends `max` with every sessions report, at least once a
+ * minute, so this is the first minute of a pod's life and pods on a client too old to report sessions at all.
+ *
+ * **Nor for a pod that is not running**, whatever it last reported. A stopped pod runs no chats at all, so any figure
+ * in the present tense is false — and its last `max` is never cleared, so it outlives both the pod that sent it and
+ * any size change made while it was stopped. That last one is the trap: a `small` pod stopped at `max: 4` and then
+ * resized to `medium` would have its dead cap read back as `medium`'s. This is the same care `memoryUse` takes with
+ * `stopped` and `memoryPressure` with refusing to warn, for the same reason — the figures describe a container that
+ * no longer exists. `fromRestart` is what such a pod can honestly be said to hold, and is what it will hold.
  */
-export function chatCapacity(reportedMax: number | null, size: VirtualAgentSize): ChatCapacity {
+export function chatCapacity(reportedMax: number | null, size: VirtualAgentSize, running: boolean): ChatCapacity {
   const cap = CONVERSATION_SESSIONS[size];
-  if (reportedMax === null) {
+  if (reportedMax === null || !running) {
     return { now: undefined, fromRestart: cap };
   }
   return { now: reportedMax, fromRestart: reportedMax === cap ? undefined : cap };
@@ -191,8 +197,9 @@ export function chatCapacity(reportedMax: number | null, size: VirtualAgentSize)
  * The sentence the Size section says about the size the person is on.
  *
  * Worded here beside `chatCapacity`, as `memoryAdvice` is beside its threshold, because which sentence is said *is*
- * the rule: a pod that has not told us how many chats it runs has to be described without that number, and a
- * sentence assembled in the component could not help naming it.
+ * the rule: a pod with no honest answer for what it runs now — it has not reported, or it is not running — has to be
+ * described without that number, and a sentence assembled in the component could not help naming it. That the pod is
+ * stopped is said by the figures below rather than repeated here.
  */
 export function sizeSentence(size: VirtualAgentSize, capacity: ChatCapacity): string {
   const offer = sizeOffer(size);

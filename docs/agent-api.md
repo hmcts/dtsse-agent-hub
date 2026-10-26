@@ -433,7 +433,9 @@ field out and the UI can say that the feature is not available on that session y
 - It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
   been upgraded re-registers.
 
-Five names are in use, and the clients published from this repo claim all five.
+These are the names in use, and the clients published from this repo claim every one of them. Deliberately not counted
+here: a count restates what the list below already says, nothing checks it, and it has been left behind twice by
+branches that each added a name.
 
 - `attachments`, because they read the `attachments` on an Assistant `direct` frame and fetch each file to the pod's
   disk. No hub field is gated on it — the frame carries `attachments` to every session — so a client too old to claim

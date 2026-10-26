@@ -507,9 +507,10 @@ export async function linkSession(
  *
  * The report's `max` is kept as well, because it is the only account of what the pod in front of the person actually
  * enforces: the cap is in the pod template, so raising the constant reaches a running pod when it next rolls and the
- * two disagree until then. `chatCapacity` is what reads it, and gives no current figure at all when it is null. Written on every report rather than only when it changes —
- * it is one integer on a row this already touches, and a pod that rolled onto a new cap says so with its first
- * report rather than waiting for a session to start or stop.
+ * two disagree until then. `chatCapacity` is what reads it, and gives no current figure at all when it is null or
+ * the pod has stopped. Written on every report rather than only when it changes — it is one integer on a row this
+ * already touches, and a pod that rolled onto a new cap says so with its first report rather than waiting for a
+ * session to start or stop.
  */
 export async function reportSessions(prisma: PrismaClient, virtualAgentId: string, report: SessionsReport, now: Date = new Date()): Promise<void> {
   const reported = new Map(report.sessions.map((session) => [session.conversation_id, session]));

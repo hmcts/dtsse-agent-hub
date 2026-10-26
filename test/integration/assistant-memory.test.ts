@@ -254,6 +254,27 @@ describe("how many chats an assistant says it runs", () => {
 
     expect((await assistantMemory(prisma, ALICE.oid, assistant))?.capacity).toEqual({ now: 4, fromRestart: undefined });
   });
+
+  // A stopped pod runs no chats, so the figure it last reported is not a present-tense answer. Nothing clears
+  // `sessions_max`, so it is still on the row.
+  it("should claim no current figure once the pod is stopped, however recently it reported", async () => {
+    const assistant = await assistantOf(ALICE, ["memory"], "stopped");
+
+    await reportSessions(prisma, assistant, { sessions: [], max: 4 });
+
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.capacity).toEqual({ now: undefined, fromRestart: 4 });
+  });
+
+  // And a size change made while stopped must not have the dead pod's cap read back as the new size's.
+  it("should not attribute a stopped pod's cap to the size it was resized to", async () => {
+    const assistant = await assistantOf(ALICE, ["memory"], "stopped");
+    await reportSessions(prisma, assistant, { sessions: [], max: 4 });
+    actAs("alice");
+
+    expect(await actions.resizeVirtualAgent(form({ id: assistant, size: "medium" }))).toMatchObject({ ok: true });
+
+    expect((await assistantMemory(prisma, ALICE.oid, assistant))?.capacity).toEqual({ now: undefined, fromRestart: 6 });
+  });
 });
 
 describe("changing an assistant's size from its settings", () => {
