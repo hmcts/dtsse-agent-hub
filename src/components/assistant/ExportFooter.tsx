@@ -25,6 +25,10 @@ export function openingDestination(jira: JiraExportView | undefined, confluence:
   return jira.status === "done" && confluence.status !== "done" ? "confluence" : "jira";
 }
 
+/** One grid cell for both rows; `min-w-0` so a long breadcrumb shrinks within the panel rather than widening it. */
+const STACKED = "col-start-1 row-start-1 min-w-0";
+const HIDDEN = { visibility: "hidden" } as const;
+
 function Tick({ done }: { done: boolean }) {
   return done ? (
     <>
@@ -85,17 +89,24 @@ export function ExportFooter({
           </div>
         </fieldset>
       ) : null}
-      {/* Both stay mounted, so a project or page chosen in one is still chosen after a look at the other. */}
-      {jira === undefined ? null : (
-        <div hidden={showing !== "jira"}>
-          <JiraFooter conversationId={conversationId} {...jira} saved={saved} written={written} />
-        </div>
-      )}
-      {confluence === undefined ? null : (
-        <div hidden={showing !== "confluence"}>
-          <ConfluenceFooter conversationId={conversationId} {...confluence} saved={saved} written={written} />
-        </div>
-      )}
+      {/*
+       * Both rows stay mounted, so a project or page chosen in one is still chosen after a look at the other, and both
+       * sit in the one grid cell, so the footer is as tall as the taller of the two whichever is showing: switching
+       * destination moves nothing. The other row is hidden with `visibility` rather than `display`, which keeps its
+       * size and still takes it out of the tab order and the accessibility tree.
+       */}
+      <div className="grid min-w-0">
+        {jira === undefined ? null : (
+          <div className={STACKED} style={showing === "jira" ? undefined : HIDDEN} data-destination="jira">
+            <JiraFooter conversationId={conversationId} {...jira} saved={saved} written={written} />
+          </div>
+        )}
+        {confluence === undefined ? null : (
+          <div className={STACKED} style={showing === "confluence" ? undefined : HIDDEN} data-destination="confluence">
+            <ConfluenceFooter conversationId={conversationId} {...confluence} saved={saved} written={written} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

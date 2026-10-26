@@ -432,11 +432,7 @@ export function ChatView({
           save={actions.saveArtefact}
           onClose={() => setPanel(false)}
           jira={{ exported: view.jira, access: jira, exportTo: actions.exportToJira }}
-          confluence={
-            actions.exportToConfluence === undefined
-              ? undefined
-              : { exported: view.confluence, access: jira, exportTo: actions.exportToConfluence }
-          }
+          confluence={actions.exportToConfluence === undefined ? undefined : { exported: view.confluence, access: jira, exportTo: actions.exportToConfluence }}
           narrow={narrow}
         />
       ) : null}

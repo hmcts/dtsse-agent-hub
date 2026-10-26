@@ -219,7 +219,7 @@ export function JiraFooter({
   const hintId = `jira-hint-${conversationId}`;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2.5">
       <ProjectPicker project={chosen} onChange={setChosen} disabled={pending || exported.status === "done"} access={access} lookUp={lookUp} />
       <JiraAction
         exported={exported}

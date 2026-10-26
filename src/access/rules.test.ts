@@ -831,5 +831,4 @@ describe("the Atlassian rules", () => {
   ])("should answer %s when the %s searches Atlassian through the owner's assistant", (expected, role) => {
     expect(canLookUpAtlassian(ROLES[role], { ownerOid: OWNER })).toBe(expected);
   });
-
 });
