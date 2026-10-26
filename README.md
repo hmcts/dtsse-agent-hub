@@ -174,20 +174,39 @@ sign-in file (`auth-profiles.json` from twg 1.3.9, `auth.conf` before it) withou
 again whenever `twg` replaces its refresh token. Any Atlassian account is accepted, and labels the credential; the
 owner can have the agent sign in again from its page.
 
-Each code lasts two minutes, and the pod offers two of them. Two minutes is `twg login`'s own limit, not the
-server's: twg 1.3.3 waits five minutes for a person at a terminal and two when it reads its environment as an
-agent's, which a pod's always is, because `AGENT_HUB_LAUNCH_TOKEN` matches the variable names it looks for. That is
-the whole environment, not a list of two or three markers, so there is nothing a pod can unset to be given the
-other three minutes. Two minutes is easy to miss when the sign-in page is on another screen, so each code that runs
-out unused is replaced. After the last the pod reports the sign-in expired, so the owner's screens say so instead of
-showing a code that no longer works, and the agent stops reading as waiting for them. Jira and Confluence are then
-unconfigured until the agent signs in again. A sign-in that breaks rather than running out — the owner refusing it,
-say — is reported at once, with no second code.
+One code lasts five minutes, which is the whole life Atlassian gives it, and the pod offers one. Five minutes is
+long enough to go and find the Atlassian sign-in page on another screen and type a code, and that is what the pod
+has to buy, because `twg login` has a limit of its own under Atlassian's: twg 1.3.3 waits five minutes for a person
+at a terminal and two when it reads its environment as an agent's. The pod therefore runs `twg login` with every
+agent-mode trigger taken out of the child's environment — twg needs none of them — and gets the full five minutes.
 
-The two minutes is measured against twg 1.3.3, which is what the pod image carries. twg prints the figure itself,
-as "(120s remaining)" or "(300s remaining)", only outside agent mode, so a pod cannot read its own lifetime off the
-output it relays: moving the image to a later twg means measuring that version's agent-mode gate again and changing
-`TWG_DEVICE_CODE_EXPIRES_S` to match.
+twg's gate is two parts, and the explicit one runs first. `TWG_AGENT_HOST`, a table of agent hosts it knows by name
+(`CLAUDECODE`, `CLAUDE_CODE`, `CURSOR_AGENT`, `CODEX_SANDBOX` and the rest), `AGENT`, `AI_AGENT`,
+`TWG_METRICS_SOURCE` and `TWG_AGENT_DEFAULTS` each put it in agent mode on their own, short-circuiting before
+anything else. Only if none of them is set does twg scan the whole environment for a name with `AGENT` as a word in
+it, bar the ssh and gpg agent sockets and the user-agent strings; `AGENT_HUB_LAUNCH_TOKEN` and every other
+`AGENT_HUB_*` and `VIRTUAL_AGENT_*` variable matches that scan, so leaving the environment alone puts every pod
+sign-in in agent mode whatever else it does. All of it is droppable, and `twgAgentModeVars` in
+`packages/agent-hub/src/virtual/atlassian.ts` is the list, with the reason it exists beside it.
+
+A code that still runs out unused means the owner is not at their screen, and a second relayed to an empty chair
+runs out too while holding the agent in `awaiting_login`, so the pod reports the sign-in expired instead: the
+owner's screens say so rather than showing a code that no longer works, and the agent stops reading as waiting for
+them. Jira and Confluence are then unconfigured until the agent signs in again, which the owner can do from its
+page and which is a fresh five minutes. A sign-in that breaks rather than running out — the owner refusing it, say
+— is reported the same way, and at once.
+
+One code rather than two is what the five minutes cost. `agent-hub jira export` drives this sign-in under a
+600-second Bash timeout, and a command killed at that reports nothing and leaves the dead code on the owner's
+screen; two five-minute codes need 900 seconds of that budget and one needs 570. A code the owner can actually use
+is worth more than a second they could not, which is what the incident behind this showed: two codes, both two
+minutes, both expired unused.
+
+The five minutes is measured against twg 1.3.3, which is what the pod image carries. twg prints the figure itself,
+as "(300s remaining)", only outside agent mode, so the countdown appearing at all is what says the drop worked and
+a spinner with no figure means it did not. Moving the image to a later twg means measuring that version's gate
+again and changing the drop list, and `TWG_DEVICE_CODE_EXPIRES_S` with it; a trigger a later twg adds and the list
+misses costs the two-minute code a pod used to get, not anything worse.
 
 Each person also has a CLAUDE.md (`claude_md`), edited in the "Your CLAUDE.md" section of `/hub/virtual`, which every one of
 their virtual agents writes to `~/.claude/CLAUDE.md` before each start of Claude. It is kept in the credentials store
