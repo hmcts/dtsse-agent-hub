@@ -575,9 +575,9 @@ describe("the size choice", () => {
 
     const size = screen.getByLabelText("Size") as HTMLSelectElement;
     expect([...size.options].map((option) => option.textContent)).toEqual([
-      "Small: 1–4 CPUs, 4Gi–8Gi memory",
-      "Medium: 2–4 CPUs, 8Gi–16Gi memory",
-      "Large: 4–8 CPUs, 16Gi–32Gi memory"
+      "Small: from 1 CPU, 4Gi–8Gi memory",
+      "Medium: from 2 CPUs, 8Gi–16Gi memory",
+      "Large: from 4 CPUs, 16Gi–32Gi memory"
     ]);
     expect(size.value).toBe("small");
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "big" } });

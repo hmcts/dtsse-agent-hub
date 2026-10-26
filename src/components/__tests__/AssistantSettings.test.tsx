@@ -20,9 +20,7 @@ import type { AssistantTemplates } from "@/components/assistant/TemplateSettings
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
-import { CONVERSATION_SESSIONS } from "@/orchestrator/manifests";
 import type { LoginState, LoginView } from "@/virtual-agents/logins";
-import { SIZE_RESOURCES } from "@/virtual-agents/size";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
@@ -1511,10 +1509,11 @@ describe("the Assistant's size", () => {
     expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
   });
 
-  it("should say the size it is on with what that size gives, from the orchestrator's own constants", () => {
+  // The figures a person reads, not a read-back of the constants they come from.
+  it("should say the size it is on with what that size gives", () => {
     open({ size: size() }, "Size");
 
-    expect(panel().textContent).toContain(`You are on small: ${CONVERSATION_SESSIONS.small} chats at once, ${SIZE_RESOURCES.small.limits.memory} of memory.`);
+    expect(panel().textContent).toContain("You are on small: 4 chats at once, 8Gi of memory.");
   });
 
   // The peak leads, because that is what the warning is about: the live figure dips between turns, so a pod that has
@@ -1571,9 +1570,7 @@ describe("the Assistant's size", () => {
     open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES - 1), openChats: 3 }) }, "Size");
 
     expect(panel().textContent).toContain("Your assistant is low on memory");
-    expect(panel().textContent).toContain(
-      `Move up to medium below for ${CONVERSATION_SESSIONS.medium} chats at once and ${SIZE_RESOURCES.medium.limits.memory} of memory, or close a chat you have finished with.`
-    );
+    expect(panel().textContent).toContain("Move up to medium below for 6 chats at once and 16Gi of memory, or close a chat you have finished with.");
   });
 
   // Telling someone with one chat open to close some chats is telling them to stop working.
@@ -1611,9 +1608,9 @@ describe("the Assistant's size", () => {
     const select = screen.getByLabelText("Choose a size") as HTMLSelectElement;
 
     expect([...select.options].map((option) => option.textContent)).toEqual([
-      `small — ${CONVERSATION_SESSIONS.small} chats at once, ${SIZE_RESOURCES.small.limits.memory} of memory`,
-      `medium — ${CONVERSATION_SESSIONS.medium} chats at once, ${SIZE_RESOURCES.medium.limits.memory} of memory`,
-      `large — ${CONVERSATION_SESSIONS.large} chats at once, ${SIZE_RESOURCES.large.limits.memory} of memory`
+      "small — 4 chats at once, 8Gi of memory",
+      "medium — 6 chats at once, 16Gi of memory",
+      "large — 8 chats at once, 32Gi of memory"
     ]);
     expect(select.value).toBe("small");
     expect(panel().textContent).toContain("This is the size you are on.");

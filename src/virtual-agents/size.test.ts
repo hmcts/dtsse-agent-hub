@@ -24,18 +24,25 @@ describe("isVirtualAgentSize", () => {
 });
 
 describe("SIZE_RESOURCES", () => {
-  it("should give each size its CPU and memory, small keeping the limits pods had before sizes", () => {
+  // The figures, not a read-back of the constant: these are what a pod is reserved on the cluster, and a CPU quota
+  // left on any of them would throttle a session's bursts for a latency cost nothing here is protected from.
+  it("should request CPU and memory and limit memory alone, with no CPU quota on any size, when read", () => {
     expect(SIZE_RESOURCES).toEqual({
-      small: { requests: { cpu: "1", memory: "4Gi" }, limits: { cpu: "4", memory: "8Gi" } },
-      medium: { requests: { cpu: "2", memory: "8Gi" }, limits: { cpu: "4", memory: "16Gi" } },
-      large: { requests: { cpu: "4", memory: "16Gi" }, limits: { cpu: "8", memory: "32Gi" } }
+      small: { requests: { cpu: "1", memory: "4Gi" }, limits: { memory: "8Gi" } },
+      medium: { requests: { cpu: "2", memory: "8Gi" }, limits: { memory: "16Gi" } },
+      large: { requests: { cpu: "4", memory: "16Gi" }, limits: { memory: "32Gi" } }
     });
   });
 });
 
 describe("sizeLabel", () => {
-  it("should describe a size by its CPU and memory range", () => {
-    expect(sizeLabel("medium")).toBe("Medium: 2–4 CPUs, 8Gi–16Gi memory");
+  // CPU reads as a floor because there is no quota above it; memory as a range because the kernel enforces the top.
+  it.each([
+    ["small", "Small: from 1 CPU, 4Gi–8Gi memory"],
+    ["medium", "Medium: from 2 CPUs, 8Gi–16Gi memory"],
+    ["large", "Large: from 4 CPUs, 16Gi–32Gi memory"]
+  ] as const)("should describe %s by the CPU it guarantees and its memory range", (size, label) => {
+    expect(sizeLabel(size)).toBe(label);
   });
 });
 

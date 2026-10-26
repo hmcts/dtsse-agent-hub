@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { CONVERSATION_SESSIONS } from "../orchestrator/manifests.ts";
-import { SIZE_RESOURCES } from "../virtual-agents/size.ts";
 import {
   CONVERSATION_MEMORY_BYTES,
   type MemoryReportRow,
@@ -143,7 +141,7 @@ describe("memoryAdvice", () => {
     const pressure = memoryPressure(reported(0), 3, "small");
 
     expect(memoryAdvice(pressure!)).toBe(
-      `It has reached 8 GB of its 8 GB, which leaves no room for another chat. Move up to medium below for ${CONVERSATION_SESSIONS.medium} chats at once and ${SIZE_RESOURCES.medium.limits.memory} of memory, or close a chat you have finished with.`
+      "It has reached 8 GB of its 8 GB, which leaves no room for another chat. Move up to medium below for 6 chats at once and 16Gi of memory, or close a chat you have finished with."
     );
   });
 
@@ -177,12 +175,28 @@ describe("sizeChangeQuestion", () => {
 });
 
 describe("sizeOffers", () => {
-  it("should describe every size from the constants the orchestrator applies, smallest first", () => {
+  // The caps and memory as figures rather than read back from the constants: a cap is a measured ceiling on what a
+  // pod of that size holds, and reading it back would pass whatever the constant happened to say.
+  it("should offer every size's cap and memory, smallest first", () => {
     expect(sizeOffers()).toEqual([
-      { size: "small", chats: CONVERSATION_SESSIONS.small, requests: SIZE_RESOURCES.small.requests.memory, limit: SIZE_RESOURCES.small.limits.memory },
-      { size: "medium", chats: CONVERSATION_SESSIONS.medium, requests: SIZE_RESOURCES.medium.requests.memory, limit: SIZE_RESOURCES.medium.limits.memory },
-      { size: "large", chats: CONVERSATION_SESSIONS.large, requests: SIZE_RESOURCES.large.requests.memory, limit: SIZE_RESOURCES.large.limits.memory }
+      { size: "small", chats: 4, requests: "4Gi", limit: "8Gi" },
+      { size: "medium", chats: 6, requests: "8Gi", limit: "16Gi" },
+      { size: "large", chats: 8, requests: "16Gi", limit: "32Gi" }
     ]);
+  });
+
+  // 0.95Gi awake with nothing open plus 0.65Gi a chat, so a cap of N costs 0.95 + 0.65N Gi — and that has to stay
+  // inside the size's memory *request*, because a pod over its request is an eviction candidate under node pressure
+  // however much its limit leaves spare.
+  it.each(sizeOffers())("should keep $size's full complement of chats inside the memory it requests", ({ chats, requests }) => {
+    expect(0.95 + 0.65 * chats).toBeLessThanOrEqual(Number.parseInt(requests, 10));
+  });
+
+  // Which is what fixes `small` where it is: a fifth chat would be 4.20Gi against the 4Gi it requests.
+  it("should have no room inside small's request for a chat beyond its cap", () => {
+    const { chats, requests } = sizeOffer("small");
+
+    expect(0.95 + 0.65 * (chats + 1)).toBeGreaterThan(Number.parseInt(requests, 10));
   });
 });
 
