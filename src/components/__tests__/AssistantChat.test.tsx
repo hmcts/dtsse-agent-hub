@@ -670,6 +670,14 @@ describe("ChatView document", () => {
 });
 
 describe("ChatView menu", () => {
+  it("should offer the open chat for sharing from the options menu", () => {
+    render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+
+    expect(screen.getByRole("menuitem", { name: "Share" }).getAttribute("href")).toBe(`/assistant/${CONVERSATION}?share=1`);
+  });
+
   it("should rename the chat when the person saves a new name from the options menu", async () => {
     const rename = ok();
     render(<ChatView viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ rename })} />);

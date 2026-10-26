@@ -155,16 +155,18 @@ describe("describeBytes", () => {
 });
 
 describe("attachedBody", () => {
-  it("should name the one file when a message carries a single one", () => {
-    expect(attachedBody(["letter.pdf"])).toBe("I have attached letter.pdf. Please take a look.");
+  it("should say a file when a message carries a single one", () => {
+    expect(attachedBody(["letter.pdf"])).toBe("I have attached a file. Please take a look.");
   });
 
-  it("should join two files with and", () => {
-    expect(attachedBody(["letter.pdf", "scan.png"])).toBe("I have attached letter.pdf and scan.png. Please take a look.");
+  it("should count the files when a message carries several", () => {
+    expect(attachedBody(["a.pdf", "b.pdf", "c.pdf", "d.pdf"])).toBe("I have attached 4 files. Please take a look.");
   });
 
-  it("should comma-separate all but the last when a message carries several", () => {
-    expect(attachedBody(["a.pdf", "b.pdf", "c.pdf", "d.pdf"])).toBe("I have attached a.pdf, b.pdf, c.pdf and d.pdf. Please take a look.");
+  // The names belong to the chips beside the message, which are the owner's to see. This body is the one in the hub
+  // its sender did not write, and a read-only share of their conversation carries it.
+  it("should name no file, whatever they were called", () => {
+    expect(attachedBody(["grievance-smith-2026.pdf", "scan.png"])).toBe("I have attached 2 files. Please take a look.");
   });
 
   it("should give nothing when there are no files, so the caller refuses the send rather than write an empty message", () => {
