@@ -7,6 +7,7 @@ import type { AssistantPluginsData } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
+import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
@@ -24,6 +25,7 @@ interface SettingsView {
   plugins: AssistantPlugins | undefined;
   claudeMd: AssistantClaudeMd | undefined;
   templates: AssistantTemplates | undefined;
+  files: AssistantFiles | undefined;
 }
 
 /**
@@ -237,6 +239,13 @@ const SECTIONS: readonly SettingsSection[] = [
     group: null,
     shown: (view) => view.templates !== undefined,
     panel: (view) => (view.templates === undefined ? null : <Templates templates={view.templates} />)
+  },
+  {
+    id: "files",
+    label: "Files",
+    group: null,
+    shown: (view) => view.files !== undefined,
+    panel: (view) => (view.files === undefined ? null : <Files files={view.files} />)
   }
 ];
 
@@ -562,13 +571,15 @@ export function AssistantSettings({
   connections: data,
   plugins,
   claudeMd,
-  templates
+  templates,
+  files
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
   plugins?: AssistantPlugins;
   claudeMd?: AssistantClaudeMd;
   templates?: AssistantTemplates;
+  files?: AssistantFiles;
 }) {
   const cog = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -634,7 +645,7 @@ export function AssistantSettings({
       </button>
       {open
         ? createPortal(
-            <Dialog view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, claudeMd, templates }} onClose={close} />,
+            <Dialog view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, claudeMd, templates, files }} onClose={close} />,
             themeRoot()
           )
         : null}

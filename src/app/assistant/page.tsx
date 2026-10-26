@@ -7,6 +7,7 @@ import {
   setConversationProduct,
   startConversation
 } from "@/app/_actions/assistant";
+import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
 import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
 import { pasteLoginCode, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
@@ -20,7 +21,7 @@ import { AssistantShell, type ConversationActions } from "@/components/assistant
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { requireViewer } from "@/viewer/current";
-import { assistantTemplates, claudeMdSettings, openAssistant, unsentNewChat } from "@/web/data";
+import { assistantFiles, assistantTemplates, claudeMdSettings, openAssistant, unsentNewChat } from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -40,11 +41,12 @@ export default async function AssistantPage() {
   const viewer = await requireViewer();
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
-  const [home, unsent, claudeMd, mine] = await Promise.all([
+  const [home, unsent, claudeMd, mine, files] = await Promise.all([
     openAssistant(viewer),
     unsentNewChat(viewer),
     claudeMdSettings(viewer),
-    assistantTemplates(viewer)
+    assistantTemplates(viewer),
+    assistantFiles(viewer)
   ]);
   const plugins = assistantPluginsData(home.assistant, home.plugins);
   const pluginSettings = plugins && { ...plugins, save: setVirtualAgentPlugins };
@@ -59,6 +61,7 @@ export default async function AssistantPage() {
       plugins={pluginSettings}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
+      files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}
     >
       <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
       <OnboardingGate

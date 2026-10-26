@@ -14,10 +14,12 @@ import {
   canManageCredential,
   canManageGrants,
   canManageTemplate,
+  canManageUploadsOnDisk,
   canManageVirtualAgent,
   canOwnerReadCredential,
   canPersonMessageAgent,
   canReadMessage,
+  canRemoveUploadFromDisk,
   canSeeAgentSkills,
   canSessionUseAttachment,
   canShareConversationWith,
@@ -593,6 +595,41 @@ describe("the upload rules", () => {
 
     it("should refuse someone else's expired upload as not theirs, saying nothing about its state", () => {
       expect(attachmentDownload(STRANGER, upload({ state: "expired", messageId: "41" }), PASSED, NOW)).toBe("not_yours");
+    });
+  });
+
+  describe("canManageUploadsOnDisk", () => {
+    it("should let a person see and clear what is on their own assistant's disk", () => {
+      expect(canManageUploadsOnDisk(OWNER, OWNER)).toBe(true);
+    });
+
+    // A grant is over sessions a person chose to share, and what is on their assistant's volume is neither a session
+    // nor something they shared, so this rule takes no grants at all rather than some it would ignore.
+    it.each([
+      ["writer", WRITER],
+      ["reader", READER],
+      ["stranger", STRANGER]
+    ] as const)("should refuse a %s, however much access they hold over that person's agents", (_role, oid) => {
+      expect(canManageUploadsOnDisk(oid, OWNER)).toBe(false);
+    });
+  });
+
+  describe("canRemoveUploadFromDisk", () => {
+    it.each([["stored"], ["fetched"], ["expired"]] as const)("should let the owner clear a %s upload that reached a message", (state) => {
+      expect(canRemoveUploadFromDisk(OWNER, upload({ state, messageId: "41" }))).toBe(true);
+    });
+
+    // A pod only ever fetches what was sent, so an upload still in a composer has no copy on its disk to clear.
+    it("should refuse an upload that never reached a message, which no pod has a copy of", () => {
+      expect(canRemoveUploadFromDisk(OWNER, upload({ state: "stored" }))).toBe(false);
+    });
+
+    it.each([
+      ["writer", WRITER],
+      ["reader", READER],
+      ["stranger", STRANGER]
+    ] as const)("should refuse a %s clearing the owner's file", (_role, oid) => {
+      expect(canRemoveUploadFromDisk(oid, upload({ state: "fetched", messageId: "41" }))).toBe(false);
     });
   });
 

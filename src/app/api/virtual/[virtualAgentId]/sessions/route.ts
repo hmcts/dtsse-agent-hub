@@ -3,6 +3,7 @@ import { virtualRoute } from "@/agent-api/route";
 import { sessionsReportBody } from "@/assistant/schemas";
 import { sessionStream } from "@/assistant/session-stream";
 import { pendingWake, pendingWakes, reportSessions } from "@/assistant/store";
+import { pendingUploadDeletions } from "@/assistant/upload-disk";
 import { RECONNECT_FRAME } from "@/realtime/agent-stream";
 import { realtime } from "@/realtime/process";
 import { openSseStream, SSE_HEADERS } from "@/realtime/sse";
@@ -27,7 +28,8 @@ export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgen
       hub,
       ready: listener.ready,
       wakes: () => pendingWakes(prisma, virtualAgent.id),
-      wake: (conversationId) => pendingWake(prisma, virtualAgent.id, conversationId)
+      wake: (conversationId) => pendingWake(prisma, virtualAgent.id, conversationId),
+      deletions: () => pendingUploadDeletions(prisma, virtualAgent.id)
     })
   });
   return new Response(body, { headers: SSE_HEADERS });

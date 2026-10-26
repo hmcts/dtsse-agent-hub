@@ -108,9 +108,10 @@ A share exposes the words of the thread and the conversation's artefact, and not
 
 | Method and path | Body | Response |
 |---|---|---|
-| `GET /api/virtual/{id}/sessions` | — | SSE, framed as the agent stream: `: connected`, `retry: 1000`, `: ping` every 15 seconds, and `event: reconnect` at the stream lifetime. On connect it sends a `wake` for every conversation with a wake pending, oldest first; after that, a `wake` for each new one, an `interrupt` for each answer the person stopped, and a `close` for each conversation deleted. `wake` data is `{conversation_id, session_id, resume, product}`, where `resume` is `true` once the session has sent a transcript entry, so the pod runs `claude --resume <session_id>` rather than `claude --session-id <session_id>` (the pod also checks for the session's JSONL itself). `interrupt` data is `{conversation_id}` and is described under Stopping an answer below. `close` data is `{conversation_id}`; the pod stops whatever session it runs for that conversation. A deleted conversation takes its agents, their transcripts and its messages with it. A wake is sent again on every connection until a session registers for the conversation. |
+| `GET /api/virtual/{id}/sessions` | — | SSE, framed as the agent stream: `: connected`, `retry: 1000`, `: ping` every 15 seconds, and `event: reconnect` at the stream lifetime. On connect it sends a `wake` for every conversation with a wake pending, oldest first, and a `delete_uploads` for every conversation with files the owner has asked it to delete; after that, a `wake` for each new one, an `interrupt` for each answer the person stopped, a `delete_uploads` as each request is made, and a `close` for each conversation deleted. `wake` data is `{conversation_id, session_id, resume, product}`, where `resume` is `true` once the session has sent a transcript entry, so the pod runs `claude --resume <session_id>` rather than `claude --session-id <session_id>` (the pod also checks for the session's JSONL itself). `interrupt` data is `{conversation_id}` and is described under Stopping an answer below. `delete_uploads` data is `{conversation_id, upload_ids}` and is described under Uploads on the pod's disk below. `close` data is `{conversation_id}`; the pod stops whatever session it runs for that conversation. A deleted conversation takes its agents, their transcripts and its messages with it. A wake is sent again on every connection until a session registers for the conversation. |
 | `PUT /api/virtual/{id}/sessions` | `{sessions: [{conversation_id, state, detail?}], max}` | `204`. What the supervisor runs, replacing its last report: `state` is `starting`, `live` or `queued` (waiting for a free slot), `detail` at most 200 characters, and `max` how many sessions it runs at once, 1–20; at most 50 entries. A conversation left out has no session. Unknown conversation ids are ignored. Notifies the owner's UI. |
 | `GET /api/virtual/{id}/conversations` | — | `200 {conversations: [{id}]}`, every conversation of that virtual agent. The pod reconciles its `/workspace/uploads/<conversation-id>/` directories against this list (see Attachments below), so a conversation deleted while it was stopped — which sends no `close` it was there to hear — still has its files removed. |
+| `PUT /api/virtual/{id}/uploads` | `{uploads_bytes, volume_used_bytes, volume_total_bytes, files_total, files: [{upload_id, bytes}], deleted: [upload_id]}` | `204`. What the pod holds on its own volume, replacing its last report, and which deletions it has carried out; see Uploads on the pod's disk below. |
 
 **Registering.** The supervisor starts each session with the conversation's `session_id` and with `AGENT_HUB_CONVERSATION_ID` in its environment, and the session registers with `conversation_id` set, using the launch token. That registration adopts the agent the hub created, makes it the conversation's current agent and clears the wake, and does **not** make it the virtual agent's current agent. A later registration with the same `conversation_id` and a new `session_id` (after `/clear`) becomes the conversation's current agent instead. A `conversation_id` that is not one of the launch token's virtual agent's conversations, or sent without a launch token, gives `409`. A conversation's session subscribes to no topics.
 
@@ -175,6 +176,41 @@ A fetched report that fails after the bytes are written does not change any of t
 **Downloading a file back.** `GET /api/ui/uploads/{upload_id}/content` answers the whole file, streamed one part row at a time, to **the person who uploaded it and nobody else** — the same cookie-authenticated, same-origin route family as the upload itself, so no grant over that person's agents reaches it. It is `404` for someone else's upload and for one that never existed, deliberately alike; `410` with `reason: "no_longer_held"` for the owner's own file once its window has closed, which is something they need telling rather than something to hide. The window decides rather than the swept state, because the sweep runs on a timer and a row it has not reached yet is still past its window. The response carries `Content-Disposition: attachment` with the `stored_name`, the media type the browser claimed on the way up, `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`.
 
 Each attachment in the thread therefore carries `available_until`, the instant the hub stops holding its bytes, or `null` for an upload whose bytes it does not hold at all. The chip offers a download only while that instant is ahead and says the file has gone otherwise, so the UI never offers one the route would refuse.
+
+## Uploads on the pod's disk
+
+The part rows are a 3-hour window; the pod's copies are not. Every fetched file stays under `/workspace/uploads/<conversation-id>/` on the persistent volume until its conversation is deleted, so that — and not the hub's rows — is what accumulates and what a person means by their files taking up space. **The hub cannot see it**: every call between the two is pod to hub. So the pod says, and the hub asks for deletions on the stream the pod is already reading.
+
+**Reporting.** `PUT /api/virtual/{id}/uploads` replaces the virtual agent's last report:
+
+```jsonc
+{
+  "uploads_bytes": 2254857830,       // what the uploads directory comes to
+  "volume_used_bytes": 30477004800,  // the whole volume, which the repository clones share
+  "volume_total_bytes": 34359738368,
+  "files_total": 231,                // how many files it holds, of which it names the largest below
+  "files": [{ "upload_id": "…", "bytes": 4194304 }],
+  "deleted": ["…"]                   // the deletions it has carried out since its last report
+}
+```
+
+- Two totals rather than one, because the uploads are a share of a volume the clones are on too. "2.1 GB of files" says much less than "2.1 GB of files, on a volume that is 28 of 32 GB full", and the second is the number that explains why something is going wrong.
+- `files` is at most 200 entries, **largest first**, and the hub keeps them in the order sent. A pod holding more sends the largest 200 and `files_total` says how many there are, which is what lets the UI claim truncation only when something was cut; the totals are of everything, not of the 200. An `upload_id` the hub has no row for is kept in the stored report but is not listed to the person, who has nothing to call it.
+- **`files` and `deleted` are required arrays and `files_total` a required count**, as the three byte figures are. A report that left `files` out would otherwise read as an authoritative empty list, and nothing in this design is read that way: see Deleting below for what `deleted` is, and why absence from `files` means nothing at all.
+- Every figure is a whole number from 0 up; anything else is `400`. A report is sent on the pod's uploads reconcile, every 10 minutes, and again as soon as it has a deletion to acknowledge — so the hub's figures are always *as of* `uploads_reported_at`, and the UI says when rather than presenting them as current.
+- A report **notifies nobody**. It is read by the person's own page, which the action they took revalidates; nothing streams it to a browser, and a pod that reports is the pod that already knows. See Deleting for why that matters.
+- The report is what the hub shows; it does **not** infer the pod's disk from its own rows. It could not: a row says a file was fetched, not that the pod still has it, and the sweep marks a `fetched` row `expired` for its own reasons.
+
+**Deleting.** The owner asks through the web UI. The hub records the request on the upload rows, drops any part rows it still holds for them, and sends the pod `event: delete_uploads`, `{conversation_id, upload_ids}` — one frame per conversation, at most 200 ids per frame.
+
+- It **is** replayed, on connect and on `resync`, unlike `interrupt`. A delete names a state to reach rather than a turn to end, so a request made while the pod was restarting must still be carried out; and it is idempotent, since a file that is not there is a deletion that has already happened.
+- A request is cleared **only** by a report that names it in `deleted`, which is the pod saying it has acted. `deleted` carries every id whose copies are gone — the ones it removed and the ones that were not there, which are the same outcome — and leaves out any whose removal failed, so a request the pod could not carry out stays outstanding and is sent again on its next connect.
+- Absence from `files` clears nothing. It cannot: `files` is the largest 200, so a file outside that list is unnamed while sitting on the volume, and a report that named none at all would otherwise mark every outstanding request done. Positive acknowledgement is the only thing here that cannot rot.
+- Because a report notifies nobody, a deletion the pod could not carry out does not produce another frame straight away: it is retried when the pod's stream next opens, which its lifetime bounds. The same goes for the ids past `MAX_DELETED_PER_FRAME` in a conversation with more than 200 outstanding. Both are deliberate — a frame for every report would be a loop between the two with no backoff and nothing giving up.
+- The pod removes `<upload_id>-*` inside that conversation's directory and nothing else, and a missing file is success. It does not remove the directory: the conversation still exists, and `close` is what empties it. It reports straight after, so a deletion is acknowledged in seconds rather than at the next reconcile — unless it removed nothing at all, when there is nothing to acknowledge and nothing to report.
+- **Deleting is honest about which copy goes.** It removes the pod's copy, which is the one occupying space. The hub's own part rows for the same upload go with it, so a file still inside its 3-hour window can no longer be downloaded back from the thread — the chip's `available_until` becomes `null`, as it does when the sweep reaches it. The upload row itself stays, so the thread goes on saying a file was attached.
+
+**An older client.** This is gated on the `files` client feature below, on both sides: a pod whose current session has not claimed it is one the hub will not promise a deletion for, and the UI says the figures cannot be reported yet rather than showing `0 B`, which would read as "no files". A pod takes the current client when it boots, so this reaches a pod at its next start.
 
 Metadata rows cascade from the message and from the conversation, so deleting either takes them with it, and the pod removes the conversation's directory when it is told the conversation was deleted.
 
@@ -261,7 +297,7 @@ field out and the UI can say that the feature is not available on that session y
 - It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
   been upgraded re-registers.
 
-Two names are in use, and the clients published from this repo claim both.
+Three names are in use, and the clients published from this repo claim all three.
 
 - `attachments`, because they read the `attachments` on an Assistant `direct` frame and fetch each file to the pod's
   disk. No hub field is gated on it — the frame carries `attachments` to every session — so a client too old to claim
@@ -270,6 +306,11 @@ Two names are in use, and the clients published from this repo claim both.
   one **is** gated, on both sides: the hub refuses to stop an answer on a session that did not claim it, and the web
   UI offers no stop control for such a conversation. A pod takes the current client when it boots, so a conversation
   on a session started by an older build has no stop until that session is next started.
+- `files`, because their supervisor reports what the uploads directory holds (`PUT /api/virtual/{id}/uploads`) and
+  acts on the sessions stream's `delete_uploads` frame. Claimed by the pod's **own** session, which is the virtual
+  agent's current agent, since the supervisor is what does both — not by a conversation's session. Gated on both
+  sides: the hub refuses a deletion request for a pod that has not claimed it, and the settings' Files section says
+  the figures cannot be reported yet rather than showing an empty disk.
 
 ## Replies
 

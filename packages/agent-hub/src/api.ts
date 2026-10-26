@@ -180,6 +180,22 @@ export type ConversationSummary = { id: string };
 
 export type ConversationsResponse = { conversations: ConversationSummary[] };
 
+/**
+ * What this pod holds on its own volume, and which deletions it has carried out: the uploads' share, the whole
+ * volume, how many files there are, the largest of them by id, and the ids whose copies are now gone.
+ *
+ * `deleted` is the only thing that ends a deletion request. Absence from `files` means nothing, since that list is
+ * capped at the largest `MAX_REPORTED_FILES`.
+ */
+export type UploadsReportBody = {
+  uploads_bytes: number;
+  volume_used_bytes: number;
+  volume_total_bytes: number;
+  files_total: number;
+  files: { upload_id: string; bytes: number }[];
+  deleted: string[];
+};
+
 export type RegisterResponse = { agent_id: string; name: string };
 export type MessageResponse = { message: Message };
 export type MessagesResponse = { messages: Message[] };
@@ -312,6 +328,8 @@ export type Api = {
   sessionsStream: (id: string, opts?: StreamOptions) => Promise<Response>;
   putSessions: (id: string, body: SessionsBody) => Promise<null>;
   conversations: (virtualId: string) => Promise<ConversationsResponse>;
+  /** What the uploads directory and the volume under it come to, which the hub has no way to see for itself. */
+  putUploads: (virtualId: string, body: UploadsReportBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
   /** One part of a file attached to a message in this agent's conversation. One part, never the whole file. */
@@ -471,6 +489,7 @@ export function createApi({
     sessionsStream: (id, opts) => openStream(v(id, "sessions"), opts),
     putSessions: (id, body) => request<null>("PUT", v(id, "sessions"), body),
     conversations: (virtualId) => request<ConversationsResponse>("GET", v(virtualId, "conversations")),
+    putUploads: (virtualId, body) => request<null>("PUT", v(virtualId, "uploads"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
     attachmentPart: (agentId, uploadId, index) => requestBytes(`${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/parts/${index}`),
