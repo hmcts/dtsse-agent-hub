@@ -203,7 +203,9 @@ hai_note=""
 install_hai() {
     local out rc=0 prefix version reason
     hai_tries=$((hai_tries + 1))
-    out=$(npm install -g --no-fund --no-audit --fetch-timeout=60000 --fetch-retries=2 \
+    # --ignore-scripts: nothing in this install needs a lifecycle script, and a pod runs it unattended on
+    # every boot. @hmcts-cft/hai-cli declares none and has no dependencies to declare any.
+    out=$(npm install -g --ignore-scripts --no-fund --no-audit --fetch-timeout=60000 --fetch-retries=2 \
         "$HAI_REGISTRY" @hmcts-cft/hai-cli@latest 2>&1) || rc=$?
     if ! command -v hai >/dev/null; then
         prefix=$(npm prefix -g 2>/dev/null)
