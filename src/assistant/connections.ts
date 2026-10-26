@@ -265,8 +265,11 @@ export interface OfferedConnection {
 /**
  * Whether a sign-in of this kind that is over and unsuccessful has a way back the hub will take.
  *
- * One the assistant makes for itself always has: `reconnectSignIn` accepts every kind whose `paste` is `null`, and
- * restarts the pod so it relays a fresh code. Anything the person pastes has one only for a credential their
+ * One the assistant makes for itself always has: `reconnectSignIn` accepts a `SignInKind`, and the kinds with no
+ * `paste` are exactly those — which is `CONNECTORS`'s own test, "should ask the person to paste exactly the
+ * connections their assistant cannot sign in to itself", and the reason this can read `paste` rather than importing
+ * the server module that owns `SIGN_IN_KINDS`. It restarts the pod so it relays a fresh code. Anything the person
+ * pastes has a way back only for a credential their
  * assistant uses, because `saveCredential` is route-aware — it refuses a Claude token from somebody whose agents run
  * on Amazon Bedrock. So a lapsed Claude sign-in relayed to a Bedrock-route person has no way back at all: the only
  * control for it is a box whose save is refused, and nothing ever clears the login row, since `startLogin` overwrites

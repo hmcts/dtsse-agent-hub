@@ -296,7 +296,18 @@ describe("WarmingUp hydration", () => {
 describe("OnboardingGate while the assistant starts", () => {
   function gate(summary: AssistantSummary, statuses: CredentialStatus[] = [], dismissed = false) {
     const noop = vi.fn(async () => ({ ok: true as const }));
-    return <OnboardingGate assistant={summary} statuses={statuses} unavailable={null} paste={noop} save={noop} reconnect={noop} dismissed={dismissed} />;
+    return (
+      <OnboardingGate
+        assistant={summary}
+        statuses={statuses}
+        unavailable={null}
+        paste={noop}
+        save={noop}
+        reconnect={noop}
+        now={Date.now()}
+        dismissed={dismissed}
+      />
+    );
   }
 
   it("should wait on the warming-up screen when someone who has onboarded arrives to a stopped assistant", () => {

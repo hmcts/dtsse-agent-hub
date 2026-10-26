@@ -9,6 +9,7 @@ import {
   CONNECTORS,
   type Connection,
   type ConnectionState,
+  canSignInAgain,
   codeCollectable,
   connectionState,
   connections,
@@ -200,6 +201,37 @@ describe("lapsedSinceStored", () => {
 
   it("should count a lapsed sign-in with nothing stored, which there is nothing newer to contradict", () => {
     expect(lapsedSinceStored(login("atlassian", "expired"), NONE, NOW)).toBe(true);
+  });
+});
+
+/**
+ * What decides whether a sign-in that is over has anywhere to go, which is what both the screen's rows and the ask
+ * are filtered on. The two halves are two different actions, and this is the tie between what it offers them for and
+ * what each will accept: `reconnectSignIn` takes a `SignInKind`, and `saveCredential` takes a value only for a
+ * credential the person's assistant uses.
+ */
+describe("canSignInAgain", () => {
+  const NOTHING: CredentialKind[] = [];
+
+  it("should offer every sign-in the assistant makes for itself, whatever the assistant uses", () => {
+    expect(CREDENTIAL_KINDS.filter((kind) => canSignInAgain(kind, NOTHING))).toEqual(CREDENTIAL_KINDS.filter(isSignInKind));
+  });
+
+  it("should offer a credential the person pastes only while their assistant uses it", () => {
+    expect(canSignInAgain("jenkins", ["jenkins"])).toBe(true);
+    expect(canSignInAgain("jenkins", NOTHING)).toBe(false);
+  });
+
+  // The state the rule exists for: `saveCredential` refuses a Claude token from somebody on the Bedrock route, so a
+  // lapsed Claude row would be an ask with a box that cannot be answered and no reconnect to fall back on.
+  it("should offer no Claude sign-in to an assistant that runs on Amazon Bedrock", () => {
+    expect(canSignInAgain("claude", neededCredentials("bedrock"))).toBe(false);
+    expect(canSignInAgain("claude", neededCredentials("own-licence"))).toBe(true);
+  });
+
+  it("should offer nothing that is not a sign-in at all", () => {
+    expect(canSignInAgain("claude_md", ["claude_md"])).toBe(false);
+    expect(canSignInAgain("git_identity", ["git_identity"])).toBe(false);
   });
 });
 

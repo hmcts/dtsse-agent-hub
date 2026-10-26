@@ -97,6 +97,7 @@ export default async function ConversationPage({
         paste={pasteLoginCode}
         save={saveCredential}
         reconnect={reconnectSignIn}
+        now={Date.now()}
         dismissed={waitingDismissed(jar.get(WAITING_COOKIE)?.value, home.assistant.id, home.assistant.startedAt)}
         theme={theme}
       />

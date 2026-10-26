@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CONNECTORS, canSignInAgain, connectionsPrompt, offeredConnections } from "@/assistant/connections";
 import { readiness } from "@/assistant/onboarding";
@@ -79,7 +80,17 @@ function ok() {
 
 function ready(props: Partial<Parameters<typeof GettingReady>[0]> = {}) {
   return (
-    <GettingReady assistant={assistant()} statuses={[]} unavailable={null} paste={ok()} save={ok()} reconnect={ok()} onDone={() => undefined} {...props} />
+    <GettingReady
+      assistant={assistant()}
+      statuses={[]}
+      unavailable={null}
+      paste={ok()}
+      save={ok()}
+      reconnect={ok()}
+      now={Date.now()}
+      onDone={() => undefined}
+      {...props}
+    />
   );
 }
 
@@ -396,7 +407,18 @@ describe("GettingReady when the hub cannot read the credentials", () => {
 
 describe("OnboardingGate", () => {
   function gate(summary: AssistantSummary, stored: CredentialStatus[] = [], dismissed = false) {
-    return <OnboardingGate assistant={summary} statuses={stored} unavailable={null} paste={ok()} save={ok()} reconnect={ok()} dismissed={dismissed} />;
+    return (
+      <OnboardingGate
+        assistant={summary}
+        statuses={stored}
+        unavailable={null}
+        paste={ok()}
+        save={ok()}
+        reconnect={ok()}
+        now={Date.now()}
+        dismissed={dismissed}
+      />
+    );
   }
 
   it("should ask for nothing when every needed account is connected and the hub can read them", () => {
@@ -408,6 +430,7 @@ describe("OnboardingGate", () => {
         paste={ok()}
         save={ok()}
         reconnect={ok()}
+        now={Date.now()}
       />
     );
 
@@ -419,7 +442,18 @@ describe("OnboardingGate", () => {
 
   /** What the page passes when the hub cannot read the credential store: the reason, and no statuses to go on. */
   function unreadable(summary: AssistantSummary = assistant("running"), dismissed = false) {
-    return <OnboardingGate assistant={summary} statuses={[]} unavailable={UNREADABLE} paste={ok()} save={ok()} reconnect={ok()} dismissed={dismissed} />;
+    return (
+      <OnboardingGate
+        assistant={summary}
+        statuses={[]}
+        unavailable={UNREADABLE}
+        paste={ok()}
+        save={ok()}
+        reconnect={ok()}
+        now={Date.now()}
+        dismissed={dismissed}
+      />
+    );
   }
 
   it("should let the person into their chat, and ask them for nothing, when the hub cannot read the credentials", () => {
@@ -621,6 +655,7 @@ describe("OnboardingGate", () => {
           paste={ok()}
           save={ok()}
           reconnect={reconnect}
+          now={Date.now()}
         />
       );
       fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
@@ -652,6 +687,7 @@ describe("OnboardingGate", () => {
           paste={ok()}
           save={ok()}
           reconnect={reconnect}
+          now={Date.now()}
         />
       );
       fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
@@ -768,7 +804,16 @@ describe("OnboardingGate", () => {
 
     it("should ask for nothing while the hub cannot read the credentials, which say nothing about any sign-in", () => {
       render(
-        <OnboardingGate assistant={running([lapsed("atlassian")])} statuses={[]} unavailable={UNREADABLE} paste={ok()} save={ok()} reconnect={ok()} dismissed />
+        <OnboardingGate
+          assistant={running([lapsed("atlassian")])}
+          statuses={[]}
+          unavailable={UNREADABLE}
+          paste={ok()}
+          save={ok()}
+          reconnect={ok()}
+          now={Date.now()}
+          dismissed
+        />
       );
 
       expect(screen.queryByRole("region", { name: "Sign in" })).toBeNull();
@@ -863,5 +908,93 @@ describe("OnboardingGate", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start chatting" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("region", { name: "Connect your accounts" })).toBeNull();
+  });
+});
+
+/**
+ * What the HTML the server sends says, which is everything a person has until the bundle has arrived — and for good
+ * where hydration fails or scripts do not run. These rows carry a device code as plain text and the provider's page
+ * as a plain `<a href>`, both of which work with no script at all, so a sign-in this HTML reads as live when it is
+ * dead is a working link and a number to type for something that cannot be completed. The clock comes in from the
+ * server component for that reason: it is a real time, and React serialises it, so the browser's first render is
+ * made from the same number and there is nothing for hydration to disagree about.
+ */
+describe("the HTML the server sends", () => {
+  const AN_HOUR_AGO = () => new Date(Date.now() - 60 * 60_000).toISOString();
+
+  function serverHtml(node: React.ReactElement): string {
+    return renderToString(node);
+  }
+
+  function gate(summary: AssistantSummary, stored: CredentialStatus[]) {
+    return <OnboardingGate assistant={summary} statuses={stored} unavailable={null} paste={ok()} save={ok()} reconnect={ok()} now={Date.now()} />;
+  }
+
+  /**
+   * Through the gate, which is where the clock comes from, and on a pod still in `awaiting_login` so the screen with
+   * the digits on it is part of the document rather than something the person has to open.
+   */
+  it("should offer no code for a device sign-in whose code ran out before the page was built", () => {
+    const dead = login("atlassian", { expiresAt: AN_HOUR_AGO(), updatedAt: AN_HOUR_AGO() });
+    const summary = assistant("awaiting_login", { onboarded: true, logins: [dead] });
+    const html = serverHtml(gate(summary, statuses("github", "azure", "claude", "atlassian")));
+
+    expect(html).not.toContain("ABCD-1234");
+    expect(html).not.toContain("enter this code");
+    expect(html).toContain("Sign-in expired");
+    expect(html).toContain("Sign in again");
+  });
+
+  it("should offer the code for a device sign-in whose code is still live when the page is built", () => {
+    const summary = assistant("awaiting_login", { onboarded: true, logins: [login("atlassian")] });
+    const html = serverHtml(gate(summary, statuses("github", "azure", "claude", "atlassian")));
+
+    expect(html).toContain("ABCD-1234");
+    expect(html).toContain("enter this code");
+  });
+
+  it("should ask for the code again when the one the person pasted was past collecting before the page was built", () => {
+    const dead = login("claude", {
+      prompt: "paste_code",
+      userCode: null,
+      expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      codeWaitingUntil: AN_HOUR_AGO()
+    });
+    const summary = assistant("awaiting_login", { needed: ["github", "azure", "claude"], onboarded: true, logins: [dead] });
+    const html = serverHtml(gate(summary, statuses("github", "azure", "claude")));
+
+    expect(html).not.toContain("Got it");
+    expect(html).toContain("Paste the Claude code");
+  });
+
+  // Both ways a Claude sign-in can be over for somebody on the Bedrock route: a pod's report, and a code that simply
+  // ran out. The second is the one a clock decides, so it is the one a stand-in clock would read as live.
+  it.each([
+    ["a pod reported it expired", "expired" as const],
+    ["its code ran out with no report", "pending" as const]
+  ])("should raise no ask for a Claude sign-in the hub would take no value for when %s", (_what, state) => {
+    const over = login("claude", { state, expiresAt: AN_HOUR_AGO(), updatedAt: AN_HOUR_AGO() });
+    const summary = assistant("running", { needed: ["github", "azure", "bedrock"], onboarded: true, logins: [over] });
+    const html = serverHtml(gate(summary, statuses("github", "azure", "bedrock", "atlassian")));
+
+    expect(html).not.toContain("Claude");
+    expect(html).not.toContain("Sign in");
+  });
+
+  /**
+   * The banner itself is in the HTML, because a person who can see it should have the ask with the page. The live
+   * region is not: a region is not announced for what it already holds, so an ask that was there at load would reach
+   * a screen-reader user only if they happened on the banner. Going from empty to the sentence is a change, and read.
+   */
+  it("should carry the ask but hold it back from the live region until the browser takes the page over", () => {
+    const relayed = assistant("running", { onboarded: true, logins: [login("atlassian")] });
+    const stored = statuses("github", "azure", "claude", "atlassian");
+    const html = serverHtml(gate(relayed, stored));
+
+    expect(html).toContain('aria-label="Sign in"');
+    expect(html).toContain('data-testid="sign-in-ask"></div>');
+
+    render(gate(relayed, stored));
+    expect(screen.getByTestId("sign-in-ask").textContent).toBe("Your assistant is waiting for you to sign in to Atlassian.");
   });
 });

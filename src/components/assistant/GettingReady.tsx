@@ -48,7 +48,7 @@ const FOOTER_QUIET = `${FOOTER} border border-asst-strong font-medium text-asst-
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 5000);
+    const timer = setInterval(() => setNow(Date.now()), SIGN_IN_CLOCK_MS);
     return () => clearInterval(timer);
   }, []);
   return now;
@@ -64,21 +64,29 @@ function useTicked(): boolean {
 }
 
 /**
- * The clock every sign-in on this screen is read against: the browser's, or a time before all of them for as long as
- * the server's render stands.
+ * The clock every sign-in on this screen is read against: the page's own, and the browser's from then on.
  *
- * The server renders these rows too and its clock is not the browser's, so a code expiring between the two reads
- * would be a countdown in the HTML and a lapsed row in the hydration. `BEFORE_EVERYTHING` reads every relayed code as
- * still live, which is what the HTML says either way, and the browser's own clock takes over on the next frame. It
- * changes nothing for a sign-in a pod has already reported on, because that answer needs no clock.
+ * `from` is the server component's `Date.now()`, which React serialises, so the HTML and the browser's first render
+ * are made from the identical number and there is nothing for hydration to disagree about — the hub's own agent page
+ * reads its sign-ins the same way. It has to be a real clock and not a stand-in: these rows carry a device code as
+ * plain text and the provider's page as a plain link, both of which work before any script does, so HTML that read a
+ * dead code as live would be sending somebody off to use it for as long as the bundle took to arrive, and for ever
+ * where hydration fails or scripts do not run.
+ *
+ * Then the browser's own, so a code dying while the page sits there stops being offered without waiting for the next
+ * render. Without that the page would hold a countdown at zero until the pod reported — and a pod that stops before
+ * reporting never does.
  */
-const BEFORE_EVERYTHING = 0;
-
-function useSignInClock(): number {
-  const ticked = useTicked();
-  const now = useNow();
-  return ticked ? now : BEFORE_EVERYTHING;
+function useSignInClock(from: number): number {
+  const [now, setNow] = useState(from);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), SIGN_IN_CLOCK_MS);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
 }
+
+const SIGN_IN_CLOCK_MS = 5000;
 
 /**
  * The line that rotates while the assistant starts. The first one is the phase's first message, not a random one,
@@ -499,7 +507,7 @@ export function GettingReady({
   onLeave,
   returning = false,
   theme = "system",
-  now: given
+  now
 }: ScreenProps & {
   statuses: CredentialStatus[];
   paste: FormAction;
@@ -509,10 +517,8 @@ export function GettingReady({
   onLeave?: () => void;
   returning?: boolean;
   /** The clock the gate is reading, so the banner and the screen it opens are never a few seconds apart. */
-  now?: number;
+  now: number;
 }) {
-  const own = useSignInClock();
-  const now = given ?? own;
   const ask = connectionsAsk(assistant.onboarded, unavailable);
   const offered = offeredConnections(assistant, now);
   const starting = !assistant.readiness.failed && assistant.status !== "running";
@@ -747,10 +753,11 @@ function storedKinds(statuses: CredentialStatus[]): Set<CredentialKind> {
 export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean }) {
   const { assistant } = props;
   const visit = useVisit();
-  // One clock for the banner and for the screen it opens, handed down rather than read again there: two readings of
-  // the same hook are two intervals mounted at different moments, so they differ by up to `WARMUP_ROTATE_MS` and the
-  // banner could point at a screen that disagreed with it about whether a code was still live.
-  const now = useSignInClock();
+  // One clock for the banner and for the screen it opens, started from the page's own and handed down rather than
+  // read again there: two readings of the same hook are two intervals mounted at different moments, so they would
+  // differ by up to `SIGN_IN_CLOCK_MS` and the banner could point at a screen that disagreed with it about whether a
+  // code was still live.
+  const now = useSignInClock(props.now);
   const ask = connectionsAsk(assistant.onboarded, props.unavailable);
   const [needed] = useState(ask === "connect");
   const [waiting] = useState(ask === "done" && assistant.status !== "running");
@@ -800,6 +807,15 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
     now
   );
   const relayed = signInPrompt(rows);
+  // What the live region holds, put there after the browser takes over rather than rendered into the HTML. A live
+  // region is not announced for what it already contains, so an ask that was there when the page loaded would reach
+  // a screen-reader user only if they happened on the banner; going from empty to the sentence is a change, and is
+  // read. Keyed on the sentence, so a `router.refresh()` that leaves the ask alone says nothing.
+  const [announced, setAnnounced] = useState("");
+  const message = relayed?.message ?? "";
+  useEffect(() => {
+    setAnnounced(message);
+  }, [message]);
   const onboarding = (ask === "connect" || (needed && !done)) && view === "screen";
   const unknown = ask === "unknown" && view === "screen";
   const screen = waiting && !started && !onboarding && !unknown && view === "screen";
@@ -850,7 +866,7 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
        * sign-in joining the first — is read as the new sentence rather than as a count of asks.
        */}
       <div aria-live="polite" aria-atomic="true" className="sr-only" data-testid="sign-in-ask">
-        {relayed?.message ?? ""}
+        {announced}
       </div>
     </>
   );
