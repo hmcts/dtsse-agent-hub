@@ -242,7 +242,7 @@ The figures are **proportional set size (PSS)**, read per process from `/proc/<p
 
 An awake pod with no conversations holds about 0.95Gi of `anon` — its own session, the three agent-hub daemons and the entrypoint — over 15 samples of two pods on two images, which ranged 0.91–0.99Gi. So a cap of N costs 0.95 + 0.65N.
 
-**Memory is the only hard constraint, and it is read at the request rather than the limit**: a pod over its memory request is an eviction candidate when the node comes under pressure, however much headroom its limit leaves. `small` at 4 is 3.55Gi of the 4Gi it requests, and a fifth chat would be 4.20Gi — which is what fixes `small` where it is. `small` keeps that 4Gi deliberately so that someone needing more conversations at once moves up a size rather than every small pod costing more.
+**Memory is the only hard constraint, and it is read at the request rather than the limit**: a pod over its memory request is an eviction candidate when the node comes under pressure, however much headroom its limit leaves. `small` at 4 is 3.55Gi of the 4Gi it requests, and a fifth chat would be 4.20Gi — which is what fixes `small` where it is. `small` is the size that binds — its request holds to a cap of 4 where `medium` holds to 10 and `large` to 23 — so that is the figure to re-check against before raising a cap. `small` keeps that 4Gi deliberately so that someone needing more conversations at once moves up a size rather than every small pod costing more.
 
 **A pod gets no CPU limit.** What it is guaranteed under contention comes from `cpu.shares`, which the request sets; a quota adds nothing to that floor and only clips the bursts above it. A single session on its own averaged 568m over its busiest 30s and was still throttled in 26 of that window's periods against a four-CPU quota, against none at all on an idle pod — so every conversation was paying latency for a ceiling protecting nothing, throttling having no OOM-kill equivalent. A quota is not wrong in principle, its job being to bound a runaway pod, but nothing measured here can size one: a quota is CPU-seconds per 100ms period and every figure here is a mean over seconds, which is how a session averaging 0.57 CPU was throttled against 4.0.
 
@@ -290,11 +290,12 @@ every call between the two is pod to hub. The pod reports, as it does for its di
   `memory.peak` is resettable on newer kernels, and refusing the report over it would lose the live figure too.
   Anything that is not a whole number is `400`.
 - Sent every 10 minutes on the pod's uploads reconcile, **and on every change in the number of conversation sessions
-  running**, so the figures are never more than a reconcile behind the thing that moves them. A session starting or
-  ending steps `anon_bytes` by about one conversation and is the only event that does; between those steps `anon` is
-  flat — 15 samples of a working pod over 35 minutes held within 3%, while `current_bytes` and `peak_bytes` moved
-  several times that. An unconditioned 10-minute sample would be a poor instrument for a figure that moves in steps,
-  so the step is what triggers the report and the 10 minutes is only the floor.
+  running**. A session starting or ending steps `anon_bytes` by about one conversation, and between those steps it was
+  flat for the work that was measured — 15 samples of a working pod over 35 minutes held within 3%, while
+  `current_bytes` and `peak_bytes` moved several times that. So an unconditioned 10-minute sample is a poor instrument
+  for it: the step is what triggers the report and the 10 minutes is only the longest the hub will go without a fresh
+  figure. What that flatness does **not** mean is that nothing else can move `anon` — heavier work inside a session
+  can, which is the whole case the warning below exists for, and what the 10-minute floor is there to catch.
 - The hub's figures are always *as of* `memory_reported_at` and the UI says when rather than presenting them as
   current. `anon_bytes` is what the warning below is computed from. `peak_bytes` leads the Size section as what the
   pod reached at its busiest, and nothing is warned on it: nothing resets it while the pod lives, so a threshold
@@ -303,23 +304,53 @@ every call between the two is pod to hub. The pod reports, as it does for its di
   nothing streams it.
 
 **The warning.** The hub warns when the part of the pod that **cannot be reclaimed** leaves less than one more
-conversation's worth of headroom under the limit — `anon_bytes + 0.65Gi > limit_bytes`. A pod merely using memory
-within its size never raises it, and the two things it names are the two things that change the answer: move up a
-size, or close some chats.
+conversation's worth of headroom under the limit — `anon_bytes + 0.65Gi > limit_bytes`. What it detects is a pod
+heading for an OOM kill, and the remedy it offers is a bigger size.
 
-**`anon_bytes`, because it is the only figure the sentence can be true of.** `memory.current` and `memory.peak` both
-count page cache, which was 2.1–2.4Gi of the 6.8GiB workspace clone on the pods the 0.65Gi was measured on. Cache is
-reclaimed at the `memory.max` watermark rather than kept, so a container that has read the clone sits high and stays
-high: a threshold on either figure is crossed by file reads, in which case there *is* room for another chat and
-"leaves less than another chat's worth free" is false exactly when it appears. Neither figure can be fixed by choosing
-the constant differently — `anon` is what the constant was measured as in the first place, it is purely additive, and
-a session starting or ending moves it by about one conversation and nothing else does. So the threshold is reachable
-by opening chats, which is what the warning says, and `peak_bytes` can go on leading the Size section as the fuller
-account of what the pod has had to hold without having to carry a rule it cannot support.
+**It is not about how many chats are open, and it does not say it is.** The reason holds at any cap: the caps under
+Capacity keep a pod's chats inside its memory *request*, and this threshold is a conversation short of its *limit*,
+which is double the request. So a pod holding its full complement cannot reach it, and raising a cap does not change
+that — on `small` the two would not meet below a cap of about 10.
+
+The figures, **at the caps under Capacity**, which are the `cap` column here. The `anon` column is `0.95 + 0.65 × cap`
+and moves whenever a cap does; the threshold column never does.
+
+| size | cap | `anon` at that cap | must exceed | short by | cap it would take |
+| --- | --- | --- | --- | --- | --- |
+| `small` | 4 | 3.55Gi | 7.35Gi | 3.80Gi | 9.8 |
+| `medium` | 6 | 4.85Gi | 15.35Gi | 10.50Gi | 22.2 |
+| `large` | 8 | 6.15Gi | 31.35Gi | 25.20Gi | 46.8 |
+
+**What crosses it is the work inside a chat, not the number of them.** The 0.65Gi is what a session *settles* at, not
+a ceiling: a build, a dependency tree, a language server or a leak can put one session gigabytes above it, and the
+pod's own work can do the same. That reconciles the two statements above — `0.95 + 0.65N` predicts a pod whose
+sessions are doing what they were measured doing, and this threshold is for when one of them is not. If the additivity
+held without exception the warning could never fire at any cap; if the warning fires, the exception is work. That is
+the thing worth saying, because it ends with the kernel killing the container and nobody outside the pod can see it
+coming. Closing a chat frees about 0.65Gi against the 7.4Gi a `small` pod holds when this fires, so the warning gives
+that as a figure and not as the answer. "One conversation's worth from the ceiling" is the unit the person thinks in,
+not a claim about the cause.
+
+**`anon_bytes`, because it is the only figure a headroom question can be asked of.** `memory.current` and
+`memory.peak` both count page cache, which was 2.1–2.4Gi of the 6.8GiB workspace clone on the pods the 0.65Gi was
+measured on. Cache is reclaimed at the `memory.max` watermark rather than kept, so a container that has read the clone
+sits high and stays high: a threshold on either is crossed by file reads, and the kernel would give that memory back
+before killing anything, so it says nothing about how close the pod is to dying. Neither is rescued by choosing the
+constant differently, because the problem is what the figure tracks rather than its scale. `anon` is what the kernel
+cannot reclaim, it is purely additive, and it is what the constant was measured as in the first place. That also frees
+`peak_bytes` to go on leading the Size section as the fuller account of what the pod has had to hold, without
+carrying a rule it cannot support.
 
 **A stopped pod is not warned about.** Nothing clears the last report when a pod stops — the figures are still the
 last thing anyone measured, and the section says so — but they describe a container that no longer exists, so no
 warning is raised from them. A pod stopped mid-build must not tell its owner the next day that it is low on memory.
+
+**A replacement pod never shows the last one's figures.** Starting, resizing or re-applying an agent drops its memory
+report in the same transaction that bumps `pod_generation`, because `running` goes true again and the figures would
+otherwise read as the new pod's — "Holding 7.9 GB right now" about a container that is gone. A stop does not drop
+them, for the reason above. The pod also sends its first report as it boots rather than a tick later, which is what
+closes the same window for a pod the kubelet restarted underneath the hub: no `pod_generation` moved, so the hub was
+never told, and that first report is the only thing that moves the figures off the ones the kill happened at.
 
 **Who sees it.** The owner alone, through `canSeeAssistantMemory`. No grant reaches it: a figure about someone's pod
 is not a session they chose to share.
@@ -433,9 +464,10 @@ field out and the UI can say that the feature is not available on that session y
 - It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
   been upgraded re-registers.
 
-These are the names in use, and the clients published from this repo claim every one of them. Deliberately not counted
-here: a count restates what the list below already says, nothing checks it, and it has been left behind twice by
-branches that each added a name.
+The names in use are below, and the clients published from this repo claim every one of them. Deliberately not
+counted here: this sentence has carried a wrong number twice, once for a name added in this repo and once for one
+added in another, because `ClientFeature` and `CLIENT_FEATURES` are each a single line that two changes land on at
+the same time and a count is a third place to remember. The list is the record.
 
 - `attachments`, because they read the `attachments` on an Assistant `direct` frame and fetch each file to the pod's
   disk. No hub field is gated on it — the frame carries `attachments` to every session — so a client too old to claim
@@ -452,15 +484,16 @@ branches that each added a name.
 - `lookups`, because their supervisor answers the sessions stream's `lookup` frame (see Atlassian lookups). Claimed by
   the pod's own session, as `files` is. Gated: the hub answers a lookup for a pod that has not claimed it with
   `unsupported`, and sends it no frame.
-- `memory`, because their supervisor reads its own container cgroup and reports it (`PUT /api/virtual/{id}/memory`).
-  Claimed by the pod's **own** session, as `files` is, since the supervisor is what reports. Nothing is gated on it in
-  the other direction — the hub sends no field for it — but the settings' Size section reads it to tell a pod that
-  cannot report yet apart from one that has not reported yet, and says so rather than showing an unused pod.
-- `memory-anon`, because their supervisor reads `memory.stat`'s `anon` line as well and sends it as `anon_bytes`,
-  which that route now requires. A separate name rather than widening `memory`, because the two say different things
-  about the same pod: a build claiming `memory` alone would be one whose reports are refused, and the Size section has
-  to be able to word that as an older version rather than as a pod that has gone quiet. Claimed by the pod's **own**
-  session, as `memory` is.
+- `memory`, which **no gate in this hub reads**. It is kept and still claimed for hubs deployed before `anon_bytes`
+  existed, whose Size section gates on this name: the client is published on merge and a pod installs the current one
+  when it boots, so a pod can be talking to a hub that has not deployed yet, and to that hub a build without this
+  claim is an older client. It can be dropped once no such hub is running.
+- `memory-anon`, because their supervisor reads its own container cgroup and reports it
+  (`PUT /api/virtual/{id}/memory`), including `memory.stat`'s `anon` line as `anon_bytes`, which that route requires.
+  **This is the name the Size section gates on.** A separate name rather than widening `memory`, because the two say
+  different things about the same pod: a build claiming `memory` alone is one whose reports this hub refuses, and the
+  Size section has to be able to word that as an older version rather than as a pod that has gone quiet. Claimed by
+  the pod's **own** session, which is the virtual agent's current agent, since the supervisor is what reports.
 
 ## Replies
 

@@ -1,8 +1,8 @@
 // What this container's memory cgroup says, reported to the hub because the hub cannot see it: every call between the
-// two is pod to hub. Each HMCTS Assistant conversation runs a Claude process of its own and brings its MCP servers
-// with it, so a pod can reach the ceiling of its size with nothing wrong with it — and the figures that tell anyone
-// that are the one the kernel would kill it at and the part of the charge it cannot reclaim to avoid that, which only
-// the cgroup has.
+// two is pod to hub. A pod's whole complement of conversations comes to well under half its limit, so a pod near that
+// limit on memory the kernel cannot reclaim is one session holding far more than a conversation costs, or the pod's
+// own work — and it ends in the kernel killing the container. The two figures that say it is coming, the ceiling and
+// the part of the charge that cannot be reclaimed to stay under it, are only in the cgroup.
 import nodeFs from "node:fs";
 import path from "node:path";
 import type { MemoryReportBody } from "../api.ts";

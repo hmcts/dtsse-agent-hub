@@ -17,4 +17,12 @@ describe("CLIENT_FEATURES", () => {
   it("should claim stop, since the supervisor acts on the sessions stream's interrupt", () => {
     expect(CLIENT_FEATURES).toContain("stop");
   });
+
+  // Named here as well as in the list, unlike most features, because this one is only ever added to the same single
+  // line of the same two tables that every other feature is added to: a merge that resolves that line in favour of
+  // one side drops whichever name the other side added, and without this the result is a build whose reports the hub
+  // refuses while its Size section calls every pod an older version. Nothing else would fail.
+  it("should claim memory-anon, since the hub requires anon_bytes in the memory report", () => {
+    expect(CLIENT_FEATURES).toContain("memory-anon");
+  });
 });

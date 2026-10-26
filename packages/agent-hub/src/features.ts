@@ -35,13 +35,15 @@ export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "me
  * `lookups` is claimed because the assistant supervisor answers the sessions stream's `lookup` frame, searching the
  * owner's Jira or Confluence with twg. The hub gates on it, answering `unsupported` to a pod that did not claim it.
  *
- * `memory` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it. The
- * hub sends nothing back for it; what the claim buys is the settings being able to say that an older pod cannot
- * report its memory yet, rather than showing it as using none.
+ * `memory-anon` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it,
+ * including `anon_bytes` from `memory.stat`, which the hub's memory route requires and computes its low-memory
+ * warning from. This is the name the current hub gates the Size section on, so that it can tell a pod that cannot
+ * report apart from one that has not reported yet rather than showing either as using none.
  *
- * `memory-anon` is claimed because that report carries `anon_bytes`, `memory.stat`'s `anon` line, which the hub's
- * memory route requires and computes its low-memory warning from. A second name rather than widening `memory`,
- * because the hub has to be able to word a build claiming only `memory` as an older version whose reports it is
- * refusing, rather than as a pod that has gone quiet.
+ * `memory` is claimed **for hubs older than `memory-anon`**, and for nothing else. No gate in the current hub reads
+ * it. It is here because this list travels in the other direction too: the client is published on merge and a pod
+ * installs the current one when it boots, so a build can be talking to a hub that has not deployed yet, and that
+ * hub's Size section gates on `memory`. Dropping it would make such a pod read as an older client to the one hub
+ * that still cares. It can go once no hub predating `anon_bytes` is running anywhere.
  */
 export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory", "memory-anon", "stop"];

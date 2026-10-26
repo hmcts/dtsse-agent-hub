@@ -49,9 +49,12 @@ const NO_REPORT: Record<Exclude<MemoryUse, { reported: true }>["reason"], string
  *
  * The peak leads because it is the fuller account of what the pod has had to hold. The figure beside it is `anon`,
  * the part that cannot be reclaimed, rather than `memory.current`: it is what the warning is computed from and what
- * a chat adds to, so it is the one the per-chat cost belongs against — `memoryPressure` has why. Nothing here is
- * presented as current; a stopped pod's line says so in its own words, because the hub cannot see a pod's memory
- * between reports and sees nothing at all once it is gone.
+ * a chat adds to, so it is the one the per-chat cost belongs against — `memoryPressure` has why.
+ *
+ * "right now" is as close to current as this gets, and it is earned rather than assumed: the report is this pod's,
+ * because the store drops the last one whenever a new or replacement pod is asked for and the pod reports as it
+ * boots. The date underneath is always shown, because the hub cannot see a pod's memory between reports, and a
+ * stopped pod's line says "when it stopped" instead — there is no "now" for a container that is gone.
  */
 function Use({ use }: Readonly<{ use: MemoryUse }>) {
   if (!use.reported) {

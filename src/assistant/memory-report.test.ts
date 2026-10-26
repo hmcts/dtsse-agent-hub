@@ -89,9 +89,19 @@ describe("memoryUse", () => {
     "memoryLimitBytes",
     "memoryCurrentBytes",
     "memoryPeakBytes",
+    "memoryAnonBytes",
     "memoryReportedAt"
   ] as const)("should report nothing when %s alone is missing", (missing) => {
     expect(memoryUse(row({ [missing]: null }))).toEqual({ reported: false, reason: "waiting" });
+  });
+
+  // What every row written before `memory_anon_bytes` existed looks like: three figures and a date, and no `anon`.
+  // The warning cannot be computed from it, so it is not a report — and the pod that wrote it is on a client that
+  // does not claim `memory-anon`, which is what makes "an older version" the right thing to say rather than a guess.
+  it("should treat a row from before the anon figure as no report at all, naming the client", () => {
+    const beforeAnon = row({ memoryAnonBytes: null, reports: false });
+
+    expect(memoryUse(beforeAnon)).toEqual({ reported: false, reason: "older_client" });
   });
 });
 
@@ -130,11 +140,11 @@ describe("memoryPressure", () => {
 
   // The boundary: exactly one conversation's worth of headroom still has room for the chat the person is about to
   // open, so it is not warned about. One byte less and it has not.
-  it("should say nothing when the live figure leaves room for exactly one more chat", () => {
+  it("should say nothing when what it cannot reclaim leaves room for exactly one more chat", () => {
     expect(memoryPressure(reported(CONVERSATION_MEMORY_BYTES), 2, "small")).toBeUndefined();
   });
 
-  it("should warn when the live figure leaves a byte less than one more chat", () => {
+  it("should warn when what it cannot reclaim leaves a byte less than one more chat", () => {
     expect(memoryPressure(reported(CONVERSATION_MEMORY_BYTES - 1), 2, "small")).toMatchObject({ openChats: 2, limitBytes: LIMIT });
   });
 
@@ -144,7 +154,7 @@ describe("memoryPressure", () => {
 
   // A pod using memory normally within its size must not nag: the warning is about running out of room, not about
   // using what the size is for.
-  it("should say nothing when the live figure leaves room for several more chats", () => {
+  it("should say nothing when what it cannot reclaim leaves room for several more chats", () => {
     expect(memoryPressure(reported(4 * CONVERSATION_MEMORY_BYTES), 1, "small")).toBeUndefined();
   });
 
@@ -172,42 +182,48 @@ describe("memoryWarning", () => {
 });
 
 describe("memoryAdvice", () => {
-  it("should say what the pod is holding and offer both answers when a chat could be closed and a bigger size exists", () => {
+  it("should say what cannot be freed up and offer a bigger size when there is one and a chat is open", () => {
     const pressure = memoryPressure(reported(0), 3, "small");
 
     expect(memoryAdvice(pressure!)).toBe(
-      "Its chats and tools are holding 8 GB of its 8 GB, which leaves less than another chat's worth free. Move up to medium below for 6 chats at once and 8Gi–16Gi of memory, or close a chat you have finished with to free about 0.65 GB."
+      "It is holding 8 GB of its 8 GB in memory that cannot be freed up, which leaves less than another chat's worth spare. Move up to medium below for 8Gi–16Gi of memory and 6 chats at once. Closing a chat frees about 0.65 GB of it."
     );
   });
 
-  // The section's first line already says what the pod reached at its busiest, which is a bigger number than this
-  // one. Two sentences using "reached" for two different figures, the second smaller, reads as one being wrong.
+  // A pod's whole complement of chats cannot reach this threshold at any size, so when it fires the chats are a
+  // quarter of what is held and closing one would not change the answer. The size is the remedy; the per-chat figure
+  // is a quantity someone deciding what to do should have, not the thing to do.
+  it("should not offer closing a chat as the remedy when memory is tight", () => {
+    const advice = memoryAdvice(memoryPressure(reported(0), 3, "small")!);
+
+    expect(advice).toContain("Move up to medium below");
+    expect(advice).toContain("Closing a chat frees about 0.65 GB of it.");
+    expect(advice).not.toContain("close a chat you have finished with");
+  });
+
+  // The section's first line says what the pod reached at its busiest, a bigger number than this one. Two sentences
+  // using "reached" for two different figures, the second smaller, reads as one of them being wrong.
   it("should name what it is counting rather than say the pod reached it when memory is tight", () => {
     const advice = memoryAdvice(memoryPressure(reported(0), 3, "small")!);
 
-    expect(advice).toContain("Its chats and tools are holding");
+    expect(advice).toContain("It is holding");
     expect(advice).not.toContain("It has reached");
   });
 
-  // Telling someone with one chat open to close a chat is telling them to stop working.
-  it("should offer only the bigger size when a single chat is open", () => {
-    expect(memoryAdvice(memoryPressure(reported(0), 1, "small")!)).not.toContain("or close a chat");
-  });
-
-  it("should offer only closing a chat on the largest size there is when several are open", () => {
+  it("should offer no bigger size on the largest there is when a chat is open", () => {
     const advice = memoryAdvice(memoryPressure(reported(0), 3, "large")!);
 
-    expect(advice).toContain("This is the largest size there is, so close a chat you have finished with to free about 0.65 GB.");
+    expect(advice).toContain("This is the largest size there is. Closing a chat frees about 0.65 GB of it.");
     expect(advice).not.toContain("Move up to");
   });
 
-  // On the largest size with nothing to close there is no remedy to offer, and the sentence now promises a specific
-  // amount for closing one — so it must not tell the person to close the chat they are working in, or one they do
-  // not have. The measurement alone is what honesty looks like here.
-  it.each([0, 1])("should offer nothing beyond the measurement on the largest size when %i chats are open", (openChats) => {
-    const advice = memoryAdvice(memoryPressure(reported(0), openChats, "large")!);
+  // With nothing open, what closing a chat would free is a fact about nothing.
+  it("should leave the per-chat figure out when no chat is open", () => {
+    const advice = memoryAdvice(memoryPressure(reported(0), 0, "large")!);
 
-    expect(advice).toBe("Its chats and tools are holding 8 GB of its 8 GB, which leaves less than another chat's worth free.");
+    expect(advice).toBe(
+      "It is holding 8 GB of its 8 GB in memory that cannot be freed up, which leaves less than another chat's worth spare. This is the largest size there is."
+    );
   });
 });
 

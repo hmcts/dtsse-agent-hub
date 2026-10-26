@@ -190,6 +190,21 @@ const NO_PORTS = { exposedPorts: [], localOnlyPorts: [] } as const;
 /** A change the pod template carries, so the orchestrator applies the StatefulSet again. */
 const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1 } } as const;
 
+/**
+ * The memory report belongs to the pod that made it, so asking for a new or replacement one drops it.
+ *
+ * Without this the next pod shows the last one's figures as what it is holding right now, and can inherit its
+ * low-memory warning, until its own first report lands. **Not applied when stopping**: there the figures are the last
+ * thing anyone measured and the Size section says as much, which is the whole reason they are kept.
+ */
+const NO_MEMORY_REPORT = {
+  memoryLimitBytes: null,
+  memoryCurrentBytes: null,
+  memoryPeakBytes: null,
+  memoryAnonBytes: null,
+  memoryReportedAt: null
+} as const;
+
 function statusChange(status: VirtualAgentStatus, now: Date) {
   return { status, statusDetail: null, statusChangedAt: now };
 }
@@ -226,7 +241,15 @@ export async function setDesired(
     }
     let data: Record<string, unknown>;
     if (desired === "running") {
-      data = { startedAt: now, stoppedAt: null, stopReason: null, diskExpiresAt: null, diskDeletedAt: null, ...statusChange("requested", now) };
+      data = {
+        startedAt: now,
+        stoppedAt: null,
+        stopReason: null,
+        diskExpiresAt: null,
+        diskDeletedAt: null,
+        ...NO_MEMORY_REPORT,
+        ...statusChange("requested", now)
+      };
     } else {
       const settled = desired === "stopped" && row.status === "stopped";
       data = { ...NO_TOKEN, ...NO_PORTS, ...(desired === "stopped" ? { stopReason: "user" } : {}), ...(settled ? {} : statusChange("stopping", now)) };
@@ -298,7 +321,9 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
     if (row.size === checked.size) {
       return row;
     }
-    const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { size: checked.size, ...POD_CHANGE, updatedAt: now }, select: SELECT }));
+    const updated = toRow(
+      await tx.virtualAgent.update({ where: { id }, data: { size: checked.size, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now }, select: SELECT })
+    );
     await announce(tx, id, row.ownerOid);
     return updated;
   });
@@ -333,7 +358,9 @@ export async function setVirtualAgentPlugins(
     if (samePlugins(row.plugins, checked.plugins)) {
       return row;
     }
-    const updated = toRow(await tx.virtualAgent.update({ where: { id }, data: { plugins: checked.plugins, ...POD_CHANGE, updatedAt: now }, select: SELECT }));
+    const updated = toRow(
+      await tx.virtualAgent.update({ where: { id }, data: { plugins: checked.plugins, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now }, select: SELECT })
+    );
     await announce(tx, id, row.ownerOid);
     return updated;
   });
