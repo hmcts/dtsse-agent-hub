@@ -2,10 +2,12 @@
  * @vitest-environment jsdom
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionsData } from "@/assistant/connections";
 import { MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } from "@/assistant/templates";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
+import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
@@ -46,9 +48,33 @@ function cog(): HTMLElement {
   return screen.getByRole("button", { name: /^Settings/ });
 }
 
-function open(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}): void {
+/** The dialog's own navigation, which is a vertical tablist beside whichever section it has open. */
+function nav(): HTMLElement {
+  return screen.getByRole("tablist", { name: "Settings sections" });
+}
+
+/** Every section the navigation offers, in the order it offers them. */
+function sections(): string[] {
+  return within(nav())
+    .getAllByRole("tab")
+    .map((tab) => tab.textContent ?? "");
+}
+
+/** Opens the section the navigation calls `label`, as clicking it does. */
+function go(label: string): void {
+  fireEvent.click(within(nav()).getByRole("tab", { name: label }));
+}
+
+/**
+ * Opens the dialog, and the section named after it. The dialog opens on the first section its navigation offers, so
+ * a test of any other one says which it is about.
+ */
+function open(props: Partial<Parameters<typeof AssistantSettings>[0]> = {}, section?: string): void {
   render(<AssistantSettings connections={data(ALL_SIGNED_IN)} {...props} />);
   fireEvent.click(cog());
+  if (section !== undefined) {
+    go(section);
+  }
 }
 
 /**
@@ -199,10 +225,12 @@ describe("the Assistant's settings dialog", () => {
     expect(document.activeElement).toBe(cog());
   });
 
-  it("should move focus into the dialog when it opens", () => {
+  // The navigation rather than the close button, so what has focus says where in the settings the person is.
+  it("should move focus to the section it opens on when it opens", () => {
     open();
 
-    expect(document.activeElement).toBe(stops()[0]);
+    expect(document.activeElement).toBe(within(nav()).getByRole("tab", { name: "Appearance" }));
+    expect(document.activeElement?.getAttribute("aria-selected")).toBe("true");
   });
 
   it("should wrap focus back to the start when the person tabs off the end of the dialog", () => {
@@ -228,7 +256,7 @@ describe("the Assistant's settings dialog", () => {
   it("should pull focus back into the dialog when it is somewhere else entirely", () => {
     open();
     const items = stops();
-    document.body.focus();
+    (document.activeElement as HTMLElement).blur();
 
     fireEvent.keyDown(document, { key: "Tab" });
 
@@ -325,6 +353,7 @@ describe("the Assistant's settings dialog", () => {
       />
     );
     fireEvent.click(cog());
+    go("Connections");
     const rows = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("listitem");
 
     expect(rows.map((row) => row.textContent)).toEqual([
@@ -339,6 +368,7 @@ describe("the Assistant's settings dialog", () => {
   it("should never list a CLAUDE.md or a git identity as a connection when they are among the kinds", () => {
     render(<AssistantSettings connections={{ kinds: [...KINDS, "claude_md", "git_identity"], statuses: [], logins: [], unavailable: null }} />);
     fireEvent.click(cog());
+    go("Connections");
     const rows = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("listitem");
 
     expect(rows).toHaveLength(KINDS.length);
@@ -349,20 +379,23 @@ describe("the Assistant's settings dialog", () => {
     render(<AssistantSettings connections={{ kinds: KINDS, statuses: [], logins: [], unavailable: "the credentials Key Vault is not configured" }} />);
 
     fireEvent.click(cog());
+    go("Connections");
 
     expect(screen.getByText("the credentials Key Vault is not configured")).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
   });
 
-  it("should offer the appearance alone when it has no sign-ins to list", () => {
+  // Nothing to say about the sign-ins is a section the navigation does not offer at all, rather than an empty one:
+  // the dialog is a list of places to go, and one that leads nowhere is worse than one that is not there.
+  it("should offer the appearance alone, and no Connections section, when it has no sign-ins to list", () => {
     open({ connections: undefined });
 
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
-    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+    expect(sections()).toEqual(["Appearance"]);
   });
 
   it("should explain what a person should do, without saying the assistant is broken, when a sign-in needs attention", () => {
-    open({ connections: data(["azure", "bedrock", "atlassian"]) });
+    open({ connections: data(["azure", "bedrock", "atlassian"]) }, "Connections");
     const dialog = screen.getByRole("dialog");
 
     expect(within(dialog).getByText("GitHub needs your attention")).toBeTruthy();
@@ -370,7 +403,7 @@ describe("the Assistant's settings dialog", () => {
   });
 
   it("should show no warning inside the dialog when every sign-in it prompts about is connected", () => {
-    open();
+    open({}, "Connections");
 
     expect(screen.queryByText(/needs your attention/)).toBeNull();
   });
@@ -393,9 +426,10 @@ function plugins(overrides: Partial<AssistantPlugins> = {}): AssistantPlugins {
 const FORM = "Change your assistant's team tools";
 
 describe("the Assistant's team tools", () => {
-  it("should show nothing at all when the hub offers none and the assistant loads none", () => {
+  it("should offer no Tools section when the hub offers none and the assistant loads none", () => {
     open({ plugins: plugins({ available: [] }) });
 
+    expect(sections()).not.toContain("Tools");
     expect(screen.queryByRole("form", { name: FORM })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Team tools" })).toBeNull();
   });
@@ -406,6 +440,7 @@ describe("the Assistant's team tools", () => {
   it("should show nothing at all when the page passes no plugins", () => {
     open({ plugins: undefined });
 
+    expect(sections()).not.toContain("Tools");
     expect(screen.queryByRole("heading", { name: "Team tools" })).toBeNull();
     expect(screen.queryByText(/No longer offered/)).toBeNull();
   });
@@ -413,32 +448,34 @@ describe("the Assistant's team tools", () => {
   it("should still offer the appearance and the connections when there are no team tools to show", () => {
     open({ plugins: undefined });
 
+    expect(sections()).toEqual(["Appearance", "Connections"]);
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
+    go("Connections");
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
   });
 
   it("should describe each tool in the hub's own words, with its name underneath, when it opens", () => {
-    open({ plugins: plugins() });
+    open({ plugins: plugins() }, "Tools");
     const items = within(screen.getByRole("form", { name: FORM })).getAllByRole("listitem");
 
     expect(items.map((item) => item.textContent)).toEqual(["PCS team workflowspcs", "dtsse"]);
   });
 
   it("should tick the tools the assistant already loads when it opens", () => {
-    open({ plugins: plugins({ checked: ["pcs"] }) });
+    open({ plugins: plugins({ checked: ["pcs"] }) }, "Tools");
 
     expect((screen.getByRole("checkbox", { name: /pcs/ }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: /dtsse/ }) as HTMLInputElement).checked).toBe(false);
   });
 
   it("should say a save restarts the assistant and keeps the chats when its pod is up", () => {
-    open({ plugins: plugins() });
+    open({ plugins: plugins() }, "Tools");
 
     expect(screen.getByText(/Saving restarts your assistant; your chats are kept\./)).toBeTruthy();
   });
 
   it("should say the assistant picks them up at its next start when its pod is not up", () => {
-    open({ plugins: plugins({ podRunning: false }) });
+    open({ plugins: plugins({ podRunning: false }) }, "Tools");
 
     expect(screen.getByText(/Your assistant loads them the next time it starts\./)).toBeTruthy();
     expect(screen.queryByText(/Saving restarts/)).toBeNull();
@@ -446,7 +483,7 @@ describe("the Assistant's team tools", () => {
 
   it("should send the assistant's own id and the newly ticked names to the hub's plugins action when saved", async () => {
     const save = ok();
-    open({ plugins: plugins({ checked: ["pcs"], save }) });
+    open({ plugins: plugins({ checked: ["pcs"], save }) }, "Tools");
 
     fireEvent.click(screen.getByRole("checkbox", { name: /dtsse/ }));
     await act(async () => {
@@ -460,7 +497,7 @@ describe("the Assistant's team tools", () => {
 
   it("should send no tools when the person unticks every one", async () => {
     const save = ok();
-    open({ plugins: plugins({ checked: ["pcs"], save }) });
+    open({ plugins: plugins({ checked: ["pcs"], save }) }, "Tools");
 
     fireEvent.click(screen.getByRole("checkbox", { name: /pcs/ }));
     await act(async () => {
@@ -471,7 +508,7 @@ describe("the Assistant's team tools", () => {
   });
 
   it("should keep a ticked tool the hub no longer offers, so the person can untick it", () => {
-    open({ plugins: plugins({ checked: ["civil", "pcs"] }) });
+    open({ plugins: plugins({ checked: ["civil", "pcs"] }) }, "Tools");
 
     expect((screen.getByRole("checkbox", { name: /civil/ }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getByText("No longer offered. Untick it to stop using it.")).toBeTruthy();
@@ -479,7 +516,7 @@ describe("the Assistant's team tools", () => {
   });
 
   it("should keep its own tools in the dialog's focus trap when it is open", () => {
-    open({ plugins: plugins() });
+    open({ plugins: plugins() }, "Tools");
     const items = stops();
 
     expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Save team tools" }));
@@ -504,6 +541,7 @@ describe("the Assistant's own templates", () => {
   it("should show nothing at all when the page passes no templates", () => {
     open({ templates: undefined });
 
+    expect(sections()).not.toContain("Templates");
     expect(screen.queryByRole("heading", { name: "Your templates" })).toBeNull();
     expect(screen.queryByRole("form", { name: ADD })).toBeNull();
   });
@@ -511,19 +549,21 @@ describe("the Assistant's own templates", () => {
   it("should still offer the appearance and the connections when the templates section is not shown", () => {
     open({ templates: undefined });
 
+    expect(sections()).toEqual(["Appearance", "Connections"]);
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
+    go("Connections");
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
   });
 
   it("should say the person has saved none, and still offer the form, when their list is empty", () => {
-    open({ templates: templates() });
+    open({ templates: templates() }, "Templates");
 
     expect(screen.getByText("You have not saved any yet.")).toBeTruthy();
     expect(screen.getByRole("form", { name: ADD })).toBeTruthy();
   });
 
   it("should list each saved template with its prompt when it opens", () => {
-    open({ templates: templates({ mine: [row("Stand-up"), row("Retro")] }) });
+    open({ templates: templates({ mine: [row("Stand-up"), row("Retro")] }) }, "Templates");
     const rows = within(screen.getByRole("list", { name: "Your templates" })).getAllByRole("listitem");
 
     expect(rows.map((row) => row.textContent)).toEqual(["Stand-upStand-up promptEditDelete", "RetroRetro promptEditDelete"]);
@@ -531,7 +571,7 @@ describe("the Assistant's own templates", () => {
 
   it("should send the name and the prompt, and no id, to the save action when the person adds one", async () => {
     const save = saveOk();
-    open({ templates: templates({ save }) });
+    open({ templates: templates({ save }) }, "Templates");
 
     fireEvent.change(screen.getByLabelText("Template name"), { target: { value: " Stand-up " } });
     fireEvent.change(screen.getByLabelText("What it fills the message box with"), { target: { value: "What I did yesterday:" } });
@@ -544,7 +584,7 @@ describe("the Assistant's own templates", () => {
 
   it("should open the form on a template, and send its id, when the person edits one", async () => {
     const save = saveOk();
-    open({ templates: templates({ mine: [row("Stand-up")], save }) });
+    open({ templates: templates({ mine: [row("Stand-up")], save }) }, "Templates");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit Stand-up" }));
     expect((screen.getByLabelText("Template name") as HTMLInputElement).value).toBe("Stand-up");
@@ -557,7 +597,7 @@ describe("the Assistant's own templates", () => {
   });
 
   it("should go back to adding, with the fields empty, when the person cancels an edit", () => {
-    open({ templates: templates({ mine: [row("Stand-up")] }) });
+    open({ templates: templates({ mine: [row("Stand-up")] }) }, "Templates");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit Stand-up" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -567,7 +607,7 @@ describe("the Assistant's own templates", () => {
   });
 
   it("should empty the fields after a save, so the next template is not written over the last one", async () => {
-    open({ templates: templates() });
+    open({ templates: templates() }, "Templates");
 
     fireEvent.change(screen.getByLabelText("Template name"), { target: { value: "Stand-up" } });
     await submit(ADD);
@@ -577,7 +617,7 @@ describe("the Assistant's own templates", () => {
 
   it("should send the template's id to the delete action when the person deletes one", async () => {
     const remove = vi.fn(async () => ({ ok: true as const, confirmation: "Your template is deleted" }));
-    open({ templates: templates({ mine: [row("Stand-up"), row("Retro")], remove }) });
+    open({ templates: templates({ mine: [row("Stand-up"), row("Retro")], remove }) }, "Templates");
 
     await submit("Delete Retro");
 
@@ -586,7 +626,7 @@ describe("the Assistant's own templates", () => {
 
   it("should show the save action's own refusal, rather than deciding for itself, when it refuses", async () => {
     const save = vi.fn(async () => ({ ok: false as const, error: `you already have a template called "Stand-up"` }));
-    open({ templates: templates({ save }) });
+    open({ templates: templates({ save }) }, "Templates");
 
     fireEvent.change(screen.getByLabelText("Template name"), { target: { value: "Stand-up" } });
     await submit(ADD);
@@ -595,7 +635,7 @@ describe("the Assistant's own templates", () => {
   });
 
   it("should count what the person has against the cap when it opens", () => {
-    open({ templates: templates({ mine: [row("Stand-up")] }) });
+    open({ templates: templates({ mine: [row("Stand-up")] }) }, "Templates");
 
     expect(screen.getByText(`1 of ${MAX_TEMPLATES} templates`)).toBeTruthy();
   });
@@ -603,7 +643,7 @@ describe("the Assistant's own templates", () => {
   // The cap is refused in the store's own sentence, so what is read here is what a POST skipping this screen is told.
   it("should refuse another in the store's own words, and offer no form, when the person is at the cap", () => {
     const mine = Array.from({ length: MAX_TEMPLATES }, (_, index) => row(`Template ${index}`));
-    open({ templates: templates({ mine }) });
+    open({ templates: templates({ mine }) }, "Templates");
 
     expect(screen.getByText(TEMPLATES_FULL)).toBeTruthy();
     expect(screen.queryByRole("form", { name: ADD })).toBeNull();
@@ -611,7 +651,7 @@ describe("the Assistant's own templates", () => {
 
   it("should still let the person change one of the ones they have when they are at the cap", () => {
     const mine = Array.from({ length: MAX_TEMPLATES }, (_, index) => row(`Template ${index}`));
-    open({ templates: templates({ mine }) });
+    open({ templates: templates({ mine }) }, "Templates");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit Template 3" }));
 
@@ -620,7 +660,7 @@ describe("the Assistant's own templates", () => {
   });
 
   it("should say how far over the cap a prompt is, in the same count the store checks, while the person types", () => {
-    open({ templates: templates() });
+    open({ templates: templates() }, "Templates");
 
     fireEvent.change(screen.getByLabelText("What it fills the message box with"), { target: { value: "x".repeat(MAX_TEMPLATE_BODY + 5) } });
 
@@ -629,13 +669,13 @@ describe("the Assistant's own templates", () => {
   });
 
   it("should say the templates sit above the built-in ones, which the + menu cannot show, when it opens", () => {
-    open({ templates: templates() });
+    open({ templates: templates() }, "Templates");
 
     expect(screen.getByText(/above the built-in templates/)).toBeTruthy();
   });
 
   it("should keep its own fields in the dialog's focus trap when it is open", () => {
-    open({ templates: templates({ mine: [row("Stand-up")] }) });
+    open({ templates: templates({ mine: [row("Stand-up")] }) }, "Templates");
     const items = stops();
 
     expect(items).toContain(screen.getByLabelText("What it fills the message box with"));
@@ -644,7 +684,7 @@ describe("the Assistant's own templates", () => {
 
   // Two rows of Edit and Delete say which template they belong to, so a screen reader is not read four of one name.
   it("should name the Edit and Delete of each row after its own template when it opens", () => {
-    open({ templates: templates({ mine: [row("Stand-up"), row("Retro")] }) });
+    open({ templates: templates({ mine: [row("Stand-up"), row("Retro")] }) }, "Templates");
     const section = screen.getByRole("list", { name: "Your templates" });
 
     expect(
@@ -654,20 +694,25 @@ describe("the Assistant's own templates", () => {
     ).toEqual(["Edit Stand-up", "Delete Stand-up", "Edit Retro", "Delete Retro"]);
   });
 
-  // The sections are each other's neighbours in one dialog, so the one that was added last must not be the only one
-  // left working: every form a page can pass is still here, and the trap still ends on the last of them.
-  it("should keep every other section working, in one focus trap, when the page passes them all", () => {
+  // Every section is still reachable from one navigation, and each one is still in the focus trap once it is open:
+  // the section that was added last must not be the only one left working.
+  it("should offer every section the page passes, each in the focus trap, when they are all passed", () => {
     open({ plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }) });
-    const items = stops();
 
-    for (const name of ["Appearance"]) {
-      expect(screen.getByRole("radiogroup", { name })).toBeTruthy();
-    }
-    for (const name of ["Change your assistant's team tools", "Save your CLAUDE.md", "Save a new template"]) {
-      expect(items).toContain(screen.getByRole("form", { name }).querySelector("button[type='submit']"));
-    }
+    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates"]);
+    expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
+    go("Connections");
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
-    expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Save template" }));
+    for (const [section, form, last] of [
+      ["Tools", "Change your assistant's team tools", "Save team tools"],
+      ["Claude.md", "Save your CLAUDE.md", "Save your CLAUDE.md"],
+      ["Templates", "Save a new template", "Save template"]
+    ] as const) {
+      go(section);
+      const items = stops();
+      expect(items).toContain(screen.getByRole("form", { name: form }).querySelector("button[type='submit']"));
+      expect(items.at(-1)).toBe(screen.getByRole("button", { name: last }));
+    }
   });
 });
 
@@ -697,24 +742,28 @@ describe("the Assistant's CLAUDE.md", () => {
   it("should show nothing at all when the page passes no CLAUDE.md", () => {
     open({ claudeMd: undefined });
 
+    expect(sections()).not.toContain("Claude.md");
     expect(screen.queryByRole("heading", { name: "Your CLAUDE.md" })).toBeNull();
     expect(screen.queryByRole("form", { name: SAVE_FORM })).toBeNull();
   });
 
-  it("should still offer the appearance, the connections and the team tools beside it when it is shown", () => {
-    open({ claudeMd: claudeMd(), plugins: plugins() });
+  // The navigation's own label is the person's word for it; the section's heading is the file's.
+  it("should sit under Agent, beside the tools, and leave the other sections reachable when it is shown", () => {
+    open({ claudeMd: claudeMd(), plugins: plugins() }, "Claude.md");
 
-    expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
-    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
-    expect(screen.getByRole("form", { name: FORM })).toBeTruthy();
+    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Connections"]);
     expect(screen.getByRole("heading", { name: "Your CLAUDE.md" })).toBeTruthy();
+    go("Tools");
+    expect(screen.getByRole("form", { name: FORM })).toBeTruthy();
+    go("Appearance");
+    expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
   });
 
   // Every pod writes the file before each start of Claude, so a chat that is already running keeps what it started
   // with. People read a settings dialog as being about the chat they opened it from, which is the misunderstanding
   // this wording is here to stop.
   it("should say the notes are used by all of their chats, and when a change reaches one, whenever it is shown", () => {
-    open({ claudeMd: claudeMd() });
+    open({ claudeMd: claudeMd() }, "Claude.md");
 
     const section = screen.getByRole("region", { name: "Your CLAUDE.md" });
     expect(section.textContent).toContain("They apply to all of your chats, not only this one.");
@@ -722,7 +771,7 @@ describe("the Assistant's CLAUDE.md", () => {
   });
 
   it("should fill the editor with the default and say none of theirs is stored when the person has saved none", () => {
-    open({ claudeMd: claudeMd() });
+    open({ claudeMd: claudeMd() }, "Claude.md");
 
     expect(notes().value).toBe(DEFAULT_CLAUDE_MD);
     expect(screen.getByText("This is the default. Nothing of yours is stored yet.")).toBeTruthy();
@@ -730,7 +779,10 @@ describe("the Assistant's CLAUDE.md", () => {
   });
 
   it("should fill the editor with their own text, and say when it was saved, when one is stored", () => {
-    open({ claudeMd: claudeMd({ settings: { available: true, stored: true, text: "# Me\n\nI work on PCS.", updatedAt: "2026-10-05T09:00:00.000Z" } }) });
+    open(
+      { claudeMd: claudeMd({ settings: { available: true, stored: true, text: "# Me\n\nI work on PCS.", updatedAt: "2026-10-05T09:00:00.000Z" } }) },
+      "Claude.md"
+    );
 
     expect(notes().value).toBe("# Me\n\nI work on PCS.");
     expect(screen.queryByText("This is the default. Nothing of yours is stored yet.")).toBeNull();
@@ -739,7 +791,7 @@ describe("the Assistant's CLAUDE.md", () => {
 
   it("should send the edited text to the save action, and confirm it, when the person saves", async () => {
     const save = saved(SAVED);
-    open({ claudeMd: claudeMd({ save }) });
+    open({ claudeMd: claudeMd({ save }) }, "Claude.md");
 
     fireEvent.change(notes(), { target: { value: "# Me\n\nAlways British English." } });
     await submit(SAVE_FORM);
@@ -754,7 +806,7 @@ describe("the Assistant's CLAUDE.md", () => {
   it("should word the store's own reason when the save is refused", async () => {
     const refused = "your CLAUDE.md can only hold printable text, tabs and new lines";
     const save = vi.fn(async () => ({ ok: false as const, error: refused }));
-    open({ claudeMd: claudeMd({ save }) });
+    open({ claudeMd: claudeMd({ save }) }, "Claude.md");
 
     await submit(SAVE_FORM);
 
@@ -764,7 +816,7 @@ describe("the Assistant's CLAUDE.md", () => {
 
   it("should put the default back in the editor, and confirm it, when the person resets a stored one", async () => {
     const reset = saved(RESET);
-    open({ claudeMd: claudeMd({ settings: { available: true, stored: true, text: "# Me\n\nI work on PCS.", updatedAt: null }, reset }) });
+    open({ claudeMd: claudeMd({ settings: { available: true, stored: true, text: "# Me\n\nI work on PCS.", updatedAt: null }, reset }) }, "Claude.md");
 
     await submit(RESET_FORM);
 
@@ -774,7 +826,7 @@ describe("the Assistant's CLAUDE.md", () => {
   });
 
   it("should count the text against the store's own limit, and mark the field invalid, when there is too much of it", () => {
-    open({ claudeMd: claudeMd() });
+    open({ claudeMd: claudeMd() }, "Claude.md");
 
     fireEvent.change(notes(), { target: { value: "a".repeat(MAX_CLAUDE_MD_CHARACTERS + 5) } });
 
@@ -783,7 +835,7 @@ describe("the Assistant's CLAUDE.md", () => {
   });
 
   it("should count what the person has written, and not mark it invalid, while it is within the limit", () => {
-    open({ claudeMd: claudeMd() });
+    open({ claudeMd: claudeMd() }, "Claude.md");
 
     fireEvent.change(notes(), { target: { value: "🚀🚀" } });
 
@@ -792,14 +844,14 @@ describe("the Assistant's CLAUDE.md", () => {
   });
 
   it("should say why, rather than show an editor, when the hub cannot read the person's CLAUDE.md", () => {
-    open({ claudeMd: claudeMd({ settings: { available: false, reason: "the credentials Key Vault is not configured" } }) });
+    open({ claudeMd: claudeMd({ settings: { available: false, reason: "the credentials Key Vault is not configured" } }) }, "Claude.md");
 
     expect(screen.getByText(/the credentials Key Vault is not configured/)).toBeTruthy();
     expect(screen.queryByRole("form", { name: SAVE_FORM })).toBeNull();
   });
 
   it("should describe the editor to a screen reader by its label, how it stands and its count, when it is shown", () => {
-    open({ claudeMd: claudeMd() });
+    open({ claudeMd: claudeMd() }, "Claude.md");
     const described = (notes().getAttribute("aria-describedby") ?? "").split(" ").map((id) => document.getElementById(id)?.textContent);
 
     expect(described).toEqual(["This is the default. Nothing of yours is stored yet.", `${DEFAULT_CLAUDE_MD.length} of 20,000 characters`]);
@@ -808,7 +860,7 @@ describe("the Assistant's CLAUDE.md", () => {
   // A markdown editor is a textarea, which the trap's list of tab stops has to name: one left out of it is a control
   // Tab can reach and the wrap cannot account for, and the dialog is modal.
   it("should keep its editor and its buttons among the dialog's own tab stops when it is open", () => {
-    open({ claudeMd: claudeMd({ settings: { available: true, stored: true, text: "# Me", updatedAt: null } }) });
+    open({ claudeMd: claudeMd({ settings: { available: true, stored: true, text: "# Me", updatedAt: null } }) }, "Claude.md");
     const items = stops();
 
     expect(items).toContain(notes());
@@ -816,7 +868,7 @@ describe("the Assistant's CLAUDE.md", () => {
   });
 
   it("should wrap focus from its last control back to the start of the dialog when the person tabs off the end", () => {
-    open({ claudeMd: claudeMd() });
+    open({ claudeMd: claudeMd() }, "Claude.md");
     const items = stops();
     items.at(-1)?.focus();
 
@@ -825,4 +877,369 @@ describe("the Assistant's CLAUDE.md", () => {
     expect(items.at(-1)).toBe(screen.getByRole("button", { name: SAVE_FORM }));
     expect(document.activeElement).toBe(items[0]);
   });
+});
+
+/** The whole dialog, which is what a person has when they open it: the navigation and every section it offers. */
+function everything(): Partial<Parameters<typeof AssistantSettings>[0]> {
+  return { plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }) };
+}
+
+function tabs(): HTMLElement[] {
+  return within(nav()).getAllByRole("tab");
+}
+
+function selected(): string {
+  return tabs().find((tab) => tab.getAttribute("aria-selected") === "true")?.textContent ?? "";
+}
+
+/**
+ * The dialog as a narrow screen has it. `useTwoPane` reads the viewport, and jsdom has no `matchMedia` at all, so a
+ * test of the narrow interface is a test that defines one — which is also what says plainly which interface it is
+ * about.
+ */
+/** The `change` listeners `useTwoPane` has registered, so a test can take the screen across the breakpoint. */
+let resized: (() => void)[] = [];
+
+/**
+ * A viewport of `width`, answering the dialog's own `min-width` query and dispatching `change` when it moves — so a
+ * test of a resize exercises the listener rather than only the first read. jsdom has no `matchMedia` at all, which is
+ * why every other test here takes the hook's fallback and is wide.
+ */
+function viewport(width: number): (next: number) => void {
+  let current = width;
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: (query: string) => ({
+      // A getter, as a real `MediaQueryList` has: the hook keeps the object and reads `matches` again inside its
+      // `change` handler, so a plain property would freeze the answer at the width the dialog opened on.
+      get matches() {
+        return current >= SETTINGS_TWO_PANE_MIN_WIDTH;
+      },
+      media: query,
+      addEventListener: (_event: string, listener: () => void) => resized.push(listener),
+      removeEventListener: (_event: string, listener: () => void) => {
+        resized = resized.filter((other) => other !== listener);
+      }
+    })
+  });
+  return (next: number) => {
+    current = next;
+    for (const listener of [...resized]) {
+      listener();
+    }
+  };
+}
+
+/** The dialog as a 390×844 screen has it. */
+function narrow(): void {
+  viewport(390);
+}
+
+function wideAgain(): void {
+  Reflect.deleteProperty(window, "matchMedia");
+  resized = [];
+}
+
+describe("the Assistant's settings navigation", () => {
+  afterEach(wideAgain);
+
+  it("should gather the sections under the headings they belong to when it opens", () => {
+    open(everything());
+
+    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates"]);
+    expect(nav().textContent).toBe("GeneralAppearanceAgentClaude.mdToolsConnectionsTemplates");
+  });
+
+  // A tablist owns tabs and nothing else, so the two group headings are shown rather than announced, and the panel's
+  // own heading is what says in full what a short label like "Tools" stands for.
+  it("should keep its group headings out of what a screen reader is read when it opens", () => {
+    open(everything());
+
+    expect(within(nav()).getAllByRole("tab")).toHaveLength(5);
+    for (const group of ["General", "Agent"]) {
+      expect(within(nav()).getByText(group).getAttribute("aria-hidden")).toBe("true");
+    }
+  });
+
+  it("should open on the first section it offers, and relate it to the panel beside it, when it opens", () => {
+    open(everything());
+    const panel = screen.getByRole("tabpanel");
+
+    expect(selected()).toBe("Appearance");
+    expect(panel.getAttribute("aria-labelledby")).toBe(tabs()[0]?.id);
+    expect(tabs()[0]?.getAttribute("aria-controls")).toBe(panel.id);
+  });
+
+  it("should show only the section the person opens, and not the one they left, when they choose another", () => {
+    open(everything());
+
+    go("Templates");
+
+    expect(selected()).toBe("Templates");
+    expect(screen.getByRole("heading", { name: "Your templates" })).toBeTruthy();
+    expect(screen.queryByRole("radiogroup", { name: "Appearance" })).toBeNull();
+  });
+
+  it.each([
+    ["ArrowDown", "Claude.md"],
+    ["End", "Templates"]
+  ] as const)("should move focus down the navigation with %s when a section has focus", (key, expected) => {
+    open(everything());
+
+    fireEvent.keyDown(tabs()[0]!, { key });
+
+    expect(document.activeElement?.textContent).toBe(expected);
+  });
+
+  it.each([
+    ["ArrowUp", "Appearance"],
+    ["Home", "Appearance"]
+  ] as const)("should move focus back up the navigation with %s when a later section has focus", (key, expected) => {
+    open(everything());
+    tabs()[1]?.focus();
+
+    fireEvent.keyDown(tabs()[1]!, { key });
+
+    expect(document.activeElement?.textContent).toBe(expected);
+  });
+
+  it("should wrap from the last section to the first when the person arrows off the end", () => {
+    open(everything());
+    tabs()[4]?.focus();
+
+    fireEvent.keyDown(tabs()[4]!, { key: "ArrowDown" });
+
+    expect(document.activeElement?.textContent).toBe("Appearance");
+  });
+
+  it("should wrap from the first section to the last when the person arrows off the start", () => {
+    open(everything());
+
+    fireEvent.keyDown(tabs()[0]!, { key: "ArrowUp" });
+
+    expect(document.activeElement?.textContent).toBe("Templates");
+  });
+
+  // Every panel here is a form. Opening whichever section the arrows reach would throw away half-typed notes on the
+  // way past, so arrows move focus and Enter or Space is what opens one.
+  it("should leave the open section alone, until the person presses Enter, while they arrow past it", () => {
+    open(everything());
+
+    fireEvent.keyDown(tabs()[0]!, { key: "ArrowDown" });
+
+    expect(selected()).toBe("Appearance");
+    expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
+
+    fireEvent.click(document.activeElement as HTMLElement);
+
+    expect(selected()).toBe("Claude.md");
+  });
+
+  // A roving tabindex: every section but the one with focus is deliberately not a tab stop, so `FOCUSABLE` must not
+  // count them — the wrap would otherwise be measured from a button Tab can never land on.
+  it("should put exactly one of its sections in the dialog's tab stops when it is open", () => {
+    open(everything());
+
+    expect(stops().filter((item) => item.getAttribute("role") === "tab")).toEqual([tabs()[0]]);
+  });
+
+  it("should keep the trap across both panes, wrapping from the open section's last control, when it is open", () => {
+    open(everything(), "Templates");
+    const items = stops();
+
+    expect(items[0]).toBe(within(screen.getByRole("dialog")).getByRole("button", { name: "Close settings" }));
+    expect(items[1]).toBe(within(nav()).getByRole("tab", { name: "Templates" }));
+    expect(items).toContain(screen.getByRole("tabpanel"));
+    items.at(-1)?.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+
+    expect(document.activeElement).toBe(items[0]);
+  });
+
+  // Connections is a list and nothing else, so without a focusable panel a keyboard could not reach or scroll it.
+  it("should make the panel itself a tab stop when the section it holds has no control of its own", () => {
+    open({}, "Connections");
+    const items = stops();
+
+    expect(items.at(-1)).toBe(screen.getByRole("tabpanel"));
+  });
+});
+
+describe("the Assistant's settings on a narrow screen", () => {
+  afterEach(wideAgain);
+
+  it("should offer the sections as a list, with nothing open, when there is no room for two panes", () => {
+    narrow();
+    open(everything());
+
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(
+      within(screen.getByRole("list", { name: "Settings sections" }))
+        .getAllByRole("button")
+        .map((item) => item.textContent)
+    ).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates"]);
+    expect(screen.queryByRole("radiogroup", { name: "Appearance" })).toBeNull();
+  });
+
+  it("should replace the list with the section, and put focus in it, when the person opens one", () => {
+    narrow();
+    open(everything());
+
+    fireEvent.click(screen.getByRole("button", { name: "Claude.md" }));
+
+    expect(screen.queryByRole("list", { name: "Settings sections" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Your CLAUDE.md" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Back to settings" }));
+  });
+
+  it("should put the list back, and focus in it, when the person goes back from a section", () => {
+    narrow();
+    open(everything());
+    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to settings" }));
+
+    expect(screen.getByRole("list", { name: "Settings sections" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Your templates" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Appearance" }));
+  });
+
+  it("should keep the open section in the dialog's own focus trap when there is only one pane", () => {
+    narrow();
+    open(everything());
+    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+    const items = stops();
+
+    expect(items).toContain(screen.getByRole("button", { name: "Back to settings" }));
+    items.at(-1)?.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+
+    expect(document.activeElement).toBe(items[0]);
+  });
+
+  it("should still close on Escape, and put focus back on the cog, when a section is open", () => {
+    narrow();
+    open(everything());
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(cog());
+  });
+});
+
+/**
+ * A phone turned on its side crosses the breakpoint with the dialog open — 390×844 becomes 844×390 — so the two
+ * interfaces have to hand over rather than start again.
+ */
+describe("the Assistant's settings across a change of width", () => {
+  afterEach(wideAgain);
+
+  function notes(): HTMLTextAreaElement {
+    return screen.getByLabelText("CLAUDE.md") as HTMLTextAreaElement;
+  }
+
+  it("should keep what the person has typed in a section when the screen becomes too narrow for two panes", () => {
+    const resize = viewport(1024);
+    open(everything(), "Claude.md");
+    fireEvent.change(notes(), { target: { value: "# Me\n\nHalf a thought" } });
+
+    act(() => resize(390));
+
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.getByRole("button", { name: "Back to settings" })).toBeTruthy();
+    expect(notes().value).toBe("# Me\n\nHalf a thought");
+  });
+
+  it("should keep what the person has typed when a narrow screen becomes wide enough for two panes", () => {
+    const resize = viewport(390);
+    open(everything());
+    fireEvent.click(screen.getByRole("button", { name: "Claude.md" }));
+    fireEvent.change(notes(), { target: { value: "# Me\n\nHalf a thought" } });
+
+    act(() => resize(1024));
+
+    expect(within(nav()).getByRole("tab", { name: "Claude.md" }).getAttribute("aria-selected")).toBe("true");
+    expect(notes().value).toBe("# Me\n\nHalf a thought");
+  });
+
+  // The element focus was on goes with the navigation that is replaced, and focus would otherwise fall to the body —
+  // outside the trap, with nothing to read.
+  it.each([
+    [1024, 390, "Back to settings"],
+    [390, 1024, "Claude.md"]
+  ])("should move focus to the navigation of whichever interface is showing when the width changes from %i to %i", (from, to, entry) => {
+    const resize = viewport(from);
+    open(everything());
+    if (from === 390) {
+      fireEvent.click(screen.getByRole("button", { name: "Claude.md" }));
+    } else {
+      go("Claude.md");
+    }
+
+    act(() => resize(to));
+
+    expect(document.activeElement).toBe(screen.getByRole(to === 390 ? "button" : "tab", { name: entry }));
+  });
+
+  it("should keep the trap working, with the panel still in it, after the width has changed", () => {
+    const resize = viewport(1024);
+    open(everything(), "Templates");
+
+    act(() => resize(390));
+    const items = stops();
+    items.at(-1)?.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+
+    expect(items).toContain(screen.getByRole("button", { name: "Back to settings" }));
+    expect(document.activeElement).toBe(items[0]);
+  });
+});
+
+/**
+ * An axe audit of the dialog itself, which has none anywhere else: the Assistant's end-to-end audit opens
+ * `/assistant` and never the cog, because the dialog's cog is underneath the getting-ready screen until a pod is
+ * running. Run here it costs tens of milliseconds, and it is what checks that the navigation's tablist, its panel
+ * and the relations between them hold together rather than only look as though they do.
+ *
+ * **It is structural and name-based only, and must not be read as "the dialog is accessible."** jsdom has no layout
+ * and no computed colour, so `color-contrast` is turned off rather than silently inapplicable — and since nothing
+ * end to end ever opens this dialog, its contrast, including `text-asst-error` on `bg-asst-hover`, is audited
+ * **nowhere**. Nor does this catch everything structural: a non-`tab` child of a tablist passes it even with the
+ * `aria-hidden` taken off, which is why the group headings have a test of their own.
+ */
+async function auditOpenDialog(section?: string): Promise<void> {
+  const root = document.createElement("div");
+  root.className = "asst-theme";
+  root.dataset.theme = "dark";
+  document.body.append(root);
+  render(<AssistantSettings connections={data(ALL_SIGNED_IN)} {...everything()} />, { container: root });
+  fireEvent.click(cog());
+  if (section !== undefined) {
+    go(section);
+  }
+  const results = await axe.run(root, {
+    runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
+    rules: { "color-contrast": { enabled: false } }
+  });
+  expect(results.violations.map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.html).join(" ")}`)).toEqual([]);
+  root.remove();
+}
+
+describe("the Assistant's settings accessibility", () => {
+  afterEach(wideAgain);
+
+  for (const section of ["Appearance", "Claude.md", "Tools", "Connections", "Templates"]) {
+    it(`should raise no WCAG A or AA violations with ${section} open`, async () => {
+      await auditOpenDialog(section);
+    }, 20_000);
+  }
+
+  it("should raise no WCAG A or AA violations on the section list of a narrow screen", async () => {
+    narrow();
+    await auditOpenDialog();
+    wideAgain();
+  }, 20_000);
 });
