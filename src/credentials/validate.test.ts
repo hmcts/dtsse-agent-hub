@@ -337,4 +337,55 @@ describe("checkCredential for atlassian", () => {
   it("should ask for the sign-in when the value is empty", () => {
     expect(checkCredential("atlassian", " \n ")).toEqual({ ok: false, error: "paste an Atlassian twg sign-in" });
   });
+
+  const profile = (id: string, user: string, refresh: string) => ({
+    id,
+    user,
+    createdAt: "2026-10-01T00:00:00.000Z",
+    bitbucket: false,
+    credentials: { primary: { user, oauthAccessToken: "", oauthRefreshToken: refresh } }
+  });
+  const profiles = (extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      version: 1,
+      activeEnvironment: "prod",
+      defaults: { prod: "p1" },
+      profiles: [profile("p1", "a.person@justice.gov.uk", REFRESH)],
+      ...extra
+    });
+
+  it("should accept it trimmed and labelled with its user when it is a twg 1.3.9 auth-profiles.json", () => {
+    expect(checkCredential("atlassian", `\n${profiles()}\n`)).toEqual({ ok: true, value: profiles(), accountLabel: "a.person@justice.gov.uk" });
+  });
+
+  it("should label it with the active environment's default profile when there are several", () => {
+    const value = profiles({ profiles: [profile("p0", "someone@example.com", REFRESH), profile("p1", "a.person@justice.gov.uk", REFRESH)] });
+
+    expect(checkCredential("atlassian", value)).toMatchObject({ ok: true, accountLabel: "a.person@justice.gov.uk" });
+  });
+
+  it("should label it with the first profile that can refresh when no default is set", () => {
+    const value = profiles({ defaults: {}, profiles: [profile("p0", "spent@example.com", ""), profile("p1", "a.person@justice.gov.uk", REFRESH)] });
+
+    expect(checkCredential("atlassian", value)).toMatchObject({ ok: true, accountLabel: "a.person@justice.gov.uk" });
+  });
+
+  it.each([
+    ["no profiles", JSON.stringify({ version: 1 })],
+    ["an empty refresh token", profiles({ profiles: [profile("p1", "a.person@justice.gov.uk", " ")] })],
+    ["a profile with no credentials", JSON.stringify({ profiles: [{ id: "p1", user: "a.person@justice.gov.uk" }] })],
+    ["an array", JSON.stringify([profile("p1", "a.person@justice.gov.uk", REFRESH)])]
+  ])("should refuse an auth-profiles.json without echoing it when it has %s", (_label, value) => {
+    const checked = checkCredential("atlassian", value);
+
+    expect(checked).toMatchObject({ ok: false });
+    expect(JSON.stringify(checked)).not.toContain("a.person");
+  });
+
+  it("should refuse it without echoing it when it starts like JSON but is not", () => {
+    const checked = checkCredential("atlassian", `{ "profiles": [ ${REFRESH}`);
+
+    expect(checked).toEqual({ ok: false, error: "that is not a twg auth-profiles.json: it is not JSON" });
+    expect(JSON.stringify(checked)).not.toContain(REFRESH);
+  });
 });

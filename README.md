@@ -170,16 +170,24 @@ tools, and an agent starts without it. Like a GitHub token, only the owner's own
 
 An Atlassian sign-in (`atlassian`) is optional too: it gives an agent the Atlassian Teamwork Graph CLI, `twg`, for Jira
 and Confluence on hmcts.atlassian.net. It is not pasted: the pod relays a device code to its owner, then saves `twg`'s
-`auth.conf` without the access token, and saves it again whenever `twg` replaces its refresh token. Any Atlassian
-account is accepted, and labels the credential; the owner can have the agent sign in again from its page.
+sign-in file (`auth-profiles.json` from twg 1.3.9, `auth.conf` before it) without its access tokens, and saves it
+again whenever `twg` replaces its refresh token. Any Atlassian account is accepted, and labels the credential; the
+owner can have the agent sign in again from its page.
 
-Each code lasts two minutes, and the pod offers three of them. Two minutes is `twg login`'s own limit, not the
-server's: twg waits five minutes for a person at a terminal and two when it reads its environment as an agent's,
-which a pod's always is, because `AGENT_HUB_LAUNCH_TOKEN` is enough to tell it so. Two minutes is easy to miss when
-the sign-in page is on another screen, so each code that runs out unused is replaced. After the last the pod reports
-the sign-in expired, so the owner's screens say so instead of showing a code that no longer works, and the agent
-stops reading as waiting for them. Jira and Confluence are then unconfigured until the agent signs in again. A
-sign-in that breaks rather than running out — the owner refusing it, say — is reported at once, with no second code.
+Each code lasts two minutes, and the pod offers two of them. Two minutes is `twg login`'s own limit, not the
+server's: twg 1.3.3 waits five minutes for a person at a terminal and two when it reads its environment as an
+agent's, which a pod's always is, because `AGENT_HUB_LAUNCH_TOKEN` matches the variable names it looks for. That is
+the whole environment, not a list of two or three markers, so there is nothing a pod can unset to be given the
+other three minutes. Two minutes is easy to miss when the sign-in page is on another screen, so each code that runs
+out unused is replaced. After the last the pod reports the sign-in expired, so the owner's screens say so instead of
+showing a code that no longer works, and the agent stops reading as waiting for them. Jira and Confluence are then
+unconfigured until the agent signs in again. A sign-in that breaks rather than running out — the owner refusing it,
+say — is reported at once, with no second code.
+
+The two minutes is measured against twg 1.3.3, which is what the pod image carries. twg prints the figure itself,
+as "(120s remaining)" or "(300s remaining)", only outside agent mode, so a pod cannot read its own lifetime off the
+output it relays: moving the image to a later twg means measuring that version's agent-mode gate again and changing
+`TWG_DEVICE_CODE_EXPIRES_S` to match.
 
 Each person also has a CLAUDE.md (`claude_md`), edited in the "Your CLAUDE.md" section of `/hub/virtual`, which every one of
 their virtual agents writes to `~/.claude/CLAUDE.md` before each start of Claude. It is kept in the credentials store
