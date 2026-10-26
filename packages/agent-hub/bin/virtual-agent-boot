@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stage 0 of an agent-hub virtual agent pod. It only gets the workspace onto the volume: GitHub auth,
 # then a clone or fast-forward of cft-workspace, then an upgrade of this client to the published one, then
-# it hands over to the versioned .devcontainer/virtual-agent/entrypoint.sh in that checkout.
+# it hands over to stage 1, this package's virtual-agent/entrypoint.sh.
 #
 # The pod's `command` is this bin's name, resolved by the kubelet with no shell against the image's
 # PATH, and npm's global bin directory is not on it (the devcontainer image reaches node through
@@ -13,7 +13,24 @@
 
 set -euo pipefail
 
-WORKSPACE="${VIRTUAL_AGENT_WORKSPACE:-/workspace/cft-workspace}"
+# Stage 1 ships in this package, so every symlink in the way has to be followed first: npm installs a bin as a
+# symlink from <prefix>/bin, and cft-workspace's Dockerfile links that into /usr/local/bin again, so neither
+# unresolved directory holds the package's virtual-agent/. `readlink -f` would do it in one call but macOS ships
+# a BSD readlink without -f, so the loop walks the chain itself, as bin/agent-hub does.
+target="${BASH_SOURCE[0]}"
+while [ -L "$target" ]; do
+    link="$(readlink "$target")"
+    case "$link" in
+        /*) target="$link" ;;
+        *) target="$(cd "$(dirname "$target")" && pwd)/$link" ;;
+    esac
+done
+PACKAGE="$(cd "$(dirname "$target")/.." && pwd)"
+
+# Stage 1 takes the workspace from the environment rather than from its own location, so it is exported here
+# whether the pod template set it or this default stands in.
+export VIRTUAL_AGENT_WORKSPACE="${VIRTUAL_AGENT_WORKSPACE:-/workspace/cft-workspace}"
+WORKSPACE="$VIRTUAL_AGENT_WORKSPACE"
 REPO_URL="${VIRTUAL_AGENT_REPO:-git@github.com:hmcts/cft-workspace.git}"
 # Every required variable is checked before it is used: under `set -u` an expansion of an unset one aborts with
 # bash's own "unbound variable" instead of the message here.
@@ -269,11 +286,18 @@ fi
 checkout_workspace
 [[ -n "$sync_detail" ]] && { log "$sync_detail"; report provisioning "$sync_detail"; }
 
-entrypoint="$WORKSPACE/.devcontainer/virtual-agent/entrypoint.sh"
+# Stage 1 is this package's own, so a pod gets the runtime it was published with rather than whatever the
+# checkout happens to carry. The checkout's copy is the fallback for a pod whose client predates the move, and
+# goes once every pod image floor carries a client that ships one.
+entrypoint="$PACKAGE/virtual-agent/entrypoint.sh"
 if [[ ! -x "$entrypoint" ]]; then
-    report failed "the cft-workspace checkout has no executable .devcontainer/virtual-agent/entrypoint.sh"
+    entrypoint="$WORKSPACE/.devcontainer/virtual-agent/entrypoint.sh"
+fi
+if [[ ! -x "$entrypoint" ]]; then
+    report failed "neither this agent-hub client nor the cft-workspace checkout has an executable virtual-agent/entrypoint.sh"
     exit 1
 fi
+log "handing over to $entrypoint"
 upgrade_client
 rm -rf "$TMP"
 trap - EXIT TERM INT

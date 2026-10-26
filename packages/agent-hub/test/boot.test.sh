@@ -19,7 +19,8 @@
 set -u
 
 CASES=(no-token refused-token stored-token-no-access checkout-client broken-checkout-client no-client trailing-slash
-    client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned)
+    client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint
+    checkout-entrypoint)
 
 if [ "${1:-}" = "--list" ]; then
     printf '%s\n' "${CASES[@]}"
@@ -61,8 +62,15 @@ no() {
 setup() {
     CASE="$1"
     C="$T/$1"
-    mkdir -p "$C/bin" "$C/home"
+    mkdir -p "$C/bin" "$C/home" "$C/pkg/bin"
     : >"$C/order.log"
+
+    # The script under test runs from a package directory of the case's own, reached through a symlink as npm
+    # installs a bin: stage 1 is resolved from this file's location, so a case controls whether the package it
+    # was installed from ships one. Only package-entrypoint does; every other case falls back to the checkout's.
+    cp "$BOOT" "$C/pkg/bin/virtual-agent-boot"
+    chmod +x "$C/pkg/bin/virtual-agent-boot"
+    ln -s "$C/pkg/bin/virtual-agent-boot" "$C/bin/virtual-agent-boot"
 
     cat >"$C/bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -157,7 +165,7 @@ boot() {
     env -i PATH="$BOOT_PATH" HOME="$C/home" NVM_DIR=/nonexistent FAKE_DIR="$C" \
         FAKE_GOOD_TOKEN="$GOOD_TOKEN" AGENT_HUB_URL="$HUB_URL" AGENT_HUB_VIRTUAL_AGENT_ID="$VID" \
         AGENT_HUB_LAUNCH_TOKEN="$LAUNCH" AGENT_HUB_CLI_JS="$CLI_JS" VIRTUAL_AGENT_WORKSPACE="$C/ws/cft-workspace" \
-        "$@" bash "$BOOT" >"$C/out" 2>&1 &
+        "$@" bash "$C/bin/virtual-agent-boot" >"$C/out" 2>&1 &
     local pid=$! watchdog
     # Killing the subshell below leaves its sleep running, and anything still holding this script's
     # stdout keeps the wrapper waiting on the pipe long after the script has exited, so it writes nowhere.
@@ -332,6 +340,33 @@ case_client_upgrade_pinned() {
         ok "says the pod is pinned" || no "no reason logged: $(grep 'client' "$C/out")"
 }
 
+# Stage 1 ships with the client, so the package's copy is the one a pod runs: a checkout pinning an older
+# runtime than the client it boots on is exactly what moving the runtime out of the checkout was for.
+case_package_entrypoint() {
+    setup package-entrypoint
+    mkdir -p "$C/pkg/virtual-agent"
+    printf '#!/bin/sh\necho package-entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/pkg/virtual-agent/entrypoint.sh"
+    chmod +x "$C/pkg/virtual-agent/entrypoint.sh"
+    seed_github "$GOOD_TOKEN"
+    boot
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install package-entrypoint " &&
+        ok "hands over to the package's own stage 1" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    grep -q "handing over to $C/pkg/virtual-agent/entrypoint.sh" "$C/out" &&
+        ok "logs which stage 1 it ran, resolved through the symlink it was invoked by" || no "handover not logged: $(grep 'handing over' "$C/out")"
+}
+
+# A pod whose client predates the move has stage 1 only in the checkout. The fallback goes once every pod image
+# floor carries a client that ships one.
+case_checkout_entrypoint() {
+    setup checkout-entrypoint
+    seed_github "$GOOD_TOKEN"
+    boot
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
+        ok "falls back to the checkout's stage 1 when the package ships none" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    grep -q "handing over to $C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh" "$C/out" &&
+        ok "logs that the stage 1 it ran came from the checkout" || no "handover not logged: $(grep 'handing over' "$C/out")"
+}
+
 run_case() {
     case "$1" in
         no-token) case_no_token ;;
@@ -345,6 +380,8 @@ run_case() {
         client-upgrade-offline) case_client_upgrade_offline ;;
         client-upgrade-no-npm) case_client_upgrade_no_npm ;;
         client-upgrade-pinned) case_client_upgrade_pinned ;;
+        package-entrypoint) case_package_entrypoint ;;
+        checkout-entrypoint) case_checkout_entrypoint ;;
         *) printf 'unknown case %s (try --list)\n' "$1" >&2; exit 2 ;;
     esac
 }

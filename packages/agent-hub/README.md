@@ -30,7 +30,12 @@ invoked as, `agent-hub` by default. A wrapper with its own name, such as cft-wor
 set `AGENT_HUB_INVOKED_AS` before calling to have that spelling quoted instead.
 
 `bin/virtual-agent-boot` is the other bash bin. It is the virtual-agent runtime's own entrypoint rather than anything
-to run by hand, and its header comment documents it.
+to run by hand, and its header comment documents it. It gets the workspace onto the pod's volume and then hands over
+to `virtual-agent/entrypoint.sh`, stage 1, which is the pod's runtime and ships in this package so that a pod gets it
+with the client; `virtual-agent/assistant-prompt.md` beside it is the system prompt a conversation's session appends.
+Everything about how the workspace it works in is laid out stays in that workspace, behind
+`.devcontainer/virtual-agent/prepare-workspace.sh`. `test/entrypoint.test.sh` covers stage 1 and `test/boot.test.sh`
+stage 0; `src/virtual-agent-entrypoint.test.ts` and `src/virtual-agent-boot.test.ts` drive them.
 
 ## Develop
 

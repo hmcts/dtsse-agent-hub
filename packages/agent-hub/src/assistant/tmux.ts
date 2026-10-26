@@ -3,10 +3,17 @@
 import { execFile } from "node:child_process";
 import nodeFs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Env } from "../env.ts";
 
-/** The system prompt the pod appends for a conversation's session. It is a cft-workspace file, not this package's. */
-export const PROMPT_FILE = ".devcontainer/virtual-agent/assistant-prompt.md";
+/**
+ * The system prompt the pod appends for a conversation's session, shipped beside the pod runtime that starts the
+ * supervisor. Absolute, resolved from this module rather than named relative to anything: tmux runs the command
+ * line in the workspace, and the package is installed under a global `node_modules` that the workspace says
+ * nothing about. `dist/assistant/` is two directories below the package root, which is where `virtual-agent/`
+ * sits in both the source tree and the tarball.
+ */
+export const PROMPT_FILE = fileURLToPath(new URL("../../virtual-agent/assistant-prompt.md", import.meta.url));
 
 const TMUX_TIMEOUT_MS = 10000;
 

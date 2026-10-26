@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { canRunProgram, claudeCommand, commandProgram, createTmux, PROMPT_FILE, type TmuxExec, type TmuxResult, tmuxName } from "./tmux.ts";
 
@@ -49,6 +50,17 @@ describe("tmuxName", () => {
     // Act & Assert
     expect(tmuxName("0F8A6A1E-1234-4000-8000-000000000001")).toBe("c-0f8a6a1e");
     expect(tmuxName("0f8a6a1e-1234-4000-8000-000000000001")).toBe("c-0f8a6a1e");
+  });
+});
+
+describe("PROMPT_FILE", () => {
+  // tmux starts the pane in the workspace, so a path relative to this package would be looked for there and the
+  // session would start with no system prompt at all.
+  it("should be the prompt shipped beside the pod runtime when resolved from this module", () => {
+    // Act & Assert
+    expect(PROMPT_FILE).toBe(fileURLToPath(new URL("../../virtual-agent/assistant-prompt.md", import.meta.url)));
+    expect(path.isAbsolute(PROMPT_FILE)).toBe(true);
+    expect(fs.existsSync(PROMPT_FILE)).toBe(true);
   });
 });
 
