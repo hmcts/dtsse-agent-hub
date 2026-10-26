@@ -29,7 +29,10 @@ export const ATLASSIAN_AUTH_MAX_CHARS = 24000;
  * figure lives.
  *
  * Overstating it is the one thing that must not happen: the wall-clock check in `relayDeviceLogin` would then never
- * call a genuine expiry an expiry, and a code nobody used would be reported as a sign-in that broke.
+ * call a genuine expiry an expiry, and a code nobody used would be reported as a sign-in that broke. That check is
+ * why 300 is safe without having seen Atlassian's `expires_in` for twg's device-code client, which only a completed
+ * sign-in would show: twg takes the lower of the two, so a shorter one would make the owner's clock run long and
+ * `twgLoginExpired` would still read the expiry off twg's own error code.
  */
 export const TWG_DEVICE_CODE_EXPIRES_S = 300;
 /**
@@ -95,9 +98,15 @@ export const TWG_AGENT_VARS = [
  */
 const TWG_AGENT_NAME = /(^|_)AGENT($|_)/;
 /**
- * The names that scan matches and twg exempts anyway — the ssh and gpg agent sockets and the user-agent strings —
- * so a child keeps them. twg narrows the scan once more, past names that normalise to one of its own hosts, which
- * a pod's environment does not carry; dropping one of those would cost nothing but the code's lifetime either way.
+ * The names that scan matches and twg exempts anyway, so they are not triggers and the child keeps them: the ssh
+ * and gpg agent sockets (`SSH_AGENT*`, `GPG_AGENT*`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`), the user-agent strings,
+ * and `AGENT_RUNTIME` and `AGENT_TRANSCRIPTS`. Keeping them is what stops this from taking a variable away from a
+ * child that may want it, which is the only cost of over-dropping — the code's lifetime is not at stake either
+ * way, because twg was never going to read them.
+ *
+ * twg narrows the scan once more and this does not: it also ignores a name that normalises to fewer than three
+ * characters or to one of its own hosts. Not following that over-drops, which is the safe direction, and a pod's
+ * environment carries no such name anyway.
  */
 const TWG_AGENT_NAME_KEEP = new Set([
   "SSH_AUTH_SOCK",
@@ -119,10 +128,15 @@ const TWG_AGENT_NAME_KEEP_PREFIXES = ["SSH_AGENT", "GPG_AGENT"];
  * for somebody to find the Atlassian sign-in page on another screen and type the code into it. Both halves of the
  * gate have to be covered, because the explicit one above short-circuits the scan rather than the other way round.
  *
- * Measured against twg 1.3.3, which is what the pod image carries. Whoever moves the image to a later twg has to
- * measure its gate again: a `twg login` printing "(300s remaining)" is outside agent mode and one drawing a spinner
- * with no figure is in it. A trigger a later twg adds and this misses costs the 120-second code a pod used to get,
- * not anything worse.
+ * Measured against **twg 1.3.3**, which is what the pod image carries. The gate has to be measured again on any
+ * later twg: a `twg login` printing "(300s remaining)" is outside agent mode and one drawing a spinner with no
+ * figure is in it. That move does not pass through this repo — `VIRTUAL_AGENT_IMAGE` is digest-pinned in
+ * cnp-flux-config, still points at the cft-workspace devcontainer image rather than `docker/virtual-agent/`, and
+ * that devcontainer already pins twg 1.3.9 — so whoever bumps the digest owns the re-measure.
+ *
+ * A trigger a later twg adds and this misses holds the code for 120 seconds while the owner's screen counts down
+ * from 300. `twgLoginExpired` reads twg's own error code, so the expiry is still reported as an expiry and the
+ * owner is still told the code ran out: the only wrong thing is the clock.
  */
 export function twgAgentModeVars(env: Env): string[] {
   return Object.keys(env).filter(

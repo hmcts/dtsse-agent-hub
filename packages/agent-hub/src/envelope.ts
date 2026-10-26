@@ -142,8 +142,8 @@ export const JIRA_EXPORT_BASH_TIMEOUT_MS = 600000;
  *
  * The session is told not to check anything around it, because looking at the document, twg or the new ticket is
  * exactly the extra round trips the one command is there to save. The Bash timeout is raised because the command
- * waits for the person when twg has to be signed in: twg gives them two minutes a code, and the command offers
- * more than one.
+ * waits for the person when twg has to be signed in: the one code it relays lasts five minutes, after the twg calls
+ * that come before it.
  *
  * These are the last lines before the skill line, which keeps its place against the `---`. They go after the
  * attachment lines, which are facts that stand on their own wherever they sit.

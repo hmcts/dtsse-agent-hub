@@ -184,7 +184,8 @@ twg's gate is two parts, and the explicit one runs first. `TWG_AGENT_HOST`, a ta
 (`CLAUDECODE`, `CLAUDE_CODE`, `CURSOR_AGENT`, `CODEX_SANDBOX` and the rest), `AGENT`, `AI_AGENT`,
 `TWG_METRICS_SOURCE` and `TWG_AGENT_DEFAULTS` each put it in agent mode on their own, short-circuiting before
 anything else. Only if none of them is set does twg scan the whole environment for a name with `AGENT` as a word in
-it, bar the ssh and gpg agent sockets and the user-agent strings; `AGENT_HUB_LAUNCH_TOKEN` and every other
+it, bar the ssh and gpg agent sockets, the user-agent strings, `AGENT_RUNTIME` and `AGENT_TRANSCRIPTS`, which the
+child therefore keeps; `AGENT_HUB_LAUNCH_TOKEN` and every other
 `AGENT_HUB_*` and `VIRTUAL_AGENT_*` variable matches that scan, so leaving the environment alone puts every pod
 sign-in in agent mode whatever else it does. All of it is droppable, and `twgAgentModeVars` in
 `packages/agent-hub/src/virtual/atlassian.ts` is the list, with the reason it exists beside it.
@@ -204,9 +205,16 @@ minutes, both expired unused.
 
 The five minutes is measured against twg 1.3.3, which is what the pod image carries. twg prints the figure itself,
 as "(300s remaining)", only outside agent mode, so the countdown appearing at all is what says the drop worked and
-a spinner with no figure means it did not. Moving the image to a later twg means measuring that version's gate
-again and changing the drop list, and `TWG_DEVICE_CODE_EXPIRES_S` with it; a trigger a later twg adds and the list
-misses costs the two-minute code a pod used to get, not anything worse.
+a spinner with no figure means it did not. Moving the pod to a later twg means measuring that version's gate again
+and changing the drop list, and `TWG_DEVICE_CODE_EXPIRES_S` with it.
+
+**That move does not pass through this repo.** `VIRTUAL_AGENT_IMAGE` is digest-pinned in `cnp-flux-config` and
+still points at the cft-workspace devcontainer image rather than `docker/virtual-agent/Dockerfile`, and that
+devcontainer already pins twg 1.3.9. So the next digest bump in flux changes the pod's twg with nothing changed
+here and nobody reading this. Whoever bumps `twg_ver` or that digest owns re-measuring the gate. If the drop list
+is short on the new version, the code dies at two minutes while the owner's screen counts down from five:
+`twgLoginExpired` reads twg's own error code, so the expiry is still reported as an expiry and the owner is still
+told the code ran out — the only wrong thing is the clock.
 
 Each person also has a CLAUDE.md (`claude_md`), edited in the "Your CLAUDE.md" section of `/hub/virtual`, which every one of
 their virtual agents writes to `~/.claude/CLAUDE.md` before each start of Claude. It is kept in the credentials store

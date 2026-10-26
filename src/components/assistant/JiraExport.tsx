@@ -41,16 +41,16 @@ export function JiraBanner({ exported }: { exported: JiraExportView }) {
 }
 
 /** Where the Atlassian sign-in an export is waiting on has got to, which decides what the footer may claim. */
-export type SignInStage = "live" | "renewing" | "given-up" | "none";
+export type SignInStage = "live" | "given-up" | "none";
 
 /**
  * A code is `live` only while it can still be used: a dead code under "Signing in to Atlassian…" is worse than
  * saying nothing, because it sends somebody off to use it.
  *
- * The clock decides as much as the state does, because neither the pod's report that it has run out of codes nor the
- * hub's sweep lands the instant a code's time is up. A `pending` login past its expiry is therefore `renewing`: the
- * pod relays another code, so one more is usually on its way, and the half-minute when it was the last code rather
- * than the next reads as the `given-up` it is about to become.
+ * The clock decides as much as the state does, because neither the pod's report that the code ran out nor the hub's
+ * sweep lands the instant a code's time is up. A `pending` login past its expiry is therefore already `given-up`:
+ * the pod relays one code (`ATLASSIAN_SIGN_IN_CODES`), so nothing follows it, and the seconds before that report
+ * arrives are no different to the owner from the minutes after.
  *
  * `since` is when the export now running was asked for. There is one sign-in row per kind, so the row a finished
  * export left behind is still the row this one reads: without it, clicking Export again announces that the sign-in
@@ -67,14 +67,11 @@ export function signInStage(login: LoginView | null | undefined, now: number, si
   if (login.state !== "pending") {
     return "none";
   }
-  return new Date(login.expiresAt).getTime() > now ? "live" : "renewing";
+  return new Date(login.expiresAt).getTime() > now ? "live" : "given-up";
 }
 
 /** What the footer says about the sign-in, beside the controls, or `null` when the code itself is the thing to show. */
 export function signInNote(stage: SignInStage): string | null {
-  if (stage === "renewing") {
-    return "That code's time ran out. Your assistant is relaying a fresh one, which will replace it here.";
-  }
   if (stage === "given-up") {
     return "The Atlassian sign-in expired before it was used, so no ticket was created. Export again for a fresh code.";
   }
@@ -250,7 +247,7 @@ export function JiraFooter({
       <JiraAction
         exported={exported}
         pending={pending}
-        signingIn={stage === "live" || stage === "renewing"}
+        signingIn={stage === "live"}
         connected={access.connected}
         blocked={blocked !== null}
         describedBy={hint === null ? undefined : hintId}
