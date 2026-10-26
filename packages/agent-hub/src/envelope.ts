@@ -127,28 +127,27 @@ export type JiraExportFrame = {
 };
 
 /**
- * How to carry out a pending Jira export, step by step, so every session runs the same `twg` command with the
- * person's own sign-in. The title and the document reach twg through files, never through the command line the
- * session writes, so nothing in them can change the command. Sent with every message while the export is pending,
- * so the session is told to report a ticket it already made rather than make another.
+ * How to carry out a pending Jira export: one command, `jira export`, that checks twg's sign-in, reads the
+ * document, creates the ticket with the person's own sign-in and reports it. One command because every tool call is
+ * another round trip to the model, and a step per call made exporting slow. The title and the document never appear
+ * in what the session types: the command reads them from the hub itself. Sent with every message while the export
+ * is pending; the command remembers the key it made for an export id, so running it again cannot make a second one.
+ *
+ * The session is told not to check anything around it, because looking at the document, twg or the new ticket is
+ * exactly the extra round trips the one command is there to save. The Bash timeout is raised because the command
+ * waits for the person when twg has to be signed in, and twg gives them five minutes for that.
  *
  * These are the last lines before the skill line, which keeps its place against the `---`. They go after the
- * attachment lines rather than before: a numbered procedure read straight through is harder to misfollow than one
- * with a block of absolute paths in the middle of it, and the attachment lines are facts that stand on their own
- * wherever they sit.
+ * attachment lines, which are facts that stand on their own wherever they sit.
  */
 export function jiraExportLines(jira: JiraExportFrame): string[] {
-  const dir = `/tmp/jira-export-${jira.export_id}`;
-  const labels = jira.labels.length ? ` --labels=${jira.labels.join(",")}` : "";
+  const labels = jira.labels.length ? ` --labels ${jira.labels.join(",")}` : "";
   return [
     `The user has asked you to export the conversation's document to the ${jira.project} backlog in Jira (export ${jira.export_id}).`,
-    `If you have already created a ticket for export ${jira.export_id}, do not create another: report its key with step 4 and say so.`,
-    "Otherwise, run exactly these steps. twg is signed in as the user, so they are the ticket's reporter:",
-    `1. If \`twg whoami\` fails, run \`${CLI} virtual atlassian-login\`; the user is shown a code to sign in with. Then carry on.`,
-    `2. mkdir -p ${dir} && ${CLI} artefact get --json | jq -r .title > ${dir}/title && ${CLI} artefact get > ${dir}/document.md`,
-    `3. twg jira workitem create --space=${jira.project} --type=${jira.issue_type} --summary="$(cat ${dir}/title)" --description="$(cat ${dir}/document.md)" --description-format=markdown${labels} --output=json --output-summary=none`,
-    `4. Report the key from its output with \`${CLI} jira report ${jira.export_id} --key <KEY>\`, or if it failed, why in one plain sentence with \`${CLI} jira report ${jira.export_id} --error "<why>"\`.`,
-    "Then tell the user in one short sentence which ticket it became, or why it could not be made."
+    `Run exactly this one command, with a Bash timeout of 600000 ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} jira export ${jira.export_id} --project ${jira.project} --type ${jira.issue_type}${labels}\``,
+    "It does every step itself: it checks twg is signed in as the user, reads the document, creates the ticket and reports it to the Assistant. Run again for the same export, it reports the ticket it already made rather than making another.",
+    "Do not read the document, check twg, or look at the ticket yourself, before or after; do not run any other command for this.",
+    "Then tell the user in one short sentence which ticket it became, or why it could not be made, in the words the command printed."
   ];
 }
 
@@ -248,7 +247,7 @@ export function assistantEnvelope(
     ...edited,
     // Files and Jira steps before the skill line, and the skill line last, for one reason: it says "the rest of the
     // message as its arguments", so it has to sit against the `---` and the body it is talking about. A block of
-    // absolute paths or of numbered steps between the two reads as though it were part of those arguments. Neither of
+    // absolute paths or of instructions between the two reads as though it were part of those arguments. Neither of
     // the other two carries that dependency — one is self-contained facts about where the bytes already are, the other
     // a procedure — so they lose nothing by going above. A message that is both `/skill` and a file therefore reads
     // as: here is the file, now run the skill.
