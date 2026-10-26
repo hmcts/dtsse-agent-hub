@@ -55,11 +55,25 @@ const STATE_CLASS: Record<Connection["state"], string> = {
   waiting: "text-asst-muted"
 };
 
+/**
+ * Eight teeth around a hub, every vertex on one of two radii about (10, 10) — 7.5 at a tooth tip, 5.6 at a root — so
+ * the outline is concentric with the hub circle and the whole glyph is square in its viewBox. The rest is the
+ * sidebar icon set's: a 20×20 viewBox, no fill, a 1.6 `currentColor` stroke and round joins.
+ */
 function CogIcon() {
   return (
-    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" className="h-[18px] w-[18px]">
-      <circle cx="10" cy="10" r="2.6" />
-      <path d="M10 2.2l1 1.9 2.1-.5 1.3 1.8-1.3 1.7.9 1.9 2.1.4v2.2l-2.1.4-.9 1.9 1.3 1.7-1.3 1.8-2.1-.5-1 1.9h-.9l-1-1.9-2.1.5-1.3-1.8 1.3-1.7-.9-1.9-2.1-.4V9.4l2.1-.4.9-1.9L4.7 5.4 6 3.6l2.1.5 1-1.9Z" />
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-[18px] w-[18px]"
+    >
+      <circle cx="10" cy="10" r="2.4" />
+      <path d="M9.09 2.56h1.82l.35 1.98 1.71.71 1.65-1.16 1.29 1.29-1.16 1.65.71 1.71 1.98.35v1.82l-1.98.35-.71 1.71 1.16 1.65-1.29 1.29-1.65-1.16-1.71.71-.35 1.98H9.09l-.35-1.98-1.71-.71-1.65 1.16-1.29-1.29 1.16-1.65-.71-1.71-1.98-.35V9.09l1.98-.35.71-1.71-1.16-1.65 1.29-1.29 1.65 1.16 1.71-.71.35-1.98Z" />
     </svg>
   );
 }
@@ -585,7 +599,9 @@ export function AssistantSettings({
           setShownTheme(shownNow());
           setOpen(true);
         }}
-        className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"
+        // 36px, the size of the composer's own buttons, with the two extra pixels each way taken out of the margin
+        // again so the footer row stays the height the 32px avatar beside it sets.
+        className="relative -my-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"
       >
         <CogIcon />
         {warning === null ? null : (
