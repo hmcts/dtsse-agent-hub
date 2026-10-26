@@ -83,7 +83,30 @@ if [ "${1:-}" = "hook" ]; then
     exit 0
 fi
 
-if ! command -v node >/dev/null 2>&1; then
+# PATH alone does not find node outside an interactive shell: the devcontainer base installs nvm with
+# PROFILE=/dev/null and sources it from .bashrc and .zshrc only, so npm's global bin directory is missing from
+# every `kubectl exec` into a pod and from every non-login non-interactive shell — `bash -lc` included. Reading a
+# pod's client version and reporting a stuck session both failed on that. nvm.sh is sourced rather than searched
+# for, as bin/virtual-agent-boot and virtual-agent/entrypoint.sh do; its own output is dropped, so nothing it says
+# reaches a caller reading this command's stdout.
+#
+# Defined below the gate, which always exits, so no hook can reach it: the gate decides whether to start node
+# without starting it, and a session that never enabled comms must pay nothing for this. The gate keeps its own
+# `command -v node` and its exit 0 besides, because a hook must never fail or slow a session.
+load_node() {
+    command -v node >/dev/null 2>&1 && return 0
+    # HOME is defaulted because `set -u` would abort on an unset one before the error below could explain itself,
+    # and a process started with no shell in the way need not have HOME at all.
+    export NVM_DIR="${NVM_DIR:-${HOME:-}/.nvm}"
+    # nvm.sh reads variables it has not set, which `set -u` would abort on.
+    set +u
+    # shellcheck disable=SC1091
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1
+    set -u
+    command -v node >/dev/null 2>&1
+}
+
+if ! load_node; then
     printf 'agent-hub: node is not on PATH. Install Node 22 or later (the devcontainer ships it).\n' >&2
     exit 1
 fi
