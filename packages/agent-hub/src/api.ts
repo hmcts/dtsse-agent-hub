@@ -13,6 +13,8 @@ const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 /** One attachment part is up to 4 MiB, which a slow pod connection will not pull inside the JSON timeout. */
 const PART_TIMEOUT_MS = 60000;
+/** How much of a body that is not the contract's `{ error }` object is worth keeping, and saying. */
+const BODY_TEXT_MAX = 200;
 
 /** The credential kinds `docs/agent-api.md` defines; any other gives 404. */
 export const CREDENTIAL_KINDS = ["github", "azure", "claude", "bedrock", "jenkins", "atlassian", "claude_md", "git_identity"] as const;
@@ -229,20 +231,31 @@ export type CredentialResponse = { value: string };
 export type LoginCodeResponse = { code: string };
 
 /**
- * How every call in this module reads a response body: the service's JSON, or — when it sent something that is
- * not JSON at all, such as a page — the first of that text under `error`. Streams read theirs this way too,
- * rather than discarding a body they cannot parse, because a client talking to a service older than itself meets
- * an unmatched path on a stream as readily as anywhere else and `isMissingRoute` has to be able to tell.
+ * How every call in this module reads a response body: the service's JSON when it sent a JSON object, and
+ * otherwise the first `BODY_TEXT_MAX` characters of whatever it did send, under `error`. A number, a string or an
+ * array is text as far as this is concerned — only an object can be the `{ error }` the contract promises, and
+ * typing a bare `404` as one would be a lie the callers below would carry.
+ *
+ * Streams read theirs this way too, rather than discarding a body they cannot parse, because a client talking to
+ * a service older than itself meets an unmatched path on a stream as readily as anywhere else and
+ * `isMissingRoute` has to be able to tell.
+ *
+ * `request` also reads its successful responses through this, so the rule above is what a 2xx payload gets as
+ * well: every route answering one sends a JSON object, and the ones that send nothing answer `204`, whose empty
+ * body gives `null`. A route that started answering 2xx with a top-level array, number or string would arrive at
+ * its caller as `{ error: "<the text>" }` cast to the expected type, so give it its own read rather than this one.
  */
 const readBody = (text: string): ApiErrorBody | null => {
   if (!text) {
     return null;
   }
   try {
-    return JSON.parse(text) as ApiErrorBody;
-  } catch {
-    return { error: text.slice(0, 200) };
-  }
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as ApiErrorBody;
+    }
+  } catch {}
+  return { error: text.slice(0, BODY_TEXT_MAX) };
 };
 
 // A body that came back as a page rather than this service's JSON: whatever a route of its own answers with, it
@@ -255,7 +268,9 @@ export class ApiError extends Error {
   readonly body: ApiErrorBody | null;
 
   constructor(status: number, body: ApiErrorBody | null, method: string, path: string) {
-    const said = body?.error && !isErrorPage(body) ? ` ${body.error}` : "";
+    // Bounded like the text bodies `readBody` keeps, because a service's own `error` is not length-checked either
+    // and this message is what reaches a log.
+    const said = body?.error && !isErrorPage(body) ? ` ${String(body.error).slice(0, BODY_TEXT_MAX)}` : "";
     super(`${method} ${path} failed: ${status}${said}`);
     this.status = status;
     this.body = body;

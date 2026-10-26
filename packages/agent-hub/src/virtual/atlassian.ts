@@ -368,10 +368,14 @@ export async function syncAtlassianAuth({
   // What that budget is depends on how the hub is failing. Refusing fast — a connection reset, or the 503 an
   // ingress gives while a replica rolls — it is the 31 seconds of backoff alone, which is the case this is for.
   // Hanging instead, every attempt also waits out `REQUEST_TIMEOUT_MS`, and an aborted fetch carries no numeric
-  // status so `retryableByStatus` keeps going: six attempts, up to ~121 seconds. That overruns the 60 the pod
-  // gets after SIGTERM and is meant to — SIGKILL then cuts short attempts that were failing anyway, and this
-  // store runs first in a cache-sync pass precisely so the grace period is spent here rather than on the Azure
-  // cache, which the next pod can recover from without it.
+  // status so `retryableByStatus` keeps going: six attempts, up to ~121 seconds.
+  //
+  // One figure for two deadlines, and they disagree. A cache-sync pass between the periodic runs has no ceiling
+  // and wants every one of those 121 seconds; the pass on SIGTERM has whatever is left of the pod's 60 and will
+  // be SIGKILLed mid-attempt. Nothing here reads the clock, so the longer deadline is the one served — a shorter
+  // budget would not save a store that needs longer than the grace period anyway, and would give up on a hub
+  // that was about to answer. What the SIGTERM pass can do instead is spend its time on this store rather than
+  // another, which is `cache-sync.ts`'s business and is where that reasoning lives.
   await withRetry(() => api.putCredential(id, "atlassian", value), { wait });
   fs.writeFileSync(atlassianShaFile(), `${sha}\n`);
   return "stored";

@@ -43,6 +43,12 @@ export async function cacheSync({
     // Entra's refresh tokens for a public client are not single-use, so a stale MSAL cache restored to the next
     // pod still refreshes. On SIGTERM the two share whatever is left of the pod's 60 seconds, and the one that
     // cannot be recovered from should not be the one spending what the other left behind.
+    //
+    // The claim is only that Atlassian never comes off worse for the order, not that the order rescues a pass
+    // that has run out of time. Against a hub refusing fast both stores fit either way round; against one that
+    // hangs, the pass in flight can take 181 seconds on its own — a 60-second `twg auth refresh` and a
+    // 121-second store — so SIGKILL lands before the final pass starts and neither store completes whichever
+    // goes first.
     try {
       atlassian = await syncAtlassianAuth({ api, id, env, refresh });
       if (atlassian === "stored") {
