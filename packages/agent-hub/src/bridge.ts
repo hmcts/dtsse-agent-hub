@@ -13,6 +13,7 @@ import {
   type AssistantProduct,
   type AttachmentOutcome,
   assistantEnvelope,
+  type ConfluenceExportFrame,
   directEnvelope,
   type EnvelopeOptions,
   type JiraExportFrame,
@@ -167,6 +168,7 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
     artefact_updated_by: asNullableString(raw.artefact_updated_by),
     jira_export: parseJiraExportFrame(raw.jira_export),
+    confluence_export: parseConfluenceExportFrame(raw.confluence_export),
     // Left as it came: `readAttachments`, at the point of delivery, is what decides which entries this client will
     // fetch and what the envelope says about the rest, so checking them here would only do it twice.
     attachments: raw.attachments
@@ -197,6 +199,28 @@ export function parseJiraExportFrame(value: unknown): JiraExportFrame | null {
     return null;
   }
   return { export_id: raw.export_id, project: raw.project, issue_type: raw.issue_type, labels: raw.labels as string[] };
+}
+
+const NUMERIC_ID_RE = /^[0-9]{1,20}$/;
+
+/**
+ * A pending Confluence export on the frame, or null. Its values go into the `confluence export` command the session is
+ * told to run, so anything but an id and two numeric ids is dropped rather than passed on.
+ */
+export function parseConfluenceExportFrame(value: unknown): ConfluenceExportFrame | null {
+  const raw = asRecord(value);
+  if (
+    !raw ||
+    typeof raw.export_id !== "string" ||
+    !EXPORT_ID_RE.test(raw.export_id) ||
+    typeof raw.space_id !== "string" ||
+    !NUMERIC_ID_RE.test(raw.space_id) ||
+    typeof raw.parent_id !== "string" ||
+    !NUMERIC_ID_RE.test(raw.parent_id)
+  ) {
+    return null;
+  }
+  return { export_id: raw.export_id, space_id: raw.space_id, parent_id: raw.parent_id };
 }
 
 /** The recorded product of the last delivery, which only this module writes; null for anything else. */

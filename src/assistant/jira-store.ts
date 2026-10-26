@@ -26,7 +26,7 @@ export async function requestJiraExport(
   now: Date = new Date()
 ): Promise<void> {
   if (!isJiraProject(project)) {
-    throw new HttpError(400, "pick a Jira board from the list");
+    throw new HttpError(400, "pick a Jira project to export to");
   }
   const staleBefore = new Date(now.getTime() - JIRA_EXPORT_TIMEOUT_MS);
   await prisma.$transaction(async (tx) => {

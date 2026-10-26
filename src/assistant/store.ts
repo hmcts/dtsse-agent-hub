@@ -4,6 +4,7 @@ import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
+import { CONFLUENCE_SELECT, type ConfluenceExportFrame, pendingConfluenceExport } from "./confluence.ts";
 import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
 import { DEFAULT_PRODUCT, isProduct, productLabel, storedProduct } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
@@ -671,7 +672,7 @@ export async function writeArtefact(
  * A field only some clients read belongs behind a claim, left out of the frame for a client that did not claim it, so
  * the hub does not send where it cannot be read; `client_features` on register (`src/agents/client-features.ts`) is
  * what says which client claimed what. No field here is gated on a claim, and two of them are not read by every
- * published client: `attachments` and `jira_export`. Both go to every session.
+ * published client: `attachments`, `jira_export` and `confluence_export`. All three go to every session.
  *
  * A client older than attachments drops that message's files in silence. Gating `attachments` is two lines:
  *   1. `clientFeatures: true` in the `select` below. It is free: a column of the `agent` row this read already
@@ -693,6 +694,7 @@ export async function writeArtefact(
  * timeout; leaving the field out of the frame changes none of that. The claim belongs one step earlier, where the
  * person can be told: `exportArtefactToJira` refusing an export the conversation's session could not carry out, as
  * `canStopAssistantAnswer` refuses a stop. That is not built, and the published client claims no `jira_export`.
+ * `confluence_export` is the same case and is left the same way.
  */
 export interface AssistantFrame {
   conversation_id: string;
@@ -702,6 +704,8 @@ export interface AssistantFrame {
   artefact_updated_by: "user" | "agent" | null;
   /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
   jira_export?: JiraExportFrame;
+  /** While an export to Confluence is pending: where to create the page, which the session carries out with `twg`. */
+  confluence_export?: ConfluenceExportFrame;
   /**
    * The files the person attached to this message, for the pod to fetch to its disk before it delivers the message.
    * Absent from a frame built without a message — a wake rather than a delivery — and an empty array for a message
@@ -716,7 +720,7 @@ export interface AssistantFrame {
 export async function assistantFrame(db: Database, agentId: string, messageId?: bigint): Promise<AssistantFrame | undefined> {
   const row = await db.agent.findUnique({
     where: { id: agentId },
-    select: { assistantConversation: { select: { id: true, product: true, ...ARTEFACT_SELECT, ...JIRA_SELECT } } }
+    select: { assistantConversation: { select: { id: true, product: true, ...ARTEFACT_SELECT, ...JIRA_SELECT, ...CONFLUENCE_SELECT } } }
   });
   const conversation = row?.assistantConversation;
   if (conversation === null || conversation === undefined) {
@@ -724,6 +728,7 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
   }
   const artefact = toArtefact(conversation);
   const jira = pendingJiraExport(conversation);
+  const confluence = pendingConfluenceExport(conversation);
   return {
     conversation_id: conversation.id,
     // What the conversation is stored as, not what the picker can show: this is the subject the session has been
@@ -733,6 +738,7 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     artefact_version: artefact.version,
     artefact_updated_by: artefact.updatedBy,
     ...(jira === undefined ? {} : { jira_export: jira }),
+    ...(confluence === undefined ? {} : { confluence_export: confluence }),
     ...(messageId === undefined ? {} : { attachments: await frameAttachments(db, messageId) })
   };
 }

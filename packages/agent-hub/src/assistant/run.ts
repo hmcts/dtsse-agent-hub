@@ -4,8 +4,11 @@
 import type { Api } from "../api.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../bridge.ts";
 import { createSseParser, type SseEvent } from "../sse.ts";
+import { atlassianLogin } from "../virtual/atlassian.ts";
+import { run } from "../virtual/sign-in.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
+import { createLookupRunner, type LookupDeps } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
 
@@ -20,13 +23,15 @@ const STREAM_IDLE_MS = 45000;
 const RECONCILE_MS = 10 * 60 * 1000;
 
 export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOptions, "api" | "id"> & {
-  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations" | "putUploads" | "putMemory">;
+  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations" | "putUploads" | "putLookup" | "putMemory">;
   id: string;
   /** The filesystem the uploads report and the deletions use; a test passes its own. */
   uploadsFs?: DiskFs;
   /** Where the memory cgroup is read from, and with what; a test passes its own rather than a real cgroup. */
   cgroupRoot?: string;
   memoryFs?: MemoryFs;
+  /** How lookups run twg and sign it in; a test passes its own rather than a twg on PATH. */
+  lookups?: Partial<LookupDeps>;
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
   signal?: AbortSignal;
   tickMs?: number;
@@ -48,11 +53,22 @@ export async function runAssistantSupervisor({
   idleTimeoutMs = Number(env.AGENT_HUB_STREAM_IDLE_MS) || STREAM_IDLE_MS,
   reconcileMs = Number(env.AGENT_HUB_UPLOAD_RECONCILE_MS) || RECONCILE_MS,
   uploadsFs,
+  lookups: lookupDeps = {},
   cgroupRoot,
   memoryFs,
   ...options
 }: RunAssistantSupervisorOptions): Promise<void> {
   const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, ...options });
+  // Lookups run beside the supervisor rather than on its chain: see `createLookupRunner`.
+  const lookups = createLookupRunner({
+    api,
+    id,
+    env,
+    say,
+    run: lookupDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
+    login: lookupDeps.login ?? (async () => (await atlassianLogin({ env })) !== "not-signed-in"),
+    ...(lookupDeps.env === undefined ? {} : { env: lookupDeps.env })
+  });
   const uploads = {
     api,
     id,
@@ -135,6 +151,13 @@ export async function runAssistantSupervisor({
           handle(supervisor.interrupt, event);
         } else if (event.event === "close") {
           handle(supervisor.close, event);
+        } else if (event.event === "lookup") {
+          // Not through `handle`, whose chain runs one event after another: somebody is typing and waiting for this.
+          try {
+            lookups.lookup(JSON.parse(event.data));
+          } catch {
+            say("unparseable lookup event");
+          }
         } else if (event.event === "delete_uploads") {
           handle(removeUploads, event);
         } else if (event.event === "reconnect") {
