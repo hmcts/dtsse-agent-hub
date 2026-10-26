@@ -92,17 +92,24 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
 /**
  * How many HMCTS Assistant conversation sessions a pod runs at once beside its own, by size.
  *
- * Each session is a Claude process of its own, with its own MCP servers, hai wrapper and bridge beside it, which
- * measures at about 1.2Gi on a running `small` pod — three sessions there hold 4.1Gi of a cgroup whose limit is the
- * 8Gi `SIZE_RESOURCES` gives it. So each cap is set against the memory limit of its own size, leaving the pod's own
- * session and the supervisors room: `medium` keeps about a third of its 16Gi free at 8, and `large` half of its 32Gi
- * at 12.
+ * **A session costs about 1.2Gi and about 100m of CPU while it sits idle**, measured on a running `small` pod: three
+ * sessions, the pod's own included, held 4.1Gi of its 8Gi cgroup limit at 314m. Each is a Claude process of its own,
+ * with its own MCP servers, hai wrapper and bridge beside it, and the MCP servers are the larger half of that.
  *
- * `small` at 5 is the exception: five sessions and the pod's own come to roughly 7.5Gi of that 8Gi limit, and to
- * nearly twice the 4Gi the pod requests. A small pod running five busy conversations at once is the case to watch,
- * and `small` the size whose memory to raise if it OOMs or is evicted under node pressure.
+ * `small` at 3 puts four sessions and the supervisors at roughly 5.3Gi of the 8Gi limit `SIZE_RESOURCES` gives it,
+ * which leaves a third of it free for the sessions that are actually working. It is over the 4Gi a small pod
+ * requests, as two sessions already were, so a small pod is a candidate for eviction under node pressure either way.
+ * `small` keeps that 4Gi deliberately: someone who needs more conversations at once moves up a size rather than
+ * every small pod costing more.
+ *
+ * `medium` and `large` are left where they are, because the measurement above is of a `small` pod and nobody has
+ * asked for more sessions on the others. Memory alone would allow more — a third free of `medium`'s 16Gi is about
+ * eight sessions, of `large`'s 32Gi about seventeen — but memory is not what binds: `medium` has the same 4-CPU
+ * limit as `small`, so it buys guaranteed memory rather than more parallelism, and seventeen Claude processes would
+ * saturate `large`'s 8 CPUs long before its memory. Raising either wants a measurement taken on that size, with the
+ * sessions busy rather than idle, and rolls every pod of it.
  */
-export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 5, medium: 8, large: 12 };
+export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 3, medium: 4, large: 6 };
 
 /**
  * The pod is given its public domain rather than its URLs, so that a server starting or stopping changes the Service

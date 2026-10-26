@@ -20,10 +20,11 @@ Delete this file once everything below is done or has moved to Jira.
   - a product change.
 - [ ] Try it in a real pod in preview, with `AGENT_HUB_SESSION_IDLE_MINUTES=1` to see sessions stop. Check that:
   - two chats run two `c-*` sessions;
-  - a sixth queues on `small`;
+  - a fourth queues on `small`;
   - a reopened chat resumes the same session id;
   - `scripts/agent-hub artefact put` updates the panel live.
-- [ ] Decide whether `small` should get more memory. Measured on a running `small` pod: three sessions, the pod's own included, hold 4.1Gi of its 8Gi cgroup limit, so a session with its MCP servers, hai wrapper and bridge costs about 1.2Gi. At the cap of 5 (`CONVERSATION_SESSIONS` in `src/orchestrator/manifests.ts`), five conversations and the pod's own session come to roughly 7.5Gi of that 8Gi, and to nearly twice the 4Gi `SIZE_RESOURCES` has `small` request — so five busy conversations on a `small` pod is the case that OOMs or gets evicted under node pressure. `medium` at 8 and `large` at 12 keep a third and a half of their limits free.
+- [x] Check memory and CPU with several sessions running at once. Measured on a running `small` pod: three sessions, the pod's own included, hold 4.1Gi of its 8Gi cgroup limit at 314m of CPU, so a session with its MCP servers, hai wrapper and bridge costs about 1.2Gi and about 100m idle. `small`'s cap is 3 on that basis (`CONVERSATION_SESSIONS` in `src/orchestrator/manifests.ts`), which leaves a third of the limit free. Still to do on `medium` and `large`, and with the sessions busy rather than idle, which is what raising either of their caps wants.
+- [x] **`small` does not get more memory.** It stays on 1 CPU / 4Gi requested: someone who needs more conversations at once moves up a size, rather than every `small` pod costing more. That is why the cap is 3 and not higher — three plus the pod's own fits the 8Gi limit with headroom, where five would have crowded it at about 7.5Gi.
 - [ ] Tell Linus's `move-agent-hub-client` session what changed: `assistant.mjs` and the `artefact` commands still need absorbing into `packages/agent-hub`, there is no `AGENT_HUB_VIRTUAL_MODE` now, and `entrypoint.sh` always starts the supervisor.
 
 ## Rollout
