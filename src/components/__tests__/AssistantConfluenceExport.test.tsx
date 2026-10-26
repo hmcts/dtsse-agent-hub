@@ -257,6 +257,19 @@ describe("AtlassianSearch", () => {
     return { onPick, onCancel, view };
   }
 
+  it("should leave no empty results box under the search when nothing has been found", async () => {
+    vi.useFakeTimers();
+    const { view } = search(answering({ status: "done", results: [] }));
+    const list = () => view.container.querySelector('[role="listbox"]') as HTMLElement;
+
+    expect(list().classList.contains("hidden")).toBe(true);
+    expect(list().classList.contains("flex")).toBe(false);
+
+    await typeAndWait("Find a page", "design");
+
+    expect(list().classList.contains("hidden")).toBe(true);
+  });
+
   it("should search once for a burst of typing, and not at all for a single letter", async () => {
     vi.useFakeTimers();
     const lookUp = answering({ status: "done", results: [] });
