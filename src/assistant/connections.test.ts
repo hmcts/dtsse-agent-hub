@@ -5,8 +5,11 @@ import type { CredentialStatus } from "../credentials/store.ts";
 import { isSignInKind, type LoginState, type LoginView } from "../virtual-agents/logins.ts";
 import { neededCredentials, OPTIONAL_CREDENTIALS } from "../virtual-agents/views.ts";
 import {
+  CONNECTION_STATES,
   CONNECTORS,
   type Connection,
+  type ConnectionState,
+  codeCollectable,
   connectionState,
   connections,
   connectionsData,
@@ -19,8 +22,7 @@ import {
   needsPerson,
   OFFERED_OPTIONAL,
   offeredConnections,
-  PROMPTED_CONNECTIONS,
-  PROMPTED_WHEN_ASKED,
+  PROMPTED_WHEN_MISSING,
   type StoredCredential,
   signInPrompt
 } from "./connections.ts";
@@ -44,7 +46,16 @@ function held(updatedAt: string | null = STORED_AT): StoredCredential {
 const NONE: StoredCredential = { stored: false, updatedAt: null };
 
 function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(NOW + 600_000).toISOString(), updatedAt = BEFORE_STORED): LoginView {
-  return { kind, prompt: "device_code", userCode: "ABCD-1234", verificationUri: "https://example.com/device", expiresAt, state, updatedAt, codeWaiting: false };
+  return {
+    kind,
+    prompt: "device_code",
+    userCode: "ABCD-1234",
+    verificationUri: "https://example.com/device",
+    expiresAt,
+    state,
+    updatedAt,
+    codeWaitingUntil: null
+  };
 }
 
 /** A sign-in that lapsed after the credential it was to replace was saved: the credential the pod could not use. */
@@ -110,7 +121,7 @@ describe("connectionState", () => {
   });
 
   it.each([held(), NONE])("should be finishing when the person has sent a code back and the pod has yet to take it", (stored) => {
-    const sent = { ...login("claude", "pending"), prompt: "paste_code" as const, userCode: null, codeWaiting: true };
+    const sent = { ...login("claude", "pending"), prompt: "paste_code" as const, userCode: null, codeWaitingUntil: new Date(NOW + 5 * 60_000).toISOString() };
 
     expect(connectionState("login", sent, stored, NOW)).toBe("finishing");
   });
@@ -192,23 +203,71 @@ describe("lapsedSinceStored", () => {
   });
 });
 
+describe("codeCollectable", () => {
+  /** A login the person has pasted a code for, which the pod has until `until` to collect. */
+  function sent(until: string | null): LoginView {
+    return { ...login("claude", "pending"), prompt: "paste_code", userCode: null, codeWaitingUntil: until };
+  }
+
+  it("should count a pasted code the pod can still collect when asked", () => {
+    expect(codeCollectable(sent(new Date(NOW + 60_000).toISOString()), NOW)).toBe(true);
+  });
+
+  /**
+   * `takePastedCode` hands the pod nothing once the deadline has passed and leaves the column set, and a login runs
+   * for `MAX_LOGIN_SECONDS` while a pasted code keeps for `PASTED_CODE_TTL_MS`. Reading the column as the answer
+   * would tell the person their code was on its way for the next fifty minutes with the box to paste another hidden,
+   * while `storePastedCode` would still take one.
+   */
+  it("should not count a pasted code the pod can no longer collect, whatever the column still says", () => {
+    expect(codeCollectable(sent(new Date(NOW - 1000).toISOString()), NOW)).toBe(false);
+  });
+
+  it("should not count a sign-in nobody has pasted a code for when asked", () => {
+    expect(codeCollectable(sent(null), NOW)).toBe(false);
+  });
+
+  it("should not count anything when there is no sign-in to go on", () => {
+    expect(codeCollectable(undefined, NOW)).toBe(false);
+  });
+});
+
 describe("needsPerson", () => {
-  it.each(["refreshing", "signing-in", "expired", "failed"] as const)("should count %s as a sign-in only the person can finish", (state) => {
+  const WAITS_ON_THEM: ConnectionState[] = ["refreshing", "signing-in", "expired", "failed"];
+  const DOES_NOT: ConnectionState[] = ["connected", "finishing", "waiting"];
+
+  it.each(WAITS_ON_THEM)("should count %s as a sign-in only the person can finish", (state) => {
     expect(needsPerson(state)).toBe(true);
   });
 
-  it.each(["connected", "finishing", "waiting"] as const)("should not count %s as a sign-in waiting on the person", (state) => {
+  it.each(DOES_NOT)("should not count %s as a sign-in waiting on the person", (state) => {
     expect(needsPerson(state)).toBe(false);
+  });
+
+  /**
+   * Every surface that prompts is built on this, so a state it had no answer for would be a sign-in nobody was told
+   * about. The guarantee is the table it reads, which does not compile without an entry; this pins that the states
+   * above are all of them, so a new one is a decision taken here as well.
+   */
+  it("should be decided for every state a sign-in can be in", () => {
+    expect([...WAITS_ON_THEM, ...DOES_NOT].sort((a, b) => a.localeCompare(b))).toEqual([...CONNECTION_STATES].sort((a, b) => a.localeCompare(b)));
   });
 });
 
 describe("hasLapsed", () => {
-  it.each(["expired", "failed"] as const)("should count %s as a sign-in that has lapsed", (state) => {
+  const LAPSED: ConnectionState[] = ["expired", "failed"];
+  const NOT: ConnectionState[] = ["connected", "finishing", "refreshing", "signing-in", "waiting"];
+
+  it.each(LAPSED)("should count %s as a sign-in that has lapsed", (state) => {
     expect(hasLapsed(state)).toBe(true);
   });
 
-  it.each(["connected", "refreshing", "signing-in", "waiting"] as const)("should not count %s as a sign-in that has lapsed", (state) => {
+  it.each(NOT)("should not count %s as a sign-in that has lapsed", (state) => {
     expect(hasLapsed(state)).toBe(false);
+  });
+
+  it("should be decided for every state a sign-in can be in", () => {
+    expect([...LAPSED, ...NOT].sort((a, b) => a.localeCompare(b))).toEqual([...CONNECTION_STATES].sort((a, b) => a.localeCompare(b)));
   });
 });
 
@@ -305,9 +364,10 @@ describe("connectionsWarning", () => {
     expect(connectionsWarning(rows)).toBeNull();
   });
 
-  it("should prompt about the needed sign-ins and, once their assistant has asked, the optional one", () => {
-    expect([...PROMPTED_CONNECTIONS]).toEqual(["github", "azure"]);
-    expect([...PROMPTED_WHEN_ASKED]).toEqual(["atlassian"]);
+  // Every kind is prompted about once the assistant has asked for it; being never set up prompts only for the two
+  // the assistant cannot start without, and the model route is left to the connections banner that asks for it.
+  it("should prompt about only the two sign-ins a person must have when none was ever set up", () => {
+    expect([...PROMPTED_WHEN_MISSING]).toEqual(["github", "azure"]);
   });
 
   it("should be nothing when there are no sign-ins to report on", () => {
@@ -315,8 +375,8 @@ describe("connectionsWarning", () => {
   });
 
   it.each(["github", "azure"] as const)("should name %s when it alone is not connected", (kind) => {
-    const stored = PROMPTED_CONNECTIONS.filter((other) => other !== kind).map((other) => status(other, true));
-    const rows = list([...PROMPTED_CONNECTIONS], stored);
+    const stored = PROMPTED_WHEN_MISSING.filter((other: CredentialKind) => other !== kind).map((other: CredentialKind) => status(other, true));
+    const rows = list([...PROMPTED_WHEN_MISSING], stored);
 
     expect(connectionsWarning(rows)).toBe(`${CONNECTORS[kind]?.name} needs your attention`);
   });
@@ -404,7 +464,7 @@ describe("connectionsWarning", () => {
   });
 
   it("should raise no warning nobody can act on when the hub cannot read the person's credentials", () => {
-    const rows = connections({ kinds: [...PROMPTED_CONNECTIONS], statuses: [], logins: [], unavailable: "no Key Vault here" }, checklistState, NOW);
+    const rows = connections({ kinds: [...PROMPTED_WHEN_MISSING], statuses: [], logins: [], unavailable: "no Key Vault here" }, checklistState, NOW);
 
     expect(connectionsWarning(rows)).toBeNull();
   });
@@ -430,15 +490,17 @@ describe("signInPrompt", () => {
     const prompt = signInPrompt(list(["github", "azure", "atlassian"], CONNECTED, [login("atlassian", "pending")]));
 
     expect(prompt).toEqual({
-      label: "Sign in again",
+      label: "Sign in",
       message: "Your assistant is waiting for you to sign in to Atlassian.",
       action: "Show the sign-in"
     });
   });
 
-  it("should name the sign-in when a stored credential is the one a later sign-in lapsed over", () => {
+  // Worded apart from a live code, because what there is to do differs — type this, or ask for another — and because
+  // a sentence that read the same for both would be read out once and then not again when the thing to do changed.
+  it("should say the sign-in could not be made when a stored credential is the one it lapsed over", () => {
     expect(signInPrompt(list(["github", "azure", "atlassian"], CONNECTED, [lapsed("atlassian")]))?.message).toBe(
-      "Your assistant is waiting for you to sign in to Atlassian."
+      "Your assistant could not sign in to Atlassian, and is not asking again by itself."
     );
   });
 
@@ -493,7 +555,7 @@ describe("connectionsData", () => {
  */
 describe("offeredConnections", () => {
   function offer(needed: CredentialKind[], logins: LoginView[] = []) {
-    return offeredConnections({ needed, optional: OPTIONAL_CREDENTIALS, logins }).map((row) => row.kind);
+    return offeredConnections({ needed, optional: OPTIONAL_CREDENTIALS, logins }, NOW).map((row) => row.kind);
   }
 
   it.each(["own-licence", "bedrock"] as const)("should offer a row for every credential the %s route needs", (route) => {
@@ -551,12 +613,37 @@ describe("offeredConnections", () => {
     expect(offer(["github", "azure", "bedrock"], [login("jenkins", state)])).toContain("jenkins");
   });
 
+  /**
+   * `saveCredential` refuses a Claude token from somebody whose agents run on Amazon Bedrock, and the only control a
+   * lapsed Claude row has is that box. Nothing clears the login row either — `startLogin` overwrites only on a new
+   * relay, and the states that end one need a pod's report — so a row here would be a banner naming a sign-in the
+   * person can neither satisfy nor dismiss, for good. The ask names from this set, so leaving it out covers both.
+   */
+  it.each(["expired", "failed"] as const)("should offer no row for a %s sign-in the hub would take no value for", (state) => {
+    expect(offer(["github", "azure", "bedrock"], [login("claude", state)])).not.toContain("claude");
+  });
+
+  it("should offer no row for a code that ran out for a kind the hub would take no value for", () => {
+    const stale = login("claude", "pending", new Date(NOW - 1000).toISOString());
+
+    expect(offer(["github", "azure", "bedrock"], [stale])).not.toContain("claude");
+  });
+
+  // A live one is always offered, whatever the kind: finishing it sends the code back to the pod through
+  // `storePastedCode`, which is not route-aware, so there is always something to do about it.
+  it("should offer a row for a live sign-in even for a kind the hub would take no value for", () => {
+    expect(offer(["github", "azure", "bedrock"], [login("claude", "pending")])).toContain("claude");
+  });
+
   it("should offer no row for a credential that is not a connection", () => {
     expect(offer(["github", "claude_md", "git_identity"])).toEqual(["github", "atlassian"]);
   });
 
   it("should word every row it offers", () => {
-    for (const row of offeredConnections({ needed: ["github", "azure", "claude"], optional: OPTIONAL_CREDENTIALS, logins: [login("jenkins", "pending")] })) {
+    for (const row of offeredConnections(
+      { needed: ["github", "azure", "claude"], optional: OPTIONAL_CREDENTIALS, logins: [login("jenkins", "pending")] },
+      NOW
+    )) {
       expect(row.connector.name).not.toBe("");
       expect(row.connector.initial).not.toBe("");
     }

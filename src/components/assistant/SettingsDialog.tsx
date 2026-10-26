@@ -129,10 +129,15 @@ function Connections({ list, unavailable, warning }: Pick<SettingsView, "list" |
       {warning === null ? null : (
         <div className="flex flex-col gap-1 rounded-[10px] border border-asst-warn bg-asst-raised px-3.5 py-3">
           <p className="text-[13px] font-semibold text-asst-text">{warning}</p>
-          {/* This section lists where each sign-in stands and nothing more, so it says where the sign-in itself is. */}
+          {/*
+           * This section lists where each sign-in stands and nothing more, so it says where to go and not what will
+           * be there. What is above the chats is whichever ask applies — the accounts to connect on a first visit, a
+           * code to type, or a lapsed sign-in to ask for again — and promising one of the three would be wrong for
+           * the other two.
+           */}
           <p className="text-pretty text-[13px] text-asst-body">
-            Your assistant cannot use these until you have signed in. Close this and the message above your chats shows you the sign-in, with the code to enter
-            or a way to ask for a new one. You can carry on chatting either way.
+            Your assistant cannot use these until you have signed in. Close this and the message above your chats takes you to them. You can carry on chatting
+            either way.
           </p>
         </div>
       )}

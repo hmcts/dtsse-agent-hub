@@ -772,7 +772,7 @@ function login(overrides: Partial<LoginView> = {}): LoginView {
     expiresAt: "2026-10-05T12:10:00.000Z",
     state: "pending",
     updatedAt: "2026-10-05T12:08:00.000Z",
-    codeWaiting: false,
+    codeWaitingUntil: null,
     ...overrides
   };
 }
@@ -877,7 +877,7 @@ describe("OnboardingChecklist", () => {
         reconnect={ok()}
         needed={["claude"]}
         statuses={[]}
-        logins={[login({ kind: "claude", prompt: "paste_code", codeWaiting: true })]}
+        logins={[login({ kind: "claude", prompt: "paste_code", codeWaitingUntil: new Date(Date.now() + 5 * 60_000).toISOString() })]}
         paste={ok()}
         save={ok()}
         now={NOW}
@@ -886,6 +886,38 @@ describe("OnboardingChecklist", () => {
 
     expect(screen.queryByRole("form")).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("waiting for your virtual agent");
+  });
+
+  /**
+   * A pasted code keeps for `PASTED_CODE_TTL_MS` while the sign-in itself can run for `MAX_LOGIN_SECONDS`, and
+   * `takePastedCode` gives the pod nothing past the deadline without clearing the column. A card going by the column
+   * would promise for the rest of the hour that a dead code was on its way, with the box hidden — and
+   * `storePastedCode` would still take another.
+   */
+  it("should ask for the code again when the one the owner pasted is past being collected", () => {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired="running"
+        reconnect={ok()}
+        needed={["claude"]}
+        statuses={[]}
+        logins={[
+          login({
+            kind: "claude",
+            prompt: "paste_code",
+            expiresAt: "2026-10-05T12:50:00.000Z",
+            codeWaitingUntil: "2026-10-05T11:55:00.000Z"
+          })
+        ]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("form", { name: "Paste the Claude code" })).toBeTruthy();
   });
 
   it("should offer a password box for the Bedrock API key and save it as the owner's credential when it is not stored", async () => {

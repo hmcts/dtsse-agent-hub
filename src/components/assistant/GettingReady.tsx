@@ -5,6 +5,7 @@ import {
   CONNECTION_DETAILS,
   type ConnectionsPrompt,
   type Connector,
+  codeCollectable,
   connectionState,
   connections,
   connectionsPrompt,
@@ -31,7 +32,6 @@ import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { Mark } from "@/components/assistant/AssistantShell";
 import { useVisit } from "@/components/assistant/AssistantVisit";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
-import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { LoginCountdown } from "@/components/virtual-agents/LoginCountdown";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import type { CredentialKind } from "@/credentials/names";
@@ -61,6 +61,23 @@ function useTicked(): boolean {
     setTicked(true);
   }, []);
   return ticked;
+}
+
+/**
+ * The clock every sign-in on this screen is read against: the browser's, or a time before all of them for as long as
+ * the server's render stands.
+ *
+ * The server renders these rows too and its clock is not the browser's, so a code expiring between the two reads
+ * would be a countdown in the HTML and a lapsed row in the hydration. `BEFORE_EVERYTHING` reads every relayed code as
+ * still live, which is what the HTML says either way, and the browser's own clock takes over on the next frame. It
+ * changes nothing for a sign-in a pod has already reported on, because that answer needs no clock.
+ */
+const BEFORE_EVERYTHING = 0;
+
+function useSignInClock(): number {
+  const ticked = useTicked();
+  const now = useNow();
+  return ticked ? now : BEFORE_EVERYTHING;
 }
 
 /**
@@ -100,8 +117,26 @@ function useWarmupMessage(phase: WarmupPhase, rotating: boolean, since: number):
   return { message, slow };
 }
 
-/** What to do for a sign-in the assistant is waiting on: a code to enter on a page, or a code to paste back. */
-function SignIn({ assistantId, login, name, paste }: { assistantId: string; login: LoginView; name: string; paste: FormAction }) {
+/**
+ * What to do for a sign-in the assistant is waiting on: a code to enter on a page, or a code to paste back.
+ *
+ * `collectable` is whether a code they have already pasted is still there for the pod, rather than whether they ever
+ * pasted one: a code the pod never came for stops being any use after `PASTED_CODE_TTL_MS` while the sign-in itself
+ * can run for the rest of the hour, and `storePastedCode` will take another — so the box comes back.
+ */
+function SignIn({
+  assistantId,
+  login,
+  name,
+  collectable,
+  paste
+}: {
+  assistantId: string;
+  login: LoginView;
+  name: string;
+  collectable: boolean;
+  paste: FormAction;
+}) {
   if (login.prompt === "device_code") {
     return (
       <div className="flex flex-col gap-1.5 text-[13px] text-asst-body">
@@ -122,7 +157,7 @@ function SignIn({ assistantId, login, name, paste }: { assistantId: string; logi
       </div>
     );
   }
-  if (login.codeWaiting) {
+  if (collectable) {
     return (
       <p role="status" className="text-[13px] text-asst-ok">
         Got it. Your assistant is finishing signing in.
@@ -310,7 +345,7 @@ function ConnectionRow({
   if (answer === "login" && login !== undefined) {
     // The live sign-in wins over anything the person clicked before it arrived, which on the Claude row is the usual
     // order: they ask to connect, and the pod relays its code a moment later.
-    below = <SignIn assistantId={assistantId} login={login} name={connector.name} paste={paste} />;
+    below = <SignIn assistantId={assistantId} login={login} name={connector.name} collectable={codeCollectable(login, now)} paste={paste} />;
   } else if (again) {
     below = (
       <SignInAgain assistantId={assistantId} kind={kind} name={connector.name} stored={status?.stored === true} running={running} reconnect={reconnect} />
@@ -463,7 +498,8 @@ export function GettingReady({
   onDone,
   onLeave,
   returning = false,
-  theme = "system"
+  theme = "system",
+  now: given
 }: ScreenProps & {
   statuses: CredentialStatus[];
   paste: FormAction;
@@ -472,10 +508,13 @@ export function GettingReady({
   onDone: () => void;
   onLeave?: () => void;
   returning?: boolean;
+  /** The clock the gate is reading, so the banner and the screen it opens are never a few seconds apart. */
+  now?: number;
 }) {
-  const now = useNow();
+  const own = useSignInClock();
+  const now = given ?? own;
   const ask = connectionsAsk(assistant.onboarded, unavailable);
-  const offered = offeredConnections(assistant);
+  const offered = offeredConnections(assistant, now);
   const starting = !assistant.readiness.failed && assistant.status !== "running";
   return (
     <ReadyShell assistant={assistant} unavailable={unavailable} theme={theme} subtitle={subtitleFor(ask, returning)}>
@@ -700,21 +739,18 @@ function storedKinds(statuses: CredentialStatus[]): Set<CredentialKind> {
  * the time the codes have run out. It is a banner, like every other ask here, and the screen behind it opens only
  * when the person presses it: a code waiting is not worth taking away the conversation they are in the middle of.
  *
- * It is announced as it arrives rather than by being a live region. The banner is one node that comes and goes, and
- * a region read on every change would read the ask again on every `router.refresh()` the stream causes, of which a
- * relay is only one. `useAnnouncer` reads each arrival once instead, as the feed does.
+ * It is read out by a region holding the ask and nothing else, so it is announced as it changes. The screen it opens
+ * is not a live region and the banner is not inside one: a region around the page would read the ask again on every
+ * `router.refresh()` the stream causes, of which a relay is only one. The sentence says which sign-in and what kind
+ * of thing to do, so a count of asks would name neither, and a fresh code arriving over a lapsed one is a change.
  */
 export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean }) {
   const { assistant } = props;
   const visit = useVisit();
-  // The same clock the screen this banner opens uses, so the two cannot disagree about whether a code is still live:
-  // a frozen one here would keep the banner up while the screen it leads to showed the row as connected, with no code
-  // on it and nothing to press. An expired code is lapsed either way, so the ask outlasts it regardless.
-  const now = useNow();
-  // The server renders this too and its clock is not the browser's, so the ask waits for the browser's: a code
-  // expiring between the two reads is a banner the server sends and the client does not. The cost is that the ask
-  // arrives a frame after the page, which nobody can see; the alternative is a hydration mismatch.
-  const ticked = useTicked();
+  // One clock for the banner and for the screen it opens, handed down rather than read again there: two readings of
+  // the same hook are two intervals mounted at different moments, so they differ by up to `WARMUP_ROTATE_MS` and the
+  // banner could point at a screen that disagreed with it about whether a code was still live.
+  const now = useSignInClock();
   const ask = connectionsAsk(assistant.onboarded, props.unavailable);
   const [needed] = useState(ask === "connect");
   const [waiting] = useState(ask === "done" && assistant.status !== "running");
@@ -755,7 +791,7 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
   // nothing here is allowed to make a claim about.
   const rows = connections(
     {
-      kinds: offeredConnections(assistant).map((row) => row.kind),
+      kinds: offeredConnections(assistant, now).map((row) => row.kind),
       statuses: props.statuses,
       logins: assistant.logins,
       unavailable: props.unavailable
@@ -763,18 +799,7 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
     checklistState,
     now
   );
-  const relayed = ticked ? signInPrompt(rows) : null;
-  const { text, announce } = useAnnouncer("sign-ins");
-  // Announced by its message, so a second sign-in arriving is read and the same one being re-rendered is not.
-  const said = useRef<string | null>(null);
-  useEffect(() => {
-    if (relayed?.message !== said.current) {
-      said.current = relayed?.message ?? null;
-      if (relayed !== null) {
-        announce(relayed.message);
-      }
-    }
-  }, [relayed, announce]);
+  const relayed = signInPrompt(rows);
   const onboarding = (ask === "connect" || (needed && !done)) && view === "screen";
   const unknown = ask === "unknown" && view === "screen";
   const screen = waiting && !started && !onboarding && !unknown && view === "screen";
@@ -784,20 +809,20 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
   /** Whichever surface is showing, if any, in the order they take precedence. */
   function surface(): React.ReactNode {
     if (onboarding) {
-      return <GettingReady {...props} onDone={() => setDone(true)} onLeave={dismiss} />;
+      return <GettingReady {...props} now={now} onDone={() => setDone(true)} onLeave={dismiss} />;
     }
     if (unknown) {
-      return <GettingReady {...props} onDone={hide} />;
+      return <GettingReady {...props} now={now} onDone={hide} />;
     }
     if (screen) {
       return waitingForPerson(assistant.status) ? (
-        <GettingReady {...props} returning onDone={dismiss} />
+        <GettingReady {...props} now={now} returning onDone={dismiss} />
       ) : (
         <WarmingUp assistant={assistant} unavailable={props.unavailable} theme={props.theme} onDismiss={dismiss} />
       );
     }
     if (signIn) {
-      return <GettingReady {...props} returning onDone={stopAsking} />;
+      return <GettingReady {...props} now={now} returning onDone={stopAsking} />;
     }
     // Sent away for good, which only an `unknown` is ever allowed to be: an ask with something still to connect
     // outlasts anything the person closes, because it is the only thing telling them why nothing works.
@@ -819,7 +844,14 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
   return (
     <>
       {surface()}
-      <AnnouncerRegion text={text} />
+      {/*
+       * The ask and nothing else, so what is read out is the sentence that says which sign-in and what to do about
+       * it. `aria-atomic` reads the whole of it, and a change — a code arriving over a lapsed sign-in, a second
+       * sign-in joining the first — is read as the new sentence rather than as a count of asks.
+       */}
+      <div aria-live="polite" aria-atomic="true" className="sr-only" data-testid="sign-in-ask">
+        {relayed?.message ?? ""}
+      </div>
     </>
   );
 }

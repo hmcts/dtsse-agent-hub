@@ -88,7 +88,7 @@ function login(kind: CredentialKind): LoginView {
     expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
     state: "pending",
     updatedAt: new Date(Date.now() - 60_000).toISOString(),
-    codeWaiting: false
+    codeWaitingUntil: null
   };
 }
 
@@ -373,7 +373,7 @@ describe("OnboardingGate while the assistant starts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Carry on without waiting" }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
-    const banner = screen.getByRole("region", { name: "Sign in again" });
+    const banner = screen.getByRole("region", { name: "Sign in" });
     expect(banner.textContent).toContain("Your assistant is waiting for you to sign in to Azure.");
   });
 

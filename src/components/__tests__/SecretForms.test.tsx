@@ -44,7 +44,7 @@ function pasteLogin(kind: LoginView["kind"]): LoginView {
     expiresAt: "2026-10-05T12:10:00.000Z",
     state: "pending",
     updatedAt: "2026-10-05T12:08:00.000Z",
-    codeWaiting: false
+    codeWaitingUntil: null
   };
 }
 

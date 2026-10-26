@@ -68,7 +68,7 @@ function atlassianLogin(overrides: Partial<LoginView> = {}): LoginView {
     expiresAt: new Date(Date.now() + 120_000).toISOString(),
     state: "pending",
     updatedAt: new Date(Date.now() - 60_000).toISOString(),
-    codeWaiting: false,
+    codeWaitingUntil: null,
     ...overrides
   };
 }

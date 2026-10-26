@@ -51,7 +51,16 @@ function status(kind: CredentialKind, accountLabel: string | null = null): Crede
 }
 
 function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(Date.now() + 600_000).toISOString(), updatedAt = BEFORE_STORED): LoginView {
-  return { kind, prompt: "device_code", userCode: "ABCD-1234", verificationUri: "https://example.com/device", expiresAt, state, updatedAt, codeWaiting: false };
+  return {
+    kind,
+    prompt: "device_code",
+    userCode: "ABCD-1234",
+    verificationUri: "https://example.com/device",
+    expiresAt,
+    state,
+    updatedAt,
+    codeWaitingUntil: null
+  };
 }
 
 function data(stored: CredentialKind[], logins: LoginView[] = [], unavailable: string | null = null): ConnectionsData {
@@ -172,6 +181,35 @@ describe("the Assistant's settings cog", () => {
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs your attention");
     expect(cog().textContent).toBe("!");
+  });
+
+  /**
+   * Being stored is what silences the connections banner, so a stored value whose sign-in has since lapsed is a
+   * state no other surface says anything about — which is what the badge is for, whatever the kind.
+   */
+  it.each([
+    ["jenkins", "Jenkins"],
+    ["bedrock", "AI model access"]
+  ] as const)("should say %s needs attention when a stored value is what a later sign-in lapsed over", (kind, name) => {
+    const stale = login(kind, "expired", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
+    render(<AssistantSettings connections={data([...ALL_SIGNED_IN, kind], [stale])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe(`Settings. ${name} needs your attention`);
+  });
+
+  // The badge sends the person to the ask above their chats, and `signInPrompt` raises none for a code they have
+  // already sent back — so a mark here would point at nothing.
+  it("should say nothing needs attention while a code the person sent back is still to be collected", () => {
+    const sent = {
+      ...login("github", "pending"),
+      prompt: "paste_code" as const,
+      userCode: null,
+      codeWaitingUntil: new Date(Date.now() + 60_000).toISOString()
+    };
+    render(<AssistantSettings connections={data(ALL_SIGNED_IN, [sent])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings");
+    expect(cog().textContent).toBe("");
   });
 
   it("should not say Atlassian needs attention when a sign-in failed before their credential was stored", () => {

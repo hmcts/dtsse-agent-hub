@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { type ConnectionState, connectionState, hasLapsed } from "@/assistant/connections";
+import { type ConnectionState, codeCollectable, connectionState, hasLapsed } from "@/assistant/connections";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { AtlassianHint } from "@/components/credentials/AtlassianHint";
 import { JenkinsHint } from "@/components/credentials/JenkinsHint";
@@ -79,7 +79,13 @@ function lapsedLine(kind: CredentialKind, state: ConnectionState): string {
   return state === "failed" ? `The last ${TITLES[kind]} sign-in failed.` : `The last ${TITLES[kind]} sign-in ran out before anyone used it.`;
 }
 
-function PendingLogin({ virtualAgentId, login, paste }: { virtualAgentId: string; login: LoginView; paste: FormAction }) {
+/**
+ * `collectable` is whether a code the owner pasted is still there for the pod, rather than whether they ever pasted
+ * one: a code the pod never came for is no use after `PASTED_CODE_TTL_MS` while the sign-in itself can run for the
+ * rest of the hour, and `storePastedCode` will take another — so the box comes back rather than the card promising
+ * for the next fifty minutes that a dead code is on its way.
+ */
+function PendingLogin({ virtualAgentId, login, collectable, paste }: { virtualAgentId: string; login: LoginView; collectable: boolean; paste: FormAction }) {
   const title = TITLES[login.kind];
   if (login.prompt === "device_code") {
     return (
@@ -110,7 +116,7 @@ function PendingLogin({ virtualAgentId, login, paste }: { virtualAgentId: string
         </a>
         , sign in, and paste the code it gives you here <LoginCountdown expiresAt={login.expiresAt} />.
       </p>
-      {login.codeWaiting ? (
+      {collectable ? (
         <p role="status" className="text-xs text-green-300">
           Your code is waiting for your virtual agent to collect it.
         </p>
@@ -284,7 +290,7 @@ function Card({
     body = (
       <>
         <Header kind={kind} detail={SIGN_IN_DETAIL[connection]} ticked={false} />
-        <PendingLogin virtualAgentId={virtualAgentId} login={login} paste={paste} />
+        <PendingLogin virtualAgentId={virtualAgentId} login={login} collectable={codeCollectable(login, now)} paste={paste} />
       </>
     );
   } else if (isPasted(kind)) {

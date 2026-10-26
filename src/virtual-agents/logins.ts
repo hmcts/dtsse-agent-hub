@@ -322,8 +322,16 @@ export interface LoginView {
    * credential from one a pod has just failed to use.
    */
   updatedAt: string;
-  /** A code the owner pasted is waiting for the pod to fetch it. */
-  codeWaiting: boolean;
+  /**
+   * When a code the owner pasted stops being there for the pod to collect, or `null` when they have pasted none.
+   *
+   * The deadline rather than a flag, because the two are not the same answer for as long as 50 minutes:
+   * `takePastedCode` gives the pod nothing once this has passed but leaves the column set, and a login may run for
+   * `MAX_LOGIN_SECONDS` while a pasted code keeps for `PASTED_CODE_TTL_MS`. A flag read off the column would tell
+   * the owner their code was on its way for the rest of the hour, with the box to paste another one hidden —
+   * `storePastedCode` would still take one.
+   */
+  codeWaitingUntil: string | null;
 }
 
 /** The virtual agent's logins, for its owner's page. Never a pasted code. */
@@ -340,6 +348,6 @@ export async function loginViews(db: Database, virtualAgentId: string): Promise<
     expiresAt: row.expiresAt.toISOString(),
     state: row.state,
     updatedAt: row.updatedAt.toISOString(),
-    codeWaiting: row.pastedCodeExpiresAt !== null
+    codeWaitingUntil: row.pastedCodeExpiresAt?.toISOString() ?? null
   }));
 }
