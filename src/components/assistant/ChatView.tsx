@@ -363,7 +363,7 @@ export function ChatView({
           </div>
         </header>
         <div ref={scroller.ref} onScroll={scroller.onScroll} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex max-w-[760px] flex-col gap-[26px] px-5 pb-10 pt-7">
+          <div className="mx-auto flex max-w-[900px] flex-col gap-[26px] px-5 pb-10 pt-7">
             {live.olderBefore !== null ? (
               <button
                 type="button"
@@ -402,7 +402,7 @@ export function ChatView({
           <AnnouncerRegion text={arrivals.text} />
         </div>
         <div className="shrink-0 px-4 pb-3.5">
-          <div className="mx-auto max-w-[760px]">
+          <div className="mx-auto max-w-[900px]">
             {error === null ? null : (
               <p role="alert" className="pb-2 text-center text-[13px] text-asst-error">
                 {error}
