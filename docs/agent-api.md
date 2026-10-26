@@ -233,11 +233,9 @@ Metadata rows cascade from the message and from the conversation, so deleting ei
 
 ## Memory in the pod
 
-Each HMCTS Assistant conversation runs a Claude process of its own, and the process is the smaller half of what that
-costs: the session's MCP servers — playwright-mcp, azmcp, mcp-jenkins and their wrappers — are the rest, and the whole
-comes to roughly **1.2 GiB** per conversation. The pod's own work is on top of that. So a pod can reach the ceiling of
-its size without anything being wrong with it, and the hub cannot see that either: every call between the two is pod
-to hub. The pod reports, as it does for its disk.
+A conversation session costs about **1.2Gi**, for the reasons under Capacity above, and the pod's own work is on top
+of that. So a pod reaches the ceiling of its size with nothing wrong with it — and the hub cannot see that either:
+every call between the two is pod to hub. The pod reports, as it does for its disk.
 
 **Reporting.** `PUT /api/virtual/{id}/memory` replaces the virtual agent's last report:
 
@@ -270,7 +268,7 @@ to hub. The pod reports, as it does for its disk.
   nothing streams it.
 
 **The warning.** The hub warns when the peak leaves less than **one more conversation's worth** of headroom under the
-limit — `peak_bytes + 1.2 GiB > limit_bytes`. The threshold is derived rather than chosen: it is the measured cost of
+limit — `peak_bytes + 1.2Gi > limit_bytes`. The threshold is derived rather than chosen: it is the measured cost of
 a conversation against the ceiling the pod itself reported, so what it says is the thing the person can act on ("there
 is no room for another chat at this size"), and a pod merely using memory within its size never raises it. The two
 things it names are the two things that change the answer: move up a size, or close some chats.
