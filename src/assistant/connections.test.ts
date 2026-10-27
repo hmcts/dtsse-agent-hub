@@ -22,10 +22,13 @@ import {
   lapsedSinceStored,
   needsPerson,
   OFFERED_OPTIONAL,
+  ON_REQUEST,
   offeredConnections,
+  offersConnect,
   PROMPTED_WHEN_MISSING,
   type StoredCredential,
-  signInPrompt
+  signInPrompt,
+  signsInOnRequest
 } from "./connections.ts";
 
 const NOW = Date.parse("2026-10-25T12:00:00.000Z");
@@ -406,33 +409,44 @@ describe("connectionsWarning", () => {
     expect(connectionsWarning(rows)).toBeNull();
   });
 
-  // Every kind is prompted about once the assistant has asked for it; being never set up prompts only for the two
-  // the assistant cannot start without, and the model route is left to the connections banner that asks for it.
-  it("should prompt about only the two sign-ins a person must have when none was ever set up", () => {
-    expect([...PROMPTED_WHEN_MISSING]).toEqual(["github", "azure"]);
+  // Every kind is prompted about once the assistant has asked for it; being never set up prompts only for the one
+  // sign-in the assistant cannot start without, and the model route is left to the connections banner that asks for it.
+  it("should prompt about only the one sign-in a person must have when none was ever set up", () => {
+    expect([...PROMPTED_WHEN_MISSING]).toEqual(["github"]);
+  });
+
+  it("should say nothing about Azure when it was never connected, as it says nothing about Jenkins", () => {
+    const rows = list(["github", "azure", "jenkins"], [status("github", true)]);
+
+    expect(connectionsWarning(rows)).toBeNull();
+  });
+
+  it("should say nothing about an Azure sign-in that lapsed, which settings offers to connect again", () => {
+    const rows = list(["github", "azure"], [status("github", true), status("azure", true)], [lapsed("azure", "failed")]);
+
+    expect(connectionsWarning(rows)).toBeNull();
+  });
+
+  it("should warn about an Azure code the person asked for while it is live", () => {
+    const rows = list(["github", "azure"], [status("github", true)], [login("azure", "pending")]);
+
+    expect(connectionsWarning(rows)).toBe("Azure needs your attention");
   });
 
   it("should be nothing when there are no sign-ins to report on", () => {
     expect(connectionsWarning([])).toBeNull();
   });
 
-  it.each(["github", "azure"] as const)("should name %s when it alone is not connected", (kind) => {
-    const stored = PROMPTED_WHEN_MISSING.filter((other: CredentialKind) => other !== kind).map((other: CredentialKind) => status(other, true));
-    const rows = list([...PROMPTED_WHEN_MISSING], stored);
-
-    expect(connectionsWarning(rows)).toBe(`${CONNECTORS[kind]?.name} needs your attention`);
-  });
-
-  it("should name both when neither needed sign-in is connected", () => {
+  it("should name GitHub when it alone is not connected", () => {
     const rows = list(["github", "azure", "atlassian"], [status("atlassian", true)]);
 
-    expect(connectionsWarning(rows)).toBe("GitHub and Azure need your attention");
+    expect(connectionsWarning(rows)).toBe(`${CONNECTORS.github.name} needs your attention`);
   });
 
-  it("should name all three when none of them is connected and the optional one has lapsed", () => {
+  it("should name both when GitHub is not connected and the optional one has lapsed", () => {
     const rows = list(["github", "azure", "atlassian"], [], [login("atlassian", "expired")]);
 
-    expect(connectionsWarning(rows)).toBe("GitHub, Azure and Atlassian need your attention");
+    expect(connectionsWarning(rows)).toBe("GitHub and Atlassian need your attention");
   });
 
   // The badge the lapsed-sign-in rule exists to raise: everything is stored, so nothing else on any surface says
@@ -693,6 +707,67 @@ describe("offeredConnections", () => {
 
   it("should offer Atlassian, and only Atlassian, of the optional connections unasked", () => {
     expect([...OFFERED_OPTIONAL]).toEqual(["atlassian"]);
+  });
+});
+
+describe("sign-ins made on request", () => {
+  function offer(logins: LoginView[] = []) {
+    return offeredConnections({ needed: neededCredentials("own-licence"), optional: OPTIONAL_CREDENTIALS, logins }, NOW).map((row) => row.kind);
+  }
+
+  it("should sign in to Azure, and nothing else, only when the person asks", () => {
+    expect([...ON_REQUEST]).toEqual(["azure"]);
+    expect(signsInOnRequest("azure")).toBe(true);
+    expect(signsInOnRequest("atlassian")).toBe(false);
+  });
+
+  it("should offer no Azure row on the getting-ready screen when nobody has asked for one", () => {
+    expect(offer()).not.toContain("azure");
+  });
+
+  it("should offer an Azure row while the code the person asked for is live", () => {
+    expect(offer([login("azure", "pending")])).toContain("azure");
+  });
+
+  it.each(["expired", "failed"] as const)("should offer no Azure row when the sign-in the person asked for %s", (state) => {
+    expect(offer([login("azure", state)])).not.toContain("azure");
+  });
+
+  it("should raise no sign-in ask for an Azure sign-in that lapsed", () => {
+    const rows = list(["azure"], [], [login("azure", "expired")]);
+
+    expect(signInPrompt(rows)).toBeNull();
+  });
+
+  it("should ask the person to sign in to Azure while the code they asked for is live", () => {
+    const rows = list(["azure"], [], [login("azure", "pending")]);
+
+    expect(signInPrompt(rows)?.message).toBe("Your assistant is waiting for you to sign in to Azure.");
+  });
+
+  it.each([
+    ["waiting", true],
+    ["expired", true],
+    ["failed", true],
+    ["connected", false],
+    ["signing-in", false],
+    ["refreshing", false],
+    ["finishing", false]
+  ] as const)("should offer to connect Azure from settings when it is %s: %s", (state, expected) => {
+    expect(offersConnect({ kind: "azure", state })).toBe(expected);
+  });
+
+  it.each(["github", "jenkins", "atlassian"] as const)("should offer no connect from settings for %s, which is not made on request", (kind) => {
+    expect(offersConnect({ kind, state: "waiting" })).toBe(false);
+  });
+
+  it("should say whether a value is saved on each row", () => {
+    const rows = list(["github", "azure"], [status("azure", true)]);
+
+    expect(rows.map((row) => [row.kind, row.stored])).toEqual([
+      ["github", false],
+      ["azure", true]
+    ]);
   });
 });
 

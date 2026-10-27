@@ -13,7 +13,7 @@ import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
-import { type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
+import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
@@ -96,6 +96,7 @@ export function AssistantShell({
   activeId,
   theme = "system",
   connections,
+  connect,
   now,
   plugins,
   claudeMd,
@@ -113,6 +114,8 @@ export function AssistantShell({
   theme?: Theme;
   /** The person's sign-ins, which the footer's settings lists and warns about. */
   connections?: ConnectionsData;
+  /** How the footer's settings connects a sign-in made only on request, such as Azure. */
+  connect?: AssistantConnect;
   /** The page's own clock, which the footer's settings reads its sign-ins against. */
   now: number;
   /** The workspace plugins the footer's settings lets the person tick. */
@@ -309,6 +312,7 @@ export function AssistantShell({
             <AssistantSettings
               theme={theme}
               connections={connections}
+              connect={connect}
               now={now}
               plugins={plugins}
               claudeMd={claudeMd}

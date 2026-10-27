@@ -437,6 +437,8 @@ model VirtualAgent {
   stopDetail          String?                 @map("stop_detail")
   diskExpiresAt       DateTime?               @map("disk_expires_at") @db.Timestamptz(6)
   diskDeletedAt       DateTime?               @map("disk_deleted_at") @db.Timestamptz(6)
+  /// When the owner asked it to sign in to Azure, until its pod relays that sign-in. See src/virtual-agents/logins.ts.
+  azureSignInRequestedAt DateTime?            @map("azure_sign_in_requested_at") @db.Timestamptz(6)
   createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
 

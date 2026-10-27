@@ -18,7 +18,11 @@ import { azureLogin, claudeLogin, GITHUB_SIGN_IN_GAP_MS, githubLogin, run } from
 export const VIRTUAL_USAGE = `usage: ${CLI} virtual <command>
 
   status <phase> [detail…]    report a phase (${PHASES.join(", ")})
-  azure-login                 restore the stored Azure sign-in, or relay a device-code sign-in
+  azure-login [--restore-only | --if-requested]
+                              restore the stored Azure sign-in, or relay a device-code sign-in. With
+                              --restore-only, never relay; with --if-requested, relay one only when the owner
+                              has asked for it from their settings. Either exits ${EXIT_NO_CREDENTIAL} when Azure stays
+                              unconnected
   github-login                relay GitHub device-code sign-ins and store the token; exit ${EXIT_NO_CREDENTIAL} when every
                               code was shown to the owner and none completed, which asking again will not fix
   claude-login                relay a Claude sign-in (own licence) and store the token
@@ -66,9 +70,10 @@ export async function runVirtual(
         await withRetry(() => hub().virtualStatus(id, phase, detail.join(" ") || undefined));
         return 0;
       }
-      case "azure-login":
-        await azureLogin({ api: hub(), env });
-        return 0;
+      case "azure-login": {
+        const mode = rest.includes("--restore-only") ? "restore" : rest.includes("--if-requested") ? "requested" : "relay";
+        return (await azureLogin({ api: hub(), env, mode })) === "not-connected" ? EXIT_NO_CREDENTIAL : 0;
+      }
       case "github-login":
         return (await githubLogin({ api: hub(), env })) === "not-signed-in" ? EXIT_NO_CREDENTIAL : 0;
       case "claude-login":

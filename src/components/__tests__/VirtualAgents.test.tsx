@@ -154,7 +154,7 @@ describe("VirtualAgentsView", () => {
   it("should warn that a virtual agent acts with the viewer's access and name the model route when it offers to create one", () => {
     render(<VirtualAgentsView agents={[]} route="own-licence" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
-    expect(screen.getByText("A virtual agent acts with your GitHub and Azure access.")).toBeTruthy();
+    expect(screen.getByText("A virtual agent acts with your GitHub access, and with your Azure access if you connect Azure.")).toBeTruthy();
     expect(screen.getByText(/your own Claude licence/)).toBeTruthy();
     expect(screen.getByText("You have no virtual agents.")).toBeTruthy();
     expect(screen.getByRole("form", { name: "Create a virtual agent" })).toBeTruthy();
@@ -770,6 +770,47 @@ describe("the optional Atlassian sign-in", () => {
     expect(atlassian.textContent).toContain("Sign-in waiting for you");
     expect(within(atlassian).getByRole("link", { name: "https://auth.atlassian.com/activate" })).toBeTruthy();
     expect(atlassian.textContent).toContain("WXYZ-9876");
+  });
+});
+
+describe("the optional Azure sign-in", () => {
+  function azureCard(statuses: CredentialStatus[], desired: "running" | "stopped" = "running", reconnect = ok()) {
+    render(
+      <OnboardingChecklist
+        virtualAgentId="va-1"
+        desired={desired}
+        reconnect={reconnect}
+        needed={["github"]}
+        optional={["azure", "jenkins", "atlassian"]}
+        statuses={statuses}
+        logins={[]}
+        paste={ok()}
+        save={ok()}
+        now={NOW}
+      />
+    );
+    return within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem")[1]!;
+  }
+
+  it("should say Azure is not connected and optional, rather than waiting for the agent to ask, when it is not stored", () => {
+    const azure = azureCard([stored("github")]);
+
+    expect(azure.querySelector("h3")?.textContent).toBe("Azure");
+    expect(azure.textContent).toContain("Not connected (optional)");
+    expect(azure.textContent).not.toContain("Waiting for your virtual agent to ask");
+  });
+
+  it("should restart the agent to ask for an Azure sign-in when the owner confirms connecting it", async () => {
+    const reconnect = ok();
+    const azure = azureCard([stored("github")], "running", reconnect);
+
+    fireEvent.click(within(azure).getByRole("button", { name: "Reconnect Azure" }));
+    await act(async () => {
+      fireEvent.submit(within(azure).getByRole("form", { name: "Reconnect Azure" }));
+    });
+
+    const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("kind")]).toEqual(["va-1", "azure"]);
   });
 });
 

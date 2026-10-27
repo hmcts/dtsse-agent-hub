@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Stage 1 of an agent-hub virtual agent pod, exec'd by virtual-agent-boot once the workspace is checked out and
-# gh is signed in. Signs in to Azure, starts the optional Atlassian sign-in and the workspace's own clone step in
-# the background, sets up Claude Code for the model route, reports the web servers listening in the pod, and
-# keeps Claude running in tmux session "claude" until SIGTERM. Beside it, it keeps the conversation supervisor
-# running, which runs one Claude per HMCTS Assistant conversation in tmux sessions "c-…".
+# gh is signed in. Restores the owner's stored Azure sign-in, starts the optional Azure and Atlassian sign-ins and
+# the workspace's own clone step in the background, sets up Claude Code for the model route, reports the web
+# servers listening in the pod, and keeps Claude running in tmux session "claude" until SIGTERM. Beside it, it
+# keeps the conversation supervisor running, which runs one Claude per HMCTS Assistant conversation in tmux
+# sessions "c-…".
 #
 # This file is the pod's runtime and ships with the client, so a pod gets it from the package it boots on rather
 # than from the repository it clones. Everything that knows how that repository is laid out — which repositories
@@ -38,6 +39,7 @@ cache_pid=""
 ports_pid=""
 repos_pid=""
 atlassian_pid=""
+azure_pid=""
 supervisor_pid=""
 
 sleep_interruptibly() {
@@ -58,21 +60,29 @@ conversation_sessions() {
     tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^c-'
 }
 
+# Claude, then the conversation supervisor and its sessions. The supervisor goes first, so that it starts no
+# session while its sessions are stopped.
+stop_sessions() {
+    tmux kill-session -t claude 2>/dev/null || true
+    if [[ -n "$supervisor_pid" ]]; then
+        kill -TERM -- "-$supervisor_pid" 2>/dev/null || kill -TERM "$supervisor_pid" 2>/dev/null || true
+        supervisor_pid=""
+    fi
+    conversation_sessions | while read -r name; do tmux kill-session -t "$name" 2>/dev/null; done
+}
+
 # Each bridge marks its agent offline and uploads the last of the transcript as it stops, which is all
 # `agent-hub disable` would add here without opting the session out of auto-enable.
 shutdown() {
     stopping=1
-    log "SIGTERM: stopping Claude, the conversation supervisor and its sessions, the agent-hub bridges, the workspace's clone step, the Atlassian sign-in, the port watcher and the cache sync"
-    tmux kill-session -t claude 2>/dev/null || true
-    # The supervisor goes first, so that it starts no session while its sessions are stopped.
-    if [[ -n "$supervisor_pid" ]]; then
-        kill -TERM -- "-$supervisor_pid" 2>/dev/null || kill -TERM "$supervisor_pid" 2>/dev/null || true
-    fi
-    conversation_sessions | while read -r name; do tmux kill-session -t "$name" 2>/dev/null; done
-    local pids pid waited=0 repos=""
-    if [[ -n "$atlassian_pid" ]] && kill -0 "$atlassian_pid" 2>/dev/null; then
-        kill -TERM -- "-$atlassian_pid" 2>/dev/null || kill -TERM "$atlassian_pid" 2>/dev/null || true
-    fi
+    log "SIGTERM: stopping Claude, the conversation supervisor and its sessions, the agent-hub bridges, the workspace's clone step, the Azure and Atlassian sign-ins, the port watcher and the cache sync"
+    stop_sessions
+    local pids pid waited=0 repos="" signin
+    for signin in "$atlassian_pid" "$azure_pid"; do
+        if [[ -n "$signin" ]] && kill -0 "$signin" 2>/dev/null; then
+            kill -TERM -- "-$signin" 2>/dev/null || kill -TERM "$signin" 2>/dev/null || true
+        fi
+    done
     if [[ -n "$repos_pid" ]] && kill -0 "$repos_pid" 2>/dev/null; then
         repos=$repos_pid
         kill -TERM -- "-$repos" 2>/dev/null || kill -TERM "$repos" 2>/dev/null || true
@@ -238,7 +248,64 @@ retry "the hai install" install_hai
 cd "$WS" || fatal "cannot cd to $WS"
 mkdir -p "$STATE"
 
-retry "azure sign-in" "$AH" virtual azure-login
+# Azure is optional: it lets Claude run az as the owner, and gives Jenkins their Entra object id. A stored sign-in
+# is restored before Claude starts, so the first session has it, and nothing else waits for one. With none that
+# works, a device code is relayed only when the owner has asked for one from their settings, and in the background
+# as Atlassian's is; otherwise the pod carries on without Azure, which they can connect at any time. cache-sync
+# below stores a sign-in whenever one appears.
+AZURE_TRIES=3
+azure_rc=""
+
+azure_login() {
+    local try rc delay=60
+    for ((try = 1; try <= AZURE_TRIES; try++)); do
+        "$AH" virtual azure-login --if-requested
+        rc=$?
+        [[ "$rc" -eq 0 || "$rc" -eq "$EXIT_FATAL" ]] && return "$rc"
+        if [[ "$rc" -eq "$EXIT_NO_CREDENTIAL" ]]; then
+            log "azure: not connected; az, and the Jenkins tools that need it, stay unconfigured until the owner connects Azure from their settings"
+            return "$rc"
+        fi
+        [[ "$try" -lt "$AZURE_TRIES" ]] || break
+        log "azure sign-in failed (exit $rc); retrying in ${delay}s"
+        sleep "$delay"
+        delay=$((delay * 2))
+    done
+    log "azure sign-in failed $AZURE_TRIES times; Azure stays unconfigured until the next boot"
+    return 1
+}
+
+# Monitor mode gives the sign-in its own process group, so SIGTERM stops az with it.
+start_azure() {
+    set -m
+    azure_login &
+    azure_pid=$!
+    set +m
+}
+
+# Succeeds once, when the background sign-in has just finished, with its exit status in azure_rc.
+poll_azure() {
+    [[ -n "$azure_pid" ]] || return 1
+    kill -0 "$azure_pid" 2>/dev/null && return 1
+    wait "$azure_pid" 2>/dev/null
+    azure_rc=$?
+    azure_pid=""
+    return 0
+}
+
+# An Azure sign-in as somebody other than the owner fails the agent on the hub, so the sessions running as the
+# owner stop with it, as they would have had the sign-in held up boot. A sign-in that worked is what Jenkins
+# waits for.
+azure_finished() {
+    if [[ "$azure_rc" -eq "$EXIT_FATAL" ]]; then
+        stop_sessions
+        fatal "azure sign-in: the hub failed the agent"
+    fi
+    [[ "$azure_rc" -eq 0 ]] && jenkins_env
+    return 0
+}
+
+"$AH" virtual azure-login --restore-only || start_azure
 
 "$AH" virtual cache-sync &
 cache_pid=$!
@@ -567,8 +634,9 @@ jenkins_oid=""
 jenkins_state=""
 
 # Writes .claude/.jenkins.env for the workspace's Jenkins MCP server from the owner's Jenkins API token, when
-# they have stored one. Jenkins keys users on their Entra object id, and az is signed in as the owner.
-# Without a token Jenkins stays unconfigured; that never holds up boot.
+# they have stored one. Jenkins keys users on their Entra object id, which only az, signed in as the owner, can
+# read, so it also needs Azure connected; azure_finished runs this again once a background sign-in has worked.
+# Without either, Jenkins stays unconfigured; that never holds up boot.
 jenkins_env() {
     local token rc tmp
     token=$("$AH" credentials get jenkins)
@@ -590,7 +658,7 @@ jenkins_env() {
     [[ -n "$jenkins_oid" ]] || jenkins_oid=$(az ad signed-in-user show --query id -o tsv 2>/dev/null)
     if [[ ! "$jenkins_oid" =~ ^[0-9a-fA-F-]{36}$ ]]; then
         jenkins_oid=""
-        log "jenkins: could not read the owner's Entra object id from az; leaving Jenkins unconfigured"
+        log "jenkins: could not read the owner's Entra object id from az (is Azure connected?); leaving Jenkins unconfigured"
         return 0
     fi
     tmp=$(umask 077 && mktemp "$JENKINS_ENV.XXXXXX") || return 0
@@ -772,8 +840,14 @@ while [[ "$stopping" -eq 0 ]]; do
         while [[ "$stopping" -eq 0 ]] && tmux has-session -t claude 2>/dev/null; do
             sleep_interruptibly 5
             poll_repos
-            # A relayed Atlassian sign-in reported awaiting_login over running.
-            if poll_atlassian; then report_running now; else report_running; fi
+            # A relayed Atlassian or Azure sign-in reported awaiting_login over running.
+            relayed=0
+            poll_atlassian && relayed=1
+            if poll_azure; then
+                relayed=1
+                azure_finished
+            fi
+            if [[ "$relayed" -eq 1 ]]; then report_running now; else report_running; fi
         done
     else
         log "tmux could not start the session"

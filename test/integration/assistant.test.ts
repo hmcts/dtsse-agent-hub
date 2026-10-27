@@ -22,6 +22,8 @@ import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
 import { reportModelAccess } from "../../src/assistant/model-access-store.ts";
 import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
+import { credentialBackend } from "../../src/credentials/backend.ts";
+import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { expireDeliveries } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
@@ -170,7 +172,25 @@ describe("the person's assistant", () => {
 
     expect(second.assistant.id).toBe(first.assistant.id);
     expect(await prisma.virtualAgent.findMany({ where: { ownerOid: ALICE.oid }, select: { name: true } })).toEqual([{ name: "assistant" }]);
-    expect(first.assistant).toMatchObject({ needed: ["github", "azure", "claude"], onboarded: false, readiness: { percent: 10 } });
+    expect(first.assistant).toMatchObject({ needed: ["github", "claude"], onboarded: false, readiness: { percent: 10 } });
+  });
+
+  it("should count the person as onboarded with GitHub and the model key stored and no Azure", async () => {
+    await insertUser(ALICE);
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      throw new Error(backend.reason);
+    }
+    for (const [kind, value] of [
+      ["github", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"],
+      ["claude", `sk-ant-oat01-${"a".repeat(40)}`]
+    ] as const) {
+      await putCredential(prisma, backend.store, { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind, value, via: "web" });
+    }
+
+    const home = await openAssistant(VIEWER);
+
+    expect(home.assistant).toMatchObject({ needed: ["github", "claude"], optional: ["azure", "jenkins", "atlassian"], onboarded: true });
   });
 
   it("should offer the plugins the hub is configured with, and the ones the assistant loads", async () => {
@@ -270,10 +290,10 @@ describe("the person's assistant", () => {
   // `/assistant` asks for must then be storable: it asks for the row's credentials, and the only Claude token the
   // hub will ever hand that pod is the one this page can take.
   it.each([
-    ["bedrock", "own-licence", ["github", "azure", "claude"], true],
-    ["own-licence", "bedrock", ["github", "azure", "bedrock"], true],
-    ["own-licence", "own-licence", ["github", "azure", "claude"], true],
-    ["bedrock", "bedrock", ["github", "azure", "bedrock"], false]
+    ["bedrock", "own-licence", ["github", "claude"], true],
+    ["own-licence", "bedrock", ["github", "bedrock"], true],
+    ["own-licence", "own-licence", ["github", "claude"], true],
+    ["bedrock", "bedrock", ["github", "bedrock"], false]
   ] as const)("should ask for the assistant's own credentials and allow every one of them when the viewer is on %s and the row on %s", async (viewerRoute, rowRoute, needed, claudeTokenUsable) => {
     await insertUser(ALICE);
     await createVirtualAgent(prisma, { owner: ALICE, modelRoute: rowRoute, name: "assistant" });
