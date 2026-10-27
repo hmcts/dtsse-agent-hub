@@ -14,12 +14,13 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import type { SpawnWorker } from "./enable.ts";
 import type { Env } from "./env.ts";
 import { HELD_NOTES, holdNote } from "./held-notes.ts";
-import { type HookPayload, parseHandoff, reposNote, runHook, virtualAgentStateDir, webServersNote } from "./hooks.ts";
+import { type HookPayload, mustDeny, parseHandoff, reposNote, runHook, virtualAgentStateDir, webServersNote } from "./hooks.ts";
+import { ASK_USER_QUESTION, ASKED_REASON, type HookDenyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { ensureStateDir, statePath, writeJson } from "./session.ts";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -401,11 +402,11 @@ describe("runHook", () => {
     enable("unknown-sess");
 
     // Act
-    const out = await hookText("PreToolUse", { session_id: "unknown-sess" });
+    const out = await hookText("PostToolUse", { session_id: "unknown-sess" });
 
     // Assert
     expect(out).toBe("");
-    expect(fs.readFileSync(statePath("unknown-sess", "log"), "utf8")).toMatch(/unknown hook event PreToolUse/);
+    expect(fs.readFileSync(statePath("unknown-sess", "log"), "utf8")).toMatch(/unknown hook event PostToolUse/);
   });
 });
 
@@ -596,6 +597,260 @@ describe("runHook in an assistant conversation", () => {
     expect(out[0]).toMatch(/^agent-hub: this session is one conversation of the HMCTS Assistant, connected as @conv-sta\./);
     expect(out[0]).toMatch(/agent-hub artefact get/);
     expect(out.some((l) => /^This is a virtual agent/.test(l))).toBe(false);
+  });
+});
+
+/**
+ * Whether a failing `PreToolUse` has to print a deny rather than nothing. Its own test because it is read from
+ * three places — the hook itself, the CLI's catch when the payload could not be parsed at all, and the bash gate's
+ * copy of it — and each of those is a path where printing nothing draws the prompt that hangs a pod.
+ */
+describe("mustDeny", () => {
+  const CONVERSATION = { AGENT_HUB_CONVERSATION_ID: "0f8a6a1e-1234-4000-8000-0000000000bb" };
+
+  it.each([
+    ["an assistant conversation", CONVERSATION],
+    ["a virtual agent's pod", VIRTUAL]
+  ])("should decide for %s, where nobody can answer a prompt", (_label, env) => {
+    // Act & Assert
+    expect(mustDeny("PreToolUse", { tool_name: "AskUserQuestion" }, env)).toBe(true);
+    // A payload that could not be read at all: the hook is registered for that one tool, so this is a broken
+    // payload rather than another tool's call.
+    expect(mustDeny("PreToolUse", null, env)).toBe(true);
+    expect(mustDeny("PreToolUse", {}, env)).toBe(true);
+  });
+
+  it("should decide nothing for another tool, which is not this hook's business", () => {
+    // Act & Assert
+    expect(mustDeny("PreToolUse", { tool_name: "Bash" }, CONVERSATION)).toBe(false);
+  });
+
+  it("should decide nothing in an engineer's own session, where a person can answer the prompt", () => {
+    // Act & Assert
+    expect(mustDeny("PreToolUse", { tool_name: "AskUserQuestion" }, {})).toBe(false);
+    expect(mustDeny("PreToolUse", null, {})).toBe(false);
+  });
+
+  it("should decide nothing for any other hook event", () => {
+    // Act & Assert
+    for (const event of ["SessionStart", "UserPromptSubmit", "UserPromptContext", "Stop", "SessionEnd", "PostToolUse"]) {
+      expect(mustDeny(event, { tool_name: "AskUserQuestion" }, CONVERSATION)).toBe(false);
+    }
+  });
+});
+
+// AskUserQuestion in a session nobody is sitting at: the question goes to the hub and the tool is denied, so the
+// TUI prompt that would hold the session busy for ever is never drawn.
+describe("runHook PreToolUse", () => {
+  const AGENT = "0f8a6a1e-1234-4000-8000-0000000000aa";
+  const CONVERSATION = { AGENT_HUB_CONVERSATION_ID: "0f8a6a1e-1234-4000-8000-0000000000bb" };
+  const TOOL_INPUT = {
+    questions: [
+      {
+        question: "Do you prefer red or blue?",
+        header: "Color",
+        options: [
+          { label: "Red", description: "You prefer red." },
+          { label: "Blue", description: "You prefer blue." }
+        ],
+        multiSelect: false
+      }
+    ]
+  };
+
+  function ask(sid: string, overrides: Partial<HookPayload> = {}): HookPayload {
+    return { session_id: sid, tool_name: ASK_USER_QUESTION, tool_input: TOOL_INPUT, tool_use_id: "toolu_bdrk_01TNH", ...overrides };
+  }
+
+  /** A session that has registered an agent, with no `enabled` flag: the question is denied whatever the comms state. */
+  function registered(sid: string, agentId: string | null = AGENT): void {
+    ensureStateDir(sid);
+    writeJson(statePath(sid, "agent.json"), agentId === null ? { claude_pid: DEAD_PID } : { agent_id: agentId, claude_pid: DEAD_PID });
+  }
+
+  /** A fetch that answers 204, as the hub's question route does, and records what it was given. */
+  function accepts(): { calls: { url: string; body: unknown }[]; fetchImpl: ReturnType<typeof vi.fn> } {
+    const calls: { url: string; body: unknown }[] = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    return { calls, fetchImpl };
+  }
+
+  async function hookJson(input: HookPayload, env: Env): Promise<HookDenyOutput> {
+    const out = await runHook("PreToolUse", input, { ...process.env, ...env });
+    if (typeof out === "string") {
+      throw new Error(`expected a decision from PreToolUse, got ${JSON.stringify(out)}`);
+    }
+    return out as HookDenyOutput;
+  }
+
+  const reason = (out: HookDenyOutput) => out.hookSpecificOutput.permissionDecisionReason;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("should put the question on screen and deny the tool when the session is an assistant conversation", async () => {
+    // Arrange
+    registered("preq-conversation");
+    const { calls } = accepts();
+
+    // Act
+    const out = await hookJson(ask("preq-conversation"), CONVERSATION);
+
+    // Assert
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe(`http://127.0.0.1:9/api/agent/${AGENT}/question`);
+    expect(calls[0]?.body).toEqual({ session_id: "preq-conversation", tool_use_id: "toolu_bdrk_01TNH", questions: TOOL_INPUT.questions });
+    expect(out.hookSpecificOutput.hookEventName).toBe("PreToolUse");
+    expect(out.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(reason(out)).toBe(ASKED_REASON);
+  });
+
+  it("should put the question on screen and deny the tool when the session is a virtual agent's pod", async () => {
+    // Arrange
+    registered("preq-pod");
+    const { calls } = accepts();
+
+    // Act
+    const out = await hookJson(ask("preq-pod"), VIRTUAL);
+
+    // Assert
+    expect(calls).toHaveLength(1);
+    expect(reason(out)).toBe(ASKED_REASON);
+  });
+
+  it("should output nothing and ask nobody when a person is at the keyboard, since they can answer the prompt", async () => {
+    // Arrange
+    registered("preq-local");
+    const { calls } = accepts();
+
+    // Act
+    const out = await runHook("PreToolUse", ask("preq-local"), { ...process.env });
+
+    // Assert
+    expect(out).toBe("");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("should output nothing when the tool is not the one that would wait for a keyboard", async () => {
+    // Arrange
+    registered("preq-other-tool");
+    const { calls } = accepts();
+
+    // Act
+    const out = await runHook("PreToolUse", ask("preq-other-tool", { tool_name: "Bash", tool_input: { command: "ls" } }), {
+      ...process.env,
+      ...CONVERSATION
+    });
+
+    // Assert
+    expect(out).toBe("");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("should tell the model to ask in words when the question could not be sent", async () => {
+    // Arrange
+    registered("preq-unreachable");
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("connect ECONNREFUSED");
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    // Act
+    const out = await hookJson(ask("preq-unreachable"), CONVERSATION);
+
+    // Assert
+    expect(reason(out)).toBe(UNDELIVERED_REASON);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  // A connection error may have left the hub with the row written: the abort or reset stops this process reading
+  // the response, not the hub committing it. The POST is idempotent on `tool_use_id`, so a second attempt is what
+  // tells "the question never arrived" from "the answer did not come back" — and the model is told the truth.
+  it("should ask again and say the question is on screen when the first attempt's answer never came back", async () => {
+    // Arrange
+    registered("preq-retried");
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+      }
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    // Act
+    const out = await hookJson(ask("preq-retried"), CONVERSATION);
+
+    // Assert
+    expect(reason(out)).toBe(ASKED_REASON);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * The hub refuses a second, different question while one of this session's is still unanswered: nothing is
+   * written, so there is no card to wait for. Telling the model its question is on screen would leave it waiting
+   * for one that does not exist, which is the stall this hook exists to remove — so a `409` has to come out as the
+   * reason that sends it back to asking in words, and it must not be retried.
+   */
+  it("should tell the model to ask in words when the hub already has a different question of this session's", async () => {
+    // Arrange
+    registered("preq-conflict");
+    const fetchImpl = vi.fn(async () => Response.json({ error: "this session already has a different question waiting for an answer" }, { status: 409 }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    // Act
+    const out = await hookJson(ask("preq-conflict"), CONVERSATION);
+
+    // Assert
+    expect(reason(out)).toBe(UNDELIVERED_REASON);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  // A refusal is the hub reading the body and saying no, which asking again cannot change; the model is waiting on
+  // this hook, so the budget is not spent repeating it.
+  it("should tell the model to ask in words, without asking twice, when the hub refused the question", async () => {
+    // Arrange
+    registered("preq-refused");
+    const fetchImpl = vi.fn(async () => Response.json({ error: "no such agent" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    // Act
+    const out = await hookJson(ask("preq-refused"), CONVERSATION);
+
+    // Assert
+    expect(reason(out)).toBe(UNDELIVERED_REASON);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("should tell the model to ask in words without calling the hub when the session has no agent", async () => {
+    // Arrange
+    registered("preq-unregistered", null);
+    const { calls } = accepts();
+
+    // Act
+    const out = await hookJson(ask("preq-unregistered"), CONVERSATION);
+
+    // Assert
+    expect(reason(out)).toBe(UNDELIVERED_REASON);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("should tell the model to ask in words when the payload carries no question it can read", async () => {
+    // Arrange
+    registered("preq-unreadable");
+    const { calls } = accepts();
+
+    // Act & Assert
+    for (const payload of [{ tool_input: {} }, { tool_input: "red or blue" }, { tool_use_id: "" }] as Partial<HookPayload>[]) {
+      expect(reason(await hookJson(ask("preq-unreadable", payload), CONVERSATION))).toBe(UNDELIVERED_REASON);
+    }
+    expect(calls).toHaveLength(0);
   });
 });
 

@@ -5,6 +5,7 @@
 import { execFile } from "node:child_process";
 import type { Env } from "./env.ts";
 import type { PortsReport } from "./ports.ts";
+import type { QuestionBody } from "./questions.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
 export const DEFAULT_URL = "https://agent-hub.aat.platform.hmcts.net";
@@ -240,6 +241,13 @@ export type MemoryReportBody = {
   anon_bytes: number;
 };
 
+/** What one model's check came to: see Model access. `unknown` never takes a model away on the hub. */
+export type ModelCheckStatus = "available" | "unavailable" | "unknown";
+
+export type ModelCheckResult = { model: string; status: ModelCheckStatus };
+
+export type ModelCheckBody = { models: ModelCheckResult[] };
+
 export type RegisterResponse = { agent_id: string; name: string };
 export type MessageResponse = { message: Message };
 export type MessagesResponse = { messages: Message[] };
@@ -422,8 +430,15 @@ export type Api = {
   putUploads: (virtualId: string, body: UploadsReportBody) => Promise<null>;
   /** What this container's memory cgroup says, which the hub has no way to see for itself either. */
   putMemory: (virtualId: string, body: MemoryReportBody) => Promise<null>;
+  /** Which models its owner's credential answered on this pod's route, from the supervisor's own check. */
+  postModels: (virtualId: string, body: ModelCheckBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
+  /**
+   * A question this session's model asked with `AskUserQuestion`, for the person to answer in the web UI. Idempotent
+   * on `tool_use_id`, so a retry after a lost response does not put the question on screen twice.
+   */
+  postQuestion: (agentId: string, body: QuestionBody, opts?: RequestOptions) => Promise<null>;
   putJiraExport: (agentId: string, body: JiraExportReport) => Promise<null>;
   putConfluenceExport: (agentId: string, body: ConfluenceExportReport) => Promise<null>;
   /** The supervisor's answer to one of its owner's Jira or Confluence lookups. */
@@ -580,8 +595,10 @@ export function createApi({
     conversations: (virtualId) => request<ConversationsResponse>("GET", v(virtualId, "conversations")),
     putUploads: (virtualId, body) => request<null>("PUT", v(virtualId, "uploads"), body),
     putMemory: (virtualId, body) => request<null>("PUT", v(virtualId, "memory"), body),
+    postModels: (virtualId, body) => request<null>("POST", v(virtualId, "models"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
+    postQuestion: (agentId, body, opts) => request<null>("POST", `${a(agentId)}/question`, body, opts),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     putConfluenceExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/confluence`, body),
     putLookup: (virtualId, lookupId, body) => request<null>("PUT", v(virtualId, `lookups/${encodeURIComponent(lookupId)}`), body),

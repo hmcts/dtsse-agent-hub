@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import type { AgentView } from "@/agents/views";
 import { saveCredential } from "@/app/_actions/credentials";
 import { sendDirect } from "@/app/_actions/direct";
+import { answerAgentQuestion } from "@/app/_actions/questions";
 import {
   deleteVirtualAgent,
   pasteLoginCode,
@@ -42,6 +43,7 @@ const VIRTUAL_AGENT_ACTIONS: VirtualAgentActions = {
 
 async function AgentConversation({ viewer, activity, view }: { viewer: Viewer; activity: Activity; view: AgentView }) {
   const { agent, access, skills } = view;
+  const { conversation, questions } = await activity;
   return (
     <Conversation
       agentId={agent.id}
@@ -51,9 +53,11 @@ async function AgentConversation({ viewer, activity, view }: { viewer: Viewer; a
       viewerOid={viewer.oid}
       status={agent.status}
       access={access}
-      initial={(await activity).conversation}
+      initial={conversation}
+      questions={questions}
       skills={skills}
       send={sendDirect}
+      answerQuestion={answerAgentQuestion}
     />
   );
 }

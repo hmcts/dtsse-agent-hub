@@ -9,6 +9,7 @@ import { mayMessage, offlineNote } from "@/components/agents/DirectComposer";
 import { ANNOUNCE_AFTER_MS } from "@/components/live/Announcer";
 import { HubStreamProvider } from "@/components/live/HubStream";
 import type { ThreadMessage } from "@/messages/direct-thread";
+import type { QuestionView } from "@/questions/views";
 import type { ConversationPage, TranscriptEntryView } from "@/transcripts/conversation";
 import { duration } from "@/web/format";
 
@@ -104,6 +105,7 @@ function view(props: Partial<Parameters<typeof Conversation>[0]> = {}) {
       access="read"
       initial={page()}
       send={vi.fn()}
+      answerQuestion={vi.fn()}
       {...props}
     />
   );
@@ -343,6 +345,76 @@ describe("Conversation skills", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "/c", selectionStart: 2, selectionEnd: 2 } });
 
     expect(screen.getByRole("listbox", { name: "Skills" }).textContent).toContain("cft-explain");
+  });
+});
+
+describe("Conversation questions", () => {
+  const ASKED: QuestionView = {
+    id: "q-1",
+    agentId: AGENT,
+    askedAt: "2026-09-29T09:02:00.000Z",
+    questions: [
+      {
+        question: "Do you prefer red or blue?",
+        header: "Colour",
+        options: [
+          { label: "Red", description: "You prefer red." },
+          { label: "Blue", description: "You prefer blue." }
+        ],
+        multiSelect: false
+      }
+    ],
+    answer: null,
+    offered: true
+  };
+
+  it("should show a question the agent's session asked, merged into the time line", () => {
+    render(view({ access: "owner", initial: page({ entries: [entry("1")] }), questions: [ASKED] }));
+
+    const items = screen.getByRole("list", { name: "Conversation" }).children;
+    expect(screen.getByRole("region", { name: "A question for you" })).toBeTruthy();
+    expect(items).toHaveLength(2);
+  });
+
+  it("should send the owner's choice through the action the page gave it", async () => {
+    const answerQuestion = vi.fn(async () => ({ ok: true as const }));
+    render(view({ access: "owner", questions: [ASKED], answerQuestion }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: /Red/ }));
+    });
+
+    expect(answerQuestion).toHaveBeenCalledWith({ questionId: "q-1", answers: { answers: [{ labels: ["Red"], text: null }] } });
+  });
+
+  // The same rule the composer is behind: a read-grant viewer may read the question and may not answer it, and
+  // offering them the controls would end in a refusal saying the question is no longer waiting for an answer.
+  it("should offer a read-only viewer no way to answer, while still showing them the question", () => {
+    render(view({ access: "read", questions: [ASKED] }));
+
+    expect(screen.getByText("Do you prefer red or blue?")).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Something else" })).toBeNull();
+  });
+
+  it.each(["owner", "write"] as const)("should offer a %s viewer the options, since they may message the agent", (access) => {
+    render(view({ access, questions: [ASKED] }));
+
+    expect(screen.getByRole("radio", { name: /Red/ })).toBeTruthy();
+  });
+
+  it("should re-read the page when the watched agent's questions change, and not for another agent's", async () => {
+    live({ access: "owner", questions: [ASKED] });
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_question", { agent_id: "someone-else" });
+    });
+    expect(refresh).not.toHaveBeenCalled();
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_question", { agent_id: AGENT });
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
 

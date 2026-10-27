@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import type { AgentAccess } from "@/access/rules";
 import type { Skill } from "@/agents/skills";
-import { DirectComposer, type SendAction } from "@/components/agents/DirectComposer";
+import { DirectComposer, mayMessage, type SendAction } from "@/components/agents/DirectComposer";
 import { DirectMessage, senderName } from "@/components/agents/DirectMessage";
 import { TranscriptEntry } from "@/components/agents/TranscriptEntry";
 import { useLiveConversation } from "@/components/agents/useLiveConversation";
@@ -12,6 +12,8 @@ import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubEvent } from "@/components/live/HubStream";
 import { SessionEndedMessage } from "@/components/live/SessionEnded";
+import { type AnswerQuestionAction, QuestionCard } from "@/components/questions/QuestionCard";
+import type { QuestionView } from "@/questions/views";
 import type { AgentStatus } from "@/realtime/events";
 import type { ConversationPage } from "@/transcripts/conversation";
 
@@ -32,8 +34,10 @@ export function Conversation({
   status,
   access,
   initial,
+  questions = [],
   skills = [],
-  send
+  send,
+  answerQuestion
 }: {
   agentId: string;
   agentName: string;
@@ -45,19 +49,30 @@ export function Conversation({
   status: AgentStatus;
   access: Exclude<AgentAccess, "none">;
   initial: ConversationPage;
+  /** The questions this agent's sessions asked, which the time line shows as cards. */
+  questions?: readonly QuestionView[];
   /** What the composer's "/" autocomplete offers. */
   skills?: readonly Skill[];
   send: SendAction;
+  answerQuestion: AnswerQuestionAction;
 }) {
   const arrivals = useAnnouncer("messages");
   const router = useRouter();
   const { items, olderBefore, loading, error, signedOut, loadEarlier, addMessage } = useLiveConversation(agentId, initial, {
+    questions,
     onReply: () => arrivals.announce(`New reply from @${agentName}`),
     onMessage: (message) => arrivals.announce(`New message from ${senderName(message)}`)
   });
   const scroller = useStickToBottom<HTMLDivElement>(items.length);
 
+  // Both frames carry the agent id alone, so the page is re-read: a changed skill list reaches the composer, and a
+  // question asked, or answered in another tab, reaches the time line.
   useHubEvent<{ agent_id: string }>("agent_skills", ({ agent_id }) => {
+    if (agent_id === agentId) {
+      router.refresh();
+    }
+  });
+  useHubEvent<{ agent_id: string }>("agent_question", ({ agent_id }) => {
     if (agent_id === agentId) {
       router.refresh();
     }
@@ -97,6 +112,15 @@ export function Conversation({
               {items.map((item) =>
                 item.type === "message" ? (
                   <DirectMessage key={item.key} agentId={agentId} message={item.message} />
+                ) : item.type === "question" ? (
+                  <li key={item.key} className="px-5 py-2">
+                    {/*
+                      The action goes to whoever may message the agent, and nobody else: the same rule the composer
+                      is behind. A read-grant viewer is offered no controls, because the action would refuse them
+                      and its refusal says the question is no longer waiting for an answer, which is not true.
+                    */}
+                    <QuestionCard view={item.question} tone="hub" answer={mayMessage(access) ? answerQuestion : undefined} />
+                  </li>
                 ) : (
                   <TranscriptEntry key={item.key} entry={item.entry} agentName={agentName} ownerName={ownerName} />
                 )

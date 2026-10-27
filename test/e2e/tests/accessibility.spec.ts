@@ -1,12 +1,19 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { buildChannel, connectForChat, PERSONA_COOKIE, registerAgent, sampleTranscript, unique, uploadTranscript } from "./hub";
+import { askQuestion, buildChannel, connectForChat, PERSONA_COOKIE, registerAgent, sampleTranscript, unique, uploadTranscript } from "./hub";
 
 const PERSONA = unique("a11y");
 
-/** Audits the page as it stands, which is what a surface reached by interacting rather than by its own address needs. */
-async function expectNoViolations(page: Page): Promise<void> {
-  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+/**
+ * Audits the page as it stands, which is what a surface reached by interacting rather than by its own address needs.
+ *
+ * `within` narrows it to one region, for a surface that sits inside a page audited by a test of its own: auditing
+ * the whole page again would report that page's own findings against whichever test ran last, and the one that owns
+ * them would no longer be the one that fails.
+ */
+async function expectNoViolations(page: Page, within?: string): Promise<void> {
+  const builder = new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]);
+  const results = await (within === undefined ? builder : builder.include(within)).analyze();
   expect(results.violations).toEqual([]);
 }
 
@@ -100,6 +107,31 @@ test.describe("accessibility @nightly", () => {
     await audit(page, `/hub/agents/${agent}`);
     await page.locator("details summary").first().click();
     await expectNoViolations(page);
+  });
+
+  test("should raise no WCAG A or AA violations on an agent page showing a question @nightly @a11y", async ({ page, request }) => {
+    const agent = await registerAgent(request, PERSONA, unique("agent"));
+    test.skip(agent === undefined, "this deployment checks real agent tokens, so the suite cannot register an agent");
+    await askQuestion(request, PERSONA, agent!, {
+      question: "Do you prefer red or blue?",
+      header: "Colour",
+      options: [
+        { label: "Red", description: "You prefer red." },
+        { label: "Blue", description: "You prefer blue." }
+      ]
+    });
+
+    const response = await page.goto(`/hub/agents/${agent}`);
+    expect(response?.status()).toBe(200);
+    // The card alone, not the page around it: the agent page is audited whole by the test above, and this one is
+    // about the question's own markup — its fieldsets, its labelled options and the free-text way out.
+    const card = '[aria-label="A question for you"]';
+    await expect(page.locator(card)).toBeVisible();
+    await expectNoViolations(page, card);
+    // The free-text box is a surface of its own, reached by pressing rather than by its own address.
+    await page.getByRole("button", { name: "Something else" }).click();
+    await expect(page.locator(card).getByRole("textbox")).toBeVisible();
+    await expectNoViolations(page, card);
   });
 
   /**

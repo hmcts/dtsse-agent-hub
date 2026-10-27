@@ -4,6 +4,7 @@ import {
   openConversation,
   renameConversation,
   sendAssistantMessage,
+  setConversationModel,
   setConversationProduct,
   startConversation
 } from "@/app/_actions/assistant";
@@ -31,6 +32,7 @@ const CHAT_ACTIONS: EmptyChatActions = {
   start: startConversation,
   open: openConversation,
   send: sendAssistantMessage,
+  setModel: setConversationModel,
   setProduct: setConversationProduct
 };
 
@@ -75,7 +77,15 @@ export default async function AssistantPage() {
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
     >
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>
-        <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
+        <EmptyChat
+          starters={STARTERS}
+          templates={offeredTemplates(mine)}
+          viewerOid={viewer.oid}
+          unsent={unsent}
+          actions={CHAT_ACTIONS}
+          models={home.assistant.models}
+          defaultModel={home.assistant.defaultModel}
+        />
       </AssistantGate>
     </AssistantShell>
   );

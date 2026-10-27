@@ -32,6 +32,7 @@ export const HUB_EVENT_TYPES = [
   "post",
   "agent_status",
   "agent_skills",
+  "agent_question",
   "direct",
   "delivery",
   "transcript",

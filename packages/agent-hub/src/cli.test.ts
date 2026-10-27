@@ -26,6 +26,7 @@ import { createApi, type RegisterBody } from "./api.ts";
 import { parseFlags, readStdinText, runCli, USAGE, UsageError } from "./cli.ts";
 import type { Env } from "./env.ts";
 import { CLIENT_FEATURES } from "./features.ts";
+import { denyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { VIRTUAL_USAGE } from "./virtual/index.ts";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -913,6 +914,37 @@ describe("the commands, in process against the mock hub", () => {
       expect(out.hookSpecificOutput.additionalContext).toMatch(/NOT from the user[\s\S]*#50 touches the same table\./);
       expect(fs.existsSync(stateFile("held-notes.jsonl"))).toBe(false);
       expect(second.raw()).toBe("");
+    });
+
+    /**
+     * A `PreToolUse` whose stdin body is not JSON throws on the parse, before `runHook` — and so before
+     * `parseQuestions` — can decide anything. Printing nothing then is read as "no decision" and
+     * `AskUserQuestion`'s prompt is drawn, which in a pod nobody can answer. So the catch decides instead, from
+     * the environment and the tool name alone.
+     */
+    it("should still deny a PreToolUse in a pod when the hook input is not JSON at all", async () => {
+      // Act
+      const r = await cli(["hook", "PreToolUse"], {
+        env: cliEnv({
+          AGENT_HUB_URL: "http://127.0.0.1:9",
+          AGENT_HUB_VIRTUAL_AGENT_ID: "0f8a6a1e-1234-4000-8000-000000000001",
+          AGENT_HUB_LAUNCH_TOKEN: "lt-abc123"
+        }),
+        input: "not json"
+      });
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.raw())).toEqual(denyOutput(UNDELIVERED_REASON));
+    });
+
+    it("should decide nothing for an unreadable PreToolUse in an engineer's own session, who can answer the prompt", async () => {
+      // Act
+      const r = await cli(["hook", "PreToolUse"], { env: hookEnv(), input: "not json" });
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(r.raw()).toBe("");
     });
 
     it("should log the failure against the session and still exit 0 when a hook throws", async () => {
