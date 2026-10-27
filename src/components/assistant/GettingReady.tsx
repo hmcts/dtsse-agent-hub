@@ -496,7 +496,7 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
  *
  * `onLeave` is how the screen is closed while a connection is still missing: a thing the person opened from the banner
  * and can close again. It is left out while `chatGate` is `blocked`, because then the screen is the gate across the
- * Assistant, and "Go to your chats" would be a way to chats that cannot be had without GitHub, Azure and Claude.
+ * Assistant, and "Go to your chats" would be a way to chats that cannot be had without GitHub and Claude.
  *
  * A row whose stored credential a pod has failed to use reads as lapsed rather than connected, and offers `reconnect`:
  * nothing else on this screen can mend a stored value, so without it the one row that needs the person is the one
@@ -771,11 +771,10 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
   const [waiting] = useState(ask === "done" && assistant.status !== "running");
   const [done, setDone] = useState(false);
   const [asking, setAsking] = useState(false);
-  // Without GitHub, Azure and Claude there is no chat to be had, because the pod starts Claude only once it has all
-  // three, so this one is a gate rather than a banner: no cookie, no Escape and no button takes the person past it,
-  // and the page behind it renders no chat while it holds. It lifts when the credential's row is written, whose event
-  // refreshes the page; the screen then stays, as one opened from the banner does, until the person chooses to start
-  // chatting.
+  // Without GitHub and Claude there is no chat to be had, so this one is a gate rather than a banner: no cookie, no
+  // Escape and no button takes the person past it, and the page behind it renders no chat while it holds. It lifts
+  // when the credential's row is written, whose event refreshes the page; the screen then stays, as one opened from
+  // the banner does, until the person chooses to start chatting.
   const blocked = chatGate(assistant.toChat, storedKinds(props.statuses), props.unavailable) === "blocked";
   const [view, setView] = useState<"screen" | "notice" | "gone">(() => (blocked ? "screen" : initialView(ask, dismissed)));
   const running = assistant.status === "running";

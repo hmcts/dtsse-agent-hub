@@ -6,7 +6,7 @@ import { actAs } from "./web-session.ts";
 /**
  * The hooks a suite that drives the Assistant's actions shares: the realtime listener for the run, virtual agents on
  * and the local credential store keyed for each test, an empty database in which every person named has connected
- * GitHub, Azure and Claude so `chatGate` lets them chat, and Alice as the viewer.
+ * GitHub and Claude so `chatGate` lets them chat, and Alice as the viewer.
  *
  * Called at the top level of the suite, after its `vi.mock` calls, so the hooks belong to the file.
  */

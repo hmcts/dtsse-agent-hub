@@ -46,7 +46,7 @@ const OFF: { ok: false; error: string } = { ok: false, error: "the HMCTS Assista
 const MISSING: { ok: false; error: string } = { ok: false, error: "that conversation no longer exists" };
 
 /**
- * Refused while the person has yet to connect GitHub, Azure and Claude: `assistantChatGate` is the same gate the pages hold
+ * Refused while the person has yet to connect GitHub and Claude: `assistantChatGate` is the same gate the pages hold
  * the getting-ready screen on, so a page loaded before it closed, or a request made without the page, gets no further.
  */
 const BLOCKED: { ok: false; error: string } = { ok: false, error: CHAT_BLOCKED };

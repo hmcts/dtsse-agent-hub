@@ -147,8 +147,6 @@ assistantSuite([ALICE, BOB]);
 describe("the person's assistant", () => {
   it("should create a virtual agent on the first visit of someone who has none, and reuse it on the next", async () => {
     await insertUser(ALICE);
-    // A first visit is someone who has connected nothing yet, not the suite's connected Alice.
-    await prisma.credential.deleteMany({ where: { ownerOid: ALICE.oid } });
     const first = await openAssistant(VIEWER);
     const second = await openAssistant(VIEWER);
 
@@ -630,7 +628,7 @@ describe("the chat gate", () => {
     await prisma.credential.deleteMany({ where: { ownerOid: ALICE.oid, kind: { notIn: kinds } } });
   }
 
-  const BLOCKED = { ok: false, error: "connect GitHub, Azure and Claude before you start chatting" };
+  const BLOCKED = { ok: false, error: "connect GitHub and Claude before you start chatting" };
 
   it("should refuse to start or open a conversation when the person has not connected GitHub and Claude", async () => {
     await startedAssistant();
@@ -655,24 +653,15 @@ describe("the chat gate", () => {
   it("should judge the model key by the assistant's own route when the viewer's differs from it", async () => {
     await insertUser(ALICE);
     await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "assistant" });
-    await storedOnly("github", "azure", "claude");
+    await storedOnly("github", "claude");
 
     expect(await actions.startConversation({ product: "general", body: "hello" })).toEqual(BLOCKED);
     expect((await openAssistant(VIEWER)).chat).toBe("blocked");
   });
 
-  it("should refuse to start a conversation when GitHub and the assistant's model key are stored without Azure", async () => {
+  it("should open the chat when GitHub and the assistant's model key are stored without Azure", async () => {
     await startedAssistant();
     await storedOnly("github", "claude", "bedrock");
-
-    expect((await openAssistant(VIEWER)).chat).toBe("blocked");
-    expect(await actions.startConversation({ product: "general", body: "hello" })).toEqual(BLOCKED);
-    expect(await prisma.assistantConversation.count()).toBe(0);
-  });
-
-  it("should open the chat when GitHub, Azure and the assistant's model key are stored", async () => {
-    await startedAssistant();
-    await storedOnly("github", "azure", "claude", "bedrock");
 
     expect((await openAssistant(VIEWER)).chat).toBe("open");
     expect(await actions.startConversation({ product: "general", body: "hello" })).toMatchObject({ ok: true });
