@@ -1,3 +1,4 @@
+import { gzipSync } from "node:zlib";
 import { type APIRequestContext, type Browser, type BrowserContext, expect, type Page } from "@playwright/test";
 
 /**
@@ -42,13 +43,28 @@ export async function registerAgent(request: APIRequestContext, persona: string,
 }
 
 /**
- * Stores placeholder GitHub, Claude and Bedrock credentials for `persona` through the agent API, so the Assistant's
- * chat is past the gate that holds it at GitHub and Claude. Nothing in a spec runs a pod to use them. A deployment
- * that keeps no credentials (503), or none for a development identity (403), leaves the gate open anyway, and one
- * that checks real agent tokens (401) cannot be driven this way, so none of them is an error here.
+ * An Azure token cache as the agent API takes one, gzipped MSAL JSON in base64, holding only the persona's own account
+ * in `tenant`. That ownership is all the hub checks before it stores one, and it needs `ENTRA_TENANT_ID` set to check
+ * it, so a local run sets that to `dev`, the tenant a development identity is in.
+ */
+function azureCache(persona: string, tenant: string): string {
+  const account = { home_account_id: `dev-${persona}.${tenant}`, username: `${persona}@dev.invalid` };
+  return gzipSync(JSON.stringify({ Account: { [`dev-${persona}`]: account } })).toString("base64");
+}
+
+/**
+ * Stores placeholder GitHub, Azure, Claude and Bedrock credentials for `persona` through the agent API, so the
+ * Assistant's chat is past the gate that holds it at GitHub, Azure and Claude. Nothing in a spec runs a pod to use
+ * them. A deployment that keeps no credentials (503), or none for a development identity (403), leaves the gate open
+ * anyway, and one that checks real agent tokens (401) cannot be driven this way, so none of them is an error here.
  */
 export async function connectForChat(request: APIRequestContext, persona: string): Promise<void> {
-  const values = { github: `ghp_${"e2e".repeat(10)}`, claude: `sk-ant-oat-${"e2e".repeat(10)}`, bedrock: `ABSK${"e2e".repeat(10)}` };
+  const values = {
+    github: `ghp_${"e2e".repeat(10)}`,
+    azure: azureCache(persona, process.env.ENTRA_TENANT_ID ?? "dev"),
+    claude: `sk-ant-oat-${"e2e".repeat(10)}`,
+    bedrock: `ABSK${"e2e".repeat(10)}`
+  };
   for (const [kind, value] of Object.entries(values)) {
     const response = await request.put(`/api/agent/credentials/${kind}`, { headers: { "x-dev-user": devUser(persona) }, data: { value } });
     expect([204, 401, 403, 503]).toContain(response.status());

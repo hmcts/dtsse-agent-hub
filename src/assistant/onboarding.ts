@@ -39,17 +39,15 @@ export function onboarded(needed: readonly CredentialKind[], stored: ReadonlySet
 }
 
 /**
- * The credentials without which there is no chat to be had: GitHub, and the key to the assistant's model. Which key
- * that is follows the assistant's route, as `neededCredentials` decides it — a Claude token on the person's own
- * licence, a Bedrock API key on Amazon Bedrock — so "Claude connected" means the key its pod will use, never
- * whichever of the two happens to be stored. A key for the other route is no use to the pod.
+ * The credentials without which there is no chat to be had: every one `neededCredentials` gives the assistant's
+ * route, because its pod starts Claude only once it has them all. GitHub clones the workspace, the pod waits on the
+ * Azure sign-in before it goes any further, and the model key is a Claude token on the person's own licence or a
+ * Bedrock API key on Amazon Bedrock — the key its pod will use, never whichever of the two happens to be stored.
  *
- * Azure is needed too but is not here: the banner asks for it, and a chat is still worth having without it.
+ * The optional ones, Jenkins and Atlassian, are never here: the pod does not wait for either.
  */
-const CHAT_CREDENTIALS: readonly CredentialKind[] = ["github", "claude", "bedrock"];
-
 export function chatCredentials(needed: readonly CredentialKind[]): CredentialKind[] {
-  return needed.filter((kind) => CHAT_CREDENTIALS.includes(kind));
+  return [...needed];
 }
 
 /**
@@ -71,7 +69,7 @@ export function chatGate(toChat: readonly CredentialKind[], stored: ReadonlySet<
 }
 
 /** What a server action answers while the gate is `blocked`, for a page that was loaded before it closed. */
-export const CHAT_BLOCKED = "connect GitHub and Claude before you start chatting";
+export const CHAT_BLOCKED = "connect GitHub, Azure and Claude before you start chatting";
 
 /**
  * What the getting-ready screen asks of the person: to connect their accounts, nothing because they have, or

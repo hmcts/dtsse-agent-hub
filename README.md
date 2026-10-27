@@ -505,10 +505,11 @@ The Playwright suite (`test/e2e/`) runs against `TEST_URL`, default `http://loca
 The pipeline selects by tag: `@smoke` on a preview, `@regression` on AAT, `@nightly` (the axe pass over every
 route) from `Jenkinsfile_nightly`. The specs that need an agent register one through the agent API and skip where
 agent tokens are checked, which is every deployment; run them fully locally against `next dev`, since a production
-build refuses `AGENT_AUTH_DISABLED`:
+build refuses `AGENT_AUTH_DISABLED`. `ENTRA_TENANT_ID=dev` lets the Assistant specs store the placeholder Azure sign-in
+its gate needs, which the hub checks against that tenant:
 
 ```bash
-AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev &
+AUTH_DISABLED=true AGENT_AUTH_DISABLED=true ENTRA_TENANT_ID=dev yarn dev &
 yarn test:e2e
 ```
 

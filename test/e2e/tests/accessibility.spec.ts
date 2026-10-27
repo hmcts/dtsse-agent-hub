@@ -135,9 +135,8 @@ test.describe("accessibility @nightly", () => {
   });
 
   /**
-   * The Assistant, which is audited as a first visit renders it: the shell, its sidebar and the new-chat screen, with
-   * the connections banner asking for the Azure sign-in nothing has made yet, GitHub and Claude having been stored so
-   * that the gate they are behind lets the page through. That is the whole of the Assistant a
+   * The Assistant, which is audited as a first visit renders it: the shell, its sidebar and the new-chat screen,
+   * GitHub, Azure and Claude having been stored so that the gate they are behind lets the page through. That is the whole of the Assistant a
    * deployment can show without a pod — a conversation, its thread and its document panel all need one running, so
    * they stay outside this gate.
    *

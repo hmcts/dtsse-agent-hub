@@ -51,31 +51,34 @@ describe("connectionsAsk", () => {
 });
 
 describe("chatCredentials", () => {
-  it("should need GitHub and a Claude token when the assistant runs on the person's own licence", () => {
-    expect(chatCredentials(["github", "azure", "claude"])).toEqual(["github", "claude"]);
+  it("should need GitHub, Azure and a Claude token when the assistant runs on the person's own licence", () => {
+    expect(chatCredentials(["github", "azure", "claude"])).toEqual(["github", "azure", "claude"]);
   });
 
-  it("should need GitHub and a Bedrock API key when the assistant runs on Amazon Bedrock", () => {
-    expect(chatCredentials(["github", "azure", "bedrock"])).toEqual(["github", "bedrock"]);
+  it("should need GitHub, Azure and a Bedrock API key when the assistant runs on Amazon Bedrock", () => {
+    expect(chatCredentials(["github", "azure", "bedrock"])).toEqual(["github", "azure", "bedrock"]);
   });
 });
 
 describe("chatGate", () => {
-  const OWN_LICENCE: CredentialKind[] = ["github", "claude"];
-  const BEDROCK: CredentialKind[] = ["github", "bedrock"];
+  const OWN_LICENCE: CredentialKind[] = ["github", "azure", "claude"];
+  const BEDROCK: CredentialKind[] = ["github", "azure", "bedrock"];
 
   it.each([
-    ["neither GitHub nor Claude is stored", OWN_LICENCE, ["azure"]],
-    ["GitHub is stored and Claude is not", OWN_LICENCE, ["github", "azure"]],
-    ["Claude is stored and GitHub is not", OWN_LICENCE, ["claude", "azure"]],
-    ["a Claude token is stored and the assistant runs on Bedrock", BEDROCK, ["github", "claude"]],
-    ["a Bedrock key is stored and the assistant runs on the person's own licence", OWN_LICENCE, ["github", "bedrock"]]
+    ["nothing is stored", OWN_LICENCE, []],
+    ["GitHub and Azure are stored and Claude is not", OWN_LICENCE, ["github", "azure"]],
+    ["Claude and Azure are stored and GitHub is not", OWN_LICENCE, ["claude", "azure"]],
+    ["GitHub and Claude are stored and Azure is not", OWN_LICENCE, ["github", "claude"]],
+    ["GitHub and a Bedrock key are stored and Azure is not", BEDROCK, ["github", "bedrock"]],
+    ["a Claude token is stored and the assistant runs on Bedrock", BEDROCK, ["github", "azure", "claude"]],
+    ["a Bedrock key is stored and the assistant runs on the person's own licence", OWN_LICENCE, ["github", "azure", "bedrock"]]
   ] as const)("should be blocked when %s", (_, toChat, stored) => {
     expect(chatGate(toChat, new Set<CredentialKind>(stored), null)).toBe("blocked");
   });
 
-  it("should be open when GitHub and the assistant's model key are stored, even without Azure", () => {
-    expect(chatGate(OWN_LICENCE, new Set(["github", "claude"]), null)).toBe("open");
+  it("should be open when GitHub, Azure and the assistant's model key are stored, without the optional ones", () => {
+    expect(chatGate(OWN_LICENCE, new Set(["github", "azure", "claude"]), null)).toBe("open");
+    expect(chatGate(BEDROCK, new Set(["github", "azure", "bedrock"]), null)).toBe("open");
   });
 
   it("should be open when the hub cannot read the credentials it would judge that on", () => {

@@ -517,7 +517,7 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  // Short of GitHub and Claude, which the gate's own tests cover, nothing covers the page until the person asks for
+  // Short of the connections the gate holds the person at, which its own tests cover, nothing covers the page until the person asks for
   // it. The connections screen is `fixed inset-0`, so showing it unbidden takes away the sidebar, every conversation
   // and the settings.
   it("should ask on a banner, over nothing, when the person has a connection still to make", () => {
@@ -924,9 +924,9 @@ describe("OnboardingGate", () => {
  * server component for that reason: it is a real time, and React serialises it, so the browser's first render is
  * made from the same number and there is nothing for hydration to disagree about.
  */
-describe("OnboardingGate holding the person at GitHub and Claude", () => {
-  const OWN_LICENCE: Partial<AssistantSummary> = { needed: ["github", "azure", "claude"], toChat: ["github", "claude"] };
-  const BEDROCK: Partial<AssistantSummary> = { needed: ["github", "azure", "bedrock"], toChat: ["github", "bedrock"] };
+describe("OnboardingGate holding the person at GitHub, Azure and Claude", () => {
+  const OWN_LICENCE: Partial<AssistantSummary> = { needed: ["github", "azure", "claude"], toChat: ["github", "azure", "claude"] };
+  const BEDROCK: Partial<AssistantSummary> = { needed: ["github", "azure", "bedrock"], toChat: ["github", "azure", "bedrock"] };
 
   function held(summary: AssistantSummary, stored: CredentialStatus[] = [], options: { dismissed?: boolean; unavailable?: string | null } = {}) {
     return (
@@ -993,11 +993,20 @@ describe("OnboardingGate holding the person at GitHub and Claude", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("should ask for Azure on the banner rather than hold the screen when GitHub and Claude are connected", () => {
+  it("should hold the screen when GitHub and Claude are connected and Azure is not", () => {
     render(held(assistant("awaiting_login", OWN_LICENCE), statuses("github", "claude")));
 
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).toContain("needs Azure");
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Connect the accounts above to continue" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("should hold the screen when GitHub and the Bedrock key are connected and Azure is not", () => {
+    render(held(assistant("awaiting_login", BEDROCK), statuses("github", "bedrock")));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
   });
 
   it("should not hold the person when the hub cannot read the credentials", () => {
@@ -1007,7 +1016,7 @@ describe("OnboardingGate holding the person at GitHub and Claude", () => {
     expect(screen.getByRole("region", { name: "Your sign-ins cannot be checked" })).toBeTruthy();
   });
 
-  it("should offer the way to the chats when GitHub and Claude are connected during the visit", () => {
+  it("should offer the way to the chats when the last of GitHub, Azure and Claude is connected during the visit", () => {
     const { rerender } = render(held(assistant("awaiting_credentials", OWN_LICENCE), statuses("azure")));
     expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
 

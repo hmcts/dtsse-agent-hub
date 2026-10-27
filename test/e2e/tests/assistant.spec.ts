@@ -12,7 +12,7 @@ const PERSONA = unique("asst");
 test.describe("assistant @regression", () => {
   test.beforeEach(async ({ context, baseURL, request }) => {
     await context.addCookies([{ name: PERSONA_COOKIE, value: PERSONA, url: baseURL! }]);
-    // Past the gate that holds the Assistant at GitHub and Claude, so there is a message box to measure.
+    // Past the gate that holds the Assistant at GitHub, Azure and Claude, so there is a message box to measure.
     await connectForChat(request, PERSONA);
   });
 
