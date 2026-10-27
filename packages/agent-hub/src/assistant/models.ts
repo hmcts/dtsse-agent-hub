@@ -9,7 +9,7 @@ import { type Tmux, tmuxName } from "./tmux.ts";
  * the id goes onto a command line and into a pane as keys, and checked by shape rather than against a list so that a
  * model the hub starts offering works on a pod that booted with an older client.
  */
-const MODEL_RE = /^claude-[a-z]+-[0-9]+(-[0-9]+)?$/;
+const MODEL_RE = /^claude-[a-z]+-\d+(-\d+)?$/;
 
 /**
  * The families Bedrock has a cross-region inference profile for, which are the families hai sets a default for. A model

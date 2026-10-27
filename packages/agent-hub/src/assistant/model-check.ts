@@ -47,7 +47,11 @@ const REFUSED: readonly RegExp[] = [
 function parseResult(stdout: string): { isError: boolean; text: string } | null {
   try {
     const parsed = JSON.parse(stdout.trim()) as { is_error?: unknown; result?: unknown };
-    return typeof parsed === "object" && parsed !== null ? { isError: parsed.is_error === true, text: String(parsed.result ?? "") } : null;
+    if (typeof parsed !== "object" || parsed === null) {
+      return null;
+    }
+    const text = typeof parsed.result === "string" ? parsed.result : "";
+    return { isError: parsed.is_error === true, text };
   } catch {
     return null;
   }
@@ -71,14 +75,13 @@ export function classify(run: CheckRun): ModelCheckStatus {
 }
 
 /**
- * The environment one request runs in, built from nothing rather than from this process's: only `PATH` to find
- * `claude`, a `HOME` and `CLAUDE_CONFIG_DIR` in the empty directory so no user settings, hooks, plugins or MCP servers
- * load, and the one credential the route pays with, as hai would hand it to `claude`. Nothing of agent-hub's reaches
- * it, so no hook could register the request as a session even if one were configured.
+ * The environment one request runs in, built from nothing rather than from this process's: a `HOME` and
+ * `CLAUDE_CONFIG_DIR` in the empty directory so no user settings, hooks, plugins or MCP servers load, and the one
+ * credential the route pays with, as hai would hand it to `claude`. Nothing of agent-hub's reaches it, so no hook could
+ * register the request as a session even if one were configured. `PATH` is the runner's, which knows where `claude` is.
  */
 export function checkEnv(route: "own_licence" | "bedrock", credential: string, dir: string, env: Env): NodeJS.ProcessEnv {
   const base: NodeJS.ProcessEnv = {
-    PATH: env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
     HOME: dir,
     CLAUDE_CONFIG_DIR: path.join(dir, ".claude"),
     DISABLE_AUTOUPDATER: "1",
@@ -109,16 +112,64 @@ export function checkArgs(launched: string): string[] {
   ];
 }
 
-/** `claude` itself rather than `hai`: hai adds `--plugin-dir` per plugin, and a plugin's hooks are what must not run. */
-export const runClaude: CheckRunner = (args, { cwd, env, timeoutMs }) =>
-  new Promise((resolve) => {
-    execFile("claude", args, { cwd, env, timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-      const failure = err as (Error & { code?: number | string; killed?: boolean; signal?: string }) | null;
-      const timedOut = failure?.killed === true && failure.signal === "SIGKILL";
-      const code = failure === null ? 0 : typeof failure.code === "number" ? failure.code : null;
-      resolve({ code, timedOut, stdout: String(stdout), stderr: String(stderr || (failure && !timedOut ? failure.message : "")) });
+/** The system directories a request's `PATH` holds besides `claude`'s own, which is where `node` sits beside it. */
+const SYSTEM_PATH = ["/usr/local/bin", "/usr/bin", "/bin"];
+
+function canExecute(file: string): boolean {
+  try {
+    nodeFs.accessSync(file, nodeFs.constants.X_OK);
+    return nodeFs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Where `claude` is, as a full path: `AGENT_HUB_CLAUDE_BIN` when that is one, otherwise the first executable `claude`
+ * in an absolute directory on this process's `PATH`. Resolved once, here, so the request runs that file and nothing
+ * else a `PATH` search could find first. Null when there is none, and then no model is asked.
+ */
+export function findClaude(env: Env, isExecutable: (file: string) => boolean = canExecute): string | null {
+  const configured = env.AGENT_HUB_CLAUDE_BIN;
+  if (configured !== undefined && path.isAbsolute(configured)) {
+    return isExecutable(configured) ? configured : null;
+  }
+  for (const dir of (env.PATH ?? "").split(path.delimiter)) {
+    const file = path.join(dir, "claude");
+    if (path.isAbsolute(dir) && isExecutable(file)) {
+      return file;
+    }
+  }
+  return null;
+}
+
+function exitCode(failure: (Error & { code?: number | string }) | null): number | null {
+  if (failure === null) {
+    return 0;
+  }
+  return typeof failure.code === "number" ? failure.code : null;
+}
+
+/**
+ * Runs `claude` itself rather than `hai`: hai adds `--plugin-dir` per plugin, and a plugin's hooks are what must not
+ * run. The request's `PATH` is `claude`'s own directory and the system ones, never this process's.
+ */
+export function claudeRunner(bin: string | null): CheckRunner {
+  return (args, { cwd, env, timeoutMs }) =>
+    new Promise((resolve) => {
+      if (bin === null) {
+        resolve({ code: null, timedOut: false, stdout: "", stderr: "claude was not found" });
+        return;
+      }
+      const PATH = [path.dirname(bin), ...SYSTEM_PATH].join(path.delimiter);
+      execFile(bin, args, { cwd, env: { ...env, PATH }, timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        const failure = err as (Error & { code?: number | string; killed?: boolean; signal?: string }) | null;
+        const timedOut = failure?.killed === true && failure.signal === "SIGKILL";
+        const said = failure && !timedOut ? failure.message : "";
+        resolve({ code: exitCode(failure), timedOut, stdout: String(stdout), stderr: String(stderr || said) });
+      });
     });
-  });
+}
 
 export type CheckModelsOptions = {
   api: Pick<Api, "getCredential">;
@@ -143,7 +194,7 @@ export async function checkModels({
   api,
   id,
   env = process.env,
-  run = runClaude,
+  run = claudeRunner(findClaude(env)),
   fs = nodeFs,
   tmpRoot = os.tmpdir(),
   timeoutMs = CHECK_TIMEOUT_MS,
@@ -180,7 +231,8 @@ export async function checkModels({
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, asked.length)) }, worker));
-  say(`model check: ${results.map((r) => `${r.model} ${r.status}`).join(", ")}`);
+  const summary = results.map((r) => `${r.model} ${r.status}`).join(", ");
+  say(`model check: ${summary}`);
   return results;
 }
 

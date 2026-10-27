@@ -4,7 +4,18 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ModelCheckBody } from "../api.ts";
-import { CHECKED_MODELS, type CheckRun, type CheckRunner, checkArgs, checkEnv, checkModels, classify, createModelChecker, runClaude } from "./model-check.ts";
+import {
+  CHECKED_MODELS,
+  type CheckRun,
+  type CheckRunner,
+  checkArgs,
+  checkEnv,
+  checkModels,
+  classify,
+  claudeRunner,
+  createModelChecker,
+  findClaude
+} from "./model-check.ts";
 
 const SECRET = "sk-ant-oat01-a-very-secret-token-value";
 const BEDROCK_KEY = "ABSKa-very-secret-bedrock-key-value";
@@ -63,7 +74,6 @@ describe("checkEnv", () => {
     const env = checkEnv("own_licence", SECRET, "/tmp/check", parent);
 
     expect(env).toEqual({
-      PATH: "/opt/node/bin:/usr/bin",
       HOME: "/tmp/check",
       CLAUDE_CONFIG_DIR: path.join("/tmp/check", ".claude"),
       DISABLE_AUTOUPDATER: "1",
@@ -84,8 +94,49 @@ describe("checkEnv", () => {
     expect(checkEnv("bedrock", BEDROCK_KEY, "/tmp/check", { AWS_REGION: "us-east-1" }).AWS_REGION).toBe("us-east-1");
   });
 
-  it("should fall back to a system PATH when the pod has none", () => {
-    expect(checkEnv("bedrock", BEDROCK_KEY, "/tmp/check", {}).PATH).toBe("/usr/local/bin:/usr/bin:/bin");
+  it("should not pass the pod's PATH on when it builds the environment", () => {
+    expect(checkEnv("bedrock", BEDROCK_KEY, "/tmp/check", parent).PATH).toBeUndefined();
+  });
+});
+
+describe("findClaude", () => {
+  const executable =
+    (...files: string[]) =>
+    (file: string) =>
+      files.includes(file);
+
+  it("should use AGENT_HUB_CLAUDE_BIN when it is a full path to an executable", () => {
+    const env = { AGENT_HUB_CLAUDE_BIN: "/opt/claude/bin/claude", PATH: "/usr/bin" };
+
+    expect(findClaude(env, executable("/opt/claude/bin/claude", "/usr/bin/claude"))).toBe("/opt/claude/bin/claude");
+  });
+
+  it("should find no claude when AGENT_HUB_CLAUDE_BIN is a full path to nothing executable", () => {
+    expect(findClaude({ AGENT_HUB_CLAUDE_BIN: "/opt/missing/claude", PATH: "/usr/bin" }, executable("/usr/bin/claude"))).toBeNull();
+  });
+
+  it("should take the first claude in an absolute PATH directory when AGENT_HUB_CLAUDE_BIN is a bare name", () => {
+    const env = { AGENT_HUB_CLAUDE_BIN: "claude", PATH: "bin:/opt/node/bin:/usr/bin" };
+
+    expect(findClaude(env, executable("bin/claude", "/opt/node/bin/claude", "/usr/bin/claude"))).toBe("/opt/node/bin/claude");
+  });
+
+  it("should find no claude when no PATH directory holds one", () => {
+    expect(findClaude({ PATH: "/usr/bin:/bin" }, executable())).toBeNull();
+    expect(findClaude({}, executable())).toBeNull();
+  });
+
+  it("should find a real executable and not a directory when it checks the file system", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-hub-find-"));
+    try {
+      fs.mkdirSync(path.join(dir, "first", "claude"), { recursive: true });
+      fs.mkdirSync(path.join(dir, "second"));
+      fs.writeFileSync(path.join(dir, "second", "claude"), "#!/bin/sh\n", { mode: 0o755 });
+
+      expect(findClaude({ PATH: [path.join(dir, "first"), path.join(dir, "second")].join(path.delimiter) })).toBe(path.join(dir, "second", "claude"));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -288,10 +339,12 @@ describe("createModelChecker", () => {
   });
 });
 
-describe("runClaude", () => {
+describe("claudeRunner", () => {
   let bin: string;
+  let run: CheckRunner;
 
-  // A `claude` that answers by its model argument: `ok` prints a result, `slow` outlives the timeout, `bad` fails.
+  // A `claude` that answers by its model argument: `ok` prints a result, `path` prints its PATH, `slow` outlives the
+  // timeout, `bad` fails.
   beforeAll(() => {
     bin = fs.mkdtempSync(path.join(os.tmpdir(), "agent-hub-claude-"));
     fs.writeFileSync(
@@ -300,6 +353,7 @@ describe("runClaude", () => {
         "#!/bin/sh",
         'case "$3" in',
         '  ok) printf \'{"type":"result","is_error":false,"result":"OK %s"}\' "$PWD" ;;',
+        "  path) printf '%s' \"$PATH\" ;;",
         "  slow) sleep 5 ;;",
         "  *) echo 'API Error: 404 not_found_error' >&2; exit 1 ;;",
         "esac",
@@ -307,40 +361,52 @@ describe("runClaude", () => {
       ].join("\n"),
       { mode: 0o755 }
     );
+    run = claudeRunner(path.join(bin, "claude"));
   });
 
   afterAll(() => {
     fs.rmSync(bin, { recursive: true, force: true });
   });
 
-  const env = () => ({ PATH: `${bin}:/usr/bin:/bin` });
-
   it("should answer what claude printed, from the directory it was given, when it exits cleanly", async () => {
-    const outcome = await runClaude(["-p", "--model", "ok"], { cwd: os.tmpdir(), env: env(), timeoutMs: 5000 });
+    const outcome = await run(["-p", "--model", "ok"], { cwd: os.tmpdir(), env: {}, timeoutMs: 5000 });
 
     expect(outcome).toMatchObject({ code: 0, timedOut: false });
     expect(classify(outcome)).toBe("available");
     expect(outcome.stdout).toContain(fs.realpathSync(os.tmpdir()));
   });
 
+  it("should give claude only its own directory and the system ones on PATH when the caller passes another", async () => {
+    const outcome = await run(["-p", "--model", "path"], { cwd: os.tmpdir(), env: { PATH: "/tmp/planted:/usr/bin" }, timeoutMs: 5000 });
+
+    expect(outcome.stdout).toBe([bin, "/usr/local/bin", "/usr/bin", "/bin"].join(path.delimiter));
+  });
+
   it("should answer its exit status and what it said when it fails", async () => {
-    const outcome = await runClaude(["-p", "--model", "bad"], { cwd: os.tmpdir(), env: env(), timeoutMs: 5000 });
+    const outcome = await run(["-p", "--model", "bad"], { cwd: os.tmpdir(), env: {}, timeoutMs: 5000 });
 
     expect(outcome).toMatchObject({ code: 1, timedOut: false });
     expect(classify(outcome)).toBe("unavailable");
   });
 
   it("should say it timed out when claude outlives the timeout", async () => {
-    const outcome = await runClaude(["-p", "--model", "slow"], { cwd: os.tmpdir(), env: env(), timeoutMs: 200 });
+    const outcome = await run(["-p", "--model", "slow"], { cwd: os.tmpdir(), env: {}, timeoutMs: 200 });
 
     expect(outcome.timedOut).toBe(true);
     expect(classify(outcome)).toBe("unknown");
   });
 
-  it("should answer no status and the error when claude is not on PATH", async () => {
-    const outcome = await runClaude(["-p"], { cwd: os.tmpdir(), env: { PATH: "/nonexistent" }, timeoutMs: 5000 });
+  it("should answer no status and the error when the claude it was given is missing", async () => {
+    const outcome = await claudeRunner("/nonexistent/claude")(["-p"], { cwd: os.tmpdir(), env: {}, timeoutMs: 5000 });
 
     expect(outcome).toMatchObject({ code: null, timedOut: false });
     expect(outcome.stderr).toContain("ENOENT");
+  });
+
+  it("should run nothing and leave every model unknown when no claude was found", async () => {
+    const outcome = await claudeRunner(null)(["-p", "--model", "ok"], { cwd: os.tmpdir(), env: {}, timeoutMs: 5000 });
+
+    expect(outcome).toEqual({ code: null, timedOut: false, stdout: "", stderr: "claude was not found" });
+    expect(classify(outcome)).toBe("unknown");
   });
 });
