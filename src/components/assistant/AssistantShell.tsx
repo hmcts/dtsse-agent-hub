@@ -10,6 +10,7 @@ import type { ConversationLink } from "@/assistant/views";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { ConversationSearch } from "@/components/assistant/ConversationSearch";
+import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
@@ -101,6 +102,7 @@ export function AssistantShell({
   templates,
   files,
   size,
+  exports,
   actions,
   children
 }: {
@@ -122,6 +124,8 @@ export function AssistantShell({
   files?: AssistantFiles;
   /** How much its pod has to work with, which the footer's settings shows and changes. */
   size?: AssistantSize;
+  /** Where the person's documents go by default, which the footer's settings shows and edits. */
+  exports?: AssistantExportDefaults;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
   actions?: ConversationActions;
   children: React.ReactNode;
@@ -311,6 +315,7 @@ export function AssistantShell({
               templates={templates}
               files={files}
               size={size}
+              exports={exports}
             />
           </div>
           {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,

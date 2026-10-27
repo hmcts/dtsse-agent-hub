@@ -8,6 +8,7 @@ import type { AssistantPluginsData } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
+import { type AssistantExportDefaults, ExportSettings } from "@/components/assistant/ExportSettings";
 import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
@@ -29,6 +30,7 @@ interface SettingsView {
   templates: AssistantTemplates | undefined;
   files: AssistantFiles | undefined;
   size: AssistantSize | undefined;
+  exports: AssistantExportDefaults | undefined;
 }
 
 /**
@@ -261,6 +263,13 @@ const SECTIONS: readonly SettingsSection[] = [
     group: null,
     shown: (view) => view.templates !== undefined,
     panel: (view) => (view.templates === undefined ? null : <Templates templates={view.templates} />)
+  },
+  {
+    id: "exports",
+    label: "Jira & Confluence",
+    group: null,
+    shown: (view) => view.exports !== undefined,
+    panel: (view) => (view.exports === undefined ? null : <ExportSettings exports={view.exports} />)
   },
   {
     id: "files",
@@ -601,7 +610,8 @@ export function AssistantSettings({
   claudeMd,
   templates,
   files,
-  size
+  size,
+  exports
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
@@ -612,6 +622,7 @@ export function AssistantSettings({
   templates?: AssistantTemplates;
   files?: AssistantFiles;
   size?: AssistantSize;
+  exports?: AssistantExportDefaults;
 }) {
   const cog = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -686,7 +697,7 @@ export function AssistantSettings({
       {open
         ? createPortal(
             <Dialog
-              view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, claudeMd, templates, files, size }}
+              view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, claudeMd, templates, files, size, exports }}
               onClose={close}
             />,
             themeRoot()

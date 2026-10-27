@@ -6,6 +6,7 @@ import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import type { ConfluenceExportView } from "@/assistant/confluence";
+import type { DefaultConfluencePage } from "@/assistant/export-defaults";
 import type { LookupResponse } from "@/assistant/lookups";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
 import { AtlassianSearch, LOOKUP_AFTER_MS, shortCrumb, WAKING_RETRY_MS } from "@/components/assistant/AtlassianSearch";
@@ -24,6 +25,14 @@ const PAGE = {
   space_name: "Core Case Data",
   ancestors: ["Core Case Data", "Guides"],
   url: "https://hmcts.atlassian.net/wiki/spaces/CCD/pages/280959611"
+};
+const DEFAULT_PAGE: DefaultConfluencePage = {
+  id: "100",
+  title: "Team space",
+  space_id: "280952876",
+  space_key: "CCD",
+  space_name: "Core Case Data",
+  ancestors: ["Core Case Data"]
 };
 
 afterEach(() => {
@@ -44,11 +53,13 @@ function answering(...answers: LookupResponse[]) {
 function panel({
   exported = { status: "none" },
   exportTo = vi.fn<ExportToConfluenceAction>(async () => ({ ok: true })),
+  defaultPage = null,
   lookUp = answering({ status: "done", results: [PAGE] }),
   jira = true
 }: {
   exported?: ConfluenceExportView;
   exportTo?: ExportToConfluenceAction;
+  defaultPage?: DefaultConfluencePage | null;
   lookUp?: LookUp;
   jira?: boolean;
 } = {}) {
@@ -69,7 +80,7 @@ function panel({
             }
           : undefined
       }
-      confluence={{ exported, access: CONNECTED, exportTo, lookUp }}
+      confluence={{ exported, access: CONNECTED, exportTo, defaultPage, lookUp }}
     />
   );
 }
@@ -93,7 +104,7 @@ describe("Confluence export in the document panel", () => {
     expect(screen.getByRole("radio", { name: /Jira backlog/ }).parentElement?.textContent).toContain("(done)");
   });
 
-  it("should start from the built-in AI Resources page, and publish under it, when nobody has picked another", async () => {
+  it("should start from the built-in AI Resources page, and publish under it, when the person has no default", async () => {
     const exportTo = vi.fn<ExportToConfluenceAction>(async () => ({ ok: true }));
     render(panel({ exportTo }));
 
@@ -114,13 +125,13 @@ describe("Confluence export in the document panel", () => {
     });
   });
 
-  it("should publish under the page the person found by searching, within the built-in page's space first", async () => {
+  it("should publish under the page the person found by searching, within the default space first", async () => {
     vi.useFakeTimers();
     const exportTo = vi.fn<ExportToConfluenceAction>(async () => ({ ok: true }));
     const lookUp = answering({ status: "done", results: [PAGE] });
-    render(panel({ exportTo, lookUp }));
+    render(panel({ exportTo, lookUp, defaultPage: DEFAULT_PAGE }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Change the Confluence page, now AI Resources" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change the Confluence page, now Team space" }));
     await typeAndWait(/Search Confluence/, "design");
     expect(screen.getByRole("option").textContent).toContain("Design notes");
     fireEvent.click(screen.getByRole("option"));
@@ -128,7 +139,7 @@ describe("Confluence export in the document panel", () => {
       fireEvent.click(publishButton());
     });
 
-    expect(lookUp).toHaveBeenCalledWith({ kind: "confluence_page", query: "design", space: "CATHAI" }, expect.any(AbortSignal));
+    expect(lookUp).toHaveBeenCalledWith({ kind: "confluence_page", query: "design", space: "CCD" }, expect.any(AbortSignal));
     expect(exportTo).toHaveBeenCalledWith({
       conversationId: CONVERSATION,
       parent: { id: PAGE.id, title: PAGE.title, space_id: PAGE.space_id, space_key: "CCD", space_name: "Core Case Data" }
@@ -159,7 +170,7 @@ describe("Confluence export in the document panel", () => {
   });
 
   it("should show why and offer the export again when it failed", () => {
-    render(panel({ exported: { status: "failed", place: null, error: "Confluence did not answer in time. Try again." } }));
+    render(panel({ exported: { status: "failed", place: null, error: "Confluence did not answer in time. Try again." }, defaultPage: DEFAULT_PAGE }));
 
     expect(screen.getByRole("alert").textContent).toBe("Confluence did not answer in time. Try again.");
     expect(publishButton().disabled).toBe(false);
@@ -213,7 +224,7 @@ describe("confluenceBannerText", () => {
 describe("the export footer accessibility", () => {
   it("should raise no WCAG A or AA violations with the Confluence search showing results", async () => {
     vi.useFakeTimers();
-    const { container } = render(panel());
+    const { container } = render(panel({ defaultPage: DEFAULT_PAGE }));
     fireEvent.click(screen.getByRole("button", { name: /Change the Confluence page/ }));
     await typeAndWait(/Search Confluence/, "design");
     vi.useRealTimers();
@@ -245,6 +256,19 @@ describe("AtlassianSearch", () => {
     );
     return { onPick, onCancel, view };
   }
+
+  it("should leave no empty results box under the search when nothing has been found", async () => {
+    vi.useFakeTimers();
+    const { view } = search(answering({ status: "done", results: [] }));
+    const list = () => view.container.querySelector('[role="listbox"]') as HTMLElement;
+
+    expect(list().classList.contains("hidden")).toBe(true);
+    expect(list().classList.contains("flex")).toBe(false);
+
+    await typeAndWait("Find a page", "design");
+
+    expect(list().classList.contains("hidden")).toBe(true);
+  });
 
   it("should search once for a burst of typing, and not at all for a single letter", async () => {
     vi.useFakeTimers();

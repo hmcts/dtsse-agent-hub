@@ -652,14 +652,16 @@ describe("atlassianLogin", () => {
     // Act & Assert: killed at the Bash timeout, the command reports nothing and the dead code stays on the owner's
     // screen, which is the fault this whole path exists to prevent. The code count is bounded by this, not by taste.
     expect(TWG_DEVICE_CODE_EXPIRES_S).toBe(300);
-    expect(jiraExportSignInBudget()).toBe(570000);
+    // 240000 of fixed twg calls, then the code's own 330000 and the two `SIGKILL_AFTER_MS` that a command which
+    // will not stop for SIGTERM can add after it, which leaves 20000 of the timeout spare.
+    expect(jiraExportSignInBudget()).toBe(580000);
     expect(jiraExportSignInBudget()).toBeLessThan(JIRA_EXPORT_BASH_TIMEOUT_MS);
   });
 
   it("should not fit another code into that time, which is why the bound is where it is", () => {
-    // Act & Assert: the five minutes and the one code are the same decision — two of them is 900 seconds against a
+    // Act & Assert: the five minutes and the one code are the same decision — two of them is 920 seconds against a
     // 600-second Bash timeout, so a code lasting its full life is what the count was traded for
-    expect(jiraExportSignInBudget(ATLASSIAN_SIGN_IN_CODES + 1)).toBe(900000);
+    expect(jiraExportSignInBudget(ATLASSIAN_SIGN_IN_CODES + 1)).toBe(920000);
     expect(jiraExportSignInBudget(ATLASSIAN_SIGN_IN_CODES + 1)).toBeGreaterThan(JIRA_EXPORT_BASH_TIMEOUT_MS);
   });
 

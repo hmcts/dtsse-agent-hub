@@ -285,7 +285,9 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
         role="listbox"
         aria-label={kind === "jira_project" ? "Jira projects found" : "Confluence pages found"}
         hidden={results.length === 0}
-        className="flex max-h-56 min-w-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden rounded-[9px] border border-asst-line bg-asst-field p-1"
+        // `flex` would override the `hidden` attribute and leave its border and padding as an empty box under the
+        // search, so the display class itself switches as well.
+        className={`${results.length === 0 ? "hidden" : "flex"} max-h-56 min-w-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden rounded-[9px] border border-asst-line bg-asst-field p-1`}
       >
         {results.map((result, index) => (
           <div

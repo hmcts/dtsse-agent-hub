@@ -199,7 +199,7 @@ export function EmptyChat({
         </div>
       </div>
       <div className="shrink-0 px-4 pb-3.5">
-        <div className="mx-auto max-w-[760px]">
+        <div className="mx-auto max-w-[900px]">
           {/* The draft is forgotten when the message typed here is sent, which is also when the page moves to the
               conversation — not when the conversation is created, because attaching a file creates one while the
               person is still typing into this box. A starter card only fills this box, so it is a draft like anything typed. */}

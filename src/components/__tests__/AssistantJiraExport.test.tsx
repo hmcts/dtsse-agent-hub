@@ -4,6 +4,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
+import type { DefaultJiraProject } from "@/assistant/export-defaults";
 import type { JiraExportView } from "@/assistant/jira";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
 import { LOOKUP_AFTER_MS } from "@/components/assistant/AtlassianSearch";
@@ -33,12 +34,14 @@ function panel({
   exported = { status: "none" },
   access = CONNECTED,
   exportTo = exporting(),
+  defaultProject = null,
   lookUp
 }: {
   artefact?: ArtefactSnapshot;
   exported?: JiraExportView;
   access?: JiraAccess;
   exportTo?: ExportToJiraAction;
+  defaultProject?: DefaultJiraProject | null;
   lookUp?: LookUp;
 } = {}) {
   return (
@@ -49,7 +52,7 @@ function panel({
       save={vi.fn(async () => ({ ok: true as const, saved: true as const, version: 99 }))}
       onClose={() => undefined}
       narrow={false}
-      jira={{ exported, access, exportTo, lookUp }}
+      jira={{ exported, access, exportTo, defaultProject, lookUp }}
     />
   );
 }
@@ -78,7 +81,7 @@ function atlassianLogin(overrides: Partial<LoginView> = {}): LoginView {
 }
 
 describe("Jira export in the document panel", () => {
-  it("should offer the VIBE backlog and export to it when the document is saved", async () => {
+  it("should offer the VIBE backlog and export to it when the person has no default and the document is saved", async () => {
     const exportTo = exporting();
     render(panel({ exportTo }));
 
@@ -223,6 +226,18 @@ describe("Jira export in the document panel", () => {
     );
 
     expect(screen.queryByRole("button", { name: /Change the Jira project/ })).toBeNull();
+  });
+
+  it("should start from the person's default project when they have one", async () => {
+    const exportTo = exporting();
+    render(panel({ exportTo, defaultProject: { key: "CCD", name: "Core Case Data" } }));
+
+    expect(screen.getByText("· Core Case Data")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(exportButton());
+    });
+
+    expect(exportTo).toHaveBeenCalledWith({ conversationId: CONVERSATION, project: "CCD" });
   });
 
   it("should put the backlog back as it was when the person cancels the project search", () => {

@@ -70,17 +70,22 @@ export const uploadsReportBody = z.object({
 });
 
 /**
- * What the pod's container cgroup says about its own memory: `memory.max`, `memory.current` and `memory.peak`.
+ * What the pod's container cgroup says about its own memory: `memory.max`, `memory.current`, `memory.peak` and
+ * `memory.stat`'s `anon`.
  *
- * All three are required, because every sentence the hub writes about memory is relative to the limit and the peak
- * is what the warning is computed from — a report missing one of them is not a weaker report, it is a figure that
- * would have to be guessed. The pod sends nothing at all rather than a partial one.
+ * All four are required, because every sentence the hub writes about memory is relative to the limit and `anon` is
+ * what the warning is computed from — a report missing one of them is not a weaker report, it is a figure that would
+ * have to be guessed. The pod sends nothing at all rather than a partial one, so a client from before `anon_bytes`
+ * is refused here and told apart by the `memory-anon` client feature instead; an optional field would have made an
+ * older client and a pod that could not measure the same silence.
  *
  * `peak_bytes` is not required to be at least `current_bytes`: `memory.peak` is resettable on newer kernels, and
- * refusing a report over that would lose the live figure with it.
+ * refusing a report over that would lose the live figure with it. Nor is `anon_bytes` required to be at most
+ * `current_bytes`, for the same reason — the four are read one after another, not atomically.
  */
 export const memoryReportBody = z.object({
   limit_bytes: wholeCount,
   current_bytes: wholeCount,
-  peak_bytes: wholeCount
+  peak_bytes: wholeCount,
+  anon_bytes: wholeCount
 });

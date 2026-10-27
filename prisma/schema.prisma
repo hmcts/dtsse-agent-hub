@@ -166,6 +166,7 @@ model User {
   assistantConversations AssistantConversation[]
   assistantUploads       AssistantUpload[]
   assistantTemplates     AssistantTemplate[]
+  assistantExportDefault AssistantExportDefault?
   conversationsSharedWithThem AssistantConversationShare[] @relation("shareRecipient")
   conversationsTheyShared     AssistantConversationShare[] @relation("shareOwner")
 
@@ -414,11 +415,16 @@ model VirtualAgent {
   /// How many it holds in all, which is more than `uploadsFiles` names once it holds more than the cap.
   uploadsFilesTotal   Int?                    @map("uploads_files_total")
   uploadsReportedAt   DateTime?               @map("uploads_reported_at") @db.Timestamptz(6)
+  /// How many conversation sessions the pod says it runs at once. The cap is in the pod template, so a running pod
+  /// enforces the figure it booted with; null means it has not said. See src/assistant/memory-report.ts.
+  sessionsMax         Int?                    @map("sessions_max")
   /// What the pod last reported its container cgroup says. Null means it has not said, not that it is idle.
   memoryLimitBytes    BigInt?                 @map("memory_limit_bytes")
   memoryCurrentBytes  BigInt?                 @map("memory_current_bytes")
-  /// The high-water mark since it booted, which the memory warning is computed from; see src/assistant/memory-report.ts.
+  /// The high-water mark since it booted, shown as what the pod reached at its busiest.
   memoryPeakBytes     BigInt?                 @map("memory_peak_bytes")
+  /// The part the kernel cannot reclaim, which the memory warning is computed from; see src/assistant/memory-report.ts.
+  memoryAnonBytes     BigInt?                 @map("memory_anon_bytes")
   memoryReportedAt    DateTime?               @map("memory_reported_at") @db.Timestamptz(6)
   startedAt           DateTime                @default(now()) @map("started_at") @db.Timestamptz(6)
   lastActiveAt        DateTime?               @map("last_active_at") @db.Timestamptz(6)
@@ -594,6 +600,25 @@ model AssistantTemplate {
   @@unique([ownerOid, name], map: "assistant_template_owner_name_key")
   @@index([ownerOid, name], map: "assistant_template_owner_idx")
   @@map("assistant_template")
+}
+
+/// Where a person's documents go by default, which the document panel starts from. See src/assistant/export-defaults.ts.
+model AssistantExportDefault {
+  ownerOid              String   @id @map("owner_oid")
+  jiraProject           String?  @map("jira_project")
+  jiraProjectName       String?  @map("jira_project_name")
+  confluenceParentId    String?  @map("confluence_parent_id")
+  confluenceParentTitle String?  @map("confluence_parent_title")
+  confluenceSpaceId     String?  @map("confluence_space_id")
+  confluenceSpaceKey    String?  @map("confluence_space_key")
+  confluenceSpaceName   String?  @map("confluence_space_name")
+  /// The titles above the parent page, from the space's top: at most 8 strings.
+  confluenceAncestors   Json     @default("[]") @map("confluence_ancestors")
+  updatedAt             DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
+
+  @@map("assistant_export_default")
 }
 
 /// One search of a person's Jira or Confluence, answered by their pod. See "Atlassian lookups" in docs/agent-api.md.

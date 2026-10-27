@@ -16,6 +16,8 @@ export type GithubDeviceFlowStubOptions = {
   expiresInS?: number;
   /** How many polls answer `authorization_pending` before the token. */
   pendingPolls?: number;
+  /** An OAuth error every poll answers with instead, so each code is spent and none is completed. */
+  refuseWith?: string;
 };
 
 export type GithubDeviceFlowStub = {
@@ -36,7 +38,8 @@ export function createGithubDeviceFlowStub({
   verificationUri = "https://github.com/login/device",
   intervalS = 1,
   expiresInS = 900,
-  pendingPolls = 0
+  pendingPolls = 0,
+  refuseWith
 }: GithubDeviceFlowStubOptions = {}): GithubDeviceFlowStub {
   const codeRequests: Record<string, string>[] = [];
   const polls: Record<string, string>[] = [];
@@ -76,6 +79,10 @@ export function createGithubDeviceFlowStub({
         polls.push(values);
         if (values.device_code !== deviceCode) {
           send(200, form({ error: "incorrect_device_code", error_description: "The device code is not valid." }));
+          return;
+        }
+        if (refuseWith !== undefined) {
+          send(200, form({ error: refuseWith, error_description: "The stub refuses every poll." }));
           return;
         }
         if (polls.length <= pendingPolls) {

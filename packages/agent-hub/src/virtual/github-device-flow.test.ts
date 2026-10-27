@@ -17,6 +17,7 @@ import {
   MAX_TRANSIENT_WAIT_S,
   MIN_INTERVAL_S,
   nextWaitSeconds,
+  oauthAppLabel,
   POLL_INTERVAL_MULTIPLIER,
   POLL_JITTER,
   parseOAuthBody,
@@ -231,6 +232,27 @@ describe("nextWaitSeconds", () => {
   it("should floor a host that says interval=0, so it cannot become a tight loop", () => {
     // Act & Assert
     expect(nextWaitSeconds(0, half)).toBe(MIN_INTERVAL_S * POLL_INTERVAL_MULTIPLIER);
+  });
+});
+
+describe("oauthAppLabel", () => {
+  it("should name gh's own app when nothing overrides it", () => {
+    // Act & Assert
+    expect(oauthAppLabel({})).toBe(`the GitHub CLI OAuth app (client ${GITHUB_CLIENT_ID})`);
+  });
+
+  it("should name the app and host an override points at, so a pod's log says whose app was granted", () => {
+    // Act & Assert
+    expect(oauthAppLabel({ GITHUB_OAUTH_CLIENT_ID: "hmcts-own-app", GITHUB_OAUTH_HOST: HOST })).toBe(
+      `the OAuth app GITHUB_OAUTH_CLIENT_ID names (client hmcts-own-app) on ${HOST}`
+    );
+  });
+});
+
+describe("deviceFlowRetryable", () => {
+  it("should give anything that is not the flow's own error another attempt", () => {
+    // Act & Assert
+    expect(deviceFlowRetryable(new Error("something else entirely"))).toBe(true);
   });
 });
 

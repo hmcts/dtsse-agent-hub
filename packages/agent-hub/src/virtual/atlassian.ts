@@ -15,7 +15,7 @@ import { withRetry } from "../retry.ts";
 import { readText, sha256 } from "../session.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
 import { say, virtualStateDir } from "./phases.ts";
-import { childEnv, type Respond, type RunResult, relayDeviceLogin, run, stripAnsi } from "./sign-in.ts";
+import { childEnv, type Respond, type RunResult, relayDeviceLogin, run, SIGKILL_AFTER_MS, stripAnsi } from "./sign-in.ts";
 
 export const ATLASSIAN_AUTH_MAX_CHARS = 24000;
 /**
@@ -169,14 +169,19 @@ const TWG_REJECTED_CODES = new Set(["unauthorized_client", "invalid_grant"]);
 const SIGN_IN_OVERHEAD_MS = 30000 + 60000 + 60000 + 90000;
 
 /**
- * The longest `atlassianLogin` can take to report that nobody completed the sign-in. Every relayed code is killed
- * `expiresIn + 30` seconds in (`relayDeviceLogin`), after the fixed twg calls above.
+ * The longest `atlassianLogin` can take to report that nobody completed the sign-in. Every relayed code is asked
+ * to stop `expiresIn + 30` seconds in (`relayDeviceLogin`), after the fixed twg calls above, and a command that
+ * does not go then is killed `SIGKILL_AFTER_MS` later and let go of `SIGKILL_AFTER_MS` after that — so two of
+ * them is the worst a code can add beyond its own time.
  *
  * This has to stay inside the Bash timeout the envelope gives `agent-hub jira export`: a command killed before it
  * reports leaves the owner the dead code and the agent in `awaiting_login`, which is the whole fault this guards.
+ * At the current figures it comes to 580000 of that 600000, so there is 20000 spare and a second code is not
+ * close to fitting — one at 300 seconds would take it to 920000. Anything added between codes, a gap of the kind
+ * `githubLogin` has included, has that 20000 to fit into, and raising the count means raising the timeout with it.
  */
 export function jiraExportSignInBudget(codes = ATLASSIAN_SIGN_IN_CODES, expiresIn = TWG_DEVICE_CODE_EXPIRES_S): number {
-  return SIGN_IN_OVERHEAD_MS + codes * (expiresIn + 30) * 1000;
+  return SIGN_IN_OVERHEAD_MS + codes * ((expiresIn + 30) * 1000 + 2 * SIGKILL_AFTER_MS);
 }
 
 export type PackedAtlassianAuth = {

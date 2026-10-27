@@ -129,7 +129,7 @@ A share exposes the words of the thread and the conversation's artefact, and not
 | Method and path | Body | Response |
 |---|---|---|
 | `GET /api/virtual/{id}/sessions` | — | SSE, framed as the agent stream: `: connected`, `retry: 1000`, `: ping` every 15 seconds, and `event: reconnect` at the stream lifetime. On connect it sends a `wake` for every conversation with a wake pending, oldest first, and a `delete_uploads` for every conversation with files the owner has asked it to delete; after that, a `wake` for each new one, an `interrupt` for each answer the person stopped, a `delete_uploads` as each request is made, a `lookup` as the owner searches their Jira or Confluence, and a `close` for each conversation deleted. `wake` data is `{conversation_id, session_id, resume, product}`, where `resume` is `true` once the session has sent a transcript entry, so the pod runs `claude --resume <session_id>` rather than `claude --session-id <session_id>` (the pod also checks for the session's JSONL itself). `interrupt` data is `{conversation_id}` and is described under Stopping an answer below. `delete_uploads` data is `{conversation_id, upload_ids}` and is described under Uploads on the pod's disk below. `lookup` data is `{lookup_id, kind, query, space, sign_in}` and is described under Atlassian lookups below. `close` data is `{conversation_id}`; the pod stops whatever session it runs for that conversation. A deleted conversation takes its agents, their transcripts and its messages with it. A wake is sent again on every connection until the conversation has a session, which a registration or a `live` session report clears (see Registering below). |
-| `PUT /api/virtual/{id}/sessions` | `{sessions: [{conversation_id, state, detail?}], max}` | `204`. What the supervisor runs, replacing its last report: `state` is `starting`, `live` or `queued` (waiting for a free slot), `detail` at most 200 characters, and `max` how many sessions it runs at once, 1–20; at most 50 entries. A conversation left out has no session. Unknown conversation ids are ignored. Notifies the owner's UI. |
+| `PUT /api/virtual/{id}/sessions` | `{sessions: [{conversation_id, state, detail?}], max}` | `204`. What the supervisor runs, replacing its last report: `state` is `starting`, `live` or `queued` (waiting for a free slot), `detail` at most 200 characters, and `max` how many sessions it runs at once, 1–20; at most 50 entries. A conversation left out has no session. Unknown conversation ids are ignored. `max` is kept on the agent, because it is the only account of what the pod in front of a person enforces — see Capacity. Notifies the owner's UI. |
 | `GET /api/virtual/{id}/conversations` | — | `200 {conversations: [{id}]}`, every conversation of that virtual agent. The pod reconciles its `/workspace/uploads/<conversation-id>/` directories against this list (see Attachments below), so a conversation deleted while it was stopped — which sends no `close` it was there to hear — still has its files removed. |
 | `PUT /api/virtual/{id}/uploads` | `{uploads_bytes, volume_used_bytes, volume_total_bytes, files_total, files: [{upload_id, bytes}], deleted: [upload_id]}` | `204`. What the pod holds on its own volume, replacing its last report, and which deletions it has carried out; see Uploads on the pod's disk below. |
 | `PUT /api/virtual/{id}/lookups/{lookup_id}` | `{results}` or `{error, detail?}` | `204`. The answer to one `lookup`; see Atlassian lookups below. |
@@ -172,13 +172,15 @@ The person's edits in the web UI follow the same version rule, recorded as `upda
 |---|---|---|
 | `PUT /api/agent/{agent_id}/jira` | `{export_id, key}` or `{export_id, error}` | `204`. The session's result: the issue key it created, such as `VIBE-123`, or at most 300 characters saying why it could not. Recorded only while `export_id` is the conversation's current export and it has no key yet; otherwise ignored, still `204`. Notifies the owner's UI. `404` for an agent that is not a conversation's. |
 
-The project is any Jira project key (`^[A-Z][A-Z0-9_]{1,9}$`) the person picks by searching their own Jira (see Atlassian lookups below); the hub keeps no list of boards. A project has one backlog, whichever of its boards shows it, so the key is all an export needs. The panel offers VIBE until the person picks another.
+The project is any Jira project key (`^[A-Z][A-Z0-9_]{1,9}$`) the person picks, by searching their own Jira (see Atlassian lookups below) or from their default; the hub keeps no list of boards. A project has one backlog, whichever of its boards shows it, so the key is all an export needs.
 
 **Confluence export.** The person can also publish a conversation's document to Confluence once, as a new page under a parent page they pick, created by the conversation's session with `twg` and their own Atlassian sign-in, so they are its author. The page is titled after the document and its body is the document's markdown. It mirrors the Jira export: exporting gives the conversation a `confluence_export_id` and sends its agent the ordinary direct message `Please publish this document to Confluence, under "{parent title}" in {space name}.`; while it is pending every `direct` frame to the conversation's agent carries `assistant.confluence_export: {export_id, space_id, parent_id}`, both ids numeric strings; and the client's envelope tells the session to run one command, `agent-hub confluence export {export_id} --space-id {space_id} --parent-id {parent_id}`, then answer in one sentence. That command signs `twg` in only if `twg whoami` fails (relaying a device code as `agent-hub virtual atlassian-login` does), reads the document as `GET …/artefact` returns it, runs `twg confluence content create --content-type=page` with the title and a body file rather than through a shell, and reports the new page with `PUT …/confluence`. A leading `#` heading that repeats the title is left out of the body, since Confluence shows the title above it. Confluence refuses a second page of the same title in a space, so a refusal saying the title is taken is tried once more with the date after the title. The client remembers the page it created for each `export_id`, so the command run again reports that page rather than creating another. The same 15-minute timeout, retry and once-only rules as the Jira export apply. Until the person picks a page, the panel offers a built-in one, as it offers VIBE for Jira: "AI Resources" (page `286130747`) in the `CATHAI` space, Court and Tribunal Hearings (CaTH) AI Project. It is a temporary default, there so the export can be tested.
 
 | Method and path | Body | Response |
 |---|---|---|
 | `PUT /api/agent/{agent_id}/confluence` | `{export_id, page_id, title?}` or `{export_id, error}` | `204`. The session's result: the numeric id of the page it created and the title it was created with (at most 255 characters), or at most 300 characters saying why it could not. The hub builds the page's link itself, from the space key the person picked and this id, so nothing the pod reports becomes a URL. Recorded only while `export_id` is the conversation's current Confluence export and it has no page yet; otherwise ignored, still `204`. Notifies the owner's UI. `404` for an agent that is not a conversation's. |
+
+**Defaults.** Each person can keep a default Jira project and a default Confluence parent page in the Assistant's settings. The document panel starts from them, falling back to the built-in VIBE and "AI Resources" when there is none, and the person can change either for one document there; clearing one in the settings goes back to the built-in; a Confluence search in the panel starts in the default page's space and can be widened to all of Confluence. They are the person's own and nobody else's, read and written only through the web UI.
 
 **Attachments.** A person can attach files to a message in the Assistant. The browser uploads them to the hub in 4 MiB parts over same-origin, cookie-authenticated `/api/ui/uploads` routes; the hub holds the parts in Postgres for the retention window below; the pod **pulls** them and writes them to its own disk, and within that same window the person can pull their own file back. Nothing in it needs outbound HTTP from the hub, and nothing needs a route from the browser to a pod.
 
@@ -256,13 +258,27 @@ Metadata rows cascade from the message and from the conversation, so deleting ei
 
 **A session whose launcher is not there is not started.** The supervisor resolves the first word of the command against the directory it would start the session in — on PATH for a bare name like `hai`, in that directory for a path — and starts nothing when it does not resolve to an executable. Without that check `tmux new-session` succeeds whatever the command is, because the pane's shell starts and only the command inside it fails, taking its error message with it when the pane closes; the hub would be told a session is running, drop it a tick later as having exited by itself, and wake it again. The wake is refused before anything is given up for it: it is dropped rather than left `queued`, which would promise the person a session that cannot start, and no running session is stopped to make room for it, which at the cap is what would otherwise happen to the least recently active one on every wake. The reason goes to the supervisor's stderr, which is the pod's log, once rather than on every replay, and the wake is left for the hub to send again. A pod whose client is older than its launcher is what this catches: `upgrade_client` at pod boot is deliberately non-fatal, so a pod that boots while the package feed is unreachable keeps the client its image was built with.
 
-**Capacity.** The supervisor runs at most `AGENT_HUB_MAX_SESSIONS` conversation sessions at once, beside the pod's own session: 3 on `small`, 4 on `medium` and 6 on `large`. Each is a Claude process with its own MCP servers, hai wrapper and bridge, and costs about 1.2Gi and about 100m of CPU idle — measured on a `small` pod, where three sessions including the pod's own held 4.1Gi of its 8Gi limit at 314m. `small` at 3 puts four sessions and the supervisors at roughly 5.3Gi of that limit, a third of it still free; it is over the 4Gi a small pod requests, as two sessions already were, and `small` keeps that 4Gi deliberately so that someone needing more conversations at once moves up a size rather than every small pod costing more. A cap is in the pod template, so a change of it rolls the pod rather than taking effect on the pod running now. A wake when that many run stops the least recently active idle one; when every one is busy, the wake waits and is reported `queued`. A session idle for `AGENT_HUB_SESSION_IDLE_MINUTES` (20 by default) is stopped. The sweep's idle stop treats a virtual agent as busy while any of its sessions is.
+**Capacity.** The supervisor runs at most `AGENT_HUB_MAX_SESSIONS` conversation sessions at once, beside the pod's own session: 4 on `small`, 6 on `medium` and 8 on `large`. Each is a Claude process with its own MCP servers, hai wrapper and bridge, and costs about **0.65Gi** of anonymous memory, 25–30m of CPU idle and 139–186m while working.
+
+The figures are **proportional set size (PSS)**, read per process from `/proc/<pid>/smaps_rollup`, with the container's own `memory.stat`, `memory.current` and `cpu.stat` as the totals. **PSS, never RSS**: a session is twenty-odd node processes sharing one node binary and their `node_modules` pages, and ΣRSS counts those pages once per process — it puts the same marginal at 1.25Gi, nearly double, which is where the older 1.2Gi figure came from. The marginal is a subtraction across one `small` preview pod sampled four minutes apart as it went from two sessions to one: `anon` fell 0.64Gi, Σ PSS 0.68Gi and `memory.current` 0.69Gi — one transition read three ways rather than three measurements, where the 0.95Gi baseline below has 15 samples behind it. Every pod in preview is `small`, so nothing here is measured on the sizes it is applied to. `anon` is the figure the caps are reasoned about, because it is the part the kernel cannot reclaim; page cache was 2.1–2.4Gi on the pods measured, which is the workspace clone rather than the sessions, and it is evicted under pressure rather than killing the container. MCP servers share less between sessions than they appear to — about 14% of a session is pages genuinely shared with another, because each session spawns MCP servers with heaps of their own and only their binary and library pages are common.
+
+An awake pod with no conversations holds about 0.95Gi of `anon` — its own session, the three agent-hub daemons and the entrypoint — over 15 samples of two pods on two images, which ranged 0.91–0.99Gi. So a cap of N costs 0.95 + 0.65N.
+
+**Memory is the only hard constraint, and it is read at the request rather than the limit**: a pod over its memory request is an eviction candidate when the node comes under pressure, however much headroom its limit leaves. `small` at 4 is 3.55Gi of the 4Gi it requests, and a fifth chat would be 4.20Gi — which is what fixes `small` where it is. `small` is the size that binds — its request holds to a cap of 4 where `medium` holds to 10 and `large` to 23 — so that is the figure to re-check against before raising a cap. `small` keeps that 4Gi deliberately so that someone needing more conversations at once moves up a size rather than every small pod costing more.
+
+**A pod gets no CPU limit.** What it is guaranteed under contention comes from `cpu.shares`, which the request sets; a quota adds nothing to that floor and only clips the bursts above it. A single session on its own averaged 568m over its busiest 30s and was still throttled in 26 of that window's periods against a four-CPU quota, against none at all on an idle pod — so every conversation was paying latency for a ceiling protecting nothing, throttling having no OOM-kill equivalent. A quota is not wrong in principle, its job being to bound a runaway pod, but nothing measured here can size one: a quota is CPU-seconds per 100ms period and every figure here is a mean over seconds, which is how a session averaging 0.57 CPU was throttled against 4.0.
+
+So CPU is a convention rather than a constraint: a cap of N draws (N + 1) × 186m sustained with the pod's own session counted, kept inside the request as a check on whether a pod would contend with its own guarantee while merely working. Every cap in use is well under its request on that formula; the worked percentages are left out, because each is right only at the cap it was taken at.
+
+`medium` and `large` are bound by neither — their memory requests would hold 10 and 23 chats, the CPU convention 9 and 20 — but by the evidence. No pod has been measured above two concurrent sessions, and the burst figure above is of a single session alone, so both sit deliberately well inside their requests. Raising them wants a pod driven deliberately with its full complement busy at once.
+
+A cap is in the pod template, so a change of it rolls the pod rather than taking effect on the pod running now — and because `CONVERSATION_SESSIONS` is a code constant, a deploy that changes it bumps no agent's `generation` and so claims no already-observed running agent. A running pod therefore enforces the cap it booted with until it next rolls for some other reason. The pod's `max` in its sessions report is kept for exactly this: how many chats a person is told their assistant runs is always the figure the pod reported, so the Assistant never offers a chat the pod in front of them would make room for by stopping another. A pod that has not reported is told **nothing** about what it runs now rather than being given the size's cap as a fallback — the hub cannot see a pod's supervisor, so the cap is what the pod will be given and not what it was given — and is described by what its next restart will hold instead. A wake when that many run stops the least recently active idle one; when every one is busy, the wake waits and is reported `queued`. A session idle for `AGENT_HUB_SESSION_IDLE_MINUTES` (20 by default) is stopped. The sweep's idle stop treats a virtual agent as busy while any of its sessions is.
 
 **Which sessions count as busy.** The hooks' `busy` is believed only while the status file was written since the supervisor started — give or take five seconds, because the comparison is against a time taken a moment later and a filesystem that keeps mtimes to the whole second would otherwise put a turn that began as the pod came up on the wrong side of it — and while the session has shown progress, a write to the status file or the transcript, in the last two hours. `~/.claude` is a volume that outlives the pod, so a turn a pod went down in the middle of leaves `busy` on disk with nothing to rewrite it: Claude Code runs no `Stop` hook for an interrupted turn, and a session resumed under the same session id skips the enable that writes it afresh. Taken at face value, that frozen flag is a slot nothing can evict and the idle stop never reaches, and the slot it holds cannot be recovered by restarting the pod. A session's place in the eviction order comes from those two mtimes alone and never from the flag, which is what keeps a genuine turn — one appending to its transcript — at the recent end of the order and makes it safe to discount a `busy` claimed before the boot. Two hours rather than something tighter because evicting a session that is really working, on a long build or a slow wait, costs the person the answer it was in the middle of.
 
 ## Memory in the pod
 
-A conversation session costs about **1.2Gi**, for the reasons under Capacity above, and the pod's own work is on top
+A conversation session costs about **0.65Gi**, for the reasons under Capacity above, and the pod's own work is on top
 of that. So a pod reaches the ceiling of its size with nothing wrong with it — and the hub cannot see that either:
 every call between the two is pod to hub. The pod reports, as it does for its disk.
 
@@ -272,15 +288,21 @@ every call between the two is pod to hub. The pod reports, as it does for its di
 {
   "limit_bytes": 8589934592,   // memory.max: where the kernel kills the container
   "current_bytes": 3221225472, // memory.current
-  "peak_bytes": 5637144576     // memory.peak: the high-water mark since the pod booted
+  "peak_bytes": 5637144576,    // memory.peak: the high-water mark since the pod booted
+  "anon_bytes": 1717986918     // memory.stat's anon: the part that cannot be reclaimed
 }
 ```
 
-- The figures are the container's **own cgroup** — `memory.max`, `memory.current` and `memory.peak` under
-  `/sys/fs/cgroup` — so this is three small reads rather than a walk of anything, unlike the uploads report. A pod on
-  cgroup v1, or one whose `memory.max` is `max` (no limit at all), reports **nothing**: a ceiling is what every
-  sentence the hub writes about this is relative to, and a limit guessed from the size would be a figure presented as
-  measured. There is no partial report.
+- The figures are the container's **own cgroup** — `memory.max`, `memory.current`, `memory.peak` and `memory.stat`'s
+  `anon` line under `/sys/fs/cgroup` — so this is four small reads rather than a walk of anything, unlike the uploads
+  report. A pod on cgroup v1, or one whose `memory.max` is `max` (no limit at all), reports **nothing**: a ceiling is
+  what every sentence the hub writes about this is relative to, and a limit guessed from the size would be a figure
+  presented as measured. There is no partial report.
+- **`anon_bytes` is required, not optional.** It is what the warning is computed from, so a report without it is a
+  report the hub cannot say the one useful thing about. Optional would have made "an older client" and "a client whose
+  kernel has no `anon`" the same silence, which is the distinction the three states below exist to keep. A client from
+  before this field sends three figures, gets `400`, and is told apart by the `memory-anon` client feature: the
+  settings say it is running an older version, which is true and which the next boot fixes.
 - **A report of its own, not part of the uploads report.** The two are one `PUT` each on the same reconcile, and
   keeping them apart is what lets either fail alone: a cgroup the pod cannot read must not cost the person their disk
   figures, and a volume it cannot `statfs` must not cost them the memory warning. It also keeps the three
@@ -289,24 +311,84 @@ every call between the two is pod to hub. The pod reports, as it does for its di
 - Every figure is a whole number from 0 up, and `peak_bytes` is **not** required to be at least `current_bytes`:
   `memory.peak` is resettable on newer kernels, and refusing the report over it would lose the live figure too.
   Anything that is not a whole number is `400`.
-- Sent every 10 minutes, on the pod's uploads reconcile, so the hub's figures are always *as of* `memory_reported_at`
-  and the UI says when rather than presenting them as current. `peak_bytes` is what the warning below is computed
-  from, and a stale peak is a **lower bound** on the true one, so a late report understates the pressure and never
-  invents it. `current_bytes` dips between turns and is shown beside the peak rather than warned on.
+- Sent every 10 minutes on the pod's uploads reconcile, **and on every change in the number of conversation sessions
+  running**. A session starting or ending steps `anon_bytes` by about one conversation, and between those steps it was
+  flat for the work that was measured — 15 samples of a working pod over 35 minutes held within 3%, while
+  `current_bytes` and `peak_bytes` moved several times that. So an unconditioned 10-minute sample is a poor instrument
+  for it: the step is what triggers the report and the 10 minutes is only the longest the hub will go without a fresh
+  figure. What that flatness does **not** mean is that nothing else can move `anon` — heavier work inside a session
+  can, which is the whole case the warning below exists for, and what the 10-minute floor is there to catch.
+- The hub's figures are always *as of* `memory_reported_at` and the UI says when rather than presenting them as
+  current. `anon_bytes` is what the warning below is computed from. `peak_bytes` leads the Size section as what the
+  pod reached at its busiest, and nothing is warned on it: nothing resets it while the pod lives, so a threshold
+  crossed once would stay crossed for ever.
 - A report **notifies nobody**, for the reasons a disk report does not: it is read by the owner's own settings, and
   nothing streams it.
 
-**The warning.** The hub warns when the peak leaves less than **one more conversation's worth** of headroom under the
-limit — `peak_bytes + 1.2Gi > limit_bytes`. The threshold is derived rather than chosen: it is the measured cost of
-a conversation against the ceiling the pod itself reported, so what it says is the thing the person can act on ("there
-is no room for another chat at this size"), and a pod merely using memory within its size never raises it. The two
-things it names are the two things that change the answer: move up a size, or close some chats.
+**The warning.** The hub warns when the part of the pod that **cannot be reclaimed** leaves less than one more
+conversation's worth of headroom under the limit — `anon_bytes + 0.65Gi > limit_bytes`. What it detects is a pod
+heading for an OOM kill, and the remedy it offers is a bigger size.
+
+**It is not about how many chats are open, and it does not say it is.** A pod's chats hold `0.95Gi + cap × 0.65Gi` of
+`anon`; this threshold is `limit − 0.65Gi`. The two meet only above a cap of `(limit − 0.95Gi − 0.65Gi) / 0.65Gi` — about ten
+chats on `small`, and several times any cap under Capacity on every size, because the caps are chosen to keep chats
+inside a size's memory *request* and this sits a conversation under its *limit*, which is double the request.
+
+The formula rather than a table of worked figures, deliberately: that bound depends only on the limit and the two
+constants, so it never moves, where the figures either side of it move with every cap and go stale on a line nothing
+conflicts with — which has happened three times. `src/assistant/memory-report.test.ts` asserts the conclusion for
+every size at whatever cap it currently holds, which is the only form of this a cap change cannot quietly invalidate.
+
+**What crosses it is the work inside a chat, not the number of them.** The 0.65Gi is what a session *settles* at, not
+a ceiling: a build, a dependency tree, a language server or a leak can put one session gigabytes above it, and the
+pod's own work can do the same. That reconciles the two statements above — `0.95 + 0.65N` predicts a pod whose
+sessions are doing what they were measured doing, and this threshold is for when one of them is not. If the additivity
+held without exception the warning could never fire at any cap; if the warning fires, the exception is work. That is
+the thing worth saying, because it ends with the kernel killing the container and nobody outside the pod can see it
+coming. Closing a chat frees about 0.65Gi against the 7.4Gi a `small` pod holds when this fires, so the warning gives
+that as a figure and not as the answer. "One conversation's worth from the ceiling" is the unit the person thinks in,
+not a claim about the cause.
+
+**`anon_bytes`, because it is the only figure a headroom question can be asked of.** `memory.current` and
+`memory.peak` both count page cache, which was 2.1–2.4Gi of the 6.8GiB workspace clone on the pods the 0.65Gi was
+measured on. Cache is reclaimed at the `memory.max` watermark rather than kept, so a container that has read the clone
+sits high and stays high: a threshold on either is crossed by file reads, and the kernel would give that memory back
+before killing anything, so it says nothing about how close the pod is to dying. Neither is rescued by choosing the
+constant differently, because the problem is what the figure tracks rather than its scale. `anon` is what the kernel
+cannot reclaim, it is purely additive, and it is what the constant was measured as in the first place. That also frees
+`peak_bytes` to go on leading the Size section as the fuller account of what the pod has had to hold, without
+carrying a rule it cannot support.
+
+**A stopped pod is not warned about.** Nothing clears the last report when a pod stops — the figures are still the
+last thing anyone measured, and the section says so — but they describe a container that no longer exists, so no
+warning is raised from them. A pod stopped mid-build must not tell its owner the next day that it is low on memory.
+
+**A replacement pod does not show the last one's figures.** Every path that asks for a new or replacement pod drops
+the memory report in the same transaction — starting, resizing, changing plugins, restarting, a takeover onto another
+cluster, and the orchestrator minting a launch token, which is what catches a pod re-applied after a failed apply.
+Otherwise `running` goes true again and the figures read as the new pod's: "Holding 7.9 GB right now" about a
+container that is gone.
+
+The rule is **not** "whatever bumps `pod_generation`": stopping, deleting and the sweep's auto-stop all bump it and
+all keep the figures, for the reason above.
+
+Dropping them is not enough where the pod being replaced is still running, because it can report again and put them
+back. Those paths drop its **launch token** in the same breath, so it cannot, and that also stops the outgoing pod and
+its replacement both holding a valid token over the handover. The starting path has no token to drop.
+
+**The window this leaves.** A pod reports phase `running` before it starts its supervisor, so between those two the
+row is running with no report at all, which the Size section says plainly. What is not closed is a pod replaced
+without the hub asking — the kubelet restarting one after the OOM kill this warning is about, where no row changed at
+all. The pod sends its first report as it boots rather than a tick later, so that window is the new supervisor's boot
+rather than ten minutes, but it is a window.
 
 **Who sees it.** The owner alone, through `canSeeAssistantMemory`. No grant reaches it: a figure about someone's pod
 is not a session they chose to share.
 
-**An older client.** Gated on the `memory` client feature below. A pod whose current session has not claimed it is one
-the Assistant's settings say cannot report yet, rather than one shown `0`, which would read as an idle pod.
+**An older client.** Gated on the `memory-anon` client feature below, not `memory`: a pod claiming only `memory` sends
+three figures, which this route now refuses, so for the purposes of the Size section it reports nothing at all. Either
+way the settings say it cannot report yet, rather than showing it as `0`, which would read as an idle pod. A pod takes
+the current client when it boots, so this reaches a pod at its next start.
 
 **Changing size.** `size` is in the pod template, so a change bumps `pod_generation` and the orchestrator replaces the
 pod — which ends every conversation session running on it. The Assistant's settings say that before the person
@@ -412,7 +494,10 @@ field out and the UI can say that the feature is not available on that session y
 - It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
   been upgraded re-registers.
 
-Five names are in use, and the clients published from this repo claim all five.
+The names in use are below, and the clients published from this repo claim every one of them. Deliberately not
+counted here: this sentence has carried a wrong number twice, once for a name added in this repo and once for one
+added in another, because `ClientFeature` and `CLIENT_FEATURES` are each a single line that two changes land on at
+the same time and a count is a third place to remember. The list is the record.
 
 - `attachments`, because they read the `attachments` on an Assistant `direct` frame and fetch each file to the pod's
   disk. No hub field is gated on it — the frame carries `attachments` to every session — so a client too old to claim
@@ -429,10 +514,16 @@ Five names are in use, and the clients published from this repo claim all five.
 - `lookups`, because their supervisor answers the sessions stream's `lookup` frame (see Atlassian lookups). Claimed by
   the pod's own session, as `files` is. Gated: the hub answers a lookup for a pod that has not claimed it with
   `unsupported`, and sends it no frame.
-- `memory`, because their supervisor reads its own container cgroup and reports it (`PUT /api/virtual/{id}/memory`).
-  Claimed by the pod's **own** session, as `files` is, since the supervisor is what reports. Nothing is gated on it in
-  the other direction — the hub sends no field for it — but the settings' Size section reads it to tell a pod that
-  cannot report yet apart from one that has not reported yet, and says so rather than showing an unused pod.
+- `memory`, which **no gate in this hub reads**. It is kept and still claimed for hubs deployed before `anon_bytes`
+  existed, whose Size section gates on this name: the client is published on merge and a pod installs the current one
+  when it boots, so a pod can be talking to a hub that has not deployed yet, and to that hub a build without this
+  claim is an older client. It can be dropped once no such hub is running.
+- `memory-anon`, because their supervisor reads its own container cgroup and reports it
+  (`PUT /api/virtual/{id}/memory`), including `memory.stat`'s `anon` line as `anon_bytes`, which that route requires.
+  **This is the name the Size section gates on.** A separate name rather than widening `memory`, because the two say
+  different things about the same pod: a build claiming `memory` alone is one whose reports this hub refuses, and the
+  Size section has to be able to word that as an older version rather than as a pod that has gone quiet. Claimed by
+  the pod's **own** session, which is the virtual agent's current agent, since the supervisor is what reports.
 
 ## Replies
 
@@ -477,6 +568,14 @@ data: {"message": <Message>}
 A virtual agent is a Claude Code session the hub runs for a person in the preview cluster. The person creates it in the web UI (`/hub/virtual`); the orchestrator claims it and runs a one-replica StatefulSet and PVC for it; the pod's boot script uses the launch token to report progress, fetch and save the owner's credentials and relay sign-ins to the owner; then Claude starts and the workspace client registers as an ordinary agent with the same token.
 
 All of `/api/virtual/**` and `/api/orchestrator/**` answer `404` unless the service runs with `VIRTUAL_AGENTS_ENABLED=true`.
+
+**The GitHub sign-in.** A pod with no usable stored `github` token relays `gh auth login` device codes to its owner, at most three of them, whatever ended the one before: a code that reached its `expires_in` unused means they were not there yet, and a poll GitHub answered with a fault got no verdict out of them at all, so both earn the next code. Whichever it was, the sign-in ends with `POST login/github/failed` — `expired` for the first, `failed` for the rest — so the code is withdrawn from the owner's screen rather than left there to be entered to no effect.
+
+With none of them completed the pod reports `awaiting_credentials`, naming both ways on — a token pasted in the web UI, or stopping and starting the agent for another code — and then watches for a stored token rather than offering more codes, reporting again if GitHub refuses one that is pasted but not the one that was already refused when it started.
+
+Codes are a minute apart (`AGENT_HUB_GITHUB_SIGN_IN_GAP_MS`, less whatever the attempt itself took, so one that ran its code out adds nothing), because an attempt that fails on the poll is over in seconds and three of those back to back are the same fault three times rather than three chances at it.
+
+What the pod never does is report a failure the owner was never asked about: a hub it could not reach, a `gh` that would not run or could not be run to read the token it was granted, and a hub that would not take that token are all retried instead, and none of them says anybody did not sign in. The dividing line is whether a code reached the owner's screen, not what went wrong. What `gh` said goes to the pod's log, with the credential shapes that can be written as one redacted — the GitHub, Claude and Atlassian token shapes, and anything JWT-shaped — and it is not sent to the hub. `bedrock` and `jenkins` keys are any printable string, so nothing can match them; neither appears in the output of the commands quoted, which is what makes quoting it safe.
 
 **Model routes.** A virtual agent's `model_route` is fixed when it is created, from its owner's sign-in: holders of the `AIGateway.User` app role are on `bedrock`, calling Amazon Bedrock directly with their own Bedrock API key; everyone else is on `own_licence`, their own Claude licence. A `bedrock` agent needs the owner's `github`, `azure` and `bedrock` credentials; an `own_licence` one needs `github`, `azure` and `claude`. Either can also use a `jenkins` API token and an `atlassian` sign-in, both optional: the pod never waits for either.
 
@@ -541,13 +640,15 @@ Both `complete` and `failed` take the agent out of `awaiting_login` when no sign
 
 ### Sizes
 
-`size` sets the CPU and memory of the agent's pod. It is chosen when the agent is created, `small` by default, and the owner can change it only while the agent is `requested` or `stopped`, so a change never restarts a pod in use. A change bumps `generation` and `pod_generation`, so the next claim applies the StatefulSet with the new resources. Every size has the same 2Gi–10Gi of scratch space.
+`size` sets the CPU and memory of the agent's pod. It is chosen when the agent is created, `small` by default, and the owner can change it at any time but while the agent is being deleted (`sizeChangeRefusal`). A change bumps `generation` and `pod_generation`, so the next claim applies the StatefulSet with the new resources — which **replaces a pod that is already up** and ends every session on it, as `sizeChangeRollsPod` says and both surfaces warn before the change is made. Every size has the same 2Gi–10Gi of scratch space.
 
-| `size` | CPU request–limit | Memory request–limit |
+No size has a CPU limit: the request is a floor the pod bursts above, and the reasoning is under Capacity above.
+
+| `size` | CPU request | Memory request–limit |
 |---|---|---|
-| `small` | 1–4 | 4Gi–8Gi |
-| `medium` | 2–4 | 8Gi–16Gi |
-| `large` | 4–8 | 16Gi–32Gi |
+| `small` | 1 | 4Gi–8Gi |
+| `medium` | 2 | 8Gi–16Gi |
+| `large` | 4 | 16Gi–32Gi |
 
 ### Plugins
 

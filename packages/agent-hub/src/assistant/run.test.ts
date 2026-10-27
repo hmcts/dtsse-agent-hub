@@ -8,6 +8,7 @@ import { conversation, fakeTmux } from "../__fixtures__/fake-tmux.ts";
 import { createMockHub } from "../__fixtures__/mock-hub.ts";
 import { ApiError, createApi } from "../api.ts";
 import { hubHome } from "../session.ts";
+import type { MemoryFs } from "./memory.ts";
 import { runAssistantSupervisor } from "./run.ts";
 import { tmuxName } from "./tmux.ts";
 
@@ -273,6 +274,100 @@ describe("runAssistantSupervisor", () => {
       stop.abort();
       await running;
       fs.rmSync(uploads, { recursive: true, force: true });
+    }
+  });
+
+  // A session starting or ending steps the container's `anon` by about one conversation, and nothing else steps it.
+  // It is also what the hub's low-memory warning is computed from, so a report that waited for the ten-minute
+  // reconcile would leave the warning describing a pod the person has already changed. Work inside a session moves
+  // `anon` with no step to trigger on, which is what keeps that reconcile worth having.
+  it("should report its memory as soon as the number of sessions changes, not on the next reconcile", async () => {
+    // Arrange: a reconcile far longer than the test, so only the session change can have caused a report.
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const stop = new AbortController();
+    const memoryFs = {
+      readFileSync: (file: string) => (String(file).endsWith("memory.stat") ? "anon 1717986918\n" : "4096\n")
+    } as unknown as MemoryFs;
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 20,
+      reconcileMs: 10 * 60 * 1000,
+      memoryFs
+    });
+    const memoryPuts = () => hub.calls.filter((c) => c.method === "PUT" && c.path === `/api/virtual/${VID}/memory`);
+
+    try {
+      // Act
+      hub.sendWake(VID, conversation());
+
+      // Assert
+      await waitUntil(() => memoryPuts().length >= 1, "the session starting to be reported as memory");
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
+    }
+  });
+
+  // The guard on `sendMemory`, which the tick and the reconcile both reach. Two overlapping PUTs can be stored in
+  // either order and the later-stored one wins, so an in-flight report must not be joined by a second: the hub would
+  // be left showing whichever measurement happened to land last rather than the newest one. Skipped rather than
+  // queued, because every caller only ever wants the latest reading.
+  it("should send no second memory report while one is still in flight", async () => {
+    // Arrange: a report that never settles, and a tick and reconcile fast enough to ask for several more.
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const stop = new AbortController();
+    const attempts: unknown[] = [];
+    let release: () => void = () => {};
+    const held = new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    });
+    const api = {
+      putSessions: async () => null,
+      conversations: async () => ({ conversations: [] }),
+      putUploads: async () => null,
+      putLookup: async () => null,
+      putMemory: async (_id: string, body: unknown) => {
+        attempts.push(body);
+        return await held;
+      },
+      sessionsStream: async () => new Response("", { status: 200 })
+    };
+    const memoryFs = {
+      readFileSync: (file: string) => (String(file).endsWith("memory.stat") ? "anon 1717986918\n" : "4096\n")
+    } as unknown as MemoryFs;
+    const running = runAssistantSupervisor({
+      api,
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 10,
+      reconcileMs: 10,
+      memoryFs
+    });
+
+    try {
+      // Act: the report sent before the loop takes the guard; every tick and reconcile after it asks for another.
+      await waitUntil(() => attempts.length === 1, "the first memory report to be in flight");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      // Assert
+      expect(attempts).toHaveLength(1);
+    } finally {
+      release();
+      stop.abort();
+      await running;
     }
   });
 

@@ -12,7 +12,9 @@ import { MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } 
 import type { UploadsOnDisk } from "@/assistant/upload-disk";
 import { MAX_REPORTED_FILES, type PodFile, type UploadsDisk } from "@/assistant/upload-report";
 import type { FormAction } from "@/components/ActionForm";
+import { LOOKUP_AFTER_MS } from "@/components/assistant/AtlassianSearch";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
+import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
@@ -21,9 +23,7 @@ import type { AssistantTemplates } from "@/components/assistant/TemplateSettings
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
-import { CONVERSATION_SESSIONS } from "@/orchestrator/manifests";
 import type { LoginState, LoginView } from "@/virtual-agents/logins";
-import { SIZE_RESOURCES } from "@/virtual-agents/size";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
@@ -1582,19 +1582,125 @@ describe("the Assistant's files", () => {
   }, 20_000);
 });
 
+describe("the Assistant's Jira and Confluence defaults", () => {
+  const PROJECT = { key: "PCS", name: "Possession claims", url: "https://hmcts.atlassian.net/browse/PCS" };
+
+  function exportsSettings(overrides: Partial<AssistantExportDefaults> = {}): AssistantExportDefaults {
+    return {
+      defaults: { jira: null, confluence: null },
+      save: vi.fn(async (input: { jira: unknown; confluence: unknown }) => ({ ok: true as const, defaults: input as AssistantExportDefaults["defaults"] })),
+      access: { connected: true, login: null },
+      lookUp: vi.fn(async () => ({ status: "done" as const, results: [PROJECT] })),
+      ...overrides
+    };
+  }
+
+  it("should offer the section only when the page passes the defaults", () => {
+    open({ exports: exportsSettings() });
+
+    expect(sections()).toContain("Jira & Confluence");
+  });
+
+  it("should save a Jira project the person found by searching their own Jira", async () => {
+    vi.useFakeTimers();
+    const exports = exportsSettings();
+    open({ exports }, "Jira & Confluence");
+
+    fireEvent.click(within(screen.getByRole("group", { name: "Jira backlog" })).getByRole("button", { name: "Change" }));
+    fireEvent.change(screen.getByRole("combobox", { name: /default backlog/ }), { target: { value: "possess" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LOOKUP_AFTER_MS);
+    });
+    fireEvent.click(screen.getByRole("option"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    });
+    vi.useRealTimers();
+
+    expect(exports.save).toHaveBeenCalledWith({ jira: { key: "PCS", name: "Possession claims" }, confluence: null });
+    expect(screen.getByText("Your defaults are saved")).toBeTruthy();
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("should clear a default and save nothing until something has changed", async () => {
+    const exports = exportsSettings({ defaults: { jira: { key: "VIBE", name: "Vibe" }, confluence: null } });
+    open({ exports }, "Jira & Confluence");
+
+    expect((screen.getByRole("button", { name: "Save defaults" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    });
+
+    expect(exports.save).toHaveBeenCalledWith({ jira: null, confluence: null });
+    const jira = within(screen.getByRole("group", { name: "Jira backlog" }));
+    const confluence = within(screen.getByRole("group", { name: "Confluence page" }));
+    expect(jira.getByText("VIBE")).toBeTruthy();
+    expect(jira.getByText("(default)")).toBeTruthy();
+    expect(jira.queryByRole("button", { name: "Clear" })).toBeNull();
+    expect(confluence.getByText("AI Resources")).toBeTruthy();
+    expect(confluence.getByText("(default)")).toBeTruthy();
+    expect(confluence.queryByRole("button", { name: "Clear" })).toBeNull();
+  });
+
+  it("should raise no WCAG A or AA violations with the section open", async () => {
+    const root = document.createElement("div");
+    root.className = "asst-theme";
+    document.body.append(root);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} exports={exportsSettings()} />, { container: root });
+    fireEvent.click(cog());
+    go("Jira & Confluence");
+    fireEvent.click(within(screen.getByRole("group", { name: "Confluence page" })).getByRole("button", { name: "Change" }));
+
+    const results = await axe.run(root, {
+      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
+      rules: { "color-contrast": { enabled: false } }
+    });
+
+    expect(results.violations.map((violation) => violation.id)).toEqual([]);
+    root.remove();
+  }, 20_000);
+});
+
 const GIB = 1024 ** 3;
 const LIMIT = 8 * GIB;
 
-/** A memory report whose peak leaves `headroom` under the limit, which is what the warning's threshold is about. */
+/**
+ * A memory report whose non-reclaimable figure leaves `headroom` under the limit, which is what the threshold is
+ * about.
+ *
+ * **Both figures that count page cache are pinned at the limit** — `currentBytes` and `peakBytes` — and neither may
+ * raise the warning on its own: a pod that has merely read its workspace clone sits at its ceiling on both of them,
+ * and `memory.peak` never falls while the pod lives. So every expectation below that no warning is shown is also a
+ * check that the rule reads `anonBytes` and nothing else.
+ */
 function use(headroom: number, overrides: Partial<Extract<MemoryUse, { reported: true }>> = {}): MemoryUse {
-  return { reported: true, limitBytes: LIMIT, currentBytes: 3 * GIB, peakBytes: LIMIT - headroom, at: REPORTED_AT, stopped: false, ...overrides };
+  return {
+    reported: true,
+    limitBytes: LIMIT,
+    currentBytes: LIMIT,
+    peakBytes: LIMIT,
+    anonBytes: LIMIT - headroom,
+    at: REPORTED_AT,
+    stopped: false,
+    ...overrides
+  };
 }
 
 const CHANGE_FORM = "Change the size of your assistant";
 
 function size(overrides: Partial<AssistantMemory> = {}, save: FormAction = vi.fn(async () => ({ ok: true as const, confirmation: "done" }))): AssistantSize {
   return {
-    view: { use: use(4 * CONVERSATION_MEMORY_BYTES), size: "small", openChats: 1, rollsPod: true, refusal: undefined, ...overrides },
+    view: {
+      use: use(4 * CONVERSATION_MEMORY_BYTES),
+      size: "small",
+      // A pod reporting the cap of the size it is on, which is the ordinary case; the tests that care pass their own.
+      capacity: { now: 4, fromRestart: undefined },
+      openChats: 1,
+      rollsPod: true,
+      refusal: undefined,
+      ...overrides
+    },
     assistantId: "0f8a6a1e-0000-4000-8000-0000000000aa",
     save
   };
@@ -1618,26 +1724,66 @@ describe("the Assistant's size", () => {
     expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
   });
 
-  it("should say the size it is on with what that size gives, from the orchestrator's own constants", () => {
+  // The figures a person reads, not a read-back of the constants they come from.
+  it("should say the size it is on with what that size gives", () => {
     open({ size: size() }, "Size");
 
-    expect(panel().textContent).toContain(`You are on small: ${CONVERSATION_SESSIONS.small} chats at once, ${SIZE_RESOURCES.small.limits.memory} of memory.`);
+    expect(panel().textContent).toContain("You are on small: 4 chats at once, 4Gi–8Gi of memory.");
+    expect(panel().textContent).not.toContain("from its next restart");
   });
 
-  // The peak leads, because that is what the warning is about: the live figure dips between turns, so a pod that has
-  // twice nearly been killed reads as idle whenever nothing is mid-answer.
-  it("should give the peak against the limit, the live figure and when the pod last looked", () => {
+  // The figure the pod enforces, not the size's cap. A cap is in the pod template, so a deploy that raises it leaves
+  // every running pod on the old one, and at its cap the pod stops an idle session to make room rather than queueing
+  // — so offering the higher figure here would invite someone to end a chat they never closed.
+  it("should say what the pod runs now, and what a restart would change it to, when it is behind its size's cap", () => {
+    open({ size: size({ capacity: { now: 3, fromRestart: 4 } }) }, "Size");
+
+    expect(panel().textContent).toContain("You are on small: 3 chats at once, 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
+  });
+
+  // A pod that has not reported gets no current figure at all: the cap is what it will be given, not what it has.
+  it("should claim no current figure, and name the cap a restart gives, when the pod has reported nothing", () => {
+    open({ size: size({ capacity: { now: undefined, fromRestart: 4 } }) }, "Size");
+
+    expect(panel().textContent).toContain("You are on small, with 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
+    // The dropdown still describes each size's cap, which is what a change would give; nothing says the pod's own.
+    expect(panel().textContent).not.toContain("You are on small:");
+  });
+
+  // The peak leads because it is the fuller account of what the pod has had to hold; the figure beside it is the part
+  // that cannot be reclaimed, which is what the warning is computed from and what a chat adds to.
+  it("should give the peak against the limit, what it is holding of that, and when the pod last looked", () => {
     open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
 
-    expect(panel().textContent).toContain("3.2 GB of 8 GB at its busiest");
-    expect(panel().textContent).toContain("Using 3 GB right now");
+    expect(panel().textContent).toContain("8 GB of 8 GB at its busiest");
+    expect(panel().textContent).toContain("Holding 5.4 GB right now");
     expect(panel().textContent).toContain("Last reported");
+  });
+
+  // The sentence used to carry its own number, which left it telling someone a chat costs one thing while the
+  // warning was computed from another. In gigabytes to two places, not `describeSize`'s tenth of a megabyte, which
+  // would claim a precision the one measurement behind the figure cannot support.
+  it("should say what a chat costs from the same figure the warning uses when the pod has reported", () => {
+    open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES) }) }, "Size");
+
+    expect(panel().textContent).toContain("about 0.65 GB of it for each chat open.");
   });
 
   it("should say the figures will not move while the assistant is stopped", () => {
     open({ size: size({ use: use(4 * CONVERSATION_MEMORY_BYTES, { stopped: true }) }) }, "Size");
 
     expect(panel().textContent).toContain("Your assistant is stopped. Last reported");
+  });
+
+  // The section must not say "4 chats at once" in the same breath as "Your assistant is stopped", which is what
+  // `chatCapacity` giving a stopped pod no `now` is for.
+  it("should claim no current chats beside the sentence saying the assistant is stopped", () => {
+    const stopped = { use: use(4 * CONVERSATION_MEMORY_BYTES, { stopped: true }), capacity: { now: undefined, fromRestart: 4 } };
+    open({ size: size(stopped) }, "Size");
+
+    expect(panel().textContent).toContain("Your assistant is stopped. Last reported");
+    expect(panel().textContent).toContain("You are on small, with 4Gi–8Gi of memory. It holds 4 chats at once from its next restart.");
+    expect(panel().textContent).not.toContain("You are on small:");
   });
 
   // Zero would read as an idle pod, which is the one thing the section must never say when it cannot tell.
@@ -1660,33 +1806,40 @@ describe("the Assistant's size", () => {
   });
 
   // The threshold: exactly one conversation's worth of headroom still has room for the chat about to be opened.
-  it("should raise no warning when the peak leaves room for exactly one more chat", () => {
+  it("should raise no warning when what it cannot reclaim leaves room for exactly one more chat", () => {
     open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES) }) }, "Size");
 
     expect(panel().textContent).not.toContain("low on memory");
   });
 
-  it("should warn, and name both ways out, when the peak leaves a byte less than one more chat", () => {
+  it("should warn, and name the size to move to, when what it cannot reclaim leaves a byte less than one more chat", () => {
     open({ size: size({ use: use(CONVERSATION_MEMORY_BYTES - 1), openChats: 3 }) }, "Size");
 
     expect(panel().textContent).toContain("Your assistant is low on memory");
-    expect(panel().textContent).toContain(
-      `Move up to medium below for ${CONVERSATION_SESSIONS.medium} chats at once and ${SIZE_RESOURCES.medium.limits.memory} of memory, or close a chat you have finished with.`
-    );
+    expect(panel().textContent).toContain("Move up to medium below for 8Gi–16Gi of memory and 6 chats at once. Closing a chat frees about 0.65 GB of it.");
   });
 
-  // Telling someone with one chat open to close some chats is telling them to stop working.
-  it("should offer only the bigger size when there is one chat open", () => {
+  // A pod's chats cannot reach this threshold, so closing one is given as a quantity and never as the remedy.
+  it("should not tell the person to close a chat when it warns", () => {
     open({ size: size({ use: use(0), openChats: 1 }) }, "Size");
 
     expect(panel().textContent).toContain("Move up to medium below");
-    expect(panel().textContent).not.toContain("or close a chat");
+    expect(panel().textContent).not.toContain("close a chat you have finished with");
   });
 
-  it("should say to close a chat, and offer no bigger size, on the largest size there is", () => {
-    open({ size: size({ use: use(0), size: "large" }) }, "Size");
+  it("should offer no bigger size on the largest size there is when a chat is open", () => {
+    open({ size: size({ use: use(0), size: "large", openChats: 3 }) }, "Size");
 
-    expect(panel().textContent).toContain("This is the largest size there is, so close a chat you have finished with");
+    expect(panel().textContent).toContain("This is the largest size there is. Closing a chat frees about 0.65 GB of it.");
+    expect(panel().textContent).not.toContain("Move up to");
+  });
+
+  // With nothing open, what closing a chat would free is a fact about nothing.
+  it("should leave the per-chat figure out on the largest size when no chat is open", () => {
+    open({ size: size({ use: use(0), size: "large", openChats: 0 }) }, "Size");
+
+    expect(panel().textContent).toContain("Your assistant is low on memory");
+    expect(panel().textContent).not.toContain("Closing a chat");
     expect(panel().textContent).not.toContain("Move up to");
   });
 
@@ -1710,9 +1863,9 @@ describe("the Assistant's size", () => {
     const select = screen.getByLabelText("Choose a size") as HTMLSelectElement;
 
     expect([...select.options].map((option) => option.textContent)).toEqual([
-      `small — ${CONVERSATION_SESSIONS.small} chats at once, ${SIZE_RESOURCES.small.limits.memory} of memory`,
-      `medium — ${CONVERSATION_SESSIONS.medium} chats at once, ${SIZE_RESOURCES.medium.limits.memory} of memory`,
-      `large — ${CONVERSATION_SESSIONS.large} chats at once, ${SIZE_RESOURCES.large.limits.memory} of memory`
+      "small — 4 chats at once, 4Gi–8Gi of memory",
+      "medium — 6 chats at once, 8Gi–16Gi of memory",
+      "large — 8 chats at once, 16Gi–32Gi of memory"
     ]);
     expect(select.value).toBe("small");
     expect(panel().textContent).toContain("This is the size you are on.");

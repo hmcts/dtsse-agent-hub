@@ -28,6 +28,8 @@ const CASE_TIMEOUT = 120_000;
 const CASES = [
   "no-token",
   "refused-token",
+  "sign-in-not-completed",
+  "sign-in-transient-failure",
   "stored-token-no-access",
   "checkout-client",
   "broken-checkout-client",
@@ -102,14 +104,22 @@ async function runCase(name: string): Promise<Run> {
   const url = await hub.listen();
   // Stage 0's device-code sign-in is the client's own HTTP now, so it is pointed at a fake github.com: the
   // suite must not reach the real one, and nobody is there to enter a code at it.
-  const github = createGithubDeviceFlowStub({ token: GOOD_TOKEN });
+  // One case drives the client out of codes, which now means a GitHub that refuses every poll rather than a
+  // gh that stops: the flow is the client's own.
+  const github = createGithubDeviceFlowStub({ token: GOOD_TOKEN, refuseWith: name === "sign-in-not-completed" ? "access_denied" : undefined });
   const githubHost = await github.listen();
   const state = path.join(stateDir, `${name}.json`);
   const v = hub.virtuals.get(VID)!;
   const dump = () => {
     fs.writeFileSync(
       `${state}.tmp`,
-      JSON.stringify({ status: v.status, prompts: v.prompts, completes: v.completes, github: v.credentials.get("github") ?? null })
+      JSON.stringify({
+        status: v.status,
+        prompts: v.prompts,
+        completes: v.completes,
+        loginFailures: v.loginFailures,
+        github: v.credentials.get("github") ?? null
+      })
     );
     fs.renameSync(`${state}.tmp`, state);
   };

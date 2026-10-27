@@ -60,6 +60,7 @@ export default defineConfig({
         "src/assistant/jira-store.ts",
         "src/assistant/confluence-store.ts",
         "src/assistant/lookup-store.ts",
+        "src/assistant/export-default-store.ts",
         "src/assistant/store.ts",
         "src/assistant/template-store.ts",
         "src/assistant/upload-store.ts",
