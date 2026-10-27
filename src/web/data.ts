@@ -103,7 +103,7 @@ export async function agentActivity(viewer: Identity, view: AgentView) {
   const [conversation, posts, questions] = await Promise.all([
     agentConversation(prisma, viewer.oid, agent, view.grants),
     agentPosts(prisma, view.agent.id, 20),
-    agentQuestions(prisma, view.agent.id)
+    agentQuestions(prisma, viewer.oid, agent, view.grants)
   ]);
   return { conversation, posts, questions };
 }

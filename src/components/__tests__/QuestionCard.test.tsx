@@ -36,6 +36,11 @@ function card(props: { view?: QuestionView; tone?: QuestionTone; answer?: Answer
   return <QuestionCard view={props.view ?? view()} tone={props.tone ?? "assistant"} answer={props.answer ?? answering()} />;
 }
 
+/** The card as a viewer who may see the agent but not message it gets it: no action to give it, so no controls. */
+function readOnly(overrides: Partial<QuestionView> = {}) {
+  return <QuestionCard view={view(overrides)} tone="hub" />;
+}
+
 describe("QuestionCard", () => {
   it("should show the header, the question and every option with its description when the question is unanswered", () => {
     // Act
@@ -159,6 +164,58 @@ describe("QuestionCard", () => {
 
     // Assert
     expect(screen.getByText("Red — but only for now")).toBeTruthy();
+  });
+
+  /**
+   * A viewer with a read grant is offered nothing: the action would refuse them, and its refusal says the question
+   * is no longer waiting for an answer, which is not true. The question and its options are still shown, because
+   * they are transcript-grade content a reader may see.
+   */
+  it("should offer no controls, and say what is being waited on, when there is no action to answer with", () => {
+    // Act
+    render(readOnly());
+
+    // Assert
+    expect(screen.getByText("Do you prefer red or blue?")).toBeTruthy();
+    expect(screen.getByText("Red")).toBeTruthy();
+    expect(screen.getByText("Waiting for an answer from the owner.")).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("should show the answer and no controls to a reader once the owner has answered", () => {
+    // Act
+    render(readOnly({ answer: { answers: [{ labels: ["Red"], text: null }], at: ASKED_AT } }));
+
+    // Assert
+    expect(screen.getByText("Red")).toBeTruthy();
+    expect(screen.queryByText("Waiting for an answer from the owner.")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("should name itself as the assistant's question rather than theirs when it is not theirs to answer", () => {
+    // Act
+    render(readOnly());
+
+    // Assert
+    expect(screen.getByRole("region", { name: "A question the assistant asked" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "A question for you" })).toBeNull();
+  });
+
+  /**
+   * An answered row whose stored answer this version cannot read arrives with an empty `answers`. It must not go
+   * back to offering a choice: the question already has an answer, so every press would be refused.
+   */
+  it("should say it was answered, without saying what was chosen, when the answer cannot be read", () => {
+    // Act
+    render(card({ view: view({ answer: { answers: [], at: ASKED_AT } }) }));
+
+    // Assert
+    expect(screen.getByText("Answered, though what was chosen cannot be shown.")).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it.each<QuestionTone>(["assistant", "hub"])("should name itself for a screen reader in the %s theme", (tone) => {

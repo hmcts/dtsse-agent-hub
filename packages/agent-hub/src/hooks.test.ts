@@ -19,7 +19,7 @@ import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.
 import type { SpawnWorker } from "./enable.ts";
 import type { Env } from "./env.ts";
 import { HELD_NOTES, holdNote } from "./held-notes.ts";
-import { type HookPayload, parseHandoff, reposNote, runHook, virtualAgentStateDir, webServersNote } from "./hooks.ts";
+import { type HookPayload, mustDeny, parseHandoff, reposNote, runHook, virtualAgentStateDir, webServersNote } from "./hooks.ts";
 import { ASK_USER_QUESTION, ASKED_REASON, type HookDenyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { ensureStateDir, statePath, writeJson } from "./session.ts";
 
@@ -600,6 +600,45 @@ describe("runHook in an assistant conversation", () => {
   });
 });
 
+/**
+ * Whether a failing `PreToolUse` has to print a deny rather than nothing. Its own test because it is read from
+ * three places — the hook itself, the CLI's catch when the payload could not be parsed at all, and the bash gate's
+ * copy of it — and each of those is a path where printing nothing draws the prompt that hangs a pod.
+ */
+describe("mustDeny", () => {
+  const CONVERSATION = { AGENT_HUB_CONVERSATION_ID: "0f8a6a1e-1234-4000-8000-0000000000bb" };
+
+  it.each([
+    ["an assistant conversation", CONVERSATION],
+    ["a virtual agent's pod", VIRTUAL]
+  ])("should decide for %s, where nobody can answer a prompt", (_label, env) => {
+    // Act & Assert
+    expect(mustDeny("PreToolUse", { tool_name: "AskUserQuestion" }, env)).toBe(true);
+    // A payload that could not be read at all: the hook is registered for that one tool, so this is a broken
+    // payload rather than another tool's call.
+    expect(mustDeny("PreToolUse", null, env)).toBe(true);
+    expect(mustDeny("PreToolUse", {}, env)).toBe(true);
+  });
+
+  it("should decide nothing for another tool, which is not this hook's business", () => {
+    // Act & Assert
+    expect(mustDeny("PreToolUse", { tool_name: "Bash" }, CONVERSATION)).toBe(false);
+  });
+
+  it("should decide nothing in an engineer's own session, where a person can answer the prompt", () => {
+    // Act & Assert
+    expect(mustDeny("PreToolUse", { tool_name: "AskUserQuestion" }, {})).toBe(false);
+    expect(mustDeny("PreToolUse", null, {})).toBe(false);
+  });
+
+  it("should decide nothing for any other hook event", () => {
+    // Act & Assert
+    for (const event of ["SessionStart", "UserPromptSubmit", "UserPromptContext", "Stop", "SessionEnd", "PostToolUse"]) {
+      expect(mustDeny(event, { tool_name: "AskUserQuestion" }, CONVERSATION)).toBe(false);
+    }
+  });
+});
+
 // AskUserQuestion in a session nobody is sitting at: the question goes to the hub and the tool is denied, so the
 // TUI prompt that would hold the session busy for ever is never drawn.
 describe("runHook PreToolUse", () => {
@@ -716,33 +755,57 @@ describe("runHook PreToolUse", () => {
   it("should tell the model to ask in words when the question could not be sent", async () => {
     // Arrange
     registered("preq-unreachable");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new Error("connect ECONNREFUSED");
-      })
-    );
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("connect ECONNREFUSED");
+    });
+    vi.stubGlobal("fetch", fetchImpl);
 
     // Act
     const out = await hookJson(ask("preq-unreachable"), CONVERSATION);
 
     // Assert
     expect(reason(out)).toBe(UNDELIVERED_REASON);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("should tell the model to ask in words when the hub refused the question", async () => {
+  // A connection error may have left the hub with the row written: the abort or reset stops this process reading
+  // the response, not the hub committing it. The POST is idempotent on `tool_use_id`, so a second attempt is what
+  // tells "the question never arrived" from "the answer did not come back" — and the model is told the truth.
+  it("should ask again and say the question is on screen when the first attempt's answer never came back", async () => {
+    // Arrange
+    registered("preq-retried");
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+      }
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    // Act
+    const out = await hookJson(ask("preq-retried"), CONVERSATION);
+
+    // Assert
+    expect(reason(out)).toBe(ASKED_REASON);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  // A refusal is the hub reading the body and saying no, which asking again cannot change; the model is waiting on
+  // this hook, so the budget is not spent repeating it.
+  it("should tell the model to ask in words, without asking twice, when the hub refused the question", async () => {
     // Arrange
     registered("preq-refused");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ error: "no such agent" }, { status: 404 }))
-    );
+    const fetchImpl = vi.fn(async () => Response.json({ error: "no such agent" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchImpl);
 
     // Act
     const out = await hookJson(ask("preq-refused"), CONVERSATION);
 
     // Assert
     expect(reason(out)).toBe(UNDELIVERED_REASON);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("should tell the model to ask in words without calling the hub when the session has no agent", async () => {

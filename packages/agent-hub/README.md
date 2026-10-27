@@ -33,8 +33,13 @@ nothing else. Add it beside the others in `.claude/settings.json`:
 In an HMCTS Assistant conversation or a virtual agent's pod it posts the question to the hub, for the person to
 answer in the web UI as an ordinary message, and denies the tool so its prompt is never drawn — a prompt there waits
 for a keyboard nobody is at, and the turn never ends. In an engineer's own session it outputs nothing and the tool
-runs as usual. It never allows the tool in a pod, not even when the hub cannot be reached: it denies with a reason
-telling the model to ask in plain words instead.
+runs as usual.
+
+It never allows the tool in a pod, and **printing nothing is allowing it**: Claude Code reads a `PreToolUse` that
+says nothing as "no decision" and draws the prompt. So the deny has to survive this package failing to run. The gate
+in `bin/agent-hub` carries its own copy of it in bash and prints that whenever the CLI is not installed, crashes, is
+killed, or prints nothing; the CLI prints it from the `catch` around its own `hook` command, which is where a stdin
+body that is not JSON lands. `src/bin.test.ts` holds the bash copy in step with `UNDELIVERED_REASON`.
 
 ## Install
 

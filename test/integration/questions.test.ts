@@ -1,9 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { grantsHeldBy, setGrant } from "../../src/access/load.ts";
 import * as questionRoute from "../../src/app/api/agent/[agentId]/question/route.ts";
 import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
 import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
+import { agentQuestions } from "../../src/questions/views.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import { insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
@@ -135,6 +137,43 @@ describe("POST /api/agent/{agent_id}/question", () => {
     expect(await prisma.agentQuestion.count({ where: { agentId } })).toBe(1);
   });
 
+  /**
+   * A model that calls the tool again after the deny brings a new `tool_use_id`, which the unique index cannot
+   * see. Two live cards in one blocked turn is the worse outcome of the two: answering either sends a message that
+   * contradicts the other.
+   */
+  it("should leave one card up when the session asks a second question before the first is answered", async () => {
+    const { agentId, token } = await conversationSession();
+    await ask(token, agentId);
+
+    const response = await ask(token, agentId, { ...QUESTION, tool_use_id: "toolu_second", questions: [{ ...QUESTION.questions[0], question: "And again?" }] });
+
+    expect(response.status).toBe(204);
+    expect(await prisma.agentQuestion.findMany({ where: { agentId }, select: { toolUseId: true } })).toEqual([{ toolUseId: QUESTION.tool_use_id }]);
+  });
+
+  it("should take a new question once the one before it has been answered", async () => {
+    const { agentId, token } = await conversationSession();
+    await ask(token, agentId);
+    const first = await prisma.agentQuestion.findFirstOrThrow({ where: { agentId }, select: { id: true } });
+    await answerAgentQuestion({ questionId: first.id, answers: { answers: [{ labels: ["Red"], text: null }] } });
+
+    await ask(token, agentId, { ...QUESTION, tool_use_id: "toolu_second" });
+
+    expect(await prisma.agentQuestion.count({ where: { agentId } })).toBe(2);
+  });
+
+  // Keyed on the session as well as the agent, so a /clear — which registers a new session for the conversation —
+  // is not blocked by a card the session before it left unanswered.
+  it("should take a question from another session of the same agent", async () => {
+    const { agentId, token } = await conversationSession();
+    await ask(token, agentId);
+
+    await ask(token, agentId, { ...QUESTION, session_id: "sid-after-clear", tool_use_id: "toolu_second" });
+
+    expect(await prisma.agentQuestion.count({ where: { agentId } })).toBe(2);
+  });
+
   it("should keep the question the session is waiting on when a retry carries different words", async () => {
     const { agentId, token } = await conversationSession();
     await ask(token, agentId);
@@ -146,6 +185,21 @@ describe("POST /api/agent/{agent_id}/question", () => {
   });
 
   it.each([
+    [
+      "two options sharing a label",
+      {
+        ...QUESTION,
+        questions: [
+          {
+            ...QUESTION.questions[0],
+            options: [
+              { label: "Red", description: "one" },
+              { label: "Red", description: "two" }
+            ]
+          }
+        ]
+      }
+    ],
     ["no questions at all", { ...QUESTION, questions: [] }],
     ["more questions than the tool allows", { ...QUESTION, questions: Array.from({ length: 5 }, () => QUESTION.questions[0]) }],
     ["a question offering one option", { ...QUESTION, questions: [{ ...QUESTION.questions[0], options: [{ label: "Red", description: "" }] }] }],
@@ -172,6 +226,73 @@ describe("POST /api/agent/{agent_id}/question", () => {
     const { token } = await conversationSession();
 
     expect((await ask(token, "11111111-1111-1111-1111-111111111111")).status).toBe(404);
+  });
+});
+
+describe("who may read a question", () => {
+  /** An ordinary agent of Alice's with a question on it, which a grant from her can reach. */
+  async function laptopQuestion(): Promise<string> {
+    const agentId = await insertAgent(ALICE, "laptop");
+    await call(questionRoute.POST, { as: ALICE, path: `/api/agent/${agentId}/question`, params: { agentId }, method: "POST", body: QUESTION });
+    return agentId;
+  }
+
+  const ref = (agentId: string) => ({ id: agentId, ownerOid: ALICE.oid });
+
+  it("should give the owner the questions their agent's sessions asked", async () => {
+    const agentId = await laptopQuestion();
+
+    expect(await agentQuestions(prisma, ALICE.oid, ref(agentId), [])).toHaveLength(1);
+  });
+
+  // A question is the model's own words, as a transcript entry is, so it follows `canViewTranscript` — the rule
+  // that exists so who may read those can narrow without changing who may see the agent.
+  it.each(["read", "write"] as const)("should give a %s grantee the questions, since they may read the transcript", async (level) => {
+    const agentId = await laptopQuestion();
+    await insertUser(BOB);
+    await setGrant(prisma, ALICE.oid, BOB.oid, level);
+
+    expect(await agentQuestions(prisma, BOB.oid, ref(agentId), await grantsHeldBy(prisma, BOB.oid))).toHaveLength(1);
+  });
+
+  it("should give someone with no grant nothing", async () => {
+    const agentId = await laptopQuestion();
+    await insertUser(BOB);
+
+    expect(await agentQuestions(prisma, BOB.oid, ref(agentId), await grantsHeldBy(prisma, BOB.oid))).toEqual([]);
+  });
+
+  // The conversation's agent is owner-only, so no grant reaches its questions however wide the grant.
+  it("should give a grantee nothing for an assistant conversation's agent", async () => {
+    const { agentId, token } = await conversationSession();
+    await ask(token, agentId);
+    await insertUser(BOB);
+    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
+
+    const seen = await agentQuestions(prisma, BOB.oid, { id: agentId, ownerOid: ALICE.oid, ownerOnly: true }, await grantsHeldBy(prisma, BOB.oid));
+
+    expect(seen).toEqual([]);
+  });
+
+  /**
+   * An answered row whose answer this version cannot read is still answered. Reading it as unanswered would put a
+   * card back up offering a choice, and `recordAnswer` refuses a question that already has one — so every press
+   * would fail and the card would never settle.
+   */
+  it("should show a question as answered when its stored answer cannot be read", async () => {
+    const agentId = await laptopQuestion();
+    await prisma.agentQuestion.updateMany({ where: { agentId }, data: { answeredAt: new Date(), answer: ["not an answer set"] } });
+
+    const [seen] = await agentQuestions(prisma, ALICE.oid, ref(agentId), []);
+
+    expect(seen?.answer).toEqual({ answers: [], at: expect.any(String) });
+  });
+
+  it("should leave out a question whose stored set cannot be read, since there is nothing to choose between", async () => {
+    const agentId = await laptopQuestion();
+    await prisma.agentQuestion.updateMany({ where: { agentId }, data: { questions: [{ question: "half a question" }] } });
+
+    expect(await agentQuestions(prisma, ALICE.oid, ref(agentId), [])).toEqual([]);
   });
 });
 

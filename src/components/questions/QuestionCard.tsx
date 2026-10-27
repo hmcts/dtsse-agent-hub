@@ -76,8 +76,17 @@ function complete(answers: readonly QuestionAnswer[]): boolean {
   return answers.every((answer) => answer.labels.length > 0 || (answer.text ?? "").trim() !== "");
 }
 
-/** What one answered question reads as, which is also what the message said. */
-function said(answer: QuestionAnswer): string {
+/**
+ * What one answered question reads as, which is also what the message said.
+ *
+ * `undefined` is an answered question whose stored answer this version cannot read, which `agentQuestions` gives
+ * an empty `answers`. The card still has to say it is answered: offering a choice again would be a card every
+ * press of which is refused, since the question already has an answer.
+ */
+function said(answer: QuestionAnswer | undefined): string {
+  if (answer === undefined) {
+    return "Answered, though what was chosen cannot be shown.";
+  }
   const picked = answer.labels.join(", ");
   if (picked === "") {
     return answer.text ?? "";
@@ -136,44 +145,74 @@ function Options({
   );
 }
 
-/** Headers and questions, with what was chosen under each: the whole of the card once it has been answered. */
-function Answered({ view, palette }: { view: QuestionView; palette: Palette }) {
+/**
+ * The card with nothing to operate: what was asked, and what was chosen once it has been answered.
+ *
+ * Both states that have no controls render through here — the question answered, and a reader who may see the agent
+ * but not message it, for whom answering is not theirs to do. A viewer offered the buttons without the access to
+ * use them is worse than one shown none: the action refuses them, and its refusal says the question is no longer
+ * waiting for an answer, which is not true.
+ */
+function Quiet({ view, palette }: { view: QuestionView; palette: Palette }) {
+  const answer = view.answer;
   return (
     <ol className="flex flex-col gap-3">
       {view.questions.map((question, index) => (
         <li key={index} className="flex flex-col gap-1">
           <span className={palette.header}>{question.header}</span>
           <span className={palette.question}>{question.question}</span>
-          <span className={palette.muted}>
-            <span className="sr-only">Your answer: </span>
-            {said(view.answer?.answers[index] ?? { labels: [], text: null })}
-          </span>
+          {answer === null ? (
+            <>
+              <ul className={`list-inside list-disc ${palette.description}`}>
+                {question.options.map((option, at) => (
+                  <li key={at}>{option.label}</li>
+                ))}
+              </ul>
+              <span className={palette.muted}>Waiting for an answer from the owner.</span>
+            </>
+          ) : (
+            <span className={palette.muted}>
+              <span className="sr-only">Answer: </span>
+              {said(answer.answers[index])}
+            </span>
+          )}
         </li>
       ))}
     </ol>
   );
 }
 
-export function QuestionCard({ view, tone, answer: send }: { view: QuestionView; tone: QuestionTone; answer: AnswerQuestionAction }) {
+/**
+ * `answer` left out is what makes the card read-only: a viewer who may see the agent but not message it has no
+ * action to give it, so the controls cannot be rendered without one. Keeping the two inseparable is the point —
+ * a `readOnly` flag beside a live action is a state the caller can get wrong.
+ */
+export function QuestionCard({ view, tone, answer: send }: { view: QuestionView; tone: QuestionTone; answer?: AnswerQuestionAction }) {
   const palette = PALETTES[tone];
   const [answers, setAnswers] = useState<QuestionAnswer[]>(() => emptyAnswers(view.questions));
   const [own, setOwn] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const label = view.questions.length === 1 ? "A question for you" : "Questions for you";
+  const plural = view.questions.length !== 1;
+  /** The action, only where there is something to do with it. A `const`, so the callbacks below keep the narrowing. */
+  const ask = view.answer === null ? send : undefined;
 
-  if (view.answer !== null) {
+  if (ask === undefined) {
     return (
-      <section aria-label={label} className={palette.card}>
-        <Answered view={view} palette={palette} />
+      <section aria-label={plural ? "Questions the assistant asked" : "A question the assistant asked"} className={palette.card}>
+        <Quiet view={view} palette={palette} />
       </section>
     );
   }
 
-  async function submit(): Promise<void> {
+  const label = plural ? "Questions for you" : "A question for you";
+
+  // A `const` rather than a declaration, so that `ask` is narrowed inside it: a hoisted function could be called
+  // before the guard above ran, which is what TypeScript objects to.
+  const submit = async (): Promise<void> => {
     setSending(true);
     setError(null);
-    const result = await send({ questionId: view.id, answers: { answers } });
+    const result = await ask({ questionId: view.id, answers: { answers } });
     setSending(false);
     if (!result.ok) {
       setError(result.error);
@@ -181,7 +220,7 @@ export function QuestionCard({ view, tone, answer: send }: { view: QuestionView;
     // Nothing is cleared on success: the card is replaced by the answered one when the page re-reads the question,
     // which the `agent_question` event asks for. Leaving the choice showing until then is what stops it flickering
     // back to empty.
-  }
+  };
 
   /**
    * A single-choice question with nothing typed sends as soon as an option is pressed, because that is the whole
@@ -206,7 +245,7 @@ export function QuestionCard({ view, tone, answer: send }: { view: QuestionView;
               if (immediate) {
                 setSending(true);
                 setError(null);
-                void send({ questionId: view.id, answers: { answers: updated } }).then((result) => {
+                void ask({ questionId: view.id, answers: { answers: updated } }).then((result) => {
                   setSending(false);
                   if (!result.ok) {
                     setError(result.error);

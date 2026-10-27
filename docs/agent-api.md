@@ -449,7 +449,7 @@ So the client intercepts it. Its `PreToolUse` hook, registered for that one tool
 
 | Method and path | Body | Response |
 |---|---|---|
-| `POST /api/agent/{agent_id}/question` | `{session_id, tool_use_id, questions}` | `204`. Records a question for the agent's owner to answer. Idempotent on `tool_use_id`: a retry after a lost response leaves one question, and does **not** replace the stored one — the session is waiting on an answer to the question already on screen. |
+| `POST /api/agent/{agent_id}/question` | `{session_id, tool_use_id, questions}` | `204`. Records a question for the agent's owner to answer, or records nothing because that session already has one on screen. Idempotent on `tool_use_id`: a retry after a lost response leaves one question, and does **not** replace the stored one — the session is waiting on an answer to the question already on screen. |
 
 ```jsonc
 {
@@ -470,17 +470,21 @@ So the client intercepts it. Its `PreToolUse` hook, registered for that one tool
 ```
 
 - 1–4 questions, mirroring `AskUserQuestion`'s own limits; the client applies the same caps and cuts long values to fit before sending, so a `400` here is a client fault rather than a question nobody can read. Every string is bounded and no other field is accepted.
+- **A question's options must have distinct labels.** The label is the whole of what an answer names — the card keys a press by it and the message the session receives says it — so two options sharing one is a choice nobody could resolve. The client drops such a question before sending and asks in words instead.
 - Any agent's, not a conversation's alone, so an owner watching an ordinary pod agent's page is shown the same card there.
 - Notifies the owner's UI, so a second tab shows the question without a reload.
+- **One unanswered card per session.** A question posted while an earlier one from the same `session_id` is still unanswered is dropped, and the response is the same `204`. The unique index on `(agent_id, tool_use_id)` covers the retry of one tool call; this covers a model that calls the tool *again* after the deny, which arrives with a new `tool_use_id`. Two live cards in one blocked turn is the worse outcome of the two, because answering either sends a message that contradicts the other. It is keyed on the session as well as the agent, so a `/clear` is not blocked by a card the session before it left unanswered.
+- **The client retries this call, which no other call of its kind does**, because it is idempotent on `tool_use_id`: an attempt aborted at its timeout may still have committed here, and a second attempt is what tells "the question never arrived" from "the answer did not come back". Two attempts, 6 seconds each; a `4xx` is not retried.
+- **Reading a question follows the transcript**, not the agent: its owner and anyone holding a grant from them, as `canViewTranscript` decides, since a question is the model's own words as a transcript entry is. A conversation's agent is owner-only, so no grant reaches one of those.
 
-**Answering.** Only in the web UI, and only by someone who may message the agent — its owner, or a holder of a write grant; a conversation's agent is its owner's alone, so no grant reaches one of those. The answer is one entry per question, in order, each naming options the question offered or carrying words of the person's own, since `AskUserQuestion` always lets someone answer in their own words. It is sent as an ordinary direct message that quotes each question back above its answer, recorded on the question in that message's own transaction, and refused for a question already answered — so the session is told exactly once.
+**Answering.** Only in the web UI, and only by someone who may *message* the agent — its owner, or a holder of a write grant; a conversation's agent is its owner's alone, so no grant reaches one of those. That is narrower than reading it, so a read-grant viewer is shown the question and its options with no controls at all rather than controls the action would refuse. The answer is one entry per question, in order, each naming options the question offered or carrying words of the person's own, since `AskUserQuestion` always lets someone answer in their own words. It is sent as an ordinary direct message that quotes each question back above its answer, recorded on the question in that message's own transaction, and refused for a question already answered — so the session is told exactly once.
 
 **What the model is told.** Two reasons, and never an allow:
 
 - the question reached the hub: it is on screen with its options, the answer will arrive as an ordinary message, so end the turn and wait — do not repeat the question in the reply and do not guess;
 - the question did not reach the hub (no agent registered, comms off, the hub unreachable, or a payload the client could not read): ask it in plain words in the reply instead, listing the choices, and end the turn.
 
-There is no fail-open path, because allowing the tool is what hangs the session.
+There is no fail-open path, because allowing the tool is what hangs the session — and **printing nothing is allowing it**: Claude Code reads a `PreToolUse` that says nothing as "no decision" and draws the prompt. So the deny is printed even by the paths that cannot reach the hub client at all. `bin/agent-hub` carries its own copy of it in bash, for a CLI that is not installed, crashed, was killed or printed nothing, and the CLI's own `hook` command prints it from the `catch` that a stdin body which is not JSON lands in.
 
 **An engineer's own session is untouched.** The hook acts only where `AGENT_HUB_CONVERSATION_ID` is set or the process is a virtual agent's pod. Anywhere else it outputs nothing and the tool runs as usual: there is a person at that keyboard who can answer the prompt, and intercepting it would take a working tool away.
 

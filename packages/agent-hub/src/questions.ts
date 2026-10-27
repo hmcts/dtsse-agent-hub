@@ -102,7 +102,10 @@ function parseQuestion(value: unknown): Question | null {
     }
     options.push(option);
   }
-  if (options.length < MIN_OPTIONS) {
+  // Two options sharing a label are an ambiguous choice: the label is what the person's answer says and what the
+  // card keys their press by, so neither the hub nor the session could tell which one they meant. The hub refuses
+  // such a question, so sending it would be a card nobody ever sees; asking in words is the better outcome.
+  if (options.length < MIN_OPTIONS || new Set(options.map((option) => option.label)).size !== options.length) {
     return null;
   }
   return { question, header, options, multiSelect: raw.multiSelect === true };

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import type { AgentAccess } from "@/access/rules";
 import type { Skill } from "@/agents/skills";
-import { DirectComposer, type SendAction } from "@/components/agents/DirectComposer";
+import { DirectComposer, mayMessage, type SendAction } from "@/components/agents/DirectComposer";
 import { DirectMessage, senderName } from "@/components/agents/DirectMessage";
 import { TranscriptEntry } from "@/components/agents/TranscriptEntry";
 import { useLiveConversation } from "@/components/agents/useLiveConversation";
@@ -114,7 +114,12 @@ export function Conversation({
                   <DirectMessage key={item.key} agentId={agentId} message={item.message} />
                 ) : item.type === "question" ? (
                   <li key={item.key} className="px-5 py-2">
-                    <QuestionCard view={item.question} tone="hub" answer={answerQuestion} />
+                    {/*
+                      The action goes to whoever may message the agent, and nobody else: the same rule the composer
+                      is behind. A read-grant viewer is offered no controls, because the action would refuse them
+                      and its refusal says the question is no longer waiting for an answer, which is not true.
+                    */}
+                    <QuestionCard view={item.question} tone="hub" answer={mayMessage(access) ? answerQuestion : undefined} />
                   </li>
                 ) : (
                   <TranscriptEntry key={item.key} entry={item.entry} agentName={agentName} ownerName={ownerName} />

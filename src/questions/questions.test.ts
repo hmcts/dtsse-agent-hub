@@ -49,6 +49,17 @@ describe("questionPostBody", () => {
     expect(questionPostBody.safeParse(body({ questions: [question({ options: ["a", "b", "c", "d", "e"].map(option) })] })).success).toBe(false);
   });
 
+  // The label is the whole of what an answer names: the card keys a press by it and the message the session gets
+  // says it, so two options sharing one is a choice nobody could resolve.
+  it("should refuse a question whose options share a label", () => {
+    // Act
+    const parsed = questionPostBody.safeParse(body({ questions: [question({ options: [option("One"), option("One")] })] }));
+
+    // Assert
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.message).toBe("each option needs its own label");
+  });
+
   it("should refuse a body missing the ids the row is keyed on, or carrying anything else", () => {
     // Act & Assert
     expect(questionPostBody.safeParse(body({ tool_use_id: "" })).success).toBe(false);
@@ -155,6 +166,28 @@ describe("checkAnswer", () => {
   it("should refuse a label the question did not offer", () => {
     // Act & Assert
     expect(checkAnswer([question()], { answers: [{ labels: ["Three"] }] })).toEqual({ ok: false, error: "that is not one of the options offered" });
+  });
+
+  // A browser sending the same label twice has chosen it once. Refusing it as an option that was never offered
+  // would be both the wrong reason and an answer the person could not get through at all.
+  it("should take a label sent twice as chosen once", () => {
+    // Act & Assert
+    expect(checkAnswer([question()], { answers: [{ labels: ["One", "One"] }] })).toEqual({
+      ok: true,
+      answer: { answers: [{ labels: ["One"], text: null }] }
+    });
+    expect(checkAnswer([question({ multiSelect: true })], { answers: [{ labels: ["One", "Two", "One"] }] })).toEqual({
+      ok: true,
+      answer: { answers: [{ labels: ["One", "Two"], text: null }] }
+    });
+  });
+
+  it("should still refuse a repeated label beside one that was never offered", () => {
+    // Act & Assert
+    expect(checkAnswer([question({ multiSelect: true })], { answers: [{ labels: ["One", "One", "Three"] }] })).toEqual({
+      ok: false,
+      error: "that is not one of the options offered"
+    });
   });
 
   it("should refuse a question answered with neither an option nor words", () => {

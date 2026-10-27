@@ -120,6 +120,16 @@ describe("parseQuestions", () => {
     // Act & Assert
     expect(parseQuestions({ questions: [question(), question({ question: "" })] })).toBeNull();
   });
+
+  // The label is what the answer says and what the card keys the press by, so two options sharing one is a choice
+  // neither the hub nor the session could resolve. The hub refuses such a question, so sending it would be a card
+  // nobody ever sees.
+  it("should be null when two options of a question share a label", () => {
+    // Act & Assert
+    expect(parseQuestions({ questions: [question({ options: [option("One"), option("One")] })] })).toBeNull();
+    expect(parseQuestions({ questions: [question({ options: [option("One"), { label: " One ", description: "elsewhere" }] })] })).toBeNull();
+    expect(parseQuestions({ questions: [question({ options: [option("One"), option("Two"), option("One")] })] })).toBeNull();
+  });
 });
 
 describe("denyOutput", () => {

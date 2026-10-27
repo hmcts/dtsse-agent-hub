@@ -34,7 +34,15 @@ export const question = z
   .object({
     question: z.string().trim().min(1).max(MAX_QUESTION),
     header: z.string().trim().min(1).max(MAX_HEADER),
-    options: boundedArray(questionOption, MAX_OPTIONS, { min: MIN_OPTIONS }),
+    // Distinct labels, because the label is the whole of what an answer names: the card keys a press by it and the
+    // message the session receives says it, so two options sharing one would be a choice nobody could resolve.
+    options: boundedArray(questionOption, MAX_OPTIONS, {
+      min: MIN_OPTIONS,
+      refine: {
+        check: (options) => new Set(options.map((option) => option.label)).size === options.length,
+        message: "each option needs its own label"
+      }
+    }),
     multiSelect: z.boolean()
   })
   .strict();
@@ -109,8 +117,12 @@ export function checkAnswer(questions: readonly Question[], raw: unknown): Check
     const answer = given.answers[index] as QuestionAnswer;
     const text = answer.text === null ? null : answer.text.trim().slice(0, MAX_ANSWER_TEXT);
     const offered = asked.options.map((option) => option.label);
-    const labels = [...new Set(answer.labels)].filter((chosen) => offered.includes(chosen));
-    if (labels.length !== answer.labels.length) {
+    // De-duplicated first, and the check is against that rather than against what arrived: a browser sending the
+    // same label twice has chosen it once, and refusing it as an option that was never offered would be both the
+    // wrong reason and an answer the person could not get through.
+    const picked = [...new Set(answer.labels)];
+    const labels = picked.filter((label) => offered.includes(label));
+    if (labels.length !== picked.length) {
       return { ok: false, error: "that is not one of the options offered" };
     }
     if (labels.length > 1 && !asked.multiSelect) {

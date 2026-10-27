@@ -386,6 +386,22 @@ describe("Conversation questions", () => {
     expect(answerQuestion).toHaveBeenCalledWith({ questionId: "q-1", answers: { answers: [{ labels: ["Red"], text: null }] } });
   });
 
+  // The same rule the composer is behind: a read-grant viewer may read the question and may not answer it, and
+  // offering them the controls would end in a refusal saying the question is no longer waiting for an answer.
+  it("should offer a read-only viewer no way to answer, while still showing them the question", () => {
+    render(view({ access: "read", questions: [ASKED] }));
+
+    expect(screen.getByText("Do you prefer red or blue?")).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Something else" })).toBeNull();
+  });
+
+  it.each(["owner", "write"] as const)("should offer a %s viewer the options, since they may message the agent", (access) => {
+    render(view({ access, questions: [ASKED] }));
+
+    expect(screen.getByRole("radio", { name: /Red/ })).toBeTruthy();
+  });
+
   it("should re-read the page when the watched agent's questions change, and not for another agent's", async () => {
     live({ access: "owner", questions: [ASKED] });
 

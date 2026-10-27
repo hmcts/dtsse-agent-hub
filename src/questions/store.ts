@@ -16,13 +16,31 @@ async function announce(db: Database, agent: Pick<AgentRow, "id" | "ownerOid">):
 }
 
 /**
- * Records a question for the person to answer. Idempotent on `tool_use_id`: the client denies the tool whether or not
- * this call was answered, so a retry after a lost response must not put a second card on screen. A retry does not
- * replace the stored set either — the question is the one the session is waiting on an answer to, and rewriting it
- * under a card the person is reading would change what they are choosing between.
+ * Records a question for the person to answer, and nothing at all when that session already has one on screen.
+ *
+ * **One unanswered card per session.** Two things both lead here. The retry of a single tool call is idempotent on
+ * `tool_use_id`, which the unique index enforces: the client denies the tool whether or not its POST was answered,
+ * so a lost response must not put a second card up. A model that calls the tool *again* after the deny brings a new
+ * `tool_use_id`, which that index cannot see — and two live cards in one blocked turn is the worse outcome of the
+ * two, because answering either sends a message that contradicts the other. So an unanswered question for this
+ * agent and session is taken as the question being asked, and the second call changes nothing. The row is the
+ * lock: it is read `FOR UPDATE` so two calls arriving together cannot both find room.
+ *
+ * A retry does not replace the stored set either — the question is the one the session is waiting on an answer to,
+ * and rewriting it under a card the person is reading would change what they are choosing between.
  */
 export async function recordQuestion(prisma: PrismaClient, agent: Pick<AgentRow, "id" | "ownerOid">, post: QuestionPost): Promise<void> {
   await prisma.$transaction(async (tx) => {
+    // The agent row, so that two questions arriving at once are serialised: the question rows themselves cannot be
+    // locked, since the one that matters is usually the one that does not exist yet.
+    await tx.$queryRaw`SELECT 1 FROM agent WHERE id = ${agent.id}::uuid FOR UPDATE`;
+    const open = await tx.agentQuestion.findFirst({
+      where: { agentId: agent.id, sessionId: post.session_id, answeredAt: null },
+      select: { id: true }
+    });
+    if (open !== null) {
+      return;
+    }
     const { count } = await tx.agentQuestion.createMany({
       data: [{ agentId: agent.id, sessionId: post.session_id, toolUseId: post.tool_use_id, questions: post.questions }],
       skipDuplicates: true
