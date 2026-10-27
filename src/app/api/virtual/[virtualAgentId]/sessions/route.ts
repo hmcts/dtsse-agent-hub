@@ -27,6 +27,7 @@ export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgen
     closingFrame: RECONNECT_FRAME,
     onOpen: sessionStream(virtualAgent.id, {
       hub,
+      ownerOid: virtualAgent.ownerOid,
       ready: listener.ready,
       wakes: () => pendingWakes(prisma, virtualAgent.id),
       wake: (conversationId) => pendingWake(prisma, virtualAgent.id, conversationId),

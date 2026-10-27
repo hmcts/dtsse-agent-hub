@@ -6,7 +6,8 @@ import type { ModelRoute } from "../viewer/identity.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
 import { CONFLUENCE_SELECT, type ConfluenceExportFrame, pendingConfluenceExport } from "./confluence.ts";
 import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
-import { DEFAULT_MODEL, isModel, storedModel } from "./models.ts";
+import { readModelOffer } from "./model-access-store.ts";
+import { isOffered, storedModel } from "./models.ts";
 import { DEFAULT_PRODUCT, isProduct, productLabel, storedProduct } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
 import { SEARCH_LIMIT, SNIPPET_MAX_WORDS, SNIPPET_MIN_WORDS, searchTerms, visibleMatches } from "./search.ts";
@@ -44,7 +45,10 @@ export interface ConversationRow {
   product: string;
   productHistory: ProductChange[];
   stopHistory: StopMark[];
-  /** The Claude model it runs on: always one `models.ts` offers, an id no longer offered reading as the default. */
+  /**
+   * The Claude model it was last set to, as stored. What it runs on is this when its owner is still offered it, and
+   * otherwise their default: read it through `storedModel` with their `readModelOffer`.
+   */
   model: string;
   wakeRequestedAt: Date | null;
   sessionState: SessionState | null;
@@ -130,7 +134,6 @@ function toRow(row: {
     product: storedProduct(row.product),
     productHistory: storedHistory(row.productHistory),
     stopHistory: storedStops(row.stopHistory),
-    model: storedModel(row.model),
     sessionState: state === "starting" || state === "live" || state === "queued" ? state : null
   };
 }
@@ -375,13 +378,16 @@ export async function createConversation(
   if (!isProduct(product)) {
     throw new HttpError(400, "pick a product from the list");
   }
-  const model = request.model === undefined ? DEFAULT_MODEL : request.model;
-  if (!isModel(model)) {
-    throw new HttpError(400, "pick a model from the list");
-  }
   const assistant = await findAssistant(prisma, ownerOid);
   if (assistant === undefined) {
     throw new HttpError(409, "open the Assistant first, so it can be set up");
+  }
+  // What this person's own credential answered on the assistant's route, so a model they cannot use is refused here
+  // rather than failing on the first message.
+  const offer = await readModelOffer(prisma, assistant.id);
+  const model = request.model === undefined ? offer.defaultModel : request.model;
+  if (!isOffered(offer, model)) {
+    throw new HttpError(400, "pick a model from the list");
   }
   const title = request.title?.trim().slice(0, TITLE_FROM_MESSAGE) || null;
   return await prisma.$transaction(async (tx) => {
@@ -590,18 +596,18 @@ export async function setProduct(prisma: PrismaClient, ownerOid: string, id: str
 }
 
 /**
- * The model the conversation runs on from now on. Refused unless `models.ts` offers it, because the pod puts it on
- * its launcher's command line. Nothing is sent to the pod here: the next message's frame carries the model, and the
+ * The model the conversation runs on from now on. Refused unless its owner is offered it — their own credential
+ * answered it on the assistant's route — and because the pod puts it on its launcher's command line. Nothing is sent to the pod here: the next message's frame carries the model, and the
  * pod switches its session before delivering that message, so a change always applies from the next message on. A
  * session started later is started on it, from the wake.
  */
 export async function setModel(prisma: PrismaClient, ownerOid: string, id: string, model: unknown, now: Date = new Date()): Promise<void> {
-  if (!isModel(model)) {
-    throw new HttpError(400, "pick a model from the list");
-  }
   const conversation = await findConversation(prisma, ownerOid, id);
   if (conversation === undefined) {
     throw new ConversationNotFound();
+  }
+  if (!isOffered(await readModelOffer(prisma, conversation.virtualAgentId), model)) {
+    throw new HttpError(400, "pick a model from the list");
   }
   await prisma.$transaction(async (tx) => {
     const changed = await tx.$executeRaw`
@@ -743,7 +749,7 @@ export interface AssistantFrame {
   product: string;
   product_label: string;
   /**
-   * The model the person wants this message answered by, always one `models.ts` offers. The pod switches the session
+   * The model the person wants this message answered by, always one its owner is offered. The pod switches the session
    * to it before delivering the message when the session is on another, which is what makes a change in the composer
    * apply to the next message rather than to the next session.
    */
@@ -768,7 +774,11 @@ export interface AssistantFrame {
 export async function assistantFrame(db: Database, agentId: string, messageId?: bigint): Promise<AssistantFrame | undefined> {
   const row = await db.agent.findUnique({
     where: { id: agentId },
-    select: { assistantConversation: { select: { id: true, product: true, model: true, ...ARTEFACT_SELECT, ...JIRA_SELECT, ...CONFLUENCE_SELECT } } }
+    select: {
+      assistantConversation: {
+        select: { id: true, virtualAgentId: true, product: true, model: true, ...ARTEFACT_SELECT, ...JIRA_SELECT, ...CONFLUENCE_SELECT }
+      }
+    }
   });
   const conversation = row?.assistantConversation;
   if (conversation === null || conversation === undefined) {
@@ -783,7 +793,7 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     // working in, and a product dropped from the list still names it. `productLabel` falls back to the slug.
     product: conversation.product,
     product_label: productLabel(conversation.product),
-    model: storedModel(conversation.model),
+    model: storedModel(await readModelOffer(db, conversation.virtualAgentId), conversation.model),
     artefact_version: artefact.version,
     artefact_updated_by: artefact.updatedBy,
     ...(jira === undefined ? {} : { jira_export: jira }),
@@ -805,7 +815,8 @@ export interface Wake {
 /**
  * Every pending wake of the assistant, oldest first. `resume` once the session has sent a transcript entry. The
  * product is the stored one, as the frame's is: what the pod is told is what the conversation holds. The model is
- * the offered one, as the frame's is, so a session is never started on a model the list no longer vouches for.
+ * one the owner is offered, as the frame's is, so a session is never started on a model their credential no longer
+ * answered.
  */
 export async function pendingWakes(db: Database, virtualAgentId: string): Promise<Wake[]> {
   const rows = await db.$queryRaw<Wake[]>`
@@ -815,7 +826,11 @@ export async function pendingWakes(db: Database, virtualAgentId: string): Promis
      WHERE c.virtual_agent_id = ${virtualAgentId}::uuid AND c.wake_requested_at IS NOT NULL
      ORDER BY c.wake_requested_at, c.id
   `;
-  return rows.map((wake) => ({ ...wake, model: storedModel(wake.model) }));
+  if (rows.length === 0) {
+    return rows;
+  }
+  const offer = await readModelOffer(db, virtualAgentId);
+  return rows.map((wake) => ({ ...wake, model: storedModel(offer, wake.model) }));
 }
 
 /** The wake for one conversation, if it has one pending; `null` when the conversation is gone. */

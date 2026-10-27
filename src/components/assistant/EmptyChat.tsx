@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { DEFAULT_MODEL } from "@/assistant/models";
+import { type AssistantModel, modelOffer } from "@/assistant/models";
 import { DEFAULT_PRODUCT, isProduct } from "@/assistant/products";
 import { fillWith, type Starter, type Template } from "@/assistant/starters";
 import type { UnsentChat } from "@/assistant/views";
@@ -35,6 +35,9 @@ export interface EmptyChatActions {
  * and a conversation id is a UUID, so this can never be mistaken for one.
  */
 export const NEW_CHAT_DRAFT = "new";
+
+/** What is offered before any check has answered: the default alone. */
+const UNCHECKED = modelOffer(undefined);
 
 /** Where the new chat's product choice is remembered, scoped to the viewer as the drafts are and for the same reason. */
 const PRODUCT_KEY = "agent-hub:assistant-product:";
@@ -90,7 +93,9 @@ export function EmptyChat({
   templates,
   viewerOid,
   unsent,
-  actions
+  actions,
+  models = UNCHECKED.models,
+  defaultModel = UNCHECKED.defaultModel
 }: {
   starters: readonly Starter[];
   templates: readonly Template[];
@@ -99,12 +104,15 @@ export function EmptyChat({
   /** The conversation this screen already opened for a file and never sent, if there is one. */
   unsent?: UnsentChat;
   actions: EmptyChatActions;
+  /** The models the person's own credential answered, which the + menu offers, and the one a new chat starts on. */
+  models?: readonly AssistantModel[];
+  defaultModel?: string;
 }) {
   const router = useRouter();
   // The conversation's own product wins: it is what the file was attached under, and what the session will be told.
   const [product, setProduct] = useState(() => unsent?.product ?? rememberedProduct(viewerOid) ?? DEFAULT_PRODUCT);
   // Not remembered across a remount the way the product is: picking the wrong model costs time, not a wrong answer.
-  const [model, setModel] = useState(() => unsent?.model ?? DEFAULT_MODEL);
+  const [model, setModel] = useState(() => unsent?.model ?? defaultModel);
   const [error, setError] = useState<string | null>(null);
 
   // The conversation attaching created, and the request that created it. The promise is held rather than the id so
@@ -227,7 +235,7 @@ export function EmptyChat({
             filler={composer}
             openConversation={openConversation}
             attached={unsent?.attachments}
-            model={{ value: model, onChange: (next) => void changeModel(next) }}
+            model={{ value: model, options: models, onChange: (next) => void changeModel(next) }}
           />
         </div>
       </div>

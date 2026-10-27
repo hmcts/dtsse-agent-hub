@@ -76,7 +76,15 @@ export default async function AssistantPage() {
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
     >
-      <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
+      <EmptyChat
+        starters={STARTERS}
+        templates={offeredTemplates(mine)}
+        viewerOid={viewer.oid}
+        unsent={unsent}
+        actions={CHAT_ACTIONS}
+        models={home.assistant.models}
+        defaultModel={home.assistant.defaultModel}
+      />
       <OnboardingGate
         assistant={home.assistant}
         statuses={home.credentials.available ? home.credentials.statuses : []}

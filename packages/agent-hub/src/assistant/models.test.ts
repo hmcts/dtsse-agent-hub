@@ -214,3 +214,11 @@ describe("switchModel", () => {
     expect(tmux.calls).toEqual([]);
   });
 });
+
+describe("launcherModel for a family Bedrock has no profile for", () => {
+  it("should be null for Fable on Bedrock, so the session keeps hai's default, and its own id on a licence", () => {
+    // Act & Assert
+    expect(launcherModel("claude-fable-5-1", BEDROCK_EU)).toBeNull();
+    expect(launcherModel("claude-fable-5-1", { AGENT_HUB_MODEL_ROUTE: "own_licence" })).toBe("claude-fable-5-1");
+  });
+});

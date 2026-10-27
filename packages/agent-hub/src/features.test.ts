@@ -19,7 +19,7 @@ describe("CLIENT_FEATURES", () => {
   // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
   // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
-    expect(CLIENT_FEATURES).toHaveLength(7);
+    expect(CLIENT_FEATURES).toHaveLength(8);
   });
 
   /**
@@ -35,7 +35,7 @@ describe("CLIENT_FEATURES", () => {
    * and `memory` are quieter: the feature is withheld and nothing says so, which is why these two are worth the
    * words and those four are covered by being on the list at all.
    */
-  it.each(["attachments", "files", "lookups", "memory", "memory-anon", "model", "stop"])("should claim %s", (feature) => {
+  it.each(["attachments", "files", "lookups", "memory", "memory-anon", "model", "model-check", "stop"])("should claim %s", (feature) => {
     expect(CLIENT_FEATURES).toContain(feature);
   });
 });

@@ -4,6 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Skill } from "@/agents/skills";
+import { CATALOGUE } from "@/assistant/models";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import type { ConversationView } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
@@ -108,6 +109,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     productLabel: "CCD",
     productHistory: [],
     model: "claude-sonnet-5-5",
+    models: CATALOGUE.slice(0, 3),
     stopHistory: [],
     agentId: AGENT,
     agentStatus: "idle",
@@ -1660,7 +1662,7 @@ describe("Composer model choice", () => {
 
   it("should start the new chat on the model the person picked when they send its first message", async () => {
     const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} models={CATALOGUE.slice(0, 3)} />);
 
     pickFromMenu("Haiku 5.5");
     fireEvent.change(newChatBox(), { target: { value: "a quick one" } });
@@ -1669,5 +1671,49 @@ describe("Composer model choice", () => {
     });
 
     expect(start).toHaveBeenCalledWith({ product: "general", model: "claude-haiku-5-5", body: "a quick one" });
+  });
+
+  it("should list only the models the person's credential answered when it offers them", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ model: "claude-haiku-5-5", models: CATALOGUE.filter((m) => m.id === "claude-haiku-5-5" || m.id === "claude-fable-5-1") })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    const offered = within(openModels())
+      .getAllByRole("menuitemradio")
+      .map((item) => item.textContent);
+    expect(offered).toEqual([expect.stringMatching(/Haiku 5\.5/), expect.stringMatching(/Fable 5\.1/)]);
+  });
+
+  it("should keep the Model item, with the one model, when only one is offered", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ models: CATALOGUE.slice(0, 1) })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(within(openModels()).getAllByRole("menuitemradio")).toHaveLength(1);
+  });
+
+  it("should start the new chat on the person's default when they pick nothing and Sonnet 5.5 is not offered", async () => {
+    const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
+    render(
+      <EmptyChat
+        viewerOid={VIEWER}
+        starters={STARTERS}
+        templates={TEMPLATES}
+        actions={emptyActions(start)}
+        models={CATALOGUE.slice(1, 3)}
+        defaultModel="claude-opus-5-5"
+      />
+    );
+
+    fireEvent.change(newChatBox(), { target: { value: "hello" } });
+    await act(async () => {
+      fireEvent.keyDown(newChatBox(), { key: "Enter" });
+    });
+
+    expect(start).toHaveBeenCalledWith({ product: "general", model: "claude-opus-5-5", body: "hello" });
   });
 });

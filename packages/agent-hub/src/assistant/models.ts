@@ -11,6 +11,14 @@ import { type Tmux, tmuxName } from "./tmux.ts";
  */
 const MODEL_RE = /^claude-[a-z]+-[0-9]+(-[0-9]+)?$/;
 
+/**
+ * The families Bedrock has a cross-region inference profile for, which are the families hai sets a default for. A model
+ * of any other family, such as Fable, has no id on Bedrock, so it gets no `--model` and no `/model`, and the model
+ * check reports it unavailable without asking. Which of these a person is *offered* is decided by that check, against
+ * their own key; this only says which ids exist to ask with.
+ */
+const BEDROCK_FAMILIES = /^claude-(opus|sonnet|haiku)-/;
+
 /** The families whose Bedrock profile hai runs with the 1M-token context, which `[1m]` asks Claude Code for. */
 const LONG_CONTEXT = /^claude-(opus|sonnet)-/;
 
@@ -42,7 +50,7 @@ function bedrockPrefix(region: string | undefined): string | null {
  * What the launcher is given for a model: the id itself on the person's own Claude licence, and on Amazon Bedrock the
  * region's inference profile, `eu.anthropic.claude-sonnet-5-5[1m]` — the same shape as the defaults hai sets for each
  * family, so picking Sonnet gives the session exactly what it would have run on by default. Null when the id is not
- * one or the region has no profile, which leaves the session on hai's own default rather than on a model that fails.
+ * one, the region has no profile or the family has none on Bedrock, which leaves the session on hai's own default rather than on a model that fails.
  *
  * The route is `AGENT_HUB_MODEL_ROUTE`, which the entrypoint exports before the supervisor starts; anything but
  * `own_licence` is Bedrock, as it is in the entrypoint.
@@ -55,7 +63,7 @@ export function launcherModel(model: string | null, env: Env = process.env): str
     return model;
   }
   const prefix = bedrockPrefix(env.AWS_REGION);
-  if (prefix === null) {
+  if (prefix === null || !BEDROCK_FAMILIES.test(model)) {
     return null;
   }
   return `${prefix}.anthropic.${model}${LONG_CONTEXT.test(model) ? "[1m]" : ""}`;

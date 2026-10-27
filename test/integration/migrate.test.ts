@@ -127,6 +127,7 @@ describe("migrate", () => {
       "assistant_conversation_share",
       "assistant_export_default",
       "assistant_lookup",
+      "assistant_model_access",
       "assistant_template",
       "assistant_upload",
       "assistant_upload_part",

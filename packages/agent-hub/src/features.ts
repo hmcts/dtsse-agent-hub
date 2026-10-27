@@ -13,7 +13,7 @@
  * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
  * from here; keep the two in step, so a name only one side knows is a type error on that side.
  */
-export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "memory-anon" | "model" | "stop";
+export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "memory-anon" | "model" | "model-check" | "stop";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
@@ -50,10 +50,14 @@ export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "me
  * conversation whose model choice is honoured apart from one on an older session that runs hai's default whatever
  * was picked.
  *
+ * `model-check` is claimed because the assistant supervisor checks which models its owner's credential can use and
+ * reports it with `POST /api/virtual/{id}/models`. The hub gates on it: a virtual agent whose current agent does not
+ * claim it is offered only the default model, since nothing on it will check again.
+ *
  * `memory` is claimed **for hubs older than `memory-anon`**, and for nothing else. No gate in the current hub reads
  * it. It is here because this list travels in the other direction too: the client is published on merge and a pod
  * installs the current one when it boots, so a build can be talking to a hub that has not deployed yet, and that
  * hub's Size section gates on `memory`. Dropping it would make such a pod read as an older client to the one hub
  * that still cares. It can go once no hub predating `anon_bytes` is running anywhere.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory", "memory-anon", "model", "stop"];
+export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory", "memory-anon", "model", "model-check", "stop"];

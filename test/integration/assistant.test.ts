@@ -20,6 +20,7 @@ import { readExportDefaults, saveExportDefaults } from "../../src/assistant/expo
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
 import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
+import { reportModelAccess } from "../../src/assistant/model-access-store.ts";
 import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { expireDeliveries } from "../../src/messages/store.ts";
@@ -86,6 +87,29 @@ async function startedAssistant(): Promise<{ id: string; token: string; claimed:
     }
   );
   return { id: assistant.id, token: claimed.launch_token!, claimed };
+}
+
+/**
+ * What the assistant's pod would have found: its own session claiming `model-check`, and one check's answers
+ * stored for its owner. Without both, only the default is offered.
+ */
+async function answered(assistantId: string, statuses: Record<string, "available" | "unavailable" | "unknown">): Promise<void> {
+  const pod = await prisma.agent.create({
+    data: {
+      ownerOid: ALICE.oid,
+      sessionId: `${ALICE.oid}-pod-${assistantId}`,
+      name: "assistant",
+      virtualAgentId: assistantId,
+      clientFeatures: ["model-check"]
+    },
+    select: { id: true }
+  });
+  const assistant = await prisma.virtualAgent.update({ where: { id: assistantId }, data: { agentId: pod.id }, select: { modelRoute: true } });
+  await reportModelAccess(
+    prisma,
+    { id: assistantId, ownerOid: ALICE.oid, modelRoute: assistant.modelRoute === "own_licence" ? "own-licence" : "bedrock" },
+    Object.entries(statuses).map(([model, status]) => ({ model, status }))
+  );
 }
 
 function register(
@@ -492,6 +516,7 @@ describe("conversations", () => {
 
   it("should start the conversation on the model picked and tell the pod in the wake when the person picked one", async () => {
     const { id: assistantId } = await startedAssistant();
+    await answered(assistantId, { "claude-sonnet-5-5": "available", "claude-opus-5-5": "available" });
     const id = ((await actions.startConversation({ product: "general", model: "claude-opus-5-5", body: "hi" })) as { id: string }).id;
 
     expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-opus-5-5");
@@ -514,7 +539,8 @@ describe("conversations", () => {
   });
 
   it("should carry a changed model on the next message's frame when the person changes it mid-conversation", async () => {
-    await startedAssistant();
+    const { id: assistantId } = await startedAssistant();
+    await answered(assistantId, { "claude-sonnet-5-5": "available", "claude-haiku-5-5": "available" });
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
@@ -534,10 +560,11 @@ describe("conversations", () => {
     expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-sonnet-5-5");
   });
 
-  it("should send the pod the default when a conversation is on a model no longer offered", async () => {
+  it("should send the pod the default when the person's credential stops answering the conversation's model", async () => {
     const { id: assistantId } = await startedAssistant();
+    await answered(assistantId, { "claude-sonnet-5-5": "available", "claude-opus-5-5": "available" });
     const id = ((await actions.startConversation({ product: "general", model: "claude-opus-5-5", body: "hi" })) as { id: string }).id;
-    await prisma.$executeRaw`UPDATE assistant_conversation SET model = 'claude-retired-1' WHERE id = ${id}::uuid`;
+    await reportModelAccess(prisma, { id: assistantId, ownerOid: ALICE.oid, modelRoute: "own-licence" }, [{ model: "claude-opus-5-5", status: "unavailable" }]);
     const { agentId } = await sessionOf(id);
 
     expect(await assistantFrame(prisma, agentId)).toMatchObject({ model: "claude-sonnet-5-5" });

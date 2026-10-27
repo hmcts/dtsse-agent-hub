@@ -203,6 +203,8 @@ describe("runAssistantSupervisor", () => {
       putUploads: async () => null,
       putLookup: async () => null,
       putMemory: async () => null,
+      getCredential: async () => null,
+      postModels: async () => null,
       sessionsStream: async (): Promise<Response> => {
         opens.push(Date.now());
         throw new ApiError(403, { error: "forbidden" }, "GET", `/api/virtual/${VID}/sessions`);
@@ -252,6 +254,8 @@ describe("runAssistantSupervisor", () => {
         putUploads: async () => null,
         putLookup: async () => null,
         putMemory: async () => null,
+        getCredential: async () => null,
+        postModels: async () => null,
         sessionsStream: async () => new Response("", { status: 200 })
       },
       id: VID,
@@ -339,6 +343,8 @@ describe("runAssistantSupervisor", () => {
         attempts.push(body);
         return await held;
       },
+      getCredential: async () => null,
+      postModels: async () => null,
       sessionsStream: async () => new Response("", { status: 200 })
     };
     const memoryFs = {
@@ -382,6 +388,8 @@ describe("runAssistantSupervisor", () => {
       putUploads: async () => null,
       putLookup: async () => null,
       putMemory: async () => null,
+      getCredential: async () => null,
+      postModels: async () => null,
       sessionsStream: async () => new Response("", { status: 200 })
     };
     const running = runAssistantSupervisor({
@@ -425,6 +433,8 @@ describe("runAssistantSupervisor", () => {
       putUploads: async () => null,
       putLookup: async () => null,
       putMemory: async () => null,
+      getCredential: async () => null,
+      postModels: async () => null,
       sessionsStream: async (_id: string, opts: { signal?: AbortSignal } = {}): Promise<Response> => {
         opens += 1;
         const body = new ReadableStream<Uint8Array>({
@@ -460,6 +470,47 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
+  it("should check the models at boot, again on a check_models frame, and on its own interval", async () => {
+    // Arrange: a stream that sends one check_models and then ends, and a daily check shortened to the test.
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const posted: unknown[] = [];
+    const stop = new AbortController();
+    let streams = 0;
+    const running = runAssistantSupervisor({
+      api: {
+        putSessions: async () => null,
+        conversations: async () => ({ conversations: [] }),
+        putUploads: async () => null,
+        putLookup: async () => null,
+        putMemory: async () => null,
+        getCredential: async () => "sk-ant-oat01-a-token-for-the-check",
+        postModels: async (_id: string, body: unknown) => {
+          posted.push(body);
+          return null;
+        },
+        sessionsStream: async () => new Response(streams++ === 0 ? "event: check_models\ndata: {}\n\nevent: reconnect\ndata: {}\n\n" : "", { status: 200 })
+      },
+      id: VID,
+      env: { AGENT_HUB_MODEL_ROUTE: "own_licence" },
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 1000,
+      modelCheck: { run: async () => ({ code: 0, timedOut: false, stdout: '{"is_error":false,"result":"OK"}', stderr: "" }) },
+      modelCheckEveryMs: 100
+    });
+
+    try {
+      // Act & Assert: the boot check, the one the frame asked for, and at least one from the interval.
+      await waitUntil(() => posted.length >= 3, "three model checks to be reported");
+      expect(posted[0]).toMatchObject({ models: [{ model: "claude-sonnet-5-5", status: "available" }, {}, {}, {}] });
+    } finally {
+      stop.abort();
+      await running;
+    }
+  });
+
   it("should log an event it cannot parse and carry on when the stream sends one", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
@@ -471,6 +522,8 @@ describe("runAssistantSupervisor", () => {
       putUploads: async () => null,
       putLookup: async () => null,
       putMemory: async () => null,
+      getCredential: async () => null,
+      postModels: async () => null,
       sessionsStream: async () => new Response("event: wake\ndata: {oops\n\nevent: close\ndata: nope\n\nevent: reconnect\ndata: {}\n\n", { status: 200 })
     };
     const running = runAssistantSupervisor({

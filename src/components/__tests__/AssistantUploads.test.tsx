@@ -3,6 +3,7 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CATALOGUE } from "@/assistant/models";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import type { ConversationView, UnsentChat } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
@@ -557,6 +558,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     productLabel: "CCD",
     productHistory: [],
     model: "claude-sonnet-5-5",
+    models: CATALOGUE.slice(0, 1),
     stopHistory: [],
     agentId: AGENT,
     agentStatus: "idle",

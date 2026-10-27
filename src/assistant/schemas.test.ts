@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { artefactPutBody, jiraExportReportBody, MAX_ARTEFACT_MARKDOWN, MAX_JIRA_ERROR, sessionsReportBody, uploadsReportBody } from "./schemas.ts";
+import {
+  artefactPutBody,
+  jiraExportReportBody,
+  MAX_ARTEFACT_MARKDOWN,
+  MAX_JIRA_ERROR,
+  MAX_MODEL_RESULTS,
+  modelCheckBody,
+  sessionsReportBody,
+  uploadsReportBody
+} from "./schemas.ts";
 import { MAX_REPORTED_FILES } from "./upload-report.ts";
 
 describe("artefactPutBody", () => {
@@ -115,5 +124,37 @@ describe("uploadsReportBody", () => {
     const files = Array.from({ length: MAX_REPORTED_FILES + 1 }, () => ({ upload_id: "0f8a6a1e-0000-4000-8000-000000000001", bytes: 1 }));
 
     expect(uploadsReportBody.safeParse({ ...report, files }).success).toBe(false);
+  });
+});
+
+describe("modelCheckBody", () => {
+  it("should accept one result per model with any of the three statuses when the report is well formed", () => {
+    const body = {
+      models: [
+        { model: "claude-sonnet-5-5", status: "available" },
+        { model: "claude-opus-5-5", status: "unavailable" },
+        { model: "claude-next-6", status: "unknown" }
+      ]
+    };
+
+    expect(modelCheckBody.parse(body)).toEqual(body);
+  });
+
+  it.each([
+    ["a status it does not know", { models: [{ model: "claude-sonnet-5-5", status: "maybe" }] }],
+    ["a model that is not the shape of an id", { models: [{ model: "claude-sonnet-5-5; rm -rf /", status: "available" }] }],
+    [
+      "the same model twice",
+      {
+        models: [
+          { model: "claude-sonnet-5-5", status: "available" },
+          { model: "claude-sonnet-5-5", status: "unavailable" }
+        ]
+      }
+    ],
+    ["more results than it takes", { models: Array.from({ length: MAX_MODEL_RESULTS + 1 }, (_, i) => ({ model: `claude-m-${i}`, status: "available" })) }],
+    ["no list", {}]
+  ])("should refuse a report with %s", (_what, body) => {
+    expect(modelCheckBody.safeParse(body).success).toBe(false);
   });
 });

@@ -451,7 +451,7 @@ export function ChatView({
               conversationId={view.id}
               skills={view.skills}
               dropZone={scroller.ref}
-              model={{ value: model, onChange: (next) => void changeModel(next) }}
+              model={{ value: model, options: view.models, onChange: (next) => void changeModel(next) }}
               onFocus={() => {
                 if (!warmed.current && status === "offline") {
                   warmed.current = true;
