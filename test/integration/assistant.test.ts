@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { setGrant } from "../../src/access/load.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
@@ -23,11 +23,11 @@ import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/look
 import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { expireDeliveries } from "../../src/messages/store.ts";
-import { realtime } from "../../src/realtime/process.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
-import { connectForChat, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { assistantSuite } from "./assistant-suite.ts";
+import { insertUser, type Person, prisma } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
 
@@ -118,27 +118,7 @@ async function sessionOf(conversationId: string): Promise<{ agentId: string; ses
   return { agentId: conversation.agent!.id, sessionId: conversation.agent!.sessionId };
 }
 
-beforeAll(async () => {
-  await realtime().listener.ready();
-});
-
-beforeEach(async () => {
-  vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
-  vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
-  await resetDatabase();
-  await connectForChat(ALICE);
-  await connectForChat(BOB);
-  actAs("alice");
-});
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
-afterAll(async () => {
-  await realtime().listener.stop();
-  await prisma.$disconnect();
-});
+assistantSuite([ALICE, BOB]);
 
 describe("the person's assistant", () => {
   it("should create a virtual agent on the first visit of someone who has none, and reuse it on the next", async () => {

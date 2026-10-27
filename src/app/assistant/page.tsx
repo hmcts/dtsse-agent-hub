@@ -8,19 +8,19 @@ import {
   startConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
+import { resetClaudeMd, saveClaudeMd } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { pasteLoginCode, reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
 import { STARTERS } from "@/assistant/starters";
 import { offeredTemplates } from "@/assistant/templates";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
-import { WAITING_COOKIE, waitingDismissed } from "@/assistant/waiting";
+import { WAITING_COOKIE } from "@/assistant/waiting";
+import { AssistantGate } from "@/components/assistant/AssistantGate";
 import { AssistantShell, type ConversationActions } from "@/components/assistant/AssistantShell";
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
-import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { requireViewer } from "@/viewer/current";
 import { assistantExportDefaults, assistantFiles, assistantSize, assistantTemplates, claudeMdSettings, openAssistant, unsentNewChat } from "@/web/data";
 
@@ -74,21 +74,9 @@ export default async function AssistantPage() {
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
     >
-      {/* Nothing to chat in behind the getting-ready screen while it holds the person at GitHub and Claude. */}
-      {home.chat === "blocked" ? null : (
+      <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>
         <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
-      )}
-      <OnboardingGate
-        assistant={home.assistant}
-        statuses={home.credentials.available ? home.credentials.statuses : []}
-        unavailable={home.credentials.available ? null : home.credentials.reason}
-        paste={pasteLoginCode}
-        save={saveCredential}
-        reconnect={reconnectSignIn}
-        now={Date.now()}
-        dismissed={waitingDismissed(jar.get(WAITING_COOKIE)?.value, home.assistant.id, home.assistant.startedAt)}
-        theme={theme}
-      />
+      </AssistantGate>
     </AssistantShell>
   );
 }
