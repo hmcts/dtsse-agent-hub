@@ -10,7 +10,9 @@
 # in every workspace session, so a session that never enabled comms costs one file test
 # here and never starts node. With auto-enable on, SessionStart and UserPromptSubmit
 # start node for a session that is neither enabled nor opted out. UserPromptContext
-# starts it only when the stop worker has held a feed note for the next prompt.
+# starts it only when the stop worker has held a feed note for the next prompt, and
+# PreToolUse only in a pod or an Assistant conversation, where a tool prompt cannot be
+# answered by anyone.
 
 set -u
 
@@ -54,6 +56,29 @@ if [ "${1:-}" = "hook" ]; then
     if [[ "$input" =~ $re ]]; then
         sid="${BASH_REMATCH[1]}"
     fi
+    # Whether this invocation has to print a decision rather than nothing. A PreToolUse hook that prints nothing
+    # is read by Claude Code as "no decision", so AskUserQuestion's prompt is drawn — and in a pod or an Assistant
+    # conversation nobody is there to answer it, which is the forever-busy session this hook exists to prevent.
+    # Everything below that would otherwise exit 0 printing nothing checks this first. It is the bash copy of
+    # mustDeny() in src/hooks.ts; src/bin.test.ts holds the two in step.
+    must_decide=0
+    if [ "${2:-}" = "PreToolUse" ] &&
+        { [ -n "${AGENT_HUB_CONVERSATION_ID:-}" ] ||
+            { [ -n "${AGENT_HUB_VIRTUAL_AGENT_ID:-}" ] && [ -n "${AGENT_HUB_LAUNCH_TOKEN:-}" ]; }; }; then
+        # Both patterns are held in variables, which is the form bash 3.2 reads as a regex rather than as literal
+        # text; the session_id read above is written the same way.
+        tool_re='"tool_name"[[:space:]]*:[[:space:]]*"AskUserQuestion"'
+        name_re='"tool_name"'
+        # A payload naming no tool at all counts as the tool: the hook is registered for that tool alone, so a body
+        # this cannot read is a broken payload rather than some other tool's call.
+        if [[ "$input" =~ $tool_re ]] || [[ ! "$input" =~ $name_re ]]; then
+            must_decide=1
+        fi
+    fi
+    # What this script prints when it cannot run the CLI, or the CLI ran and said nothing: the JSON the CLI would
+    # have printed for UNDELIVERED_REASON in src/questions.ts, written out again because bash cannot call it.
+    # src/bin.test.ts holds the two copies in step.
+    deny='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"This question could not be put on screen, and there is nobody at a terminal to answer the prompt. Ask it in plain words in your reply instead, listing the choices, and end your turn so the person can answer with a message."}}'
     if [ -n "$sid" ] && [ ! -f "$hub/$sid/enabled" ]; then
         pending=0
         case "${2:-}:${AGENT_HUB_AUTO_ENABLE:-}" in
@@ -65,6 +90,12 @@ if [ "${1:-}" = "hook" ]; then
         # A virtual agent's SessionStart may have to say its repos are still arriving. This is the
         # bash copy of virtualAgent() in src/virtual-agent.ts; src/bin.test.ts holds the two in step.
         if [ "$pending" -eq 0 ] && [ "${2:-}" = "SessionStart" ] && [ -n "${AGENT_HUB_VIRTUAL_AGENT_ID:-}" ] && [ -n "${AGENT_HUB_LAUNCH_TOKEN:-}" ]; then
+            pending=1
+        fi
+        # A question has to reach the CLI whatever the comms state: a session with comms off may still have a hub
+        # it can reach, and the deny below is only the fallback for when it cannot. This is why nothing after here
+        # can exit 0 printing nothing for a must_decide invocation — pending is set, so the exit below is not taken.
+        if [ "$pending" -eq 0 ] && [ "$must_decide" -eq 1 ]; then
             pending=1
         fi
         # /clear starts a new session id; SessionStart must look for a handoff from the old one.
@@ -79,6 +110,20 @@ if [ "${1:-}" = "hook" ]; then
     # Runs synchronously on every prompt, so node starts only when a held note is waiting.
     if [ "${2:-}" = "UserPromptContext" ]; then
         [ -n "$sid" ] && [ -s "$hub/$sid/held-notes.jsonl" ] || exit 0
+    fi
+    if [ "$must_decide" -eq 1 ]; then
+        # The decision has to reach Claude Code whatever becomes of the CLI, so its output is captured and checked
+        # rather than streamed: a missing dist/, a node that is not installed, a crash, an OOM kill and a run that
+        # printed nothing all end up here, and every one of them used to let the prompt be drawn.
+        out=""
+        if command -v node >/dev/null 2>&1; then
+            out=$(node "$CLI" "$@" <<<"$input" 2>/dev/null) || out=""
+        fi
+        case "$out" in
+            *'"permissionDecision"'*) printf '%s\n' "$out" ;;
+            *) printf '%s\n' "$deny" ;;
+        esac
+        exit 0
     fi
     command -v node >/dev/null 2>&1 || exit 0
     node "$CLI" "$@" <<<"$input" 2>/dev/null

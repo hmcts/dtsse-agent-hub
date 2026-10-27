@@ -14,6 +14,7 @@ import {
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
 import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
+import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
 import { pasteLoginCode, reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
@@ -47,6 +48,7 @@ const ACTIONS: ChatActions = {
   setProduct: setConversationProduct,
   rename: renameConversation,
   remove: deleteConversation,
+  answerQuestion: answerAgentQuestion,
   saveArtefact,
   exportToJira: exportArtefactToJira,
   exportToConfluence: exportArtefactToConfluence
