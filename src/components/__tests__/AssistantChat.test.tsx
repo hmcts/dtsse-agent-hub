@@ -1478,19 +1478,30 @@ describe("EmptyChat", () => {
 
 /** The model the next message is answered by: shown on a chip beside the + button and changed from the + menu. */
 describe("Composer model choice", () => {
-  function pickFromMenu(label: string): void {
+  function openModels(): HTMLElement {
     fireEvent.click(screen.getByRole("button", { name: /add a template$/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /^Model/ }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: new RegExp(`^${label}`) }));
+    return screen.getByRole("menu", { name: "Models" });
   }
 
-  it("should show Sonnet 5.5 on the chip when the conversation is on the default model", () => {
+  function pickFromMenu(label: string): void {
+    fireEvent.click(within(openModels()).getByRole("menuitemradio", { name: new RegExp(`^${label}`) }));
+  }
+
+  function checkedModel(): (string | null)[] {
+    return within(openModels())
+      .getAllByRole("menuitemradio")
+      .filter((item) => item.getAttribute("aria-checked") === "true")
+      .map((item) => item.textContent);
+  }
+
+  it("should check Sonnet 5.5 in the + menu when the conversation is on the default model", () => {
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
 
-    expect(screen.getByRole("button", { name: "Model: Sonnet 5.5. Change model" }).textContent).toBe("Sonnet 5.5");
+    expect(checkedModel()).toEqual([expect.stringMatching(/Sonnet 5\.5/)]);
   });
 
-  it("should save the pick and show it on the chip when the person chooses another model from the + menu", async () => {
+  it("should save the pick and check it in the + menu when the person chooses another model", async () => {
     const setModel = ok();
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ setModel })} />);
 
@@ -1498,20 +1509,20 @@ describe("Composer model choice", () => {
     await act(async () => {});
 
     expect(setModel).toHaveBeenCalledWith({ conversationId: CONVERSATION, model: "claude-opus-5-5" });
-    expect(screen.getByRole("button", { name: "Model: Opus 5.5. Change model" })).toBeTruthy();
     expect(screen.queryByRole("menu")).toBeNull();
+    expect(checkedModel()).toEqual([expect.stringMatching(/Opus 5\.5/)]);
   });
 
-  it("should open the models with the current one checked when the person presses the chip", () => {
+  it("should check the stored model when the person opens the models", () => {
     render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ model: "claude-haiku-5-5" })} templates={TEMPLATES} actions={actions()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Model: Haiku 5.5. Change model" }));
+    expect(checkedModel()).toEqual([expect.stringMatching(/Haiku 5\.5/)]);
+  });
 
-    const models = screen.getByRole("menu", { name: "Models" });
-    const checked = within(models)
-      .getAllByRole("menuitemradio")
-      .filter((item) => item.getAttribute("aria-checked") === "true");
-    expect(checked.map((item) => item.textContent)).toEqual([expect.stringMatching(/Haiku 5\.5/)]);
+  it("should not show the model beside the + button when the + menu is closed", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByText("Sonnet 5.5")).toBeNull();
   });
 
   it("should save nothing when the person picks the model the conversation is already on", () => {
@@ -1531,7 +1542,7 @@ describe("Composer model choice", () => {
     await act(async () => {});
 
     expect(screen.getByRole("alert").textContent).toBe("pick a model from the list");
-    expect(screen.getByRole("button", { name: "Model: Sonnet 5.5. Change model" })).toBeTruthy();
+    expect(checkedModel()).toEqual([expect.stringMatching(/Sonnet 5\.5/)]);
   });
 
   it("should offer no model when the composer is given none to show", () => {
@@ -1540,7 +1551,6 @@ describe("Composer model choice", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
 
     expect(screen.queryByRole("menuitem", { name: /^Model/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Model:/ })).toBeNull();
   });
 
   it("should start the new chat on the model the person picked when they send its first message", async () => {

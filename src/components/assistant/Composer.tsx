@@ -630,21 +630,6 @@ export function Composer({
                 ) : null}
               </div>
             ) : null}
-            {model === undefined ? null : (
-              // The model in use, always on show, since it decides how good and how quick the next answer is. It is
-              // also a shortcut to the same choice in the + menu, which is where the menu opens to.
-              <button
-                type="button"
-                onClick={() => {
-                  skillMenu.dismiss();
-                  setMenu(menu === "models" ? "closed" : "models");
-                }}
-                aria-label={`Model: ${modelLabel(model.value)}. Change model`}
-                className="mb-1 shrink-0 rounded-full border border-asst-strong px-2.5 py-1 text-xs text-asst-muted hover:bg-asst-bubble hover:text-asst-text"
-              >
-                {modelLabel(model.value)}
-              </button>
-            )}
           </div>
           {attachable ? (
             <input
