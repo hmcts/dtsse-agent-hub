@@ -235,6 +235,20 @@ describe("selectFrame", () => {
     expect(await selectFrame({ type: "agent_skills", agent_id: AGENT.id, owner_oid: OWNER }, watch, sources(grants))).toBeUndefined();
   });
 
+  it("should name the watched agent whose questions changed when the viewer may see the agent", async () => {
+    const frame = await selectFrame({ type: "agent_question", agent_id: AGENT.id, owner_oid: OWNER }, THREAD, sources(READ));
+
+    expect(frame).toBe(`event: agent_question\ndata: ${JSON.stringify({ agent_id: AGENT.id })}\n\n`);
+  });
+
+  it.each<[string, UiWatch, Grant[]]>([
+    ["no agent is watched", TOPICS, READ],
+    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: OWNER } }, READ],
+    ["the viewer can no longer see the agent", THREAD, []]
+  ])("should not send a question change when %s", async (_label, watch, grants) => {
+    expect(await selectFrame({ type: "agent_question", agent_id: AGENT.id, owner_oid: OWNER }, watch, sources(grants))).toBeUndefined();
+  });
+
   it("should tell the page to re-read when the listener resyncs", async () => {
     expect(await selectFrame({ type: "resync" }, TOPICS, sources([]))).toBe("event: resync\ndata: {}\n\n");
   });

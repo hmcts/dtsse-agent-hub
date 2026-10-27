@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { PERSONA_COOKIE, unique } from "./hub";
+import { connectForChat, PERSONA_COOKIE, unique } from "./hub";
 
 /** A phone, which is where the message box is tightest for room. The size the Assistant's layout is checked at. */
 const PHONE = { width: 390, height: 844 };
@@ -10,8 +10,10 @@ const TWO_LINES = 60;
 const PERSONA = unique("asst");
 
 test.describe("assistant @regression", () => {
-  test.beforeEach(async ({ context, baseURL }) => {
+  test.beforeEach(async ({ context, baseURL, request }) => {
     await context.addCookies([{ name: PERSONA_COOKIE, value: PERSONA, url: baseURL! }]);
+    // Past the gate that holds the Assistant at GitHub and Claude, so there is a message box to measure.
+    await connectForChat(request, PERSONA);
   });
 
   /**

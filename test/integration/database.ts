@@ -5,7 +5,7 @@ import { prisma } from "../../src/store/prisma.ts";
 /** Empties every table the schema defines, leaving the migration ledger alone. */
 export async function resetDatabase(): Promise<void> {
   await prisma.$executeRawUnsafe(
-    `TRUNCATE "orchestrator_lease", "assistant_upload_part", "assistant_upload", "assistant_conversation_share", "assistant_template", "assistant_conversation", "virtual_agent_login", "virtual_agent", "dev_credential_value", "credential", "transcript_entry", "delivery", "subscription", "message_topic", "message", "topic", "channel", "agent_grant", "agent", "user" RESTART IDENTITY CASCADE`
+    `TRUNCATE "orchestrator_lease", "assistant_upload_part", "assistant_upload", "assistant_conversation_share", "assistant_template", "assistant_conversation", "virtual_agent_login", "virtual_agent", "dev_credential_value", "credential", "transcript_entry", "delivery", "subscription", "message_topic", "message", "topic", "channel", "agent_grant", "agent_question", "agent", "user" RESTART IDENTITY CASCADE`
   );
 }
 
@@ -56,3 +56,20 @@ export async function insertAgent(
 }
 
 export { prisma };
+
+/**
+ * Marks the person as having connected GitHub and both model keys, which is what `chatGate` reads, so a suite about
+ * something else can drive the Assistant's actions. Rows only: the gate never reads a value.
+ */
+export async function connectForChat(who: Person): Promise<void> {
+  await insertUser(who);
+  await prisma.credential.createMany({
+    data: (["github", "claude", "bedrock"] as const).map((kind) => ({
+      ownerOid: who.oid,
+      kind,
+      secretName: `u-${who.oid}-${kind}`,
+      updatedVia: "web" as const
+    })),
+    skipDuplicates: true
+  });
+}

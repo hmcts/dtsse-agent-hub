@@ -7,7 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home.ts";
 import { conversation, fakeTmux } from "../__fixtures__/fake-tmux.ts";
 import type { SessionsBody } from "../api.ts";
-import { ensureStateDir, hubHome, projectTranscriptPath, statePath } from "../session.ts";
+import { ensureStateDir, hubHome, projectTranscriptPath, readText, statePath } from "../session.ts";
+import { launcherModel, modelPath } from "./models.ts";
 import {
   BUSY_STALE_MS,
   createAssistantSupervisor,
@@ -106,9 +107,14 @@ describe("parseWake", () => {
     const c = conversation();
 
     // Act & Assert
-    expect(parseWake({ ...c, resume: true, product: "pcs" })).toEqual({ conversation_id: c.conversation_id, session_id: c.session_id, resume: true });
-    expect(parseWake(c)).toEqual({ conversation_id: c.conversation_id, session_id: c.session_id, resume: false });
-    expect(parseWake({ ...c, resume: "yes" })).toEqual({ conversation_id: c.conversation_id, session_id: c.session_id, resume: false });
+    expect(parseWake({ ...c, resume: true, product: "pcs", model: "claude-opus-5-5" })).toEqual({
+      conversation_id: c.conversation_id,
+      session_id: c.session_id,
+      resume: true,
+      model: "claude-opus-5-5"
+    });
+    expect(parseWake(c)).toEqual({ conversation_id: c.conversation_id, session_id: c.session_id, resume: false, model: null });
+    expect(parseWake({ ...c, resume: "yes" })).toEqual({ conversation_id: c.conversation_id, session_id: c.session_id, resume: false, model: null });
   });
 
   it("should be null when the conversation id or the session id is not one it would run", () => {
@@ -128,7 +134,7 @@ describe("parseSavedSession", () => {
   it("should keep every field the adoption reads when the file is one the supervisor wrote", () => {
     // Arrange
     const c = conversation();
-    const written = { ...c, resume: true, name: tmuxName(c.conversation_id), started_at: 1700000000000 };
+    const written = { ...c, resume: true, model: "claude-haiku-5-5", name: tmuxName(c.conversation_id), started_at: 1700000000000 };
 
     // Act & Assert
     expect(parseSavedSession(written)).toEqual(written);
@@ -164,6 +170,49 @@ describe("createAssistantSupervisor wake", () => {
     expect(start?.cwd).toBe(CWD);
     expect(start?.vars).toEqual({ AGENT_HUB_CONVERSATION_ID: c.conversation_id });
     expect(start?.command).toBe(`hai --dangerously-skip-permissions --session-id ${c.session_id} --append-system-prompt-file '${PROMPT_FILE}'`);
+  });
+
+  it("should start the session on the wake's model and record it for the bridge when the wake names one", async () => {
+    // Arrange
+    const { tmux, supervisor } = setup();
+    const c = { ...conversation(), model: "claude-opus-5-5" };
+
+    // Act
+    await supervisor.wake(c);
+
+    // Assert
+    const launched = launcherModel("claude-opus-5-5");
+    expect(launched).not.toBeNull();
+    expect(tmux.starts()[0]?.command).toBe(claudeCommand(c.session_id, false, launched));
+    expect(tmux.starts()[0]?.command).toContain(`--model '${launched}'`);
+    expect(readText(modelPath(c.session_id))).toBe("claude-opus-5-5");
+  });
+
+  it("should start the session on hai's default and clear any recorded model when the wake names none", async () => {
+    // Arrange
+    const { tmux, supervisor } = setup();
+    const c = conversation();
+    ensureStateDir(c.session_id);
+    fs.writeFileSync(modelPath(c.session_id), "claude-haiku-5-5\n");
+
+    // Act
+    await supervisor.wake(c);
+
+    // Assert
+    expect(tmux.starts()[0]?.command).not.toContain("--model");
+    expect(fs.existsSync(modelPath(c.session_id))).toBe(false);
+  });
+
+  it("should not put a model on the command line when the wake's is not the shape of an id", async () => {
+    // Arrange
+    const { tmux, supervisor } = setup();
+    const c = { ...conversation(), model: "claude-opus-5-5'; touch /tmp/owned; '" };
+
+    // Act
+    await supervisor.wake(c);
+
+    // Assert
+    expect(tmux.starts()[0]?.command).toBe(claudeCommand(c.session_id, false));
   });
 
   it("should ask for the command's program against the session's working directory when a conversation is woken", async () => {

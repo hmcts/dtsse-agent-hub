@@ -89,6 +89,22 @@ describe("claudeCommand", () => {
     expect(shellWords(command)).toEqual(["hai", "--dangerously-skip-permissions", "--session-id", "sess-1", "--append-system-prompt-file", spaced]);
     expect(shellWords(claudeCommand("sess-1", false)).at(-1)).toBe(PROMPT_FILE);
   });
+
+  // A Bedrock profile ends in `[1m]`, which an unquoted shell word would try as a glob.
+  it("should pass the model as one literal argument when the session is started on one", () => {
+    // Act
+    const words = shellWords(claudeCommand("sess-1", true, "eu.anthropic.claude-sonnet-5-5[1m]"));
+
+    // Assert
+    expect(words.slice(-2)).toEqual(["--model", "eu.anthropic.claude-sonnet-5-5[1m]"]);
+    expect(words).toContain(PROMPT_FILE);
+  });
+
+  it("should leave --model off when no model is given, so the session runs on hai's default", () => {
+    // Act & Assert
+    expect(claudeCommand("sess-1", false, null)).toBe(claudeCommand("sess-1", false));
+    expect(claudeCommand("sess-1", false)).not.toContain("--model");
+  });
 });
 
 describe("commandProgram", () => {

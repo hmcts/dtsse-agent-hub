@@ -19,6 +19,7 @@ export const ENV_KEYS = [
   "AGENT_HUB_INVOKED_AS",
   "AGENT_HUB_LAUNCH_TOKEN",
   "AGENT_HUB_MAX_SESSIONS",
+  "AGENT_HUB_MODEL_ROUTE",
   "AGENT_HUB_PLUGINS",
   "AGENT_HUB_PORTS_MS",
   "AGENT_HUB_PROC_NET",
@@ -34,6 +35,8 @@ export const ENV_KEYS = [
   "AGENT_HUB_UPLOAD_RECONCILE_MS",
   "AGENT_HUB_URL",
   "AGENT_HUB_VIRTUAL_AGENT_ID",
+  // The Bedrock region hai calls, which decides the inference profile a conversation's model is named by.
+  "AWS_REGION",
   "AZURE_CONFIG_DIR",
   "AZURE_TENANT_ID",
   "CLAUDE_CODE_MESSAGING_SOCKET",

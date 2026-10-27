@@ -39,6 +39,41 @@ export function onboarded(needed: readonly CredentialKind[], stored: ReadonlySet
 }
 
 /**
+ * The credentials without which there is no chat to be had: GitHub, and the key to the assistant's model. Which key
+ * that is follows the assistant's route, as `neededCredentials` decides it — a Claude token on the person's own
+ * licence, a Bedrock API key on Amazon Bedrock — so "Claude connected" means the key its pod will use, never
+ * whichever of the two happens to be stored. A key for the other route is no use to the pod.
+ *
+ * Azure is needed too but is not here: the banner asks for it, and a chat is still worth having without it.
+ */
+const CHAT_CREDENTIALS: readonly CredentialKind[] = ["github", "claude", "bedrock"];
+
+export function chatCredentials(needed: readonly CredentialKind[]): CredentialKind[] {
+  return needed.filter((kind) => CHAT_CREDENTIALS.includes(kind));
+}
+
+/**
+ * Whether the person may reach the chat: `blocked` while one of `chatCredentials` is not stored, `open` otherwise.
+ *
+ * Credentials the hub cannot read leave it `open`, for the reason `connectionsAsk` gives: `stored` is empty then
+ * whatever the person has connected, so a gate on it would hold someone who has signed in everywhere behind a screen
+ * nothing they do can satisfy. `credentialBackend` answers unavailable only for a deployment that keeps no
+ * credentials at all — a preview, sign-in turned off, a malformed vault URL — where nobody can connect anything and
+ * the pod has nothing to boot on either, so a gate there would shut everybody out and protect nothing.
+ */
+export type ChatGate = "open" | "blocked";
+
+export function chatGate(toChat: readonly CredentialKind[], stored: ReadonlySet<CredentialKind>, unavailable: string | null): ChatGate {
+  if (unavailable !== null) {
+    return "open";
+  }
+  return toChat.every((kind) => stored.has(kind)) ? "open" : "blocked";
+}
+
+/** What a server action answers while the gate is `blocked`, for a page that was loaded before it closed. */
+export const CHAT_BLOCKED = "connect GitHub and Claude before you start chatting";
+
+/**
  * What the getting-ready screen asks of the person: to connect their accounts, nothing because they have, or
  * nothing because the hub cannot tell.
  *

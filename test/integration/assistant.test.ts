@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { setGrant } from "../../src/access/load.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
@@ -20,14 +20,15 @@ import { readExportDefaults, saveExportDefaults } from "../../src/assistant/expo
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
 import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
+import { reportModelAccess } from "../../src/assistant/model-access-store.ts";
 import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { expireDeliveries } from "../../src/messages/store.ts";
-import { realtime } from "../../src/realtime/process.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
-import { insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { assistantSuite } from "./assistant-suite.ts";
+import { insertUser, type Person, prisma } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
 
@@ -88,6 +89,29 @@ async function startedAssistant(): Promise<{ id: string; token: string; claimed:
   return { id: assistant.id, token: claimed.launch_token!, claimed };
 }
 
+/**
+ * What the assistant's pod would have found: its own session claiming `model-check`, and one check's answers
+ * stored for its owner. Without both, only the default is offered.
+ */
+async function answered(assistantId: string, statuses: Record<string, "available" | "unavailable" | "unknown">): Promise<void> {
+  const pod = await prisma.agent.create({
+    data: {
+      ownerOid: ALICE.oid,
+      sessionId: `${ALICE.oid}-pod-${assistantId}`,
+      name: "assistant",
+      virtualAgentId: assistantId,
+      clientFeatures: ["model-check"]
+    },
+    select: { id: true }
+  });
+  const assistant = await prisma.virtualAgent.update({ where: { id: assistantId }, data: { agentId: pod.id }, select: { modelRoute: true } });
+  await reportModelAccess(
+    prisma,
+    { id: assistantId, ownerOid: ALICE.oid, modelRoute: assistant.modelRoute === "own_licence" ? "own-licence" : "bedrock" },
+    Object.entries(statuses).map(([model, status]) => ({ model, status }))
+  );
+}
+
 function register(
   token: string,
   sessionId: string,
@@ -118,25 +142,7 @@ async function sessionOf(conversationId: string): Promise<{ agentId: string; ses
   return { agentId: conversation.agent!.id, sessionId: conversation.agent!.sessionId };
 }
 
-beforeAll(async () => {
-  await realtime().listener.ready();
-});
-
-beforeEach(async () => {
-  vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
-  vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
-  await resetDatabase();
-  actAs("alice");
-});
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
-afterAll(async () => {
-  await realtime().listener.stop();
-  await prisma.$disconnect();
-});
+assistantSuite([ALICE, BOB]);
 
 describe("the person's assistant", () => {
   it("should create a virtual agent on the first visit of someone who has none, and reuse it on the next", async () => {
@@ -480,6 +486,74 @@ describe("conversations", () => {
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.product)).toEqual(["other"]);
   });
 
+  it("should start a conversation on Sonnet 5.5 when the person picked no model", async () => {
+    const { id: assistantId } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId } = await sessionOf(id);
+
+    expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-sonnet-5-5");
+    expect(await assistantFrame(prisma, agentId)).toMatchObject({ model: "claude-sonnet-5-5" });
+    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.model)).toEqual(["claude-sonnet-5-5"]);
+  });
+
+  it("should start the conversation on the model picked and tell the pod in the wake when the person picked one", async () => {
+    const { id: assistantId } = await startedAssistant();
+    await answered(assistantId, { "claude-sonnet-5-5": "available", "claude-opus-5-5": "available" });
+    const id = ((await actions.startConversation({ product: "general", model: "claude-opus-5-5", body: "hi" })) as { id: string }).id;
+
+    expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-opus-5-5");
+    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.model)).toEqual(["claude-opus-5-5"]);
+  });
+
+  it("should refuse a model it does not offer when starting a conversation or changing one", async () => {
+    await startedAssistant();
+
+    expect(await actions.startConversation({ product: "general", model: "claude-fable-5-1", body: "hi" })).toEqual({
+      ok: false,
+      error: "pick a model from the list"
+    });
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    expect(await actions.setConversationModel({ conversationId: id, model: "claude-sonnet-5-5 --dangerously-skip-permissions" })).toEqual({
+      ok: false,
+      error: "pick a model from the list"
+    });
+    expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-sonnet-5-5");
+  });
+
+  it("should carry a changed model on the next message's frame when the person changes it mid-conversation", async () => {
+    const { id: assistantId } = await startedAssistant();
+    await answered(assistantId, { "claude-sonnet-5-5": "available", "claude-haiku-5-5": "available" });
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId } = await sessionOf(id);
+
+    expect(await actions.setConversationModel({ conversationId: id, model: "claude-haiku-5-5" })).toEqual({ ok: true });
+
+    expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-haiku-5-5");
+    expect(await assistantFrame(prisma, agentId)).toMatchObject({ model: "claude-haiku-5-5" });
+    expect((await assistantConversation(VIEWER, id))!.model).toBe("claude-haiku-5-5");
+  });
+
+  it("should not change another person's conversation's model when they name it", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    actAs("bob");
+
+    expect(await actions.setConversationModel({ conversationId: id, model: "claude-opus-5-5" })).toMatchObject({ ok: false });
+    expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-sonnet-5-5");
+  });
+
+  it("should send the pod the default when the person's credential stops answering the conversation's model", async () => {
+    const { id: assistantId } = await startedAssistant();
+    await answered(assistantId, { "claude-sonnet-5-5": "available", "claude-opus-5-5": "available" });
+    const id = ((await actions.startConversation({ product: "general", model: "claude-opus-5-5", body: "hi" })) as { id: string }).id;
+    await reportModelAccess(prisma, { id: assistantId, ownerOid: ALICE.oid, modelRoute: "own-licence" }, [{ model: "claude-opus-5-5", status: "unavailable" }]);
+    const { agentId } = await sessionOf(id);
+
+    expect(await assistantFrame(prisma, agentId)).toMatchObject({ model: "claude-sonnet-5-5" });
+    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.model)).toEqual(["claude-sonnet-5-5"]);
+    expect((await assistantConversation(VIEWER, id))!.model).toBe("claude-sonnet-5-5");
+  });
+
   it("should carry attachments on a frame built for a delivery and leave them out of one built for a wake", async () => {
     const { token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
@@ -491,7 +565,14 @@ describe("conversations", () => {
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).clientFeatures).toBeNull();
 
     const { id: messageId } = await prisma.message.findFirstOrThrow({ where: { kind: "direct" }, select: { id: true } });
-    const frame = { conversation_id: id, product: "general", product_label: "General", artefact_version: 0, artefact_updated_by: null };
+    const frame = {
+      conversation_id: id,
+      product: "general",
+      product_label: "General",
+      model: "claude-sonnet-5-5",
+      artefact_version: 0,
+      artefact_updated_by: null
+    };
 
     // A wake is "this conversation needs a session", so there is no message whose files the field could name.
     expect(await assistantFrame(prisma, agentId)).toEqual(frame);
@@ -541,6 +622,61 @@ describe("conversations", () => {
   });
 });
 
+describe("the chat gate", () => {
+  /** Leaves the person with only the credentials named, as rows, which is all the gate reads. */
+  async function storedOnly(...kinds: ("github" | "azure" | "claude" | "bedrock")[]): Promise<void> {
+    await prisma.credential.deleteMany({ where: { ownerOid: ALICE.oid, kind: { notIn: kinds } } });
+  }
+
+  const BLOCKED = { ok: false, error: "connect GitHub and Claude before you start chatting" };
+
+  it("should refuse to start or open a conversation when the person has not connected GitHub and Claude", async () => {
+    await startedAssistant();
+    await storedOnly("azure");
+
+    expect(await actions.startConversation({ product: "general", body: "hello" })).toEqual(BLOCKED);
+    expect(await actions.openConversation({ product: "general" })).toEqual(BLOCKED);
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+
+  it("should refuse to send or warm when a chat credential is deleted after the conversation was started", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hello" })) as { id: string }).id;
+    const queued = await prisma.delivery.count();
+    await storedOnly("claude", "bedrock");
+
+    expect(await actions.sendAssistantMessage({ conversationId: id, body: "again" })).toEqual(BLOCKED);
+    expect(await actions.warmConversation({ conversationId: id })).toEqual(BLOCKED);
+    expect(await prisma.delivery.count()).toBe(queued);
+  });
+
+  it("should judge the model key by the assistant's own route when the viewer's differs from it", async () => {
+    await insertUser(ALICE);
+    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "assistant" });
+    await storedOnly("github", "claude");
+
+    expect(await actions.startConversation({ product: "general", body: "hello" })).toEqual(BLOCKED);
+    expect((await openAssistant(VIEWER)).chat).toBe("blocked");
+  });
+
+  it("should open the chat when GitHub and the assistant's model key are stored without Azure", async () => {
+    await startedAssistant();
+    await storedOnly("github", "claude", "bedrock");
+
+    expect((await openAssistant(VIEWER)).chat).toBe("open");
+    expect(await actions.startConversation({ product: "general", body: "hello" })).toMatchObject({ ok: true });
+  });
+
+  it("should not hold the person when the hub cannot read the credentials", async () => {
+    await startedAssistant();
+    await storedOnly();
+    vi.stubEnv("SESSION_SECRET", "");
+
+    expect((await openAssistant(VIEWER)).chat).toBe("open");
+    expect(await actions.startConversation({ product: "general", body: "hello" })).toMatchObject({ ok: true });
+  });
+});
+
 describe("the sessions stream and report", () => {
   it("should replay pending wakes, then send a close when a conversation is deleted", async () => {
     const { id: assistantId, token } = await startedAssistant();
@@ -552,7 +688,7 @@ describe("the sessions stream and report", () => {
       await pod(sessionsRoute.GET, token, `/api/virtual/${assistantId}/sessions`, { virtualAgentId: assistantId }, "GET", undefined, abort.signal)
     );
     const [wake] = await stream.named("wake", 1);
-    expect(JSON.parse(wake!.data!)).toEqual({ conversation_id: id, session_id: sessionId, resume: false, product: "pcs" });
+    expect(JSON.parse(wake!.data!)).toEqual({ conversation_id: id, session_id: sessionId, resume: false, product: "pcs", model: "claude-sonnet-5-5" });
 
     await actions.deleteConversation({ conversationId: id });
     const [close] = await stream.named("close", 1);
@@ -576,7 +712,9 @@ describe("the sessions stream and report", () => {
 
     await actions.sendAssistantMessage({ conversationId: id, body: "again" });
 
-    expect(await pendingWakes(prisma, assistantId)).toEqual([{ conversation_id: id, session_id: sessionId, resume: true, product: "general" }]);
+    expect(await pendingWakes(prisma, assistantId)).toEqual([
+      { conversation_id: id, session_id: sessionId, resume: true, product: "general", model: "claude-sonnet-5-5" }
+    ]);
   });
 
   it("should store what the supervisor reports, and clear a conversation it leaves out", async () => {

@@ -128,18 +128,19 @@ A share exposes the words of the thread and the conversation's artefact, and not
 
 | Method and path | Body | Response |
 |---|---|---|
-| `GET /api/virtual/{id}/sessions` | — | SSE, framed as the agent stream: `: connected`, `retry: 1000`, `: ping` every 15 seconds, and `event: reconnect` at the stream lifetime. On connect it sends a `wake` for every conversation with a wake pending, oldest first, and a `delete_uploads` for every conversation with files the owner has asked it to delete; after that, a `wake` for each new one, an `interrupt` for each answer the person stopped, a `delete_uploads` as each request is made, a `lookup` as the owner searches their Jira or Confluence, and a `close` for each conversation deleted. `wake` data is `{conversation_id, session_id, resume, product}`, where `resume` is `true` once the session has sent a transcript entry, so the pod runs `claude --resume <session_id>` rather than `claude --session-id <session_id>` (the pod also checks for the session's JSONL itself). `interrupt` data is `{conversation_id}` and is described under Stopping an answer below. `delete_uploads` data is `{conversation_id, upload_ids}` and is described under Uploads on the pod's disk below. `lookup` data is `{lookup_id, kind, query, space, sign_in}` and is described under Atlassian lookups below. `close` data is `{conversation_id}`; the pod stops whatever session it runs for that conversation. A deleted conversation takes its agents, their transcripts and its messages with it. A wake is sent again on every connection until the conversation has a session, which a registration or a `live` session report clears (see Registering below). |
+| `GET /api/virtual/{id}/sessions` | — | SSE, framed as the agent stream: `: connected`, `retry: 1000`, `: ping` every 15 seconds, and `event: reconnect` at the stream lifetime. On connect it sends a `wake` for every conversation with a wake pending, oldest first, and a `delete_uploads` for every conversation with files the owner has asked it to delete; after that, a `wake` for each new one, an `interrupt` for each answer the person stopped, a `delete_uploads` as each request is made, a `lookup` as the owner searches their Jira or Confluence, a `check_models` as the owner stores or replaces their `claude` or `bedrock` credential (data `{}`; see Model access below), and a `close` for each conversation deleted. `wake` data is `{conversation_id, session_id, resume, product, model}`, where `resume` is `true` once the session has sent a transcript entry, so the pod runs `claude --resume <session_id>` rather than `claude --session-id <session_id>` (the pod also checks for the session's JSONL itself), and `model` is the Claude model the person chose for the conversation (see Direct frames below), which the pod starts the session on with `--model`. `interrupt` data is `{conversation_id}` and is described under Stopping an answer below. `delete_uploads` data is `{conversation_id, upload_ids}` and is described under Uploads on the pod's disk below. `lookup` data is `{lookup_id, kind, query, space, sign_in}` and is described under Atlassian lookups below. `close` data is `{conversation_id}`; the pod stops whatever session it runs for that conversation. A deleted conversation takes its agents, their transcripts and its messages with it. A wake is sent again on every connection until the conversation has a session, which a registration or a `live` session report clears (see Registering below). |
 | `PUT /api/virtual/{id}/sessions` | `{sessions: [{conversation_id, state, detail?}], max}` | `204`. What the supervisor runs, replacing its last report: `state` is `starting`, `live` or `queued` (waiting for a free slot), `detail` at most 200 characters, and `max` how many sessions it runs at once, 1–20; at most 50 entries. A conversation left out has no session. Unknown conversation ids are ignored. `max` is kept on the agent, because it is the only account of what the pod in front of a person enforces — see Capacity. Notifies the owner's UI. |
 | `GET /api/virtual/{id}/conversations` | — | `200 {conversations: [{id}]}`, every conversation of that virtual agent. The pod reconciles its `/workspace/uploads/<conversation-id>/` directories against this list (see Attachments below), so a conversation deleted while it was stopped — which sends no `close` it was there to hear — still has its files removed. |
 | `PUT /api/virtual/{id}/uploads` | `{uploads_bytes, volume_used_bytes, volume_total_bytes, files_total, files: [{upload_id, bytes}], deleted: [upload_id]}` | `204`. What the pod holds on its own volume, replacing its last report, and which deletions it has carried out; see Uploads on the pod's disk below. |
 | `PUT /api/virtual/{id}/lookups/{lookup_id}` | `{results}` or `{error, detail?}` | `204`. The answer to one `lookup`; see Atlassian lookups below. |
 | `PUT /api/virtual/{id}/memory` | `{limit_bytes, current_bytes, peak_bytes}` | `204`. What the pod's container cgroup says about its own memory, replacing its last report; see Memory in the pod below. |
+| `POST /api/virtual/{id}/models` | `{models: [{model, status}]}` | `204`. Which Claude models its owner's credential for this virtual agent's route answered, from the pod's own check; see Model access below. |
 
 **Registering.** The supervisor starts each session with the conversation's `session_id` and with `AGENT_HUB_CONVERSATION_ID` in its environment, and the session registers with `conversation_id` set, using the launch token. That registration adopts the agent the hub created, makes it the conversation's current agent and clears the wake, and does **not** make it the virtual agent's current agent. A later registration with the same `conversation_id` and a new `session_id` (after `/clear`) becomes the conversation's current agent instead. A `conversation_id` that is not one of the launch token's virtual agent's conversations, or sent without a launch token, gives `409`. A conversation's session subscribes to no topics.
 
 **A `live` session report also clears the wake.** A registration cannot be the only thing that does: a session resumed on a new pod never registers again, because it finds the `enabled` state its predecessor left on the volume and skips the enable that would have registered it. A wake left pending is replayed on every sessions stream the pod opens, and the supervisor takes the oldest wake first, so a few resumed conversations take each other's slots in turn for ever and none of them keeps a session long enough to answer. `starting` does not clear it — a session still starting may yet fail, and the wake is what starts it again. Nothing is stranded by this: a pod that loses its sessions leaves their agents silent, the offline sweep marks them so within 90 seconds, and that is what the person's next message, or the warm on opening the conversation, asks for a new wake on.
 
-**Direct frames.** A `direct` frame to a conversation's agent carries `assistant: {conversation_id, product, product_label, artefact_version, artefact_updated_by, attachments}`: the product area the person chose for the conversation — a CFT product slug of 1–32 lowercase letters, digits and hyphens (`ccd`, `nfdiv`, `pcs`, …), or `general` when none in particular, which is the default — and its display name, which is the slug itself for a product the hub no longer offers, since the frame carries what the conversation is stored as rather than what its picker can show; and the version of the conversation's artefact and who last wrote it (`user`, `agent`, or `null` before anyone has); and the files the person attached to this message (see Attachments below; an empty array for a message with none); and, only while one is pending, `jira_export` (see Jira export below) and `confluence_export` (see Confluence export below). The client frames the message for a non-technical reader, and tells the session when the product has changed since the last message it delivered.
+**Direct frames.** A `direct` frame to a conversation's agent carries `assistant: {conversation_id, product, product_label, model, artefact_version, artefact_updated_by, attachments}`: the product area the person chose for the conversation — a CFT product slug of 1–32 lowercase letters, digits and hyphens (`ccd`, `nfdiv`, `pcs`, …), or `general` when none in particular, which is the default — and its display name, which is the slug itself for a product the hub no longer offers, since the frame carries what the conversation is stored as rather than what its picker can show; and the version of the conversation's artefact and who last wrote it (`user`, `agent`, or `null` before anyone has); and the files the person attached to this message (see Attachments below; an empty array for a message with none); and, only while one is pending, `jira_export` (see Jira export below) and `confluence_export` (see Confluence export below). The client frames the message for a non-technical reader, and tells the session when the product has changed since the last message it delivered. `model` is the hub's id for the Claude model the person picked in the composer, always one the hub offers that person (see Model access below), since a stored one no longer offered is sent as their default. The hub refuses any other id when the person picks it. The id is the same on both model routes; the pod maps it to what its launcher takes, the id itself on a person's own Claude licence and the region's inference profile on Amazon Bedrock (`eu.anthropic.claude-sonnet-5-5[1m]` in `eu-west-2`). When the session is on another model, the client types `/model` into the conversation's pane before delivering the message, so a change applies from the next message on, without a new session.
 
 **Stopping an answer.** While a conversation's session is answering, its owner can stop it from the web UI. The hub
 records the stop on the conversation and sends the pod an `interrupt` frame, `{conversation_id}`, on its sessions
@@ -441,6 +442,99 @@ The web UI's credentials list shows only whether each kind is stored, when and h
 - A register of an existing session or a heartbeat whose `skills` differ from the stored list updates an open page for the agent without a reload. Sending the stored list again, in any order, changes nothing.
 - A message picked from the list starts `/<name> `, followed by whatever the person typed. The client delivers it as a request to run that skill with the rest of the message as its arguments; the hub does not treat it differently from any other direct message.
 
+## Questions
+
+Claude Code has a built-in `AskUserQuestion` tool: the model calls it and the TUI draws a prompt with the options for someone to pick from. In a virtual agent's pod, and in an HMCTS Assistant conversation, **nobody is at that keyboard**. The prompt is never answered, the turn never ends, the session's status file stays `busy` so the supervisor's idle timer never fires, and the conversation's session slot is held indefinitely. The person, meanwhile, sees "Thinking…" for ever and is never shown the question.
+
+So the client intercepts it. Its `PreToolUse` hook, registered for that one tool, fires before any prompt is drawn; it posts the question to the hub and **denies** the tool, which surfaces its reason to the model as the tool's error and ends the turn. The person reads the question as a card in the web UI, and their choice is sent back as an ordinary direct message — so the answer travels the same delivery and wake path as anything they type, and there is no blocked turn left to unblock.
+
+| Method and path | Body | Response |
+|---|---|---|
+| `POST /api/agent/{agent_id}/question` | `{session_id, tool_use_id, questions}` | `204` when the question is now on screen: either it was recorded, or this `tool_use_id` had already recorded it. Idempotent on `tool_use_id`, so a retry after a lost response leaves one question, and does **not** replace the stored one — the session is waiting on an answer to the question already on screen. `409` for a **different** question while one of this `session_id`'s is still unanswered: nothing is written, and the caller must not be told there is a card to wait for. |
+
+```jsonc
+{
+  "session_id": "481900c7-…",             // the Claude Code session, 1–200 characters
+  "tool_use_id": "toolu_bdrk_01TNH…",     // the tool call's own id, 1–200 characters
+  "questions": [
+    {
+      "question": "Do you prefer red or blue?",   // 1–1000 characters
+      "header": "Color",                          // a short label for the card, 1–40 characters
+      "options": [                                // 2–4
+        { "label": "Red", "description": "You prefer red." },   // label 1–200, description 0–500
+        { "label": "Blue", "description": "You prefer blue." }
+      ],
+      "multiSelect": false                        // required
+    }
+  ]
+}
+```
+
+- 1–4 questions, mirroring `AskUserQuestion`'s own limits; the client applies the same caps and cuts long values to fit before sending, so a `400` here is a client fault rather than a question nobody can read. Every string is bounded and no other field is accepted.
+- **A question's options must have distinct labels.** The label is the whole of what an answer names — the card keys a press by it and the message the session receives says it — so two options sharing one is a choice nobody could resolve. The client drops such a question before sending and asks in words instead.
+- Any agent's, not a conversation's alone, so an owner watching an ordinary pod agent's page is shown the same card there.
+- Notifies the owner's UI, so a second tab shows the question without a reload.
+- **One unanswered card per session, and three outcomes rather than two.** The unique index on `(agent_id, tool_use_id)` covers the retry of one tool call. What it cannot see is a model that calls the tool *again* after the deny, which arrives with a new `tool_use_id` — and two live cards in one blocked turn is the worse outcome, because answering either sends a message contradicting the other. So that second question is **refused with `409`**, not dropped: the hook turns this response into what the model is told, and a `204` for a question nobody wrote would leave it ending its turn waiting for a card that does not exist. The rule is keyed on the session as well as the agent, so a `/clear` is not blocked by a card the session before it left unanswered.
+- **The client retries this call, which no other call of its kind does**, because it is idempotent on `tool_use_id`: an attempt aborted at its timeout may still have committed here, and a second attempt is what tells "the question never arrived" from "the answer did not come back". Two attempts, 6 seconds each; a `4xx`, the `409` included, is not retried.
+- **Reading a question follows the transcript**, not the agent: its owner and anyone holding a grant from them, as `canViewTranscript` decides, since a question is the model's own words as a transcript entry is. A conversation's agent is owner-only, so no grant reaches one of those. At most the newest 20 questions of an agent are read — the transcript beside them is paginated and they are not.
+- **A question is offered for two hours**, and that is deliberately longer than the session that asked it lives. A conversation's session is sent `/exit` after 20 idle minutes and the whole pod stops after 120, so a card outliving its session is the normal case rather than the exception. It is safe because a stopped session is restarted on its own session id — `claude --resume` for a conversation, `--continue` for a pod's own session — and so comes back holding the transcript it asked the question in: a late answer arrives as an ordinary message to a session that remembers asking. What the window bounds is therefore not whether an answer can be delivered but the claim an unanswered card makes, that the assistant is waiting on the person. Past it the card shows what was asked and offers nothing, the thread stops saying the assistant is waiting, and the action refuses the answer — against the clock at the time of the press, since a page left open overnight has no say in what time it is.
+
+**Answering.** Only in the web UI, and only by someone who may *message* the agent — its owner, or a holder of a write grant; a conversation's agent is its owner's alone, so no grant reaches one of those. That is narrower than reading it, so a read-grant viewer is shown the question and its options with no controls at all rather than controls the action would refuse. The answer is one entry per question, in order, each naming options the question offered or carrying words of the person's own, since `AskUserQuestion` always lets someone answer in their own words. It is sent as an ordinary direct message that quotes each question back above its answer, recorded on the question in that message's own transaction, and refused for a question already answered — so the session is told exactly once.
+
+**What the model is told.** Two reasons, and never an allow:
+
+- the question reached the hub: it is on screen with its options, the answer will arrive as an ordinary message, so end the turn and wait — do not repeat the question in the reply and do not guess;
+- the question did not reach the hub (no agent registered, comms off, the hub unreachable, a payload the client could not read, or the `409` above): ask it in plain words in the reply instead, listing the choices, and end the turn.
+
+There is no fail-open path, because allowing the tool is what hangs the session — and **printing nothing is allowing it**: Claude Code reads a `PreToolUse` that says nothing as "no decision" and draws the prompt. So the deny is printed even by the paths that cannot reach the hub client at all. `bin/agent-hub` carries its own copy of it in bash, for a CLI that is not installed, crashed, was killed or printed nothing, and the CLI's own `hook` command prints it from the `catch` that a stdin body which is not JSON lands in.
+
+**An engineer's own session is untouched.** The hook acts only where `AGENT_HUB_CONVERSATION_ID` is set or the process is a virtual agent's pod. Anywhere else it outputs nothing and the tool runs as usual: there is a person at that keyboard who can answer the prompt, and intercepting it would take a working tool away.
+
+**Release order.** The route is new, so a pod running a client that predates it never posts one and `AskUserQuestion` is not registered for interception there at all — the hook only exists once that client is installed. Nothing is gated on a client feature: the client either has the hook or does not.
+
+## Model access
+
+Which Claude models a person is offered in the Assistant's composer is worked out from what their own credential can
+actually use, by asking each model, from their own pod. The hub holds a catalogue of the models it can describe —
+`claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-5-5` and `claude-fable-5-1`, in menu order, in
+`src/assistant/models.ts` — and the pod client holds the same list, in `packages/agent-hub/src/assistant/model-check.ts`.
+
+**The check.** The supervisor sends every catalogue model one request through the same `claude` CLI and the same
+credential a conversation's session uses: the owner's `claude` token as `CLAUDE_CODE_OAUTH_TOKEN` on `own_licence`, or
+their `bedrock` key as `AWS_BEARER_TOKEN_BEDROCK` with `CLAUDE_CODE_USE_BEDROCK=1` on `bedrock`, read fresh from
+`GET /api/virtual/{id}/credentials/{kind}` so a key replaced since boot is the one checked. Each request is
+`claude -p --model <launcher id> --output-format json --no-session-persistence --tools "" --strict-mcp-config
+--disable-slash-commands --system-prompt "Reply with OK."`, in an empty temporary directory that is also its `HOME` and
+`CLAUDE_CONFIG_DIR`, with an environment built from nothing but `PATH` and the route's variables. So no user or project
+settings, hooks, plugins, skills or MCP servers load, nothing registers with the hub, and nothing is written outside the
+directory, which is removed after. Two run at a time, each stopped after 60 seconds. A model with no launcher id on the
+route — no Bedrock profile in the region, as for `claude-fable-5-1`, which has none — is `unavailable` without a request.
+
+It runs when the supervisor starts, which is after the pod has its credentials; on a `check_models` frame, which the
+sessions stream sends when the owner stores or replaces their `claude` or `bedrock` credential; and every 24 hours while
+the pod runs. One check runs at a time; one asked for while another runs follows it. The credential is never logged.
+
+**Results.** Each model is one of three:
+
+- `available`: it answered.
+- `unavailable`: a definite refusal of that model — a 400, 403 or 404, access denied, not found, not entitled, or no
+  launcher id on the route.
+- `unknown`: anything else, including a timeout, throttling, a 5xx, a network error or a 401. A 401 is the credential
+  being refused rather than the model, and a lapsed token is said by the chat itself.
+
+`POST /api/virtual/{id}/models` takes `{models: [{model, status}]}`, at most 20 entries, each `model` the shape of a
+model id and `status` one of the three, each model once. An id the hub's catalogue does not know is ignored, so a newer
+client's list does not cost an older hub the report. `available` and `unavailable` replace what the hub held for that
+model, for the owner and the virtual agent's model route; **`unknown` changes nothing**, so a check that could not tell
+never takes a model away. It answers `204`.
+
+**What is offered.** The catalogue models whose last result for the owner on the virtual agent's route is
+`available`. Until a result is stored, or when the virtual agent's current agent does not claim `model-check`, only
+`claude-sonnet-5-5`. The default is `claude-sonnet-5-5` when offered, otherwise the first offered; with nothing
+`available`, `claude-sonnet-5-5` is offered anyway, and the chat's own error says why it fails. Starting a conversation
+and changing its model refuse an id not offered, and a conversation stored on one no longer offered reads as, and is
+sent to the pod as, the default.
+
 ## Atlassian lookups
 
 Picking a Jira project or a Confluence page means searching the person's own Jira or Confluence, as them: the hub holds no Atlassian credentials, so the search runs in their pod, with their `twg` sign-in. It is a search-as-you-type, so it does not go through a conversation's session — a model turn is far too slow for that — but through a small, fixed request and answer between the hub and the pod's supervisor.
@@ -506,6 +600,13 @@ the same time and a count is a third place to remember. The list is the record.
   one **is** gated, on both sides: the hub refuses to stop an answer on a session that did not claim it, and the web
   UI offers no stop control for such a conversation. A pod takes the current client when it boots, so a conversation
   on a session started by an older build has no stop until that session is next started.
+- `model-check`, because their supervisor checks which models its owner's credential can use and reports it with
+  `POST /api/virtual/{id}/models`. Claimed by the pod's **own** session, as `files` is. **Gated:** a virtual agent whose
+  current agent does not claim it is offered only the default model, `claude-sonnet-5-5`, whatever an earlier pod
+  reported, because nothing on it will check again.
+- `model`, because their supervisor starts a conversation's session with `--model` from the wake's `model`, and their
+  bridge switches the session with `/model` when a `direct` frame's `model` names another. No hub field is gated on it:
+  a client too old to claim it runs every conversation on its launcher's default model, whatever was picked.
 - `files`, because their supervisor reports what the uploads directory holds (`PUT /api/virtual/{id}/uploads`) and
   acts on the sessions stream's `delete_uploads` frame. Claimed by the pod's **own** session, which is the virtual
   agent's current agent, since the supervisor is what does both — not by a conversation's session. Gated on both

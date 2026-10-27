@@ -7,7 +7,9 @@ import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
 import { attachForkContext, forkContextPending } from "@/assistant/fork-store";
 import { requestJiraExport } from "@/assistant/jira-store";
+import { CHAT_BLOCKED } from "@/assistant/onboarding";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
+import { sendToConversation } from "@/assistant/send";
 import {
   type Artefact,
   ArtefactConflict,
@@ -18,20 +20,20 @@ import {
   deleteConversation as remove,
   renameConversation as rename,
   requestWake,
+  setModel,
   setProduct,
   stopAnswer,
-  touchConversation,
   writeArtefact
 } from "@/assistant/store";
 import { attachUploads, uploadNames } from "@/assistant/upload-store";
 import { attachedBody, MAX_ATTACHMENTS_PER_MESSAGE } from "@/assistant/uploads";
-import { loadThreadMessage, type ThreadMessage } from "@/messages/direct-thread";
+import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
-import { directAsPerson } from "@/messages/send";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { type ActionResult, runAction, text } from "@/web/action";
+import { assistantChatGate } from "@/web/data";
 
 /**
  * The HMCTS Assistant's writes, each for the signed-in person's own conversations only: `findConversation` reports
@@ -43,6 +45,12 @@ import { type ActionResult, runAction, text } from "@/web/action";
 const OFF: { ok: false; error: string } = { ok: false, error: "the HMCTS Assistant is not available on this deployment" };
 
 const MISSING: { ok: false; error: string } = { ok: false, error: "that conversation no longer exists" };
+
+/**
+ * Refused while the person has yet to connect GitHub and Claude: `assistantChatGate` is the same gate the pages hold
+ * the getting-ready screen on, so a page loaded before it closed, or a request made without the page, gets no further.
+ */
+const BLOCKED: { ok: false; error: string } = { ok: false, error: CHAT_BLOCKED };
 
 /**
  * The message body, or the refusal. A message of files and no words is a message: handing the assistant a document is
@@ -69,7 +77,6 @@ function uploadIdsOf(raw: unknown): string[] {
 }
 
 async function send(oid: string, conversation: ConversationRow, typed: string, uploadIds: readonly string[] = []): Promise<ThreadMessage> {
-  const agentId = await conversationAgent(prisma, conversation);
   // Read before the insert, because a message of files and no words still needs a body: see `attachedBody`. The
   // claim inside the transaction below is what actually decides whether these files may be sent.
   const names = uploadIds.length === 0 ? [] : await uploadNames(prisma, oid, conversation.id, uploadIds);
@@ -83,35 +90,36 @@ async function send(oid: string, conversation: ConversationRow, typed: string, u
     throw new HttpError(400, `the first message in a forked chat carries at most ${MAX_ATTACHMENTS_PER_MESSAGE - 1} files; remove one and send it again`);
   }
   const body = wordless ? attachedBody(names) : typed;
-  // Attached inside the message's own transaction: an id that is not this person's, is not this conversation's, is
-  // not finished uploading, or is already on another message refuses the whole send, and no message is written.
-  const sent = await directAsPerson(prisma, oid, agentId, body, async (tx, messageId) => {
-    await attachUploads(tx, { viewerOid: oid, conversationId: conversation.id, messageId, uploadIds });
-    await attachForkContext(tx, { conversationId: conversation.id, ownerOid: oid, messageId });
+  return await sendToConversation(prisma, oid, conversation, {
+    body,
+    // A conversation opened by attaching a file and never typed in would otherwise be titled after the sentence
+    // written for the person rather than after the only thing they actually chose, which is the file.
+    title: wordless ? (names[0] ?? body) : typed,
+    // Attached inside the message's own transaction: an id that is not this person's, is not this conversation's, is
+    // not finished uploading, or is already on another message refuses the whole send, and no message is written.
+    // The first message in a copy of someone else's chat also takes the copied turns, once.
+    alongside: async (tx, messageId) => {
+      await attachUploads(tx, { viewerOid: oid, conversationId: conversation.id, messageId, uploadIds });
+      await attachForkContext(tx, { conversationId: conversation.id, ownerOid: oid, messageId });
+    }
   });
-  // A conversation opened by attaching a file and never typed in would otherwise be titled after the sentence written
-  // for the person rather than after the only thing they actually chose, which is the file.
-  await touchConversation(prisma, conversation, wordless ? (names[0] ?? body) : typed);
-  const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });
-  if (agent?.status !== "busy" && agent?.status !== "idle") {
-    await requestWake(prisma, conversation);
-  }
-  const loaded = await loadThreadMessage(prisma, BigInt(sent.id));
-  return loaded?.message ?? { ...sent, delivery: "queued" };
 }
 
 /** A new conversation, started with its first message: a starter card's prompt, or what the person typed. */
-export async function startConversation(input: { product: unknown; body: unknown }): Promise<ActionResult<{ id: string }>> {
+export async function startConversation(input: { product: unknown; model?: unknown; body: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("start conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return BLOCKED;
+    }
     const body = checkBody(input.body, 0);
     if (typeof body !== "string") {
       return body;
     }
-    const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
+    const conversation = await createConversation(prisma, viewer.oid, { product: input.product, model: input.model });
     await send(viewer.oid, conversation, body);
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
@@ -129,13 +137,16 @@ export async function startConversation(input: { product: unknown; body: unknown
  * It leaves an empty conversation behind if they attach and walk away. `sweepUploads` removes one whose only content
  * was an attachment nobody ever sent, a few hours later — see the note there for why it is swept rather than left.
  */
-export async function openConversation(input: { product: unknown }): Promise<ActionResult<{ id: string }>> {
+export async function openConversation(input: { product: unknown; model?: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("open conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
-    const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return BLOCKED;
+    }
+    const conversation = await createConversation(prisma, viewer.oid, { product: input.product, model: input.model });
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
   });
@@ -152,6 +163,9 @@ export async function sendAssistantMessage(input: {
       return OFF;
     }
     const viewer = await requireViewer();
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return BLOCKED;
+    }
     const uploadIds = uploadIdsOf(input.uploadIds);
     const body = checkBody(input.body, uploadIds.length);
     if (typeof body !== "string") {
@@ -172,6 +186,9 @@ export async function warmConversation(input: { conversationId: unknown }): Prom
       return OFF;
     }
     const viewer = await requireViewer();
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return BLOCKED;
+    }
     const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
     if (conversation === undefined) {
       return MISSING;
@@ -227,6 +244,18 @@ export async function setConversationProduct(input: { conversationId: unknown; p
     }
     const viewer = await requireViewer();
     await setProduct(prisma, viewer.oid, text(input.conversationId), input.product);
+    return { ok: true };
+  });
+}
+
+/** The model the conversation's next message, and every one after it, is answered by. */
+export async function setConversationModel(input: { conversationId: unknown; model: unknown }): Promise<ActionResult> {
+  return await runAction("set conversation model", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    await setModel(prisma, viewer.oid, text(input.conversationId), input.model);
     return { ok: true };
   });
 }

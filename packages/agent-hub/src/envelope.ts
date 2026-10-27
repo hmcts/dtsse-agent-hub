@@ -111,6 +111,8 @@ export type AssistantFrame = {
   conversation_id?: string;
   product?: string | null;
   product_label?: string | null;
+  /** The hub's id for the model the person wants this message answered by; null from a hub older than the choice. */
+  model?: string | null;
   artefact_version?: number | null;
   artefact_updated_by?: string | null;
   jira_export?: JiraExportFrame | null;

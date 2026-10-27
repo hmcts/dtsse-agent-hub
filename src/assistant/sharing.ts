@@ -44,19 +44,26 @@ export type SharedThreadItem =
   | { type: "stopped"; key: string; at: string };
 
 /**
- * The thread with everything a share does not carry taken out: the attachments down to a count, and the delivery
- * state, which says whether the owner's message reached their own assistant and is theirs to act on.
+ * The thread with everything a share does not carry taken out: the attachments down to a count, the delivery state,
+ * which says whether the owner's message reached their own assistant and is theirs to act on, and the questions the
+ * assistant asked, which are controls rather than words — a recipient must not answer one, and an answered question
+ * is quoted back in the owner's own answering message, which a share does show.
  *
  * Every other kind of item passes through, which is deliberate: a kind the thread grows is part of what was said
  * until someone decides otherwise, and the type above is what makes that decision explicit rather than silent.
  */
 export function sharedThreadItems(items: readonly ThreadItem[]): SharedThreadItem[] {
-  return items.map((item) => {
+  const shared: SharedThreadItem[] = [];
+  for (const item of items) {
     if (item.type === "user") {
-      return { type: "user", key: item.key, at: item.at, text: item.text, attachmentCount: item.attachments.length };
+      shared.push({ type: "user", key: item.key, at: item.at, text: item.text, attachmentCount: item.attachments.length });
+    } else if (item.type === "assistant") {
+      shared.push({ type: "assistant", key: item.key, at: item.at, text: item.text });
+    } else if (item.type !== "question") {
+      shared.push(item);
     }
-    return item.type === "assistant" ? { type: "assistant", key: item.key, at: item.at, text: item.text } : item;
-  });
+  }
+  return shared;
 }
 
 export interface SharedConversationView {

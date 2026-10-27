@@ -41,6 +41,20 @@ export async function registerAgent(request: APIRequestContext, persona: string,
   return ((await response.json()) as { agent_id: string }).agent_id;
 }
 
+/**
+ * Stores placeholder GitHub, Claude and Bedrock credentials for `persona` through the agent API, so the Assistant's
+ * chat is past the gate that holds it at GitHub and Claude. Nothing in a spec runs a pod to use them. A deployment
+ * that keeps no credentials (503), or none for a development identity (403), leaves the gate open anyway, and one
+ * that checks real agent tokens (401) cannot be driven this way, so none of them is an error here.
+ */
+export async function connectForChat(request: APIRequestContext, persona: string): Promise<void> {
+  const values = { github: `ghp_${"e2e".repeat(10)}`, claude: `sk-ant-oat-${"e2e".repeat(10)}`, bedrock: `ABSK${"e2e".repeat(10)}` };
+  for (const [kind, value] of Object.entries(values)) {
+    const response = await request.put(`/api/agent/credentials/${kind}`, { headers: { "x-dev-user": devUser(persona) }, data: { value } });
+    expect([204, 401, 403, 503]).toContain(response.status());
+  }
+}
+
 export interface TranscriptEntry {
   key: string;
   role: "user" | "assistant" | "tool_use" | "tool_result" | "system";
@@ -59,6 +73,27 @@ export async function uploadTranscript(request: APIRequestContext, persona: stri
   });
   expect(response.status()).toBe(200);
   return ((await response.json()) as { accepted: number }).accepted;
+}
+
+/**
+ * Puts a question on screen for an agent `registerAgent` made, as the client's `PreToolUse` hook does for
+ * `AskUserQuestion`. `multiSelect` decides whether the card offers checkboxes and a submit or radios that send at once.
+ */
+export async function askQuestion(
+  request: APIRequestContext,
+  persona: string,
+  agentId: string,
+  question: { question: string; header: string; options: { label: string; description: string }[]; multiSelect?: boolean }
+): Promise<void> {
+  const response = await request.post(`/api/agent/${agentId}/question`, {
+    headers: { "x-dev-user": devUser(persona) },
+    data: {
+      session_id: unique("e2e-session"),
+      tool_use_id: unique("toolu"),
+      questions: [{ multiSelect: false, ...question }]
+    }
+  });
+  expect(response.status()).toBe(204);
 }
 
 /** A small conversation with every kind of entry the page renders, keyed under `prefix`. */

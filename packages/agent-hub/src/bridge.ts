@@ -6,6 +6,8 @@ import fs from "node:fs";
 import { loadAgent, registerAgent, type StoredAgent } from "./agent.ts";
 import { type Api, ApiError, createApi } from "./api.ts";
 import { fetchAttachments, readAttachments, unfetchedAttachments } from "./assistant/attachments.ts";
+import { parseModel, switchModel } from "./assistant/models.ts";
+import { createTmux, type Tmux } from "./assistant/tmux.ts";
 import { peerOf, recordDirect } from "./directs.ts";
 import type { Env } from "./env.ts";
 import {
@@ -165,6 +167,7 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     conversation_id: asOptionalString(raw.conversation_id),
     product: asNullableString(raw.product),
     product_label: asNullableString(raw.product_label),
+    model: parseModel(raw.model),
     artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
     artefact_updated_by: asNullableString(raw.artefact_updated_by),
     jira_export: parseJiraExportFrame(raw.jira_export),
@@ -250,6 +253,9 @@ export type RunBridgeOptions = {
   skills?: () => SkillListing[];
   transcriptSync?: TranscriptSync;
   inbound?: (opts: InboundOptions) => InboundResult;
+  /** What types `/model` into a conversation's pane; a test passes its own. */
+  tmux?: Pick<Tmux, "sendKeys">;
+  modelSettleMs?: number;
 };
 
 export async function runBridge({
@@ -263,7 +269,9 @@ export async function runBridge({
   skillsMs = Number(env.AGENT_HUB_SKILLS_MS) || 5 * 60 * 1000,
   skills: listSkills = collectSkills,
   transcriptSync,
-  inbound = inboundAccepted
+  inbound = inboundAccepted,
+  tmux = createTmux({ env: env as NodeJS.ProcessEnv }),
+  modelSettleMs
 }: RunBridgeOptions): Promise<void> {
   // Connected without it, the bridge would take every message off the stream and fail to deliver it.
   if (!env.CLAUDE_CODE_MESSAGING_TOKEN) {
@@ -548,6 +556,20 @@ export async function runBridge({
       // outcome the envelope says so about, because a message delivered with the attachment silently missing would
       // leave the person believing the agent had read it.
       const attachments = await fetchForDelivery(message.id, assistant);
+      // Before the message, so a model the person picked since the last one answers this one. Nothing here throws: a
+      // switch that could not be made leaves the message to be answered by the model the session is already on.
+      if (assistant) {
+        await switchModel({
+          sid,
+          conversationId: assistant.conversation_id,
+          model: assistant.model ?? null,
+          env,
+          tmux,
+          write: (file, text) => fs.writeFileSync(file, text, { mode: 0o600 }),
+          settleMs: modelSettleMs,
+          say: (m) => log(sid, `#${message.id}: ${m}`)
+        });
+      }
       try {
         const skills = skillNames();
         const content = assistant ? assistantEnvelope(message, assistant, previousProduct, { skills, attachments }) : envelope(message, { skills });
