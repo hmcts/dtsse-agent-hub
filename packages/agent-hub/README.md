@@ -83,4 +83,4 @@ yarn workspace @hmcts-cft/agent-hub run typecheck
 The package declares no `devDependencies` either: its scripts reach TypeScript and Vitest with `yarn run -T`, so the
 versions stay pinned in one place, the repository root.
 
-Conventions are the repository's, in [`AGENTS.md`](../../AGENTS.md).
+Conventions are the repository's, in [`CLAUDE.md`](../../CLAUDE.md).
