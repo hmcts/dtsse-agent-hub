@@ -44,6 +44,8 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
     optional: ["jenkins", "atlassian"],
     logins: [],
     onboarded: false,
+    models: [],
+    defaultModel: "claude-sonnet-5-5",
     ...overrides
   };
 }
