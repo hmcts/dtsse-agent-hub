@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
-import { DEFAULT_IDLE_MINUTES } from "../virtual-agents/settings.ts";
 
 /**
  * A question a session's model asked with Claude Code's `AskUserQuestion` tool, which the client's `PreToolUse` hook
@@ -35,16 +34,24 @@ export const MAX_SESSION_ID = 200;
 export const MAX_SHOWN_QUESTIONS = 20;
 
 /**
- * How long a question is offered for. Past it the card still shows what was asked — the thread must not lose that —
- * but it stops being answerable and stops being something the assistant is waiting on.
+ * How long a question is offered for: two hours. Past it the card still shows what was asked — the thread must not
+ * lose that — but it stops being answerable and stops being something the assistant is waiting on.
  *
- * `DEFAULT_IDLE_MINUTES`, the pod's own idle stop, because that is the clock that decides whether the session which
- * asked is still there at all: a pod with nothing happening in it is stopped after this long, so an answer arriving
- * later reaches a session started afresh rather than the turn that asked. It is deliberately generous — a person
- * coming back from lunch to a question can still answer it — and the point of the bound is only that an abandoned
- * card stops claiming the assistant is waiting on them for ever.
+ * **It is not tied to a session's lifetime, and it deliberately outlives one.** Two different idle stops could be
+ * mistaken for this clock and neither is it: `DEFAULT_IDLE_MINUTES` in `src/virtual-agents/settings.ts` is 120
+ * minutes and stops the whole pod, while `DEFAULT_IDLE_MINUTES` in the client's
+ * `packages/agent-hub/src/assistant/supervisor.ts` is 20 and sends one conversation's session `/exit`. A question in
+ * a conversation therefore usually outlives the session that asked it by well over an hour.
+ *
+ * That is safe, which is why neither clock is borrowed here. A session stopped either way is restarted on its own
+ * session id — `claude --resume` for a conversation, `--continue` for a pod's own session — so it comes back holding
+ * the transcript in which it asked, and a late answer arrives as an ordinary message to a session that remembers
+ * asking. Nothing about answering late is broken; what this bound is for is the claim the card makes while it is
+ * unanswered, that the assistant is waiting on the person. Two hours is where that stops being true of someone who
+ * was going to answer, and short enough that an abandoned card is not still suppressing the "working" line a day
+ * later.
  */
-export const QUESTION_OFFER_WINDOW_MS = DEFAULT_IDLE_MINUTES * 60_000;
+export const QUESTION_OFFER_WINDOW_MS = 2 * 60 * 60_000;
 
 /**
  * Whether a question is past being offered. Pure and shared, because three places have to agree on it: the view

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_IDLE_MINUTES } from "../virtual-agents/settings.ts";
 import {
   answerMessage,
   checkAnswer,
@@ -89,17 +88,23 @@ describe("offerExpired", () => {
     expect(offerExpired(asked, later(QUESTION_OFFER_WINDOW_MS - 1))).toBe(false);
   });
 
-  // Past the pod's own idle stop the session that asked may well have gone, so an answer would reach a session
-  // started afresh rather than the turn that was waiting.
+  // Past the window, somebody who was going to answer is not coming, and the card has to stop claiming the
+  // assistant is waiting on them. Whether an answer could still be delivered is a separate question: it could.
   it("should stop offering a question once the window has run out", () => {
     // Act & Assert
     expect(offerExpired(asked, later(QUESTION_OFFER_WINDOW_MS))).toBe(true);
     expect(offerExpired(asked, later(QUESTION_OFFER_WINDOW_MS * 10))).toBe(true);
   });
 
-  it("should be the pod's idle stop, which is the clock that decides whether the session is still there", () => {
+  /**
+   * Two hours, and its own number rather than either idle stop: a conversation's session is sent `/exit` after 20
+   * minutes and the whole pod after 120, so a question outliving the session that asked it is the normal case. It
+   * is safe because such a session is restarted on its own id and comes back with the transcript it asked in, so
+   * what this bound limits is the card's claim that the assistant is waiting, not whether an answer can arrive.
+   */
+  it("should outlive the session that asked, since a resumed session still has the transcript", () => {
     // Act & Assert
-    expect(QUESTION_OFFER_WINDOW_MS).toBe(DEFAULT_IDLE_MINUTES * 60_000);
+    expect(QUESTION_OFFER_WINDOW_MS).toBe(2 * 60 * 60_000);
   });
 });
 
