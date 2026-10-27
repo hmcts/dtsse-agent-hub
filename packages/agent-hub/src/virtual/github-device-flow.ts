@@ -60,8 +60,22 @@ export const MIN_INTERVAL_S = 1;
  * screen and no `failed` report either, since there is no relayed sign-in for the hub to mark.
  */
 export const MAX_LOGIN_SECONDS = 3600;
-export const MAX_URI_CHARS = 2048;
 export const USER_CODE = /^[A-Za-z0-9-]{1,64}$/;
+/** The longest a user code can be, which is `USER_CODE`'s own bound and part of the arithmetic below. */
+export const MAX_USER_CODE_CHARS = 64;
+/** The hub's bound on any `status_detail`, which the relayed page has to fit inside rather than its own. */
+export const MAX_DETAIL_CHARS = 500;
+/** The 38 characters `githubLogin` words around the code and the page when it relays them. */
+export const RELAY_WORDING_CHARS = 38;
+
+/**
+ * How long a verification page may be. **Not** `loginBody`'s own 2048: the same URI is read back to the owner
+ * inside a `virtualStatus` detail, and `statusBody.detail` is 500, so that is the bound that binds. A page
+ * between the two passes the mint and the prompt, puts a code the owner could have used on their screen, and
+ * then `400`s on the status — which is not retryable, so the attempt throws. Three codes burn seconds apiece
+ * and the owner is told the sign-in could not be finished while holding codes that would have worked.
+ */
+export const MAX_URI_CHARS = MAX_DETAIL_CHARS - RELAY_WORDING_CHARS - MAX_USER_CODE_CHARS;
 
 /**
  * At most 500 characters of detail reach the hub, and these two are what an answer fills one with. An OAuth
@@ -101,7 +115,10 @@ export const REQUEST_TIMEOUT_MS = 20000;
 
 /**
  * The device flow's own refusals: the owner's answer, or the app's registration. No amount of asking again
- * changes any of them, so a mint that answers one of these is not retried.
+ * changes any of them, so `withRetry` does not repeat a mint that answers one — which is as far as this set
+ * reaches. The code budget around it still offers the owner the next code, because the budget is deliberately
+ * not conditioned on why an attempt failed, so a permanently refused mint costs the three codes and the gaps
+ * between them before it is thrown rather than failing at once.
  *
  * `expired_token` is in it because it is just as permanent for the code it names, but on a **poll** it is not a
  * refusal at all — it is GitHub's own word that the code reached its `expires_in` unused, which is exactly what

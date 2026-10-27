@@ -11,7 +11,7 @@ import type { Writable } from "node:stream";
 import type { Api } from "../api.ts";
 import { ApiError, createApi, DEFAULT_SCOPE } from "../api.ts";
 import type { Env } from "../env.ts";
-import { withRetry } from "../retry.ts";
+import { type RetryOptions, withRetry } from "../retry.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
 import { azureDir, restoreAzureCache, syncAzureCache } from "./azure-cache.ts";
 import { type DeviceCode, deviceFlowRetryable, oauthAppLabel, pollDeviceToken, requestDeviceCode } from "./github-device-flow.ts";
@@ -557,6 +557,30 @@ function githubNotSignedInDetail(expired: boolean, broke: boolean): string {
 }
 
 /**
+ * What the owner is told when the sign-in worked and keeping what it granted did not. Which of the two stores
+ * failed is the whole of what decides whether there is anything for them to do: a token gh is holding is one
+ * the pod puts right by itself, and one GitHub will not take needs a current one from them.
+ */
+function githubStoreFailedDetail(hubFailed: boolean, ghFailed: boolean): string {
+  if (!ghFailed) {
+    return "github: signed in, but the token could not be saved to agent-hub yet; this agent is holding it and will keep trying";
+  }
+  return hubFailed
+    ? "github: signed in, but the token could not be saved either on agent-hub or in this agent"
+    : "github: GitHub would not accept the token the sign-in granted; it is saved on agent-hub, so this agent will keep trying it";
+}
+
+/**
+ * Runs one of the two stores and answers the error it ended with, or `null`. Each is run this way rather than
+ * allowed to throw, because neither failing may end the call before the other has been tried.
+ */
+const storeAttempt = async (store: () => Promise<unknown>, options: RetryOptions): Promise<Error | null> =>
+  withRetry(store, options).then(
+    () => null,
+    (e: unknown) => e as Error
+  );
+
+/**
  * The token gh holds, or `""` for none. Tolerates a `gh auth token` that fails, because having no sign-in yet is
  * one of the ways it does: only safe where no sign-in has been run, which is the reuse check below.
  */
@@ -691,11 +715,16 @@ export async function githubLogin({
 
   if (token) {
     const granted = token;
-    // Stored on the hub before gh is handed it, because the owner's grant is the scarce thing in this function:
-    // a token they have already authorised must not be lost to a fault while gh validates it. The hub is also
-    // where it has to end up — gh's config is memory-backed and goes with the pod.
-    await withRetry(() => api.putCredential(id, "github", granted), { wait });
-    const refusal = await withRetry(
+    // Two stores, attempted independently rather than as one step, because only losing **both** loses a grant
+    // the owner has already given. The hub holds the copy that outlives the pod — gh's config is a
+    // memory-backed emptyDir — and gh's is what lets this pod clone and what validates the token as it is
+    // written. Either one left holding it is a way on that costs the owner nothing further, so neither
+    // failing may end the call before the other has been tried.
+    //
+    // The hub goes first: that is the fault this order exists for. gh's store reaches api.github.com to
+    // validate, and a token lost to a blip there is one the owner has to authorise again.
+    const hubFailed = await storeAttempt(() => api.putCredential(id, "github", granted), { wait });
+    const ghFailed = await storeAttempt(
       async () => {
         const r = await run("gh", ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--with-token"], {
           env: ghEnv,
@@ -709,29 +738,40 @@ export async function githubLogin({
         }
       },
       { attempts: GH_STORE_ATTEMPTS, wait }
-    ).then(
-      () => null,
-      (e: unknown) => e as Error
     );
-    if (!refusal) {
-      // `loginComplete` before the say, so the usual case clears the pending row; one that fails throws, and
-      // the caller's next attempt finds the token through `storedGhToken` and completes it without relaying.
+    if (!hubFailed && !ghFailed) {
       const login = (await run("gh", ["api", "user", "--jq", ".login"], { env: ghEnv })).stdout.trim();
       await withRetry(() => api.loginComplete(id, "github", login ? { account_label: login } : {}), { wait });
       say(`github: signed in${login ? ` as ${login}` : ""}`);
       return "signed-in";
     }
-    say(`github: ${refusal.message}`);
-    if (!shown) {
-      // Nobody was asked for this token — it was already in gh's config — so there is nothing to conclude about
-      // the owner and nothing for the hub to mark. The caller rides it out, and no code is spent doing it.
-      throw refusal;
+    // Whichever failed says so in full in the pod's log; the hub gets the wording the owner can act on.
+    for (const failure of [hubFailed, ghFailed]) {
+      if (failure) {
+        say(`github: ${failure.message}`);
+      }
     }
-    // The token is on the hub, so the way on that costs no further code is the one the boot script already
-    // watches for: it reads the stored token every 30s and tries it, which is this same validation again.
-    const detail = "github: GitHub would not accept the token the sign-in granted; it is stored, so the agent will keep trying it";
+    const unstored = (hubFailed ?? ghFailed) as Error;
+    if (!shown) {
+      // Nobody was asked for this token — it came out of gh's own config — so there is nothing to conclude
+      // about the owner and nothing for the hub to mark. The caller rides it out, and no code is spent.
+      throw unstored;
+    }
+    const detail = githubStoreFailedDetail(hubFailed !== null, ghFailed !== null);
+    // Reported before either way out, because the owner was shown a code and the hub is owed exactly one
+    // outcome for it. Leaving the row pending holds a dead code on their screen until the sweep, and the next
+    // call completes it from `failed` as readily as from `pending`.
     await reportGithubFailure({ api, id, state: "failed", detail, wait });
     say(detail);
+    if (hubFailed && !ghFailed) {
+      // gh is holding the grant, so this is the one failure the next call repairs for free: `storedGhToken`
+      // finds the token, the loop is skipped, and the hub is tried again with no code spent. A throw is what
+      // gets that next call — `not-signed-in` would stop the asking and leave the boot script watching for a
+      // stored token that is the very thing that could not be stored.
+      throw hubFailed;
+    }
+    // The hub has the token and gh would not take it, or neither has it. Both are the owner's to act on: the
+    // first is what the boot script's watcher retries without a new code, the second needs one from them.
     return "not-signed-in";
   }
 

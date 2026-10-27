@@ -15,6 +15,7 @@ import {
   MAX_INTERVAL_S,
   MAX_LOGIN_SECONDS,
   MAX_TRANSIENT_WAIT_S,
+  MAX_URI_CHARS,
   MIN_INTERVAL_S,
   nextWaitSeconds,
   oauthAppLabel,
@@ -338,8 +339,10 @@ describe("requestDeviceCode", () => {
   });
 
   it("should refuse a page too long for the hub to take, rather than relay a sign-in it will reject", async () => {
-    // Arrange
-    const uri = `https://github.com/login/device?${"x".repeat(2100)}`;
+    // Arrange: longer than the bound that binds, which is the 500 the relayed `virtualStatus` detail has to fit
+    // inside rather than `loginBody`'s own 2048 — a page between the two passes the mint and the prompt and
+    // then 400s on the status, after a code the owner could have used is already on their screen.
+    const uri = `https://github.com/login/device?${"x".repeat(MAX_URI_CHARS)}`;
     const { fetchImpl } = fakeFetch([{ body: form({ device_code: "d", user_code: "AAAA-BBBB", verification_uri: uri }) }]);
 
     // Act

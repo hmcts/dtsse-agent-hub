@@ -20,6 +20,7 @@ import {
 import { type Api, ApiError, createApi } from "../api.ts";
 import { jiraExportSignInBudget } from "./atlassian.ts";
 import { packAzureCache, pruneMsalCache, unpackAzureCache } from "./azure-cache.ts";
+import { MAX_DETAIL_CHARS, MAX_URI_CHARS, MAX_USER_CODE_CHARS } from "./github-device-flow.ts";
 import { FatalError } from "./phases.ts";
 import {
   azureLogin,
@@ -598,6 +599,35 @@ describe("githubLogin", () => {
     expect(stderr).toMatch(/github: signing in through the GitHub CLI OAuth app \(client 178c6fc778ccc68e1d6a\)/);
   });
 
+  it("should keep the relayed status inside the hub's detail bound at the longest code and page it will take", async () => {
+    // Arrange: the worst case the mint lets through — a user code at `USER_CODE`'s 64 characters and a page at
+    // `MAX_URI_CHARS`. The detail this words around them is a `virtualStatus`, which the hub bounds at 500 and
+    // rejects rather than truncates; a `400` there is not retryable, so it would throw after the code was
+    // already on the owner's screen and burn the budget on codes that would have worked.
+    const fetchImpl = ((): typeof fetch => {
+      const longest = new URLSearchParams({
+        device_code: "dev-code",
+        user_code: "A".repeat(MAX_USER_CODE_CHARS),
+        verification_uri: `https://github.com/login/device?${"x".repeat(MAX_URI_CHARS - 38)}`,
+        expires_in: "899",
+        interval: "1"
+      }).toString();
+      return (async (url: string | URL) => {
+        const body = String(url).endsWith("/login/device/code") ? longest : token(GH_TOKEN);
+        return new Response(body, { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+      }) as unknown as typeof fetch;
+    })();
+
+    // Act
+    const { result } = await captureStderr(() => signIn(fetchImpl));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    const awaiting = virtual().status.filter((s) => s.phase === "awaiting_login");
+    expect(awaiting).toHaveLength(1);
+    expect((awaiting[0] as { detail: string }).detail.length).toBeLessThanOrEqual(MAX_DETAIL_CHARS);
+  });
+
   it("should store the token gh already holds without relaying a code when an earlier call signed it in", async () => {
     // Arrange: a pod whose previous call was granted a token and failed only to finish storing it. gh's config
     // is memory-backed, so a token there is one this pod was granted — asking for another would ask the owner
@@ -783,7 +813,7 @@ describe("githubLogin", () => {
       {
         kind: "github",
         state: "failed",
-        detail: "github: GitHub would not accept the token the sign-in granted; it is stored, so the agent will keep trying it"
+        detail: "github: GitHub would not accept the token the sign-in granted; it is saved on agent-hub, so this agent will keep trying it"
       }
     ]);
     // gh's own words say whether a scope was refused or the token was already revoked, redacted on the way out.
@@ -804,10 +834,11 @@ describe("githubLogin", () => {
     expect(virtual().loginFailures).toEqual([]);
   });
 
-  it("should throw rather than report a failed sign-in when the hub cannot be given a token GitHub granted", async () => {
-    // Arrange: the owner completed the sign-in and the store is what failed, so the sign-in did not fail and
-    // they have nothing left to do. Reporting one would withdraw the code they used and ask them to paste the
-    // token they have just authorised.
+  it("should hand the token to gh anyway and throw when the hub will not take it, so the next call repairs it", async () => {
+    // Arrange: a hub that refuses the store does not refuse the sign-in, so gh is still handed the token and
+    // keeps the owner's grant. The throw is what earns the next call — `not-signed-in` would stop the asking
+    // and leave the boot script watching for the very thing that could not be stored — and the report goes
+    // first because a code was shown and the hub is owed exactly one outcome for it.
     hub.failNextCredentialPuts(1, 400);
 
     // Act
@@ -815,8 +846,52 @@ describe("githubLogin", () => {
 
     // Assert
     expect((error as Error).message).toMatch(/400/);
-    expect(virtual().loginFailures).toEqual([]);
+    expect(virtual().loginFailures).toEqual([
+      {
+        kind: "github",
+        state: "failed",
+        detail: "github: signed in, but the token could not be saved to agent-hub yet; this agent is holding it and will keep trying"
+      }
+    ]);
     expect(virtual().completes).toEqual([]);
+    // gh is holding it, which is what makes the next call free: it finds it and relays nothing.
+    expect(fs.readFileSync(path.join(pod.stateDir, "gh-token"), "utf8")).toBe(GH_TOKEN);
+  });
+
+  it("should finish the sign-in on the next call, relaying no code, when the hub takes the token the second time", async () => {
+    // Arrange: the recovery that throw exists for. The first call leaves the token in gh's config; the second
+    // finds it through `storedGhToken`, skips the loop entirely and completes the hub row from `failed`.
+    hub.failNextCredentialPuts(1, 400);
+    await captureStderrOfFailure(() => signIn(githubAnswering(token(GH_TOKEN))));
+    const relayed = virtual().prompts.length;
+
+    // Act: a GitHub that would refuse every poll, to show that none is made.
+    const { result } = await captureStderr(() => signIn(githubAnswering(DENIED)));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().prompts).toHaveLength(relayed);
+    expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
+    expect(virtual().completes).toEqual([{ kind: "github", account_label: "octocat" }]);
+  });
+
+  it("should report and stop asking when neither the hub nor gh will keep the token", async () => {
+    // Arrange: the grant is lost whatever happens next, so this is the owner's to act on — and the way on is
+    // the pasted token the boot script then watches for, not another code this would spend.
+    hub.failNextCredentialPuts(1, 400);
+
+    // Act
+    const { result, stderr } = await captureStderr(() => signIn(githubAnswering(token(GH_TOKEN)), { FAKE_GH_REFUSES_TOKEN: GH_TOKEN }));
+
+    // Assert
+    expect(result).toBe("not-signed-in");
+    expect(virtual().loginFailures).toEqual([
+      { kind: "github", state: "failed", detail: "github: signed in, but the token could not be saved either on agent-hub or in this agent" }
+    ]);
+    expect(virtual().credentials.has("github")).toBe(false);
+    // Both failures reach the pod's log, because either one alone would read as the whole story.
+    expect(stderr).toMatch(/400/);
+    expect(stderr).toMatch(/gh would not store the GitHub token/);
   });
 
   it("should still report the failure to its caller when the hub will not take the report", async () => {
