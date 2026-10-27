@@ -1,6 +1,7 @@
 import { storedClientFeatures } from "../agents/client-features.ts";
 import { type Skill, storedSkills } from "../agents/skills.ts";
 import type { CredentialKind } from "../credentials/names.ts";
+import { agentQuestions, type QuestionView } from "../questions/views.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import type { Database } from "../store/prisma.ts";
 import type { ConversationPage } from "../transcripts/conversation.ts";
@@ -162,16 +163,26 @@ export interface ConversationView {
   jira: JiraExportView;
   confluence: ConfluenceExportView;
   page: ConversationPage;
+  /**
+   * The questions this conversation's session asked, which the thread shows as cards. Read beside the page rather
+   * than inside it: a question is a row of its own, not a transcript entry, and the transcript route that serves
+   * later pages does not carry them.
+   */
+  questions: QuestionView[];
 }
 
 /** One of the viewer's conversations with its first page; `agentId` is the conversation's current agent. */
 export async function conversationView(db: Database, conversation: ConversationRow, agentId: string): Promise<ConversationView> {
-  const [agent, artefact, jira, confluence, page] = await Promise.all([
+  // The conversation's own agent, which is its owner's alone: both reads below apply their own rule to it, and no
+  // grant is passed because none extends to a conversation.
+  const agent = { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true };
+  const [current, artefact, jira, confluence, page, questions] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true } }),
     readArtefact(db, conversation.id),
     readJiraExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),
-    agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true }, [])
+    agentConversation(db, conversation.ownerOid, agent, []),
+    agentQuestions(db, conversation.ownerOid, agent, [])
   ]);
   return {
     id: conversation.id,
@@ -182,14 +193,15 @@ export async function conversationView(db: Database, conversation: ConversationR
     model: conversation.model,
     stopHistory: conversation.stopHistory,
     agentId,
-    agentStatus: agent?.status ?? "offline",
-    skills: storedSkills(agent?.skills),
-    clientFeatures: storedClientFeatures(agent?.clientFeatures),
+    agentStatus: current?.status ?? "offline",
+    skills: storedSkills(current?.skills),
+    clientFeatures: storedClientFeatures(current?.clientFeatures),
     sessionState: conversation.sessionState,
     sessionDetail: conversation.sessionDetail,
     artefact: { ...artefact, updatedAt: artefact.updatedAt?.toISOString() ?? null },
     jira,
     confluence,
-    page
+    page,
+    questions
   };
 }

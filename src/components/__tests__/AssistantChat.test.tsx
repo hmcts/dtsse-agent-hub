@@ -11,6 +11,7 @@ import { Composer } from "@/components/assistant/Composer";
 import { EmptyChat, type EmptyChatActions, NEW_CHAT_DRAFT } from "@/components/assistant/EmptyChat";
 import { draftKey } from "@/components/useDraft";
 import type { ThreadMessage } from "@/messages/direct-thread";
+import type { QuestionView } from "@/questions/views";
 import type { ConversationPage, TranscriptEntryView } from "@/transcripts/conversation";
 
 const AGENT = "11111111-1111-1111-1111-111111111111";
@@ -118,6 +119,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     jira: { status: "none" },
     confluence: { status: "none" },
     page: page(),
+    questions: [],
     ...overrides
   };
 }
@@ -137,6 +139,7 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
     setModel: ok(),
     rename: ok(),
     remove: ok(),
+    answerQuestion: ok(),
     saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 })),
     exportToJira: ok(),
     ...overrides
@@ -335,6 +338,108 @@ describe("ChatView progress", () => {
     emit("agent_status", { agent_id: AGENT, status: "busy" });
     expect(screen.queryByText("Starting your assistant…")).toBeNull();
     expect(screen.getByText("Thinking")).toBeTruthy();
+  });
+});
+
+describe("ChatView questions", () => {
+  const ASKED: QuestionView = {
+    id: "q-1",
+    agentId: AGENT,
+    askedAt: "2026-10-21T09:02:00.000Z",
+    questions: [
+      {
+        question: "Do you prefer red or blue?",
+        header: "Colour",
+        options: [
+          { label: "Red", description: "You prefer red." },
+          { label: "Blue", description: "You prefer blue." }
+        ],
+        multiSelect: false
+      }
+    ],
+    answer: null,
+    offered: true
+  };
+
+  it("should show the question as a card with its options when the assistant asked one", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ page: page({ messages: [message("1")] }), questions: [ASKED] })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    expect(screen.getByRole("region", { name: "A question for you" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Blue/ })).toBeTruthy();
+  });
+
+  // The session that asked it ended its turn, and the person is the one being waited on.
+  it("should stop saying the assistant is working while the question is unanswered, even with the agent busy", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ agentStatus: "busy", page: page({ messages: [message("1")] }), questions: [ASKED] })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    expect(screen.queryByText("Thinking")).toBeNull();
+  });
+
+  it("should say the assistant is working again once the question has been answered", () => {
+    const answered: QuestionView = { ...ASKED, answer: { answers: [{ labels: ["Red"], text: null }], at: "2026-10-21T09:03:00.000Z" }, offered: false };
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ agentStatus: "busy", page: page({ messages: [message("1")] }), questions: [answered] })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    expect(screen.getByText("Thinking")).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
+  });
+
+  it("should send the answer through the action the page gave it when an option is chosen", async () => {
+    const answerQuestion = vi.fn(async () => ({ ok: true as const }));
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ page: page({ messages: [message("1")] }), questions: [ASKED] })}
+        templates={TEMPLATES}
+        actions={actions({ answerQuestion })}
+      />
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: /Red/ }));
+    });
+
+    expect(answerQuestion).toHaveBeenCalledWith({ questionId: "q-1", answers: { answers: [{ labels: ["Red"], text: null }] } });
+  });
+
+  it("should re-read the page when another tab answered the question", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ page: page({ messages: [message("1")] }), questions: [ASKED] })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    emit("agent_question", { agent_id: AGENT });
+
+    expect(refresh).toHaveBeenCalled();
   });
 });
 

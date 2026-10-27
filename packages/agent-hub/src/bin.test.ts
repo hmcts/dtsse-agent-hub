@@ -9,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
+import { denyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { EXIT_NO_CREDENTIAL } from "./virtual/phases.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
@@ -344,6 +345,97 @@ describe("bin/virtual-agent-boot", () => {
     expect(result.stderr).not.toMatch(/unbound variable/);
     expect(result.stderr).toContain(`${name} is not set`);
     expect(result.status).not.toBe(0);
+  });
+});
+
+/**
+ * The gate's own answer to a `PreToolUse` it cannot hand to the CLI. A hook that prints nothing is read as "no
+ * decision", so `AskUserQuestion`'s prompt is drawn and a pod's session waits for a keyboard nobody is at — which
+ * is the one thing this hook exists to prevent, and the one failure that used to reach it: a missing `dist/`, a
+ * node that is not installed, a crash and an OOM kill all land on this path. The CLI stands in for each of them,
+ * because the gate's rule is "the CLI did not print a decision" whatever the cause.
+ */
+describe("bin/agent-hub answering a PreToolUse it cannot hand to the cli", () => {
+  const POD = { AGENT_HUB_VIRTUAL_AGENT_ID: ID, AGENT_HUB_LAUNCH_TOKEN: TOKEN };
+  const CONVERSATION = { AGENT_HUB_CONVERSATION_ID: "0f8a6a1e-1234-4000-8000-0000000000bb" };
+  const ASK = { session_id: ID, hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_use_id: "toolu_1" };
+
+  /** Runs the gate with a stand-in CLI: `cli` is the JavaScript it runs, or `null` for a CLI that is not there. */
+  function runPreToolUse(name: string, cli: string | null, env: Record<string, string>, input: unknown = ASK) {
+    const js = path.join(recorders, `${name}.mjs`);
+    if (cli === null) {
+      fs.rmSync(js, { force: true });
+    } else {
+      fs.writeFileSync(js, cli);
+    }
+    const result = spawnSync("bash", [BIN, "hook", "PreToolUse"], {
+      input: JSON.stringify(input),
+      encoding: "utf8",
+      timeout: 20000,
+      env: { PATH: process.env.PATH ?? "", ...home.env, AGENT_HUB_CLI_JS: js, ...env }
+    });
+    return { status: result.status, decision: result.stdout.trim() === "" ? null : (JSON.parse(result.stdout) as Record<string, any>) };
+  }
+
+  const denied = (reason?: string) => ({
+    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", ...(reason === undefined ? {} : { permissionDecisionReason: reason }) }
+  });
+
+  it.each([
+    ["the cli is not installed at all", null],
+    ["the cli printed nothing", "process.exit(0)\n"],
+    ["the cli crashed", 'throw new Error("boom")\n'],
+    ["the cli was killed", "process.kill(process.pid, 'SIGKILL')\n"]
+  ])("should deny the question itself when %s", (label, cli) => {
+    // Act
+    const result = runPreToolUse(`deny-${label.replace(/[^a-z]+/g, "-")}`, cli, POD);
+
+    // Assert
+    expect(result.decision).toMatchObject(denied(UNDELIVERED_REASON));
+    expect(result.status).toBe(0);
+  });
+
+  it("should deny for an Assistant conversation as well as a pod, since neither has anyone at a keyboard", () => {
+    expect(runPreToolUse("deny-conversation", null, CONVERSATION).decision).toMatchObject(denied(UNDELIVERED_REASON));
+  });
+
+  // A broken payload is still a question: the hook is registered for that one tool, so a body naming no tool is a
+  // payload the gate could not read rather than some other tool's call.
+  it("should deny when the payload names no tool at all", () => {
+    expect(runPreToolUse("deny-nameless", null, POD, { session_id: ID }).decision).toMatchObject(denied(UNDELIVERED_REASON));
+  });
+
+  it("should pass the cli's own decision through untouched when it managed to make one", () => {
+    // Arrange
+    const reason = "the cli decided this";
+    const cli = `console.log(${JSON.stringify(JSON.stringify(denyOutput(reason)))})\n`;
+
+    // Act
+    const result = runPreToolUse("deny-from-cli", cli, POD);
+
+    // Assert
+    expect(result.decision).toEqual(denyOutput(reason));
+  });
+
+  // The other half of the rule: a person at the keyboard can answer the prompt, so taking the tool away from them
+  // would be the regression, and another tool's call is none of this hook's business.
+  it.each([
+    ["an engineer's own session", {}, ASK],
+    ["another tool in a pod", POD, { session_id: ID, tool_name: "Bash", tool_input: { command: "grep AskUserQuestion ." } }]
+  ])("should decide nothing for %s", (label, env, input) => {
+    // Act
+    const result = runPreToolUse(`allow-${label.replace(/[^a-z]+/g, "-")}`, null, env, input);
+
+    // Assert
+    expect(result.decision).toBeNull();
+    expect(result.status).toBe(0);
+  });
+
+  // The gate cannot call `denyOutput`, so it carries the JSON written out by hand. Nothing else would notice the
+  // two drifting: the gate would go on printing a decision Claude Code accepts, saying something the client no
+  // longer says, and only on the path nobody exercises by hand.
+  it("should hold its copy of the undelivered deny in step with the client's", () => {
+    expect(fs.readFileSync(BIN, "utf8")).toContain(`deny='${JSON.stringify(denyOutput(UNDELIVERED_REASON))}'`);
   });
 });
 

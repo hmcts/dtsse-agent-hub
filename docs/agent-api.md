@@ -441,6 +441,56 @@ The web UI's credentials list shows only whether each kind is stored, when and h
 - A register of an existing session or a heartbeat whose `skills` differ from the stored list updates an open page for the agent without a reload. Sending the stored list again, in any order, changes nothing.
 - A message picked from the list starts `/<name> `, followed by whatever the person typed. The client delivers it as a request to run that skill with the rest of the message as its arguments; the hub does not treat it differently from any other direct message.
 
+## Questions
+
+Claude Code has a built-in `AskUserQuestion` tool: the model calls it and the TUI draws a prompt with the options for someone to pick from. In a virtual agent's pod, and in an HMCTS Assistant conversation, **nobody is at that keyboard**. The prompt is never answered, the turn never ends, the session's status file stays `busy` so the supervisor's idle timer never fires, and the conversation's session slot is held indefinitely. The person, meanwhile, sees "Thinking…" for ever and is never shown the question.
+
+So the client intercepts it. Its `PreToolUse` hook, registered for that one tool, fires before any prompt is drawn; it posts the question to the hub and **denies** the tool, which surfaces its reason to the model as the tool's error and ends the turn. The person reads the question as a card in the web UI, and their choice is sent back as an ordinary direct message — so the answer travels the same delivery and wake path as anything they type, and there is no blocked turn left to unblock.
+
+| Method and path | Body | Response |
+|---|---|---|
+| `POST /api/agent/{agent_id}/question` | `{session_id, tool_use_id, questions}` | `204` when the question is now on screen: either it was recorded, or this `tool_use_id` had already recorded it. Idempotent on `tool_use_id`, so a retry after a lost response leaves one question, and does **not** replace the stored one — the session is waiting on an answer to the question already on screen. `409` for a **different** question while one of this `session_id`'s is still unanswered: nothing is written, and the caller must not be told there is a card to wait for. |
+
+```jsonc
+{
+  "session_id": "481900c7-…",             // the Claude Code session, 1–200 characters
+  "tool_use_id": "toolu_bdrk_01TNH…",     // the tool call's own id, 1–200 characters
+  "questions": [
+    {
+      "question": "Do you prefer red or blue?",   // 1–1000 characters
+      "header": "Color",                          // a short label for the card, 1–40 characters
+      "options": [                                // 2–4
+        { "label": "Red", "description": "You prefer red." },   // label 1–200, description 0–500
+        { "label": "Blue", "description": "You prefer blue." }
+      ],
+      "multiSelect": false                        // required
+    }
+  ]
+}
+```
+
+- 1–4 questions, mirroring `AskUserQuestion`'s own limits; the client applies the same caps and cuts long values to fit before sending, so a `400` here is a client fault rather than a question nobody can read. Every string is bounded and no other field is accepted.
+- **A question's options must have distinct labels.** The label is the whole of what an answer names — the card keys a press by it and the message the session receives says it — so two options sharing one is a choice nobody could resolve. The client drops such a question before sending and asks in words instead.
+- Any agent's, not a conversation's alone, so an owner watching an ordinary pod agent's page is shown the same card there.
+- Notifies the owner's UI, so a second tab shows the question without a reload.
+- **One unanswered card per session, and three outcomes rather than two.** The unique index on `(agent_id, tool_use_id)` covers the retry of one tool call. What it cannot see is a model that calls the tool *again* after the deny, which arrives with a new `tool_use_id` — and two live cards in one blocked turn is the worse outcome, because answering either sends a message contradicting the other. So that second question is **refused with `409`**, not dropped: the hook turns this response into what the model is told, and a `204` for a question nobody wrote would leave it ending its turn waiting for a card that does not exist. The rule is keyed on the session as well as the agent, so a `/clear` is not blocked by a card the session before it left unanswered.
+- **The client retries this call, which no other call of its kind does**, because it is idempotent on `tool_use_id`: an attempt aborted at its timeout may still have committed here, and a second attempt is what tells "the question never arrived" from "the answer did not come back". Two attempts, 6 seconds each; a `4xx`, the `409` included, is not retried.
+- **Reading a question follows the transcript**, not the agent: its owner and anyone holding a grant from them, as `canViewTranscript` decides, since a question is the model's own words as a transcript entry is. A conversation's agent is owner-only, so no grant reaches one of those. At most the newest 20 questions of an agent are read — the transcript beside them is paginated and they are not.
+- **A question is offered for two hours**, and that is deliberately longer than the session that asked it lives. A conversation's session is sent `/exit` after 20 idle minutes and the whole pod stops after 120, so a card outliving its session is the normal case rather than the exception. It is safe because a stopped session is restarted on its own session id — `claude --resume` for a conversation, `--continue` for a pod's own session — and so comes back holding the transcript it asked the question in: a late answer arrives as an ordinary message to a session that remembers asking. What the window bounds is therefore not whether an answer can be delivered but the claim an unanswered card makes, that the assistant is waiting on the person. Past it the card shows what was asked and offers nothing, the thread stops saying the assistant is waiting, and the action refuses the answer — against the clock at the time of the press, since a page left open overnight has no say in what time it is.
+
+**Answering.** Only in the web UI, and only by someone who may *message* the agent — its owner, or a holder of a write grant; a conversation's agent is its owner's alone, so no grant reaches one of those. That is narrower than reading it, so a read-grant viewer is shown the question and its options with no controls at all rather than controls the action would refuse. The answer is one entry per question, in order, each naming options the question offered or carrying words of the person's own, since `AskUserQuestion` always lets someone answer in their own words. It is sent as an ordinary direct message that quotes each question back above its answer, recorded on the question in that message's own transaction, and refused for a question already answered — so the session is told exactly once.
+
+**What the model is told.** Two reasons, and never an allow:
+
+- the question reached the hub: it is on screen with its options, the answer will arrive as an ordinary message, so end the turn and wait — do not repeat the question in the reply and do not guess;
+- the question did not reach the hub (no agent registered, comms off, the hub unreachable, a payload the client could not read, or the `409` above): ask it in plain words in the reply instead, listing the choices, and end the turn.
+
+There is no fail-open path, because allowing the tool is what hangs the session — and **printing nothing is allowing it**: Claude Code reads a `PreToolUse` that says nothing as "no decision" and draws the prompt. So the deny is printed even by the paths that cannot reach the hub client at all. `bin/agent-hub` carries its own copy of it in bash, for a CLI that is not installed, crashed, was killed or printed nothing, and the CLI's own `hook` command prints it from the `catch` that a stdin body which is not JSON lands in.
+
+**An engineer's own session is untouched.** The hook acts only where `AGENT_HUB_CONVERSATION_ID` is set or the process is a virtual agent's pod. Anywhere else it outputs nothing and the tool runs as usual: there is a person at that keyboard who can answer the prompt, and intercepting it would take a working tool away.
+
+**Release order.** The route is new, so a pod running a client that predates it never posts one and `AskUserQuestion` is not registered for interception there at all — the hook only exists once that client is installed. Nothing is gated on a client feature: the client either has the hook or does not.
+
 ## Atlassian lookups
 
 Picking a Jira project or a Confluence page means searching the person's own Jira or Confluence, as them: the hub holds no Atlassian credentials, so the search runs in their pod, with their `twg` sign-in. It is a search-as-you-type, so it does not go through a conversation's session — a model turn is far too slow for that — but through a small, fixed request and answer between the hub and the pod's supervisor.

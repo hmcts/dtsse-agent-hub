@@ -25,10 +25,11 @@ import { type DirectEntry, type DirectPeer, peerOf, peerOfReply, readDirects, re
 import { clearOptOut, type EnableSessionResult, enableSession, markOptedOut, runAutoEnable } from "./enable.ts";
 import type { Env } from "./env.ts";
 import { CLI, formatMessage } from "./envelope.ts";
-import { type HookPayload, runHook } from "./hooks.ts";
+import { type HookPayload, mustDeny, runHook } from "./hooks.ts";
 import { describeInbound, inboundAccepted, inboundFix, setupInbound } from "./inbound.ts";
 import { EXPORT_ID_RE, JIRA_BROWSE_URL, JIRA_KEY_RE, MAX_JIRA_ERROR, runJiraExport } from "./jira-export.ts";
 import { MAX_POST_TOPICS } from "./limits.ts";
+import { denyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { withRetry } from "./retry.ts";
 import { findSecret } from "./secret-scan.ts";
 import { ensureStateDir, isEnabled, log, logPath, readJson, readText, removeFile, requireSessionId, statePath, validSessionId } from "./session.ts";
@@ -89,7 +90,7 @@ export const USAGE = `usage: ${CLI} <command> [args]
   credentials delete <kind>   forget a stored credential (kinds: ${CREDENTIAL_KINDS.join(", ")})
   virtual <command>           inside a virtual agent's pod: phase reports, credentials and
                               relayed sign-ins (${CLI} virtual help)
-  hook <SessionStart|UserPromptSubmit|UserPromptContext|Stop|SessionEnd>
+  hook <SessionStart|UserPromptSubmit|UserPromptContext|PreToolUse|Stop|SessionEnd>
                               Claude Code hook entry point (reads hook JSON on stdin)
 
 Environment: AGENT_HUB_URL, AGENT_HUB_SCOPE, AGENT_HUB_DEV_USER (local service only),
@@ -839,7 +840,8 @@ const agents: Command = async (cli) => {
   return 0;
 };
 
-// Hooks never fail the session and never print unless adding context on purpose.
+// Hooks never fail the session and never print unless adding context on purpose. The one exception is a
+// `PreToolUse` that has to decide: see `mustDeny`.
 const hook: Command = async (cli, args) => {
   let input: HookPayload | null = {};
   try {
@@ -852,6 +854,12 @@ const hook: Command = async (cli, args) => {
       cli.stdout.write(`${out}\n`);
     }
   } catch (e) {
+    // Printing nothing here would be read as "no decision", so the prompt a pod cannot answer is drawn. This is
+    // reached before `runHook` can decide for itself — a stdin body that is not JSON throws on the line above it,
+    // so `parseQuestions` never sees the question — and the decision has to be made anyway.
+    if (mustDeny(args[0] ?? "", input, cli.env)) {
+      cli.stdout.write(JSON.stringify(denyOutput(UNDELIVERED_REASON)));
+    }
     if (validSessionId(input?.session_id)) {
       log(input.session_id as string, `hook ${args[0]} failed: ${e instanceof Error ? e.stack || e.message : String(e)}`);
     }

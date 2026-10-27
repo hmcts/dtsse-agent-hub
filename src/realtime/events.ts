@@ -17,6 +17,11 @@ export type HubEvent =
   | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus }
   /** The skills `owner_oid`'s agent reported changed. Never carries the list, which only some viewers may see. */
   | { type: "agent_skills"; agent_id: string; owner_oid: string }
+  /**
+   * `owner_oid`'s agent asked a question, or one of its questions was answered. Carries neither, only the agent, so
+   * a page re-reads it under its own rule — the same shape as `agent_skills`, and for the same reason.
+   */
+  | { type: "agent_question"; agent_id: string; owner_oid: string }
   /** A direct message's delivery to its target agent left `queued`, so a UI thread showing it can update. */
   | { type: "delivery"; message_id: string; agent_id: string; state: DeliveredState }
   /** `owner_oid`'s grant to `grantee_oid` was set, changed or revoked, so which agents the grantee may see changed. */
@@ -108,7 +113,8 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
         ? { type: "agent_status", agent_id: event.agent_id, owner_oid: event.owner_oid, status: event.status as AgentStatus }
         : undefined;
     case "agent_skills":
-      return isId(event.agent_id) && isId(event.owner_oid) ? { type: "agent_skills", agent_id: event.agent_id, owner_oid: event.owner_oid } : undefined;
+    case "agent_question":
+      return isId(event.agent_id) && isId(event.owner_oid) ? { type: event.type, agent_id: event.agent_id, owner_oid: event.owner_oid } : undefined;
     case "delivery":
       return isId(event.message_id) && isId(event.agent_id) && typeof event.state === "string" && DELIVERED_STATES.includes(event.state)
         ? { type: "delivery", message_id: event.message_id, agent_id: event.agent_id, state: event.state as DeliveredState }

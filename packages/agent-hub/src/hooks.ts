@@ -10,6 +10,8 @@ import { CLI } from "./envelope.ts";
 import { heldNotesContext, takeHeldNotes } from "./held-notes.ts";
 import { inboundAccepted, inboundFix } from "./inbound.ts";
 import { publicUrlPattern } from "./ports.ts";
+import { ASK_USER_QUESTION, ASKED_REASON, denyOutput, type HookDenyOutput, parseQuestions, UNDELIVERED_REASON } from "./questions.ts";
+import { retryableByStatus, withRetry } from "./retry.ts";
 import {
   conversationId,
   ensureStateDir,
@@ -202,6 +204,10 @@ export type HookPayload = {
   reason?: unknown;
   transcript_path?: unknown;
   cwd?: unknown;
+  /** `PreToolUse` only. */
+  tool_name?: unknown;
+  tool_input?: unknown;
+  tool_use_id?: unknown;
 };
 
 /** The documented `UserPromptSubmit` hook output, which the CLI prints as is. */
@@ -212,22 +218,103 @@ export type HookContextOutput = {
   };
 };
 
+export type HookOutput = HookContextOutput | HookDenyOutput;
+
 export type RunHookOptions = {
   spawn?: SpawnWorker;
 };
+
+/**
+ * How long each attempt at the question POST is given, and how many it gets. The model is waiting on this hook
+ * before its turn can end, so the whole budget is bounded at about 13 seconds rather than left to the client's
+ * ordinary 15-second request timeout and six attempts.
+ *
+ * It retries a timeout as readily as a connection error, which no other call in this package does, **because the
+ * POST is idempotent on `tool_use_id`**. An attempt that was aborted at the timeout may still have committed on the
+ * hub — the abort stops this process reading the response, not the hub writing the row — and then the person has a
+ * card the model was told nothing about. A second attempt is what tells the two apart: if the first landed it
+ * answers `204` again and the model is correctly told the question is on screen.
+ */
+const QUESTION_TIMEOUT_MS = 6000;
+const QUESTION_ATTEMPTS = 2;
+const QUESTION_BACKOFF_MS = 500;
+
+/**
+ * Whether a failing `PreToolUse` has to print a deny rather than nothing.
+ *
+ * A hook that prints nothing is read as "no decision", so the prompt it would have stopped is drawn — and in a pod
+ * or an Assistant conversation nobody is there to answer it, which is the forever-busy session this hook exists to
+ * prevent. So every path that cannot decide for itself decides this way instead; `bin/agent-hub` carries the same
+ * rule in bash, for the failures that happen before this process starts.
+ *
+ * `input` is whatever could be read of the payload, which may be nothing at all: a stdin body that is not JSON
+ * reaches the caller's `catch` with none of it. An unreadable body counts as the tool, since the hook is registered
+ * for that tool alone.
+ */
+export function mustDeny(event: string, input: HookPayload | null | undefined, env: Env = process.env): boolean {
+  if (event !== "PreToolUse" || (!conversationId(env) && !virtualAgent(env))) {
+    return false;
+  }
+  const tool = input?.tool_name;
+  return tool === undefined || tool === ASK_USER_QUESTION;
+}
+
+/**
+ * `AskUserQuestion` in a session nobody is sitting at — an Assistant conversation, or a virtual agent's pod — where
+ * the tool's prompt would wait for a keyboard that does not exist, holding the session `busy` for ever and the
+ * conversation's slot with it. The question goes to the hub for the person to answer as an ordinary message, and the
+ * tool is denied so the prompt is never drawn.
+ *
+ * Every refusal path still denies. Letting the tool run is what hangs the session, so there is no fail-open: a
+ * question that could not be put on screen is denied with the reason that tells the model to ask in words instead.
+ */
+async function askUserQuestion(sid: string, input: HookPayload, env: Env): Promise<string | HookDenyOutput> {
+  // An engineer's own session is left alone: they are at the keyboard, the prompt is the better way to answer, and
+  // intercepting it would take a working tool away. Any other tool is not this hook's business either.
+  if (!mustDeny("PreToolUse", input, env) || input.tool_name !== ASK_USER_QUESTION) {
+    return "";
+  }
+  const questions = parseQuestions(input.tool_input);
+  const toolUseId = typeof input.tool_use_id === "string" ? input.tool_use_id : "";
+  const agentId = loadAgent(sid)?.agent_id;
+  if (questions === null || toolUseId === "" || !agentId) {
+    log(sid, `PreToolUse: ${ASK_USER_QUESTION} denied without asking (${agentId ? "unreadable question" : "no agent registered"})`);
+    return denyOutput(UNDELIVERED_REASON);
+  }
+  const api = createApi({ env });
+  try {
+    await withRetry(() => api.postQuestion(agentId, { session_id: sid, tool_use_id: toolUseId, questions }, { timeoutMs: QUESTION_TIMEOUT_MS }), {
+      attempts: QUESTION_ATTEMPTS,
+      baseMs: QUESTION_BACKOFF_MS,
+      // A refusal is the hub reading the body and saying no, which a second identical attempt cannot change; a
+      // timeout, a reset or a 5xx might be a row already written, so it is worth asking again.
+      retryable: retryableByStatus
+    });
+  } catch (e) {
+    log(sid, `PreToolUse: the question could not be sent: ${(e as Error).message}`);
+    return denyOutput(UNDELIVERED_REASON);
+  }
+  log(sid, `PreToolUse: put ${questions.length} question(s) on screen for the person`);
+  return denyOutput(ASKED_REASON);
+}
 
 export async function runHook(
   event: string,
   input: HookPayload | null | undefined,
   env: Env = process.env,
   { spawn = spawnDetached }: RunHookOptions = {}
-): Promise<string | HookContextOutput> {
+): Promise<string | HookOutput> {
   if (env.AGENT_HUB_CHILD) {
     return "";
   }
   const sid = input?.session_id;
   if (!validSessionId(sid) || !input) {
     return "";
+  }
+  // Before the enabled gate below, and before anything that writes session state: a pod or a conversation whose
+  // comms are off still cannot answer the tool's prompt, so the question is still denied rather than allowed.
+  if (event === "PreToolUse") {
+    return await askUserQuestion(sid, input, env);
   }
   const note = event === "SessionStart" ? withNote(reposNote(env), webServersNote(env)) : "";
 

@@ -568,6 +568,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     jira: { status: "none" },
     confluence: { status: "none" },
     page: page(),
+    questions: [],
     ...overrides
   };
 }
@@ -581,6 +582,7 @@ function actions(): ChatActions {
     setModel: vi.fn(async () => ({ ok: true as const })),
     rename: vi.fn(async () => ({ ok: true as const })),
     remove: vi.fn(async () => ({ ok: true as const })),
+    answerQuestion: vi.fn(async () => ({ ok: true as const })),
     saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 })),
     exportToJira: vi.fn(async () => ({ ok: true as const }))
   };

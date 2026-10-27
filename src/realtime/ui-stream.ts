@@ -22,6 +22,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   it. Only the id is sent; the page reads the entries through `/api/ui/agents/{id}/transcript`.
  * - `agent_skills`: the watched agent reported a changed list of skills, when the viewer may see them. Only the id is
  *   sent; the page re-reads, which hands its composer the new list.
+ * - `agent_question`: the watched agent asked a question, or one of its questions was answered, when the viewer can
+ *   still see that agent. Only the id is sent; the page re-reads, which hands the thread the cards.
  * - `virtual_agent`: a virtual agent the viewer may see changed, their own or one a grant from its owner reaches, so
  *   the live view keeps up with the page rather than quietly going stale. Only the id is sent, which is no more than
  *   the page already shows them: its login codes and settings are its owner's alone, and the page re-reads each under
@@ -134,6 +136,13 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
         return undefined;
       }
       return sseEvent({ event: "agent_skills", data: JSON.stringify({ agent_id: event.agent_id }) });
+    }
+    case "agent_question": {
+      const agent = watch.agent;
+      if (agent === null || event.agent_id !== agent.id || !canViewAgent(sources.viewerOid, agent, await sources.grants())) {
+        return undefined;
+      }
+      return sseEvent({ event: "agent_question", data: JSON.stringify({ agent_id: event.agent_id }) });
     }
     case "grant":
       return event.grantee_oid === sources.viewerOid ? RESYNC : undefined;

@@ -1,10 +1,12 @@
 import type { ThreadMessage } from "../messages/direct-thread.ts";
+import type { QuestionView } from "../questions/views.ts";
 import { byCodePoint } from "../topics/slug.ts";
 import type { TranscriptContent, TranscriptRole } from "./schema.ts";
 
 /**
- * An agent's conversation as its page shows it: the hub's direct messages and its session's transcript in one time
- * line. Pure, so the server's first page and the browser's live top-ups and earlier pages are merged the same way.
+ * An agent's conversation as its page shows it: the hub's direct messages, its session's transcript and the
+ * questions it asked, in one time line. Pure, so the server's first page and the browser's live top-ups and earlier
+ * pages are merged the same way.
  */
 
 export interface TranscriptEntryView {
@@ -34,7 +36,9 @@ export interface ConversationPage {
 
 export type ConversationItem =
   | { type: "message"; key: string; at: string; message: ThreadMessage }
-  | { type: "entry"; key: string; at: string; entry: TranscriptEntryView };
+  | { type: "entry"; key: string; at: string; entry: TranscriptEntryView }
+  /** A question the session asked, which the client intercepted rather than let the TUI prompt for. */
+  | { type: "question"; key: string; at: string; question: QuestionView };
 
 function byId(left: string, right: string): number {
   const a = BigInt(left);
@@ -43,25 +47,40 @@ function byId(left: string, right: string): number {
 }
 
 function idOf(item: ConversationItem): string {
-  return item.type === "message" ? item.message.id : item.entry.id;
-}
-
-/** By time; at the same instant a message comes before a transcript entry, since the agent reads it first. */
-function byTime(left: ConversationItem, right: ConversationItem): number {
-  return byCodePoint(left.at, right.at) || byCodePoint(right.type, left.type) || byId(idOf(left), idOf(right));
+  return item.type === "message" ? item.message.id : item.type === "entry" ? item.entry.id : item.question.id;
 }
 
 /**
- * The messages and entries in time order. A user entry that records a direct message the page already shows is the
- * agent receiving that message, so the message stands for both rather than appearing twice.
+ * At the same instant: a message first, since the agent reads it before doing anything; then its transcript entries;
+ * then a question, which is a tool call it made during that work.
  */
-export function conversationItems(messages: readonly ThreadMessage[], entries: readonly TranscriptEntryView[]): ConversationItem[] {
+const RANK: Readonly<Record<ConversationItem["type"], number>> = { message: 0, entry: 1, question: 2 };
+
+/** By time, then by kind, then by id — which for a question is a UUID rather than a number, so its key is compared. */
+function byTime(left: ConversationItem, right: ConversationItem): number {
+  const when = byCodePoint(left.at, right.at) || RANK[left.type] - RANK[right.type];
+  if (when !== 0) {
+    return when;
+  }
+  return left.type === "question" ? byCodePoint(left.key, right.key) : byId(idOf(left), idOf(right));
+}
+
+/**
+ * The messages, entries and questions in time order. A user entry that records a direct message the page already
+ * shows is the agent receiving that message, so the message stands for both rather than appearing twice.
+ */
+export function conversationItems(
+  messages: readonly ThreadMessage[],
+  entries: readonly TranscriptEntryView[],
+  questions: readonly QuestionView[] = []
+): ConversationItem[] {
   const shown = new Set(messages.map((message) => message.id));
   const items: ConversationItem[] = [
     ...messages.map((message): ConversationItem => ({ type: "message", key: `m${message.id}`, at: message.created_at, message })),
     ...entries
       .filter((entry) => !(entry.role === "user" && entry.message_id !== null && shown.has(entry.message_id)))
-      .map((entry): ConversationItem => ({ type: "entry", key: `t${entry.id}`, at: entry.occurred_at, entry }))
+      .map((entry): ConversationItem => ({ type: "entry", key: `t${entry.id}`, at: entry.occurred_at, entry })),
+    ...questions.map((question): ConversationItem => ({ type: "question", key: `q${question.id}`, at: question.askedAt, question }))
   ];
   return items.sort(byTime);
 }

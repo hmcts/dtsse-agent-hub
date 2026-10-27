@@ -22,6 +22,7 @@ import { MessageAttachments } from "@/components/assistant/MessageAttachments";
 import { useStickToBottom } from "@/components/feed/useStickToBottom";
 import { AnnouncerRegion, useAnnouncer } from "@/components/live/Announcer";
 import { useHubEvent } from "@/components/live/HubStream";
+import { type AnswerQuestionAction, QuestionCard } from "@/components/questions/QuestionCard";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import type { AgentStatus } from "@/realtime/events";
 import type { ActionResult } from "@/web/action";
@@ -35,6 +36,8 @@ export interface ChatActions {
   setModel: (input: { conversationId: unknown; model: unknown }) => Promise<ActionResult>;
   rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
+  /** The person's answer to a question the assistant asked with its own question tool. */
+  answerQuestion: AnswerQuestionAction;
   saveArtefact: SaveArtefactAction;
   exportToJira: ExportToJiraAction;
   exportToConfluence?: ExportToConfluenceAction;
@@ -84,7 +87,14 @@ function StopButton({ onStop }: { onStop: () => Promise<void> }) {
   );
 }
 
-function Item({ item }: { item: ThreadItem }) {
+function Item({ item, answerQuestion }: { item: ThreadItem; answerQuestion: AnswerQuestionAction }) {
+  if (item.type === "question") {
+    return (
+      <li>
+        <QuestionCard view={item.question} tone="assistant" answer={answerQuestion} />
+      </li>
+    );
+  }
   if (item.type === "stopped") {
     return (
       <li className="flex items-center gap-3 text-xs text-asst-faint">
@@ -214,7 +224,10 @@ export function ChatView({
 }) {
   const router = useRouter();
   const arrivals = useAnnouncer("replies");
-  const live = useLiveConversation(view.agentId, view.page, { onReply: () => arrivals.announce("New reply from the assistant") });
+  const live = useLiveConversation(view.agentId, view.page, {
+    questions: view.questions,
+    onReply: () => arrivals.announce("New reply from the assistant")
+  });
   const [status, setStatus] = useState<AgentStatus>(view.agentStatus);
   const [pendingProduct, setPendingProduct] = useState<string | null>(null);
   // The pick shows at once rather than after the round trip, and goes back to the stored one if it was refused.
@@ -230,6 +243,12 @@ export function ChatView({
   useHubEvent<{ agent_id: string; status: AgentStatus }>("agent_status", ({ agent_id, status: next }) => {
     if (agent_id === view.agentId) {
       setStatus(next);
+    }
+  });
+  // The frame carries the agent id alone, so a question asked, or answered in another tab, is read with the page.
+  useHubEvent<{ agent_id: string }>("agent_question", ({ agent_id }) => {
+    if (agent_id === view.agentId) {
+      router.refresh();
     }
   });
 
@@ -395,7 +414,7 @@ export function ChatView({
             )}
             <ol aria-label="Conversation" className="flex flex-col gap-[26px]">
               {thread.map((item) => (
-                <Item key={item.key} item={item} />
+                <Item key={item.key} item={item} answerQuestion={actions.answerQuestion} />
               ))}
             </ol>
             {doing.state === "idle" ? null : (
