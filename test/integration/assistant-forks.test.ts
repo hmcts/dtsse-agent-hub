@@ -7,7 +7,7 @@ import { frameAttachments } from "../../src/assistant/upload-store.ts";
 import { sweepUploads } from "../../src/assistant/upload-sweep.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
-import { insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { connectForChat, type Person, prisma, resetDatabase } from "./database.ts";
 
 /**
  * Forking an HMCTS Assistant conversation: Alice offers her chat to Bob, who takes his own copy into his own
@@ -90,9 +90,8 @@ beforeEach(async () => {
   vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
   vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
   await resetDatabase();
-  await insertUser(ALICE);
-  await insertUser(BOB);
-  await insertUser(CAROL);
+  // Connected, so the chat gate lets each of them start a chat or take a copy; the gate has its own case below.
+  await Promise.all([ALICE, BOB, CAROL].map(connectForChat));
   await setGrant(prisma, ALICE.oid, CAROL.oid, "write");
 });
 
@@ -263,6 +262,16 @@ describe("taking a copy", () => {
     const view = await assistantConversation(viewerOf(BOB), copyId);
     expect(view?.forked?.fromOwnerName).toBe(ALICE.name);
     expect(view?.forked?.thread).toHaveLength(2);
+  });
+});
+
+describe("taking a copy before connecting", () => {
+  it("should refuse the copy and make no conversation when the person offered it has not connected GitHub and Claude", async () => {
+    const { id } = await offered();
+    await prisma.credential.deleteMany({ where: { ownerOid: BOB.oid } });
+
+    expect(await forkActions.forkChat({ conversationId: id })).toEqual({ ok: false, error: "connect GitHub and Claude before you start chatting" });
+    expect(await prisma.assistantConversation.count({ where: { ownerOid: BOB.oid } })).toBe(0);
   });
 });
 

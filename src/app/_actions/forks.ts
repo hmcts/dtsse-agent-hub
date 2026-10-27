@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { acceptFork, offerFork, withdrawFork } from "@/assistant/fork-store";
+import { CHAT_BLOCKED } from "@/assistant/onboarding";
 import type { SharePerson } from "@/assistant/shares";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { type ActionResult, runAction, text } from "@/web/action";
+import { assistantChatGate } from "@/web/data";
 
 /**
  * Offering one of the signed-in person's own conversations to one person they named, to fork; withdrawing that
@@ -53,13 +55,20 @@ export async function withdrawChatFork(input: { conversationId: unknown; recipie
   });
 }
 
-/** Takes the viewer's own copy of a chat offered to them, and answers the copy's id for the page to go to. */
+/**
+ * Takes the viewer's own copy of a chat offered to them, and answers the copy's id for the page to go to. A copy is a
+ * new conversation of the viewer's, so it is behind the same gate as starting one: someone who has yet to connect
+ * GitHub and Claude would only be taken to a chat the getting-ready screen holds them out of.
+ */
 export async function forkChat(input: { conversationId: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("fork chat", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return { ok: false, error: CHAT_BLOCKED };
+    }
     const conversationId = text(input.conversationId);
     const id = await acceptFork(prisma, viewer, conversationId);
     revalidatePath("/assistant");
