@@ -6,6 +6,7 @@ import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
+import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
 import {
@@ -404,7 +405,7 @@ export async function sharedChat(viewer: Identity, id: string): Promise<SharedCo
   if (allowed === undefined) {
     return undefined;
   }
-  return await sharedConversation(prisma, allowed.conversation, allowed.access);
+  return await sharedConversation(prisma, allowed.conversation, allowed.access, await forkChoice(prisma, viewer.oid, allowed.conversation, allowed.forks));
 }
 
 /** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */
@@ -416,8 +417,27 @@ export async function chatShares(viewer: Identity, id: string): Promise<SharePer
   return await shareRecipients(prisma, id);
 }
 
-/** Both sides of the viewer's shares: their own chats they have shared, and the chats shared with them. */
-export async function sharedChats(viewer: Identity): Promise<{ given: SharedChatLink[]; received: SharedChatLink[] }> {
-  const [given, received] = await Promise.all([conversationsSharedBy(prisma, viewer.oid), conversationsSharedWith(prisma, viewer.oid)]);
-  return { given, received };
+/** Who one of the viewer's own conversations is offered to fork, or `undefined` when it is not theirs to offer. */
+export async function chatForks(viewer: Identity, id: string): Promise<SharePerson[] | undefined> {
+  const conversation = await conversationRef(prisma, id);
+  if (conversation === undefined || !canManageConversationShares(viewer.oid, conversation)) {
+    return undefined;
+  }
+  return await forkRecipients(prisma, id);
+}
+
+/**
+ * Both sides of the viewer's shares and fork offers: their own chats they have shared or offered, and the chats
+ * shared with or offered to them.
+ */
+export async function sharedChats(
+  viewer: Identity
+): Promise<{ given: SharedChatLink[]; received: SharedChatLink[]; offered: SharedChatLink[]; forkable: SharedChatLink[] }> {
+  const [given, received, offered, forkable] = await Promise.all([
+    conversationsSharedBy(prisma, viewer.oid),
+    conversationsSharedWith(prisma, viewer.oid),
+    conversationsOfferedBy(prisma, viewer.oid),
+    conversationsForkableBy(prisma, viewer.oid)
+  ]);
+  return { given, received, offered, forkable };
 }

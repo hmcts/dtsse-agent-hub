@@ -11,6 +11,7 @@ import type { VirtualAgentRow } from "../virtual-agents/store.ts";
 import { neededCredentials, OPTIONAL_CREDENTIALS } from "../virtual-agents/views.ts";
 import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
+import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
@@ -159,16 +160,19 @@ export interface ConversationView {
   jira: JiraExportView;
   confluence: ConfluenceExportView;
   page: ConversationPage;
+  /** Where the chat was forked from and the words copied from it, shown above its own; `null` unless it is a copy. */
+  forked: ForkedView | null;
 }
 
 /** One of the viewer's conversations with its first page; `agentId` is the conversation's current agent. */
 export async function conversationView(db: Database, conversation: ConversationRow, agentId: string): Promise<ConversationView> {
-  const [agent, artefact, jira, confluence, page] = await Promise.all([
+  const [agent, artefact, jira, confluence, page, fork] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true } }),
     readArtefact(db, conversation.id),
     readJiraExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),
-    agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true }, [])
+    agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true }, []),
+    db.assistantConversation.findUnique({ where: { id: conversation.id }, select: FORKED_SELECT })
   ]);
   return {
     id: conversation.id,
@@ -186,6 +190,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     artefact: { ...artefact, updatedAt: artefact.updatedAt?.toISOString() ?? null },
     jira,
     confluence,
-    page
+    page,
+    forked: fork === null ? null : forkedView(fork)
   };
 }

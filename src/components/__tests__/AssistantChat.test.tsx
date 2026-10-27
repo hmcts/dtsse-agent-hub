@@ -117,6 +117,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     jira: { status: "none" },
     confluence: { status: "none" },
     page: page(),
+    forked: null,
     ...overrides
   };
 }
@@ -203,6 +204,45 @@ describe("ChatView thread", () => {
     );
 
     expect(screen.getByText("Not delivered. Send it again.")).toBeTruthy();
+  });
+
+  const FORKED: ConversationView["forked"] = {
+    fromOwnerName: "Alice Tester",
+    fromTitle: "Possession orders",
+    at: "2026-10-20T09:00:00.000Z",
+    thread: [{ type: "assistant", key: "f0", at: "2026-10-20T09:00:00.000Z", text: "The property, the date and the costs." }],
+    earlierHidden: false
+  };
+
+  it("should show the copied part above the copy's own thread when the conversation is a fork", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ forked: FORKED })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByText(/Forked from Alice Tester/)).toBeTruthy();
+    expect(within(screen.getByRole("list", { name: "Copied conversation" })).getByText("The property, the date and the costs.")).toBeTruthy();
+    expect(screen.getByText("Your copy starts here")).toBeTruthy();
+  });
+
+  it("should hold the copied part back when earlier messages of the copy are still to load", () => {
+    render(
+      <ChatView
+        jira={NO_JIRA}
+        viewerOid={VIEWER}
+        view={conversation({ forked: FORKED, page: page({ olderBefore: "7" }) })}
+        templates={TEMPLATES}
+        actions={actions()}
+      />
+    );
+
+    expect(screen.queryByText(/Forked from Alice Tester/)).toBeNull();
+  });
+
+  it("should offer Fork beside Share in the chat options when the menu is opened", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }));
+
+    expect(screen.getByRole("menuitem", { name: "Share" }).getAttribute("href")).toBe(`/assistant/${CONVERSATION}?share=1`);
+    expect(screen.getByRole("menuitem", { name: "Fork" }).getAttribute("href")).toBe(`/assistant/${CONVERSATION}?fork=1`);
   });
 });
 

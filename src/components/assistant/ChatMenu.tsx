@@ -45,11 +45,11 @@ function room(element: HTMLElement): { above: number; below: number; beside: num
 }
 
 /**
- * A conversation's options: share it read-only, rename it, or delete it and its document. Shown from the chat's
+ * A conversation's options: share it read-only, offer it to be forked, rename it, or delete it and its document. Shown from the chat's
  * header for the open conversation and from every row of the sidebar, so the destructive confirmation is written
  * once.
  *
- * Share is a link rather than a pane of its own: the dialog lives at the chat's own address, so it can be reached
+ * Share and Fork are links rather than panes of their own: the dialog lives at the chat's own address, so it can be reached
  * from anywhere and the browser's back button closes it.
  *
  * Dismissed by Escape or a click outside, in the same shape as the hub's other menus: closing from the keyboard puts
@@ -59,6 +59,7 @@ function room(element: HTMLElement): { above: number; below: number; beside: num
 export function ChatMenu({
   title,
   shareHref,
+  forkHref,
   onRename,
   onDelete,
   onOpen,
@@ -68,6 +69,8 @@ export function ChatMenu({
   title: string;
   /** Where the share dialog for this chat is. */
   shareHref: string;
+  /** Where the dialog offering this chat to be forked is. */
+  forkHref: string;
   onRename: (title: string) => Promise<void>;
   onDelete: () => Promise<void>;
   /** Called as the menu opens, so whatever is shown about the last attempt can be dropped. */
@@ -184,6 +187,9 @@ export function ChatMenu({
             <div role="menu" aria-label={label} className="flex flex-col gap-0.5">
               <Link href={shareHref} role="menuitem" className={item} onClick={close}>
                 Share
+              </Link>
+              <Link href={forkHref} role="menuitem" className={item} onClick={close}>
+                Fork
               </Link>
               <button
                 type="button"

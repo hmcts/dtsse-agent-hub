@@ -257,6 +257,7 @@ export function AssistantShell({
                           <ChatMenu
                             title={item.title}
                             shareHref={`/assistant/${item.id}?share=1`}
+                            forkHref={`/assistant/${item.id}?fork=1`}
                             label={`Options for ${item.title}`}
                             // The trigger appears when the row is hovered, but a keyboard or touch user never
                             // hovers, so it is shown as well while the focus is anywhere inside the row, at every

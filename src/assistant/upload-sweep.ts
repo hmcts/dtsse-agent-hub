@@ -109,6 +109,8 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  * - **No message to or from any of its agents.** One message and the conversation is the person's; this never
  *   touches a chat that was spoken in, whatever became of its files.
  * - **No document.** The session may have written one before the person said anything.
+ * - **Not a fork.** A copy of someone else's chat holds its words before anyone says anything in it, and the
+ *   recipient chose to take it.
  * - **It was created longer ago than the retention window, and holds no upload newer than it.** The window follows
  *   the last thing the person actually did in the conversation rather than only when it was made, so attaching a
  *   second file hours later puts the clock back rather than leaving a live composer to be swept out from under them.
@@ -124,6 +126,7 @@ async function dropAbandoned(tx: Database, retentionHours: number, batch: number
     SELECT c.id::text AS id, c.virtual_agent_id::text AS virtual_agent_id, c.owner_oid
       FROM assistant_conversation c
      WHERE c.artefact_version = 0
+       AND c.forked_at IS NULL
        AND c.created_at < now() - make_interval(hours => ${retentionHours}::int)
        AND NOT EXISTS (
              SELECT 1 FROM assistant_upload u

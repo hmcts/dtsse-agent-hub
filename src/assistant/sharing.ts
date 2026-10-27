@@ -2,6 +2,7 @@ import type { ConversationAccess } from "../access/rules.ts";
 import type { Database } from "../store/prisma.ts";
 import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
+import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { productLabel } from "./products.ts";
 import type { SharedConversationRow } from "./shares.ts";
 import { readArtefact } from "./store.ts";
@@ -76,15 +77,24 @@ export interface SharedConversationView {
   document: { title: string; markdown: string } | null;
   /** `owner` when the owner is looking at their own share, which is how they see what a recipient sees. */
   access: ConversationAccess;
+  /**
+   * The words this conversation was forked from, when it is a copy, shown above its own: without them a share of a
+   * copy would start part-way through a chat. They are words a share of the source would have shown anyway.
+   */
+  forked: ForkedView | null;
+  /** What the viewer may do about forking it: `null` unless they were offered it. `copyId` is their copy, once taken. */
+  fork: { copyId: string | null } | null;
 }
 
-function marks(value: unknown): ProductMark[] {
+/** The stored product history, as the thread reads it. */
+export function productMarks(value: unknown): ProductMark[] {
   return Array.isArray(value)
     ? value.filter((mark): mark is ProductMark => typeof mark === "object" && mark !== null && typeof mark.product === "string" && typeof mark.at === "string")
     : [];
 }
 
-function stops(value: unknown): StopMark[] {
+/** The stored stop history, as the thread reads it. */
+export function stopMarks(value: unknown): StopMark[] {
   return Array.isArray(value) ? value.filter((mark): mark is StopMark => typeof mark === "object" && mark !== null && typeof mark.at === "string") : [];
 }
 
@@ -99,11 +109,20 @@ function stops(value: unknown): StopMark[] {
 export async function sharedConversation(
   db: Database,
   conversation: SharedConversationRow,
-  access: ConversationAccess
+  access: ConversationAccess,
+  fork: SharedConversationView["fork"] = null
 ): Promise<SharedConversationView | undefined> {
   const row = await db.assistantConversation.findUnique({
     where: { id: conversation.id },
-    select: { title: true, product: true, productHistory: true, stopHistory: true, agentId: true, owner: { select: { name: true } } }
+    select: {
+      title: true,
+      product: true,
+      productHistory: true,
+      stopHistory: true,
+      agentId: true,
+      owner: { select: { name: true } },
+      ...FORKED_SELECT
+    }
   });
   if (row === null) {
     return undefined;
@@ -119,11 +138,13 @@ export async function sharedConversation(
     title: row.title ?? UNTITLED,
     productLabel: productLabel(row.product),
     ownerName: row.owner.name,
-    thread: sharedThreadItems(threadItems(items, marks(row.productHistory), stops(row.stopHistory))),
+    thread: sharedThreadItems(threadItems(items, productMarks(row.productHistory), stopMarks(row.stopHistory))),
+    forked: forkedView(row),
     // `olderBefore` is the entry the owner's own page would ask for the previous page before; here it only says that
     // there is one.
     earlierHidden: page?.olderBefore !== null && page?.olderBefore !== undefined,
     document: artefact.version === 0 ? null : { title: artefact.title ?? "Untitled document", markdown: artefact.markdown },
-    access
+    access,
+    fork
   };
 }

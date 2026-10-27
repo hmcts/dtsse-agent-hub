@@ -16,6 +16,7 @@ import { Mark, SidebarToggle } from "@/components/assistant/AssistantShell";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
+import { ForkedThread } from "@/components/assistant/ForkedThread";
 import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/JiraExport";
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { MessageAttachments } from "@/components/assistant/MessageAttachments";
@@ -346,6 +347,7 @@ export function ChatView({
             <ChatMenu
               title={view.title}
               shareHref={`/assistant/${view.id}?share=1`}
+              forkHref={`/assistant/${view.id}?fork=1`}
               onRename={async (title) => {
                 const result = await actions.rename({ conversationId: view.id, title });
                 setError(result.ok ? null : result.error);
@@ -374,6 +376,8 @@ export function ChatView({
                 {live.loading ? "Loading" : "Show earlier messages"}
               </button>
             ) : null}
+            {/* Only once the thread reaches its own start, so the copied part never sits above a gap in the copy's own. */}
+            {view.forked === null || live.olderBefore !== null ? null : <ForkedThread forked={view.forked} />}
             {live.error === null ? null : (
               <p role="alert" className="self-center text-xs text-asst-error">
                 {live.error}
