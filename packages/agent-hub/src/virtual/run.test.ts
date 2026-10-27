@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { createGithubDeviceFlowStub, STUB_USER_CODE } from "../__fixtures__/github-device-flow-stub.ts";
 import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
 import { captureStderr, createPodShims, type PodShims, podSecrets, usePodEnv } from "../__fixtures__/pod-shims.ts";
 import { createApi } from "../api.ts";
@@ -185,12 +186,23 @@ describe("runVirtual atlassian-login", () => {
 
 describe("runVirtual github-login and claude-login", () => {
   it("should relay a GitHub sign-in and exit 0", async () => {
-    // Act
-    const r = await virtualCommand(["github-login"], { env: pod.env({ FAKE_GH_TOKEN: podSecrets.githubToken }) });
+    // Arrange: the command takes no `fetch`, so the flow is pointed at a fake github.com instead.
+    const github = createGithubDeviceFlowStub({ token: podSecrets.githubToken });
+    const host = await github.listen();
 
-    // Assert
-    expect(r.code).toBe(0);
-    expect(virtual().credentials.get("github")).toBe(podSecrets.githubToken);
+    try {
+      // Act
+      const r = await virtualCommand(["github-login"], { env: pod.env({ GITHUB_OAUTH_HOST: host }) });
+
+      // Assert
+      expect(r.code).toBe(0);
+      expect(virtual().credentials.get("github")).toBe(podSecrets.githubToken);
+      expect(virtual().prompts).toEqual([
+        { kind: "github", prompt: "device_code", verification_uri: "https://github.com/login/device", user_code: STUB_USER_CODE, expires_in: 900 }
+      ]);
+    } finally {
+      await github.close();
+    }
   });
 
   it("should relay a Claude sign-in and exit 0", async () => {

@@ -36,6 +36,9 @@ CLI_JS="${AGENT_HUB_CLI_JS:-$ROOT/src/cli.ts}"
 HUB_URL="${HUB_URL:?HUB_URL is not set: src/virtual-agent-boot.test.ts starts the mock hub}"
 # An apostrophe in a ${var:?message} is a quote to bash, even inside double quotes, so there is none here.
 HUB_STATE="${HUB_STATE:?HUB_STATE is not set: src/virtual-agent-boot.test.ts writes the hub state there}"
+# Required rather than defaulted to github.com: the device-code sign-in is the client's own HTTP now, and a
+# run of this script must reach a fake one. Nobody is there to enter a code at the real one.
+GITHUB_OAUTH_HOST="${GITHUB_OAUTH_HOST:?GITHUB_OAUTH_HOST is not set: src/virtual-agent-boot.test.ts starts the fake github.com}"
 VID="${VID:-va-boot-1}"
 LAUNCH="${LAUNCH:-launch-boot-test}"
 REAL_GIT="$(command -v git)"
@@ -44,8 +47,9 @@ REAL_NODE="$(command -v node)"
 T="$(mktemp -d)"
 trap '[ -n "${KEEP:-}" ] || rm -rf "$T"' EXIT
 
-# Not a real credential: what the fake gh hands back, and what the hub should end up holding.
-GOOD_TOKEN="gh-boot-test-token"
+# Not a real credential: what the fake github.com hands over, what the fake gh accepts, and what the hub
+# should end up holding. The wrapper passes the same value to both sides.
+GOOD_TOKEN="${GOOD_TOKEN:-gh-boot-test-token}"
 STALE_TOKEN="gh-boot-test-stale"
 # A second token GitHub also refuses: the fake gh accepts FAKE_GOOD_TOKEN alone, so any other value is refused.
 OTHER_STALE_TOKEN="gh-boot-test-stale-again"
@@ -74,21 +78,17 @@ setup() {
     chmod +x "$C/pkg/bin/virtual-agent-boot"
     ln -s "$C/pkg/bin/virtual-agent-boot" "$C/bin/virtual-agent-boot"
 
+    # The device flow is the client's own HTTP against $GITHUB_OAUTH_HOST, so gh only ever takes a token on
+    # stdin here: a token the owner stored, or the one that sign-in ended with.
     cat >"$C/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2" in
     "auth login")
-        if [[ " $* " == *" --with-token "* ]]; then
-            read -r token
-            [ "$token" = "$FAKE_GOOD_TOKEN" ] || { echo "error validating token: HTTP 401: Bad credentials" >&2; exit 1; }
-            echo "gh login-with-token" >>"$FAKE_DIR/order.log"
-        else
-            [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && { echo "GH_TOKEN reached gh auth login" >&2; exit 1; }
-            printf '\n! First copy your one-time code: 7B7F-C198\nOpen this URL to continue in your web browser: https://github.com/login/device\n' >&2
-            echo "gh device-login" >>"$FAKE_DIR/order.log"
-            # A sign-in that breaks under the owner: the code is printed, then gh stops polling and says why.
-            [ -n "${FAKE_GH_LOGIN_FAILS:-}" ] && { printf '%s\n' "$FAKE_GH_LOGIN_FAILS" >&2; exit 1; }
-        fi
+        [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && { echo "GH_TOKEN reached gh auth login" >&2; exit 1; }
+        [[ " $* " == *" --with-token "* ]] || { echo "unexpected gh auth login $*" >&2; exit 2; }
+        read -r token
+        [ "$token" = "$FAKE_GOOD_TOKEN" ] || { echo "error validating token: HTTP 401: Bad credentials" >&2; exit 1; }
+        echo "gh login-with-token" >>"$FAKE_DIR/order.log"
         touch "$FAKE_DIR/gh.signed-in" ;;
     "auth setup-git") echo "gh setup-git" >>"$FAKE_DIR/order.log" ;;
     "auth token") [ -f "$FAKE_DIR/gh.signed-in" ] && printf '%s\n' "$FAKE_GOOD_TOKEN" ;;
@@ -174,7 +174,7 @@ seed_github() {
 # boot [VAR=value…]: runs the boot script to its end (the fake entrypoint exits), at most 30s.
 boot() {
     env -i PATH="$BOOT_PATH" HOME="$C/home" NVM_DIR=/nonexistent FAKE_DIR="$C" \
-        FAKE_GOOD_TOKEN="$GOOD_TOKEN" AGENT_HUB_URL="$HUB_URL" AGENT_HUB_VIRTUAL_AGENT_ID="$VID" \
+        FAKE_GOOD_TOKEN="$GOOD_TOKEN" GITHUB_OAUTH_HOST="$GITHUB_OAUTH_HOST" AGENT_HUB_URL="$HUB_URL" AGENT_HUB_VIRTUAL_AGENT_ID="$VID" \
         AGENT_HUB_LAUNCH_TOKEN="$LAUNCH" AGENT_HUB_CLI_JS="$CLI_JS" VIRTUAL_AGENT_WORKSPACE="$C/ws/cft-workspace" \
         "$@" bash "$C/bin/virtual-agent-boot" >"$C/out" 2>&1 &
     local pid=$! watchdog
@@ -199,7 +199,7 @@ case_no_token() {
     setup no-token
     boot
     [ "$BOOT_RC" -eq 0 ] && ok "boots through to the entrypoint" || no "boot exited $BOOT_RC"
-    order_is "gh device-login gh setup-git git clone npm install entrypoint " && ok "signs in to GitHub before the clone" || no "order: $(tr '\n' ' ' <"$C/order.log")"
+    order_is "gh login-with-token gh setup-git git clone npm install entrypoint " && ok "signs in to GitHub before the clone" || no "order: $(tr '\n' ' ' <"$C/order.log")"
     grep -q "signing in to GitHub with $C/bin/agent-hub" "$C/out" && ok "uses the installed client with no checkout" || no "did not use the installed client"
     [ "$(hub '.status[1].phase')" = awaiting_credentials ] && hub '.status[1].detail' | grep -q '^github: no GitHub token stored' &&
         ok "reports awaiting_credentials for the missing token" || no "status: $(hub -c '.status')"
@@ -213,7 +213,7 @@ case_refused_token() {
     setup refused-token
     seed_github "$STALE_TOKEN"
     boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh setup-git git clone npm install entrypoint " &&
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
         ok "a refused stored token falls back to the device-code sign-in" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     hub '.status[1].detail' | grep -q '^github: the stored GitHub token was refused' && ok "says the stored token was refused" || no "status: $(hub -c '.status')"
     [ "$(hub '.github')" = "$GOOD_TOKEN" ] && ok "replaces the token on the hub" || no "the token was not replaced"
@@ -259,11 +259,11 @@ case_sign_in_not_completed() {
     local seeder=$!
     # The client waits a minute between codes, which no watchdog here would outlast; the three attempts are the
     # point, not the minutes. This is the same variable a pod gets to be watched through a sign-in.
-    boot FAKE_GH_LOGIN_FAILS="error: HTTP 429" AGENT_HUB_GITHUB_SIGN_IN_GAP_MS=10
+    boot AGENT_HUB_GITHUB_SIGN_IN_GAP_MS=10
     kill "$seeder" 2>/dev/null
     wait "$seeder" 2>/dev/null
     [ "$BOOT_RC" -eq 0 ] &&
-        order_is "gh device-login gh device-login gh device-login gh login-with-token gh setup-git gh setup-git git clone npm install entrypoint " &&
+        order_is "gh login-with-token gh setup-git gh setup-git git clone npm install entrypoint " &&
         ok "stops asking, signs in with the token that works and boots on" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     [ "$(hub '.prompts | length')" -eq 3 ] && ok "relays its budget of codes, and none while waiting" || no "prompts: $(hub -c '.prompts')"
     [ "$(hub '.loginFailures[0].state')" = failed ] && ok "tells the hub the sign-in did not complete" || no "loginFailures: $(hub -c '.loginFailures')"
@@ -272,9 +272,15 @@ case_sign_in_not_completed() {
         ok "never fails the agent, which would route the owner off the screen that has the token form" || no "status: $(hub -c '.status')"
     hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'Paste a GitHub token at' &&
         ok "asks for a token in the phase that offers one" || no "status: $(hub -c '.status')"
+    # $EXIT_NO_CREDENTIAL also covers an owner who entered a code and had the token it granted refused or lost on
+    # the way to being stored, so a message here about what they did not do is false for two of the three ways
+    # in. The remedy is the same for all of them; the diagnosis is the client's, and it has already reported it.
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("not signed in to GitHub yet"))] | length')" -ge 1 ] &&
+        [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("nobody completed"))] | length')" -eq 0 ] &&
+        ok "says the condition rather than blaming the owner for a sign-in they may have completed" || no "status: $(hub -c '.status')"
     [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("refused the stored token"))] | length')" -eq 1 ] &&
         ok "reports the token the owner pasted, and not the one already known refused" || no "status: $(hub -c '.status')"
-    grep -q 'gh said:.*error: HTTP 429' "$C/out" && ok "logs what gh said" || no "gh output not logged: $(grep 'gh auth login' "$C/out")"
+    grep -q 'GitHub answered access_denied' "$C/out" && ok "logs what GitHub answered" || no "the refusal was not logged: $(grep 'github:' "$C/out")"
 }
 
 # Only "the owner did not complete the sign-in" stops the asking. A client that fails for any other reason is a
@@ -296,7 +302,7 @@ exec "$CLIENT" "\$@"
 EOF
     chmod +x "$C/bin/agent-hub"
     boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh setup-git git clone npm install entrypoint " &&
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
         ok "rides out a client failure that is not the owner's and signs in after it" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     [ "$(cat "$C/client-calls")" -eq 3 ] && ok "retries the sign-in rather than giving up on the first failure" || no "client calls: $(cat "$C/client-calls")"
     grep -q 'github sign-in failed (exit 1); retrying in 30s' "$C/out" && ok "logs the exit code it is retrying" || no "retry not logged: $(grep 'github sign-in' "$C/out")"
@@ -327,7 +333,7 @@ case_checkout_client() {
     printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh setup-git git fetch git merge npm install entrypoint " &&
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
         ok "signs in, then fast-forwards the existing checkout" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     grep -q "signing in to GitHub with $C/ws/cft-workspace/scripts/agent-hub" "$C/out" && ok "prefers the checkout's client" || no "did not use the checkout's client"
 }
@@ -342,7 +348,7 @@ case_broken_checkout_client() {
     printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
     boot
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh setup-git git fetch git merge npm install entrypoint " &&
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
         ok "boots through with a shim that cannot run" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     grep -q "signing in to GitHub with $C/bin/agent-hub" "$C/out" && ok "falls through to the installed client" || no "did not fall through: $(grep 'signing in' "$C/out")"
 }
@@ -361,7 +367,7 @@ case_no_client() {
 case_trailing_slash() {
     setup trailing-slash
     boot AGENT_HUB_URL="$HUB_URL//"
-    [ "$BOOT_RC" -eq 0 ] && order_is "gh device-login gh setup-git git clone npm install entrypoint " &&
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git clone npm install entrypoint " &&
         ok "boots through with a hub URL ending in slashes" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
     [ "$(hub '.github')" = "$GOOD_TOKEN" ] && ok "reached the hub with the slashes stripped" || no "the token was not stored"
 }

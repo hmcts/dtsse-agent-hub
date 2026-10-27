@@ -311,9 +311,15 @@ if [[ -n "$github_missing" ]]; then
     # A stored token is the other way in, so that is what the pod waits for, and waiting costs one GET rather
     # than a device code nobody uses. `awaiting_credentials`, not `failed`: it is the phase that puts the owner
     # on the screen with the box to paste a token into, and it is the truth about a pod watching for one.
+    #
+    # It says the condition and not a cause, because an exit code is all this has. $EXIT_NO_CREDENTIAL covers an
+    # owner who never entered a code and an owner who entered one and had the token it granted refused or lost
+    # on the way to being stored, so anything here about what they did or did not do is false for two of the
+    # three. The client has already reported the accurate reason as the sign-in's own detail; this adds the
+    # remedy, which is the same whichever of them happened.
     if [[ "$asked" -eq 1 ]]; then
-        report awaiting_credentials "github: nobody completed the sign-in. Paste a GitHub token at $HUB/hub/settings/credentials, or stop and start this agent to be sent another code."
-        log "github sign-in did not complete; waiting for a stored GitHub token rather than asking again"
+        report awaiting_credentials "github: this agent is not signed in to GitHub yet. Paste a GitHub token at $HUB/hub/settings/credentials, or stop and start this agent to be sent another code."
+        log "github sign-in did not finish; waiting for a stored GitHub token rather than asking again"
         refused="$github_refused"
         until token=$(github_credential) && [[ -n "$token" ]] && gh_login_with_token "$token"; do
             # Keyed on the value, so each token pasted is reported once and a second bad one is reported too,

@@ -43,6 +43,14 @@ export const ENV_KEYS = [
   "CLAUDE_CONFIG_DIR",
   "CLAUDE_PID",
   "CLAUDE_PROJECT_DIR",
+  // The GitHub host and OAuth app the device-code sign-in runs against. Both default to github.com and the
+  // "GitHub CLI" app, which is what a pod wants. `GITHUB_OAUTH_CLIENT_ID` is settable so an HMCTS-owned app
+  // needs no code change; `GITHUB_OAUTH_HOST` is settable so the boot suite can drive the flow without leaving
+  // the box, and that is all it is for — it moves the device flow alone, while `storedGhToken`, the
+  // `gh auth login --hostname github.com` that stores the token and the `gh api user` that names the account
+  // are all pinned to github.com, so a host that is not github.com would store its token against the wrong one.
+  "GITHUB_OAUTH_CLIENT_ID",
+  "GITHUB_OAUTH_HOST",
   "HOME",
   "NVM_DIR",
   "PATH",

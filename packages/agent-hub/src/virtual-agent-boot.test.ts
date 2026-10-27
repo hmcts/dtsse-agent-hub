@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createGithubDeviceFlowStub } from "./__fixtures__/github-device-flow-stub.ts";
 import { createMockHub } from "./__fixtures__/mock-hub.ts";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -94,9 +95,19 @@ function runScript(args: string[], env: Record<string, string> = {}): Promise<Ru
 // pod never reported. And it is written as the response goes out rather than on that response's `finish`,
 // which is emitted only after the data has reached the socket — late enough for the script to be asserting
 // on a state a request behind.
+// Not a real credential: what the fake github.com hands over, what the fake gh will accept, and what the hub
+// should end up holding. The script defaults to the same value, so either side can be read in a failure.
+const GOOD_TOKEN = "gh-boot-test-token";
+
 async function runCase(name: string): Promise<Run> {
   const hub = createMockHub({ launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
   const url = await hub.listen();
+  // Stage 0's device-code sign-in is the client's own HTTP now, so it is pointed at a fake github.com: the
+  // suite must not reach the real one, and nobody is there to enter a code at it.
+  // One case drives the client out of codes, which now means a GitHub that refuses every poll rather than a
+  // gh that stops: the flow is the client's own.
+  const github = createGithubDeviceFlowStub({ token: GOOD_TOKEN, refuseWith: name === "sign-in-not-completed" ? "access_denied" : undefined });
+  const githubHost = await github.listen();
   const state = path.join(stateDir, `${name}.json`);
   const v = hub.virtuals.get(VID)!;
   const dump = () => {
@@ -115,8 +126,9 @@ async function runCase(name: string): Promise<Run> {
   hub.onBeforeRespond(dump);
   dump();
   try {
-    return await runScript([name], { HUB_URL: url, HUB_STATE: state, VID, LAUNCH });
+    return await runScript([name], { HUB_URL: url, HUB_STATE: state, VID, LAUNCH, GITHUB_OAUTH_HOST: githubHost, GOOD_TOKEN });
   } finally {
+    await github.close();
     await hub.close();
   }
 }
