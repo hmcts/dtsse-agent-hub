@@ -792,6 +792,26 @@ describe("runHook PreToolUse", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * The hub refuses a second, different question while one of this session's is still unanswered: nothing is
+   * written, so there is no card to wait for. Telling the model its question is on screen would leave it waiting
+   * for one that does not exist, which is the stall this hook exists to remove — so a `409` has to come out as the
+   * reason that sends it back to asking in words, and it must not be retried.
+   */
+  it("should tell the model to ask in words when the hub already has a different question of this session's", async () => {
+    // Arrange
+    registered("preq-conflict");
+    const fetchImpl = vi.fn(async () => Response.json({ error: "this session already has a different question waiting for an answer" }, { status: 409 }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    // Act
+    const out = await hookJson(ask("preq-conflict"), CONVERSATION);
+
+    // Assert
+    expect(reason(out)).toBe(UNDELIVERED_REASON);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   // A refusal is the hub reading the body and saying no, which asking again cannot change; the model is waiting on
   // this hook, so the budget is not spent repeating it.
   it("should tell the model to ask in words, without asking twice, when the hub refused the question", async () => {

@@ -16,38 +16,55 @@ async function announce(db: Database, agent: Pick<AgentRow, "id" | "ownerOid">):
 }
 
 /**
- * Records a question for the person to answer, and nothing at all when that session already has one on screen.
+ * Records a question for the person to answer. Three outcomes, and the caller has to be able to tell them apart,
+ * because the hook turns this answer into what the model is told and it must never claim a card that is not there.
  *
- * **One unanswered card per session.** Two things both lead here. The retry of a single tool call is idempotent on
- * `tool_use_id`, which the unique index enforces: the client denies the tool whether or not its POST was answered,
- * so a lost response must not put a second card up. A model that calls the tool *again* after the deny brings a new
- * `tool_use_id`, which that index cannot see — and two live cards in one blocked turn is the worse outcome of the
- * two, because answering either sends a message that contradicts the other. So an unanswered question for this
- * agent and session is taken as the question being asked, and the second call changes nothing. The row is the
- * lock: it is read `FOR UPDATE` so two calls arriving together cannot both find room.
+ * - **A fresh question** is written. The model is told it is on screen.
+ * - **The same question again** — the same `tool_use_id`, whose unique index is what makes this idempotent —
+ *   writes nothing and is still success: the client denies the tool whether or not its POST was answered, so a
+ *   retry after a lost response finds the card it already put up. The model is told the same thing, truthfully.
+ * - **A different question while one is still unanswered** is refused, because writing it would put two live cards
+ *   in one blocked turn and answering either would send a message contradicting the other. Nothing is written, so
+ *   the model must be told to ask in words instead — telling it the question is on screen would leave it waiting
+ *   for a card that does not exist, which is the stall this whole feature exists to remove.
  *
  * A retry does not replace the stored set either — the question is the one the session is waiting on an answer to,
  * and rewriting it under a card the person is reading would change what they are choosing between.
  */
-export async function recordQuestion(prisma: PrismaClient, agent: Pick<AgentRow, "id" | "ownerOid">, post: QuestionPost): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+export type QuestionRecorded = "asked" | "already-asked";
+
+export class QuestionNotRecorded extends HttpError {
+  constructor() {
+    // Literal first, as every refusal here is: the rule in `docs/agent-api.md` is that no caller value leads a
+    // message, so nothing a client sends can put a `<` at the front of one.
+    super(409, "this session already has a different question waiting for an answer");
+  }
+}
+
+export async function recordQuestion(prisma: PrismaClient, agent: Pick<AgentRow, "id" | "ownerOid">, post: QuestionPost): Promise<QuestionRecorded> {
+  return await prisma.$transaction(async (tx) => {
     // The agent row, so that two questions arriving at once are serialised: the question rows themselves cannot be
     // locked, since the one that matters is usually the one that does not exist yet.
     await tx.$queryRaw`SELECT 1 FROM agent WHERE id = ${agent.id}::uuid FOR UPDATE`;
+    // This very question, answered or not. Read before the open-question check below, so a retry of the question
+    // already on screen is the success it is rather than the refusal a *different* question would get.
+    const same = await tx.agentQuestion.findFirst({ where: { agentId: agent.id, toolUseId: post.tool_use_id }, select: { id: true } });
+    if (same !== null) {
+      return "already-asked";
+    }
     const open = await tx.agentQuestion.findFirst({
       where: { agentId: agent.id, sessionId: post.session_id, answeredAt: null },
       select: { id: true }
     });
     if (open !== null) {
-      return;
+      throw new QuestionNotRecorded();
     }
-    const { count } = await tx.agentQuestion.createMany({
-      data: [{ agentId: agent.id, sessionId: post.session_id, toolUseId: post.tool_use_id, questions: post.questions }],
-      skipDuplicates: true
+    await tx.agentQuestion.create({
+      data: { agentId: agent.id, sessionId: post.session_id, toolUseId: post.tool_use_id, questions: post.questions },
+      select: { id: true }
     });
-    if (count > 0) {
-      await announce(tx, agent);
-    }
+    await announce(tx, agent);
+    return "asked";
   });
 }
 
@@ -55,6 +72,8 @@ export async function recordQuestion(prisma: PrismaClient, agent: Pick<AgentRow,
 export interface QuestionRow {
   id: string;
   questions: unknown;
+  /** Read by the action, which applies the offer window to it rather than trusting the page that drew the card. */
+  askedAt: Date;
   answeredAt: Date | null;
   agent: { id: string; ownerOid: string; virtualAgentId: string | null; assistantConversationId: string | null };
 }
@@ -65,6 +84,7 @@ export async function findQuestion(db: Database, id: string): Promise<QuestionRo
     select: {
       id: true,
       questions: true,
+      askedAt: true,
       answeredAt: true,
       agent: { select: { id: true, ownerOid: true, virtualAgentId: true, assistantConversationId: true } }
     }

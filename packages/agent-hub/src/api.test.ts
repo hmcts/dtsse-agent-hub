@@ -731,6 +731,21 @@ describe("createApi questions", () => {
     expect(error.status).toBe(400);
     expect(error.message).toBe(`POST /api/agent/${agentId}/question failed: 400 bad question`);
   });
+
+  // The caller has to be able to tell this from the idempotent retry above: nothing was written, so there is no
+  // card for the model to wait for and it has to be sent back to asking in words.
+  it("should throw a 409 when a different question of this session's is still unanswered", async () => {
+    // Arrange
+    await api.postQuestion(agentId, QUESTION);
+
+    // Act
+    const error = await api.postQuestion(agentId, { ...QUESTION, tool_use_id: "toolu_second" }).catch((e) => e);
+
+    // Assert
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(409);
+    expect(hub.questions.filter((asked) => asked.agent_id === agentId)).toHaveLength(1);
+  });
 });
 
 describe("createApi attachments", () => {

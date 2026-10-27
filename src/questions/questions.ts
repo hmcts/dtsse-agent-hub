@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
+import { DEFAULT_IDLE_MINUTES } from "../virtual-agents/settings.ts";
 
 /**
  * A question a session's model asked with Claude Code's `AskUserQuestion` tool, which the client's `PreToolUse` hook
@@ -25,6 +26,35 @@ export const MAX_OPTION_DESCRIPTION = 500;
 export const MAX_ANSWER_TEXT = 2000;
 export const MAX_TOOL_USE_ID = 200;
 export const MAX_SESSION_ID = 200;
+
+/**
+ * How many of an agent's questions a page reads. The thread is paginated and these are not, so without a bound a
+ * long-lived conversation would ship every card it had ever been asked on every load. The newest are kept, because
+ * the oldest are the ones already answered or long abandoned.
+ */
+export const MAX_SHOWN_QUESTIONS = 20;
+
+/**
+ * How long a question is offered for. Past it the card still shows what was asked — the thread must not lose that —
+ * but it stops being answerable and stops being something the assistant is waiting on.
+ *
+ * `DEFAULT_IDLE_MINUTES`, the pod's own idle stop, because that is the clock that decides whether the session which
+ * asked is still there at all: a pod with nothing happening in it is stopped after this long, so an answer arriving
+ * later reaches a session started afresh rather than the turn that asked. It is deliberately generous — a person
+ * coming back from lunch to a question can still answer it — and the point of the bound is only that an abandoned
+ * card stops claiming the assistant is waiting on them for ever.
+ */
+export const QUESTION_OFFER_WINDOW_MS = DEFAULT_IDLE_MINUTES * 60_000;
+
+/**
+ * Whether a question is past being offered. Pure and shared, because three places have to agree on it: the view
+ * that decides whether to draw controls, the thread line that decides whether the assistant is waiting on the
+ * person, and the action that records an answer — which is the one that actually enforces it, since a page left
+ * open gets no say in what time it is.
+ */
+export function offerExpired(askedAt: Date, now: Date): boolean {
+  return now.getTime() - askedAt.getTime() >= QUESTION_OFFER_WINDOW_MS;
+}
 
 const label = z.string().trim().min(1).max(MAX_OPTION_LABEL);
 

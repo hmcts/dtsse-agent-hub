@@ -25,7 +25,7 @@ function question(overrides: Partial<Question> = {}): Question {
 }
 
 function view(overrides: Partial<QuestionView> = {}): QuestionView {
-  return { id: "q-1", agentId: "agent-1", askedAt: ASKED_AT, questions: [question()], answer: null, ...overrides };
+  return { id: "q-1", agentId: "agent-1", askedAt: ASKED_AT, questions: [question()], answer: null, offered: true, ...overrides };
 }
 
 function answering(result: Awaited<ReturnType<AnswerQuestionAction>> = { ok: true }) {
@@ -146,6 +146,59 @@ describe("QuestionCard", () => {
     // Assert
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("that question has already been answered"));
     expect((screen.getByRole("radio", { name: /Red/ }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  /**
+   * An answer is accepted exactly once, so the card has to settle on the action's own answer rather than on the
+   * page coming back with the stored one. Handing the options back would let a second press through — refused as
+   * already answered — and in send-on-press mode the first, possibly mistaken, choice is already what the session
+   * received. The redraw rides on the `agent_question` event, so a card that waited for it would never settle with
+   * the stream down.
+   */
+  it("should settle on what it sent, without the page coming back, once the answer was accepted", async () => {
+    // Arrange
+    const answer = answering();
+    render(card({ answer }));
+
+    // Act
+    fireEvent.click(screen.getByRole("radio", { name: /Blue/ }));
+
+    // Assert
+    await waitFor(() => expect(screen.getByRole("region", { name: "A question the assistant asked" })).toBeTruthy());
+    expect(screen.getByText("Blue")).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(answer).toHaveBeenCalledTimes(1);
+  });
+
+  it("should settle on a submitted answer of the person's own words as well", async () => {
+    // Arrange
+    render(card({ answer: answering() }));
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Something else" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "amber" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+
+    // Assert
+    await waitFor(() => expect(screen.getByText("amber")).toBeTruthy());
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  /**
+   * A question nobody answered inside the window it was offered for. The card still says what was asked — the
+   * thread must not lose that — and offers nothing, because the turn that asked is long over.
+   */
+  it("should show what was asked and offer nothing once the question is no longer being waited on", () => {
+    // Act
+    render(card({ view: view({ offered: false }) }));
+
+    // Assert
+    expect(screen.getByText("Do you prefer red or blue?")).toBeTruthy();
+    expect(screen.getByText("This question was not answered, and the assistant is no longer waiting.")).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("should show what was chosen and offer nothing once the question has been answered", () => {

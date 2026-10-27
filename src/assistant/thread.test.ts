@@ -56,7 +56,9 @@ function question(at: string, answer: { labels: string[]; text: string | null } 
         multiSelect: false
       }
     ],
-    answer: answer === null ? null : { answers: [answer], at }
+    answer: answer === null ? null : { answers: [answer], at },
+    // Still wanted while it is unanswered, which is what `progress` reads.
+    offered: answer === null
   };
 }
 
@@ -275,6 +277,15 @@ describe("progress", () => {
   // the assistant is working on that.
   it("should work on a message the person sent instead of answering the question", () => {
     const items = conversationItems([person("never mind, do this", T(5))], [], [question(T(3))]);
+
+    expect(state(items, "busy")).toEqual({ state: "working", label: "Thinking", helpers: 0 });
+  });
+
+  // A card abandoned hours ago would otherwise go on claiming the assistant is waiting on the person for ever,
+  // including while it is in fact working. `offered` is false once the window it was asked in has run out.
+  it("should work again once the question is no longer being waited on", () => {
+    const stale = { ...question(T(3)), offered: false };
+    const items = conversationItems([person("hi", T(1))], [], [stale]);
 
     expect(state(items, "busy")).toEqual({ state: "working", label: "Thinking", helpers: 0 });
   });

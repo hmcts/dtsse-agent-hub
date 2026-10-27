@@ -364,7 +364,8 @@ describe("Conversation questions", () => {
         multiSelect: false
       }
     ],
-    answer: null
+    answer: null,
+    offered: true
   };
 
   it("should show a question the agent's session asked, merged into the time line", () => {

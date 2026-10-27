@@ -145,35 +145,53 @@ function Options({
   );
 }
 
+/** Why a card is showing no controls, which decides the one line it says under each question. */
+type QuietReason = "answered" | "not-yours" | "expired";
+
 /**
- * The card with nothing to operate: what was asked, and what was chosen once it has been answered.
+ * The card with nothing to operate: what was asked, and what was chosen once there is an answer.
  *
- * Both states that have no controls render through here — the question answered, and a reader who may see the agent
- * but not message it, for whom answering is not theirs to do. A viewer offered the buttons without the access to
- * use them is worse than one shown none: the action refuses them, and its refusal says the question is no longer
- * waiting for an answer, which is not true.
+ * Every control-less state renders through here — the question answered (by someone else, or by this card a moment
+ * ago), a reader who may see the agent but not message it, and a question nobody answered inside the window it was
+ * offered for. A viewer offered the buttons without the access or the time left to use them is worse than one shown
+ * none: the action refuses the press, and its refusal reads as though the card had never been theirs.
  */
-function Quiet({ view, palette }: { view: QuestionView; palette: Palette }) {
-  const answer = view.answer;
+function Quiet({
+  questions,
+  answers,
+  reason,
+  palette
+}: {
+  questions: readonly Question[];
+  /** `null` for a question with no answer at all, which is what the options below stand in for. */
+  answers: readonly QuestionAnswer[] | null;
+  reason: QuietReason;
+  palette: Palette;
+}) {
   return (
     <ol className="flex flex-col gap-3">
-      {view.questions.map((question, index) => (
+      {questions.map((question, index) => (
         <li key={index} className="flex flex-col gap-1">
           <span className={palette.header}>{question.header}</span>
           <span className={palette.question}>{question.question}</span>
-          {answer === null ? (
+          {answers === null ? (
             <>
               <ul className={`list-inside list-disc ${palette.description}`}>
                 {question.options.map((option, at) => (
                   <li key={at}>{option.label}</li>
                 ))}
               </ul>
-              <span className={palette.muted}>Waiting for an answer from the owner.</span>
+              <span className={palette.muted}>
+                {reason === "expired" ? "This question was not answered, and the assistant is no longer waiting." : "Waiting for an answer from the owner."}
+              </span>
             </>
           ) : (
+            // The answer sits in an element of its own rather than as a bare text node beside the screen-reader
+            // label, so that what was chosen is addressable: anything matching on an element's whole text — a
+            // Playwright locator, or a reader skimming the DOM — would otherwise only ever see "Answer: Red".
             <span className={palette.muted}>
               <span className="sr-only">Answer: </span>
-              {said(answer.answers[index])}
+              <span>{said(answers[index])}</span>
             </span>
           )}
         </li>
@@ -193,33 +211,48 @@ export function QuestionCard({ view, tone, answer: send }: { view: QuestionView;
   const [own, setOwn] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The answer this card sent and had accepted, which is what settles it.
+   *
+   * It does not wait for the page to come back with the stored answer. An answer is accepted exactly once, so the
+   * moment the action says yes there is nothing left to press — and clearing `sending` alone would hand the options
+   * back, where a second press is refused as already answered and, in the send-on-press mode, the first, possibly
+   * mistaken, choice is already what the session received. Nor can it wait: the redraw rides on the
+   * `agent_question` event, and a card that only settles when the stream is up would never settle without it.
+   */
+  const [accepted, setAccepted] = useState<QuestionAnswer[] | null>(null);
   const plural = view.questions.length !== 1;
+  const stored = view.answer?.answers ?? accepted;
   /** The action, only where there is something to do with it. A `const`, so the callbacks below keep the narrowing. */
-  const ask = view.answer === null ? send : undefined;
+  const ask = stored === null && view.offered ? send : undefined;
 
   if (ask === undefined) {
+    const reason: QuietReason = stored !== null ? "answered" : view.offered ? "not-yours" : "expired";
     return (
       <section aria-label={plural ? "Questions the assistant asked" : "A question the assistant asked"} className={palette.card}>
-        <Quiet view={view} palette={palette} />
+        <Quiet questions={view.questions} answers={stored} reason={reason} palette={palette} />
       </section>
     );
   }
 
   const label = plural ? "Questions for you" : "A question for you";
 
+  /** Keeps whatever was sent once the action accepted it, which is what takes the controls away for good. */
+  const settle = (sent: readonly QuestionAnswer[], result: ActionResult): void => {
+    setSending(false);
+    if (result.ok) {
+      setAccepted([...sent]);
+    } else {
+      setError(result.error);
+    }
+  };
+
   // A `const` rather than a declaration, so that `ask` is narrowed inside it: a hoisted function could be called
   // before the guard above ran, which is what TypeScript objects to.
   const submit = async (): Promise<void> => {
     setSending(true);
     setError(null);
-    const result = await ask({ questionId: view.id, answers: { answers } });
-    setSending(false);
-    if (!result.ok) {
-      setError(result.error);
-    }
-    // Nothing is cleared on success: the card is replaced by the answered one when the page re-reads the question,
-    // which the `agent_question` event asks for. Leaving the choice showing until then is what stops it flickering
-    // back to empty.
+    settle(answers, await ask({ questionId: view.id, answers: { answers } }));
   };
 
   /**
@@ -245,12 +278,7 @@ export function QuestionCard({ view, tone, answer: send }: { view: QuestionView;
               if (immediate) {
                 setSending(true);
                 setError(null);
-                void ask({ questionId: view.id, answers: { answers: updated } }).then((result) => {
-                  setSending(false);
-                  if (!result.ok) {
-                    setError(result.error);
-                  }
-                });
+                void ask({ questionId: view.id, answers: { answers: updated } }).then((result) => settle(updated, result));
               }
             }}
           />

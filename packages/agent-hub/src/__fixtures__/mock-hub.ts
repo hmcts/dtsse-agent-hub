@@ -824,10 +824,17 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       if (typeof body.session_id !== "string" || typeof body.tool_use_id !== "string" || asked.length < 1 || asked.length > 4) {
         return send(res, 400, { error: "bad question" });
       }
-      // Idempotent on (agent, tool_use_id), as the hub's unique constraint makes it.
-      if (!questions.some((already) => already.agent_id === agent.id && already.tool_use_id === body.tool_use_id)) {
-        questions.push({ agent_id: agent.id, ...body });
+      // Idempotent on (agent, tool_use_id), as the hub's unique constraint makes it: the same question again is the
+      // card already on screen, so it is success and nothing is written twice.
+      if (questions.some((already) => already.agent_id === agent.id && already.tool_use_id === body.tool_use_id)) {
+        return send(res, 204);
       }
+      // A *different* question while one of this session's is unanswered is refused, because nothing is written and
+      // the caller must not be told there is a card waiting. The hub answers 409; see "Questions" in the contract.
+      if (questions.some((already) => already.agent_id === agent.id && already.session_id === body.session_id && !already.answered)) {
+        return send(res, 409, { error: "this session already has a different question waiting for an answer" });
+      }
+      questions.push({ agent_id: agent.id, ...body });
       return send(res, 204);
     }
     if (action === "confluence" && req.method === "PUT") {

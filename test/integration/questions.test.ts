@@ -5,6 +5,7 @@ import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
 import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
+import { MAX_SHOWN_QUESTIONS, QUESTION_OFFER_WINDOW_MS } from "../../src/questions/questions.ts";
 import { agentQuestions } from "../../src/questions/views.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import { insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
@@ -142,14 +143,34 @@ describe("POST /api/agent/{agent_id}/question", () => {
    * see. Two live cards in one blocked turn is the worse outcome of the two: answering either sends a message that
    * contradicts the other.
    */
-  it("should leave one card up when the session asks a second question before the first is answered", async () => {
+  /**
+   * Refused rather than quietly dropped. The hook turns this response into what the model is told, so a `204` here
+   * would have it end its turn waiting for a card that was never written — a stall with nothing to answer, which is
+   * the failure this whole feature removes. The refusal sends it back to asking in plain words.
+   */
+  it("should refuse a second, different question while the first is still unanswered", async () => {
     const { agentId, token } = await conversationSession();
     await ask(token, agentId);
 
     const response = await ask(token, agentId, { ...QUESTION, tool_use_id: "toolu_second", questions: [{ ...QUESTION.questions[0], question: "And again?" }] });
 
-    expect(response.status).toBe(204);
+    expect(response.status).toBe(409);
+    expect(await jsonOf(response)).toEqual({ error: "this session already has a different question waiting for an answer" });
     expect(await prisma.agentQuestion.findMany({ where: { agentId }, select: { toolUseId: true } })).toEqual([{ toolUseId: QUESTION.tool_use_id }]);
+  });
+
+  // The other side of it: the same tool call again is the card already on screen, so it is success and the model is
+  // right to wait. Only the *different* question is a refusal.
+  it("should answer the same question posted again with success, answered or not", async () => {
+    const { agentId, token } = await conversationSession();
+    await ask(token, agentId);
+    expect((await ask(token, agentId)).status).toBe(204);
+
+    const open = await prisma.agentQuestion.findFirstOrThrow({ where: { agentId }, select: { id: true } });
+    await answerAgentQuestion({ questionId: open.id, answers: { answers: [{ labels: ["Red"], text: null }] } });
+
+    expect((await ask(token, agentId)).status).toBe(204);
+    expect(await prisma.agentQuestion.count({ where: { agentId } })).toBe(1);
   });
 
   it("should take a new question once the one before it has been answered", async () => {
@@ -294,6 +315,72 @@ describe("who may read a question", () => {
 
     expect(await agentQuestions(prisma, ALICE.oid, ref(agentId), [])).toEqual([]);
   });
+
+  /** The transcript beside these is paginated and they are not, so every load would otherwise carry the lot. */
+  it("should read at most the newest questions, however many the agent has been asked", async () => {
+    const agentId = await insertAgent(ALICE, "chatty");
+    const asked = MAX_SHOWN_QUESTIONS + 5;
+    await prisma.agentQuestion.createMany({
+      data: Array.from({ length: asked }, (_, index) => ({
+        agentId,
+        sessionId: "sid-many",
+        toolUseId: `toolu_${index}`,
+        questions: QUESTION.questions,
+        askedAt: new Date(Date.UTC(2026, 9, 21, 9, index))
+      }))
+    });
+
+    const seen = await agentQuestions(prisma, ALICE.oid, ref(agentId), []);
+
+    expect(seen).toHaveLength(MAX_SHOWN_QUESTIONS);
+    // Newest kept, and handed back oldest first, which is the order the thread merges them in.
+    expect(seen.at(0)?.askedAt).toBe(new Date(Date.UTC(2026, 9, 21, 9, asked - MAX_SHOWN_QUESTIONS)).toISOString());
+    expect(seen.at(-1)?.askedAt).toBe(new Date(Date.UTC(2026, 9, 21, 9, asked - 1)).toISOString());
+  });
+
+  /**
+   * An abandoned card stops being offered rather than disappearing: the thread must still show what the assistant
+   * asked, but it stops being answerable and stops claiming the assistant is waiting on the person.
+   */
+  it("should stop offering a question nobody answered inside its window, while still showing it", async () => {
+    const agentId = await laptopQuestion();
+    const asked = new Date(Date.UTC(2026, 9, 21, 9, 0));
+    await prisma.agentQuestion.updateMany({ where: { agentId }, data: { askedAt: asked } });
+
+    const [fresh] = await agentQuestions(prisma, ALICE.oid, ref(agentId), [], new Date(asked.getTime() + QUESTION_OFFER_WINDOW_MS - 1000));
+    const [stale] = await agentQuestions(prisma, ALICE.oid, ref(agentId), [], new Date(asked.getTime() + QUESTION_OFFER_WINDOW_MS));
+
+    expect(fresh?.offered).toBe(true);
+    expect(stale?.offered).toBe(false);
+    expect(stale?.questions).toEqual(QUESTION.questions);
+  });
+
+  it("should never offer an answered question, whatever the clock says", async () => {
+    const agentId = await laptopQuestion();
+    await prisma.agentQuestion.updateMany({ where: { agentId }, data: { answeredAt: new Date(), answer: { answers: [{ labels: ["Red"], text: null }] } } });
+
+    expect((await agentQuestions(prisma, ALICE.oid, ref(agentId), []))[0]?.offered).toBe(false);
+  });
+});
+
+describe("answering a question nobody answered in time", () => {
+  /**
+   * Enforced against the clock at the time of the press, not the page's idea of it: a tab left open overnight still
+   * shows the controls, and this is what stops that press sending a message to a turn that ended hours ago.
+   */
+  it("should refuse the answer and send no message once the question is past its window", async () => {
+    const agentId = await insertAgent(ALICE, "laptop");
+    await call(questionRoute.POST, { as: ALICE, path: `/api/agent/${agentId}/question`, params: { agentId }, method: "POST", body: QUESTION });
+    const row = await prisma.agentQuestion.findFirstOrThrow({ where: { agentId }, select: { id: true } });
+    await prisma.agentQuestion.update({ where: { id: row.id }, data: { askedAt: new Date(Date.now() - QUESTION_OFFER_WINDOW_MS - 1000) } });
+
+    expect(await answerAgentQuestion({ questionId: row.id, answers: { answers: [{ labels: ["Red"], text: null }] } })).toEqual({
+      ok: false,
+      error: "that question is no longer waiting for an answer"
+    });
+    expect(await prisma.message.count({ where: { targetAgentId: agentId } })).toBe(0);
+    expect((await prisma.agentQuestion.findUniqueOrThrow({ where: { id: row.id } })).answeredAt).toBeNull();
+  });
 });
 
 describe("the question in the conversation's view", () => {
@@ -303,7 +390,9 @@ describe("the question in the conversation's view", () => {
 
     const view = await assistantConversation(VIEWER, conversationId);
 
-    expect(view?.questions).toEqual([{ id: expect.any(String), agentId, askedAt: expect.any(String), questions: QUESTION.questions, answer: null }]);
+    expect(view?.questions).toEqual([
+      { id: expect.any(String), agentId, askedAt: expect.any(String), questions: QUESTION.questions, answer: null, offered: true }
+    ]);
   });
 });
 

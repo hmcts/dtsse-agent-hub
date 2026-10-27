@@ -5,7 +5,7 @@ import { canPersonMessageAgent } from "@/access/rules";
 import { sendToConversation } from "@/assistant/send";
 import { findConversation } from "@/assistant/store";
 import { directAsPerson } from "@/messages/send";
-import { answerMessage, checkAnswer, storedQuestions } from "@/questions/questions";
+import { answerMessage, checkAnswer, offerExpired, storedQuestions } from "@/questions/questions";
 import { findQuestion, recordAnswer } from "@/questions/store";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
@@ -39,6 +39,12 @@ export async function answerAgentQuestion(input: { questionId: unknown; answers:
     }
     if (question.answeredAt !== null) {
       return { ok: false, error: "that question has already been answered" };
+    }
+    // The clock as it is now, rather than as the page that drew the card believed it to be: a tab left open
+    // overnight still shows the controls, and this is what keeps that press from sending a message to a turn that
+    // ended hours ago. The same rule the card and the thread line read, applied where it can be enforced.
+    if (offerExpired(question.askedAt, new Date())) {
+      return MISSING;
     }
     const questions = storedQuestions(question.questions);
     if (questions.length === 0) {

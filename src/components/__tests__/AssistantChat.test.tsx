@@ -355,7 +355,8 @@ describe("ChatView questions", () => {
         multiSelect: false
       }
     ],
-    answer: null
+    answer: null,
+    offered: true
   };
 
   it("should show the question as a card with its options when the assistant asked one", () => {
@@ -389,7 +390,7 @@ describe("ChatView questions", () => {
   });
 
   it("should say the assistant is working again once the question has been answered", () => {
-    const answered: QuestionView = { ...ASKED, answer: { answers: [{ labels: ["Red"], text: null }], at: "2026-10-21T09:03:00.000Z" } };
+    const answered: QuestionView = { ...ASKED, answer: { answers: [{ labels: ["Red"], text: null }], at: "2026-10-21T09:03:00.000Z" }, offered: false };
     render(
       <ChatView
         jira={NO_JIRA}

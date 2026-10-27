@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_IDLE_MINUTES } from "../virtual-agents/settings.ts";
 import {
   answerMessage,
   checkAnswer,
@@ -6,6 +7,8 @@ import {
   MAX_HEADER,
   MAX_QUESTION,
   MAX_QUESTIONS,
+  offerExpired,
+  QUESTION_OFFER_WINDOW_MS,
   type Question,
   questionPostBody,
   storedAnswer,
@@ -73,6 +76,30 @@ describe("questionPostBody", () => {
     expect(questionPostBody.safeParse(body({ questions: [{ question: "Which?", header: "Pick", options: [option("One"), option("Two")] }] })).success).toBe(
       false
     );
+  });
+});
+
+describe("offerExpired", () => {
+  const asked = new Date("2026-10-21T09:00:00.000Z");
+  const later = (ms: number) => new Date(asked.getTime() + ms);
+
+  it("should still offer a question inside the window it was asked in", () => {
+    // Act & Assert
+    expect(offerExpired(asked, asked)).toBe(false);
+    expect(offerExpired(asked, later(QUESTION_OFFER_WINDOW_MS - 1))).toBe(false);
+  });
+
+  // Past the pod's own idle stop the session that asked may well have gone, so an answer would reach a session
+  // started afresh rather than the turn that was waiting.
+  it("should stop offering a question once the window has run out", () => {
+    // Act & Assert
+    expect(offerExpired(asked, later(QUESTION_OFFER_WINDOW_MS))).toBe(true);
+    expect(offerExpired(asked, later(QUESTION_OFFER_WINDOW_MS * 10))).toBe(true);
+  });
+
+  it("should be the pod's idle stop, which is the clock that decides whether the session is still there", () => {
+    // Act & Assert
+    expect(QUESTION_OFFER_WINDOW_MS).toBe(DEFAULT_IDLE_MINUTES * 60_000);
   });
 });
 

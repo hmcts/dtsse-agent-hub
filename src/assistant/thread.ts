@@ -58,13 +58,14 @@ function byTime(left: ThreadItem, right: ThreadItem): number {
 /**
  * Whether the thread is waiting on the person to answer a question, rather than on the assistant to work.
  *
- * Only a question newer than the last thing the person said. An unanswered card further up is one they read past and
- * carried on from, and the assistant is free to be working on whatever they said instead; a card below their last
- * message is the thing in front of them.
+ * Two bounds, and the line is wrong without either. Only a question newer than the last thing the person said: an
+ * unanswered card further up is one they read past and carried on from, and the assistant is free to be working on
+ * whatever they said instead. And only one still `offered`: a card abandoned hours ago would otherwise go on
+ * claiming the assistant is waiting on them, including while it is in fact working.
  */
 function awaitingAnswer(thread: readonly ThreadItem[]): boolean {
   const said = thread.filter((item) => item.type === "user").at(-1);
-  return thread.some((item) => item.type === "question" && item.question.answer === null && (said === undefined || byCodePoint(item.at, said.at) > 0));
+  return thread.some((item) => item.type === "question" && item.question.offered && (said === undefined || byCodePoint(item.at, said.at) > 0));
 }
 
 export function threadItems(items: readonly ConversationItem[], products: readonly ProductMark[] = [], stops: readonly StopMark[] = []): ThreadItem[] {

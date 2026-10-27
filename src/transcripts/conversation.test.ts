@@ -49,7 +49,8 @@ function question(id: string, askedAt: string): QuestionView {
         multiSelect: false
       }
     ],
-    answer: null
+    answer: null,
+    offered: true
   };
 }
 
