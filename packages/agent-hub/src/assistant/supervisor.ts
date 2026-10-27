@@ -6,8 +6,9 @@ import path from "node:path";
 import { workspaceRoot } from "../agent.ts";
 import type { Api, SessionReport } from "../api.ts";
 import type { Env } from "../env.ts";
-import { hubHome, projectTranscriptPath, statePath, validSessionId } from "../session.ts";
+import { hubHome, projectTranscriptPath, stateDir, statePath, validSessionId } from "../session.ts";
 import { removeConversationUploads, uploadsRoot } from "./attachments.ts";
+import { launcherModel, modelPath, parseModel } from "./models.ts";
 import { canRunProgram, claudeCommand, commandProgram, createTmux, type ProgramCheck, type Tmux, tmuxName } from "./tmux.ts";
 
 export const DEFAULT_MAX_SESSIONS = 2;
@@ -65,11 +66,15 @@ function boundedInt(raw: string | undefined, fallback: number, min: number, max:
 export const maxSessions = (env: Env = process.env): number => boundedInt(env.AGENT_HUB_MAX_SESSIONS, DEFAULT_MAX_SESSIONS, 1, MAX_SESSIONS_LIMIT);
 export const idleMinutes = (env: Env = process.env): number => boundedInt(env.AGENT_HUB_SESSION_IDLE_MINUTES, DEFAULT_IDLE_MINUTES, 1, 24 * 60);
 
-/** A wake on the sessions stream: which conversation, the session id to run it as, and whether to resume it. */
+/**
+ * A wake on the sessions stream: which conversation, the session id to run it as, whether to resume it, and the hub's
+ * id for the model to start it on — null from a hub older than the model choice, which starts it on hai's default.
+ */
 export type Wake = {
   conversation_id: string;
   session_id: string;
   resume: boolean;
+  model: string | null;
 };
 
 /** `starting` until the session's hooks say comms are on, `live` after that, `stopping` from its `/exit`. */
@@ -146,7 +151,7 @@ export function parseWake(value: unknown): Wake | null {
   if (!raw || !CONVERSATION_RE.test(String(raw.conversation_id)) || !validSessionId(raw.session_id)) {
     return null;
   }
-  return { conversation_id: raw.conversation_id as string, session_id: raw.session_id, resume: raw.resume === true };
+  return { conversation_id: raw.conversation_id as string, session_id: raw.session_id, resume: raw.resume === true, model: parseModel(raw.model) };
 }
 
 /** Null for anything that is not a session this supervisor saved; `started_at` is optional, as an older one left it. */
@@ -159,6 +164,7 @@ export function parseSavedSession(value: unknown): SavedSession | null {
     conversation_id: raw.conversation_id as string,
     session_id: raw.session_id,
     resume: raw.resume === true,
+    model: parseModel(raw.model),
     name: raw.name,
     started_at: typeof raw.started_at === "number" ? raw.started_at : 0
   };
@@ -216,11 +222,12 @@ export function createAssistantSupervisor({
     const tmp = `${file}.${process.pid}.tmp`;
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-      const kept: SavedSession[] = [...sessions.values()].map(({ conversation_id, session_id, name, resume, started_at }) => ({
+      const kept: SavedSession[] = [...sessions.values()].map(({ conversation_id, session_id, name, resume, model, started_at }) => ({
         conversation_id,
         session_id,
         name,
         resume,
+        model,
         started_at
       }));
       fs.writeFileSync(tmp, `${JSON.stringify(kept, null, 2)}\n`, { mode: 0o600 });
@@ -299,7 +306,21 @@ export function createAssistantSupervisor({
   async function start(w: Wake): Promise<void> {
     const resume = w.resume || fs.existsSync(transcript(w.session_id));
     const name = tmuxName(w.conversation_id);
-    const command = claudeCommand(w.session_id, resume);
+    const launched = launcherModel(w.model, env);
+    const command = claudeCommand(w.session_id, resume, launched);
+    // What the session starts on, for the bridge to compare each message's model with: it types `/model` only for a
+    // message asking for another. Cleared when it starts on hai's default, so the first message that names a model
+    // switches to it rather than being taken for one already in use.
+    try {
+      fs.mkdirSync(stateDir(w.session_id), { recursive: true, mode: 0o700 });
+      if (launched === null) {
+        fs.rmSync(modelPath(w.session_id), { force: true });
+      } else {
+        fs.writeFileSync(modelPath(w.session_id), `${w.model}\n`, { mode: 0o600 });
+      }
+    } catch (e) {
+      say(`conversation ${w.conversation_id}: could not record its model: ${(e as Error).message}`);
+    }
     try {
       await tmux.start({ name, cwd, vars: { AGENT_HUB_CONVERSATION_ID: w.conversation_id }, command });
     } catch (e) {
@@ -311,7 +332,9 @@ export function createAssistantSupervisor({
     sessions.set(w.conversation_id, { ...w, name, resume, phase: "starting", busy: false, started_at: at, active_at: at });
     save();
     refusedLauncher = null;
-    say(`conversation ${w.conversation_id}: ${resume ? "resumed" : "started"} session ${w.session_id} in tmux session ${name}`);
+    say(
+      `conversation ${w.conversation_id}: ${resume ? "resumed" : "started"} session ${w.session_id} in tmux session ${name} on ${launched ?? "the default model"}`
+    );
   }
 
   async function stop(s: ConversationSession, why: string): Promise<void> {

@@ -493,6 +493,8 @@ model AssistantConversation {
   productHistory    Json      @default("[]") @map("product_history")
   /// Every answer the person stopped, as [{at}].
   stopHistory       Json      @default("[]") @map("stop_history")
+  /// One of src/assistant/models.ts.
+  model             String    @default("claude-sonnet-5-5")
   wakeRequestedAt   DateTime? @map("wake_requested_at") @db.Timestamptz(6)
   /// What the pod's supervisor last reported: starting, live or queued; null for no session.
   sessionState      String?   @map("session_state")

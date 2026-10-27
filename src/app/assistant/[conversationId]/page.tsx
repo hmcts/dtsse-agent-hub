@@ -7,6 +7,7 @@ import {
   renameConversation,
   saveArtefact,
   sendAssistantMessage,
+  setConversationModel,
   setConversationProduct,
   stopAssistantAnswer,
   warmConversation
@@ -44,6 +45,7 @@ const ACTIONS: ChatActions = {
   send: sendAssistantMessage,
   warm: warmConversation,
   stop: stopAssistantAnswer,
+  setModel: setConversationModel,
   setProduct: setConversationProduct,
   rename: renameConversation,
   remove: deleteConversation,

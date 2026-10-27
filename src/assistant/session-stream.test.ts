@@ -7,7 +7,7 @@ import type { Wake } from "./store.ts";
 const ASSISTANT = "va-1";
 
 function wake(conversation: string, session = `s-${conversation}`): Wake {
-  return { conversation_id: conversation, session_id: session, resume: false, product: "general" };
+  return { conversation_id: conversation, session_id: session, resume: false, product: "general", model: "claude-sonnet-5-5" };
 }
 
 function changed(conversation: string, virtualAgent = ASSISTANT) {

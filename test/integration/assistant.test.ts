@@ -480,6 +480,71 @@ describe("conversations", () => {
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.product)).toEqual(["other"]);
   });
 
+  it("should start a conversation on Sonnet 5.5 when the person picked no model", async () => {
+    const { id: assistantId } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId } = await sessionOf(id);
+
+    expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-sonnet-5-5");
+    expect(await assistantFrame(prisma, agentId)).toMatchObject({ model: "claude-sonnet-5-5" });
+    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.model)).toEqual(["claude-sonnet-5-5"]);
+  });
+
+  it("should start the conversation on the model picked and tell the pod in the wake when the person picked one", async () => {
+    const { id: assistantId } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", model: "claude-opus-5-5", body: "hi" })) as { id: string }).id;
+
+    expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-opus-5-5");
+    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.model)).toEqual(["claude-opus-5-5"]);
+  });
+
+  it("should refuse a model it does not offer when starting a conversation or changing one", async () => {
+    await startedAssistant();
+
+    expect(await actions.startConversation({ product: "general", model: "claude-fable-5-1", body: "hi" })).toEqual({
+      ok: false,
+      error: "pick a model from the list"
+    });
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    expect(await actions.setConversationModel({ conversationId: id, model: "claude-sonnet-5-5 --dangerously-skip-permissions" })).toEqual({
+      ok: false,
+      error: "pick a model from the list"
+    });
+    expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-sonnet-5-5");
+  });
+
+  it("should carry a changed model on the next message's frame when the person changes it mid-conversation", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { agentId } = await sessionOf(id);
+
+    expect(await actions.setConversationModel({ conversationId: id, model: "claude-haiku-5-5" })).toEqual({ ok: true });
+
+    expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-haiku-5-5");
+    expect(await assistantFrame(prisma, agentId)).toMatchObject({ model: "claude-haiku-5-5" });
+    expect((await assistantConversation(VIEWER, id))!.model).toBe("claude-haiku-5-5");
+  });
+
+  it("should not change another person's conversation's model when they name it", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    actAs("bob");
+
+    expect(await actions.setConversationModel({ conversationId: id, model: "claude-opus-5-5" })).toMatchObject({ ok: false });
+    expect((await findConversation(prisma, ALICE.oid, id))!.model).toBe("claude-sonnet-5-5");
+  });
+
+  it("should send the pod the default when a conversation is on a model no longer offered", async () => {
+    const { id: assistantId } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", model: "claude-opus-5-5", body: "hi" })) as { id: string }).id;
+    await prisma.$executeRaw`UPDATE assistant_conversation SET model = 'claude-retired-1' WHERE id = ${id}::uuid`;
+    const { agentId } = await sessionOf(id);
+
+    expect(await assistantFrame(prisma, agentId)).toMatchObject({ model: "claude-sonnet-5-5" });
+    expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.model)).toEqual(["claude-sonnet-5-5"]);
+    expect((await assistantConversation(VIEWER, id))!.model).toBe("claude-sonnet-5-5");
+  });
+
   it("should carry attachments on a frame built for a delivery and leave them out of one built for a wake", async () => {
     const { token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
@@ -491,7 +556,14 @@ describe("conversations", () => {
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).clientFeatures).toBeNull();
 
     const { id: messageId } = await prisma.message.findFirstOrThrow({ where: { kind: "direct" }, select: { id: true } });
-    const frame = { conversation_id: id, product: "general", product_label: "General", artefact_version: 0, artefact_updated_by: null };
+    const frame = {
+      conversation_id: id,
+      product: "general",
+      product_label: "General",
+      model: "claude-sonnet-5-5",
+      artefact_version: 0,
+      artefact_updated_by: null
+    };
 
     // A wake is "this conversation needs a session", so there is no message whose files the field could name.
     expect(await assistantFrame(prisma, agentId)).toEqual(frame);
@@ -552,7 +624,7 @@ describe("the sessions stream and report", () => {
       await pod(sessionsRoute.GET, token, `/api/virtual/${assistantId}/sessions`, { virtualAgentId: assistantId }, "GET", undefined, abort.signal)
     );
     const [wake] = await stream.named("wake", 1);
-    expect(JSON.parse(wake!.data!)).toEqual({ conversation_id: id, session_id: sessionId, resume: false, product: "pcs" });
+    expect(JSON.parse(wake!.data!)).toEqual({ conversation_id: id, session_id: sessionId, resume: false, product: "pcs", model: "claude-sonnet-5-5" });
 
     await actions.deleteConversation({ conversationId: id });
     const [close] = await stream.named("close", 1);
@@ -576,7 +648,9 @@ describe("the sessions stream and report", () => {
 
     await actions.sendAssistantMessage({ conversationId: id, body: "again" });
 
-    expect(await pendingWakes(prisma, assistantId)).toEqual([{ conversation_id: id, session_id: sessionId, resume: true, product: "general" }]);
+    expect(await pendingWakes(prisma, assistantId)).toEqual([
+      { conversation_id: id, session_id: sessionId, resume: true, product: "general", model: "claude-sonnet-5-5" }
+    ]);
   });
 
   it("should store what the supervisor reports, and clear a conversation it leaves out", async () => {

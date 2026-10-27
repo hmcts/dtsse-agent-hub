@@ -32,6 +32,7 @@ export interface ChatActions {
   /** `stopped` is false for a press the answer beat, which ends no turn and is told to nobody. */
   stop: (input: { conversationId: unknown }) => Promise<ActionResult<{ stopped: boolean }>>;
   setProduct: (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
+  setModel: (input: { conversationId: unknown; model: unknown }) => Promise<ActionResult>;
   rename: (input: { conversationId: unknown; title: unknown }) => Promise<ActionResult>;
   remove: (input: { conversationId: unknown }) => Promise<ActionResult>;
   saveArtefact: SaveArtefactAction;
@@ -216,6 +217,9 @@ export function ChatView({
   const live = useLiveConversation(view.agentId, view.page, { onReply: () => arrivals.announce("New reply from the assistant") });
   const [status, setStatus] = useState<AgentStatus>(view.agentStatus);
   const [pendingProduct, setPendingProduct] = useState<string | null>(null);
+  // The pick shows at once rather than after the round trip, and goes back to the stored one if it was refused.
+  const [model, setModel] = useState(view.model);
+  useEffect(() => setModel(view.model), [view.model]);
   const [panel, setPanel] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const warmed = useRef(false);
@@ -280,6 +284,16 @@ export function ChatView({
     // not sent to. A press the answer beat records nothing, so there is nothing to announce either.
     if (result.ok && result.stopped) {
       arrivals.announce("Stopped");
+    }
+    router.refresh();
+  }
+
+  async function changeModel(next: string): Promise<void> {
+    setModel(next);
+    const result = await actions.setModel({ conversationId: view.id, model: next });
+    setError(result.ok ? null : result.error);
+    if (!result.ok) {
+      setModel(view.model);
     }
     router.refresh();
   }
@@ -418,6 +432,7 @@ export function ChatView({
               conversationId={view.id}
               skills={view.skills}
               dropZone={scroller.ref}
+              model={{ value: model, onChange: (next) => void changeModel(next) }}
               onFocus={() => {
                 if (!warmed.current && status === "offline") {
                   warmed.current = true;

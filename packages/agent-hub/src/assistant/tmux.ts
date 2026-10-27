@@ -39,8 +39,12 @@ export function tmuxName(conversationId: string): string {
 // now rather than a fixed name, and a package root holding a space would otherwise split into two arguments and
 // start the session with no system prompt. Single quotes, because a path may hold a `$` or a backslash; one
 // holding a single quote is the only shape left, and no npm prefix has one.
-export function claudeCommand(sessionId: string, resume: boolean): string {
-  return `hai --dangerously-skip-permissions ${resume ? "--resume" : "--session-id"} ${sessionId} --append-system-prompt-file '${PROMPT_FILE}'`;
+//
+// `model` is what `launcherModel` gave, quoted for the same shell: a Bedrock profile ends in `[1m]`, which `/bin/sh` would
+// otherwise try as a glob. Without one the session runs on hai's default for the route.
+export function claudeCommand(sessionId: string, resume: boolean, model: string | null = null): string {
+  const base = `hai --dangerously-skip-permissions ${resume ? "--resume" : "--session-id"} ${sessionId} --append-system-prompt-file '${PROMPT_FILE}'`;
+  return model === null ? base : `${base} --model '${model}'`;
 }
 
 /** The program a command line runs: its first word, which is always a bare `hai` and never quoted. */

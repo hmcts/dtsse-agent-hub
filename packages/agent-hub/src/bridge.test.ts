@@ -11,6 +11,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub, type MockHubOptions, type RecordedCall } from "./__fixtures__/mock-hub.ts";
 import { createApi } from "./api.ts";
+import { modelPath } from "./assistant/models.ts";
+import { tmuxName } from "./assistant/tmux.ts";
 import {
   nextBackoff,
   parseAssistantFrame,
@@ -26,13 +28,15 @@ import {
 } from "./bridge.ts";
 import type { Env } from "./env.ts";
 import { CLIENT_FEATURES } from "./features.ts";
-import { ensureStateDir, statePath, writeJson } from "./session.ts";
+import { ensureStateDir, readText, statePath, writeJson } from "./session.ts";
 import { type SkillListing, skillsHash } from "./skills.ts";
 import { setTranscriptOff } from "./transcript-sync.ts";
 
 const DEV_USER = "u-me|Me Tester|me@example.com";
 const BYPASS = "--dangerously-skip-permissions";
 const VIRTUAL = { AGENT_HUB_VIRTUAL_AGENT_ID: "0f8a6a1e-1234-4000-8000-000000000001", AGENT_HUB_LAUNCH_TOKEN: "lt-abc123" };
+// A conversation id the bridge can name a tmux session after, as the supervisor names it.
+const CONVERSATION = "0f8a6a1e-5555-4000-8000-000000000002";
 
 let home: TempClaudeHome;
 const savedEnv: Record<string, string | undefined> = {};
@@ -282,7 +286,14 @@ describe("parseConfluenceExportFrame", () => {
 describe("parseAssistantFrame", () => {
   it("should keep every field the envelope and the recorded product read when the frame is an assistant one", () => {
     // Arrange
-    const sent = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 2, artefact_updated_by: "user" };
+    const sent = {
+      conversation_id: "c1",
+      product: "pcs",
+      product_label: "Possession claims",
+      model: "claude-opus-5-5",
+      artefact_version: 2,
+      artefact_updated_by: "user"
+    };
 
     // Act & Assert
     expect(parseAssistantFrame(sent)).toEqual({ ...sent, jira_export: null, confluence_export: null });
@@ -290,6 +301,7 @@ describe("parseAssistantFrame", () => {
       conversation_id: "c1",
       product: null,
       product_label: null,
+      model: null,
       artefact_version: 0,
       artefact_updated_by: null,
       jira_export: null,
@@ -307,13 +319,22 @@ describe("parseAssistantFrame", () => {
 
   it("should drop a field that is not what it should be when the frame is malformed", () => {
     // Act
-    const frame = parseAssistantFrame({ conversation_id: 1, product: 2, product_label: 3, artefact_version: "4", artefact_updated_by: 5, jira_export: "VIBE" });
+    const frame = parseAssistantFrame({
+      conversation_id: 1,
+      product: 2,
+      product_label: 3,
+      model: "claude-opus-5-5 --dangerously-skip-permissions",
+      artefact_version: "4",
+      artefact_updated_by: 5,
+      jira_export: "VIBE"
+    });
 
     // Assert
     expect(frame).toEqual({
       conversation_id: undefined,
       product: undefined,
       product_label: undefined,
+      model: null,
       artefact_version: null,
       artefact_updated_by: undefined,
       jira_export: null,
@@ -743,6 +764,41 @@ describe("runBridge", () => {
         product: "ccd",
         product_label: "Core Case Data"
       });
+    } finally {
+      await bridge.stop();
+    }
+  });
+
+  it("should switch the session to the frame's model before delivering the message when the person picked another", async () => {
+    // Arrange: a session started on Sonnet, and a tmux that records when it was asked, against the deliveries.
+    const order: string[] = [];
+    const tmux = {
+      sendKeys: async (name: string, ...keys: string[]) => {
+        order.push(`keys ${name} ${keys.join(" ")}`);
+      }
+    };
+    const bridge = await startBridge(
+      { pingMs: 5000 },
+      { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: CONVERSATION, AGENT_HUB_MODEL_ROUTE: "own_licence" }, tmux, modelSettleMs: 0 }
+    );
+    fs.writeFileSync(modelPath(bridge.sid), "claude-sonnet-5-5\n");
+    const assistant = { conversation_id: CONVERSATION, product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Act
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "same model", { assistant: { ...assistant, model: "claude-sonnet-5-5" } });
+      await waitUntil(() => bridge.socketWrites.length >= 1, "the first message");
+      order.push("delivered 1");
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "think harder", { assistant: { ...assistant, model: "claude-opus-5-5" } });
+      await waitUntil(() => bridge.socketWrites.length >= 2, "the second message");
+      order.push("delivered 2");
+
+      // Assert
+      const name = tmuxName(CONVERSATION);
+      expect(order).toEqual(["delivered 1", `keys ${name} -l /model claude-opus-5-5`, `keys ${name} Enter`, "delivered 2"]);
+      expect(readText(modelPath(bridge.sid))).toBe("claude-opus-5-5");
     } finally {
       await bridge.stop();
     }

@@ -109,6 +109,7 @@ export async function conversationMatches(db: Database, ownerOid: string, query:
 export interface UnsentChat {
   id: string;
   product: string;
+  model: string;
   attachments: MessageAttachment[];
 }
 
@@ -124,7 +125,7 @@ export async function unsentChat(db: Database, ownerOid: string): Promise<Unsent
   if (conversation === undefined) {
     return undefined;
   }
-  return { id: conversation.id, product: conversation.product, attachments: await unsentAttachments(db, conversation.id) };
+  return { id: conversation.id, product: conversation.product, model: conversation.model, attachments: await unsentAttachments(db, conversation.id) };
 }
 
 export interface ConversationView {
@@ -133,6 +134,8 @@ export interface ConversationView {
   product: string;
   productLabel: string;
   productHistory: { product: string; at: string }[];
+  /** The model its messages are answered by, which the composer shows and changes. */
+  model: string;
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
   stopHistory: { at: string }[];
   agentId: string;
@@ -176,6 +179,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     product: conversation.product,
     productLabel: productLabel(conversation.product),
     productHistory: conversation.productHistory,
+    model: conversation.model,
     stopHistory: conversation.stopHistory,
     agentId,
     agentStatus: agent?.status ?? "offline",

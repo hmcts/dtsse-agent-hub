@@ -17,6 +17,7 @@ import {
   deleteConversation as remove,
   renameConversation as rename,
   requestWake,
+  setModel,
   setProduct,
   stopAnswer,
   touchConversation,
@@ -94,7 +95,7 @@ async function send(oid: string, conversation: ConversationRow, typed: string, u
 }
 
 /** A new conversation, started with its first message: a starter card's prompt, or what the person typed. */
-export async function startConversation(input: { product: unknown; body: unknown }): Promise<ActionResult<{ id: string }>> {
+export async function startConversation(input: { product: unknown; model?: unknown; body: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("start conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
@@ -104,7 +105,7 @@ export async function startConversation(input: { product: unknown; body: unknown
     if (typeof body !== "string") {
       return body;
     }
-    const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
+    const conversation = await createConversation(prisma, viewer.oid, { product: input.product, model: input.model });
     await send(viewer.oid, conversation, body);
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
@@ -122,13 +123,13 @@ export async function startConversation(input: { product: unknown; body: unknown
  * It leaves an empty conversation behind if they attach and walk away. `sweepUploads` removes one whose only content
  * was an attachment nobody ever sent, a few hours later — see the note there for why it is swept rather than left.
  */
-export async function openConversation(input: { product: unknown }): Promise<ActionResult<{ id: string }>> {
+export async function openConversation(input: { product: unknown; model?: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("open conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
-    const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
+    const conversation = await createConversation(prisma, viewer.oid, { product: input.product, model: input.model });
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
   });
@@ -220,6 +221,18 @@ export async function setConversationProduct(input: { conversationId: unknown; p
     }
     const viewer = await requireViewer();
     await setProduct(prisma, viewer.oid, text(input.conversationId), input.product);
+    return { ok: true };
+  });
+}
+
+/** The model the conversation's next message, and every one after it, is answered by. */
+export async function setConversationModel(input: { conversationId: unknown; model: unknown }): Promise<ActionResult> {
+  return await runAction("set conversation model", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    await setModel(prisma, viewer.oid, text(input.conversationId), input.model);
     return { ok: true };
   });
 }

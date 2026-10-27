@@ -4,6 +4,7 @@ import {
   openConversation,
   renameConversation,
   sendAssistantMessage,
+  setConversationModel,
   setConversationProduct,
   startConversation
 } from "@/app/_actions/assistant";
@@ -31,6 +32,7 @@ const CHAT_ACTIONS: EmptyChatActions = {
   start: startConversation,
   open: openConversation,
   send: sendAssistantMessage,
+  setModel: setConversationModel,
   setProduct: setConversationProduct
 };
 

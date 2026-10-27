@@ -2,6 +2,7 @@
 
 import { type Ref, type RefObject, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import type { Skill } from "@/agents/skills";
+import { MODELS, modelLabel } from "@/assistant/models";
 import { type Filled, fillWith, type Template } from "@/assistant/starters";
 import type { MessageAttachment } from "@/assistant/upload-store";
 import { admitFiles, discardUpload, fileSizeLabel, pastedName, UploadAborted, uploadFile } from "@/components/assistant/uploadClient";
@@ -118,7 +119,8 @@ export function Composer({
   attached,
   skills = [],
   dropZone,
-  filler
+  filler,
+  model
 }: {
   templates: readonly Template[];
   /** Resolves to an error to show, or `null` once sent, which clears the box and its attachments. */
@@ -139,11 +141,16 @@ export function Composer({
   dropZone?: RefObject<HTMLElement | null>;
   /** Filled in with what lets the page put a template in the box, as the new-chat screen's starter cards do. */
   filler?: Ref<ComposerFiller>;
+  /**
+   * The Claude model the next message is answered by, shown beside the + button and changed from its menu. Absent
+   * where no model can be chosen, which shows neither.
+   */
+  model?: { value: string; onChange: (id: string) => void };
 }) {
   const { body: text, setBody: setText, discard } = useDraft({ kind: "assistant-draft", viewerOid, draftId });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [menu, setMenu] = useState<"closed" | "open" | "templates">("closed");
+  const [menu, setMenu] = useState<"closed" | "open" | "templates" | "models">("closed");
   // Seeded once, on mount: `attached` is what the hub was holding when the page was rendered, and from then on this
   // list is the live one. A later render handing down a stale `attached` must not overwrite it.
   const [attachments, setAttachments] = useState<readonly Attachment[]>(() => chipsFor(attached));
@@ -495,7 +502,7 @@ export function Composer({
         )}
         {skillMenu.list}
         <div className="flex items-end gap-2">
-          <div ref={menuRef} className="relative shrink-0">
+          <div ref={menuRef} className="relative flex shrink-0 items-end gap-2">
             <button
               type="button"
               onClick={() => {
@@ -570,8 +577,74 @@ export function Composer({
                     ))}
                   </div>
                 ) : null}
+                {model === undefined ? null : (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={menu === "models"}
+                    onClick={() => setMenu(menu === "models" ? "open" : "models")}
+                    className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active ${menu === "models" ? "bg-asst-active" : ""}`}
+                  >
+                    <span aria-hidden="true" className="w-[18px] text-center text-asst-accent">
+                      ✦
+                    </span>
+                    <span className="flex-1">Model</span>
+                    <span className="text-xs text-asst-faint">{modelLabel(model.value)}</span>
+                    <span aria-hidden="true" className="text-asst-faint">
+                      ›
+                    </span>
+                  </button>
+                )}
+                {model !== undefined && menu === "models" ? (
+                  <div
+                    role="menu"
+                    aria-label="Models"
+                    className="absolute bottom-0 left-[calc(100%+6px)] flex w-[260px] flex-col gap-0.5 rounded-xl border border-asst-strong bg-asst-hover p-1.5 shadow-2xl max-sm:bottom-[calc(100%+6px)] max-sm:left-0"
+                  >
+                    <p className="px-2.5 pb-1 pt-1.5 text-xs font-medium text-asst-faint">Answer the next message with</p>
+                    {MODELS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={option.id === model.value}
+                        onClick={() => {
+                          setMenu("closed");
+                          if (option.id !== model.value) {
+                            model.onChange(option.id);
+                          }
+                        }}
+                        className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active"
+                      >
+                        <span aria-hidden="true" className="w-[18px] text-center text-asst-accent">
+                          {option.id === model.value ? "✓" : ""}
+                        </span>
+                        <span className="flex flex-1 flex-col">
+                          <span>{option.label}</span>
+                          <span className="text-xs text-asst-muted">{option.description}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : null}
+            {model === undefined ? null : (
+              // The model in use, always on show, since it decides how good and how quick the next answer is. It is
+              // also a shortcut to the same choice in the + menu, which is where the menu opens to.
+              <button
+                type="button"
+                onClick={() => {
+                  skillMenu.dismiss();
+                  setMenu(menu === "models" ? "closed" : "models");
+                }}
+                aria-label={`Model: ${modelLabel(model.value)}. Change model`}
+                className="mb-1 shrink-0 rounded-full border border-asst-strong px-2.5 py-1 text-xs text-asst-muted hover:bg-asst-bubble hover:text-asst-text"
+              >
+                {modelLabel(model.value)}
+              </button>
+            )}
           </div>
           {attachable ? (
             <input

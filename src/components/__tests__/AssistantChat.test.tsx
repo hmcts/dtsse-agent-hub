@@ -106,6 +106,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     product: "ccd",
     productLabel: "CCD",
     productHistory: [],
+    model: "claude-sonnet-5-5",
     stopHistory: [],
     agentId: AGENT,
     agentStatus: "idle",
@@ -133,6 +134,7 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
     warm: ok(),
     stop: vi.fn(async () => ({ ok: true as const, stopped: true })),
     setProduct: ok(),
+    setModel: ok(),
     rename: ok(),
     remove: ok(),
     saveArtefact: vi.fn(async () => ({ ok: true as const, saved: true as const, version: 1 })),
@@ -1078,7 +1080,8 @@ function emptyActions(start: EmptyChatActions["start"]): EmptyChatActions {
     start,
     open: vi.fn(async () => ({ ok: true as const, id: "opened" })),
     send: vi.fn(async () => ({ ok: true as const })),
-    setProduct: vi.fn(async () => ({ ok: true as const }))
+    setProduct: vi.fn(async () => ({ ok: true as const })),
+    setModel: vi.fn(async () => ({ ok: true as const }))
   };
 }
 
@@ -1388,7 +1391,7 @@ describe("EmptyChat", () => {
       fireEvent.keyDown(newChatBox(), { key: "Enter" });
     });
 
-    expect(start).toHaveBeenCalledWith({ product: "pcs", body: starterText("Analysis") });
+    expect(start).toHaveBeenCalledWith({ product: "pcs", model: "claude-sonnet-5-5", body: starterText("Analysis") });
     expect(push).toHaveBeenCalledWith("/assistant/abc");
   });
 
@@ -1411,7 +1414,7 @@ describe("EmptyChat", () => {
     expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("general");
     await type("my own words");
 
-    expect(start).toHaveBeenCalledWith({ product: "general", body: "my own words" });
+    expect(start).toHaveBeenCalledWith({ product: "general", model: "claude-sonnet-5-5", body: "my own words" });
     expect(push).toHaveBeenCalledWith("/assistant/abc");
   });
 
@@ -1470,5 +1473,86 @@ describe("EmptyChat", () => {
     cleanup();
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
     expect(newChatBox().value).toBe(filled);
+  });
+});
+
+/** The model the next message is answered by: shown on a chip beside the + button and changed from the + menu. */
+describe("Composer model choice", () => {
+  function pickFromMenu(label: string): void {
+    fireEvent.click(screen.getByRole("button", { name: /add a template$/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Model/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: new RegExp(`^${label}`) }));
+  }
+
+  it("should show Sonnet 5.5 on the chip when the conversation is on the default model", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByRole("button", { name: "Model: Sonnet 5.5. Change model" }).textContent).toBe("Sonnet 5.5");
+  });
+
+  it("should save the pick and show it on the chip when the person chooses another model from the + menu", async () => {
+    const setModel = ok();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ setModel })} />);
+
+    pickFromMenu("Opus 5.5");
+    await act(async () => {});
+
+    expect(setModel).toHaveBeenCalledWith({ conversationId: CONVERSATION, model: "claude-opus-5-5" });
+    expect(screen.getByRole("button", { name: "Model: Opus 5.5. Change model" })).toBeTruthy();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("should open the models with the current one checked when the person presses the chip", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ model: "claude-haiku-5-5" })} templates={TEMPLATES} actions={actions()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Model: Haiku 5.5. Change model" }));
+
+    const models = screen.getByRole("menu", { name: "Models" });
+    const checked = within(models)
+      .getAllByRole("menuitemradio")
+      .filter((item) => item.getAttribute("aria-checked") === "true");
+    expect(checked.map((item) => item.textContent)).toEqual([expect.stringMatching(/Haiku 5\.5/)]);
+  });
+
+  it("should save nothing when the person picks the model the conversation is already on", () => {
+    const setModel = ok();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ setModel })} />);
+
+    pickFromMenu("Sonnet 5.5");
+
+    expect(setModel).not.toHaveBeenCalled();
+  });
+
+  it("should go back to the stored model and say why when the pick is refused", async () => {
+    const setModel = vi.fn(async () => ({ ok: false as const, error: "pick a model from the list" }));
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ setModel })} />);
+
+    pickFromMenu("Opus 5.5");
+    await act(async () => {});
+
+    expect(screen.getByRole("alert").textContent).toBe("pick a model from the list");
+    expect(screen.getByRole("button", { name: "Model: Sonnet 5.5. Change model" })).toBeTruthy();
+  });
+
+  it("should offer no model when the composer is given none to show", () => {
+    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId={CONVERSATION} onSend={vi.fn(async () => null)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
+
+    expect(screen.queryByRole("menuitem", { name: /^Model/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Model:/ })).toBeNull();
+  });
+
+  it("should start the new chat on the model the person picked when they send its first message", async () => {
+    const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
+    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} />);
+
+    pickFromMenu("Haiku 5.5");
+    fireEvent.change(newChatBox(), { target: { value: "a quick one" } });
+    await act(async () => {
+      fireEvent.keyDown(newChatBox(), { key: "Enter" });
+    });
+
+    expect(start).toHaveBeenCalledWith({ product: "general", model: "claude-haiku-5-5", body: "a quick one" });
   });
 });

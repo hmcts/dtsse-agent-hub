@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { DEFAULT_MODEL } from "@/assistant/models";
 import { DEFAULT_PRODUCT, isProduct } from "@/assistant/products";
 import { fillWith, type Starter, type Template } from "@/assistant/starters";
 import type { UnsentChat } from "@/assistant/views";
@@ -10,10 +11,11 @@ import { Composer, type ComposerFiller } from "@/components/assistant/Composer";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
 import type { ActionResult } from "@/web/action";
 
-export type StartAction = (input: { product: unknown; body: unknown }) => Promise<ActionResult<{ id: string }>>;
-export type OpenAction = (input: { product: unknown }) => Promise<ActionResult<{ id: string }>>;
+export type StartAction = (input: { product: unknown; model: unknown; body: unknown }) => Promise<ActionResult<{ id: string }>>;
+export type OpenAction = (input: { product: unknown; model: unknown }) => Promise<ActionResult<{ id: string }>>;
 export type SendAction = (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult>;
 export type ProductAction = (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
+export type ModelAction = (input: { conversationId: unknown; model: unknown }) => Promise<ActionResult>;
 
 export interface EmptyChatActions {
   /** A conversation and its first message in one go, for the ordinary case where nothing was attached. */
@@ -24,6 +26,8 @@ export interface EmptyChatActions {
   send: SendAction;
   /** The product, when it is changed after attaching has already created the conversation. */
   setProduct: ProductAction;
+  /** The model, when it is changed after attaching has already created the conversation. */
+  setModel: ModelAction;
 }
 
 /**
@@ -99,6 +103,8 @@ export function EmptyChat({
   const router = useRouter();
   // The conversation's own product wins: it is what the file was attached under, and what the session will be told.
   const [product, setProduct] = useState(() => unsent?.product ?? rememberedProduct(viewerOid) ?? DEFAULT_PRODUCT);
+  // Not remembered across a remount the way the product is: picking the wrong model costs time, not a wrong answer.
+  const [model, setModel] = useState(() => unsent?.model ?? DEFAULT_MODEL);
   const [error, setError] = useState<string | null>(null);
 
   // The conversation attaching created, and the request that created it. The promise is held rather than the id so
@@ -113,7 +119,7 @@ export function EmptyChat({
       return opened.current;
     }
     opening.current ??= (async () => {
-      const result = await actions.open({ product });
+      const result = await actions.open({ product, model });
       if (!result.ok) {
         // Cleared so the next attempt tries again rather than replaying this failure for the rest of the session.
         opening.current = null;
@@ -139,10 +145,20 @@ export function EmptyChat({
     setError(result.ok ? null : result.error);
   }
 
+  async function changeModel(next: string): Promise<void> {
+    setModel(next);
+    const conversation = opened.current;
+    if (conversation === null) {
+      return;
+    }
+    const result = await actions.setModel({ conversationId: conversation, model: next });
+    setError(result.ok ? null : result.error);
+  }
+
   async function begin(body: string, uploadIds: string[] = []): Promise<string | null> {
     const conversation = opened.current;
     if (conversation === null) {
-      const result = await actions.start({ product, body });
+      const result = await actions.start({ product, model, body });
       if (!result.ok) {
         return result.error;
       }
@@ -211,6 +227,7 @@ export function EmptyChat({
             filler={composer}
             openConversation={openConversation}
             attached={unsent?.attachments}
+            model={{ value: model, onChange: (next) => void changeModel(next) }}
           />
         </div>
       </div>
