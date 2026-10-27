@@ -213,9 +213,7 @@ export function ShareDialog({
         {mode === "fork" ? (
           <p className="text-pretty text-[13px] text-asst-body">
             The people you name can read this chat and its document, and can take <strong className="font-semibold text-asst-text">their own copy</strong> of it
-            to carry on in their own Assistant. Your chat stays yours: they cannot reply in it, change it or open the files you attached, and nothing they say
-            in their copy reaches it. Their copy has the words of the chat and its document as they stand when they take it, but not your files. Taking someone
-            off the list stops them taking a copy; a copy they already took is theirs.
+            to carry on in their own Assistant.
           </p>
         ) : (
           <p className="text-pretty text-[13px] text-asst-body">
