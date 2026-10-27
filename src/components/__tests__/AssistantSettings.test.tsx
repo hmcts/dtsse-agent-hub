@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionsData } from "@/assistant/connections";
 import type { AssistantMemory } from "@/assistant/memory";
 import { CONVERSATION_MEMORY_BYTES, type MemoryUse } from "@/assistant/memory-report";
-import { MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } from "@/assistant/templates";
+import { TEMPLATES, type Template } from "@/assistant/starters";
+import { checkTemplate, MAX_TEMPLATE_BODY, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL } from "@/assistant/templates";
 import type { UploadsOnDisk } from "@/assistant/upload-disk";
 import { MAX_REPORTED_FILES, type PodFile, type UploadsDisk } from "@/assistant/upload-report";
 import type { FormAction } from "@/components/ActionForm";
@@ -19,7 +20,7 @@ import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
-import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
+import { type AssistantTemplates, copyName } from "@/components/assistant/TemplateSettings";
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
@@ -653,6 +654,18 @@ function templates(overrides: Partial<AssistantTemplates> = {}): AssistantTempla
 
 const ADD = "Save a new template";
 
+/** One of the built-in templates, which every test of them reads by its place in the list. */
+function builtIn(index: number): Template {
+  const built = TEMPLATES[index];
+  if (built === undefined) {
+    throw new Error(`there is no built-in template at ${index}`);
+  }
+  return built;
+}
+
+/** The built-in list is below the form, so its last Copy is the section's last stop in the focus trap. */
+const LAST_COPY = `Copy ${TEMPLATES.at(-1)?.name} to your templates`;
+
 describe("the Assistant's own templates", () => {
   it("should show nothing at all when the page passes no templates", () => {
     open({ templates: undefined });
@@ -795,7 +808,84 @@ describe("the Assistant's own templates", () => {
     const items = stops();
 
     expect(items).toContain(screen.getByLabelText("What it fills the message box with"));
-    expect(items.at(-1)).toBe(screen.getByRole("button", { name: "Save template" }));
+    expect(items).toContain(screen.getByRole("button", { name: "Save template" }));
+    expect(items.at(-1)).toBe(screen.getByRole("button", { name: LAST_COPY }));
+  });
+
+  it("should list every built-in template with a View and a Copy when it opens", () => {
+    open({ templates: templates() }, "Templates");
+    const list = screen.getByRole("list", { name: "Built-in templates" });
+
+    expect(within(list).getAllByRole("listitem")).toHaveLength(TEMPLATES.length);
+    expect(
+      within(list)
+        .getAllByRole("button")
+        .map((control) => control.getAttribute("aria-label"))
+    ).toEqual(TEMPLATES.flatMap((built) => [`View ${built.name}`, `Copy ${built.name} to your templates`]));
+  });
+
+  it("should show a built-in's whole prompt, and hide it again, when the person views it", () => {
+    open({ templates: templates() }, "Templates");
+    const built = builtIn(0);
+    const view = screen.getByRole("button", { name: `View ${built.name}` });
+    const panel = document.getElementById(view.getAttribute("aria-controls") ?? "") as HTMLElement;
+
+    expect([view.getAttribute("aria-expanded"), panel.hidden]).toEqual(["false", true]);
+    fireEvent.click(view);
+    expect([view.getAttribute("aria-expanded"), panel.hidden, panel.textContent]).toEqual(["true", false, built.text]);
+    fireEvent.click(screen.getByRole("button", { name: `Hide ${built.name}` }));
+    expect(panel.hidden).toBe(true);
+  });
+
+  it("should open the form on a copy of a built-in, focused, and save it as a new one, when the person copies it", async () => {
+    const save = saveOk();
+    open({ templates: templates({ save }) }, "Templates");
+    const built = builtIn(2);
+
+    fireEvent.click(screen.getByRole("button", { name: `Copy ${built.name} to your templates` }));
+    const name = screen.getByLabelText("Template name") as HTMLInputElement;
+    expect([name.value, (screen.getByLabelText("What it fills the message box with") as HTMLTextAreaElement).value]).toEqual([copyName(built), built.text]);
+    expect(document.activeElement).toBe(name);
+    await submit(ADD);
+
+    const sent = (save.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("name"), sent.get("body")]).toEqual([null, copyName(built), built.text]);
+  });
+
+  it("should start again from the built-in when the person copies the same one twice", () => {
+    open({ templates: templates() }, "Templates");
+    const built = builtIn(0);
+
+    fireEvent.click(screen.getByRole("button", { name: `Copy ${built.name} to your templates` }));
+    fireEvent.change(screen.getByLabelText("Template name"), { target: { value: "Changed" } });
+    fireEvent.click(screen.getByRole("button", { name: `Copy ${built.name} to your templates` }));
+
+    expect((screen.getByLabelText("Template name") as HTMLInputElement).value).toBe(copyName(built));
+  });
+
+  it("should go back to adding, with the fields empty, when the person cancels a copy", () => {
+    open({ templates: templates() }, "Templates");
+
+    fireEvent.click(screen.getByRole("button", { name: `Copy ${builtIn(0).name} to your templates` }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect((screen.getByLabelText("Template name") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+  });
+
+  it("should still show the built-ins, but offer no Copy, when the person is at the cap", () => {
+    const mine = Array.from({ length: MAX_TEMPLATES }, (_, index) => row(`Template ${index}`));
+    open({ templates: templates({ mine }) }, "Templates");
+
+    expect(screen.getByRole("button", { name: `View ${builtIn(0).name}` })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /to your templates$/ })).toBeNull();
+  });
+
+  // Every copy's name must save as it is, and `checkTemplate` refuses a built-in's own name.
+  it("should give every copy a name that is not a built-in's and fits the cap when it names them", () => {
+    for (const built of TEMPLATES) {
+      expect(checkTemplate({ name: copyName(built), body: built.text }).ok).toBe(true);
+    }
   });
 
   // Two rows of Edit and Delete say which template they belong to, so a screen reader is not read four of one name.
@@ -822,7 +912,7 @@ describe("the Assistant's own templates", () => {
     for (const [section, form, last] of [
       ["Tools", "Change your assistant's team tools", "Save team tools"],
       ["Claude.md", "Save your CLAUDE.md", "Save your CLAUDE.md"],
-      ["Templates", "Save a new template", "Save template"]
+      ["Templates", "Save a new template", LAST_COPY]
     ] as const) {
       go(section);
       const items = stops();
