@@ -1,4 +1,5 @@
 import type { DeliveryView } from "../messages/direct-thread.ts";
+import type { QuestionView } from "../questions/views.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { byCodePoint } from "../topics/slug.ts";
 import type { ConversationItem } from "../transcripts/conversation.ts";
@@ -6,10 +7,10 @@ import { productLabel } from "./products.ts";
 import type { MessageAttachment } from "./upload-store.ts";
 
 /**
- * An assistant conversation as a non-technical reader sees it: what they wrote, what the assistant answered, and
- * where they changed the product. Tool calls, their results and system lines are left out; what the assistant is
- * doing shows as one friendly line while it works. Pure, so the server's first render and the browser's live
- * updates agree.
+ * An assistant conversation as a non-technical reader sees it: what they wrote, what the assistant answered, any
+ * question it asked them, and where they changed the product. Tool calls, their results and system lines are left
+ * out; what the assistant is doing shows as one friendly line while it works. Pure, so the server's first render and
+ * the browser's live updates agree.
  */
 
 export type ThreadItem =
@@ -20,6 +21,11 @@ export type ThreadItem =
   | { type: "user"; key: string; at: string; text: string; delivery: DeliveryView | null; attachments: MessageAttachment[] }
   | { type: "assistant"; key: string; at: string; text: string }
   | { type: "product"; key: string; at: string; label: string }
+  /**
+   * A question the assistant asked, shown as a card with its options. The one thing in the thread the person acts on
+   * rather than reads: until they answer, the assistant is waiting on them, which is why `progress` says nothing.
+   */
+  | { type: "question"; key: string; at: string; question: QuestionView }
   /** Where the person stopped an answer. Whatever the assistant had said by then stays above it. */
   | { type: "stopped"; key: string; at: string };
 
@@ -49,6 +55,18 @@ function byTime(left: ThreadItem, right: ThreadItem): number {
   return byCodePoint(left.at, right.at) || rank(left) - rank(right);
 }
 
+/**
+ * Whether the thread is waiting on the person to answer a question, rather than on the assistant to work.
+ *
+ * Only a question newer than the last thing the person said. An unanswered card further up is one they read past and
+ * carried on from, and the assistant is free to be working on whatever they said instead; a card below their last
+ * message is the thing in front of them.
+ */
+function awaitingAnswer(thread: readonly ThreadItem[]): boolean {
+  const said = thread.filter((item) => item.type === "user").at(-1);
+  return thread.some((item) => item.type === "question" && item.question.answer === null && (said === undefined || byCodePoint(item.at, said.at) > 0));
+}
+
 export function threadItems(items: readonly ConversationItem[], products: readonly ProductMark[] = [], stops: readonly StopMark[] = []): ThreadItem[] {
   const thread: ThreadItem[] = [];
   for (const item of items) {
@@ -59,6 +77,8 @@ export function threadItems(items: readonly ConversationItem[], products: readon
           ? { type: "user", key: item.key, at: item.at, text: message.body, delivery: message.delivery, attachments: message.attachments ?? [] }
           : { type: "assistant", key: item.key, at: item.at, text: message.body }
       );
+    } else if (item.type === "question") {
+      thread.push({ type: "question", key: item.key, at: item.at, question: item.question });
     } else if (item.entry.role === "assistant") {
       const text = textOf(item.entry.content);
       if (text !== undefined) {
@@ -171,6 +191,12 @@ export function progress(items: readonly ConversationItem[], thread: readonly Th
   // work is the pod's interrupt, which writes `idle` itself. Anything the session says after the stop is a later
   // item, so this stops standing the moment there is something to show.
   if (last?.type === "stopped") {
+    return { state: "idle" };
+  }
+  // A question on screen is the person's turn. The session that asked it was denied the tool and ended its turn, but
+  // its status can still read `busy` for a few seconds, and "Thinking…" under a card waiting for them to choose says
+  // the opposite of what is true.
+  if (awaitingAnswer(thread)) {
     return { state: "idle" };
   }
   const asked = last?.type === "user" ? last : undefined;

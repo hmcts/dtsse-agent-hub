@@ -9,6 +9,7 @@ import { mayMessage, offlineNote } from "@/components/agents/DirectComposer";
 import { ANNOUNCE_AFTER_MS } from "@/components/live/Announcer";
 import { HubStreamProvider } from "@/components/live/HubStream";
 import type { ThreadMessage } from "@/messages/direct-thread";
+import type { QuestionView } from "@/questions/views";
 import type { ConversationPage, TranscriptEntryView } from "@/transcripts/conversation";
 import { duration } from "@/web/format";
 
@@ -104,6 +105,7 @@ function view(props: Partial<Parameters<typeof Conversation>[0]> = {}) {
       access="read"
       initial={page()}
       send={vi.fn()}
+      answerQuestion={vi.fn()}
       {...props}
     />
   );
@@ -343,6 +345,59 @@ describe("Conversation skills", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "/c", selectionStart: 2, selectionEnd: 2 } });
 
     expect(screen.getByRole("listbox", { name: "Skills" }).textContent).toContain("cft-explain");
+  });
+});
+
+describe("Conversation questions", () => {
+  const ASKED: QuestionView = {
+    id: "q-1",
+    agentId: AGENT,
+    askedAt: "2026-09-29T09:02:00.000Z",
+    questions: [
+      {
+        question: "Do you prefer red or blue?",
+        header: "Colour",
+        options: [
+          { label: "Red", description: "You prefer red." },
+          { label: "Blue", description: "You prefer blue." }
+        ],
+        multiSelect: false
+      }
+    ],
+    answer: null
+  };
+
+  it("should show a question the agent's session asked, merged into the time line", () => {
+    render(view({ access: "owner", initial: page({ entries: [entry("1")] }), questions: [ASKED] }));
+
+    const items = screen.getByRole("list", { name: "Conversation" }).children;
+    expect(screen.getByRole("region", { name: "A question for you" })).toBeTruthy();
+    expect(items).toHaveLength(2);
+  });
+
+  it("should send the owner's choice through the action the page gave it", async () => {
+    const answerQuestion = vi.fn(async () => ({ ok: true as const }));
+    render(view({ access: "owner", questions: [ASKED], answerQuestion }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: /Red/ }));
+    });
+
+    expect(answerQuestion).toHaveBeenCalledWith({ questionId: "q-1", answers: { answers: [{ labels: ["Red"], text: null }] } });
+  });
+
+  it("should re-read the page when the watched agent's questions change, and not for another agent's", async () => {
+    live({ access: "owner", questions: [ASKED] });
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_question", { agent_id: "someone-else" });
+    });
+    expect(refresh).not.toHaveBeenCalled();
+
+    await act(async () => {
+      FakeSource.last?.emit("agent_question", { agent_id: AGENT });
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
 

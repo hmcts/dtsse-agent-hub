@@ -1,0 +1,179 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { type AnswerQuestionAction, QuestionCard, type QuestionTone } from "@/components/questions/QuestionCard";
+import type { Question } from "@/questions/questions";
+import type { QuestionView } from "@/questions/views";
+
+const ASKED_AT = "2026-10-21T10:00:03.000Z";
+
+afterEach(cleanup);
+
+function question(overrides: Partial<Question> = {}): Question {
+  return {
+    question: "Do you prefer red or blue?",
+    header: "Colour",
+    options: [
+      { label: "Red", description: "You prefer red." },
+      { label: "Blue", description: "You prefer blue." }
+    ],
+    multiSelect: false,
+    ...overrides
+  };
+}
+
+function view(overrides: Partial<QuestionView> = {}): QuestionView {
+  return { id: "q-1", agentId: "agent-1", askedAt: ASKED_AT, questions: [question()], answer: null, ...overrides };
+}
+
+function answering(result: Awaited<ReturnType<AnswerQuestionAction>> = { ok: true }) {
+  return vi.fn<AnswerQuestionAction>(async () => result);
+}
+
+function card(props: { view?: QuestionView; tone?: QuestionTone; answer?: AnswerQuestionAction } = {}) {
+  return <QuestionCard view={props.view ?? view()} tone={props.tone ?? "assistant"} answer={props.answer ?? answering()} />;
+}
+
+describe("QuestionCard", () => {
+  it("should show the header, the question and every option with its description when the question is unanswered", () => {
+    // Act
+    render(card());
+
+    // Assert
+    expect(screen.getByText("Colour")).toBeTruthy();
+    expect(screen.getByText("Do you prefer red or blue?")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Red/ })).toBeTruthy();
+    expect(screen.getByText("You prefer blue.")).toBeTruthy();
+  });
+
+  it("should send the choice as soon as an option is pressed when one question offers one answer", async () => {
+    // Arrange
+    const answer = answering();
+    render(card({ answer }));
+
+    // Act
+    fireEvent.click(screen.getByRole("radio", { name: /Blue/ }));
+
+    // Assert
+    await waitFor(() => expect(answer).toHaveBeenCalledWith({ questionId: "q-1", answers: { answers: [{ labels: ["Blue"], text: null }] } }));
+  });
+
+  it("should offer checkboxes and one submit when the question allows more than one option", async () => {
+    // Arrange
+    const answer = answering();
+    render(card({ view: view({ questions: [question({ multiSelect: true })] }), answer }));
+
+    // Act
+    fireEvent.click(screen.getByRole("checkbox", { name: /Red/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Blue/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+
+    // Assert
+    await waitFor(() => expect(answer).toHaveBeenCalledWith({ questionId: "q-1", answers: { answers: [{ labels: ["Red", "Blue"], text: null }] } }));
+  });
+
+  it("should take an answer in the person's own words, since the tool always allows one", async () => {
+    // Arrange
+    const answer = answering();
+    render(card({ answer }));
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "Something else" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "amber, actually" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+
+    // Assert
+    await waitFor(() => expect(answer).toHaveBeenCalledWith({ questionId: "q-1", answers: { answers: [{ labels: [], text: "amber, actually" }] } }));
+  });
+
+  it("should ask for every question before it will send when the assistant asked more than one", async () => {
+    // Arrange
+    const answer = answering();
+    const two = view({
+      questions: [
+        question(),
+        question({
+          header: "Size",
+          question: "How big?",
+          options: [
+            { label: "Small", description: "" },
+            { label: "Large", description: "" }
+          ]
+        })
+      ]
+    });
+    render(card({ view: two, answer }));
+
+    // Act
+    fireEvent.click(screen.getByRole("radio", { name: /Red/ }));
+
+    // Assert
+    expect(answer).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Send answer" }).hasAttribute("disabled")).toBe(true);
+
+    // Act
+    fireEvent.click(screen.getByRole("radio", { name: /Large/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+
+    // Assert
+    await waitFor(() =>
+      expect(answer).toHaveBeenCalledWith({
+        questionId: "q-1",
+        answers: {
+          answers: [
+            { labels: ["Red"], text: null },
+            { labels: ["Large"], text: null }
+          ]
+        }
+      })
+    );
+  });
+
+  it("should show the refusal and keep the choice when the answer could not be sent", async () => {
+    // Arrange
+    render(card({ answer: answering({ ok: false, error: "that question has already been answered" }) }));
+
+    // Act
+    fireEvent.click(screen.getByRole("radio", { name: /Red/ }));
+
+    // Assert
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("that question has already been answered"));
+    expect((screen.getByRole("radio", { name: /Red/ }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("should show what was chosen and offer nothing once the question has been answered", () => {
+    // Act
+    render(card({ view: view({ answer: { answers: [{ labels: ["Red"], text: null }], at: ASKED_AT } }) }));
+
+    // Assert
+    expect(screen.getByText("Red")).toBeTruthy();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("should show the option and the words together when the person said both", () => {
+    // Act
+    render(card({ view: view({ answer: { answers: [{ labels: ["Red"], text: "but only for now" }], at: ASKED_AT } }) }));
+
+    // Assert
+    expect(screen.getByText("Red — but only for now")).toBeTruthy();
+  });
+
+  it.each<QuestionTone>(["assistant", "hub"])("should name itself for a screen reader in the %s theme", (tone) => {
+    // Act
+    render(card({ tone }));
+
+    // Assert
+    expect(screen.getByRole("region", { name: "A question for you" })).toBeTruthy();
+  });
+
+  it("should name itself in the plural when more than one question was asked", () => {
+    // Act
+    render(card({ view: view({ questions: [question(), question({ header: "Size" })] }) }));
+
+    // Assert
+    expect(screen.getByRole("region", { name: "Questions for you" })).toBeTruthy();
+  });
+});

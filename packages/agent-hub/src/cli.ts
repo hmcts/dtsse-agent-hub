@@ -89,7 +89,7 @@ export const USAGE = `usage: ${CLI} <command> [args]
   credentials delete <kind>   forget a stored credential (kinds: ${CREDENTIAL_KINDS.join(", ")})
   virtual <command>           inside a virtual agent's pod: phase reports, credentials and
                               relayed sign-ins (${CLI} virtual help)
-  hook <SessionStart|UserPromptSubmit|UserPromptContext|Stop|SessionEnd>
+  hook <SessionStart|UserPromptSubmit|UserPromptContext|PreToolUse|Stop|SessionEnd>
                               Claude Code hook entry point (reads hook JSON on stdin)
 
 Environment: AGENT_HUB_URL, AGENT_HUB_SCOPE, AGENT_HUB_DEV_USER (local service only),

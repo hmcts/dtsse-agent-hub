@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ThreadMessage } from "../messages/direct-thread.ts";
+import type { QuestionView } from "../questions/views.ts";
 import { type ConversationItem, conversationItems, type TranscriptEntryView } from "../transcripts/conversation.ts";
 import { activityLabel, MAX_HELPERS, progress, progressAnnouncement, progressLabel, runningHelpers, threadItems } from "./thread.ts";
 
@@ -36,6 +37,28 @@ function entry(role: TranscriptEntryView["role"], content: TranscriptEntryView["
 }
 
 const T = (second: number) => `2026-10-21T10:00:${String(second).padStart(2, "0")}.000Z`;
+
+/** A question the session asked, unanswered unless `answer` is given. */
+function question(at: string, answer: { labels: string[]; text: string | null } | null = null): QuestionView {
+  next += 1;
+  return {
+    id: `q-${next}`,
+    agentId: "agent",
+    askedAt: at,
+    questions: [
+      {
+        question: "Red or blue?",
+        header: "Colour",
+        options: [
+          { label: "Red", description: "warmer" },
+          { label: "Blue", description: "cooler" }
+        ],
+        multiSelect: false
+      }
+    ],
+    answer: answer === null ? null : { answers: [answer], at }
+  };
+}
 
 describe("threadItems", () => {
   it("should keep what the person and the assistant said and leave out tools and system lines when building the thread", () => {
@@ -82,6 +105,29 @@ describe("threadItems", () => {
     const items = conversationItems([person("first", T(1)), person("second", T(5))], []);
 
     expect(threadItems(items, [], [{ at: T(3) }, { at: T(7) }]).map((item) => item.type)).toEqual(["user", "stopped", "user", "stopped"]);
+  });
+});
+
+describe("threadItems questions", () => {
+  it("should place a question the assistant asked in time, with its options for the card to show", () => {
+    // Arrange
+    const asked = question(T(3));
+
+    // Act
+    const items = threadItems(conversationItems([person("Draft it", T(1))], [entry("assistant", { text: "Before I do…" }, T(2))], [asked]));
+
+    // Assert
+    expect(items.map((item) => item.type)).toEqual(["user", "assistant", "question"]);
+    expect(items.at(-1)).toEqual({ type: "question", key: `q${asked.id}`, at: T(3), question: asked });
+  });
+
+  it("should keep an answered question in its place, so the thread still shows what was asked", () => {
+    // Act
+    const items = threadItems(conversationItems([], [], [question(T(3), { labels: ["Red"], text: null })]));
+
+    // Assert
+    expect(items[0]).toMatchObject({ type: "question" });
+    expect(items[0]?.type === "question" && items[0].question.answer?.answers).toEqual([{ labels: ["Red"], text: null }]);
   });
 });
 
@@ -209,6 +255,28 @@ describe("progress", () => {
       state: "waking",
       label: "Starting your assistant…"
     });
+  });
+
+  // The session that asked was denied the tool and ended its turn, but its status reads `busy` for a few seconds
+  // after. "Thinking…" under a card waiting for the person to choose says the opposite of what is true.
+  it("should say nothing while a question is on screen unanswered, even with the session still busy", () => {
+    const items = conversationItems([person("hi", T(1))], [entry("assistant", { text: "One thing first" }, T(2))], [question(T(3))]);
+
+    expect(state(items, "busy")).toEqual({ state: "idle" });
+  });
+
+  it("should work again once the question has been answered", () => {
+    const items = conversationItems([person("hi", T(1))], [], [question(T(3), { labels: ["Red"], text: null })]);
+
+    expect(state(items, "busy")).toEqual({ state: "working", label: "Thinking", helpers: 0 });
+  });
+
+  // An unanswered card the person read past is not what they are being waited on for: they said something else, and
+  // the assistant is working on that.
+  it("should work on a message the person sent instead of answering the question", () => {
+    const items = conversationItems([person("never mind, do this", T(5))], [], [question(T(3))]);
+
+    expect(state(items, "busy")).toEqual({ state: "working", label: "Thinking", helpers: 0 });
   });
 
   it("should count the subagents still running when the assistant has handed work out", () => {

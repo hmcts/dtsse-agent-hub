@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ThreadMessage } from "../messages/direct-thread.ts";
+import type { QuestionView } from "../questions/views.ts";
 import { conversationItems, mergeEntries, newerId, oneLine, type TranscriptEntryView, toolSummary } from "./conversation.ts";
 
 function message(id: string, createdAt: string): ThreadMessage {
@@ -29,6 +30,26 @@ function entry(id: string, occurredAt: string, overrides: Partial<TranscriptEntr
     message_id: null,
     occurred_at: occurredAt,
     ...overrides
+  };
+}
+
+function question(id: string, askedAt: string): QuestionView {
+  return {
+    id,
+    agentId: "agent-1",
+    askedAt,
+    questions: [
+      {
+        question: "Red or blue?",
+        header: "Colour",
+        options: [
+          { label: "Red", description: "" },
+          { label: "Blue", description: "" }
+        ],
+        multiSelect: false
+      }
+    ],
+    answer: null
   };
 }
 
@@ -68,6 +89,23 @@ describe("conversationItems", () => {
     const [first, second] = conversationItems([message("10", T2)], [entry("1", T1)]);
 
     expect([first?.at, second?.at]).toEqual([T1, T2]);
+  });
+
+  it("should merge the questions the session asked into the same time line", () => {
+    const items = conversationItems([message("10", T1)], [entry("1", T3)], [question("q-a", T2)]);
+
+    expect(items.map((item) => item.key)).toEqual(["m10", "qq-a", "t1"]);
+  });
+
+  // A question's id is a UUID rather than a number, so it cannot be ordered by the id comparison the rest use.
+  it("should order questions at the same instant by their own ids, after a message and its entries", () => {
+    const items = conversationItems([message("10", T1)], [entry("1", T1)], [question("q-b", T1), question("q-a", T1)]);
+
+    expect(items.map((item) => item.key)).toEqual(["m10", "t1", "qq-a", "qq-b"]);
+  });
+
+  it("should carry no questions when none are given, so a page that does not read them is unchanged", () => {
+    expect(conversationItems([message("10", T1)], [entry("1", T2)]).map((item) => item.type)).toEqual(["message", "entry"]);
   });
 });
 

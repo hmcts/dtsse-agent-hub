@@ -122,6 +122,7 @@ describe("migrate", () => {
       "_prisma_migrations",
       "agent",
       "agent_grant",
+      "agent_question",
       "assistant_conversation",
       "assistant_conversation_share",
       "assistant_export_default",

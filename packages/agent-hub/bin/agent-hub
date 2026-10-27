@@ -10,7 +10,9 @@
 # in every workspace session, so a session that never enabled comms costs one file test
 # here and never starts node. With auto-enable on, SessionStart and UserPromptSubmit
 # start node for a session that is neither enabled nor opted out. UserPromptContext
-# starts it only when the stop worker has held a feed note for the next prompt.
+# starts it only when the stop worker has held a feed note for the next prompt, and
+# PreToolUse only in a pod or an Assistant conversation, where a tool prompt cannot be
+# answered by anyone.
 
 set -u
 
@@ -65,6 +67,14 @@ if [ "${1:-}" = "hook" ]; then
         # A virtual agent's SessionStart may have to say its repos are still arriving. This is the
         # bash copy of virtualAgent() in src/virtual-agent.ts; src/bin.test.ts holds the two in step.
         if [ "$pending" -eq 0 ] && [ "${2:-}" = "SessionStart" ] && [ -n "${AGENT_HUB_VIRTUAL_AGENT_ID:-}" ] && [ -n "${AGENT_HUB_LAUNCH_TOKEN:-}" ]; then
+            pending=1
+        fi
+        # A PreToolUse in a pod or an Assistant conversation has to be answered whatever the comms state: nobody
+        # there can answer AskUserQuestion's prompt, so allowing the tool would hold the session busy for ever.
+        # Only reached when the hook is registered for that one tool, so this costs nothing in an ordinary session.
+        if [ "$pending" -eq 0 ] && [ "${2:-}" = "PreToolUse" ] &&
+            { [ -n "${AGENT_HUB_CONVERSATION_ID:-}" ] ||
+                { [ -n "${AGENT_HUB_VIRTUAL_AGENT_ID:-}" ] && [ -n "${AGENT_HUB_LAUNCH_TOKEN:-}" ]; }; }; then
             pending=1
         fi
         # /clear starts a new session id; SessionStart must look for a handoff from the old one.

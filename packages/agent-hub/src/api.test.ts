@@ -686,6 +686,53 @@ describe("createApi conversations", () => {
   });
 });
 
+describe("createApi questions", () => {
+  const QUESTION = {
+    session_id: "sid-api-test",
+    tool_use_id: "toolu_bdrk_01TNH",
+    questions: [
+      {
+        question: "Do you prefer red or blue?",
+        header: "Color",
+        options: [
+          { label: "Red", description: "You prefer red." },
+          { label: "Blue", description: "You prefer blue." }
+        ],
+        multiSelect: false
+      }
+    ]
+  };
+
+  it("should post the question set for the agent when a session's hook intercepted one", async () => {
+    // Act
+    await api.postQuestion(agentId, QUESTION);
+
+    // Assert
+    expect(hub.calls.at(-1)?.path).toBe(`/api/agent/${agentId}/question`);
+    expect(hub.questions.at(-1)).toEqual({ agent_id: agentId, ...QUESTION });
+  });
+
+  // The hook denies the tool whether or not the POST answered, so a retry after a lost response is a real case.
+  it("should leave one question on screen when the same tool use is posted twice", async () => {
+    // Act
+    await api.postQuestion(agentId, QUESTION);
+    await api.postQuestion(agentId, QUESTION);
+
+    // Assert
+    expect(hub.questions.filter((asked) => asked.tool_use_id === QUESTION.tool_use_id)).toHaveLength(1);
+  });
+
+  it("should throw an ApiError naming the question path when the hub refuses the body", async () => {
+    // Act
+    const error = await api.postQuestion(agentId, { ...QUESTION, questions: [] }).catch((e) => e);
+
+    // Assert
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(400);
+    expect(error.message).toBe(`POST /api/agent/${agentId}/question failed: 400 bad question`);
+  });
+});
+
 describe("createApi attachments", () => {
   const UPLOAD = "0f8a6a1e-0000-4000-8000-0000000000a1";
 

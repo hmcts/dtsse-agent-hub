@@ -10,6 +10,7 @@ import { CLI } from "./envelope.ts";
 import { heldNotesContext, takeHeldNotes } from "./held-notes.ts";
 import { inboundAccepted, inboundFix } from "./inbound.ts";
 import { publicUrlPattern } from "./ports.ts";
+import { ASK_USER_QUESTION, ASKED_REASON, denyOutput, type HookDenyOutput, parseQuestions, UNDELIVERED_REASON } from "./questions.ts";
 import {
   conversationId,
   ensureStateDir,
@@ -202,6 +203,10 @@ export type HookPayload = {
   reason?: unknown;
   transcript_path?: unknown;
   cwd?: unknown;
+  /** `PreToolUse` only. */
+  tool_name?: unknown;
+  tool_input?: unknown;
+  tool_use_id?: unknown;
 };
 
 /** The documented `UserPromptSubmit` hook output, which the CLI prints as is. */
@@ -212,22 +217,67 @@ export type HookContextOutput = {
   };
 };
 
+export type HookOutput = HookContextOutput | HookDenyOutput;
+
 export type RunHookOptions = {
   spawn?: SpawnWorker;
 };
+
+/** How long the question POST is given. Short: the model is waiting on this hook before its turn can end. */
+const QUESTION_TIMEOUT_MS = 5000;
+
+/**
+ * `AskUserQuestion` in a session nobody is sitting at — an Assistant conversation, or a virtual agent's pod — where
+ * the tool's prompt would wait for a keyboard that does not exist, holding the session `busy` for ever and the
+ * conversation's slot with it. The question goes to the hub for the person to answer as an ordinary message, and the
+ * tool is denied so the prompt is never drawn.
+ *
+ * Every refusal path still denies. Letting the tool run is what hangs the session, so there is no fail-open: a
+ * question that could not be put on screen is denied with the reason that tells the model to ask in words instead.
+ */
+async function askUserQuestion(sid: string, input: HookPayload, env: Env): Promise<string | HookDenyOutput> {
+  if (input.tool_name !== ASK_USER_QUESTION) {
+    return "";
+  }
+  // An engineer's own session is left alone: they are at the keyboard, the prompt is the better way to answer, and
+  // intercepting it would take a working tool away.
+  if (!conversationId(env) && !virtualAgent(env)) {
+    return "";
+  }
+  const questions = parseQuestions(input.tool_input);
+  const toolUseId = typeof input.tool_use_id === "string" ? input.tool_use_id : "";
+  const agentId = loadAgent(sid)?.agent_id;
+  if (questions === null || toolUseId === "" || !agentId) {
+    log(sid, `PreToolUse: ${ASK_USER_QUESTION} denied without asking (${agentId ? "unreadable question" : "no agent registered"})`);
+    return denyOutput(UNDELIVERED_REASON);
+  }
+  try {
+    await createApi({ env }).postQuestion(agentId, { session_id: sid, tool_use_id: toolUseId, questions }, { timeoutMs: QUESTION_TIMEOUT_MS });
+  } catch (e) {
+    log(sid, `PreToolUse: the question could not be sent: ${(e as Error).message}`);
+    return denyOutput(UNDELIVERED_REASON);
+  }
+  log(sid, `PreToolUse: put ${questions.length} question(s) on screen for the person`);
+  return denyOutput(ASKED_REASON);
+}
 
 export async function runHook(
   event: string,
   input: HookPayload | null | undefined,
   env: Env = process.env,
   { spawn = spawnDetached }: RunHookOptions = {}
-): Promise<string | HookContextOutput> {
+): Promise<string | HookOutput> {
   if (env.AGENT_HUB_CHILD) {
     return "";
   }
   const sid = input?.session_id;
   if (!validSessionId(sid) || !input) {
     return "";
+  }
+  // Before the enabled gate below, and before anything that writes session state: a pod or a conversation whose
+  // comms are off still cannot answer the tool's prompt, so the question is still denied rather than allowed.
+  if (event === "PreToolUse") {
+    return await askUserQuestion(sid, input, env);
   }
   const note = event === "SessionStart" ? withNote(reposNote(env), webServersNote(env)) : "";
 

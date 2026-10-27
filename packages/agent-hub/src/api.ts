@@ -5,6 +5,7 @@
 import { execFile } from "node:child_process";
 import type { Env } from "./env.ts";
 import type { PortsReport } from "./ports.ts";
+import type { QuestionBody } from "./questions.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
 export const DEFAULT_URL = "https://agent-hub.aat.platform.hmcts.net";
@@ -424,6 +425,11 @@ export type Api = {
   putMemory: (virtualId: string, body: MemoryReportBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
+  /**
+   * A question this session's model asked with `AskUserQuestion`, for the person to answer in the web UI. Idempotent
+   * on `tool_use_id`, so a retry after a lost response does not put the question on screen twice.
+   */
+  postQuestion: (agentId: string, body: QuestionBody, opts?: RequestOptions) => Promise<null>;
   putJiraExport: (agentId: string, body: JiraExportReport) => Promise<null>;
   putConfluenceExport: (agentId: string, body: ConfluenceExportReport) => Promise<null>;
   /** The supervisor's answer to one of its owner's Jira or Confluence lookups. */
@@ -582,6 +588,7 @@ export function createApi({
     putMemory: (virtualId, body) => request<null>("PUT", v(virtualId, "memory"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
+    postQuestion: (agentId, body, opts) => request<null>("POST", `${a(agentId)}/question`, body, opts),
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     putConfluenceExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/confluence`, body),
     putLookup: (virtualId, lookupId, body) => request<null>("PUT", v(virtualId, `lookups/${encodeURIComponent(lookupId)}`), body),

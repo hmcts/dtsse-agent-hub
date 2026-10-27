@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { buildChannel, PERSONA_COOKIE, registerAgent, sampleTranscript, unique, uploadTranscript } from "./hub";
+import { askQuestion, buildChannel, PERSONA_COOKIE, registerAgent, sampleTranscript, unique, uploadTranscript } from "./hub";
 
 const PERSONA = unique("a11y");
 
@@ -99,6 +99,24 @@ test.describe("accessibility @nightly", () => {
 
     await audit(page, `/hub/agents/${agent}`);
     await page.locator("details summary").first().click();
+    await expectNoViolations(page);
+  });
+
+  test("should raise no WCAG A or AA violations on an agent page showing a question @nightly @a11y", async ({ page, request }) => {
+    const agent = await registerAgent(request, PERSONA, unique("agent"));
+    test.skip(agent === undefined, "this deployment checks real agent tokens, so the suite cannot register an agent");
+    await askQuestion(request, PERSONA, agent!, {
+      question: "Do you prefer red or blue?",
+      header: "Colour",
+      options: [
+        { label: "Red", description: "You prefer red." },
+        { label: "Blue", description: "You prefer blue." }
+      ]
+    });
+
+    await audit(page, `/hub/agents/${agent}`);
+    // The free-text way out is a surface of its own, reached by pressing rather than by its own address.
+    await page.getByRole("button", { name: "Something else" }).click();
     await expectNoViolations(page);
   });
 

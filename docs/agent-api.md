@@ -441,6 +441,51 @@ The web UI's credentials list shows only whether each kind is stored, when and h
 - A register of an existing session or a heartbeat whose `skills` differ from the stored list updates an open page for the agent without a reload. Sending the stored list again, in any order, changes nothing.
 - A message picked from the list starts `/<name> `, followed by whatever the person typed. The client delivers it as a request to run that skill with the rest of the message as its arguments; the hub does not treat it differently from any other direct message.
 
+## Questions
+
+Claude Code has a built-in `AskUserQuestion` tool: the model calls it and the TUI draws a prompt with the options for someone to pick from. In a virtual agent's pod, and in an HMCTS Assistant conversation, **nobody is at that keyboard**. The prompt is never answered, the turn never ends, the session's status file stays `busy` so the supervisor's idle timer never fires, and the conversation's session slot is held indefinitely. The person, meanwhile, sees "Thinking…" for ever and is never shown the question.
+
+So the client intercepts it. Its `PreToolUse` hook, registered for that one tool, fires before any prompt is drawn; it posts the question to the hub and **denies** the tool, which surfaces its reason to the model as the tool's error and ends the turn. The person reads the question as a card in the web UI, and their choice is sent back as an ordinary direct message — so the answer travels the same delivery and wake path as anything they type, and there is no blocked turn left to unblock.
+
+| Method and path | Body | Response |
+|---|---|---|
+| `POST /api/agent/{agent_id}/question` | `{session_id, tool_use_id, questions}` | `204`. Records a question for the agent's owner to answer. Idempotent on `tool_use_id`: a retry after a lost response leaves one question, and does **not** replace the stored one — the session is waiting on an answer to the question already on screen. |
+
+```jsonc
+{
+  "session_id": "481900c7-…",             // the Claude Code session, 1–200 characters
+  "tool_use_id": "toolu_bdrk_01TNH…",     // the tool call's own id, 1–200 characters
+  "questions": [
+    {
+      "question": "Do you prefer red or blue?",   // 1–1000 characters
+      "header": "Color",                          // a short label for the card, 1–40 characters
+      "options": [                                // 2–4
+        { "label": "Red", "description": "You prefer red." },   // label 1–200, description 0–500
+        { "label": "Blue", "description": "You prefer blue." }
+      ],
+      "multiSelect": false                        // required
+    }
+  ]
+}
+```
+
+- 1–4 questions, mirroring `AskUserQuestion`'s own limits; the client applies the same caps and cuts long values to fit before sending, so a `400` here is a client fault rather than a question nobody can read. Every string is bounded and no other field is accepted.
+- Any agent's, not a conversation's alone, so an owner watching an ordinary pod agent's page is shown the same card there.
+- Notifies the owner's UI, so a second tab shows the question without a reload.
+
+**Answering.** Only in the web UI, and only by someone who may message the agent — its owner, or a holder of a write grant; a conversation's agent is its owner's alone, so no grant reaches one of those. The answer is one entry per question, in order, each naming options the question offered or carrying words of the person's own, since `AskUserQuestion` always lets someone answer in their own words. It is sent as an ordinary direct message that quotes each question back above its answer, recorded on the question in that message's own transaction, and refused for a question already answered — so the session is told exactly once.
+
+**What the model is told.** Two reasons, and never an allow:
+
+- the question reached the hub: it is on screen with its options, the answer will arrive as an ordinary message, so end the turn and wait — do not repeat the question in the reply and do not guess;
+- the question did not reach the hub (no agent registered, comms off, the hub unreachable, or a payload the client could not read): ask it in plain words in the reply instead, listing the choices, and end the turn.
+
+There is no fail-open path, because allowing the tool is what hangs the session.
+
+**An engineer's own session is untouched.** The hook acts only where `AGENT_HUB_CONVERSATION_ID` is set or the process is a virtual agent's pod. Anywhere else it outputs nothing and the tool runs as usual: there is a person at that keyboard who can answer the prompt, and intercepting it would take a working tool away.
+
+**Release order.** The route is new, so a pod running a client that predates it never posts one and `AskUserQuestion` is not registered for interception there at all — the hook only exists once that client is installed. Nothing is gated on a client feature: the client either has the hook or does not.
+
 ## Atlassian lookups
 
 Picking a Jira project or a Confluence page means searching the person's own Jira or Confluence, as them: the hub holds no Atlassian credentials, so the search runs in their pod, with their `twg` sign-in. It is a search-as-you-type, so it does not go through a conversation's session — a model turn is far too slow for that — but through a small, fixed request and answer between the hub and the pod's supervisor.

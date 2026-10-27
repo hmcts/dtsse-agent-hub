@@ -43,6 +43,7 @@ import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMe
 import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
 import { parseMessageRef } from "../messages/permalink.ts";
+import { agentQuestions } from "../questions/views.ts";
 import { prisma } from "../store/prisma.ts";
 import { hiddenTopicPrefix } from "../topics/slug.ts";
 import { listTopics, mostActiveTopics } from "../topics/store.ts";
@@ -99,8 +100,12 @@ export async function channel(viewer: Identity, id: string) {
 /** The rest of an agent's page, which it streams in once `agentRoute` has decided the viewer may see the agent. */
 export async function agentActivity(viewer: Identity, view: AgentView) {
   const agent = { id: view.agent.id, ownerOid: view.agent.owner.oid };
-  const [conversation, posts] = await Promise.all([agentConversation(prisma, viewer.oid, agent, view.grants), agentPosts(prisma, view.agent.id, 20)]);
-  return { conversation, posts };
+  const [conversation, posts, questions] = await Promise.all([
+    agentConversation(prisma, viewer.oid, agent, view.grants),
+    agentPosts(prisma, view.agent.id, 20),
+    agentQuestions(prisma, view.agent.id)
+  ]);
+  return { conversation, posts, questions };
 }
 
 export async function topics(prefix: string) {

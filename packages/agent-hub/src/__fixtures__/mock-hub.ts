@@ -188,6 +188,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const artefacts = new Map<string, Artefact>();
   const jiraReports: Record<string, unknown>[] = [];
   const confluenceReports: Record<string, unknown>[] = [];
+  /** The questions a session's `AskUserQuestion` hook put on screen, oldest first, one per `tool_use_id`. */
+  const questions: Record<string, unknown>[] = [];
   // Every answer a supervisor gave to a lookup, in the order they came.
   const lookupAnswers: { virtual_id: string; lookup_id: string; body: Record<string, unknown> }[] = [];
   // upload id → the parts the pod may still fetch, and whether it has reported having the whole file
@@ -817,6 +819,17 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       jiraReports.push({ agent_id: agent.id, ...body });
       return send(res, 204);
     }
+    if (action === "question" && req.method === "POST") {
+      const asked = Array.isArray(body.questions) ? body.questions : [];
+      if (typeof body.session_id !== "string" || typeof body.tool_use_id !== "string" || asked.length < 1 || asked.length > 4) {
+        return send(res, 400, { error: "bad question" });
+      }
+      // Idempotent on (agent, tool_use_id), as the hub's unique constraint makes it.
+      if (!questions.some((already) => already.agent_id === agent.id && already.tool_use_id === body.tool_use_id)) {
+        questions.push({ agent_id: agent.id, ...body });
+      }
+      return send(res, 204);
+    }
     if (action === "confluence" && req.method === "PUT") {
       if (!agent.conversation_id) {
         return send(res, 404, { error: "not a conversation" });
@@ -887,6 +900,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     artefacts,
     jiraReports,
     confluenceReports,
+    questions,
     lookupAnswers,
     attachments,
     sessionStreams,

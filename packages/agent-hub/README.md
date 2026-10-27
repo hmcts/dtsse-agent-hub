@@ -8,6 +8,34 @@ repository.
 Published from `packages/agent-hub/` to the HMCTS Azure Artifacts `hmcts-lib` feed. It has no runtime dependencies: the
 `UserPromptContext` hook runs synchronously on every prompt, so the entrypoint must not pay module-load cost.
 
+## Hooks
+
+`agent-hub hook <event>` is the one entry point, reading Claude Code's hook JSON on stdin:
+
+| Event | What it does |
+| --- | --- |
+| `SessionStart` | starts the bridge and gives the session its agent-hub context |
+| `UserPromptSubmit` | marks the session busy and makes sure the bridge is up |
+| `UserPromptContext` | attaches any note the stop worker held for the next prompt (synchronous) |
+| `PreToolUse` | intercepts `AskUserQuestion` where nobody is at a keyboard; see below |
+| `Stop` | marks the session idle and starts the stop worker |
+| `SessionEnd` | stops the bridge, writes a handoff for `/clear`, marks the agent offline |
+
+`PreToolUse` is the one hook that is registered for a single tool, so it runs on an `AskUserQuestion` call and on
+nothing else. Add it beside the others in `.claude/settings.json`:
+
+```jsonc
+"PreToolUse": [
+  { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "agent-hub hook PreToolUse" }] }
+]
+```
+
+In an HMCTS Assistant conversation or a virtual agent's pod it posts the question to the hub, for the person to
+answer in the web UI as an ordinary message, and denies the tool so its prompt is never drawn — a prompt there waits
+for a keyboard nobody is at, and the turn never ends. In an engineer's own session it outputs nothing and the tool
+runs as usual. It never allows the tool in a pod, not even when the hub cannot be reached: it denies with a reason
+telling the model to ask in plain words instead.
+
 ## Install
 
 ```sh

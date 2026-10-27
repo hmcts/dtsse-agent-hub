@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useEndSession, useHubEvent, useWatch } from "@/components/live/HubStream";
 import type { DeliveryView, ThreadMessage } from "@/messages/direct-thread";
 import { mergeMessages } from "@/messages/pagination";
+import type { QuestionView } from "@/questions/views";
 import { type ConversationPage, conversationItems, mergeEntries, newerId } from "@/transcripts/conversation";
 
 export function transcriptUrl(agentId: string, cursor: { before: string } | { after: string }): string {
@@ -18,15 +19,18 @@ function isPast(id: string, last: string | null): boolean {
 class SignedOut extends Error {}
 
 /**
- * An agent's conversation kept live, for any page that shows one: the direct messages to and from it and its
- * session's transcript. A `transcript` event names the newest entry, and the entries after the newest shown are read
- * then; earlier entries are read a page at a time with `loadEarlier`. `onReply` is told of each read that brought an
- * assistant entry, and `onMessage` of each direct message not shown before.
+ * An agent's conversation kept live, for any page that shows one: the direct messages to and from it, its session's
+ * transcript and the questions it asked. A `transcript` event names the newest entry, and the entries after the
+ * newest shown are read then; earlier entries are read a page at a time with `loadEarlier`. `onReply` is told of each
+ * read that brought an assistant entry, and `onMessage` of each direct message not shown before.
+ *
+ * `questions` is handed down rather than held here: an `agent_question` event re-renders the page, because the frame
+ * carries only the agent id, and the fresh list arrives with that render.
  */
 export function useLiveConversation(
   agentId: string,
   initial: ConversationPage,
-  callbacks: { onReply?: () => void; onMessage?: (message: ThreadMessage) => void } = {}
+  options: { questions?: readonly QuestionView[]; onReply?: () => void; onMessage?: (message: ThreadMessage) => void } = {}
 ) {
   const [messages, setMessages] = useState<ThreadMessage[]>(initial.messages);
   const [entries, setEntries] = useState(initial.entries);
@@ -71,7 +75,7 @@ export function useLiveConversation(
       while (wanted.current !== null && isPast(wanted.current, lastId.current)) {
         const page = await read({ after: lastId.current ?? "0" });
         if (page.entries.some((entry) => entry.role === "assistant")) {
-          callbacks.onReply?.();
+          options.onReply?.();
         }
         setEntries((current) => mergeEntries(current, page.entries));
         lastId.current = newerId(lastId.current, page.lastId);
@@ -97,7 +101,7 @@ export function useLiveConversation(
 
   useHubEvent<{ message: ThreadMessage }>("direct", ({ message }) => {
     if (!messages.some((shown) => shown.id === message.id)) {
-      callbacks.onMessage?.(message);
+      options.onMessage?.(message);
     }
     setMessages((current) => mergeMessages(current, [message]));
   });
@@ -127,7 +131,7 @@ export function useLiveConversation(
   }
 
   return {
-    items: conversationItems(messages, entries),
+    items: conversationItems(messages, entries, options.questions),
     olderBefore,
     loading,
     error,
