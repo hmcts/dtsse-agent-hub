@@ -20,7 +20,7 @@ import {
 import { type Api, ApiError, createApi } from "../api.ts";
 import { jiraExportSignInBudget } from "./atlassian.ts";
 import { packAzureCache, pruneMsalCache, unpackAzureCache } from "./azure-cache.ts";
-import { MAX_DETAIL_CHARS, MAX_URI_CHARS, MAX_USER_CODE_CHARS } from "./github-device-flow.ts";
+import { MAX_DETAIL_CHARS, MAX_URI_CHARS, MAX_USER_CODE_CHARS, RELAY_WORDING_CHARS } from "./github-device-flow.ts";
 import { FatalError } from "./phases.ts";
 import {
   azureLogin,
@@ -31,6 +31,7 @@ import {
   GITHUB_SIGN_IN_GAP_MS,
   type GithubLoginOptions,
   githubLogin,
+  githubLoginStatus,
   githubSignInGapMs,
   OUTPUT_TAIL_CHARS,
   outputTail,
@@ -599,16 +600,26 @@ describe("githubLogin", () => {
     expect(stderr).toMatch(/github: signing in through the GitHub CLI OAuth app \(client 178c6fc778ccc68e1d6a\)/);
   });
 
-  it("should keep the relayed status inside the hub's detail bound at the longest code and page it will take", async () => {
-    // Arrange: the worst case the mint lets through — a user code at `USER_CODE`'s 64 characters and a page at
-    // `MAX_URI_CHARS`. The detail this words around them is a `virtualStatus`, which the hub bounds at 500 and
-    // rejects rather than truncates; a `400` there is not retryable, so it would throw after the code was
-    // already on the owner's screen and burn the budget on codes that would have worked.
+  it("should word the live-code status in exactly the characters MAX_URI_CHARS is derived from", async () => {
+    // Act & Assert: `MAX_URI_CHARS` is `MAX_DETAIL_CHARS` less this wording and a user code, so the wording's
+    // own length has to be held to the constant that measures it. Without this, rewording the line above by a
+    // character moves the real bound and nothing fails — the page stays inside 2048, the detail goes over 500,
+    // and the hub 400s a status for a code already on the owner's screen.
+    expect(githubLoginStatus("", "")).toHaveLength(RELAY_WORDING_CHARS);
+  });
+
+  it("should fill the hub's detail bound exactly at the longest code and page the mint will take", async () => {
+    // Arrange: the worst case the mint lets through — a user code at `USER_CODE`'s 64 characters and a page of
+    // exactly `MAX_URI_CHARS`. The detail is a `virtualStatus`, which the hub bounds at 500 and rejects rather
+    // than truncates; a `400` there is not retryable, so it would throw after the code was already on the
+    // owner's screen and burn the budget on codes that would have worked.
+    const page = `https://github.com/login/device?${"x".repeat(MAX_URI_CHARS - "https://github.com/login/device?".length)}`;
+    expect(page).toHaveLength(MAX_URI_CHARS);
     const fetchImpl = ((): typeof fetch => {
       const longest = new URLSearchParams({
         device_code: "dev-code",
         user_code: "A".repeat(MAX_USER_CODE_CHARS),
-        verification_uri: `https://github.com/login/device?${"x".repeat(MAX_URI_CHARS - 38)}`,
+        verification_uri: page,
         expires_in: "899",
         interval: "1"
       }).toString();
@@ -621,11 +632,11 @@ describe("githubLogin", () => {
     // Act
     const { result } = await captureStderr(() => signIn(fetchImpl));
 
-    // Assert
+    // Assert: exactly the bound, not merely inside it. Slack here is what lets the wording drift unnoticed.
     expect(result).toBe("signed-in");
     const awaiting = virtual().status.filter((s) => s.phase === "awaiting_login");
     expect(awaiting).toHaveLength(1);
-    expect((awaiting[0] as { detail: string }).detail.length).toBeLessThanOrEqual(MAX_DETAIL_CHARS);
+    expect((awaiting[0] as { detail: string }).detail).toHaveLength(MAX_DETAIL_CHARS);
   });
 
   it("should store the token gh already holds without relaying a code when an earlier call signed it in", async () => {
@@ -821,6 +832,30 @@ describe("githubLogin", () => {
     expect(stderr).not.toContain(GH_TOKEN);
   });
 
+  it("should treat a store that rejects with no error at all as a failure, not as success", async () => {
+    // Arrange: a store rejecting with something falsy is the one shape that could read as success to the
+    // truthiness check and as failure to the `!== null` one four lines below it — the token nowhere and the
+    // call answering `signed-in`. Not reachable through the real client today, which is why it is pinned here.
+    const noReason: Api = { ...api(), putCredential: () => Promise.reject(undefined) };
+
+    // Act
+    const { error, stderr } = await captureStderrOfFailure(() =>
+      githubLogin({ api: noReason, env: pod.env(), fetchImpl: githubAnswering(token(GH_TOKEN)), wait: async () => {} })
+    );
+
+    // Assert: the hub-failed row, reached by a rejection that carried nothing to say.
+    expect(error).toBeInstanceOf(Error);
+    expect(virtual().loginFailures).toEqual([
+      {
+        kind: "github",
+        state: "failed",
+        detail: "github: signed in, but the token could not be saved to agent-hub yet; this agent is holding it and will keep trying"
+      }
+    ]);
+    // And the log says something about it rather than carrying the bare value as the whole account.
+    expect(stderr).toMatch(/github: the store rejected with undefined/);
+  });
+
   it("should throw rather than ask for a code when gh refuses a token nobody was asked for", async () => {
     // Arrange: the token came out of gh's own config, so no code was spent and there is nothing to report.
     fs.writeFileSync(path.join(pod.stateDir, "gh-token"), GH_TOKEN);
@@ -978,8 +1013,11 @@ describe("githubLogin", () => {
       })
     );
 
-    // Assert
-    expect(waits.filter((ms) => ms === 0)).toEqual([0, 0]);
+    // Assert: the gaps, which are the waits of no consequence beside the polls' own seconds. Up to the gap
+    // rather than exactly nil, because `gapLeft` is `gapMs` less a real elapsed time: an attempt that finishes
+    // inside the same millisecond leaves 1 of a gap of 1, which is the same nothing and not a different result.
+    const gaps = waits.filter((ms) => ms <= 1);
+    expect(gaps).toHaveLength(GITHUB_SIGN_IN_CODES - 1);
   });
 });
 

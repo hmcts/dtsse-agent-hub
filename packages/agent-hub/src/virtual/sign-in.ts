@@ -573,11 +573,17 @@ function githubStoreFailedDetail(hubFailed: boolean, ghFailed: boolean): string 
 /**
  * Runs one of the two stores and answers the error it ended with, or `null`. Each is run this way rather than
  * allowed to throw, because neither failing may end the call before the other has been tried.
+ *
+ * Whatever it rejected with becomes an `Error` with something to say, so that `null` is the only thing that
+ * means "stored". A store rejecting with something falsy would otherwise read as success to a truthiness check
+ * and as failure to a `!== null` one, and the two live a few lines apart: the token would be nowhere and the
+ * call would answer `signed-in`. Wording the value in rather than passing it through is what keeps the pod's
+ * log from carrying "github: undefined" as the whole account of why a sign-in did not stick.
  */
 const storeAttempt = async (store: () => Promise<unknown>, options: RetryOptions): Promise<Error | null> =>
   withRetry(store, options).then(
     () => null,
-    (e: unknown) => e as Error
+    (e: unknown) => (e instanceof Error ? e : new Error(`the store rejected with ${String(e)}`))
   );
 
 /**
@@ -586,6 +592,14 @@ const storeAttempt = async (store: () => Promise<unknown>, options: RetryOptions
  */
 const storedGhToken = async (env: NodeJS.ProcessEnv): Promise<string> =>
   (await run("gh", ["auth", "token", "--hostname", "github.com"], { env })).stdout.trim();
+
+/**
+ * What the agent's status says while a code is live. Its own length with nothing in it is what
+ * `RELAY_WORDING_CHARS` measures and what `MAX_URI_CHARS` is derived from, so this wording and that constant
+ * have to move together: `sign-in.test.ts` asserts the one against the other, because a derived figure nothing
+ * holds to the thing it measures goes stale the first time somebody rewords this line.
+ */
+export const githubLoginStatus = (userCode: string, verificationUri: string): string => `github: the owner must enter code ${userCode} at ${verificationUri}`;
 
 /**
  * Puts a code on the owner's screen. Throws a `DeviceLoginError` whose `shown` says whether the hub ever had
@@ -614,7 +628,7 @@ async function relayGithubCode({
           expires_in: code.expires_in
         });
         shown = true;
-        await api.virtualStatus(id, "awaiting_login", `github: the owner must enter code ${code.user_code} at ${code.verification_uri}`);
+        await api.virtualStatus(id, "awaiting_login", githubLoginStatus(code.user_code, code.verification_uri));
       },
       { wait }
     );
@@ -739,7 +753,12 @@ export async function githubLogin({
       },
       { attempts: GH_STORE_ATTEMPTS, wait }
     );
-    if (!hubFailed && !ghFailed) {
+    if (hubFailed === null && ghFailed === null) {
+      // The owner's part is done and both stores have it, so a hub that will not mark the row throws rather
+      // than being reported as a sign-in that failed: reporting one would withdraw the code they used. It is
+      // safe to throw past the report for the same reason the hub-failed row below is — the token is in gh's
+      // config, so the caller's next attempt finds it through `storedGhToken` and completes the row without
+      // relaying anything — and the pending row it leaves meanwhile is bounded by the `awaiting_owner` sweep.
       const login = (await run("gh", ["api", "user", "--jq", ".login"], { env: ghEnv })).stdout.trim();
       await withRetry(() => api.loginComplete(id, "github", login ? { account_label: login } : {}), { wait });
       say(`github: signed in${login ? ` as ${login}` : ""}`);
@@ -747,7 +766,7 @@ export async function githubLogin({
     }
     // Whichever failed says so in full in the pod's log; the hub gets the wording the owner can act on.
     for (const failure of [hubFailed, ghFailed]) {
-      if (failure) {
+      if (failure !== null) {
         say(`github: ${failure.message}`);
       }
     }
@@ -763,7 +782,7 @@ export async function githubLogin({
     // call completes it from `failed` as readily as from `pending`.
     await reportGithubFailure({ api, id, state: "failed", detail, wait });
     say(detail);
-    if (hubFailed && !ghFailed) {
+    if (hubFailed !== null && ghFailed === null) {
       // gh is holding the grant, so this is the one failure the next call repairs for free: `storedGhToken`
       // finds the token, the loop is skipped, and the hub is tried again with no code spent. A throw is what
       // gets that next call — `not-signed-in` would stop the asking and leave the boot script watching for a

@@ -272,6 +272,12 @@ case_sign_in_not_completed() {
         ok "never fails the agent, which would route the owner off the screen that has the token form" || no "status: $(hub -c '.status')"
     hub '.status[] | select(.phase == "awaiting_credentials") | .detail' | grep -q 'Paste a GitHub token at' &&
         ok "asks for a token in the phase that offers one" || no "status: $(hub -c '.status')"
+    # $EXIT_NO_CREDENTIAL also covers an owner who entered a code and had the token it granted refused or lost on
+    # the way to being stored, so a message here about what they did not do is false for two of the three ways
+    # in. The remedy is the same for all of them; the diagnosis is the client's, and it has already reported it.
+    [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("not signed in to GitHub yet"))] | length')" -ge 1 ] &&
+        [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("nobody completed"))] | length')" -eq 0 ] &&
+        ok "says the condition rather than blaming the owner for a sign-in they may have completed" || no "status: $(hub -c '.status')"
     [ "$(hub '[.status[] | select(.detail != null) | select(.detail | test("refused the stored token"))] | length')" -eq 1 ] &&
         ok "reports the token the owner pasted, and not the one already known refused" || no "status: $(hub -c '.status')"
     grep -q 'GitHub answered access_denied' "$C/out" && ok "logs what GitHub answered" || no "the refusal was not logged: $(grep 'github:' "$C/out")"
