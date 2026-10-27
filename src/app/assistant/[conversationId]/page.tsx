@@ -104,7 +104,10 @@ export default async function ConversationPage({
       exports={{ defaults, save: saveExportDefaults, access: jira }}
     >
       {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
-      <ChatView key={view.agentId} view={view} templates={offeredTemplates(mine)} viewerOid={viewer.oid} actions={ACTIONS} jira={jira} defaults={defaults} />
+      {/* Not even the thread behind the getting-ready screen while it holds the person at GitHub and Claude. */}
+      {home.chat === "blocked" ? null : (
+        <ChatView key={view.agentId} view={view} templates={offeredTemplates(mine)} viewerOid={viewer.oid} actions={ACTIONS} jira={jira} defaults={defaults} />
+      )}
       <OnboardingGate
         assistant={home.assistant}
         statuses={home.credentials.available ? home.credentials.statuses : []}

@@ -14,7 +14,7 @@ import { readConfluenceExport } from "./confluence-store.ts";
 import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
-import { onboarded, type Readiness, readiness } from "./onboarding.ts";
+import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { productLabel } from "./products.ts";
 import { snippetOf } from "./search.ts";
 import { type Artefact, type ConversationRow, listConversations, readArtefact, type SessionState, searchConversations, unsentConversation } from "./store.ts";
@@ -38,6 +38,8 @@ export interface AssistantSummary {
   logins: LoginView[];
   /** Every needed credential is stored, so the connections are offered again only for a sign-in the pod asks for. */
   onboarded: boolean;
+  /** The needed credentials without which the chat is not reachable at all; see `chatGate`. */
+  toChat: CredentialKind[];
 }
 
 export interface ConversationLink {
@@ -64,7 +66,8 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
     needed,
     optional: OPTIONAL_CREDENTIALS,
     logins: await loginViews(db, assistant.id),
-    onboarded: onboarded(needed, stored)
+    onboarded: onboarded(needed, stored),
+    toChat: chatCredentials(needed)
   };
 }
 

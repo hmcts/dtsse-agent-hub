@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectionsAsk, onboarded, readiness } from "./onboarding.ts";
+import { chatCredentials, chatGate, connectionsAsk, onboarded, readiness } from "./onboarding.ts";
 
 describe("readiness", () => {
   it("should be complete and ready when the assistant is running", () => {
@@ -46,5 +46,45 @@ describe("connectionsAsk", () => {
 
   it("should not ask for the accounts when the hub could not read the credentials it judged that on", () => {
     expect(connectionsAsk(false, "this deployment has no credentials vault")).toBe("unknown");
+  });
+});
+
+describe("chatCredentials", () => {
+  it("should need GitHub and a Claude token when the assistant runs on the person's own licence", () => {
+    expect(chatCredentials(["github", "azure", "claude"])).toEqual(["github", "claude"]);
+  });
+
+  it("should need GitHub and a Bedrock API key when the assistant runs on Amazon Bedrock", () => {
+    expect(chatCredentials(["github", "azure", "bedrock"])).toEqual(["github", "bedrock"]);
+  });
+});
+
+describe("chatGate", () => {
+  it("should be blocked when neither GitHub nor Claude is stored", () => {
+    expect(chatGate(["github", "claude"], new Set(["azure"]), null)).toBe("blocked");
+  });
+
+  it("should be blocked when GitHub is stored and Claude is not", () => {
+    expect(chatGate(["github", "claude"], new Set(["github", "azure"]), null)).toBe("blocked");
+  });
+
+  it("should be blocked when Claude is stored and GitHub is not", () => {
+    expect(chatGate(["github", "claude"], new Set(["claude", "azure"]), null)).toBe("blocked");
+  });
+
+  it("should be blocked when a Claude token is stored and the assistant runs on Bedrock", () => {
+    expect(chatGate(["github", "bedrock"], new Set(["github", "claude"]), null)).toBe("blocked");
+  });
+
+  it("should be blocked when a Bedrock key is stored and the assistant runs on the person's own licence", () => {
+    expect(chatGate(["github", "claude"], new Set(["github", "bedrock"]), null)).toBe("blocked");
+  });
+
+  it("should be open when GitHub and the assistant's model key are stored, even without Azure", () => {
+    expect(chatGate(["github", "claude"], new Set(["github", "claude"]), null)).toBe("open");
+  });
+
+  it("should be open when the hub cannot read the credentials it would judge that on", () => {
+    expect(chatGate(["github", "claude"], new Set(), "this deployment has no credentials vault")).toBe("open");
   });
 });

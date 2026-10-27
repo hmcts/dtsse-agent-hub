@@ -74,7 +74,10 @@ export default async function AssistantPage() {
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
     >
-      <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
+      {/* Nothing to chat in behind the getting-ready screen while it holds the person at GitHub and Claude. */}
+      {home.chat === "blocked" ? null : (
+        <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
+      )}
       <OnboardingGate
         assistant={home.assistant}
         statuses={home.credentials.available ? home.credentials.statuses : []}

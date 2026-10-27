@@ -41,6 +41,20 @@ export async function registerAgent(request: APIRequestContext, persona: string,
   return ((await response.json()) as { agent_id: string }).agent_id;
 }
 
+/**
+ * Stores placeholder GitHub, Claude and Bedrock credentials for `persona` through the agent API, so the Assistant's
+ * chat is past the gate that holds it at GitHub and Claude. Nothing in a spec runs a pod to use them. A deployment
+ * that keeps no credentials (503), or none for a development identity (403), leaves the gate open anyway, and one
+ * that checks real agent tokens (401) cannot be driven this way, so none of them is an error here.
+ */
+export async function connectForChat(request: APIRequestContext, persona: string): Promise<void> {
+  const values = { github: `ghp_${"e2e".repeat(10)}`, claude: `sk-ant-oat-${"e2e".repeat(10)}`, bedrock: `ABSK${"e2e".repeat(10)}` };
+  for (const [kind, value] of Object.entries(values)) {
+    const response = await request.put(`/api/agent/credentials/${kind}`, { headers: { "x-dev-user": devUser(persona) }, data: { value } });
+    expect([204, 401, 403, 503]).toContain(response.status());
+  }
+}
+
 export interface TranscriptEntry {
   key: string;
   role: "user" | "assistant" | "tool_use" | "tool_result" | "system";

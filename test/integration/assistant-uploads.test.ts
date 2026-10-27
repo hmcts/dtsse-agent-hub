@@ -29,7 +29,7 @@ import { realtime } from "../../src/realtime/process.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { DEV_PERSONA_COOKIE } from "../../src/viewer/identity.ts";
 import { type ClaimResult, createVirtualAgent } from "../../src/virtual-agents/store.ts";
-import { insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { connectForChat, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 import { jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
 
@@ -175,6 +175,8 @@ beforeEach(async () => {
   vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
   vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
   await resetDatabase();
+  await connectForChat(ALICE);
+  await connectForChat(BOB);
   actAs("alice");
 });
 

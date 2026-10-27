@@ -10,7 +10,7 @@ import { ensureAssistant, readArtefact, writeArtefact } from "../../src/assistan
 import { conversationMatches } from "../../src/assistant/views.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
-import { insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { connectForChat, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 
 /**
@@ -94,6 +94,7 @@ beforeEach(async () => {
   await insertUser(ALICE);
   await insertUser(BOB);
   await insertUser(CAROL);
+  await Promise.all([ALICE, BOB, CAROL].map(connectForChat));
   // Carol can see and message every agent Alice has. No part of that reaches a conversation.
   await setGrant(prisma, ALICE.oid, CAROL.oid, "write");
   actAs("alice");
