@@ -2,7 +2,7 @@ import { HttpError } from "../agent-api/http.ts";
 import type { AgentRow } from "../agents/store.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import type { QuestionPost, QuestionSetAnswer } from "./questions.ts";
+import { offerExpired, type QuestionPost, type QuestionSetAnswer } from "./questions.ts";
 
 /**
  * A question as the hub keeps it: recorded when a session's `PreToolUse` hook intercepts `AskUserQuestion`, read by
@@ -23,10 +23,14 @@ async function announce(db: Database, agent: Pick<AgentRow, "id" | "ownerOid">):
  * - **The same question again** — the same `tool_use_id`, whose unique index is what makes this idempotent —
  *   writes nothing and is still success: the client denies the tool whether or not its POST was answered, so a
  *   retry after a lost response finds the card it already put up. The model is told the same thing, truthfully.
- * - **A different question while one is still unanswered** is refused, because writing it would put two live cards
+ * - **A different question while one is still offered** is refused, because writing it would put two live cards
  *   in one blocked turn and answering either would send a message contradicting the other. Nothing is written, so
  *   the model must be told to ask in words instead — telling it the question is on screen would leave it waiting
  *   for a card that does not exist, which is the stall this whole feature exists to remove.
+ *
+ * Only a question still *offered* blocks, by `offerExpired` — the same rule the card and the answer read. One past
+ * `QUESTION_OFFER_WINDOW_MS` can never be answered, so counting it would leave the session unable to ask anything
+ * ever again and the person with no card to clear.
  *
  * A retry does not replace the stored set either — the question is the one the session is waiting on an answer to,
  * and rewriting it under a card the person is reading would change what they are choosing between.
@@ -52,11 +56,15 @@ export async function recordQuestion(prisma: PrismaClient, agent: Pick<AgentRow,
     if (same !== null) {
       return "already-asked";
     }
+    // The newest unanswered one, and the window applied to it here rather than in the `where`, so this reads the
+    // one `offerExpired` every other place reads instead of a second spelling of it in SQL. Newest is enough to
+    // decide: older ones were asked earlier, so if this one is past the window they all are.
     const open = await tx.agentQuestion.findFirst({
       where: { agentId: agent.id, sessionId: post.session_id, answeredAt: null },
-      select: { id: true }
+      select: { askedAt: true },
+      orderBy: [{ askedAt: "desc" }, { id: "desc" }]
     });
-    if (open !== null) {
+    if (open !== null && !offerExpired(open.askedAt, new Date())) {
       throw new QuestionNotRecorded();
     }
     await tx.agentQuestion.create({
