@@ -12,7 +12,7 @@ import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/ass
 import { resetClaudeMd, saveClaudeMd } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
 import { STARTERS } from "@/assistant/starters";
@@ -68,6 +68,7 @@ export default async function AssistantPage() {
       theme={theme}
       actions={ROW_ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
+      connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn }}
       now={Date.now()}
       plugins={pluginSettings}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}

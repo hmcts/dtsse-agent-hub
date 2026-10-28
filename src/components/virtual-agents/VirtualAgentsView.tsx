@@ -12,7 +12,7 @@ import { idleFor, statusLabel, stopReasonLabel } from "./labels";
 export function ModelRouteLine({ route }: { route: ModelRoute }) {
   return (
     <p className="text-sm text-hub-text">
-      Model: {route === "bedrock" ? "Amazon Bedrock, with your Bedrock API key" : "your own Claude licence, so it will also need your Claude token"}
+      Model: {route === "bedrock" ? "Claude Code through HMCTS, with your Claude Code key" : "your own Claude licence, so it will also need your Claude token"}
     </p>
   );
 }
@@ -74,7 +74,7 @@ export function CreateVirtualAgent({ route, create, refusal, plugins }: { route:
     <Section heading="Create a virtual agent">
       <div className="space-y-3 text-sm">
         <p role="note" className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-amber-200">
-          A virtual agent acts with your GitHub and Azure access.
+          A virtual agent acts with your GitHub access, and with your Azure access if you connect Azure.
         </p>
         <ModelRouteLine route={route} />
         {refusal ? <p className="text-hub-muted">{refusal}</p> : <CreateVirtualAgentForm create={create} plugins={plugins} />}

@@ -157,8 +157,8 @@ Each virtual agent has a model route, set from its owner's sign-in when it is cr
 
 | Route | Who | The model | Credentials it needs |
 | --- | --- | --- | --- |
-| `bedrock` | holders of the `AIGateway.User` app role | Amazon Bedrock, called directly with the owner's own Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) | `github`, `azure`, `bedrock` |
-| `own_licence` | everyone else | the owner's own Claude licence | `github`, `azure`, `claude` |
+| `bedrock` | holders of the `AIGateway.User` app role | Amazon Bedrock, called directly with the owner's own Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) | `github`, `bedrock` |
+| `own_licence` | everyone else | the owner's own Claude licence | `github`, `claude` |
 
 The Bedrock API key is pasted, in the credentials section of `/hub/virtual` (`/hub/settings/credentials` with virtual agents off) or the agent's page, or sent with
 `PUT /api/agent/credentials/bedrock`; until it is stored the pod reports `awaiting_credentials` with `bedrock: …`.
@@ -166,8 +166,18 @@ It is the one credential its owner can read back, with `GET /api/agent/credentia
 laptop uses it too. Anyone holding a person's agent-hub token can therefore read their Bedrock key;
 `docs/agent-api.md` (Credentials) has the detail.
 
+An Azure sign-in (`azure`) is optional on either route. It lets Claude run `az` as the owner — pipelines,
+environments, AKS, Key Vault and the workspace scripts that fetch secrets with `az` — and gives Jenkins the owner's
+Entra object id; nothing else needs it. A pod restores a stored one before Claude starts, and with none it carries on
+without Azure and relays no code. The owner connects it when they want it: **Connect** on the Azure row of the
+Assistant's settings (Connections), or the reconnect control on the agent's page, records the request
+(`virtual_agent.azure_sign_in_requested_at`) and restarts the agent, and its new pod, finding the request, relays a
+device code in the background while Claude runs. Relaying spends the request, so a code that runs out unused is not
+offered again until they ask again. The Assistant raises an ask about Azure only while that code is live.
+
 A Jenkins API token (`jenkins`) is optional on either route: pasted in the same places, it enables an agent's Jenkins
-tools, and an agent starts without it. Like a GitHub token, only the owner's own virtual agent reads it back.
+tools, and an agent starts without it. Jenkins also needs Azure connected, because the owner's Entra object id, which
+Jenkins keys them on, is read with `az`. Like a GitHub token, only the owner's own virtual agent reads it back.
 
 An Atlassian sign-in (`atlassian`) is optional too: it gives an agent the Atlassian Teamwork Graph CLI, `twg`, for Jira
 and Confluence on hmcts.atlassian.net. It is not pasted: the pod relays a device code to its owner, then saves `twg`'s
@@ -295,7 +305,7 @@ lease comes back to it, it behaves as above.
 **A switchover** moves agents once the old cluster's orchestrator stops renewing the lease. After
 `ORCHESTRATOR_LEASE_SECONDS` (two minutes by default) the new cluster's next claim takes the lease, and with it every
 agent meant to be running: each is started on the new cluster on a fresh disk, with a new launch token that shuts the
-old pod out at once. The pod restores the owner's GitHub, Azure and Bedrock or Claude credentials from the hub and re-bootstraps
+old pod out at once. The pod restores the owner's GitHub and Bedrock or Claude credentials, and their Azure sign-in if they connected one, from the hub and re-bootstraps
 its repos. Uncommitted work and Claude's own session history on the old disk are lost; the conversation the hub
 stored stays on the agent's page. Stopped agents are not moved; one that is started again starts on
 the new cluster. If the old cluster stays up, its orchestrator, now on standby, deletes the moved agents'
@@ -346,7 +356,7 @@ rather than a description of one build of it:
 | have `virtual-agent-boot` on the image's `PATH`, as a `/usr/local/bin` symlink | it is the container's `command`, and the kubelet resolves that with no shell, against the image's own `PATH`. npm installs it into nvm's version-specific bin directory, which only a shell that has sourced `nvm.sh` can see. `agent-hub` is linked beside it for convenience, not necessity, and does not work from a shell-less `PATH` at all: it needs node and, unlike boot, carries no `load_node` |
 | have `node` and `npm`, reachable by sourcing `$NVM_DIR/nvm.sh` | `virtual-agent-boot` sources it to upgrade the client; stage 1 refuses to start without either. The base installs nvm with `PROFILE=/dev/null` and sources it from `.bashrc` and `.zshrc` alone, so a login shell has no node either — which is what makes `kubectl exec` into a pod need `. "$HOME/.nvm/nvm.sh"` first |
 | have `jq`, `tmux`, `git`, `gh` and `curl` | boot builds every status body with `jq -cn` under `set -euo pipefail`, so without it a pod aborts at its first report and crash-loops having told the hub nothing; it clones over HTTPS with `gh`'s token and reports with `curl`, and stage 1 runs each session in tmux |
-| have the Azure CLI | the client shells out to `az` for the device-code sign-in and the token it caches (`src/virtual/sign-in.ts`), and stage 1 retries that sign-in indefinitely — so without `az` the agent sits at "Starting" with no failure its owner can act on |
+| have the Azure CLI | the client shells out to `az` to restore the owner's stored sign-in, for the device-code sign-in they ask for and the token it caches (`src/virtual/sign-in.ts`), and for the object id Jenkins needs. Azure is optional, so stage 1 starts Claude without it — without `az` an agent runs with Azure and Jenkins unconfigured rather than failing |
 | have Claude Code and `hai` | `hai` execs `claude` by bare name, and stage 1 installs `hai` itself only while the image does not carry it. `twg` is the one genuinely optional tool: stage 1 skips the Atlassian sign-in without it |
 | use `/home/hmcts` as `$HOME` | the pod's volume mounts are hardcoded to it: `~/.claude`, `~/.azure` and `~/.config/gh`. `~/.claude` is a mount from the PVC, so a session's status and `enabled` files outlive the pod |
 | own `$HOME`, `$NVM_DIR` and npm's global prefix as uid and gid 1000 | the pod sets `runAsUser`, `runAsGroup` and `fsGroup` to 1000, which override whatever the image's `USER` says — so an image expecting root still starts, and the failure is `EACCES` when boot's `npm install -g` writes to a prefix it does not own. `runAsUser` is also what makes a named `USER` acceptable: given only a name, the kubelet cannot prove the user is not root and refuses a pod asking for `runAsNonRoot` |

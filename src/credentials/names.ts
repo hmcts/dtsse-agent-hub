@@ -1,8 +1,9 @@
 import { DEV_OID_PREFIX } from "../agent-auth/dev.ts";
 
 /**
- * What a person's virtual agent needs on their behalf: a GitHub token, an Azure CLI token cache, and the key to its
- * model, a Claude token or an Amazon Bedrock API key; if they want its Jenkins tools, a Jenkins API token; their
+ * What a person's virtual agent needs on their behalf: a GitHub token and the key to its model, a Claude token or an
+ * Amazon Bedrock API key; if they want it to act in Azure, an Azure CLI token cache; if they want its Jenkins tools,
+ * a Jenkins API token (which also needs Azure, for their Entra object id); their
  * own CLAUDE.md, which is not a sign-in but is kept here because it may hold private context; if they want to
  * override the default, the git identity their agents commit as; and, if they want Jira and Confluence, the sign-in
  * of the Atlassian Teamwork Graph CLI, `twg`.

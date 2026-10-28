@@ -212,7 +212,7 @@ sleep 30`
     "az",
     `case "$1 $2" in
   "account get-access-token") [ -f "$SHIM_STATE/az-ok" ] && exit 0; echo "ERROR: AADSTS700082: The refresh token has expired" >&2; exit 1 ;;
-  "login --use-device-code") cat "$SHIM_STATE/az.out" >&2; sleep 0.3; mkdir -p "$AZURE_CONFIG_DIR"
+  "login --use-device-code") cat "$SHIM_STATE/az.out" >&2; sleep 0.3; [ -n "$FAKE_AZ_LOGIN_RC" ] && exit "$FAKE_AZ_LOGIN_RC"; mkdir -p "$AZURE_CONFIG_DIR"
       cp "$SHIM_STATE/cache.json" "$AZURE_CONFIG_DIR/msal_token_cache.json"; touch "$SHIM_STATE/az-ok"; echo "[]" ;;
   "ad signed-in-user") printf '{"id": "%s", "upn": "olive@hmcts.net", "mail": null, "name": "Olive Owner"}\\n' "$SHIM_OID" ;;
   *) echo "unexpected az $*" >&2; exit 2 ;;

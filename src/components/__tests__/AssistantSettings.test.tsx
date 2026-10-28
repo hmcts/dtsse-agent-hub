@@ -138,19 +138,24 @@ describe("the Assistant's settings cog", () => {
     expect(cog().textContent).toBe("");
   });
 
-  it.each([
-    ["github", "GitHub needs your attention"],
-    ["azure", "Azure needs your attention"]
-  ] as const)("should warn that %s needs attention when it alone is not connected", (missing, warning) => {
-    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN.filter((kind) => kind !== missing))} />);
+  it("should warn that GitHub needs attention when it alone is not connected", () => {
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN.filter((kind) => kind !== "github"))} />);
 
-    expect(cog().getAttribute("aria-label")).toBe(`Settings. ${warning}`);
+    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention");
   });
 
-  it("should name all three when the needed sign-ins are missing and the optional one has lapsed", () => {
+  // Azure is in the background, as Jenkins is: never connecting it is a choice, so the cog says nothing about it.
+  it("should not warn about Azure when it alone is not connected", () => {
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN.filter((kind) => kind !== "azure"))} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings");
+    expect(cog().textContent).toBe("");
+  });
+
+  it("should name both when GitHub is missing and the optional one has lapsed", () => {
     render(<AssistantSettings now={Date.now()} connections={data(["bedrock"], [login("atlassian", "expired")])} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub, Azure and Atlassian need your attention");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub and Atlassian need your attention");
   });
 
   it("should not nag about Atlassian when the person has simply never set it up", () => {
@@ -468,8 +473,8 @@ describe("the Assistant's settings dialog", () => {
 
     expect(rows.map((row) => row.textContent)).toEqual([
       "GGitHubalice@hmcts.netConnected",
-      "AzAzureYour HMCTS account, for pipelines and environmentsWaiting for you",
-      "AIAI model accessYour Amazon Bedrock API keyConnected",
+      "AzAzureYour HMCTS account, for pipelines and environments (optional)Waiting for you",
+      "AIAI model accessYour Claude Code connectionConnected",
       "JJenkinsBuilds and pipelines on Jenkins (optional)Last sign-in failed",
       "AAtlassianJira tickets and Confluence pages (optional)Sign-in expired"
     ]);
@@ -541,6 +546,101 @@ function plugins(overrides: Partial<AssistantPlugins> = {}): AssistantPlugins {
 }
 
 const FORM = "Change your assistant's team tools";
+
+function connectWith(overrides: Partial<{ running: boolean; reconnect: FormAction }> = {}) {
+  return { assistantId: ASSISTANT_ID, running: true, reconnect: ok(), ...overrides };
+}
+
+function azureRow(): HTMLElement {
+  const row = within(screen.getByRole("list", { name: "Connections" }))
+    .getAllByRole("listitem")
+    .find((item) => within(item).queryByText("Azure", { exact: true }) !== null);
+  if (row === undefined) {
+    throw new Error("no Azure row");
+  }
+  return row;
+}
+
+describe("connecting Azure from the Assistant's settings", () => {
+  it("should offer to connect Azure when it is not connected", () => {
+    open({ connections: data(["github", "bedrock"]), connect: connectWith() }, "Connections");
+
+    expect(within(azureRow()).getByText("Not connected")).toBeTruthy();
+    expect(within(azureRow()).getByRole("button", { name: "Connect Azure" }).textContent).toBe("Connect");
+  });
+
+  it("should restart the assistant to ask for the sign-in when the person confirms the connect", async () => {
+    const reconnect = ok();
+    open({ connections: data(["github", "bedrock"]), connect: connectWith({ reconnect }) }, "Connections");
+
+    fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
+    expect(screen.getByText("Restart your assistant so it asks you to sign in to Azure? Your chats are kept.")).toBeTruthy();
+    await act(async () => {
+      fireEvent.submit(within(azureRow()).getByRole("form", { name: "Connect Azure" }));
+    });
+
+    const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
+    expect([sent.get("id"), sent.get("kind")]).toEqual([ASSISTANT_ID, "azure"]);
+  });
+
+  it("should say the sign-in is asked for at the next start when the assistant is stopped", () => {
+    open({ connections: data(["github", "bedrock"]), connect: connectWith({ running: false }) }, "Connections");
+
+    fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
+
+    expect(screen.getByText("Have your assistant ask you to sign in to Azure? It is stopped, so it asks when it next starts.")).toBeTruthy();
+  });
+
+  it("should put the question away again when the person cancels", () => {
+    open({ connections: data(["github", "bedrock"]), connect: connectWith() }, "Connections");
+
+    fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
+    fireEvent.click(within(azureRow()).getByRole("button", { name: "Cancel" }));
+
+    expect(within(azureRow()).queryByRole("form")).toBeNull();
+    expect(within(azureRow()).getByRole("button", { name: "Connect Azure" })).toBeTruthy();
+  });
+
+  it("should offer to sign in again, and say the saved sign-in goes, when a stored Azure sign-in has lapsed", () => {
+    open(
+      {
+        connections: data(["github", "bedrock", "azure"], [login("azure", "failed", new Date(Date.now() - 600_000).toISOString(), new Date().toISOString())]),
+        connect: connectWith()
+      },
+      "Connections"
+    );
+
+    fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
+
+    expect(screen.getByText(/^Delete your saved Azure sign-in, which all your virtual agents use, and restart your assistant/)).toBeTruthy();
+    expect(within(azureRow()).getByRole("button", { name: "Sign in to Azure" })).toBeTruthy();
+  });
+
+  it("should offer no connect when Azure is connected", () => {
+    open({ connections: data(["github", "bedrock", "azure"]), connect: connectWith() }, "Connections");
+
+    expect(within(azureRow()).queryByRole("button")).toBeNull();
+  });
+
+  it("should offer no connect while a code the person asked for is waiting for them", () => {
+    open({ connections: data(["github", "bedrock"], [login("azure", "pending")]), connect: connectWith() }, "Connections");
+
+    expect(within(azureRow()).queryByRole("button")).toBeNull();
+  });
+
+  it("should offer a connect for nothing but Azure", () => {
+    open({ connections: data([]), connect: connectWith() }, "Connections");
+
+    const buttons = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("button");
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Connect Azure"]);
+  });
+
+  it("should only say where Azure stands when the page gives no way to connect it", () => {
+    open({ connections: data(["github", "bedrock"]) }, "Connections");
+
+    expect(within(azureRow()).queryByRole("button")).toBeNull();
+  });
+});
 
 describe("the Assistant's team tools", () => {
   it("should offer no Tools section when the hub offers none and the assistant loads none", () => {

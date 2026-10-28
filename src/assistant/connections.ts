@@ -58,11 +58,11 @@ export interface Connector {
  */
 export const CONNECTORS = {
   github: { name: "GitHub", initial: "G", desc: "Read repositories and open pull requests", paste: null },
-  azure: { name: "Azure", initial: "Az", desc: "Your HMCTS account, for pipelines and environments", paste: null },
+  azure: { name: "Azure", initial: "Az", desc: "Your HMCTS account, for pipelines and environments (optional)", paste: null },
   atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)", paste: null },
   jenkins: { name: "Jenkins", initial: "J", desc: "Builds and pipelines on Jenkins (optional)", paste: "Jenkins API token" },
   claude: { name: "Claude", initial: "C", desc: "Your Claude licence", paste: "Claude token" },
-  bedrock: { name: "AI model access", initial: "AI", desc: "Your Amazon Bedrock API key", paste: "Bedrock API key" },
+  bedrock: { name: "AI model access", initial: "AI", desc: "Your Claude Code connection", paste: "Claude Code key" },
   // Neither is a sign-in: both are kept beside them because they may hold private context, and there is nothing to
   // connect for either, so no surface offers a row for them.
   claude_md: null,
@@ -194,6 +194,8 @@ export interface Connection extends Connector {
   detail: string;
   /** The account the sign-in is for, when the hub recorded one. */
   accountLabel: string | null;
+  /** Whether a value is saved, which signing in again would delete; true of a lapsed sign-in as much as a working one. */
+  stored: boolean;
 }
 
 /**
@@ -246,8 +248,36 @@ export function connections(
     const status = data.statuses.find((candidate) => candidate.kind === kind);
     const login = data.logins.find((candidate) => candidate.kind === kind);
     const state = connectionState(checklist(status?.stored === true, login, now), login, status, now);
-    return { kind, ...CONNECTORS[kind], state, detail: CONNECTION_DETAILS[state], accountLabel: status?.accountLabel ?? null };
+    return { kind, ...CONNECTORS[kind], state, detail: CONNECTION_DETAILS[state], accountLabel: status?.accountLabel ?? null, stored: status?.stored === true };
   });
+}
+
+/**
+ * The sign-ins the assistant makes only when the person asks for one, from the Connections section of its settings.
+ * Azure lets it act as them with `az`, which nothing in a chat waits for, so it is in the background as a Jenkins token
+ * is: nothing prompts for it, and a sign-in of it is raised as an ask only while the code they asked for is live. One
+ * that lapsed is left to that section, where it says so and offers to connect again, rather than being put back in
+ * front of somebody who may have changed their mind.
+ */
+export const ON_REQUEST: readonly CredentialKind[] = ["azure"];
+
+/** Whether the assistant signs in to `kind` only when the person asks it to. */
+export function signsInOnRequest(kind: CredentialKind): boolean {
+  return ON_REQUEST.includes(kind);
+}
+
+/** Whether a sign-in in `state` is one the Assistant asks the person about, rather than leaving it to settings. */
+function asksAbout(kind: CredentialKind, state: ConnectionState): boolean {
+  return needsPerson(state) && !(signsInOnRequest(kind) && hasLapsed(state));
+}
+
+/**
+ * Whether the settings row offers to connect this sign-in: one made on request that is not connected and is not
+ * waiting on a code already. The connect restarts the assistant so its pod relays the sign-in, and a code that is live
+ * is already the thing to do.
+ */
+export function offersConnect(row: Pick<Connection, "kind" | "state">): boolean {
+  return signsInOnRequest(row.kind) && (row.state === "waiting" || hasLapsed(row.state));
 }
 
 /**
@@ -297,7 +327,8 @@ export function canSignInAgain(kind: CredentialKind, uses: readonly CredentialKi
  * code goes back to the pod — so there is always something to do about it.
  *
  * One that is over is here only while `canSignInAgain`, which is the other half of the same rule: the row is what the
- * ask points at, so a kind with no way back belongs on neither. Over is `now`'s to decide and not only the pod's,
+ * ask points at, so a kind with no way back belongs on neither. Nor is one made `ON_REQUEST`, whose way back is in
+ * settings. Over is `now`'s to decide and not only the pod's,
  * because a code that ran out is over whether or not its pod lived long enough to say so.
  */
 export function offeredConnections(
@@ -310,7 +341,9 @@ export function offeredConnections(
 ): OfferedConnection[] {
   const uses = [...assistant.needed, ...assistant.optional];
   const live = (login: LoginView) => login.state === "pending" && Date.parse(login.expiresAt) > now;
-  const asked = assistant.logins.filter((login) => live(login) || (login.state !== "completed" && canSignInAgain(login.kind, uses))).map((login) => login.kind);
+  const asked = assistant.logins
+    .filter((login) => live(login) || (login.state !== "completed" && !signsInOnRequest(login.kind) && canSignInAgain(login.kind, uses)))
+    .map((login) => login.kind);
   const unasked = assistant.optional.filter((kind) => OFFERED_OPTIONAL.includes(kind));
   const rows: OfferedConnection[] = [];
   for (const kind of [...assistant.needed, ...asked, ...unasked]) {
@@ -370,11 +403,11 @@ export function connectionsPrompt(ask: ConnectionsAsk, needed: readonly Credenti
 
 /**
  * The sign-ins the cog prompts about when the person has never set one up. Model access is left out: the connections
- * banner asks for it for as long as it is missing, which is as long as this would. A Jenkins token is nobody's
- * requirement, and never setting Atlassian up is a choice — a badge nobody can ever clear teaches people to ignore
- * the one that matters.
+ * banner asks for it for as long as it is missing, which is as long as this would. A Jenkins token and an Azure
+ * sign-in are nobody's requirement, and never setting Atlassian up is a choice — a badge nobody can ever clear
+ * teaches people to ignore the one that matters.
  */
-export const PROMPTED_WHEN_MISSING: readonly CredentialKind[] = ["github", "azure"];
+export const PROMPTED_WHEN_MISSING: readonly CredentialKind[] = ["github"];
 
 /**
  * Whether a row is worth the person's attention.
@@ -384,11 +417,12 @@ export const PROMPTED_WHEN_MISSING: readonly CredentialKind[] = ["github", "azur
  * says anything about — which is exactly the one the badge is for, and leaving a kind out of it by name is how
  * Claude, Bedrock and Jenkins came to have no badge at all once their value was stored.
  *
- * `needsPerson` and nothing wider, so the badge cannot point at a prompt that is not raised: the cog says to close
- * the dialog and look above the chats, and `signInPrompt` is what is there. A `finishing` sign-in raises neither.
+ * `asksAbout` and nothing wider, so the badge cannot point at a prompt that is not raised: the cog says to close the
+ * dialog and look above the chats, and `signInPrompt` is what is there. A `finishing` sign-in raises neither, and
+ * nor does a lapsed one made `ON_REQUEST`.
  */
 function needsAttention(row: Connection): boolean {
-  return needsPerson(row.state) || (PROMPTED_WHEN_MISSING.includes(row.kind) && row.state === "waiting");
+  return asksAbout(row.kind, row.state) || (PROMPTED_WHEN_MISSING.includes(row.kind) && row.state === "waiting");
 }
 
 /**
@@ -420,7 +454,7 @@ export function connectionsWarning(list: readonly Connection[]): string | null {
  * thing to do changed.
  */
 export function signInPrompt(list: readonly Connection[]): ConnectionsPrompt | null {
-  const asking = list.filter((row) => needsPerson(row.state));
+  const asking = list.filter((row) => asksAbout(row.kind, row.state));
   if (asking.length === 0) {
     return null;
   }

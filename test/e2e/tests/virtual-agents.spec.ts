@@ -28,7 +28,7 @@ test.describe("virtual agents @regression", () => {
       test.skip(response?.status() === 404, "virtual agents are off on this deployment");
 
       await expect(page.getByRole("heading", { level: 1, name: "Virtual agents" })).toBeVisible();
-      await expect(page.getByText("A virtual agent acts with your GitHub and Azure access.")).toBeVisible();
+      await expect(page.getByText("A virtual agent acts with your GitHub access, and with your Azure access if you connect Azure.")).toBeVisible();
       const name = unique("e2e").toLowerCase();
       await page.getByLabel("Name").fill(name);
       await page.getByRole("button", { name: "Create" }).click();

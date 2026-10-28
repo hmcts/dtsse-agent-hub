@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONNECTORS, canSignInAgain, connectionsPrompt, offeredConnections } from "@/assistant/connections";
+import { CONNECTORS, canSignInAgain, connectionsPrompt, offeredConnections, signsInOnRequest } from "@/assistant/connections";
 import { readiness } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
 import { GettingReady, OnboardingGate } from "@/components/assistant/GettingReady";
@@ -12,6 +12,7 @@ import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
 import type { LoginView } from "@/virtual-agents/logins";
+import { neededCredentials, OPTIONAL_CREDENTIALS } from "@/virtual-agents/views";
 
 const refresh = vi.fn();
 const push = vi.fn();
@@ -40,8 +41,8 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
     statusChangedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
     readiness: readiness(status),
-    needed: ["github", "azure", "claude"],
-    optional: ["jenkins", "atlassian"],
+    needed: neededCredentials("own-licence"),
+    optional: OPTIONAL_CREDENTIALS,
     logins: [],
     onboarded: false,
     // Empty, so `chatGate` stays open: most of these set `onboarded` without the statuses behind it, and are about
@@ -147,15 +148,22 @@ describe("GettingReady progress", () => {
 });
 
 describe("GettingReady connectors", () => {
-  it("should list the needed connections and Atlassian but not Jenkins when rendering the connections", () => {
+  it("should list the needed connections and Atlassian but neither Azure nor Jenkins when rendering the connections", () => {
     render(ready());
 
     const items = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("listitem");
-    expect(items).toHaveLength(4);
-    ["GitHub", "Azure", "Claude", "Atlassian"].forEach((name, index) => {
+    expect(items).toHaveLength(3);
+    ["GitHub", "Claude", "Atlassian"].forEach((name, index) => {
       expect(within(items[index] as HTMLElement).getByText(name, { exact: true })).toBeTruthy();
     });
     expect(screen.queryByText("Jenkins")).toBeNull();
+    expect(screen.queryByText("Azure")).toBeNull();
+  });
+
+  it("should list an Azure row with its code when the person asked for an Azure sign-in", () => {
+    render(ready({ assistant: assistant("awaiting_login", { logins: [login("azure")] }) }));
+
+    expect(within(connector("Azure")).getByText("ABCD-1234")).toBeTruthy();
   });
 
   it("should show a stored connection as connected", () => {
@@ -256,8 +264,8 @@ describe("GettingReady connectors", () => {
     expect(within(bedrock).queryByRole("form")).toBeNull();
     fireEvent.click(within(bedrock).getByRole("button", { name: "Connect" }));
 
-    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Bedrock API key" });
-    expect((within(form).getByLabelText("Bedrock API key") as HTMLInputElement).type).toBe("password");
+    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Claude Code key" });
+    expect((within(form).getByLabelText("Claude Code key") as HTMLInputElement).type).toBe("password");
   });
 });
 
@@ -276,8 +284,8 @@ describe("GettingReady asks the person can act on", () => {
     const row = connector("AI model access");
     fireEvent.click(within(row).getByRole("button", { name: "Connect" }));
 
-    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Bedrock API key" });
-    expect(within(form).getByLabelText("Bedrock API key")).toBeTruthy();
+    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Claude Code key" });
+    expect(within(form).getByLabelText("Claude Code key")).toBeTruthy();
     expect((form.querySelector('input[name="kind"]') as HTMLInputElement).value).toBe("bedrock");
   });
 
@@ -525,14 +533,36 @@ describe("OnboardingGate", () => {
 
     expect(screen.queryByRole("dialog")).toBeNull();
     const banner = screen.getByRole("region", { name: "Connect your accounts" });
-    expect(banner.textContent).toContain("Your assistant needs Azure and Claude before it can work for you.");
+    expect(banner.textContent).toContain("Your assistant needs Claude before it can work for you.");
     expect(within(banner).getByRole("button", { name: "Connect accounts" })).toBeTruthy();
   });
 
   it("should name every needed connection when the person has stored none of them", () => {
     render(gate(assistant()));
 
-    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).toContain("needs GitHub, Azure and Claude");
+    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).toContain("needs GitHub and Claude");
+  });
+
+  it("should not mention Azure anywhere above the chats when Azure is not connected", () => {
+    render(gate(assistant("awaiting_credentials"), statuses("github")));
+
+    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).not.toContain("Azure");
+  });
+
+  it("should raise no banner, and count the person as onboarded, when only Azure is missing", () => {
+    const summary = assistant("running", { onboarded: true });
+    render(gate(summary, statuses("github", "claude")));
+
+    expect(screen.queryByRole("region", { name: "Connect your accounts" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Sign in" })).toBeNull();
+    expect(document.body.textContent).not.toContain("Azure");
+  });
+
+  it("should raise no sign-in ask for an Azure sign-in the person asked for and let lapse", () => {
+    const summary = assistant("running", { onboarded: true, logins: [lapsed("azure")] });
+    render(gate(summary, statuses("github", "claude")));
+
+    expect(screen.queryByRole("region", { name: "Sign in" })).toBeNull();
   });
 
   it("should open the connections when the person asks for them from the banner", () => {
@@ -869,9 +899,10 @@ describe("OnboardingGate", () => {
 
         // Asserted rather than skipped past, so every case says something. A code they have already sent back waits
         // on nobody. A live one always asks, because finishing it goes back through the pod rather than through a
-        // credential the hub has to accept for them. A lapsed one asks only while there is a way back it will take.
+        // credential the hub has to accept for them. A lapsed one asks only while there is a way back it will take,
+        // and never for a sign-in made on request, whose way back is in settings.
         const asked = screen.queryByRole("region", { name: "Sign in" }) !== null;
-        expect(asked).toBe(live === true || (live === false && canSignInAgain(kind, [...NEEDS, ...OFFERS])));
+        expect(asked).toBe(live === true || (live === false && canSignInAgain(kind, [...NEEDS, ...OFFERS]) && !signsInOnRequest(kind)));
         if (!asked) {
           return;
         }

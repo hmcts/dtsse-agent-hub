@@ -18,7 +18,9 @@
 # shellcheck disable=SC2015,SC2016
 set -u
 
-CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure stored-token-no-access checkout-client broken-checkout-client no-client trailing-slash
+CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure stored-token-no-access checkout-client broken-checkout-client
+    checkout-untracked-file checkout-modified-file checkout-modified-collision checkout-untracked-clobber checkout-local-commit
+    checkout-refusal-flood checkout-refusal-silent no-client trailing-slash
     client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint client-upgrade-ships-entrypoint
     checkout-entrypoint)
 
@@ -124,9 +126,33 @@ case "$1" in
     -C)
         case "$3" in
             fetch) echo "git fetch" >>"$FAKE_DIR/order.log" ;;
+            merge) echo "git merge" >>"$FAKE_DIR/order.log" ;;
+        esac
+        # The checkout-sync cases leave it to git to decide whether the fast-forward can happen, since that
+        # decision is the behaviour under test, so under FAKE_GIT_REAL every -C call runs against the real
+        # repository `real_checkout` built. Every other case has no repository and gets the canned answers.
+        [ -z "${FAKE_GIT_REAL:-}" ] || exec "$REAL_GIT" "$@"
+        case "$3" in
             rev-parse) echo master ;;
             symbolic-ref) echo origin/master ;;
-            merge) echo "git merge" >>"$FAKE_DIR/order.log" ;;
+            # A refusal whose message real git would need thousands of conflicting paths to produce, and one
+            # that writes no message at all. Both are about what the script makes of git's stderr rather than
+            # about git's own rules, so they are canned here instead of staged in a repository.
+            merge)
+                [ -z "${FAKE_MERGE_SILENT:-}" ] || exit 1
+                if [ -n "${FAKE_MERGE_PATHS:-}" ]; then
+                    {
+                        echo "error: The following untracked working tree files would be overwritten by merge:"
+                        i=0
+                        while [ "$i" -lt "$FAKE_MERGE_PATHS" ]; do
+                            printf '\tdocs/how-to/a-fairly-long-doc-page-name-%s.md\n' "$i"
+                            i=$((i + 1))
+                        done
+                        echo "Please move or remove them before you merge."
+                        echo "Aborting"
+                    } >&2
+                    exit 1
+                fi ;;
         esac ;;
 esac
 EOF
@@ -194,6 +220,47 @@ hub() { jq -r "$@" "$HUB_STATE"; }
 # The arguments of the install alone. npm.args holds one line per invocation, and the `ls` that follows the
 # install carries -g too, so a flag asserted against the whole file is found whether or not the install has it.
 install_args() { grep '^install ' "$C/npm.args" 2>/dev/null; }
+
+# The real git, with an identity and a default branch of its own, so the repositories below do not depend on
+# the machine's git configuration. The case's fake git is on PATH by the time these run, so it is called by path.
+rgit() { "$REAL_GIT" -c user.name="Boot Test" -c user.email=boot@example.com -c init.defaultBranch=master "$@"; }
+
+# real_checkout: a bare origin, the seed clone the suite commits in, and a real checkout at $WORKSPACE one
+# commit behind it — the shape a restarting pod finds on its volume. For the cases that assert what the sync
+# does with a working tree only git can judge; they boot with FAKE_GIT_REAL=1 so the fake git delegates to it.
+real_checkout() {
+    rgit init --quiet --bare "$C/origin"
+    rgit init --quiet "$C/seed"
+    mkdir -p "$C/seed/.devcontainer/virtual-agent"
+    # Stage 1 comes from the checkout in these cases, so it is committed like cft-workspace's own: a file the
+    # fast-forward carries forward rather than one left in the working tree.
+    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/seed/.devcontainer/virtual-agent/entrypoint.sh"
+    chmod +x "$C/seed/.devcontainer/virtual-agent/entrypoint.sh"
+    printf 'the commit the pod booted with\n' >"$C/seed/tracked.md"
+    printf 'the commit the pod booted with\n' >"$C/seed/other.md"
+    rgit -C "$C/seed" add -A
+    rgit -C "$C/seed" commit --quiet -m "the commit the pod booted with"
+    rgit -C "$C/seed" push --quiet "$C/origin" master
+    mkdir -p "$C/ws"
+    rgit clone --quiet "$C/origin" "$C/ws/cft-workspace"
+    # An identity in the checkout's own config, as a pod's has from the owner's git_identity credential. The
+    # boot runs under `env -i`, so a merge that got as far as writing a commit would otherwise fail for the
+    # want of a committer rather than on its own merits. `--ff-only` refuses before that point, so this is
+    # insurance for anything here that does reach a commit rather than something the cases depend on.
+    rgit -C "$C/ws/cft-workspace" config user.name "Pod Owner"
+    rgit -C "$C/ws/cft-workspace" config user.email pod@example.com
+}
+
+# origin_commit PATH…: one commit on origin/master writing each PATH, which the pod's checkout does not have
+# yet. A path the checkout already tracks makes it a modification of that file; a new path is what lets a case
+# assert "did the checkout move" against a file rather than against a log line.
+origin_commit() {
+    local p
+    for p in "$@"; do printf 'from origin\n' >"$C/seed/$p"; done
+    rgit -C "$C/seed" add -A
+    rgit -C "$C/seed" commit --quiet -m "wrote $*"
+    rgit -C "$C/seed" push --quiet "$C/origin" master
+}
 
 case_no_token() {
     setup no-token
@@ -353,6 +420,155 @@ case_broken_checkout_client() {
     grep -q "signing in to GitHub with $C/bin/agent-hub" "$C/out" && ok "falls through to the installed client" || no "did not fall through: $(grep 'signing in' "$C/out")"
 }
 
+# A stray untracked file in the checkout — a core dump, an editor backup, anything nobody committed — is not a
+# local modification and must not stop the update. A dirty-tree screen ahead of the merge skips the
+# fast-forward on this boot and on every boot after it, for as long as the file sits there, which leaves a pod
+# running for days on a checkout too old to carry the hook registrations its sessions read from it.
+case_checkout_untracked_file() {
+    setup checkout-untracked-file
+    real_checkout
+    origin_commit new-from-origin.md
+    printf 'not a local modification\n' >"$C/ws/cft-workspace/core"
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_GIT_REAL=1
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
+        ok "boots through with an untracked file in the checkout" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ -f "$C/ws/cft-workspace/new-from-origin.md" ] && ok "fast-forwards past the untracked file" || no "the checkout did not reach origin/master"
+    [ -f "$C/ws/cft-workspace/core" ] && ok "leaves the untracked file alone" || no "the untracked file was removed"
+    grep -q "fast-forwarded $C/ws/cft-workspace to origin/master" "$C/out" && ok "logs the fast-forward" || no "not logged: $(grep -i 'cft-workspace' "$C/out")"
+    hub '.status[].detail // empty' | grep -q 'not updated' && no "reported the checkout as not updated: $(hub -c '.status')" ||
+        ok "reports nothing to the hub about the dirty tree"
+}
+
+# A modified tracked file is not a reason to hold the checkout back either. The fast-forward only has to not
+# overwrite the modification, and git is what knows whether it would: upstream touches a different file here,
+# so the update lands and the edit is still in the tree afterwards. An agent that regenerates DOCS.md in a pod
+# and leaves it uncommitted is this case, and a screen ahead of the merge would freeze that pod for good.
+case_checkout_modified_file() {
+    setup checkout-modified-file
+    real_checkout
+    origin_commit other.md
+    printf 'edited in the pod\n' >"$C/ws/cft-workspace/tracked.md"
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_GIT_REAL=1
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
+        ok "boots through with a modified tracked file in the checkout" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    grep -q 'from origin' "$C/ws/cft-workspace/other.md" && ok "fast-forwards with the modification in the tree" || no "the checkout did not reach origin/master"
+    grep -q 'edited in the pod' "$C/ws/cft-workspace/tracked.md" && ok "keeps the modification" || no "the modification was lost"
+    grep -q "fast-forwarded $C/ws/cft-workspace to origin/master" "$C/out" && ok "logs the fast-forward" || no "not logged: $(grep -i 'cft-workspace' "$C/out")"
+    hub '.status[].detail // empty' | grep -q 'not updated' && no "reported the checkout as not updated: $(hub -c '.status')" ||
+        ok "reports nothing to the hub about the modification"
+}
+
+# The collision the merge is there to catch: upstream changed the same file the pod did. git refuses, says
+# which file, and leaves HEAD alone — so the pod keeps its edit and the owner is told something they can act
+# on, which is the whole diagnostic now this is the only path that leaves the checkout behind.
+case_checkout_modified_collision() {
+    setup checkout-modified-collision
+    real_checkout
+    origin_commit tracked.md new-from-origin.md
+    printf 'edited in the pod\n' >"$C/ws/cft-workspace/tracked.md"
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_GIT_REAL=1
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
+        ok "attempts the merge and boots on through its refusal" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ ! -f "$C/ws/cft-workspace/new-from-origin.md" ] && ok "leaves HEAD where it was" || no "the checkout moved over a colliding modification"
+    grep -q 'edited in the pod' "$C/ws/cft-workspace/tracked.md" && ok "keeps the modification" || no "the modification was lost"
+    hub '.status[].detail // empty' | grep -qF 'cft-workspace: master cannot fast-forward to origin/master, kept the local checkout' &&
+        ok "reports the refusal through the fast-forward branch" || no "status: $(hub -c '.status')"
+    hub '.status[].detail // empty' | grep -qF 'Your local changes to the following files would be overwritten by merge: tracked.md' &&
+        ok "passes on what git said, naming the file" || no "status: $(hub -c '.status')"
+}
+
+# The same collision over a file nobody committed: `merge --ff-only` will not overwrite an untracked file
+# either, which is why nothing has to screen for one beforehand.
+case_checkout_untracked_clobber() {
+    setup checkout-untracked-clobber
+    real_checkout
+    origin_commit contested.md new-from-origin.md
+    printf 'written in the pod\n' >"$C/ws/cft-workspace/contested.md"
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_GIT_REAL=1
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
+        ok "attempts the merge and boots on through its refusal" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ ! -f "$C/ws/cft-workspace/new-from-origin.md" ] && ok "leaves HEAD where it was" || no "the checkout moved over an untracked file"
+    grep -q 'written in the pod' "$C/ws/cft-workspace/contested.md" && ok "the untracked file is not overwritten" || no "the untracked file was overwritten"
+    hub '.status[].detail // empty' | grep -qF 'cft-workspace: master cannot fast-forward to origin/master, kept the local checkout' &&
+        ok "reports the refusal through the fast-forward branch" || no "status: $(hub -c '.status')"
+    hub '.status[].detail // empty' | grep -qF 'The following untracked working tree files would be overwritten by merge: contested.md' &&
+        ok "passes on what git said, naming the file" || no "status: $(hub -c '.status')"
+}
+
+# What `--ff-only` itself is for. A pod whose checkout holds a commit origin/master does not — a session that
+# committed and never pushed — has diverged, and merging would write a merge commit into the volume and carry
+# the pod silently off master. The refusal is reported instead, with git's `fatal:` rather than the `hint:`
+# block in front of it, which runs longer on its own than the whole bound the detail is held to.
+case_checkout_local_commit() {
+    setup checkout-local-commit
+    real_checkout
+    origin_commit new-from-origin.md
+    printf 'committed in the pod\n' >"$C/ws/cft-workspace/local.md"
+    rgit -C "$C/ws/cft-workspace" add -A
+    rgit -C "$C/ws/cft-workspace" commit --quiet -m "the pod's own commit"
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_GIT_REAL=1
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
+        ok "attempts the merge and boots on through its refusal" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(rgit -C "$C/ws/cft-workspace" rev-list --count --merges HEAD)" -eq 0 ] &&
+        ok "writes no merge commit into the checkout" || no "a merge commit was created: $(rgit -C "$C/ws/cft-workspace" log --oneline -3 | tr '\n' ' ')"
+    [ ! -f "$C/ws/cft-workspace/new-from-origin.md" ] && ok "leaves HEAD where it was" || no "the checkout moved off the pod's own commit"
+    [ -f "$C/ws/cft-workspace/local.md" ] && ok "keeps the commit the pod made" || no "the pod's own commit was lost"
+    hub '.status[].detail // empty' | grep -qF 'cft-workspace: master cannot fast-forward to origin/master, kept the local checkout' &&
+        ok "reports the refusal through the fast-forward branch" || no "status: $(hub -c '.status')"
+    hub '.status[].detail // empty' | grep -qF '(fatal: Not possible to fast-forward, aborting.)' &&
+        ok "passes on git's own refusal rather than its advice" || no "status: $(hub -c '.status')"
+}
+
+# canned_checkout: a checkout the canned fake git answers for, for the cases about what the script makes of
+# git's stderr rather than about git's rules. No scripts/agent-hub, so the installed client is used.
+canned_checkout() {
+    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/.devcontainer/virtual-agent"
+    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
+    chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
+}
+
+# the_refusal: the sync detail the hub was told, out of the statuses it holds.
+the_refusal() { hub '.status[] | select(.detail != null) | .detail' | grep -F 'cannot fast-forward'; }
+
+# Thousands of conflicting paths, which is a refusal message longer than a pipe buffer. Flattening it must not
+# take the boot down with it: a `sed` that writes more than the buffer into a `head` which has already exited
+# dies of SIGPIPE, and under `pipefail` and `set -e` that assignment ends the script — the pod reports nothing,
+# hands over to nothing, and the kubelet restarts it into the same volume for ever. So the bound is taken from
+# the file first. This also keeps the detail inside MAX_DETAIL, the hub's own limit on what it will accept.
+case_checkout_refusal_flood() {
+    setup checkout-refusal-flood
+    canned_checkout
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_MERGE_PATHS=4000
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
+        ok "boots through a refusal too long to flatten in a pipe" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    local detail
+    detail=$(the_refusal)
+    [ -n "$detail" ] && ok "reports the refusal at all" || no "status: $(hub -c '.status')"
+    # 500 is MAX_DETAIL in src/virtual-agents/schemas.ts, which rejects anything longer.
+    [ "${#detail}" -le 500 ] && ok "keeps the detail inside what the hub accepts" || no "detail is ${#detail} characters: $detail"
+    printf '%s' "$detail" | grep -qF 'overwritten by merge: docs/how-to/a-fairly-long-doc-page-name-0.md' &&
+        ok "passes on what git said" || no "detail: $detail"
+}
+
+# A merge that fails without writing anything — killed mid-merge, out of memory. The detail is the prose on its
+# own: an empty parenthetical reads as this line being broken rather than as git having said nothing.
+case_checkout_refusal_silent() {
+    setup checkout-refusal-silent
+    canned_checkout
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_MERGE_SILENT=1
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
+        ok "boots through a refusal that says nothing" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(the_refusal)" = "cft-workspace: master cannot fast-forward to origin/master, kept the local checkout" ] &&
+        ok "reports the refusal with no empty parenthetical" || no "detail: $(the_refusal)"
+}
+
 case_no_client() {
     setup no-client
     rm "$C/bin/agent-hub"
@@ -492,6 +708,13 @@ run_case() {
         stored-token-no-access) case_stored_token_no_access ;;
         checkout-client) case_checkout_client ;;
         broken-checkout-client) case_broken_checkout_client ;;
+        checkout-untracked-file) case_checkout_untracked_file ;;
+        checkout-modified-file) case_checkout_modified_file ;;
+        checkout-modified-collision) case_checkout_modified_collision ;;
+        checkout-untracked-clobber) case_checkout_untracked_clobber ;;
+        checkout-local-commit) case_checkout_local_commit ;;
+        checkout-refusal-flood) case_checkout_refusal_flood ;;
+        checkout-refusal-silent) case_checkout_refusal_silent ;;
         no-client) case_no_client ;;
         trailing-slash) case_trailing_slash ;;
         client-upgrade) case_client_upgrade ;;

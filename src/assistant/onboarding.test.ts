@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CredentialKind } from "../credentials/names.ts";
+import { neededCredentials } from "../virtual-agents/views.ts";
 import { chatCredentials, chatGate, connectionsAsk, onboarded, readiness } from "./onboarding.ts";
 
 describe("readiness", () => {
@@ -23,6 +24,13 @@ describe("readiness", () => {
 });
 
 describe("onboarded", () => {
+  it.each([
+    ["own-licence", ["github", "claude"]],
+    ["bedrock", ["github", "bedrock"]]
+  ] as const)("should be onboarded without Azure when the %s route's needed credentials are stored", (route, stored) => {
+    expect(onboarded(neededCredentials(route), new Set(stored))).toBe(true);
+  });
+
   it("should be onboarded when every needed credential is stored", () => {
     expect(onboarded(["github", "azure", "claude"], new Set(["github", "azure", "claude", "jenkins"]))).toBe(true);
   });
