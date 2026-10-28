@@ -12,7 +12,7 @@ import { withoutTrailingSlashes } from "./settings.ts";
 export type Desired = "running" | "stopped" | "deleted";
 
 /** The stored labels, which is what the claim sends and the pod is given as `AGENT_HUB_MODEL_ROUTE`. */
-export type ModelRoute = "bedrock" | "gateway" | "own_licence";
+export type ModelRoute = "gateway" | "own_licence";
 
 export interface ClaimedAgent {
   id: string;

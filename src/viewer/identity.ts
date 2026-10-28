@@ -62,26 +62,20 @@ export function configuredDevUser(env: Environment = process.env): Identity | un
 }
 
 /**
- * Which model a person's virtual agents use.
+ * Which model a person's virtual agents use. These two and no third.
  *
  * - `gateway` — Amazon Bedrock through the HMCTS AI Gateway, which authorises the owner's own relayed Azure sign-in,
  *   so there is no model credential for them to store at all.
  * - `own-licence` — a Claude licence of their own, whose token their pod signs in for and they paste back.
- * - `bedrock` — Amazon Bedrock called directly with a Bedrock API key stored against them. Nobody resolves to this
- *   any more: it is kept because an agent's route is fixed on its row when it is created, so a row already on it
- *   keeps booting on that key.
  */
-export type ModelRoute = "bedrock" | "gateway" | "own-licence";
+export type ModelRoute = "gateway" | "own-licence";
 
 export interface Viewer extends Identity {
   modelRoute: ModelRoute;
 }
 
-/** A persona named `own-licence` or `own-licence-…` is on the own-licence route. */
+/** A persona named `own-licence` or `own-licence-…` is on the own-licence route; every other one is on the gateway. */
 export const OWN_LICENCE_PERSONA = "own-licence";
-
-/** And one named `bedrock` or `bedrock-…` is on the route no real sign-in reaches, so it can still be worked on. */
-export const BEDROCK_PERSONA = "bedrock";
 
 /**
  * The one place a person's route is decided. Today the signal is the hub's own `AIGateway.User` app role, which is
@@ -98,10 +92,7 @@ function named(persona: string, name: string): boolean {
 
 function devModelRoute(identity: Identity): ModelRoute {
   const persona = identity.oid.slice(DEV_OID_PREFIX.length);
-  if (named(persona, OWN_LICENCE_PERSONA)) {
-    return "own-licence";
-  }
-  return named(persona, BEDROCK_PERSONA) ? "bedrock" : "gateway";
+  return named(persona, OWN_LICENCE_PERSONA) ? "own-licence" : "gateway";
 }
 
 /** The viewer, or `undefined` when nobody may be served: no session, a session that does not open, no secret. */

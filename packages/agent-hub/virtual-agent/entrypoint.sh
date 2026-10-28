@@ -600,35 +600,6 @@ claude_token() {
     export CLAUDE_CODE_OAUTH_TOKEN
 }
 
-# Waits until the owner has stored the agent's Bedrock key, then exports it for hai. It runs
-# again before every restart, so a key replaced on the hub is picked up by the next session.
-bedrock_key() {
-    local key rc waiting=0
-    bedrock_waited=0
-    while [[ "$stopping" -eq 0 ]]; do
-        key=$("$AH" credentials get bedrock)
-        rc=$?
-        if [[ "$rc" -eq 0 && -n "$key" ]]; then
-            AWS_BEARER_TOKEN_BEDROCK="$key"
-            export AWS_BEARER_TOKEN_BEDROCK
-            [[ "$waiting" -eq 1 ]] && log "bedrock: the API key is stored"
-            bedrock_waited=$waiting
-            return 0
-        fi
-        if [[ "$rc" -eq 0 || "$rc" -eq "$EXIT_NO_CREDENTIAL" ]]; then
-            if [[ "$waiting" -eq 0 ]]; then
-                log "bedrock: no API key stored; waiting for the owner"
-                status awaiting_credentials "bedrock: paste your Amazon Bedrock API key on this agent's page"
-                waiting=1
-            fi
-        else
-            log "could not read the bedrock credential (exit $rc); retrying in 15s"
-        fi
-        sleep_interruptibly 15
-    done
-    return 1
-}
-
 # The HMCTS AI Gateway route. The owner's own Azure sign-in is the credential — the gateway authorises the person,
 # so there is no key for them to paste — and the only thing the hub injects is the APIM subscription key, which is
 # one service's rather than one person's, with the gateway's origin and the Entra scope to ask az for a token for.
@@ -868,15 +839,11 @@ case "$ROUTE" in
         ;;
     gateway)
         gateway_env
-        # Every other payer's credential: a personal OAuth token or a Bedrock key left in the environment would
-        # take precedence over the token the apiKeyHelper mints, and the session would be billed to whoever that
-        # credential belongs to while the launch line said the gateway.
+        # Every other payer's credential: a personal OAuth token or a Bedrock bearer token left in the environment
+        # would take precedence over the token the apiKeyHelper mints, and the session would be billed to whoever
+        # that credential belongs to while the launch line said the gateway.
         unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN AWS_BEARER_TOKEN_BEDROCK
         gateway_ready
-        ;;
-    bedrock)
-        bedrock_key
-        unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
         ;;
     *)
         fatal "unknown AGENT_HUB_MODEL_ROUTE: $ROUTE"
@@ -907,10 +874,10 @@ fi
 # On the gateway route HAI_ENV_READY=1 means hai never reads HAI_ROUTE, and ai-gateway is still what it is set to:
 # if that marker ever stopped being honoured, hai's own ai-gateway route fails naming the Key Vault it cannot read,
 # where any other value would quietly run the session on a credential this route did not choose.
+# The route branch above fatals on anything but these two, so there is no third arm for one to fall into.
 case "$ROUTE" in
     own_licence) HAI_ROUTE=byol ;;
     gateway) HAI_ROUTE=ai-gateway ;;
-    *) HAI_ROUTE=bedrock ;;
 esac
 
 # HAI_IN_CONTAINER=1 is not inferable: hai runs the session in a container of its own unless it can
@@ -918,9 +885,9 @@ esac
 # containerd, which creates no /.dockerenv, and this is neither a devcontainer nor a Docker
 # sandbox. Without this, hai takes container mode and dies pulling an image, because a pod has
 # no Docker socket, no privilege escalation and no root. HAI_ENV_READY would also stop that, but
-# it short-circuits route resolution with it, and the bedrock and own_licence routes need the
-# environment that resolution builds; the gateway route builds its own and sets the marker itself,
-# in gateway_env. HAI_NO_UPDATE=1 is the other half of the hai install above.
+# it short-circuits route resolution with it, and the own_licence route needs the environment that
+# resolution builds; the gateway route builds its own and sets the marker itself, in gateway_env.
+# HAI_NO_UPDATE=1 is the other half of the hai install above.
 #
 # The hub's pod template sets both of these as well, and setting them here too is deliberate rather
 # than defensive: a running agent picks up a new runtime with its next client upgrade, but it does
@@ -948,11 +915,10 @@ start_claude() {
 }
 
 # The conversation supervisor starts one Claude per HMCTS Assistant conversation that the hub wakes,
-# beside the main session, and is restarted with the same backoff as Claude. A Bedrock key replaced
-# on the hub is picked up by its next start. Monitor mode gives it its own process group, so SIGTERM
-# stops the restart loop with it.
+# beside the main session, and is restarted with the same backoff as Claude. Monitor mode gives it its
+# own process group, so SIGTERM stops the restart loop with it.
 supervise() {
-    local rc started key delay=5
+    local rc started delay=5
     while :; do
         started=$(date +%s)
         "$AH" virtual assistant-supervisor
@@ -965,10 +931,6 @@ supervise() {
         log "the conversation supervisor exited (exit $rc); restarting in ${delay}s"
         sleep "$delay"
         delay=$((delay * 2 > 300 ? 300 : delay * 2))
-        if [[ "$ROUTE" == bedrock ]] && key=$("$AH" credentials get bedrock) && [[ -n "$key" ]]; then
-            AWS_BEARER_TOKEN_BEDROCK="$key"
-            export AWS_BEARER_TOKEN_BEDROCK
-        fi
     done
 }
 
@@ -1012,10 +974,6 @@ while [[ "$stopping" -eq 0 ]]; do
     log "the Claude session ended; restarting in ${delay}s"
     sleep_interruptibly "$delay"
     delay=$((delay * 2 > 300 ? 300 : delay * 2))
-    bedrock_waited=0
-    if [[ "$ROUTE" == bedrock ]]; then
-        bedrock_key || break
-    fi
     poll_repos
-    if [[ "$bedrock_waited" -eq 1 ]]; then report_running now; else report_running; fi
+    report_running
 done

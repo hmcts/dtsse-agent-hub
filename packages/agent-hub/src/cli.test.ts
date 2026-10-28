@@ -729,7 +729,7 @@ describe("the commands, in process against the mock hub", () => {
 
   it("should fail rather than say nothing was stored when credentials delete cannot reach the hub", async () => {
     // Act
-    const r = await cli(["credentials", "delete", "bedrock"], { env: cliEnv({ AGENT_HUB_URL: "http://127.0.0.1:9" }) });
+    const r = await cli(["credentials", "delete", "jenkins"], { env: cliEnv({ AGENT_HUB_URL: "http://127.0.0.1:9" }) });
 
     // Assert
     expect(r.code).toBe(1);
@@ -1005,7 +1005,7 @@ describe("the commands, in process against the mock hub", () => {
     // Built at runtime so no secret-shaped literal sits in the repo.
     const LAUNCH = `launch-${"c".repeat(16)}`;
     const AZ_TOKEN = `az-${"t".repeat(30)}`;
-    const BEDROCK_KEY = `ABSK${"QmVkcm9jaw".repeat(8)}`;
+    const GIT_IDENTITY = '{"name":"Olive Owner","email":"olive@example.com"}';
     const GH_TOKEN = `${"gh"}o_${"K4l5M6n7".repeat(4)}`;
     const JENKINS_TOKEN = `11${"a0b1c2d3".repeat(4)}`;
     const CLAUDE_MD = "  # Olive\n\nI work on PCS.\n\n\tIndented, trailing spaces  \n\n";
@@ -1027,7 +1027,7 @@ describe("the commands, in process against the mock hub", () => {
 
     function assertNoSecrets(...results: Invocation[]) {
       for (const r of results) {
-        for (const secret of [BEDROCK_KEY, GH_TOKEN, JENKINS_TOKEN, LAUNCH, AZ_TOKEN]) {
+        for (const secret of [GH_TOKEN, JENKINS_TOKEN, LAUNCH, AZ_TOKEN]) {
           expect(r.errors.join("\n"), "the error output must never carry a secret").not.toContain(secret);
         }
       }
@@ -1063,62 +1063,60 @@ printf '{"accessToken": "%s", "expires_on": "%s"}\\n' "${AZ_TOKEN}" "$(( $(date 
       const env = personEnv();
 
       // Act and assert
-      const missing = await cli(["credentials", "get", "bedrock"], { env });
+      const missing = await cli(["credentials", "get", "git_identity"], { env });
       expect(missing.code).toBe(4);
       expect(missing.raw()).toBe("");
       expect(missing.errors).toEqual([]);
 
-      const set = await cli(["credentials", "set", "bedrock"], { env, input: `${BEDROCK_KEY}\n` });
+      const set = await cli(["credentials", "set", "git_identity"], { env, input: `${GIT_IDENTITY}\n` });
       expect(set.code).toBe(0);
       expect(set.raw()).toBe("");
-      expect(mine().get("bedrock")).toBe(BEDROCK_KEY);
-      expect(credHub.calls.findLast((c) => c.method === "PUT")?.path).toBe("/api/agent/credentials/bedrock");
+      expect(mine().get("git_identity")).toBe(GIT_IDENTITY);
+      expect(credHub.calls.findLast((c) => c.method === "PUT")?.path).toBe("/api/agent/credentials/git_identity");
 
-      const got = await cli(["credentials", "get", "bedrock"], { env });
+      const got = await cli(["credentials", "get", "git_identity"], { env });
       expect(got.code).toBe(0);
-      expect(got.raw()).toBe(BEDROCK_KEY);
+      expect(got.raw()).toBe(GIT_IDENTITY);
       expect(got.errors).toEqual([]);
 
-      const del = await cli(["credentials", "delete", "bedrock"], { env });
+      const del = await cli(["credentials", "delete", "git_identity"], { env });
       expect(del.code).toBe(0);
-      expect(mine().has("bedrock")).toBe(false);
-      expect((await cli(["credentials", "get", "bedrock"], { env })).code).toBe(4);
+      expect(mine().has("git_identity")).toBe(false);
+      expect((await cli(["credentials", "get", "git_identity"], { env })).code).toBe(4);
 
-      const again = await cli(["credentials", "delete", "bedrock"], { env });
+      const again = await cli(["credentials", "delete", "git_identity"], { env });
       expect(again.code).toBe(0);
-      expect(again.errors.join("\n")).toMatch(/no bedrock credential was stored/);
+      expect(again.errors.join("\n")).toMatch(/no git_identity credential was stored/);
       assertNoSecrets(missing, set, got, del, again);
     });
 
-    it("should read back only bedrock, claude_md and git_identity, and store the gh token as github with --from-gh", async () => {
+    it("should read back only claude_md and git_identity, and store the gh token as github with --from-gh", async () => {
       // Arrange
       const env = personEnv();
 
       // Act
       const github = await cli(["credentials", "get", "github"], { env });
       const fromGh = await cli(["credentials", "set", "github", "--from-gh"], { env });
-      const ghWrongKind = await cli(["credentials", "set", "bedrock", "--from-gh"], { env });
-      const empty = await cli(["credentials", "set", "bedrock"], { env, input: "  \n" });
+      const ghWrongKind = await cli(["credentials", "set", "jenkins", "--from-gh"], { env });
+      const empty = await cli(["credentials", "set", "jenkins"], { env, input: "  \n" });
       const noSuchKind = await cli(["credentials", "get", "nope"], { env });
       const noSuchAction = await cli(["credentials", "list"], { env });
-      const extra = await cli(["credentials", "get", "bedrock", "stray"], { env });
+      const extra = await cli(["credentials", "get", "git_identity", "stray"], { env });
 
       // Assert
       expect(github.code).toBe(2);
       expect(github.raw()).toBe("");
       expect(github.errors.join("\n")).toMatch(
-        /agent-hub returns only your bedrock, claude_md and git_identity credentials; the other kinds are read by virtual agents/
+        /agent-hub returns only your claude_md and git_identity credentials; the other kinds are read by virtual agents/
       );
       expect(fromGh.code).toBe(0);
       expect(mine().get("github")).toBe(GH_TOKEN);
       expect(ghWrongKind.code).toBe(2);
       expect(ghWrongKind.errors.join("\n")).toMatch(/--from-gh only goes with credentials set github/);
       expect(empty.code).toBe(2);
-      expect(empty.errors.join("\n")).toMatch(/credentials set reads the bedrock value from stdin, and it was empty/);
+      expect(empty.errors.join("\n")).toMatch(/credentials set reads the jenkins value from stdin, and it was empty/);
       expect(noSuchKind.code).toBe(2);
-      expect(noSuchKind.errors.join("\n")).toMatch(
-        /credential kind must be one of github, azure, claude, bedrock, jenkins, atlassian, claude_md, git_identity/
-      );
+      expect(noSuchKind.errors.join("\n")).toMatch(/credential kind must be one of github, azure, claude, jenkins, atlassian, claude_md, git_identity/);
       expect(noSuchAction.code).toBe(2);
       expect(noSuchAction.errors.join("\n")).toMatch(/credentials takes get, set or delete/);
       expect(extra.code).toBe(2);
@@ -1132,10 +1130,10 @@ printf '{"accessToken": "%s", "expires_on": "%s"}\\n' "${AZ_TOKEN}" "$(( $(date 
       fs.rmSync(path.join(home.root, "az-calls"), { force: true });
 
       // Act
-      const r = await cli(["credentials", "get", "bedrock"], { env: baseEnv() });
+      const r = await cli(["credentials", "get", "claude_md"], { env: baseEnv() });
 
       // Assert
-      const call = credHub.calls.findLast((c) => c.path === "/api/agent/credentials/bedrock");
+      const call = credHub.calls.findLast((c) => c.path === "/api/agent/credentials/claude_md");
       expect(call?.headers.authorization).toBe(`Bearer ${AZ_TOKEN}`);
       expect(fs.readFileSync(path.join(home.root, "az-calls"), "utf8")).toMatch(/--scope api:\/\/dtsse-agent-hub\/\.default/);
       // The mock knows no such token, so this is the hub refusing: a failure, not "not stored".
@@ -1146,7 +1144,7 @@ printf '{"accessToken": "%s", "expires_on": "%s"}\\n' "${AZ_TOKEN}" "$(( $(date 
 
     it("should exit 1, not the not-stored exit 4, when the hub is unreachable", async () => {
       // Act
-      const r = await cli(["credentials", "get", "bedrock"], { env: personEnv({ AGENT_HUB_URL: "http://127.0.0.1:9" }) });
+      const r = await cli(["credentials", "get", "claude_md"], { env: personEnv({ AGENT_HUB_URL: "http://127.0.0.1:9" }) });
 
       // Assert
       expect(r.code).toBe(1);
@@ -1158,25 +1156,25 @@ printf '{"accessToken": "%s", "expires_on": "%s"}\\n' "${AZ_TOKEN}" "$(( $(date 
       const env = podEnv();
 
       // Act
-      const missing = await cli(["credentials", "get", "bedrock"], { env });
+      const missing = await cli(["credentials", "get", "jenkins"], { env });
       const getPath = credHub.calls.findLast((c) => c.method === "GET")?.path;
-      virtual().credentials.set("bedrock", BEDROCK_KEY);
-      const got = await cli(["credentials", "get", "bedrock"], { env });
+      virtual().credentials.set("jenkins", JENKINS_TOKEN);
+      const got = await cli(["credentials", "get", "jenkins"], { env });
       const set = await cli(["credentials", "set", "github"], { env, input: GH_TOKEN });
-      const del = await cli(["credentials", "delete", "bedrock"], { env });
+      const del = await cli(["credentials", "delete", "jenkins"], { env });
 
       // Assert
       expect(missing.code).toBe(4);
       expect(missing.raw()).toBe("");
-      expect(getPath).toBe(`/api/virtual/${VID}/credentials/bedrock`);
+      expect(getPath).toBe(`/api/virtual/${VID}/credentials/jenkins`);
       expect(got.code).toBe(0);
-      expect(got.raw()).toBe(BEDROCK_KEY);
+      expect(got.raw()).toBe(JENKINS_TOKEN);
       expect(set.code).toBe(0);
       expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
       expect(credHub.personCredentials.size).toBe(0);
       expect(del.code).toBe(2);
       expect(del.errors.join("\n")).toMatch(/a virtual agent cannot delete its credentials; its owner removes them on agent-hub/);
-      expect(virtual().credentials.get("bedrock")).toBe(BEDROCK_KEY);
+      expect(virtual().credentials.get("jenkins")).toBe(JENKINS_TOKEN);
       assertNoSecrets(missing, got, set, del);
       virtual().credentials.clear();
     });

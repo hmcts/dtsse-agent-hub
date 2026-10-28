@@ -3,9 +3,9 @@
  * every wake and every message frame.
  *
  * The id is a bare family alias — `sonnet`, `opus` — and never a version. The version is pinned per family in the
- * pod, as `ANTHROPIC_DEFAULT_SONNET_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL`: by hai on the `bedrock` route, and by
- * stage 1 itself on `gateway`, where hai resolves nothing. So Claude Code resolves the alias to that family's Bedrock
- * inference profile there, and to the current model of the family on a person's own Claude licence.
+ * pod, as `ANTHROPIC_DEFAULT_SONNET_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL`: by stage 1 itself on `gateway`, where
+ * hai resolves nothing, and by hai on `own_licence`. So Claude Code resolves the alias to that family's Bedrock
+ * inference profile through the gateway, and to the current model of the family on a person's own Claude licence.
  *
  * **That is what keeps this catalogue honest about the gateway, and why it names no version.** The gateway refuses any
  * model id outside its application's `allowedModels` with a 404, and the pins stage 1 sets are ids on that list — so

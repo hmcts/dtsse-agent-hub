@@ -84,7 +84,7 @@ export const USAGE = `usage: ${CLI} <command> [args]
   confluence report <export-id> --page-id N [--title T] | --error E
                               report the Confluence page made for an export by hand, or why it could not be made
   credentials get <kind>      print your stored credential and nothing else (exit ${EXIT_NO_CREDENTIAL} if there is
-                              none); agent-hub returns only bedrock and claude_md to people, any kind to a pod
+                              none); agent-hub returns only claude_md and git_identity to people, any kind to a pod
   credentials set <kind> [--from-gh]
                               store a credential read from stdin (--from-gh: github, from gh auth token)
   credentials delete <kind>   forget a stored credential (kinds: ${CREDENTIAL_KINDS.join(", ")})

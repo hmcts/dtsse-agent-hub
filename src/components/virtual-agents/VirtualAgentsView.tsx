@@ -10,7 +10,6 @@ import { type CreateAction, CreateVirtualAgentForm } from "./CreateVirtualAgentF
 import { idleFor, statusLabel, stopReasonLabel } from "./labels";
 
 const MODEL_ROUTE_WORDS: Record<ModelRoute, string> = {
-  bedrock: "Amazon Bedrock, with the API key stored for you",
   gateway: "Claude through the HMCTS AI Gateway, on your own Azure sign-in",
   "own-licence": "your own Claude licence, so it will also need your Claude token"
 };

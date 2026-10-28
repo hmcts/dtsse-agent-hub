@@ -37,7 +37,7 @@ const settingsOf = (env: Record<string, string>, root: string): Record<string, u
 describe("haikuCommand", () => {
   it("should run on the session's own auth without --bare, hooks, tools or MCP whatever the model route", () => {
     // Act & Assert
-    for (const route of [undefined, "own_licence", "bedrock"]) {
+    for (const route of [undefined, "own_licence", "gateway"]) {
       const env: Record<string, string> = route ? { AGENT_HUB_MODEL_ROUTE: route } : {};
       const { bin, args } = haikuCommand(env, home.root);
       expect(bin).toBe("claude");
@@ -158,10 +158,10 @@ describe("runHaiku", () => {
     expect(fs.statSync(cwd).mode & 0o077, "private to the user").toBe(0);
   });
 
-  it("should inherit the session's Bedrock environment when it is on the Bedrock route", async () => {
+  it("should inherit the session's Bedrock-protocol environment when it is on the gateway route", async () => {
     // Arrange
-    const bedrock: Record<string, string> = { AGENT_HUB_MODEL_ROUTE: "bedrock" };
-    expect(haikuCommand(bedrock, home.root).args).not.toContain("--bare");
+    const gateway: Record<string, string> = { AGENT_HUB_MODEL_ROUTE: "gateway" };
+    expect(haikuCommand(gateway, home.root).args).not.toContain("--bare");
     const bin = path.join(home.root, "fake-haiku");
     fs.writeFileSync(
       bin,
@@ -172,10 +172,10 @@ describe("runHaiku", () => {
     );
     const env = {
       ...process.env,
-      ...bedrock,
+      ...gateway,
       AGENT_HUB_CLAUDE_BIN: bin,
       CLAUDE_CODE_USE_BEDROCK: "1",
-      AWS_BEARER_TOKEN_BEDROCK: "bedrock-key",
+      AWS_BEARER_TOKEN_BEDROCK: "gateway-minted-token",
       AWS_REGION: "eu-west-2",
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
     };
@@ -184,7 +184,7 @@ describe("runHaiku", () => {
     const out = await runHaiku("prompt", { env, root: home.root });
 
     // Assert
-    expect(JSON.parse(out).result).toBe("1|bedrock-key|eu-west-2|eu.anthropic.claude-haiku-4-5-20251001-v1:0");
+    expect(JSON.parse(out).result).toBe("1|gateway-minted-token|eu-west-2|eu.anthropic.claude-haiku-4-5-20251001-v1:0");
   });
 
   it("should drop the session's messaging socket and id so the child cannot act as the session", async () => {

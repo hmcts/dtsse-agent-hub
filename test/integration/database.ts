@@ -66,7 +66,7 @@ export { prisma };
 export async function connectForChat(who: Person): Promise<void> {
   await insertUser(who);
   await prisma.credential.createMany({
-    data: (["github", "azure", "claude", "bedrock"] as const).map((kind) => ({
+    data: (["github", "azure", "claude", "jenkins"] as const).map((kind) => ({
       ownerOid: who.oid,
       kind,
       secretName: `u-${who.oid}-${kind}`,

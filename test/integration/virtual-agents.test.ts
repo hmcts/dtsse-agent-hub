@@ -75,7 +75,7 @@ const CAROL = person("carol");
 
 const GITHUB = `ghp_${"A1b2".repeat(9)}`;
 const CLAUDE = `sk-ant-oat01-${"Qw_-".repeat(12)}`;
-const BEDROCK = `bedrock-api-key-${"YmVkcm9jay5hbWF6b25hd3MuY29t".repeat(6)}`;
+const JENKINS = `11${"a4f9c2e7b1".repeat(3)}`;
 const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
 
 function azureCacheFor(oid: string): string {
@@ -141,13 +141,13 @@ async function observe(id: string, body: Record<string, unknown>): Promise<Respo
   return await orchestrator(observedRoute.POST, `/api/orchestrator/virtual-agents/${id}/observed`, { id }, "POST", body);
 }
 
-async function create(owner: Person, name: string, modelRoute: "bedrock" | "gateway" | "own-licence" = "bedrock"): Promise<VirtualAgentRow> {
+async function create(owner: Person, name: string, modelRoute: "gateway" | "own-licence" = "gateway"): Promise<VirtualAgentRow> {
   await insertUser(owner);
   return await createVirtualAgent(prisma, { owner, modelRoute, name });
 }
 
 /** A virtual agent the orchestrator has claimed and started, with the launch token its pod holds. */
-async function started(owner: Person, name: string, modelRoute: "bedrock" | "own-licence" = "bedrock"): Promise<{ id: string; token: string }> {
+async function started(owner: Person, name: string, modelRoute: "gateway" | "own-licence" = "gateway"): Promise<{ id: string; token: string }> {
   const row = await create(owner, name, modelRoute);
   const claimed = (await claim()).find((entry) => entry.id === row.id);
   expect(claimed?.launch_token).toBeDefined();
@@ -207,7 +207,7 @@ describe("creating virtual agents", () => {
   it("should create one meant to be running, with names derived from its id, when the owner is under the limits", async () => {
     const agent = await create(ALICE, "PCS-api");
 
-    expect(agent).toMatchObject({ name: "pcs-api", desired: "running", status: "requested", generation: 1, observedGeneration: 0, modelRoute: "bedrock" });
+    expect(agent).toMatchObject({ name: "pcs-api", desired: "running", status: "requested", generation: 1, observedGeneration: 0, modelRoute: "gateway" });
     expect(agent.statefulsetName).toBe(`va-${agent.id.slice(0, 8)}`);
     expect(agent.pvcName).toBe(`work-va-${agent.id.slice(0, 8)}-0`);
   });
@@ -314,12 +314,12 @@ describe("POST /api/orchestrator/claim", () => {
     expect(active[0]!.virtual_agents.map((entry) => entry.id).sort(byCodePoint)).toEqual([...ids].sort(byCodePoint));
   });
 
-  it("should pass the Bedrock route to the orchestrator when the agent is on it", async () => {
-    await create(ALICE, "pcs-api", "bedrock");
+  it("should pass the gateway route to the orchestrator when the agent is on it", async () => {
+    await create(ALICE, "pcs-api", "gateway");
 
     const [claimed] = await claim();
 
-    expect(claimed?.model_route).toBe("bedrock");
+    expect(claimed?.model_route).toBe("gateway");
   });
 
   // The hub reads the gateway's three settings and hands them to the orchestrator here, which is what keeps the
@@ -817,14 +817,14 @@ describe("a launch token on the agent API", () => {
     expect(await prisma.credential.count()).toBe(0);
   });
 
-  it("should refuse a launch token reading its owner's Bedrock API key through the person's route", async () => {
+  it("should refuse a launch token reading its owner's CLAUDE.md through the person's route", async () => {
     const { token } = await started(ALICE, "pcs-api");
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "bedrock", value: BEDROCK, via: "web" });
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "claude_md", value: "# mine", via: "web" });
 
-    const response = await pod(personalCredentialRoute.GET, token, "/api/agent/credentials/bedrock", { kind: "bedrock" });
+    const response = await pod(personalCredentialRoute.GET, token, "/api/agent/credentials/claude_md", { kind: "claude_md" });
 
     expect(response.status).toBe(403);
-    expect(await response.text()).not.toContain(BEDROCK);
+    expect(await response.text()).not.toContain("# mine");
   });
 });
 
@@ -903,7 +903,7 @@ describe("/api/virtual/{id}/status", () => {
 
 describe("/api/virtual/{id}/credentials/{kind}", () => {
   it("should give the pod its owner's Jenkins API token when one is stored, and offer it as optional", async () => {
-    const { id, token } = await started(ALICE, "pcs-api");
+    const { id, token } = await started(ALICE, "pcs-api", "own-licence");
     const jenkins = "11a2b3c4d5e6f708192a3b4c5d6e7f8091";
     await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "jenkins", value: jenkins, via: "web" });
 
@@ -1057,28 +1057,16 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect((await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/ssh`, { virtualAgentId: id, kind: "ssh" })).status).toBe(404);
   });
 
-  it("should give the pod its owner's Bedrock API key, and 404 until there is one", async () => {
-    const { id, token } = await started(ALICE, "pcs-api");
-    const fetchKey = () => pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/bedrock`, { virtualAgentId: id, kind: "bedrock" });
-    expect((await fetchKey()).status).toBe(404);
-
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "bedrock", value: BEDROCK, via: "web" });
-
-    const found = await fetchKey();
-    expect(found.status).toBe(200);
-    expect(await jsonOf(found)).toEqual({ value: BEDROCK });
-  });
-
-  it("should store a Bedrock API key the pod saves as saved by the pod", async () => {
+  it("should store a Jenkins API token the pod saves as saved by the pod", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
 
-    const response = await pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/bedrock`, { virtualAgentId: id, kind: "bedrock" }, "PUT", {
-      value: BEDROCK
+    const response = await pod(credentialRoute.PUT, token, `/api/virtual/${id}/credentials/jenkins`, { virtualAgentId: id, kind: "jenkins" }, "PUT", {
+      value: JENKINS
     });
 
     expect(response.status).toBe(204);
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: ALICE.oid, kind: "bedrock", updatedVia: "pod" });
-    expect(await readCredential(prisma, localStore(), ALICE.oid, "bedrock")).toBe(BEDROCK);
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: ALICE.oid, kind: "jenkins", updatedVia: "pod" });
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "jenkins")).toBe(JENKINS);
   });
 
   it("should give the pod the default CLAUDE.md with 200 when its owner has stored none, and theirs once they have", async () => {
@@ -1164,12 +1152,12 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect(await prisma.credential.count()).toBe(0);
   });
 
-  it("should record the pod waiting for a Bedrock API key when it reports awaiting_credentials", async () => {
+  it("should record the pod waiting for a Claude token when it reports awaiting_credentials", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
 
-    expect((await status(id, token, { phase: "awaiting_credentials", detail: "bedrock: paste your Bedrock API key" })).status).toBe(204);
+    expect((await status(id, token, { phase: "awaiting_credentials", detail: "claude: paste your Claude token" })).status).toBe(204);
 
-    expect(await row(id)).toMatchObject({ status: "awaiting_credentials", statusDetail: "bedrock: paste your Bedrock API key" });
+    expect(await row(id)).toMatchObject({ status: "awaiting_credentials", statusDetail: "claude: paste your Claude token" });
   });
 });
 
@@ -1938,27 +1926,27 @@ describe("the web UI's reads and actions", () => {
     await create(BOB, "bobs");
     const agentId = (await jsonOf(await register(token, "va-session-1"))).agent_id;
     await directAsPerson(prisma, ALICE.oid, agentId, "hello");
-    const viewer = { ...ALICE, tid: "dev", modelRoute: "bedrock" as const };
+    const viewer = { ...ALICE, tid: "dev", modelRoute: "gateway" as const };
 
     const list = await virtualAgentsPage(viewer);
     const page = await virtualAgentPage(viewer, id);
 
     expect(list.agents.map((agent) => agent.name)).toEqual(["pcs-api"]);
-    expect(page?.manage?.detail.needed).toEqual(["github", "bedrock"]);
-    expect(page?.manage?.detail.optional).toEqual(["azure", "jenkins", "atlassian"]);
+    expect(page?.manage?.detail.needed).toEqual(["github", "azure"]);
+    expect(page?.manage?.detail.optional).toEqual(["jenkins", "atlassian"]);
     expect(page?.linked?.agent.id).toBe(agentId);
     expect((await agentActivity(viewer, page!.linked!)).conversation.messages.map((message) => message.body)).toEqual(["hello"]);
-    expect(await virtualAgentPage({ ...BOB, tid: "dev", modelRoute: "bedrock" }, id)).toBeUndefined();
+    expect(await virtualAgentPage({ ...BOB, tid: "dev", modelRoute: "gateway" }, id)).toBeUndefined();
     expect(await virtualAgentPage(viewer, "not-a-uuid")).toBeUndefined();
   });
 
-  it("should need a Bedrock API key and no Claude token when the agent is on the Bedrock route", async () => {
-    const agent = await create(ALICE, "pcs-api", "bedrock");
+  it("should need the owner's Azure sign-in and no Claude token when the agent is on the gateway route", async () => {
+    const agent = await create(ALICE, "pcs-api", "gateway");
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "bedrock"]);
+    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "azure"]);
   });
 
-  it("should need a Claude token and no Bedrock API key when the agent is on its owner's own licence", async () => {
+  it("should need a Claude token and no Azure sign-in when the agent is on its owner's own licence", async () => {
     const agent = await create(ALICE, "pcs-api", "own-licence");
 
     expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "claude"]);
@@ -2214,7 +2202,7 @@ describe("a virtual agent's plugins", () => {
 
   async function createWith(plugins: readonly string[]): Promise<VirtualAgentRow> {
     await insertUser(ALICE);
-    return await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "pcs-api", plugins });
+    return await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "pcs-api", plugins });
   }
 
   beforeEach(() => {
@@ -2556,8 +2544,8 @@ describe("PUT /api/virtual/{id}/ports", () => {
 });
 
 describe("/hub/agents/{id}", () => {
-  const ALICE_VIEWER = { ...ALICE, tid: "dev", modelRoute: "bedrock" as const };
-  const BOB_VIEWER = { ...BOB, tid: "dev", modelRoute: "bedrock" as const };
+  const ALICE_VIEWER = { ...ALICE, tid: "dev", modelRoute: "gateway" as const };
+  const BOB_VIEWER = { ...BOB, tid: "dev", modelRoute: "gateway" as const };
 
   function visit(id: string): Promise<unknown> {
     return agentsPage.default({ params: Promise.resolve({ id }) });
@@ -2781,12 +2769,12 @@ describe("signing in again", () => {
   it("should refuse when the kind is not a sign-in, or the agent is being deleted", async () => {
     const { id } = await started(ALICE, "pcs-api");
     await storedGithub();
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "bedrock", value: BEDROCK, via: "web" });
+    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "jenkins", value: JENKINS, via: "web" });
 
     actAs("alice");
-    expect(await actions.reconnectSignIn(form({ id, kind: "bedrock" }))).toEqual({ ok: false, error: "no sign-in was named" });
+    expect(await actions.reconnectSignIn(form({ id, kind: "jenkins" }))).toEqual({ ok: false, error: "no sign-in was named" });
     expect(await actions.reconnectSignIn(form({ id: "", kind: "github" }))).toEqual({ ok: false, error: "no sign-in was named" });
-    expect(await readCredential(prisma, localStore(), ALICE.oid, "bedrock")).toBe(BEDROCK);
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "jenkins")).toBe(JENKINS);
 
     await setDesired(prisma, ALICE.oid, id, "deleted");
     expect(await actions.reconnectSignIn(form({ id, kind: "github" }))).toMatchObject({ ok: false, error: expect.stringContaining("being deleted") });

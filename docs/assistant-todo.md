@@ -61,7 +61,7 @@ Delete this file once everything below is done or has moved to Jira.
 
 ## Gaps in v1
 
-- [ ] **Model access for non-technical users.** People on Bedrock still paste an API key, and people on their own licence still paste a Claude code. Look at provisioning the model without either.
+- [ ] **Model access for non-technical users.** People on their own licence still paste a Claude code; people on the gateway paste nothing. Look at provisioning the model without a paste at all.
 - [ ] **GitHub is required**, because `boot.sh` clones the workspace with it. Consider an anonymous clone so that GitHub becomes optional.
 - [ ] **Markdown.** `src/messages/markup.ts` has no tables, blockquotes or horizontal rules, so they show as raw text in answers and documents.
 - [ ] **File upload** (the prototype's "Upload file") was out of scope. It needs storage the pod can read.

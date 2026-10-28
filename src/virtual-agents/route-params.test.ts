@@ -10,12 +10,12 @@ afterEach(() => {
 const STORE: SecretStore = { acceptsDevIdentities: true, put: async () => undefined, get: async () => undefined, remove: async () => undefined };
 
 describe("pathKind", () => {
-  it.each(["github", "azure", "claude", "bedrock"])("should accept %s when it is a kind of credential", (kind) => {
+  it.each(["github", "azure", "claude", "jenkins"])("should accept %s when it is a kind of credential", (kind) => {
     expect(pathKind(kind)).toBe(kind);
   });
 
-  it("should answer 404 when the kind is unknown", () => {
-    expect(() => pathKind("ssh")).toThrow(expect.objectContaining({ status: 404 }));
+  it.each(["ssh", "bedrock"])("should answer 404 when the kind is %s, which is not one", (kind) => {
+    expect(() => pathKind(kind)).toThrow(expect.objectContaining({ status: 404 }));
   });
 });
 

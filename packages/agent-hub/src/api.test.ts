@@ -519,7 +519,7 @@ describe("createApi requests", () => {
     const stubbed = createApi({ env: {}, baseUrl: "https://hub.example.net", devUser: DEV_USER, fetchImpl });
 
     // Act and assert
-    await expect(stubbed.deleteMyCredential("bedrock")).resolves.toBeNull();
+    await expect(stubbed.deleteMyCredential("claude_md")).resolves.toBeNull();
     expect(calls[0]?.init?.method).toBe("DELETE");
   });
 
@@ -541,15 +541,15 @@ describe("createApi requests", () => {
 describe("createApi credentials", () => {
   it("should read back the caller's own credential and answer null when none is stored", async () => {
     // Act
-    const missing = await api.myCredential("bedrock");
-    await api.putMyCredential("bedrock", "ABSKsomething");
-    const stored = await api.myCredential("bedrock");
-    await api.deleteMyCredential("bedrock");
+    const missing = await api.myCredential("claude_md");
+    await api.putMyCredential("claude_md", "# my CLAUDE.md");
+    const stored = await api.myCredential("claude_md");
+    await api.deleteMyCredential("claude_md");
 
     // Assert
     expect(missing).toBeNull();
-    expect(stored).toBe("ABSKsomething");
-    expect(await api.myCredential("bedrock")).toBeNull();
+    expect(stored).toBe("# my CLAUDE.md");
+    expect(await api.myCredential("claude_md")).toBeNull();
   });
 
   it("should throw rather than answer null when the hub refuses a write-only kind", async () => {

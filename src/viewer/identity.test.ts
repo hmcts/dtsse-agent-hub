@@ -50,9 +50,7 @@ describe("viewerFrom", () => {
     ["own-licence", "own-licence"],
     ["own-licence-2", "own-licence"],
     ["own-licenced", "gateway"],
-    ["bedrock", "bedrock"],
-    ["bedrock-2", "bedrock"],
-    ["bedrocks", "gateway"]
+    ["bedrock", "gateway"]
   ])("should put the persona %s on the %s route when sign-in is disabled", async (persona, route) => {
     expect((await viewerFrom(jar({ [DEV_PERSONA_COOKIE]: persona }), { AUTH_DISABLED: "true" }))?.modelRoute).toBe(route);
   });
@@ -96,18 +94,17 @@ describe("viewerFrom", () => {
     expect(await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN)).toEqual({ ...identity, modelRoute: "own-licence" });
   });
 
-  // The route decides who pays, so nobody signed in reaches the pasted-key route: `bedrock` is an existing agent's
-  // row and a development persona, never a sign-in's answer.
   it("should put the session's person on the gateway route when the cookie carries the AIGateway.User role", async () => {
     const cookie = await sealSession({ oid: "real-oid", tid: "real-tid", name: "Real Person", aiGateway: true }, SECRET);
 
     expect((await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN))?.modelRoute).toBe("gateway");
   });
 
-  it.each([true, false])("should put nobody signed in on the pasted-key route when their AIGateway.User role is %s", async (aiGateway) => {
+  // The two routes are the whole of the answer, whichever way the role goes: there is no third for anyone to land on.
+  it.each([true, false])("should put nobody signed in on a route outside the two when their AIGateway.User role is %s", async (aiGateway) => {
     const cookie = await sealSession({ oid: "real-oid", tid: "real-tid", name: "Real Person", aiGateway }, SECRET);
 
-    expect((await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN))?.modelRoute).not.toBe("bedrock");
+    expect((await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN))?.modelRoute).toMatch(/^(gateway|own-licence)$/);
   });
 
   it("should be nobody when the session cookie does not open", async () => {

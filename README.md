@@ -57,7 +57,7 @@ it is read by its owner and by people they share it with by name, read-only. The
 | `/assistant`, `/assistant/[id]` | with virtual agents on: the HMCTS Assistant, a plain-language chat for people who are not engineers, full screen and without the hub's sidebar, light or dark. It runs on the viewer's first virtual agent, creating one on their first visit if they have none and starting it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). The id of a conversation's agent redirects here |
 | `/assistant/shared`, `/assistant/shared/[id]` | the chats you have shared and those shared with you, and one shared chat to read: its messages, its document, and how many files each message carried. Only its owner and the people they named can open it, so a link alone opens nothing. `/assistant/[id]?share=1` is the dialog the owner names them in. The list is linked from the Assistant's sidebar, from that dialog and from every shared chat |
 | `/hub/virtual` | with virtual agents on: your virtual agents, creating one (which opens its page), your credentials (the section `/hub/settings/credentials` redirects to), with your git identity, and your CLAUDE.md. `/hub/virtual/[id]` redirects to `/hub/agents/[id]`. Every address the hub answered on before it moved under `/hub` still redirects, from `redirects()` in `next.config.mjs` |
-| `/hub/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Jenkins API token, a Claude token on your own licence, or an Amazon Bedrock API key for an agent still on the `bedrock` route, or delete one. A stored value is never shown. With them on it redirects to `/hub/virtual#credentials`, the same section there |
+| `/hub/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/hub/virtual#credentials`, the same section there |
 
 Pages are server components reading through `src/web/data.ts`; writes are the server actions in
 `src/app/_actions/`, each of which reads the viewer from the session cookie itself. A person's direct message to
@@ -160,7 +160,8 @@ Each virtual agent has a model route, set from its owner's sign-in when it is cr
 | --- | --- | --- | --- |
 | `gateway` | holders of the `AIGateway.User` app role | Amazon Bedrock through the HMCTS AI Gateway, on the owner's own relayed Azure sign-in | `github`, `azure` |
 | `own_licence` | everyone else | the owner's own Claude licence | `github`, `claude` |
-| `bedrock` | nobody new | Amazon Bedrock, called directly with a Bedrock API key an administrator stores for the owner (`AWS_BEARER_TOKEN_BEDROCK`) | `github`, `bedrock` |
+
+These two and no third: there is no pasted model key anywhere in the hub, on any screen or under any route.
 
 `modelRouteFor` in `src/viewer/identity.ts` is the one place a person's route is decided, so swapping the
 `AIGateway.User` app role for a check of the gateway's own Entra group is a change to that function alone.
@@ -202,18 +203,7 @@ unchecked and the session starts — `apiKeyHelper` is re-run every five minutes
 reaches a running session. None of them falls back to the owner's own Claude licence: that would put HMCTS work on a
 personal subscription nobody offered.
 
-**The `bedrock` route is nobody's now, and is an administrator's.** It stays because an agent's route is fixed on its
-row when it is created, so a row already on it keeps booting on its key, and the hub still keeps and serves the
-credential. Nobody is asked for that key: an administrator pastes it for them on `/hub/settings/credentials` (the
-credentials section of `/hub/virtual` with virtual agents on) or sends it with `PUT /api/agent/credentials/bedrock`;
-until it is stored such a pod reports `awaiting_credentials` with `bedrock: …`.
-No Assistant surface offers it: nothing a sign-in puts somebody on asks for it, which is what keeps the row off the
-getting-ready screen and the settings dialog rather than either of them filtering it out by name. It is the one
-credential its owner can read back, with `GET /api/agent/credentials/bedrock`, because `hai` on their laptop uses it
-too. Anyone holding a person's agent-hub token can therefore read their Bedrock key; `docs/agent-api.md`
-(Credentials) has the detail.
-
-An Azure sign-in (`azure`) is optional on `own_licence` and `bedrock`, and needed on `gateway`. It lets Claude run `az` as the owner — pipelines,
+An Azure sign-in (`azure`) is optional on `own_licence` and needed on `gateway`. It lets Claude run `az` as the owner — pipelines,
 environments, AKS, Key Vault and the workspace scripts that fetch secrets with `az` — and gives Jenkins the owner's
 Entra object id; nothing else needs it. A pod restores a stored one before Claude starts, and with none it carries on
 without Azure and relays no code. The owner connects it when they want it: **Connect** on the Azure row of the
@@ -537,9 +527,8 @@ SESSION_SECRET=$(openssl rand -base64 48) AUTH_DISABLED=true AGENT_AUTH_DISABLED
 ```
 
 The local store refuses to start under `NODE_ENV=production`. With sign-in disabled every persona is on the gateway
-route except `own-licence` and `own-licence-…`, which are on their own Claude licence, and `bedrock` and `bedrock-…`,
-which are on the pasted-key route no sign-in reaches — so `ah_dev_persona=own-licence` shows the Claude token field
-and `ah_dev_persona=bedrock` is how the `bedrock` route is worked on at all.
+route except `own-licence` and `own-licence-…`, which are on their own Claude licence — so
+`ah_dev_persona=own-licence` shows the Claude token field and any other persona shows the gateway.
 
 ### The deployed secrets are opt-in
 

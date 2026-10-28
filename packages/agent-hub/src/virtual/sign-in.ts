@@ -227,9 +227,9 @@ export const REDACTED = "[redacted]";
  * `atlassian` credential's `*-token=` lines, and a JWT, which is what an access token looks like whoever issued
  * it. A twg refresh token written any other way — as JSON, say — is not matched.
  *
- * Two kinds the hub stores have no shape here and can have none: `bedrock` and `jenkins` are any printable
- * string. Neither appears in these three commands' output, which is why quoting it is safe today; a fourth
- * caller, or a command that learns to print one, is not covered by anything here.
+ * One kind the hub stores has no shape here and can have none: a `jenkins` token is any printable string. It does
+ * not appear in these three commands' output, which is why quoting it is safe today; a fourth caller, or a command
+ * that learns to print one, is not covered by anything here.
  *
  * A shape added to the validator belongs here too wherever it can be written as one.
  */

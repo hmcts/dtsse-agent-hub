@@ -19,7 +19,7 @@
 # shellcheck disable=SC2015,SC2016
 set -u
 
-CASES=(first-boot bedrock-route gateway-route gateway-route-unchecked gateway-route-unreadable gateway-route-refused
+CASES=(first-boot gateway-route gateway-route-unchecked gateway-route-unreadable gateway-route-refused
     gateway-route-no-roles gateway-route-unconfigured gateway-route-bad-audience
     unknown-route hai-install-blip-recovers hai-install-falls-back
     hai-installed-off-path hai-install-retries hai-install-keeps-failing hai-install-leaves-no-binary
@@ -233,7 +233,8 @@ case "$1 $2" in
         exit "${FAKE_ATLASSIAN_RC:-0}" ;;
     "virtual credential") printf 'sk-ant-oat-fake' ;;
     "credentials get")
-        [ "$3" = claude_md ] || { printf 'ABSKfake'; exit 0; }
+        # Any kind but the CLAUDE.md is an opaque token to the entrypoint; `jenkins` is the one it asks for.
+        [ "$3" = claude_md ] || { printf 'fake-opaque-token'; exit 0; }
         case "${FAKE_CLAUDE_MD:-missing}" in
             stored) cat "$FAKE_DIR/claude_md" ;;
             error) echo "agent-hub: GET /api/virtual/x/credentials/claude_md: 502" >&2; exit 1 ;;
@@ -371,7 +372,7 @@ case_first_boot() {
     hai_env 1 "HAI_ROUTE=byol" && ok "should map own_licence to HAI_ROUTE=byol when that is the hub's route" || no "hai env: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
     hai_env 1 "AGENT_HUB_MODEL_ROUTE=own_licence" && ok "should pass the hub's own_licence route on unrenamed when it hands over to hai" || no "AGENT_HUB_MODEL_ROUTE was rewritten"
     hai_env_has 1 CLAUDE_CODE_OAUTH_TOKEN && ok "should put the Claude token in hai's environment when the route is own_licence" || no "no CLAUDE_CODE_OAUTH_TOKEN"
-    hai_env_has 1 AWS_BEARER_TOKEN_BEDROCK && no "the Bedrock key leaked into the own_licence route" || ok "should leave the Bedrock key out when the route is own_licence"
+    hai_env_has 1 AWS_BEARER_TOKEN_BEDROCK && no "a Bedrock bearer token reached the own_licence route" || ok "should set no Bedrock bearer token when the route is own_licence"
     hai_env 1 "HAI_IN_CONTAINER=1" && ok "should tell hai it is already in a container when it starts a session" || no "hai would start a container of its own: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
     # Both markers, not just the one: the hub's pod template sets them too, but a pod still on an older
     # template has only what this file exports, and without HAI_NO_UPDATE every session self-updates.
@@ -402,18 +403,6 @@ case_first_boot() {
         ok "should install hai from the hmcts-lib feed with the registry scoped to @hmcts-cft" || no "npm install argv: $(head -1 "$F/npm.log" 2>/dev/null)"
     grep -q 'hai: installed hai-cli@9.9.9 from the hmcts-lib feed' "$T/out" &&
         ok "should log which hai the pod got when the install succeeds" || no "did not log the installed hai version"
-}
-
-case_bedrock_route() {
-    setup bedrock-route
-    start AGENT_HUB_MODEL_ROUTE=bedrock FAKE_REPO_SECONDS=0.2
-    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when the route is bedrock" || no "Claude did not start on the bedrock route"
-    hai_env 1 "HAI_ROUTE=bedrock" && ok "should map bedrock to HAI_ROUTE=bedrock when that is the hub's route" || no "hai env: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
-    hai_env 1 "AWS_BEARER_TOKEN_BEDROCK=ABSKfake" && ok "should put the stored Bedrock key in hai's environment when the route is bedrock" || no "no Bedrock key in hai's environment"
-    hai_env_has 1 CLAUDE_CODE_OAUTH_TOKEN && no "the Claude token leaked into the bedrock route" || ok "should leave the Claude token out when the route is bedrock"
-    [ "$(hai_argv 1)" = "--settings $SETTINGS --dangerously-skip-permissions " ] &&
-        ok "should give hai the same argv on the bedrock route as on any other" || no "hai argv: $(hai_argv 1)"
-    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
 # The gateway's settings as the hub injects them, and a stored Azure sign-in, which is the credential this route has.
@@ -994,7 +983,6 @@ case_broken_workspace_shim() {
 run_case() {
     case "$1" in
         first-boot) case_first_boot ;;
-        bedrock-route) case_bedrock_route ;;
         gateway-route) case_gateway_route ;;
         gateway-route-unchecked) case_gateway_route_unchecked ;;
         gateway-route-unreadable) case_gateway_route_unreadable ;;
