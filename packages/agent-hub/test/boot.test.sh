@@ -19,7 +19,8 @@
 set -u
 
 CASES=(no-token refused-token sign-in-not-completed sign-in-transient-failure stored-token-no-access checkout-client broken-checkout-client
-    checkout-untracked-file checkout-modified-file checkout-modified-collision checkout-untracked-clobber checkout-local-commit no-client trailing-slash
+    checkout-untracked-file checkout-modified-file checkout-modified-collision checkout-untracked-clobber checkout-local-commit
+    checkout-refusal-flood checkout-refusal-silent no-client trailing-slash
     client-upgrade client-upgrade-offline client-upgrade-no-npm client-upgrade-pinned package-entrypoint client-upgrade-ships-entrypoint
     checkout-entrypoint)
 
@@ -134,6 +135,24 @@ case "$1" in
         case "$3" in
             rev-parse) echo master ;;
             symbolic-ref) echo origin/master ;;
+            # A refusal whose message real git would need thousands of conflicting paths to produce, and one
+            # that writes no message at all. Both are about what the script makes of git's stderr rather than
+            # about git's own rules, so they are canned here instead of staged in a repository.
+            merge)
+                [ -z "${FAKE_MERGE_SILENT:-}" ] || exit 1
+                if [ -n "${FAKE_MERGE_PATHS:-}" ]; then
+                    {
+                        echo "error: The following untracked working tree files would be overwritten by merge:"
+                        i=0
+                        while [ "$i" -lt "$FAKE_MERGE_PATHS" ]; do
+                            printf '\tdocs/how-to/a-fairly-long-doc-page-name-%s.md\n' "$i"
+                            i=$((i + 1))
+                        done
+                        echo "Please move or remove them before you merge."
+                        echo "Aborting"
+                    } >&2
+                    exit 1
+                fi ;;
         esac ;;
 esac
 EOF
@@ -225,8 +244,9 @@ real_checkout() {
     mkdir -p "$C/ws"
     rgit clone --quiet "$C/origin" "$C/ws/cft-workspace"
     # An identity in the checkout's own config, as a pod's has from the owner's git_identity credential. The
-    # boot runs under `env -i`, so without one a merge that wanted to write a commit would fail for the want of
-    # a committer rather than on its own merits, and `--ff-only` would look load-bearing when it was not.
+    # boot runs under `env -i`, so a merge that got as far as writing a commit would otherwise fail for the
+    # want of a committer rather than on its own merits. `--ff-only` refuses before that point, so this is
+    # insurance for anything here that does reach a commit rather than something the cases depend on.
     rgit -C "$C/ws/cft-workspace" config user.name "Pod Owner"
     rgit -C "$C/ws/cft-workspace" config user.email pod@example.com
 }
@@ -504,6 +524,51 @@ case_checkout_local_commit() {
         ok "passes on git's own refusal rather than its advice" || no "status: $(hub -c '.status')"
 }
 
+# canned_checkout: a checkout the canned fake git answers for, for the cases about what the script makes of
+# git's stderr rather than about git's rules. No scripts/agent-hub, so the installed client is used.
+canned_checkout() {
+    mkdir -p "$C/ws/cft-workspace/.git" "$C/ws/cft-workspace/.devcontainer/virtual-agent"
+    printf '#!/bin/sh\necho entrypoint >>"$FAKE_DIR/order.log"\n' >"$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
+    chmod +x "$C/ws/cft-workspace/.devcontainer/virtual-agent/entrypoint.sh"
+}
+
+# the_refusal: the sync detail the hub was told, out of the statuses it holds.
+the_refusal() { hub '.status[] | select(.detail != null) | .detail' | grep -F 'cannot fast-forward'; }
+
+# Thousands of conflicting paths, which is a refusal message longer than a pipe buffer. Flattening it must not
+# take the boot down with it: a `sed` that writes more than the buffer into a `head` which has already exited
+# dies of SIGPIPE, and under `pipefail` and `set -e` that assignment ends the script — the pod reports nothing,
+# hands over to nothing, and the kubelet restarts it into the same volume for ever. So the bound is taken from
+# the file first. This also keeps the detail inside MAX_DETAIL, the hub's own limit on what it will accept.
+case_checkout_refusal_flood() {
+    setup checkout-refusal-flood
+    canned_checkout
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_MERGE_PATHS=4000
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
+        ok "boots through a refusal too long to flatten in a pipe" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    local detail
+    detail=$(the_refusal)
+    [ -n "$detail" ] && ok "reports the refusal at all" || no "status: $(hub -c '.status')"
+    # 500 is MAX_DETAIL in src/virtual-agents/schemas.ts, which rejects anything longer.
+    [ "${#detail}" -le 500 ] && ok "keeps the detail inside what the hub accepts" || no "detail is ${#detail} characters: $detail"
+    printf '%s' "$detail" | grep -qF 'overwritten by merge: docs/how-to/a-fairly-long-doc-page-name-0.md' &&
+        ok "passes on what git said" || no "detail: $detail"
+}
+
+# A merge that fails without writing anything — killed mid-merge, out of memory. The detail is the prose on its
+# own: an empty parenthetical reads as this line being broken rather than as git having said nothing.
+case_checkout_refusal_silent() {
+    setup checkout-refusal-silent
+    canned_checkout
+    seed_github "$GOOD_TOKEN"
+    boot FAKE_MERGE_SILENT=1
+    [ "$BOOT_RC" -eq 0 ] && order_is "gh login-with-token gh setup-git git fetch git merge npm install entrypoint " &&
+        ok "boots through a refusal that says nothing" || no "rc $BOOT_RC, order: $(tr '\n' ' ' <"$C/order.log")"
+    [ "$(the_refusal)" = "cft-workspace: master cannot fast-forward to origin/master, kept the local checkout" ] &&
+        ok "reports the refusal with no empty parenthetical" || no "detail: $(the_refusal)"
+}
+
 case_no_client() {
     setup no-client
     rm "$C/bin/agent-hub"
@@ -648,6 +713,8 @@ run_case() {
         checkout-modified-collision) case_checkout_modified_collision ;;
         checkout-untracked-clobber) case_checkout_untracked_clobber ;;
         checkout-local-commit) case_checkout_local_commit ;;
+        checkout-refusal-flood) case_checkout_refusal_flood ;;
+        checkout-refusal-silent) case_checkout_refusal_silent ;;
         no-client) case_no_client ;;
         trailing-slash) case_trailing_slash ;;
         client-upgrade) case_client_upgrade ;;

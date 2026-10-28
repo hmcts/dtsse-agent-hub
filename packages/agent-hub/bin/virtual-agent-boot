@@ -171,22 +171,41 @@ checkout_workspace() {
     branch=$(git -C "$WORKSPACE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
     default=$(git -C "$WORKSPACE" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/master)
     default="${default#origin/}"
-    # Nothing checks the working tree before the merge: `merge --ff-only` refuses precisely when an incoming
-    # change would overwrite a local one, tracked or untracked, and leaves HEAD where it was when it does. So a
-    # dirty checkout still follows the default branch and only a genuine collision holds it back. Any screen
-    # ahead of it can only be coarser — it would refuse the common case of an edit git was never going to touch,
-    # and then one uncommitted file holds the checkout at that commit on this boot and on every boot after it,
-    # which is how a pod ends up tens of commits behind with nothing but a line in its boot log to say so.
+    # Nothing checks the working tree before the merge: `merge --ff-only` refuses whenever an incoming change
+    # would overwrite a local one it can see, tracked or untracked, and leaves HEAD where it was when it does.
+    # So a dirty checkout still follows the default branch and only a genuine collision holds it back. Any
+    # screen ahead of it can only be coarser — it would refuse the common case of an edit git was never going to
+    # touch, and then one uncommitted file holds the checkout at that commit on this boot and on every boot
+    # after it, which is how a pod ends up tens of commits behind with nothing but a line in its log to say so.
+    #
+    # What git does not see is an ignored path: a commit that starts tracking one overwrites the working-tree
+    # file without a word, and here that covers the repo clones under apps/, libs/ and platops/. Nothing
+    # screened for those before either — `status --porcelain` does not report an ignored file — so this is the
+    # same exposure as ever and not something the removal introduced.
     if [[ "$branch" != "$default" ]]; then
         sync_detail="cft-workspace: on branch $branch, not updated from $default"
     elif ! git -C "$WORKSPACE" merge --ff-only --quiet "origin/$default" 2>"$TMP/git.err"; then
-        # git's own words, because this is now the only path that leaves the checkout behind and "cannot
+        # git's own words, because this is the only path that leaves the checkout behind and "cannot
         # fast-forward" alone does not say which file to go and look at. The names are on the lines after the
-        # first, so the message is flattened rather than cut to one line, and bounded like the fetch error
-        # above. `hint:` lines go first: the advice for diverging branches runs longer than the whole bound and
-        # would push git's own `fatal:` out of it.
-        err=$(sed '/^hint:/d' "$TMP/git.err" | head -c 200 | tr -s '\n\t ' ' ')
-        sync_detail="cft-workspace: $branch cannot fast-forward to origin/$default, kept the local checkout (${err% })"
+        # first, so the message is flattened rather than cut to one line.
+        #
+        # The first `head` reads the file, as the fetch and clone capture sites do, and that is what makes this
+        # safe rather than tidy: a `sed` reading the file and writing more than a pipe buffer into a `head` that
+        # has already taken its bytes and exited dies of SIGPIPE with 141, which `pipefail` gives to this
+        # assignment and `set -e` turns into the end of the boot — no report, no handover, and a pod that
+        # restarts into the same volume for ever. 4096 is far enough under the buffer that sed always finishes,
+        # and leaves room for the `hint:` lines dropped next: the advice for diverging branches is longer than
+        # the bound below on its own and would otherwise push git's `fatal:` out of it.
+        #
+        # 380 is sized against the hub's own ceiling: MAX_DETAIL in src/virtual-agents/schemas.ts is 500, which
+        # this prose and a long branch name have to fit inside too. Enough for six conflicting paths whole,
+        # where 200 cut the third one mid-name into a path the owner would have gone looking for.
+        err=$(head -c 4096 "$TMP/git.err" | sed '/^hint:/d' | head -c 380 | tr -s '\n\t ' ' ')
+        err="${err# }"
+        err="${err% }"
+        # git said nothing at all if it was killed mid-merge; an empty parenthetical reads as this line being
+        # broken rather than as there being nothing to pass on.
+        sync_detail="cft-workspace: $branch cannot fast-forward to origin/$default, kept the local checkout${err:+ ($err)}"
     else
         log "fast-forwarded $WORKSPACE to origin/$default"
     fi

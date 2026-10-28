@@ -38,6 +38,8 @@ const CASES = [
   "checkout-modified-collision",
   "checkout-untracked-clobber",
   "checkout-local-commit",
+  "checkout-refusal-flood",
+  "checkout-refusal-silent",
   "no-client",
   "trailing-slash",
   "client-upgrade",
