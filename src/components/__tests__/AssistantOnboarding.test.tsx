@@ -12,7 +12,7 @@ import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
 import type { LoginView } from "@/virtual-agents/logins";
-import { neededCredentials, OPTIONAL_CREDENTIALS } from "@/virtual-agents/views";
+import { neededCredentials, OPTIONAL_CREDENTIALS, optionalCredentials } from "@/virtual-agents/views";
 
 const refresh = vi.fn();
 const push = vi.fn();
@@ -255,6 +255,20 @@ describe("GettingReady connectors", () => {
     expect(within(connector("GitHub")).getByText(/The sign-in will appear here/)).toBeTruthy();
   });
 
+  // The owner's decision: the key is an administrator's to paste on the hub's own credentials page, and this screen
+  // is where somebody who came to start a chat arrives. It is gone because the route asks for nothing, not because
+  // this screen knows the kind by name.
+  it("should offer no model-key row at all when the assistant is on the gateway route", () => {
+    const summary = assistant("awaiting_credentials", { needed: neededCredentials("gateway"), optional: optionalCredentials("gateway") });
+    render(ready({ assistant: summary, statuses: statuses("github") }));
+
+    expect(screen.queryByText("AI model access")).toBeNull();
+    expect(screen.queryByText("Claude")).toBeNull();
+    // What it does ask for: the Azure sign-in the gateway authorises, which is this route's model credential.
+    expect(connectionsPrompt("connect", summary.needed, new Set<CredentialKind>(["github"]))?.message).toContain("Azure");
+    expect(connector("Azure")).toBeTruthy();
+  });
+
   it("should offer a form for the Bedrock key once the person clicks Connect, even while the assistant starts", () => {
     render(ready({ assistant: assistant("provisioning", { needed: ["github", "azure", "bedrock"] }) }));
 
@@ -262,8 +276,8 @@ describe("GettingReady connectors", () => {
     expect(within(bedrock).queryByRole("form")).toBeNull();
     fireEvent.click(within(bedrock).getByRole("button", { name: "Connect" }));
 
-    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Claude Code key" });
-    expect((within(form).getByLabelText("Claude Code key") as HTMLInputElement).type).toBe("password");
+    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Amazon Bedrock API key" });
+    expect((within(form).getByLabelText("Amazon Bedrock API key") as HTMLInputElement).type).toBe("password");
   });
 });
 
@@ -282,8 +296,8 @@ describe("GettingReady asks the person can act on", () => {
     const row = connector("AI model access");
     fireEvent.click(within(row).getByRole("button", { name: "Connect" }));
 
-    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Claude Code key" });
-    expect(within(form).getByLabelText("Claude Code key")).toBeTruthy();
+    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Amazon Bedrock API key" });
+    expect(within(form).getByLabelText("Amazon Bedrock API key")).toBeTruthy();
     expect((form.querySelector('input[name="kind"]') as HTMLInputElement).value).toBe("bedrock");
   });
 

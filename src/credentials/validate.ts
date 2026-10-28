@@ -20,11 +20,11 @@ const CLAUDE_TOKEN = /^sk-ant-[A-Za-z0-9_-]{20,}$/;
  */
 const BEDROCK_KEY = /^[\x21-\x7e]{20,4096}$/;
 
-/** Things people paste by mistake for a Claude Code key, each with what it actually is. */
+/** Things people paste by mistake for an Amazon Bedrock API key, each with what it actually is. */
 const NOT_BEDROCK: readonly (readonly [RegExp, string])[] = [
-  [/^(gh[a-z]_|github_pat_)/, "that is a GitHub token, not a Claude Code key"],
-  [/^sk-ant-/, "that is a Claude licence token, not a Claude Code key: save it as your Claude token instead"],
-  [/^(AKIA|ASIA)[A-Z0-9]{16}$/, "that is an AWS access key id, not a Claude Code key"]
+  [/^(gh[a-z]_|github_pat_)/, "that is a GitHub token, not an Amazon Bedrock API key"],
+  [/^sk-ant-/, "that is a Claude licence token, not an Amazon Bedrock API key: save it as your Claude token instead"],
+  [/^(AKIA|ASIA)[A-Z0-9]{16}$/, "that is an AWS access key id, not an Amazon Bedrock API key"]
 ];
 
 /** A Jenkins API token from `/me/configure`: opaque, so only its length and printable, space-free ASCII are checked. */
@@ -54,7 +54,7 @@ const LABELS: Record<CredentialKind, string> = {
   github: "a GitHub token",
   azure: "an Azure token cache",
   claude: "a Claude token",
-  bedrock: "a Claude Code key",
+  bedrock: "an Amazon Bedrock API key",
   jenkins: "a Jenkins API token",
   claude_md: "your CLAUDE.md",
   git_identity: "a git identity",
@@ -247,7 +247,7 @@ function checkBedrockKey(value: string): CheckedCredential {
   }
   return BEDROCK_KEY.test(value)
     ? { ok: true, value, accountLabel: null }
-    : { ok: false, error: "that is not a Claude Code key: expected 20 to 4096 printable characters with no spaces" };
+    : { ok: false, error: "that is not an Amazon Bedrock API key: expected 20 to 4096 printable characters with no spaces" };
 }
 
 function checkJenkinsToken(value: string): CheckedCredential {

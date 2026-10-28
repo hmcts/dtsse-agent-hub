@@ -12,9 +12,18 @@ describe("CATALOGUE", () => {
     }
   });
 
-  it("should name no version in a label or a description, because hai pins them", () => {
+  it("should name no version in a label or a description, because the pod pins them", () => {
     for (const model of CATALOGUE) {
       expect(`${model.label} ${model.description}`).not.toMatch(/\d/);
+    }
+  });
+
+  // The AI Gateway 404s any model id outside its application's `allowedModels`. A bare family alias cannot be one of
+  // those ids: the pod resolves it against pins it chooses, so what this offers can never name a model the gateway
+  // refuses. An id with a region prefix or a version in it offered from here could not make that promise.
+  it("should offer only bare family aliases, so no offer can name an id the gateway would refuse", () => {
+    for (const model of CATALOGUE) {
+      expect(model.id).toMatch(/^[a-z]{1,32}$/);
     }
   });
 

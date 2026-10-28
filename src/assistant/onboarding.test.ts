@@ -31,6 +31,13 @@ describe("onboarded", () => {
     expect(onboarded(neededCredentials(route), new Set(stored))).toBe(true);
   });
 
+  // The gateway authorises the person, so their Azure sign-in is this route's model credential rather than an extra.
+  it("should want Azure, and no model key, before an assistant on the gateway route is onboarded", () => {
+    expect(onboarded(neededCredentials("gateway"), new Set(["github"]))).toBe(false);
+    expect(onboarded(neededCredentials("gateway"), new Set(["github", "azure"]))).toBe(true);
+    expect(onboarded(neededCredentials("gateway"), new Set(["github", "azure", "bedrock"]))).toBe(true);
+  });
+
   it("should be onboarded when every needed credential is stored", () => {
     expect(onboarded(["github", "azure", "claude"], new Set(["github", "azure", "claude", "jenkins"]))).toBe(true);
   });
@@ -60,11 +67,21 @@ describe("connectionsAsk", () => {
 
 describe("chatCredentials", () => {
   it("should need GitHub and a Claude token when the assistant runs on the person's own licence", () => {
-    expect(chatCredentials(["github", "azure", "claude"])).toEqual(["github", "claude"]);
+    expect(chatCredentials(["github", "azure", "claude"], "own-licence")).toEqual(["github", "claude"]);
   });
 
   it("should need GitHub and a Bedrock API key when the assistant runs on Amazon Bedrock", () => {
-    expect(chatCredentials(["github", "azure", "bedrock"])).toEqual(["github", "bedrock"]);
+    expect(chatCredentials(["github", "azure", "bedrock"], "bedrock")).toEqual(["github", "bedrock"]);
+  });
+
+  // The gateway authorises the person rather than a key, so a pod whose apiKeyHelper has no sign-in to mint from
+  // fails every turn: Azure is the model credential there, and a chat opened without it is a chat that cannot work.
+  it("should need GitHub and Azure when the assistant runs on the gateway, where Azure is the model credential", () => {
+    expect(chatCredentials(neededCredentials("gateway"), "gateway")).toEqual(["github", "azure"]);
+  });
+
+  it.each(["own-licence", "bedrock"] as const)("should leave Azure out of the gate when the assistant runs on %s", (route) => {
+    expect(chatCredentials([...neededCredentials(route), "azure"], route)).not.toContain("azure");
   });
 });
 

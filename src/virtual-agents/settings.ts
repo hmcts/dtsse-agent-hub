@@ -93,3 +93,73 @@ export function orchestratorRole(env: Environment = process.env): string | null 
 export function publicDomain(env: Environment = process.env): string {
   return env.VIRTUAL_AGENT_PUBLIC_DOMAIN?.trim() || DEFAULT_PUBLIC_DOMAIN;
 }
+
+/**
+ * What a pod on the `gateway` route needs to reach the HMCTS AI Gateway, as a claim carries it to the orchestrator.
+ *
+ * Two credentials, not one: a token per person, which the pod mints from the owner's own `az` sign-in, and an APIM
+ * subscription key per service, which is this. Named as the claim's JSON, since that is the only thing that reads it.
+ */
+export interface GatewaySettings {
+  /** The gateway's origin; the pod appends the Bedrock passthrough path itself. */
+  base_url: string;
+  /** The Entra scope `az` is asked for a token for. A wrong one is a bare `401 invalid_token` at the gateway. */
+  audience: string;
+  /** The APIM subscription key, sent as `Ocp-Apim-Subscription-Key`. */
+  apim_key: string;
+}
+
+/**
+ * An Entra client-credentials scope: an Application ID URI and `/.default`.
+ *
+ * The characters are a conservative allow-list rather than "anything but whitespace", because the pod interpolates
+ * this value into a double-quoted shell string in its token helper, where a quote, a backtick or a `$(…)` would run
+ * as the pod's user. An Application ID URI holds a scheme, a host or a GUID and a path, so none of them is needed;
+ * the entrypoint refuses the same set again, since this hub is not the only thing that can set a pod's environment.
+ */
+const GATEWAY_SCOPE = /^api:\/\/[A-Za-z0-9][A-Za-z0-9._:/-]*\/\.default$/;
+
+function httpOrigin(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_AUDIENCE` and `AI_GATEWAY_APIM_KEY`, all three or none, or `null` for a
+ * deployment with no gateway configured — which simply has no working `gateway` route, and is fine until somebody is
+ * put on one.
+ *
+ * Half of them is refused here rather than at the first model call, because that is a pod that boots and then fails
+ * every turn. Refused by throwing, as every other setting in this file is: the claim is the one caller, and a claim
+ * that answered 500 is an orchestrator retrying a pass against a deployment nobody has finished configuring, which
+ * is the loudest the hub can be about it without failing agents that have nothing to do with the gateway.
+ *
+ * The key is never named in the message, since a `VirtualAgentConfigurationError` is logged and answered with.
+ */
+export function gatewaySettings(env: Environment = process.env): GatewaySettings | null {
+  const baseUrl = env.AI_GATEWAY_BASE_URL?.trim() || undefined;
+  const audience = env.AI_GATEWAY_AUDIENCE?.trim() || undefined;
+  const apimKey = env.AI_GATEWAY_APIM_KEY?.trim() || undefined;
+  if (baseUrl === undefined && audience === undefined && apimKey === undefined) {
+    return null;
+  }
+  const problems: string[] = [];
+  if (baseUrl === undefined || !httpOrigin(baseUrl)) {
+    problems.push("AI_GATEWAY_BASE_URL must be the gateway's http or https origin, as https://ai-gateway.sandbox.platform.hmcts.net");
+  }
+  if (audience === undefined || !GATEWAY_SCOPE.test(audience)) {
+    problems.push("AI_GATEWAY_AUDIENCE must be the gateway's Entra scope, as api://<client id>/.default");
+  }
+  if (apimKey === undefined) {
+    problems.push("AI_GATEWAY_APIM_KEY is not set: the gateway needs an APIM subscription key as well as a token");
+  }
+  if (problems.length > 0) {
+    throw new VirtualAgentConfigurationError(`the AI Gateway is half configured: ${problems.join("; ")}`);
+  }
+  // The pod appends the Bedrock passthrough path, so a trailing slash would make a double one at the gateway.
+  return { base_url: baseUrl!.replace(/\/+$/, ""), audience: audience!, apim_key: apimKey! };
+}

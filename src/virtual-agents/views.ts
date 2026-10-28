@@ -47,7 +47,7 @@ export interface VirtualAgentCard {
 export interface VirtualAgentDetail {
   card: VirtualAgentCard;
   logins: LoginView[];
-  /** What this agent needs stored: GitHub always, and a Claude token on the owner's own licence or a Bedrock key. */
+  /** What this agent needs stored, which is its route's: `neededCredentials`. */
   needed: CredentialKind[];
   /** What it can use if stored, but starts without. */
   optional: CredentialKind[];
@@ -102,11 +102,33 @@ export async function virtualAgentCards(db: Database, ownerOid: string): Promise
  * only adds the Jenkins tools, and an Atlassian sign-in only the `twg` CLI for Jira and Confluence, so the pod never
  * waits for any of them. Azure is signed in to only when the owner asks, from the Assistant's settings or the agent's
  * page.
+ *
+ * On the `gateway` route Azure is not one of these: `az` is where that route's model credential comes from, so it is
+ * needed rather than optional there, and `optionalCredentials` is what keeps it out of both lists at once.
  */
 export const OPTIONAL_CREDENTIALS: CredentialKind[] = ["azure", "jenkins", "atlassian"];
 
+/**
+ * What each route's pod cannot boot without, as a table over the whole union: a route added without an entry does not
+ * build, rather than quietly falling through to another route's credentials.
+ *
+ * `gateway` needs no model credential of its own. The gateway authorises the owner's own Azure sign-in, so `az` is
+ * the credential and `github` the only other thing the pod waits for.
+ */
+const NEEDED: Readonly<Record<ModelRoute, readonly CredentialKind[]>> = {
+  bedrock: ["github", "bedrock"],
+  gateway: ["github", "azure"],
+  "own-licence": ["github", "claude"]
+};
+
 export function neededCredentials(route: ModelRoute): CredentialKind[] {
-  return route === "own-licence" ? ["github", "claude"] : ["github", "bedrock"];
+  return [...NEEDED[route]];
+}
+
+/** What the route can use if stored but starts without: the optional kinds it does not already need. */
+export function optionalCredentials(route: ModelRoute): CredentialKind[] {
+  const needed = NEEDED[route];
+  return OPTIONAL_CREDENTIALS.filter((kind) => !needed.includes(kind));
 }
 
 /**
@@ -131,7 +153,7 @@ export async function virtualAgentDetail(db: Database, viewerOid: string, id: st
     return undefined;
   }
   const [newest, logins] = await Promise.all([newestEntries(db, row.agentId === null ? [] : [row.agentId]), loginViews(db, id)]);
-  return { card: toCard(row, newest), logins, needed: neededCredentials(row.modelRoute), optional: OPTIONAL_CREDENTIALS };
+  return { card: toCard(row, newest), logins, needed: neededCredentials(row.modelRoute), optional: optionalCredentials(row.modelRoute) };
 }
 
 /** What anyone who may see a virtual agent sees of it, which leaves out its sign-ins, credentials and ports. */

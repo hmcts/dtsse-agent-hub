@@ -357,7 +357,8 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
  */
 export async function assistantChatGate(viewer: Viewer): Promise<ChatGate> {
   const [assistant, credentials] = await Promise.all([findAssistant(prisma, viewer.oid), credentialSettings(viewer)]);
-  return chatGateOf(chatCredentials(neededCredentials(assistant?.modelRoute ?? viewer.modelRoute)), credentials);
+  const route = assistant?.modelRoute ?? viewer.modelRoute;
+  return chatGateOf(chatCredentials(neededCredentials(route), route), credentials);
 }
 
 /**

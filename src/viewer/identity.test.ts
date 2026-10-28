@@ -42,14 +42,17 @@ describe("isDevIdentity", () => {
 
 describe("viewerFrom", () => {
   it("should be the anonymous dev identity when sign-in is disabled and there is no persona", async () => {
-    expect(await viewerFrom(jar({}), { AUTH_DISABLED: "true" })).toEqual({ ...devIdentity(), modelRoute: "bedrock" });
+    expect(await viewerFrom(jar({}), { AUTH_DISABLED: "true" })).toEqual({ ...devIdentity(), modelRoute: "gateway" });
   });
 
   it.each([
-    ["second", "bedrock"],
+    ["second", "gateway"],
     ["own-licence", "own-licence"],
     ["own-licence-2", "own-licence"],
-    ["own-licenced", "bedrock"]
+    ["own-licenced", "gateway"],
+    ["bedrock", "bedrock"],
+    ["bedrock-2", "bedrock"],
+    ["bedrocks", "gateway"]
   ])("should put the persona %s on the %s route when sign-in is disabled", async (persona, route) => {
     expect((await viewerFrom(jar({ [DEV_PERSONA_COOKIE]: persona }), { AUTH_DISABLED: "true" }))?.modelRoute).toBe(route);
   });
@@ -66,7 +69,7 @@ describe("viewerFrom", () => {
       tid: "real-tid",
       name: "Real Person",
       email: "real@example.com",
-      modelRoute: "bedrock"
+      modelRoute: "gateway"
     });
   });
 
@@ -93,10 +96,18 @@ describe("viewerFrom", () => {
     expect(await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN)).toEqual({ ...identity, modelRoute: "own-licence" });
   });
 
-  it("should put the session's person on the Bedrock route when the cookie carries the AIGateway.User role", async () => {
+  // The route decides who pays, so nobody signed in reaches the pasted-key route: `bedrock` is an existing agent's
+  // row and a development persona, never a sign-in's answer.
+  it("should put the session's person on the gateway route when the cookie carries the AIGateway.User role", async () => {
     const cookie = await sealSession({ oid: "real-oid", tid: "real-tid", name: "Real Person", aiGateway: true }, SECRET);
 
-    expect((await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN))?.modelRoute).toBe("bedrock");
+    expect((await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN))?.modelRoute).toBe("gateway");
+  });
+
+  it.each([true, false])("should put nobody signed in on the pasted-key route when their AIGateway.User role is %s", async (aiGateway) => {
+    const cookie = await sealSession({ oid: "real-oid", tid: "real-tid", name: "Real Person", aiGateway }, SECRET);
+
+    expect((await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN))?.modelRoute).not.toBe("bedrock");
   });
 
   it("should be nobody when the session cookie does not open", async () => {

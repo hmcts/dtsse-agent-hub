@@ -122,7 +122,7 @@ describe("a form carrying a credential", () => {
 
     expect([...container.querySelectorAll("form")].filter(carriesSecret).map((form) => form.getAttribute("aria-label"))).toEqual([
       "Paste the Claude code",
-      "Save your Claude Code key",
+      "Save your Amazon Bedrock API key",
       "Save your Jenkins API token"
     ]);
     expectEveryFormPosts(container);
@@ -148,7 +148,7 @@ describe("a form carrying a credential", () => {
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "Replace your Jenkins API token" }));
-    fireEvent.click(screen.getByRole("button", { name: "Replace your Claude Code key" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replace your Amazon Bedrock API key" }));
     fireEvent.click(screen.getByRole("button", { name: "Reconnect GitHub" }));
 
     expect(screen.getByRole("form", { name: "Save your Jenkins API token" })).toBeTruthy();

@@ -266,11 +266,11 @@ describe("taking a copy", () => {
 });
 
 describe("taking a copy before connecting", () => {
-  it("should refuse the copy and make no conversation when the person offered it has not connected GitHub and Claude", async () => {
+  it("should refuse the copy and make no conversation when the person offered it has not connected their accounts", async () => {
     const { id } = await offered();
     await prisma.credential.deleteMany({ where: { ownerOid: BOB.oid } });
 
-    expect(await forkActions.forkChat({ conversationId: id })).toEqual({ ok: false, error: "connect GitHub and Claude before you start chatting" });
+    expect(await forkActions.forkChat({ conversationId: id })).toEqual({ ok: false, error: "connect your accounts before you start chatting" });
     expect(await prisma.assistantConversation.count({ where: { ownerOid: BOB.oid } })).toBe(0);
   });
 });

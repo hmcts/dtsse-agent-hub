@@ -57,7 +57,7 @@ it is read by its owner and by people they share it with by name, read-only. The
 | `/assistant`, `/assistant/[id]` | with virtual agents on: the HMCTS Assistant, a plain-language chat for people who are not engineers, full screen and without the hub's sidebar, light or dark. It runs on the viewer's first virtual agent, creating one on their first visit if they have none and starting it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). The id of a conversation's agent redirects here |
 | `/assistant/shared`, `/assistant/shared/[id]` | the chats you have shared and those shared with you, and one shared chat to read: its messages, its document, and how many files each message carried. Only its owner and the people they named can open it, so a link alone opens nothing. `/assistant/[id]?share=1` is the dialog the owner names them in. The list is linked from the Assistant's sidebar, from that dialog and from every shared chat |
 | `/hub/virtual` | with virtual agents on: your virtual agents, creating one (which opens its page), your credentials (the section `/hub/settings/credentials` redirects to), with your git identity, and your CLAUDE.md. `/hub/virtual/[id]` redirects to `/hub/agents/[id]`. Every address the hub answered on before it moved under `/hub` still redirects, from `redirects()` in `next.config.mjs` |
-| `/hub/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Bedrock API key, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/hub/virtual#credentials`, the same section there |
+| `/hub/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Jenkins API token, a Claude token on your own licence, or an Amazon Bedrock API key for an agent still on the `bedrock` route, or delete one. A stored value is never shown. With them on it redirects to `/hub/virtual#credentials`, the same section there |
 
 Pages are server components reading through `src/web/data.ts`; writes are the server actions in
 `src/app/_actions/`, each of which reads the viewer from the session cookie itself. A person's direct message to
@@ -121,6 +121,7 @@ the `-staging` release.
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
 | `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain a reported port's URL is under, as `https://<statefulset_name>-<port>.<domain>`; the orchestrator reads it too |
 | `VIRTUAL_AGENT_PLUGINS` | none | The workspace marketplace plugins an owner can tick, comma-separated `name` or `name=description`, as `pcs=PCS team workflows,dtsse=DTSSE docs`. A name is lowercase letters, digits and hyphens; any other makes the pages that read it fail. With none, the create form and the agent's page offer no plugins |
+| `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_AUDIENCE`, `AI_GATEWAY_APIM_KEY` | none | The HMCTS AI Gateway a `gateway` pod reaches Claude through: its origin, the Entra scope `az` is asked for a token for, and the APIM subscription key, which comes from the `dtsse` vault. Each claim for a running `gateway` agent carries all three to the orchestrator, which puts them in that pod and no other. All three or none: a claim on a half-configured deployment is refused. With none there is no working `gateway` route, and such a pod cannot be built |
 
 ### HMCTS Assistant
 
@@ -157,16 +158,62 @@ Each virtual agent has a model route, set from its owner's sign-in when it is cr
 
 | Route | Who | The model | Credentials it needs |
 | --- | --- | --- | --- |
-| `bedrock` | holders of the `AIGateway.User` app role | Amazon Bedrock, called directly with the owner's own Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) | `github`, `bedrock` |
+| `gateway` | holders of the `AIGateway.User` app role | Amazon Bedrock through the HMCTS AI Gateway, on the owner's own relayed Azure sign-in | `github`, `azure` |
 | `own_licence` | everyone else | the owner's own Claude licence | `github`, `claude` |
+| `bedrock` | nobody new | Amazon Bedrock, called directly with a Bedrock API key an administrator stores for the owner (`AWS_BEARER_TOKEN_BEDROCK`) | `github`, `bedrock` |
 
-The Bedrock API key is pasted, in the credentials section of `/hub/virtual` (`/hub/settings/credentials` with virtual agents off) or the agent's page, or sent with
-`PUT /api/agent/credentials/bedrock`; until it is stored the pod reports `awaiting_credentials` with `bedrock: …`.
-It is the one credential its owner can read back, with `GET /api/agent/credentials/bedrock`, because `hai` on their
-laptop uses it too. Anyone holding a person's agent-hub token can therefore read their Bedrock key;
-`docs/agent-api.md` (Credentials) has the detail.
+`modelRouteFor` in `src/viewer/identity.ts` is the one place a person's route is decided, so swapping the
+`AIGateway.User` app role for a check of the gateway's own Entra group is a change to that function alone.
 
-An Azure sign-in (`azure`) is optional on either route. It lets Claude run `az` as the owner — pipelines,
+**The `gateway` route asks the person for no model credential at all.** The gateway authorises them, not a key of
+theirs: the pod writes an `apiKeyHelper` that runs `az account get-access-token --scope <AI_GATEWAY_AUDIENCE>` as the
+owner, and sends that token with the APIM subscription key the hub injects as `AI_GATEWAY_APIM_KEY`. Its Azure
+sign-in is therefore `needed` rather than optional, is what the connections banner asks for, and is the one credential
+other than GitHub that gates the Assistant's chat — a pod whose helper has no sign-in to mint from fails every turn.
+**The hub is what is configured with the gateway, not the orchestrator.** It reads `AI_GATEWAY_BASE_URL`,
+`AI_GATEWAY_AUDIENCE` and `AI_GATEWAY_APIM_KEY` — the two plain values from its chart's `environment`, the key from
+the `dtsse` vault — and hands all three to the orchestrator in each claim for a running agent on that route, the way
+a launch token travels into the same pod template. The orchestrator puts them in the pod, and refuses to build a
+`gateway` pod it was sent none for. All three or none: `gatewaySettings` refuses a claim on a half-configured
+deployment rather than handing out a pod that boots and then fails every turn. Nothing in `cnp-flux-config` has to
+change for the route to work; the one step outside this repository is that
+`apim-subscription-dtsse-ai-gateway-bedrock-swe` in `sps-ai-kv-sbox` has to be copied into the `dtsse` vault as
+`agent-hub-ai-gateway-apim-key` before the chart ships, since that vault has no public endpoint and the hub's pods
+cannot start without a secret the chart names.
+
+Stage 1 builds the whole of the route's environment from the three and sets `HAI_ENV_READY=1`, because `hai`'s own
+`ai-gateway` route reads the APIM key from `sps-ai-kv-sbox`, which a pod cannot reach. The key is one service's
+rather than one person's, so the orchestrator redacts it by value from every log line and every apply error it
+reports for that agent: the API server's refusal of an apply can quote the spec it was given, and an apply error is
+stored as the agent's `status_detail` and shown to its owner.
+
+**The sandbox gateway's APIM subscription is rate-limited to 30 requests a minute and 1000 a day**, counted across
+the key rather than per caller, and every `gateway` pod shares the one key — so the ceiling is the whole route's, not
+each person's. Worth sizing a rollout against before adding people to the Entra group.
+
+The gateway grants its access by assigning an app role to one Entra group, and a group's assignment only reaches a
+member's own token — so an owner outside **DTSSE AI Gateway Bedrock Developer** holds a token the gateway accepts as a
+token and refuses as an entitlement, with no credential missing for anything to ask about. Stage 1 therefore mints the
+token once before the first session, decodes its payload, and requires `AI.Gateway.Standard` in the `roles` claim,
+failing the agent with a detail naming that group when it is absent. The claim and not an HTTP probe, because the
+gateway cannot be asked: every request a probe could make without spending a model turn answers `404` whether the
+caller is entitled or not. A token `az` cannot mint yet, or one whose payload will not decode, leaves the access
+unchecked and the session starts — `apiKeyHelper` is re-run every five minutes, so a sign-in that lands after boot
+reaches a running session. None of them falls back to the owner's own Claude licence: that would put HMCTS work on a
+personal subscription nobody offered.
+
+**The `bedrock` route is nobody's now, and is an administrator's.** It stays because an agent's route is fixed on its
+row when it is created, so a row already on it keeps booting on its key, and the hub still keeps and serves the
+credential. Nobody is asked for that key: an administrator pastes it for them on `/hub/settings/credentials` (the
+credentials section of `/hub/virtual` with virtual agents on) or sends it with `PUT /api/agent/credentials/bedrock`;
+until it is stored such a pod reports `awaiting_credentials` with `bedrock: …`.
+No Assistant surface offers it: nothing a sign-in puts somebody on asks for it, which is what keeps the row off the
+getting-ready screen and the settings dialog rather than either of them filtering it out by name. It is the one
+credential its owner can read back, with `GET /api/agent/credentials/bedrock`, because `hai` on their laptop uses it
+too. Anyone holding a person's agent-hub token can therefore read their Bedrock key; `docs/agent-api.md`
+(Credentials) has the detail.
+
+An Azure sign-in (`azure`) is optional on `own_licence` and `bedrock`, and needed on `gateway`. It lets Claude run `az` as the owner — pipelines,
 environments, AKS, Key Vault and the workspace scripts that fetch secrets with `az` — and gives Jenkins the owner's
 Entra object id; nothing else needs it. A pod restores a stored one before Claude starts, and with none it carries on
 without Azure and relays no code. The owner connects it when they want it: **Connect** on the Azure row of the
@@ -305,7 +352,7 @@ lease comes back to it, it behaves as above.
 **A switchover** moves agents once the old cluster's orchestrator stops renewing the lease. After
 `ORCHESTRATOR_LEASE_SECONDS` (two minutes by default) the new cluster's next claim takes the lease, and with it every
 agent meant to be running: each is started on the new cluster on a fresh disk, with a new launch token that shuts the
-old pod out at once. The pod restores the owner's GitHub and Bedrock or Claude credentials, and their Azure sign-in if they connected one, from the hub and re-bootstraps
+old pod out at once. The pod restores the owner's GitHub credential and whatever its route needs, and their Azure sign-in if they connected one, from the hub and re-bootstraps
 its repos. Uncommitted work and Claude's own session history on the old disk are lost; the conversation the hub
 stored stays on the agent's page. Stopped agents are not moved; one that is started again starts on
 the new cluster. If the old cluster stays up, its orchestrator, now on standby, deletes the moved agents'
@@ -489,9 +536,10 @@ each value AES-256-GCM sealed under a key derived from `SESSION_SECRET`, so set 
 SESSION_SECRET=$(openssl rand -base64 48) AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev
 ```
 
-The local store refuses to start under `NODE_ENV=production`. With sign-in disabled every persona is on the Bedrock
-route except `own-licence` and `own-licence-…`, which are on their own Claude licence, so
-`ah_dev_persona=own-licence` shows the Claude token field.
+The local store refuses to start under `NODE_ENV=production`. With sign-in disabled every persona is on the gateway
+route except `own-licence` and `own-licence-…`, which are on their own Claude licence, and `bedrock` and `bedrock-…`,
+which are on the pasted-key route no sign-in reaches — so `ah_dev_persona=own-licence` shows the Claude token field
+and `ah_dev_persona=bedrock` is how the `bedrock` route is worked on at all.
 
 ### The deployed secrets are opt-in
 

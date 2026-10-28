@@ -19,7 +19,9 @@
 # shellcheck disable=SC2015,SC2016
 set -u
 
-CASES=(first-boot bedrock-route legacy-gateway-route unknown-route hai-install-blip-recovers hai-install-falls-back
+CASES=(first-boot bedrock-route gateway-route gateway-route-unchecked gateway-route-unreadable gateway-route-refused
+    gateway-route-no-roles gateway-route-unconfigured gateway-route-bad-audience
+    unknown-route hai-install-blip-recovers hai-install-falls-back
     hai-installed-off-path hai-install-retries hai-install-keeps-failing hai-install-leaves-no-binary
     continues-a-conversation git-identity-fails later-boot-fails sigterm-mid-clone claude-md-stored
     claude-md-missing claude-md-error claude-md-restart atlassian-fails atlassian-not-signed-in atlassian-sigterm
@@ -110,8 +112,26 @@ for a; do f=$a; done
 cat "$f"
 EOF
     printf '#!/bin/sh\nexit 0\n' >"$F/bin/node"
-    # The owner's object id once the fake client has signed az in, and nothing before.
-    printf '#!/bin/sh\n[ -f "$FAKE_DIR/az-signed-in" ] || exit 1\necho 0f8a6a10-0000-4000-8000-000000000001\n' >"$F/bin/az"
+    # The owner's object id, or a gateway token, once the fake client has signed az in, and nothing before. The
+    # gateway route reads nothing of the token but its payload's claims, which FAKE_GATEWAY_CLAIMS is, so the header
+    # and the signature are filler; `unparseable` is a payload base64 cannot take at all. Encoded base64url and
+    # unpadded, the way Entra mints one, so the entrypoint's decode has the substitutions and the padding to do.
+    cat >"$F/bin/az" <<'EOF'
+#!/bin/sh
+[ -f "$FAKE_DIR/az-signed-in" ] || exit 1
+case "$1 $2" in
+    "account get-access-token")
+        echo "$*" >>"$FAKE_DIR/az.token.argv"
+        claims=${FAKE_GATEWAY_CLAIMS:-}
+        [ -n "$claims" ] || claims='{"oid":"0f8a6a10-0000-4000-8000-000000000001","roles":["AI.Gateway.Standard"]}'
+        if [ "$claims" = unparseable ]; then
+            echo "aaa.%%not-base64%%.bbb"
+        else
+            echo "aaa.$(printf '%s' "$claims" | base64 | tr -d '\n=' | tr '+/' '-_').bbb"
+        fi ;;
+    *) echo 0f8a6a10-0000-4000-8000-000000000001 ;;
+esac
+EOF
 
     # Every backoff the entrypoint waits out is a `sleep` on this PATH — retry()'s 30s and 60s, the restart
     # delay, fatal()'s hour — and waiting them out is what made this suite take minutes. The schedule is
@@ -135,7 +155,7 @@ echo "start $n $(grep '^state=' "$VIRTUAL_AGENT_STATE/repos-state" 2>/dev/null)"
 echo "claude $n" >>"$FAKE_DIR/order.log"
 printf '%s\n' "$@" >"$FAKE_DIR/hai.argv.$n"
 pwd >"$FAKE_DIR/hai.pwd.$n"
-env | grep -E '^(HAI_ROUTE|HAI_IN_CONTAINER|HAI_NO_UPDATE|AGENT_HUB_MODEL_ROUTE|AWS_BEARER_TOKEN_BEDROCK|CLAUDE_CODE_OAUTH_TOKEN|AGENT_HUB_CLAUDE_SETTINGS)=' | sort >"$FAKE_DIR/hai.env.$n"
+env | grep -E '^(HAI_ROUTE|HAI_IN_CONTAINER|HAI_NO_UPDATE|HAI_ENV_READY|AGENT_HUB_MODEL_ROUTE|AWS_BEARER_TOKEN_BEDROCK|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_SKIP_BEDROCK_AUTH|CLAUDE_CODE_API_KEY_HELPER_TTL_MS|AWS_REGION|ANTHROPIC_BEDROCK_BASE_URL|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|AGENT_HUB_CLAUDE_SETTINGS)=' | sort >"$FAKE_DIR/hai.env.$n"
 cp "$HOME/.claude/CLAUDE.md" "$FAKE_DIR/claude_md.seen.$n" 2>/dev/null
 if [ "$n" -eq 1 ] && [ -n "${FAKE_CLAUDE_EXIT_FIRST:-}" ]; then "$REAL_SLEEP" 2; exit 0; fi
 exec "$REAL_SLEEP" 1000
@@ -396,12 +416,123 @@ case_bedrock_route() {
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
-case_legacy_gateway_route() {
-    setup legacy-gateway-route
-    start AGENT_HUB_MODEL_ROUTE=gateway FAKE_REPO_SECONDS=0.2
-    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when the route is the legacy gateway" || no "Claude did not start on the legacy gateway route"
-    hai_env 1 "HAI_ROUTE=bedrock" && ok "should map the legacy gateway route to HAI_ROUTE=bedrock when the hub sends one" || no "hai env: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
-    hai_env 1 "AGENT_HUB_MODEL_ROUTE=bedrock" && ok "should report the legacy gateway route to the hub as bedrock when it normalises it" || no "AGENT_HUB_MODEL_ROUTE was not normalised"
+# The gateway's settings as the hub injects them, and a stored Azure sign-in, which is the credential this route has.
+GATEWAY_ENV="AI_GATEWAY_BASE_URL=https://ai-gateway.sandbox.platform.hmcts.net AI_GATEWAY_AUDIENCE=api://gw/.default AI_GATEWAY_APIM_KEY=apim-key"
+
+case_gateway_route() {
+    setup gateway-route
+    # shellcheck disable=SC2086
+    start AGENT_HUB_MODEL_ROUTE=gateway FAKE_AZURE_STORED=1 $GATEWAY_ENV FAKE_REPO_SECONDS=0.2
+    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when the route is the AI Gateway" || no "Claude did not start on the gateway route"
+    hai_env 1 "AGENT_HUB_MODEL_ROUTE=gateway" && ok "should pass the gateway route on unrenamed when it hands over to hai" || no "AGENT_HUB_MODEL_ROUTE was rewritten"
+    # The whole of hai's ai-gateway environment, because HAI_ENV_READY=1 means hai builds none of it.
+    hai_env 1 "HAI_ENV_READY=1" && ok "should tell hai the environment is already built when the route is the gateway" || no "hai would resolve the route itself: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
+    hai_env 1 "HAI_ROUTE=ai-gateway" && ok "should name hai's own ai-gateway route when the hub's route is the gateway" || no "hai env: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
+    hai_env 1 "CLAUDE_CODE_USE_BEDROCK=1" && ok "should switch Claude Code onto Bedrock when the route is the gateway" || no "no CLAUDE_CODE_USE_BEDROCK"
+    hai_env 1 "CLAUDE_CODE_SKIP_BEDROCK_AUTH=1" && ok "should stop Claude Code signing its own Bedrock calls when the gateway signs them" || no "no CLAUDE_CODE_SKIP_BEDROCK_AUTH"
+    hai_env 1 "CLAUDE_CODE_API_KEY_HELPER_TTL_MS=300000" && ok "should re-run the token helper every five minutes when the route is the gateway" || no "no helper TTL"
+    hai_env 1 "AWS_REGION=eu-west-2" && ok "should default the Bedrock region when the route is the gateway" || no "no AWS_REGION"
+    hai_env 1 "ANTHROPIC_BEDROCK_BASE_URL=https://ai-gateway.sandbox.platform.hmcts.net/ai/platform/v1/bedrock" &&
+        ok "should point Claude Code at the gateway's Bedrock passthrough when the route is the gateway" || no "base URL: $(grep ANTHROPIC_BEDROCK "$F/hai.env.1" 2>/dev/null)"
+    hai_env 1 "ANTHROPIC_CUSTOM_HEADERS=Ocp-Apim-Subscription-Key: apim-key" &&
+        ok "should send the injected APIM subscription key as a header when the route is the gateway" || no "no APIM header"
+    # Ids on the gateway's allowedModels list, which does not hold hai's [1m]-suffixed defaults.
+    hai_env 1 "ANTHROPIC_DEFAULT_SONNET_MODEL=eu.anthropic.claude-sonnet-5-5" && hai_env 1 "ANTHROPIC_DEFAULT_OPUS_MODEL=eu.anthropic.claude-opus-5-5" &&
+        hai_env 1 "ANTHROPIC_DEFAULT_HAIKU_MODEL=eu.anthropic.claude-haiku-5-5" &&
+        ok "should pin each family alias to an id the gateway allows when the route is the gateway" || no "models: $(grep ANTHROPIC_DEFAULT "$F/hai.env.1" 2>/dev/null)"
+    hai_env_has 1 AWS_BEARER_TOKEN_BEDROCK && no "a Bedrock key leaked into the gateway route" || ok "should leave any Bedrock key out when the route is the gateway"
+    hai_env_has 1 CLAUDE_CODE_OAUTH_TOKEN && no "the Claude token leaked into the gateway route" || ok "should leave the Claude token out when the route is the gateway"
+    # The helper is the only way Claude Code mints a token, and hai sets no apiKeyHelper with HAI_ENV_READY=1.
+    [ -x "$STATE/gateway-token.sh" ] && ok "should write an executable token helper when the route is the gateway" || no "no gateway-token.sh in $STATE"
+    [ "$(stat -c %a "$STATE/gateway-token.sh" 2>/dev/null || stat -f %Lp "$STATE/gateway-token.sh" 2>/dev/null)" = 700 ] &&
+        ok "should keep the token helper private to the pod's user when it writes one" || no "token helper mode: $(stat -c %a "$STATE/gateway-token.sh" 2>/dev/null)"
+    grep -q 'az account get-access-token --scope "api://gw/.default"' "$STATE/gateway-token.sh" &&
+        ok "should ask az for a token for the injected audience when it writes the token helper" || no "helper: $(cat "$STATE/gateway-token.sh" 2>/dev/null)"
+    grep -q "\"apiKeyHelper\":\"$STATE/gateway-token.sh\"" "$F/hai.argv.1" &&
+        ok "should give every session the token helper in its settings when the route is the gateway" || no "hai argv: $(hai_argv 1)"
+    hai_env 1 "AGENT_HUB_CLAUDE_SETTINGS={\"crossSessionInbound\":\"accept\",\"apiKeyHelper\":\"$STATE/gateway-token.sh\",\"env\":{\"AGENT_HUB_AUTO_ENABLE\":\"true\",\"KNOWLEDGE_SWEEP_CHILD\":\"1\"}}" &&
+        ok "should give the summariser the same token helper when the route is the gateway" || no "settings: $(grep AGENT_HUB_CLAUDE_SETTINGS "$F/hai.env.1" 2>/dev/null)"
+    # Nothing is pasted on this route, so nothing may be waited for either.
+    hub_has 'awaiting_credentials' && no "the gateway route waited for a credential" || ok "should wait for no credential of the owner's when the route is the gateway"
+    grep -qF -- '--scope api://gw/.default' "$F/az.token.argv" 2>/dev/null &&
+        ok "should mint the token for the injected audience when it checks the owner's access" || no "az scope: $(cat "$F/az.token.argv" 2>/dev/null)"
+    grep -q "gateway: the owner's Azure sign-in carries AI.Gateway.Standard" "$T/out" &&
+        ok "should say the owner's access is confirmed when their token carries the gateway's role" || no "said nothing about the confirmed access"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+# No Azure sign-in yet, so there is no token to read the owner's access from. The session still starts: Claude Code
+# re-runs the helper every few minutes, so a sign-in that lands afterwards reaches it without a restart.
+case_gateway_route_unchecked() {
+    setup gateway-route-unchecked
+    # shellcheck disable=SC2086
+    start AGENT_HUB_MODEL_ROUTE=gateway $GATEWAY_ENV FAKE_REPO_SECONDS=0.2
+    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when Azure is not connected yet on the gateway route" || no "Claude did not start with Azure unconnected"
+    grep -q "gateway: az cannot mint a token yet" "$T/out" && ok "should say the owner's access is unchecked when az cannot mint a token" || no "said nothing about the unchecked access"
+    hub_has 'failed' && no "a pod with no Azure sign-in failed the agent" || ok "should leave the agent running when Azure is not connected yet on the gateway route"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+# A payload that will not decode says nothing either way about the owner, so it is unchecked rather than refused:
+# reading a decode this pod could not make as a refusal would fail an entitled owner's agent outright.
+case_gateway_route_unreadable() {
+    setup gateway-route-unreadable
+    # shellcheck disable=SC2086
+    start AGENT_HUB_MODEL_ROUTE=gateway FAKE_AZURE_STORED=1 FAKE_GATEWAY_CLAIMS=unparseable $GATEWAY_ENV FAKE_REPO_SECONDS=0.2
+    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when the token's claims cannot be read" || no "Claude did not start on an unreadable token"
+    grep -q "gateway: the token's claims could not be read" "$T/out" &&
+        ok "should say the owner's access is unchecked when the token's payload does not decode" || no "said nothing about the unreadable claims"
+    hub_has 'failed' && no "an unreadable token failed the agent" || ok "should never fail the agent when the token's claims cannot be read"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+# The owner is signed in and is not in the gateway's Entra group, so the group's app role is not in their token: one
+# the gateway accepts as a token and refuses as an entitlement. Nothing is missing, so no credential wait and no
+# sign-in relay would ever say so, and the gateway itself cannot be asked — every probe answers 404 either way.
+case_gateway_route_refused() {
+    setup gateway-route-refused
+    # shellcheck disable=SC2086
+    start AGENT_HUB_MODEL_ROUTE=gateway FAKE_AZURE_STORED=1 'FAKE_GATEWAY_CLAIMS={"roles":["AI.Gateway.Other"]}' $GATEWAY_ENV FAKE_REPO_SECONDS=0.2
+    wait_for 10 hub_has "failed your Azure sign-in does not carry the HMCTS AI Gateway's AI.Gateway.Standard access" &&
+        ok "should fail the agent when the owner's token carries no gateway role" || no "a token without the role did not fail the agent: $(cat "$F/hub.log" 2>/dev/null)"
+    hub_has 'DTSSE AI Gateway Bedrock Developer' && ok "should name the Entra group to ask for when the owner is not entitled" || no "the failure detail named no group"
+    [ ! -f "$F/hai.argv.1" ] && ok "should start no session when the owner is not entitled" || no "a session started for an unentitled owner"
+    hai_env_has 1 CLAUDE_CODE_OAUTH_TOKEN && no "an unentitled owner fell back to their own Claude licence" || ok "should never fall back to the owner's own licence when they are not entitled"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+# Entra leaves the claim out entirely for somebody with no app-role assignment at all, which is the commonest shape
+# of an unentitled token and must not be read off some other claim that happens to name the role.
+case_gateway_route_no_roles() {
+    setup gateway-route-no-roles
+    # shellcheck disable=SC2086
+    start AGENT_HUB_MODEL_ROUTE=gateway FAKE_AZURE_STORED=1 'FAKE_GATEWAY_CLAIMS={"scp":"AI.Gateway.Standard"}' $GATEWAY_ENV FAKE_REPO_SECONDS=0.2
+    wait_for 10 hub_has "failed your Azure sign-in does not carry the HMCTS AI Gateway's AI.Gateway.Standard access" &&
+        ok "should fail the agent when the owner's token carries no roles claim" || no "a token with no roles claim did not fail the agent: $(cat "$F/hub.log" 2>/dev/null)"
+    [ ! -f "$F/hai.argv.1" ] && ok "should start no session when the token carries no roles claim" || no "a session started on a token with no roles claim"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+# Half-configured, which is a pod that would boot and then 401 every turn with nothing saying why.
+case_gateway_route_unconfigured() {
+    setup gateway-route-unconfigured
+    start AGENT_HUB_MODEL_ROUTE=gateway AI_GATEWAY_BASE_URL=https://ai-gateway.sandbox.platform.hmcts.net FAKE_REPO_SECONDS=0.2
+    wait_for 10 hub_has 'failed the AI Gateway route needs its APIM subscription key' &&
+        ok "should fail the agent naming the setting it was not given when the gateway is half-configured" || no "a missing APIM key did not fail the agent: $(cat "$F/hub.log" 2>/dev/null)"
+    [ ! -f "$F/hai.argv.1" ] && ok "should start no session when the gateway is half-configured" || no "a session started without the gateway's settings"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+# The scope goes into the token helper inside a double-quoted shell string, so a quote in it would run as the pod's
+# user rather than be passed along; and anything else wrong with it is a bare 401 at the gateway and nothing more.
+case_gateway_route_bad_audience() {
+    setup gateway-route-bad-audience
+    start AGENT_HUB_MODEL_ROUTE=gateway AI_GATEWAY_BASE_URL=https://ai-gateway.sandbox.platform.hmcts.net \
+        'AI_GATEWAY_AUDIENCE=api://gw"$(id)"/.default' AI_GATEWAY_APIM_KEY=apim-key FAKE_REPO_SECONDS=0.2
+    wait_for 10 hub_has "failed the AI Gateway route's Entra scope may hold only letters" &&
+        ok "should fail the agent when the gateway's scope holds a character a shell would act on" || no "a quoted scope did not fail the agent: $(cat "$F/hub.log" 2>/dev/null)"
+    [ ! -f "$STATE/gateway-token.sh" ] && ok "should write no token helper when the gateway's scope is refused" || no "helper: $(cat "$STATE/gateway-token.sh" 2>/dev/null)"
+    [ ! -f "$F/hai.argv.1" ] && ok "should start no session when the gateway's scope is refused" || no "a session started on a refused scope"
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
@@ -864,7 +995,13 @@ run_case() {
     case "$1" in
         first-boot) case_first_boot ;;
         bedrock-route) case_bedrock_route ;;
-        legacy-gateway-route) case_legacy_gateway_route ;;
+        gateway-route) case_gateway_route ;;
+        gateway-route-unchecked) case_gateway_route_unchecked ;;
+        gateway-route-unreadable) case_gateway_route_unreadable ;;
+        gateway-route-refused) case_gateway_route_refused ;;
+        gateway-route-no-roles) case_gateway_route_no_roles ;;
+        gateway-route-unconfigured) case_gateway_route_unconfigured ;;
+        gateway-route-bad-audience) case_gateway_route_bad_audience ;;
         unknown-route) case_unknown_route ;;
         hai-install-blip-recovers) case_hai_install_blip_recovers ;;
         hai-install-falls-back) case_hai_install_falls_back ;;

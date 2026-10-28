@@ -35,13 +35,24 @@ function card(heading: string): HTMLElement {
 }
 
 describe("CredentialSettingsView", () => {
-  it("should say the viewer is on HMCTS Claude Code access and offer no Claude token field when no agent of theirs wants one", () => {
-    show({ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: NOTHING_STORED });
+  it.each([
+    "gateway",
+    "bedrock"
+  ] as const)("should say the viewer is on HMCTS Claude Code access and offer no Claude token field when no agent of theirs wants one on the %s route", (modelRoute) => {
+    show({ available: true, modelRoute, claudeTokenUsable: false, statuses: NOTHING_STORED });
 
-    expect(card("Model").textContent).toContain("Claude Code through HMCTS, with your Claude Code key");
+    expect(card("Model").textContent).toContain("HMCTS AI Gateway, on your own Azure sign-in");
     expect(within(card("Claude token")).queryByRole("form")).toBeNull();
     expect(card("Claude token").textContent).toContain("Not needed");
     expect(screen.getByRole("form", { name: "Save GitHub token" })).toBeTruthy();
+  });
+
+  // The key is an administrator's to paste here. This page is the one surface that offers it, so the box stays for
+  // an agent created before the gateway route, and the Assistant never asks because no route of its own names it.
+  it("should still offer the Amazon Bedrock API key box when the viewer is on the gateway route", () => {
+    show({ available: true, modelRoute: "gateway", claudeTokenUsable: false, statuses: NOTHING_STORED });
+
+    expect(within(card("Amazon Bedrock API key")).getByLabelText("Paste your Amazon Bedrock API key")).toHaveProperty("type", "password");
   });
 
   it("should offer a Claude token field when the viewer is on their own licence", () => {
@@ -51,17 +62,17 @@ describe("CredentialSettingsView", () => {
     expect(screen.getByRole("form", { name: "Save Claude token" })).toBeTruthy();
   });
 
-  // A person given the `AIGateway.User` app role after an agent of theirs was created is on Bedrock while that agent
-  // is still on their own licence and still waiting for a Claude token. Keyed off the route alone, this page told
-  // them the token was not needed and gave them no box to paste it into.
-  it("should offer a Claude token field and name both routes when the viewer is on Bedrock and an agent of theirs is not", () => {
-    show({ available: true, modelRoute: "bedrock", claudeTokenUsable: true, statuses: NOTHING_STORED });
+  // A person given the `AIGateway.User` app role after an agent of theirs was created is on the gateway while that
+  // agent is still on their own licence and still waiting for a Claude token. Keyed off the route alone, this page
+  // told them the token was not needed and gave them no box to paste it into.
+  it("should offer a Claude token field and name both routes when the viewer is on the gateway and an agent of theirs is not", () => {
+    show({ available: true, modelRoute: "gateway", claudeTokenUsable: true, statuses: NOTHING_STORED });
 
     expect(card("Model").textContent).toContain("HMCTS Claude Code access");
     expect(card("Model").textContent).toContain("own Claude licence");
     expect(card("Claude token").textContent).not.toContain("Not needed");
     expect(screen.getByRole("form", { name: "Save Claude token" })).toBeTruthy();
-    expect(within(card("Claude Code key")).getByLabelText("Paste a Claude Code key")).toBeTruthy();
+    expect(within(card("Amazon Bedrock API key")).getByLabelText("Paste your Amazon Bedrock API key")).toBeTruthy();
   });
 
   it("should never offer to paste the Azure sign-in when it comes from the virtual agent", () => {
@@ -74,7 +85,7 @@ describe("CredentialSettingsView", () => {
   it("should say each credential is not stored and offer no delete when nothing is stored", () => {
     show({ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: NOTHING_STORED });
 
-    for (const heading of ["GitHub token", "Azure sign-in", "Claude token", "Claude Code key"]) {
+    for (const heading of ["GitHub token", "Azure sign-in", "Claude token", "Amazon Bedrock API key"]) {
       expect(card(heading).textContent).toContain("Not stored");
     }
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
@@ -103,13 +114,18 @@ describe("CredentialSettingsView", () => {
     expect(within(azure).getByRole("form", { name: "Delete Azure sign-in" })).toBeTruthy();
   });
 
-  it.each(["bedrock", "own-licence"] as const)("should offer a password field for the Claude Code key when the route is %s", (modelRoute) => {
-    show({ available: true, modelRoute, claudeTokenUsable: modelRoute === "own-licence", statuses: NOTHING_STORED });
+  it.each(["bedrock", "gateway", "own-licence"] as const)("should offer a password field for the Amazon Bedrock API key when the route is %s", (modelRoute) => {
+    show({
+      available: true,
+      modelRoute,
+      claudeTokenUsable: modelRoute === "own-licence",
+      statuses: NOTHING_STORED
+    });
 
-    expect(within(card("Claude Code key")).getByLabelText("Paste a Claude Code key")).toHaveProperty("type", "password");
+    expect(within(card("Amazon Bedrock API key")).getByLabelText("Paste your Amazon Bedrock API key")).toHaveProperty("type", "password");
   });
 
-  it("should show a stored Claude Code key as stored with a delete and no value when one is stored", () => {
+  it("should show a stored Amazon Bedrock API key as stored with a delete and no value when one is stored", () => {
     show({
       available: true,
       modelRoute: "bedrock",
@@ -117,11 +133,11 @@ describe("CredentialSettingsView", () => {
       statuses: [status("bedrock", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "cli" })]
     });
 
-    const bedrock = card("Claude Code key");
+    const bedrock = card("Amazon Bedrock API key");
     expect(bedrock.textContent).toContain("Stored");
     expect(bedrock.textContent).toContain("from the command line");
-    expect(within(bedrock).getByRole("form", { name: "Delete Claude Code key" })).toBeTruthy();
-    expect(within(bedrock).getByLabelText("Replace your Claude Code key")).toHaveProperty("value", "");
+    expect(within(bedrock).getByRole("form", { name: "Delete Amazon Bedrock API key" })).toBeTruthy();
+    expect(within(bedrock).getByLabelText("Replace your Amazon Bedrock API key")).toHaveProperty("value", "");
   });
 
   it("should say a stored credential was saved on this page when it came from the web", () => {
@@ -138,7 +154,7 @@ describe("CredentialSettingsView", () => {
   it("should send the kind and the pasted value to the save action and confirm when a token is saved", async () => {
     const given = show({ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: NOTHING_STORED });
 
-    fireEvent.change(screen.getByLabelText("Paste a GitHub token"), { target: { value: "ghp_pasted" } });
+    fireEvent.change(screen.getByLabelText("Paste your GitHub token"), { target: { value: "ghp_pasted" } });
     await act(async () => {
       fireEvent.submit(screen.getByRole("form", { name: "Save GitHub token" }));
     });

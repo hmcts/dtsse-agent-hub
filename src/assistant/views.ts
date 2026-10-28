@@ -9,7 +9,7 @@ import { agentConversation } from "../transcripts/views.ts";
 import type { VirtualAgentDesired, VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
 import { type LoginView, loginViews } from "../virtual-agents/logins.ts";
 import type { VirtualAgentRow } from "../virtual-agents/store.ts";
-import { neededCredentials, OPTIONAL_CREDENTIALS } from "../virtual-agents/views.ts";
+import { neededCredentials, optionalCredentials } from "../virtual-agents/views.ts";
 import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
@@ -66,10 +66,10 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
     startedAt: assistant.startedAt.toISOString(),
     readiness: readiness(assistant.status),
     needed,
-    optional: OPTIONAL_CREDENTIALS,
+    optional: optionalCredentials(assistant.modelRoute),
     logins: await loginViews(db, assistant.id),
     onboarded: onboarded(needed, stored),
-    toChat: chatCredentials(needed)
+    toChat: chatCredentials(needed, assistant.modelRoute)
   };
 }
 

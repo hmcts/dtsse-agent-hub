@@ -18,7 +18,7 @@ const TITLES: Record<CredentialKind, string> = {
   github: "GitHub token",
   azure: "Azure sign-in",
   claude: "Claude token",
-  bedrock: "Claude Code key",
+  bedrock: "Amazon Bedrock API key",
   jenkins: "Jenkins API token",
   claude_md: "CLAUDE.md",
   git_identity: "Git identity",
@@ -39,6 +39,9 @@ const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white ho
  * the agents they already have, whose route was fixed when each was created. Someone given the `AIGateway.User` app
  * role since then is on both at once, and is told so — rather than being told that the Claude token an agent of
  * theirs is still waiting for is not needed.
+ *
+ * `bedrock` is nobody's route now and is not worded for: a viewer on it is a development persona, and the sentence
+ * the gateway gets is near enough true of it — both reach Claude through HMCTS rather than their own licence.
  */
 function modelRouteWords(route: ModelRoute, claudeTokenUsable: boolean): { detail: string; body: React.ReactNode } {
   const setupToken = <code className="font-mono">claude setup-token</code>;
@@ -53,15 +56,15 @@ function modelRouteWords(route: ModelRoute, claudeTokenUsable: boolean): { detai
       detail: "HMCTS Claude Code access and your own Claude licence",
       body: (
         <>
-          A new virtual agent of yours connects to Claude Code through HMCTS, with your Claude Code key. One you created earlier is on your own Claude licence,
-          and still needs the Claude token {setupToken} prints.
+          A new virtual agent of yours reaches Claude through the HMCTS AI Gateway, on your own Azure sign-in, so there is no model key for you to paste. One
+          you created earlier is on your own Claude licence, and still needs the Claude token {setupToken} prints.
         </>
       )
     };
   }
   return {
     detail: "HMCTS Claude Code access",
-    body: "Your virtual agents connect to Claude Code through HMCTS, with your Claude Code key, so they need that key and no Claude token of yours."
+    body: "Your virtual agents reach Claude through the HMCTS AI Gateway, on your own Azure sign-in, so they need no model key of yours — only Azure connected."
   };
 }
 
@@ -83,7 +86,7 @@ function notPasteable(kind: CredentialKind, claudeTokenUsable: boolean): string 
     return "This comes from your virtual agent's own Atlassian device-code sign-in, and cannot be pasted here.";
   }
   if (kind === "claude" && !claudeTokenUsable) {
-    return "Not needed: your virtual agents connect to Claude Code through HMCTS, with your Claude Code key.";
+    return "Not needed: your virtual agents reach Claude through the HMCTS AI Gateway, on your own Azure sign-in.";
   }
   return undefined;
 }
@@ -119,7 +122,7 @@ export function CredentialCard({ status, claudeTokenUsable, actions }: { status:
           <ActionForm action={actions.save} label={`Save ${title}`} className="flex flex-wrap items-end gap-3">
             <input type="hidden" name="kind" value={status.kind} />
             <label className="block">
-              <span className="block text-hub-text">{status.stored ? `Replace your ${title}` : `Paste a ${title}`}</span>
+              <span className="block text-hub-text">{`${status.stored ? "Replace" : "Paste"} your ${title}`}</span>
               <input name="value" type="password" required autoComplete="off" spellCheck={false} className={INPUT} />
             </label>
             <button type="submit" className={BUTTON}>
@@ -143,8 +146,8 @@ export function CredentialSettingsView({ settings, actions }: { settings: Creden
         <>
           <p className="max-w-3xl text-[15px] text-hub-muted">
             You normally set these up on a virtual agent's page, by signing in with device codes, so pasting a token here is optional. This page never shows a
-            stored credential: you can only replace or delete it. Only your Claude Code key can be read back, by you, through the agent API, so the workspace on
-            your laptop can use it; nothing reads back the others.
+            stored credential: you can only replace or delete it. Only an Amazon Bedrock API key can be read back, by you, through the agent API, so the
+            workspace on your laptop can use it; nothing reads back the others.
           </p>
           {settings.statuses.map((status) => (
             <CredentialCard key={status.kind} status={status} claudeTokenUsable={settings.claudeTokenUsable} actions={actions} />
