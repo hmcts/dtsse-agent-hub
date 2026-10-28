@@ -424,6 +424,8 @@ export {
 export type {
   AtlassianLoginOptions,
   AtlassianLoginResult,
+  AzureLoginMode,
+  AzureLoginOptions,
   AzureLoginResult,
   AzureProfile,
   CacheSyncOptions,

@@ -40,7 +40,8 @@ async function lockLogin(db: Database, virtualAgentId: string, kind: CredentialK
 
 /**
  * The pod's new login, replacing any earlier one of the same kind and any code pasted for it. The agent shows as
- * `awaiting_login` until the pod reports its next step.
+ * `awaiting_login` until the pod reports its next step. A relayed Azure sign-in is the one the owner asked for, so
+ * the request is spent: the next boot relays another only if they ask again.
  */
 export async function startLogin(
   prisma: PrismaClient,
@@ -64,9 +65,25 @@ export async function startLogin(
       create: { virtualAgentId: virtualAgent.id, kind, ...row },
       update: row
     });
+    if (kind === "azure") {
+      await tx.virtualAgent.update({ where: { id: virtualAgent.id }, data: { azureSignInRequestedAt: null } });
+    }
     await moveTo(tx, virtualAgent, "awaiting_login", null, now);
     await announce(tx, virtualAgent.id, virtualAgent.ownerOid);
   });
+}
+
+/**
+ * Whether the owner has asked this agent for a sign-in of `kind` that its pod has yet to relay. Only Azure is signed in
+ * to on request, because it is optional and nothing should put a code in front of somebody who never asked for one;
+ * a pod relays every other sign-in it has no credential for whether or not anybody asked.
+ */
+export async function signInRequested(db: Database, virtualAgentId: string, kind: CredentialKind): Promise<boolean> {
+  if (kind !== "azure") {
+    return false;
+  }
+  const row = await db.virtualAgent.findUnique({ where: { id: virtualAgentId }, select: { azureSignInRequestedAt: true } });
+  return row?.azureSignInRequestedAt != null;
 }
 
 /**
@@ -288,9 +305,12 @@ export function isSignInKind(kind: string): kind is SignInKind {
 export const SIGN_IN_TITLES: Record<SignInKind, string> = { github: "GitHub", azure: "Azure", atlassian: "Atlassian" };
 
 /**
- * The owner's request to sign in to `kind` again: their stored credential is deleted and the virtual agent, if it is
- * running, restarted, so its new pod finds none and relays a fresh sign-in. A stopped one signs in when it next
- * starts. The agent is checked first, so an id that is not the actor's deletes nothing.
+ * The owner's request to sign in to `kind`, again or for the first time: their stored credential is deleted and the
+ * virtual agent, if it is running, restarted, so its new pod finds none and relays a fresh sign-in. A stopped one
+ * signs in when it next starts. The agent is checked first, so an id that is not the actor's deletes nothing.
+ *
+ * An Azure sign-in is relayed only on request, so this is also how the owner connects Azure at all: it records the
+ * request for `signInRequested`, which the new pod reads, before restarting.
  */
 export async function reconnectSignIn(
   prisma: PrismaClient,
@@ -308,6 +328,9 @@ export async function reconnectSignIn(
     throw new HttpError(409, "that virtual agent is being deleted");
   }
   await deleteCredential(prisma, store, { actorOid, ownerOid: virtualAgent.ownerOid, kind });
+  if (kind === "azure") {
+    await prisma.virtualAgent.update({ where: { id: virtualAgentId }, data: { azureSignInRequestedAt: now } });
+  }
   return await restartVirtualAgent(prisma, actorOid, virtualAgentId, `restarting to sign in to ${SIGN_IN_TITLES[kind]} again`, now);
 }
 

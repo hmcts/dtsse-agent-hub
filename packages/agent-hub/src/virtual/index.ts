@@ -38,6 +38,8 @@ export { EXIT_FATAL, EXIT_NO_CREDENTIAL, FatalError, isVirtualPhase, PHASES, say
 export type { RunVirtualOptions } from "./run.ts";
 export { runVirtual, VIRTUAL_USAGE } from "./run.ts";
 export type {
+  AzureLoginMode,
+  AzureLoginOptions,
   AzureLoginResult,
   ClaudeLoginOptions,
   ClaudeLoginResult,

@@ -99,6 +99,7 @@ export default async function ConversationPage({
       theme={theme}
       actions={ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
+      connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn }}
       now={Date.now()}
       plugins={pluginSettings}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}

@@ -62,6 +62,8 @@ export type VirtualRecord = {
   completes: Record<string, unknown>[];
   /** Sign-ins the pod relayed and gave up on; see `POST /api/virtual/{id}/login/{kind}/failed`. */
   loginFailures: Record<string, unknown>[];
+  /** The kinds the owner has asked a sign-in for and no pod has relayed yet; see `GET /api/virtual/{id}/login/{kind}`. */
+  signInRequests: Set<string>;
   ports: Record<string, unknown>[];
   wakes: Wake[];
   sessionReports: SessionsReport[];
@@ -207,6 +209,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       codes: new Map(),
       completes: [],
       loginFailures: [],
+      signInRequests: new Set(),
       ports: [],
       wakes: [],
       sessionReports: [],
@@ -455,7 +458,11 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     if (area === "login") {
       if (req.method === "POST" && !sub) {
         v.prompts.push({ kind, ...body });
+        v.signInRequests.delete(kind);
         return send(res, 204);
+      }
+      if (req.method === "GET" && !sub) {
+        return send(res, 200, { requested: v.signInRequests.has(kind) });
       }
       if (req.method === "GET" && sub === "code") {
         if (!v.codes.has(kind)) {
