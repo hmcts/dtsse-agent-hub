@@ -35,10 +35,10 @@ function card(heading: string): HTMLElement {
 }
 
 describe("CredentialSettingsView", () => {
-  it("should say the viewer is on Amazon Bedrock and offer no Claude token field when no agent of theirs wants one", () => {
+  it("should say the viewer is on HMCTS Claude Code access and offer no Claude token field when no agent of theirs wants one", () => {
     show({ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: NOTHING_STORED });
 
-    expect(card("Model").textContent).toContain("Amazon Bedrock, with your Bedrock API key");
+    expect(card("Model").textContent).toContain("Claude Code through HMCTS, with your Claude Code key");
     expect(within(card("Claude token")).queryByRole("form")).toBeNull();
     expect(card("Claude token").textContent).toContain("Not needed");
     expect(screen.getByRole("form", { name: "Save GitHub token" })).toBeTruthy();
@@ -57,11 +57,11 @@ describe("CredentialSettingsView", () => {
   it("should offer a Claude token field and name both routes when the viewer is on Bedrock and an agent of theirs is not", () => {
     show({ available: true, modelRoute: "bedrock", claudeTokenUsable: true, statuses: NOTHING_STORED });
 
-    expect(card("Model").textContent).toContain("Amazon Bedrock");
+    expect(card("Model").textContent).toContain("HMCTS Claude Code access");
     expect(card("Model").textContent).toContain("own Claude licence");
     expect(card("Claude token").textContent).not.toContain("Not needed");
     expect(screen.getByRole("form", { name: "Save Claude token" })).toBeTruthy();
-    expect(within(card("Bedrock API key")).getByLabelText("Paste a Bedrock API key")).toBeTruthy();
+    expect(within(card("Claude Code key")).getByLabelText("Paste a Claude Code key")).toBeTruthy();
   });
 
   it("should never offer to paste the Azure sign-in when it comes from the virtual agent", () => {
@@ -74,7 +74,7 @@ describe("CredentialSettingsView", () => {
   it("should say each credential is not stored and offer no delete when nothing is stored", () => {
     show({ available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: NOTHING_STORED });
 
-    for (const heading of ["GitHub token", "Azure sign-in", "Claude token", "Bedrock API key"]) {
+    for (const heading of ["GitHub token", "Azure sign-in", "Claude token", "Claude Code key"]) {
       expect(card(heading).textContent).toContain("Not stored");
     }
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
@@ -103,13 +103,13 @@ describe("CredentialSettingsView", () => {
     expect(within(azure).getByRole("form", { name: "Delete Azure sign-in" })).toBeTruthy();
   });
 
-  it.each(["bedrock", "own-licence"] as const)("should offer a password field for the Bedrock API key when the route is %s", (modelRoute) => {
+  it.each(["bedrock", "own-licence"] as const)("should offer a password field for the Claude Code key when the route is %s", (modelRoute) => {
     show({ available: true, modelRoute, claudeTokenUsable: modelRoute === "own-licence", statuses: NOTHING_STORED });
 
-    expect(within(card("Bedrock API key")).getByLabelText("Paste a Bedrock API key")).toHaveProperty("type", "password");
+    expect(within(card("Claude Code key")).getByLabelText("Paste a Claude Code key")).toHaveProperty("type", "password");
   });
 
-  it("should show a stored Bedrock API key as stored with a delete and no value when one is stored", () => {
+  it("should show a stored Claude Code key as stored with a delete and no value when one is stored", () => {
     show({
       available: true,
       modelRoute: "bedrock",
@@ -117,11 +117,11 @@ describe("CredentialSettingsView", () => {
       statuses: [status("bedrock", { stored: true, updatedAt: "2026-10-05T09:00:00.000Z", updatedVia: "cli" })]
     });
 
-    const bedrock = card("Bedrock API key");
+    const bedrock = card("Claude Code key");
     expect(bedrock.textContent).toContain("Stored");
     expect(bedrock.textContent).toContain("from the command line");
-    expect(within(bedrock).getByRole("form", { name: "Delete Bedrock API key" })).toBeTruthy();
-    expect(within(bedrock).getByLabelText("Replace your Bedrock API key")).toHaveProperty("value", "");
+    expect(within(bedrock).getByRole("form", { name: "Delete Claude Code key" })).toBeTruthy();
+    expect(within(bedrock).getByLabelText("Replace your Claude Code key")).toHaveProperty("value", "");
   });
 
   it("should say a stored credential was saved on this page when it came from the web", () => {

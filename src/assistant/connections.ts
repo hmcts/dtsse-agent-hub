@@ -62,7 +62,7 @@ export const CONNECTORS = {
   atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)", paste: null },
   jenkins: { name: "Jenkins", initial: "J", desc: "Builds and pipelines on Jenkins (optional)", paste: "Jenkins API token" },
   claude: { name: "Claude", initial: "C", desc: "Your Claude licence", paste: "Claude token" },
-  bedrock: { name: "AI model access", initial: "AI", desc: "Your Amazon Bedrock API key", paste: "Bedrock API key" },
+  bedrock: { name: "AI model access", initial: "AI", desc: "Your Claude Code connection", paste: "Claude Code key" },
   // Neither is a sign-in: both are kept beside them because they may hold private context, and there is nothing to
   // connect for either, so no surface offers a row for them.
   claude_md: null,

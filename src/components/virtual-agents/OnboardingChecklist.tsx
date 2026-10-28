@@ -17,7 +17,7 @@ const TITLES: Record<CredentialKind, string> = {
   github: "GitHub",
   azure: "Azure",
   claude: "Claude",
-  bedrock: "Bedrock API key",
+  bedrock: "Claude Code key",
   jenkins: "Jenkins API token",
   claude_md: "CLAUDE.md",
   git_identity: "Git identity",
