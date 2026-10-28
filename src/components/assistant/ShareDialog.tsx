@@ -263,7 +263,9 @@ export function ShareDialog({
               role="listbox"
               aria-label="People"
               hidden={!open}
-              className="absolute left-0 right-0 top-[calc(100%+4px)] z-10 flex max-h-56 flex-col overflow-y-auto rounded-xl border border-asst-strong bg-asst-raised p-1 shadow-2xl"
+              // `flex` would override the `hidden` attribute and leave its border and padding as an empty box under the
+              // name box, so the display class itself switches as well.
+              className={`${open ? "flex" : "hidden"} absolute left-0 right-0 top-[calc(100%+4px)] z-10 max-h-56 flex-col overflow-y-auto rounded-xl border border-asst-strong bg-asst-raised p-1 shadow-2xl`}
             >
               {open
                 ? shown.map((candidate, index) => (

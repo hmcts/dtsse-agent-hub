@@ -136,6 +136,16 @@ describe("ShareDialog", () => {
     expect(screen.getByText(/Anyone else who is sent it sees nothing/)).toBeTruthy();
   });
 
+  it("should not display the empty list as a box under the name box when nobody is offered", async () => {
+    people([]);
+    render(dialog());
+
+    await type("bo");
+
+    // The `hidden` attribute alone loses to Tailwind's `flex`, so the display class has to say so too.
+    expect(screen.getByRole("listbox", { hidden: true }).className).toMatch(/(^|\s)hidden(\s|$)/);
+  });
+
   it("should ask nobody until the query is long enough to be specific", async () => {
     const asked = people([]);
     render(dialog());
