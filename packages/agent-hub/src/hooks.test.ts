@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
+import { createMockHub, QUESTION_OFFER_WINDOW_MS } from "./__fixtures__/mock-hub.ts";
 import type { SpawnWorker } from "./enable.ts";
 import type { Env } from "./env.ts";
 import { HELD_NOTES, holdNote } from "./held-notes.ts";
@@ -851,6 +852,38 @@ describe("runHook PreToolUse", () => {
       expect(reason(await hookJson(ask("preq-unreadable", payload), CONVERSATION))).toBe(UNDELIVERED_REASON);
     }
     expect(calls).toHaveLength(0);
+  });
+
+  /**
+   * Against the fixture's real rule rather than a stubbed status, because which reason the model gets is decided by
+   * what the hub answers and nothing here may assume that. A card nobody answered inside its window can never be
+   * answered, so it does not hold the session's later questions: the hook must put the new one on screen and tell
+   * the model to wait, not fall back to prose for the rest of the conversation.
+   */
+  it("should put a new question on screen when the one before it is past the hub's offer window", async () => {
+    // Arrange
+    const hub = createMockHub();
+    const url = await hub.listen();
+    const env = { ...CONVERSATION, AGENT_HUB_URL: url };
+    try {
+      const registration = await fetch(`${url}/api/agent/register`, {
+        method: "POST",
+        headers: { "x-dev-user": "u|n|e", "content-type": "application/json" },
+        body: JSON.stringify({ session_id: "preq-expired", name: "pod", client_features: [] })
+      });
+      registered("preq-expired", ((await registration.json()) as { agent_id: string }).agent_id);
+      expect(reason(await hookJson(ask("preq-expired", { tool_use_id: "toolu_first" }), env))).toBe(ASKED_REASON);
+      hub.ageQuestion("toolu_first", QUESTION_OFFER_WINDOW_MS + 1000);
+
+      // Act
+      const out = await hookJson(ask("preq-expired", { tool_use_id: "toolu_second" }), env);
+
+      // Assert
+      expect(reason(out)).toBe(ASKED_REASON);
+      expect(hub.questions.map((asked) => asked.tool_use_id)).toEqual(["toolu_first", "toolu_second"]);
+    } finally {
+      await hub.close();
+    }
   });
 });
 
