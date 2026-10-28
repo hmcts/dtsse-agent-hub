@@ -149,6 +149,8 @@ assistantSuite([ALICE, BOB]);
 describe("the person's assistant", () => {
   it("should create a virtual agent on the first visit of someone who has none, and reuse it on the next", async () => {
     await insertUser(ALICE);
+    // A first visit is someone who has connected nothing yet, not the suite's connected Alice.
+    await prisma.credential.deleteMany({ where: { ownerOid: ALICE.oid } });
     const first = await openAssistant(VIEWER);
     const second = await openAssistant(VIEWER);
 

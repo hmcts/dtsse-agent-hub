@@ -18,7 +18,7 @@ import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
 import { offeredTemplates } from "@/assistant/templates";
