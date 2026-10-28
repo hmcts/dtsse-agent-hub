@@ -9,10 +9,7 @@ CREATE TABLE "assistant_model_choice" (
   "updated_at" TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Which models a person's credential answered, which is no longer asked: both models work on both model routes, so
--- there is nothing to discover and nothing to store.
-DROP TABLE "assistant_model_access";
-
--- The model is the person's one setting now, not the conversation's.
-ALTER TABLE "assistant_conversation"
-  DROP COLUMN "model";
+-- `assistant_model_access` and `assistant_conversation.model` are deliberately left in place. The chart runs two
+-- replicas and a pod migrates at boot, so this commits while the previous build is still serving — and that build
+-- reads both on every Assistant page load. Dropping them here would break it for the length of the rolling deploy
+-- and make a rollback to it impossible. They go in the release after this one, when no replica reads them.

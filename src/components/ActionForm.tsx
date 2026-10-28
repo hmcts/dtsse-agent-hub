@@ -20,6 +20,7 @@ export function ActionForm<T extends object & { confirmation?: string }>({
   className,
   keepValues = false,
   onSuccess,
+  onRefused,
   navigate,
   children
 }: {
@@ -28,6 +29,12 @@ export function ActionForm<T extends object & { confirmation?: string }>({
   className?: string;
   keepValues?: boolean;
   onSuccess?: () => void;
+  /**
+   * The refusal's counterpart, for a form whose fields its parent controls: a refused save changes nothing on the
+   * server and triggers no re-render, so without this the fields would keep showing a value that is not in force
+   * beside the message saying it was refused.
+   */
+  onRefused?: () => void;
   navigate?: (result: T) => string;
   children: React.ReactNode;
 }) {
@@ -55,6 +62,7 @@ export function ActionForm<T extends object & { confirmation?: string }>({
         router.refresh();
       } else {
         setMessage({ ok: false, text: result.error });
+        onRefused?.();
       }
     } catch {
       if (await sessionEnded()) {

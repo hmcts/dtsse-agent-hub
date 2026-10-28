@@ -9,7 +9,7 @@ import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
-import { readAssistantModel } from "../assistant/model-store.ts";
+import { type AssistantModelChoice, assistantModelChoice } from "../assistant/model-store.ts";
 import { type ChatGate, chatCredentials, chatGate } from "../assistant/onboarding.ts";
 import {
   accessToConversation,
@@ -404,9 +404,14 @@ export async function assistantTemplates(viewer: Identity): Promise<SavedTemplat
   return await listTemplates(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
 }
 
-/** The Claude model the viewer's chats run on, for the settings to show and change. */
-export async function assistantModel(viewer: Identity): Promise<string> {
-  return await readAssistantModel(prisma, viewer.oid);
+/**
+ * The Claude model the viewer's chats run on, for the settings to show and change, with whether their assistant's pod
+ * can act on a choice yet. `undefined` when they have no assistant at all, which is the one case the section is not
+ * offered — as the Files and Size sections are not.
+ */
+export async function assistantModel(viewer: Viewer): Promise<AssistantModelChoice | undefined> {
+  const assistant = await findAssistant(prisma, viewer.oid);
+  return assistant === undefined ? undefined : await assistantModelChoice(prisma, viewer.oid, assistant.id);
 }
 
 /** Where the viewer's documents go by default, for the settings to edit and the document panel to start from. */

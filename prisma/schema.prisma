@@ -168,6 +168,7 @@ model User {
   assistantTemplates     AssistantTemplate[]
   assistantExportDefault AssistantExportDefault?
   assistantModelChoice   AssistantModelChoice?
+  assistantModelAccess   AssistantModelAccess[]
   conversationsSharedWithThem AssistantConversationShare[] @relation("shareRecipient")
   conversationsTheyShared     AssistantConversationShare[] @relation("shareOwner")
   conversationsForkedToThem   AssistantConversationFork[]  @relation("forkRecipient")
@@ -500,6 +501,9 @@ model AssistantConversation {
   productHistory    Json      @default("[]") @map("product_history")
   /// Every answer the person stopped, as [{at}].
   stopHistory       Json      @default("[]") @map("stop_history")
+  /// Nothing reads this: AssistantModelChoice replaced it. Here only because the column is still in the database,
+  /// for the previous build to read through a rolling deploy; dropped in the release after this one.
+  model             String    @default("claude-sonnet-5-5")
   wakeRequestedAt   DateTime? @map("wake_requested_at") @db.Timestamptz(6)
   /// What the pod's supervisor last reported: starting, live or queued; null for no session.
   sessionState      String?   @map("session_state")
@@ -729,4 +733,19 @@ model AssistantModelChoice {
   owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
 
   @@map("assistant_model_choice")
+}
+
+/// Nothing reads this: AssistantModelChoice replaced it. Here only because the table is still in the database, for
+/// the previous build to read through a rolling deploy; dropped in the release after this one.
+model AssistantModelAccess {
+  ownerOid   String     @map("owner_oid")
+  modelRoute ModelRoute @map("model_route")
+  model      String
+  status     String
+  checkedAt  DateTime   @map("checked_at") @db.Timestamptz(6)
+
+  owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
+
+  @@id([ownerOid, modelRoute, model])
+  @@map("assistant_model_access")
 }

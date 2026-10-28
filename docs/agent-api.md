@@ -559,10 +559,18 @@ the same time and a count is a third place to remember. The list is the record.
   on a session started by an older build has no stop until that session is next started.
 - `model`, because their supervisor starts a conversation's session with `--model` from the wake's `model`, and their
   bridge switches the session with `/model` when a `direct` frame's `model` names another. No hub field is gated on it:
-  a client too old to claim it runs every conversation on hai's default for the route, whatever its owner chose. The
-  client takes a bare family alias and nothing else, so either half of the pair can be the older one and neither
-  starts a session on a model that fails: a client that predates the aliases refuses one, and this client refuses the
-  versioned id a hub that predates them sends. Both leave the session on hai's default for the route.
+  a client too old to claim it runs every conversation on hai's default for the route, whatever its owner chose. It
+  says nothing about *which* ids a build takes, which is what `model-alias` is for: a build claiming `model` alone
+  takes `claude-<family>-<version>` and drops a bare alias.
+- `model-alias`, because the id in `model` is a bare family alias — `sonnet` or `opus` — and this client hands it to
+  `--model` and `/model` unchanged. Claimed by the pod's **own** session, which is the virtual agent's current agent,
+  as `files` and `memory-anon` are, since the supervisor is what starts a session. **No write is gated on it**: a
+  person's model setting is theirs to save whenever they like, and the hub sends `model` to every session either way.
+  What it gates is one sentence in the settings' Model section, which says the choice is picked up at the assistant's
+  next start when its pod did not claim it — so the confirmation of a save says the choice is stored and not that it
+  is in force. Either half of the pair can be the older one and neither starts a session on a model that fails: a
+  client that predates the aliases refuses one, and this client refuses the versioned id a hub that predates them
+  sends. Both leave the session on hai's default for the route.
 - `files`, because their supervisor reports what the uploads directory holds (`PUT /api/virtual/{id}/uploads`) and
   acts on the sessions stream's `delete_uploads` frame. Claimed by the pod's **own** session, which is the virtual
   agent's current agent, since the supervisor is what does both — not by a conversation's session. Gated on both

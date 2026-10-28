@@ -256,6 +256,10 @@ export async function setConversationProduct(input: { conversationId: unknown; p
  *
  * Nothing is sent to the pod: a chat already running picks the change up from its next message's frame, which the pod
  * switches the session on before delivering, and a session started later is started on it from the wake.
+ *
+ * The confirmation says the choice is saved and nothing about when it takes effect, because that depends on the pod:
+ * one on a client predating the family aliases drops this id and runs hai's default until it restarts. When it does,
+ * the Model section is what says so — it reads the pod's `model-alias` claim, which the action does not.
  */
 export async function saveAssistantModel(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
   return await runAction<{ confirmation: string }>("save assistant model", async () => {
@@ -265,7 +269,7 @@ export async function saveAssistantModel(form: FormData): Promise<ActionResult<{
     const viewer = await requireViewer();
     const model = await saveModel(prisma, viewer.oid, form.get("model"));
     revalidatePath("/assistant", "layout");
-    return { ok: true, confirmation: `Your chats now run on ${modelLabel(model)}` };
+    return { ok: true, confirmation: `${modelLabel(model)} saved as the model for your chats` };
   });
 }
 

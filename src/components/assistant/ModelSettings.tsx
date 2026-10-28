@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CATALOGUE } from "@/assistant/models";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 
@@ -11,6 +11,8 @@ import { ActionForm, type FormAction } from "@/components/ActionForm";
  */
 export interface AssistantModelSetting {
   model: string;
+  /** Whether the pod running their assistant takes the choice now; `assistantModelChoice`'s answer. */
+  honoured: boolean;
   save: FormAction;
 }
 
@@ -24,9 +26,16 @@ export interface AssistantModelSetting {
  *
  * No version numbers: hai pins the version of each family in the pod, so naming one here would be a second answer to
  * that question and the one that goes stale.
+ *
+ * A pod whose client predates the family aliases cannot act on the choice, and the section says so rather than hiding
+ * or disabling the control: the choice is stored against the person, not the pod, so saving it is worth doing and the
+ * pod takes it when it next starts. Nothing is gated on the claim.
  */
 export function ModelSettings({ model }: Readonly<{ model: AssistantModelSetting }>) {
+  // The radios show what is in force: the stored choice whenever the server sends another, and the stored choice
+  // again when a save was refused, since the refusal means the pick never became one.
   const [chosen, setChosen] = useState(model.model);
+  useEffect(() => setChosen(model.model), [model.model]);
   return (
     <section aria-labelledby="assistant-settings-model" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-model" className="text-sm font-semibold">
@@ -36,7 +45,14 @@ export function ModelSettings({ model }: Readonly<{ model: AssistantModelSetting
         Which Claude model answers you. This applies to all of your chats. A chat writing an answer finishes it on the model it started, and takes the change
         with your next message.
       </p>
-      <ActionForm action={model.save} label="Choose the model your chats run on" keepValues className="flex flex-col gap-2.5">
+      {model.honoured ? null : <p className="text-pretty text-[13px] text-asst-muted">Your assistant picks your choice up the next time it starts.</p>}
+      <ActionForm
+        action={model.save}
+        label="Choose the model your chats run on"
+        keepValues
+        onRefused={() => setChosen(model.model)}
+        className="flex flex-col gap-2.5"
+      >
         <ul className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
           {CATALOGUE.map((option) => (
             <li key={option.id} className="border-b border-asst-line last:border-b-0">

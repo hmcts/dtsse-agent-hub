@@ -61,6 +61,26 @@ describe("ActionForm", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  // A refused save changes nothing on the server and re-renders nothing, so a parent holding the fields in state has
+  // no other way to hear that the value it is showing never came into force.
+  it("should tell the parent when the action refuses, and not when it succeeds", async () => {
+    const onRefused = vi.fn();
+    const action = vi.fn(async () => ({ ok: false as const, error: "nobody at x has used the hub" }));
+    render(
+      <ActionForm action={action} label="Grant" onRefused={onRefused}>
+        <span />
+      </ActionForm>
+    );
+
+    await submit();
+    expect(onRefused).toHaveBeenCalledTimes(1);
+
+    action.mockImplementation(async () => ({ ok: true as const }) as never);
+    await submit();
+
+    expect(onRefused).toHaveBeenCalledTimes(1);
+  });
+
   it("should say it failed when the call throws", async () => {
     render(
       <ActionForm

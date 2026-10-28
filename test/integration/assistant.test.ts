@@ -490,7 +490,7 @@ describe("conversations", () => {
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
-    expect(await assistantModel(VIEWER)).toBe("sonnet");
+    expect(await assistantModel(VIEWER)).toEqual({ model: "sonnet", honoured: false });
     expect(await assistantFrame(prisma, agentId)).toMatchObject({ model: "sonnet" });
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.model)).toEqual(["sonnet"]);
   });
@@ -500,9 +500,9 @@ describe("conversations", () => {
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
-    expect(await actions.saveAssistantModel(form({ model: "opus" }))).toEqual({ ok: true, confirmation: "Your chats now run on Opus" });
+    expect(await actions.saveAssistantModel(form({ model: "opus" }))).toEqual({ ok: true, confirmation: "Opus saved as the model for your chats" });
 
-    expect(await assistantModel(VIEWER)).toBe("opus");
+    expect(await assistantModel(VIEWER)).toMatchObject({ model: "opus" });
     expect(await assistantFrame(prisma, agentId)).toMatchObject({ model: "opus" });
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.model)).toEqual(["opus"]);
   });
@@ -515,7 +515,7 @@ describe("conversations", () => {
       ok: false,
       error: "pick a model from the list"
     });
-    expect(await assistantModel(VIEWER)).toBe("opus");
+    expect(await assistantModel(VIEWER)).toMatchObject({ model: "opus" });
   });
 
   it("should keep each person's choice to themselves when another person saves their own", async () => {
@@ -531,7 +531,7 @@ describe("conversations", () => {
       { ownerOid: ALICE.oid, model: "opus" },
       { ownerOid: BOB.oid, model: "sonnet" }
     ]);
-    expect(await assistantModel(VIEWER)).toBe("opus");
+    expect(await assistantModel(VIEWER)).toMatchObject({ model: "opus" });
   });
 
   it("should send the pod the default when the stored model has left the catalogue", async () => {
@@ -541,9 +541,31 @@ describe("conversations", () => {
     await prisma.$executeRaw`UPDATE assistant_model_choice SET model = 'haiku' WHERE owner_oid = ${ALICE.oid}`;
     const { agentId } = await sessionOf(id);
 
-    expect(await assistantModel(VIEWER)).toBe("sonnet");
+    expect(await assistantModel(VIEWER)).toMatchObject({ model: "sonnet" });
     expect(await assistantFrame(prisma, agentId)).toMatchObject({ model: "sonnet" });
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.model)).toEqual(["sonnet"]);
+  });
+
+  // Whether the Model section can promise the choice is in force now, read from the pod's own session rather than a
+  // conversation's: the supervisor is what starts a session on the model. Nothing is gated on it.
+  it("should report the choice honoured once the pod's own session claims the family aliases", async () => {
+    const { token, claimed } = await startedAssistant();
+    await register(token, claimed.id, undefined, { clientFeatures: ["model", "model-alias"] });
+
+    expect(await assistantModel(VIEWER)).toEqual({ model: "sonnet", honoured: true });
+  });
+
+  it("should report it not honoured when the pod's own session claims the older model feature alone", async () => {
+    const { token, claimed } = await startedAssistant();
+    await register(token, claimed.id, undefined, { clientFeatures: ["model"] });
+
+    expect(await assistantModel(VIEWER)).toEqual({ model: "sonnet", honoured: false });
+  });
+
+  it("should offer no Model section to somebody with no assistant at all", async () => {
+    await insertUser(ALICE);
+
+    expect(await assistantModel(VIEWER)).toBeUndefined();
   });
 
   it("should carry attachments on a frame built for a delivery and leave them out of one built for a wake", async () => {

@@ -13,7 +13,7 @@
  * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
  * from here; keep the two in step, so a name only one side knows is a type error on that side.
  */
-export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "memory-anon" | "model" | "stop";
+export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "memory-anon" | "model" | "model-alias" | "stop";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
@@ -50,10 +50,17 @@ export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "me
  * conversation whose owner's model choice is honoured apart from one on an older session that runs hai's default
  * whatever was picked.
  *
+ * `model-alias` is claimed because `parseModel` here takes the hub's bare family alias, `sonnet` or `opus`, and hands
+ * it to `--model` and to `/model` unchanged. It is narrower than `model`, which a build claimed while it would only
+ * take `claude-<family>-<version>` and so dropped an alias on the floor, leaving the session on hai's default for the
+ * route. No write is gated on it: the person's model setting is theirs to save whenever they like. What reads it is
+ * the settings' Model section, which says their choice waits for the assistant's next start when its pod's own
+ * session did not claim it.
+ *
  * `memory` is claimed **for hubs older than `memory-anon`**, and for nothing else. No gate in the current hub reads
  * it. It is here because this list travels in the other direction too: the client is published on merge and a pod
  * installs the current one when it boots, so a build can be talking to a hub that has not deployed yet, and that
  * hub's Size section gates on `memory`. Dropping it would make such a pod read as an older client to the one hub
  * that still cares. It can go once no hub predating `anon_bytes` is running anywhere.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory", "memory-anon", "model", "stop"];
+export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory", "memory-anon", "model", "model-alias", "stop"];

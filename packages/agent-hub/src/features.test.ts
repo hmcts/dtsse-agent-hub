@@ -19,7 +19,7 @@ describe("CLIENT_FEATURES", () => {
   // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
   // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
-    expect(CLIENT_FEATURES).toHaveLength(7);
+    expect(CLIENT_FEATURES).toHaveLength(8);
   });
 
   /**
@@ -33,9 +33,11 @@ describe("CLIENT_FEATURES", () => {
    * answers a lookup with `unsupported` and the search says their assistant needs an update it will get on its next
    * restart — which it will not, the claim being missing from the published client. `stop`, `attachments`, `files`
    * and `memory` are quieter: the feature is withheld and nothing says so, which is why these two are worth the
-   * words and those four are covered by being on the list at all.
+   * words and those four are covered by being on the list at all. `model-alias` is quiet the same way, except that
+   * what is withheld is a reassurance: the Model section tells the person their choice waits for the next start,
+   * which is wrong for a pod running this build.
    */
-  it.each(["attachments", "files", "lookups", "memory", "memory-anon", "model", "stop"])("should claim %s", (feature) => {
+  it.each(["attachments", "files", "lookups", "memory", "memory-anon", "model", "model-alias", "stop"])("should claim %s", (feature) => {
     expect(CLIENT_FEATURES).toContain(feature);
   });
 });

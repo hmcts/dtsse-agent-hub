@@ -128,6 +128,8 @@ describe("migrate", () => {
       "assistant_conversation_share",
       "assistant_export_default",
       "assistant_lookup",
+      // Nothing reads it; it is dropped in the release after the one that stopped, so a rollback stays possible.
+      "assistant_model_access",
       "assistant_model_choice",
       "assistant_template",
       "assistant_upload",

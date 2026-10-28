@@ -1026,7 +1026,23 @@ describe("the Assistant's own templates", () => {
 const MODEL_FORM = "Choose the model your chats run on";
 
 function modelSetting(overrides: Partial<AssistantModelSetting> = {}): AssistantModelSetting {
-  return { model: "sonnet", save: vi.fn(async () => ({ ok: true as const, confirmation: "Your chats now run on Sonnet" })), ...overrides };
+  return {
+    model: "sonnet",
+    honoured: true,
+    save: vi.fn(async () => ({ ok: true as const, confirmation: "Sonnet saved as the model for your chats" })),
+    ...overrides
+  };
+}
+
+/** The radio the form shows as the one in force. */
+function checkedModel(): string | null {
+  const form = screen.getByRole("form", { name: MODEL_FORM });
+  return (
+    within(form)
+      .getAllByRole("radio")
+      .find((radio) => (radio as HTMLInputElement).checked)
+      ?.getAttribute("value") ?? null
+  );
 }
 
 function modelPanel(): HTMLElement {
@@ -1066,7 +1082,7 @@ describe("the Assistant's model", () => {
   });
 
   it("should save the model the person picks and say so when they submit it", async () => {
-    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Your chats now run on Opus" }));
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Opus saved as the model for your chats" }));
     open({ model: modelSetting({ save }) }, "Model");
 
     fireEvent.click(within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
@@ -1076,10 +1092,12 @@ describe("the Assistant's model", () => {
 
     expect(save).toHaveBeenCalledTimes(1);
     expect((save.mock.calls[0] as unknown as [FormData])[0].get("model")).toBe("opus");
-    expect(screen.getByRole("status").textContent).toBe("Your chats now run on Opus");
+    expect(screen.getByRole("status").textContent).toBe("Opus saved as the model for your chats");
   });
 
-  it("should say why and keep the pick on the screen when the save is refused", async () => {
+  // A refused save stored nothing, so the pick never became the choice: leaving it checked beside the refusal would
+  // show a selection that is not in force.
+  it("should say why and put the radios back to the stored choice when the save is refused", async () => {
     const save = vi.fn(async () => ({ ok: false as const, error: "pick a model from the list" }));
     open({ model: modelSetting({ save }) }, "Model");
 
@@ -1089,7 +1107,37 @@ describe("the Assistant's model", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toBe("pick a model from the list");
-    expect((within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }) as HTMLInputElement).checked).toBe(true);
+    expect(checkedModel()).toBe("sonnet");
+  });
+
+  // Another tab, or the page's own revalidation, changes the stored choice under an open dialog.
+  it("should follow the stored choice when the server sends another one while the dialog is open", () => {
+    const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} model={modelSetting()} />);
+    fireEvent.click(cog());
+    go("Model");
+    expect(checkedModel()).toBe("sonnet");
+
+    rerender(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} model={modelSetting({ model: "opus" })} />);
+
+    expect(checkedModel()).toBe("opus");
+  });
+
+  it("should say the assistant takes the choice at its next start, and still offer it, when its pod cannot honour it", () => {
+    open({ model: modelSetting({ honoured: false }) }, "Model");
+
+    expect(modelPanel().textContent).toContain("Your assistant picks your choice up the next time it starts");
+    expect(
+      within(screen.getByRole("form", { name: MODEL_FORM }))
+        .getAllByRole("radio")
+        .every((radio) => !(radio as HTMLInputElement).disabled)
+    ).toBe(true);
+    expect(screen.getByRole("button", { name: "Save model" })).toBeTruthy();
+  });
+
+  it("should say nothing about the next start when its pod honours the choice now", () => {
+    open({ model: modelSetting({ honoured: true }) }, "Model");
+
+    expect(modelPanel().textContent).not.toContain("next time it starts");
   });
 
   it("should sit under Agent, above the CLAUDE.md, and leave the other sections reachable when it is shown", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Database } from "../store/prisma.ts";
-import { readAssistantModel, saveAssistantModel } from "./model-store.ts";
+import type { Database, PrismaClient } from "../store/prisma.ts";
+import { assistantModelChoice, readAssistantModel, saveAssistantModel } from "./model-store.ts";
 import { DEFAULT_MODEL } from "./models.ts";
 
 /**
@@ -9,6 +9,7 @@ import { DEFAULT_MODEL } from "./models.ts";
  */
 
 const ALICE = "oid-alice";
+const ASSISTANT = "va-1";
 
 function stub(stored: { ownerOid: string; model: string } | null) {
   const writes: { ownerOid: string; model: string }[] = [];
@@ -70,5 +71,43 @@ describe("saveAssistantModel", () => {
 
     await expect(saveAssistantModel(db, ALICE, model)).rejects.toMatchObject({ status: 400, message: "pick a model from the list" });
     expect(writes).toEqual([]);
+  });
+});
+
+/**
+ * The pod claim the Model section reads, which comes from the virtual agent's current agent — the supervisor's own
+ * registration — as the Files and Size sections' reports do.
+ */
+function podStub(clientFeatures: unknown, owner = ALICE) {
+  return {
+    assistantModelChoice: { findUnique: async () => ({ model: "opus" }) },
+    virtualAgent: {
+      findUnique: async ({ where }: { where: { id: string; ownerOid: string } }) =>
+        where.id === ASSISTANT && where.ownerOid === owner ? { agent: { clientFeatures } } : null
+    }
+  } as unknown as PrismaClient;
+}
+
+describe("assistantModelChoice", () => {
+  it("should report the choice honoured when the pod's own session claims the aliases", async () => {
+    expect(await assistantModelChoice(podStub(["model", "model-alias"]), ALICE, ASSISTANT)).toEqual({ model: "opus", honoured: true });
+  });
+
+  it("should report it not honoured when the pod claims the older model feature alone", async () => {
+    expect(await assistantModelChoice(podStub(["model"]), ALICE, ASSISTANT)).toEqual({ model: "opus", honoured: false });
+  });
+
+  it("should report it not honoured when the pod's session claimed nothing at all", async () => {
+    expect(await assistantModelChoice(podStub(null), ALICE, ASSISTANT)).toEqual({ model: "opus", honoured: false });
+  });
+
+  it("should report it not honoured when the assistant has no session on it yet", async () => {
+    const db = { assistantModelChoice: { findUnique: async () => ({ model: "opus" }) }, virtualAgent: { findUnique: async () => ({ agent: null }) } };
+
+    expect(await assistantModelChoice(db as unknown as PrismaClient, ALICE, ASSISTANT)).toEqual({ model: "opus", honoured: false });
+  });
+
+  it("should still answer the stored choice, not honoured, when the agent is somebody else's", async () => {
+    expect(await assistantModelChoice(podStub(["model-alias"], "oid-bob"), ALICE, ASSISTANT)).toEqual({ model: "opus", honoured: false });
   });
 });
