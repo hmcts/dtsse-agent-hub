@@ -8,6 +8,7 @@ import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
+import { readAssistantModel } from "../assistant/model-store.ts";
 import {
   accessToConversation,
   conversationRef,
@@ -383,6 +384,11 @@ export async function assistantSize(viewer: Viewer): Promise<AssistantMemory | u
  */
 export async function assistantTemplates(viewer: Identity): Promise<SavedTemplate[]> {
   return await listTemplates(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
+}
+
+/** The Claude model the viewer's chats run on, for the settings to show and change. */
+export async function assistantModel(viewer: Identity): Promise<string> {
+  return await readAssistantModel(prisma, viewer.oid);
 }
 
 /** Where the viewer's documents go by default, for the settings to edit and the document panel to start from. */

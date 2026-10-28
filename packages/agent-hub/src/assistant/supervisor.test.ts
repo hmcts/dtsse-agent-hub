@@ -107,11 +107,11 @@ describe("parseWake", () => {
     const c = conversation();
 
     // Act & Assert
-    expect(parseWake({ ...c, resume: true, product: "pcs", model: "claude-opus-5-5" })).toEqual({
+    expect(parseWake({ ...c, resume: true, product: "pcs", model: "opus" })).toEqual({
       conversation_id: c.conversation_id,
       session_id: c.session_id,
       resume: true,
-      model: "claude-opus-5-5"
+      model: "opus"
     });
     expect(parseWake(c)).toEqual({ conversation_id: c.conversation_id, session_id: c.session_id, resume: false, model: null });
     expect(parseWake({ ...c, resume: "yes" })).toEqual({ conversation_id: c.conversation_id, session_id: c.session_id, resume: false, model: null });
@@ -134,7 +134,7 @@ describe("parseSavedSession", () => {
   it("should keep every field the adoption reads when the file is one the supervisor wrote", () => {
     // Arrange
     const c = conversation();
-    const written = { ...c, resume: true, model: "claude-haiku-5-5", name: tmuxName(c.conversation_id), started_at: 1700000000000 };
+    const written = { ...c, resume: true, model: "haiku", name: tmuxName(c.conversation_id), started_at: 1700000000000 };
 
     // Act & Assert
     expect(parseSavedSession(written)).toEqual(written);
@@ -175,17 +175,17 @@ describe("createAssistantSupervisor wake", () => {
   it("should start the session on the wake's model and record it for the bridge when the wake names one", async () => {
     // Arrange
     const { tmux, supervisor } = setup();
-    const c = { ...conversation(), model: "claude-opus-5-5" };
+    const c = { ...conversation(), model: "opus" };
 
     // Act
     await supervisor.wake(c);
 
     // Assert
-    const launched = launcherModel("claude-opus-5-5");
+    const launched = launcherModel("opus");
     expect(launched).not.toBeNull();
     expect(tmux.starts()[0]?.command).toBe(claudeCommand(c.session_id, false, launched));
     expect(tmux.starts()[0]?.command).toContain(`--model '${launched}'`);
-    expect(readText(modelPath(c.session_id))).toBe("claude-opus-5-5");
+    expect(readText(modelPath(c.session_id))).toBe("opus");
   });
 
   it("should start the session on hai's default and clear any recorded model when the wake names none", async () => {
@@ -193,7 +193,7 @@ describe("createAssistantSupervisor wake", () => {
     const { tmux, supervisor } = setup();
     const c = conversation();
     ensureStateDir(c.session_id);
-    fs.writeFileSync(modelPath(c.session_id), "claude-haiku-5-5\n");
+    fs.writeFileSync(modelPath(c.session_id), "haiku\n");
 
     // Act
     await supervisor.wake(c);
@@ -206,7 +206,7 @@ describe("createAssistantSupervisor wake", () => {
   it("should not put a model on the command line when the wake's is not the shape of an id", async () => {
     // Arrange
     const { tmux, supervisor } = setup();
-    const c = { ...conversation(), model: "claude-opus-5-5'; touch /tmp/owned; '" };
+    const c = { ...conversation(), model: "opus'; touch /tmp/owned; '" };
 
     // Act
     await supervisor.wake(c);

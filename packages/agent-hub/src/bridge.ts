@@ -563,7 +563,6 @@ export async function runBridge({
           sid,
           conversationId: assistant.conversation_id,
           model: assistant.model ?? null,
-          env,
           tmux,
           write: (file, text) => fs.writeFileSync(file, text, { mode: 0o600 }),
           settleMs: modelSettleMs,

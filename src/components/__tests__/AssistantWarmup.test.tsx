@@ -66,8 +66,6 @@ function assistant(status: VirtualAgentStatus = "stopped", overrides: Partial<As
     optional: ["jenkins", "atlassian"],
     logins: [],
     onboarded: true,
-    models: [],
-    defaultModel: "claude-sonnet-5-5",
     ...overrides
   };
 }

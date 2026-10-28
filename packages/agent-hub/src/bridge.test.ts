@@ -290,7 +290,7 @@ describe("parseAssistantFrame", () => {
       conversation_id: "c1",
       product: "pcs",
       product_label: "Possession claims",
-      model: "claude-opus-5-5",
+      model: "opus",
       artefact_version: 2,
       artefact_updated_by: "user"
     };
@@ -323,7 +323,7 @@ describe("parseAssistantFrame", () => {
       conversation_id: 1,
       product: 2,
       product_label: 3,
-      model: "claude-opus-5-5 --dangerously-skip-permissions",
+      model: "opus --dangerously-skip-permissions",
       artefact_version: "4",
       artefact_updated_by: 5,
       jira_export: "VIBE"
@@ -781,24 +781,24 @@ describe("runBridge", () => {
       { pingMs: 5000 },
       { env: { ...VIRTUAL, AGENT_HUB_CONVERSATION_ID: CONVERSATION, AGENT_HUB_MODEL_ROUTE: "own_licence" }, tmux, modelSettleMs: 0 }
     );
-    fs.writeFileSync(modelPath(bridge.sid), "claude-sonnet-5-5\n");
+    fs.writeFileSync(modelPath(bridge.sid), "sonnet\n");
     const assistant = { conversation_id: CONVERSATION, product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
 
     try {
       await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
 
       // Act
-      bridge.hub.sendDirectFromOwner(bridge.agentId, "same model", { assistant: { ...assistant, model: "claude-sonnet-5-5" } });
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "same model", { assistant: { ...assistant, model: "sonnet" } });
       await waitUntil(() => bridge.socketWrites.length >= 1, "the first message");
       order.push("delivered 1");
-      bridge.hub.sendDirectFromOwner(bridge.agentId, "think harder", { assistant: { ...assistant, model: "claude-opus-5-5" } });
+      bridge.hub.sendDirectFromOwner(bridge.agentId, "think harder", { assistant: { ...assistant, model: "opus" } });
       await waitUntil(() => bridge.socketWrites.length >= 2, "the second message");
       order.push("delivered 2");
 
       // Assert
       const name = tmuxName(CONVERSATION);
-      expect(order).toEqual(["delivered 1", `keys ${name} -l /model claude-opus-5-5`, `keys ${name} Enter`, "delivered 2"]);
-      expect(readText(modelPath(bridge.sid))).toBe("claude-opus-5-5");
+      expect(order).toEqual(["delivered 1", `keys ${name} -l /model opus`, `keys ${name} Enter`, "delivered 2"]);
+      expect(readText(modelPath(bridge.sid))).toBe("opus");
     } finally {
       await bridge.stop();
     }

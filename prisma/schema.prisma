@@ -167,7 +167,7 @@ model User {
   assistantUploads       AssistantUpload[]
   assistantTemplates     AssistantTemplate[]
   assistantExportDefault AssistantExportDefault?
-  assistantModelAccess   AssistantModelAccess[]
+  assistantModelChoice   AssistantModelChoice?
   conversationsSharedWithThem AssistantConversationShare[] @relation("shareRecipient")
   conversationsTheyShared     AssistantConversationShare[] @relation("shareOwner")
 
@@ -496,8 +496,6 @@ model AssistantConversation {
   productHistory    Json      @default("[]") @map("product_history")
   /// Every answer the person stopped, as [{at}].
   stopHistory       Json      @default("[]") @map("stop_history")
-  /// One of src/assistant/models.ts.
-  model             String    @default("claude-sonnet-5-5")
   wakeRequestedAt   DateTime? @map("wake_requested_at") @db.Timestamptz(6)
   /// What the pod's supervisor last reported: starting, live or queued; null for no session.
   sessionState      String?   @map("session_state")
@@ -686,19 +684,14 @@ model AgentQuestion {
   @@map("agent_question")
 }
 
-/// Which Claude models a person's credential for a model route last answered, from their pod's check. Definite
-/// answers only: a check that could not tell writes nothing.
-model AssistantModelAccess {
-  ownerOid   String     @map("owner_oid")
-  modelRoute ModelRoute @map("model_route")
+/// The Claude model all of a person's Assistant chats run on. One row per person; no row means the default.
+model AssistantModelChoice {
+  ownerOid  String   @id @map("owner_oid")
   /// One of src/assistant/models.ts.
-  model      String
-  /// available or unavailable.
-  status     String
-  checkedAt  DateTime   @map("checked_at") @db.Timestamptz(6)
+  model     String
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
 
-  @@id([ownerOid, modelRoute, model])
-  @@map("assistant_model_access")
+  @@map("assistant_model_choice")
 }

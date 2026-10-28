@@ -1,26 +1,18 @@
 // Which Claude model a conversation's session runs on: the hub's model id, as the wake and every message frame carry
-// it, turned into what `hai` hands Claude Code as `--model` or `/model` on the route this pod runs.
-import type { Env } from "../env.ts";
+// it, handed to `hai` as `--model` or typed into the pane as `/model`.
 import { readText, statePath } from "../session.ts";
 import { type Tmux, tmuxName } from "./tmux.ts";
 
 /**
- * The shape of a model id the hub may send: `claude-<family>-<version>`. Checked here as well as on the hub because
- * the id goes onto a command line and into a pane as keys, and checked by shape rather than against a list so that a
- * model the hub starts offering works on a pod that booted with an older client.
+ * The shape of a model id the hub may send: a bare family alias, `sonnet` or `opus`. Checked here as well as on the
+ * hub because the id goes onto a command line and into a pane as keys, and checked by shape rather than against a
+ * list so that a family the hub starts offering works on a pod that booted with an older client.
+ *
+ * Letters alone, which is what rules out the versioned ids an older hub sends (`claude-sonnet-5-5`). Those are not
+ * aliases hai pins a version for, so on Bedrock one would reach Claude Code as a model id that does not exist there
+ * and fail every turn; refusing it leaves the session on hai's default, which is the family the person asked for.
  */
-const MODEL_RE = /^claude-[a-z]+-\d+(-\d+)?$/;
-
-/**
- * The families Bedrock has a cross-region inference profile for, which are the families hai sets a default for. A model
- * of any other family, such as Fable, has no id on Bedrock, so it gets no `--model` and no `/model`, and the model
- * check reports it unavailable without asking. Which of these a person is *offered* is decided by that check, against
- * their own key; this only says which ids exist to ask with.
- */
-const BEDROCK_FAMILIES = /^claude-(opus|sonnet|haiku)-/;
-
-/** The families whose Bedrock profile hai runs with the 1M-token context, which `[1m]` asks Claude Code for. */
-const LONG_CONTEXT = /^claude-(opus|sonnet)-/;
+const MODEL_RE = /^[a-z]{1,32}$/;
 
 /** The model id on a wake or a frame, or null for one that is missing or not the shape of an id. */
 export function parseModel(value: unknown): string | null {
@@ -28,45 +20,14 @@ export function parseModel(value: unknown): string | null {
 }
 
 /**
- * The cross-region inference profile prefix for the Bedrock region a pod's sessions run in. hai calls Bedrock in
- * `eu-west-2` unless `AWS_REGION` says otherwise, and a profile in another geography is refused there. Null for a
- * region with no known prefix, where naming any model would be a guess.
+ * What the launcher is given for a model: the id itself, on both model routes. Nothing is prefixed or suffixed here
+ * because hai pins the version of each family in the pod — it exports `ANTHROPIC_DEFAULT_SONNET_MODEL` and
+ * `ANTHROPIC_DEFAULT_OPUS_MODEL`, so Claude Code resolves `sonnet` and `opus` to that family's Bedrock inference
+ * profile on `bedrock` and to the family's current model on a person's own Claude licence. Null when the id is not
+ * one, which leaves the session on hai's own default rather than on a model that fails.
  */
-function bedrockPrefix(region: string | undefined): string | null {
-  const name = region === undefined || region === "" ? "eu-west-2" : region;
-  if (name.startsWith("eu-")) {
-    return "eu";
-  }
-  if (name.startsWith("us-")) {
-    return "us";
-  }
-  if (name.startsWith("ap-")) {
-    return "apac";
-  }
-  return null;
-}
-
-/**
- * What the launcher is given for a model: the id itself on the person's own Claude licence, and on Amazon Bedrock the
- * region's inference profile, `eu.anthropic.claude-sonnet-5-5[1m]` — the same shape as the defaults hai sets for each
- * family, so picking Sonnet gives the session exactly what it would have run on by default. Null when the id is not
- * one, the region has no profile or the family has none on Bedrock, which leaves the session on hai's own default rather than on a model that fails.
- *
- * The route is `AGENT_HUB_MODEL_ROUTE`, which the entrypoint exports before the supervisor starts; anything but
- * `own_licence` is Bedrock, as it is in the entrypoint.
- */
-export function launcherModel(model: string | null, env: Env = process.env): string | null {
-  if (model === null || !MODEL_RE.test(model)) {
-    return null;
-  }
-  if (env.AGENT_HUB_MODEL_ROUTE === "own_licence") {
-    return model;
-  }
-  const prefix = bedrockPrefix(env.AWS_REGION);
-  if (prefix === null || !BEDROCK_FAMILIES.test(model)) {
-    return null;
-  }
-  return `${prefix}.anthropic.${model}${LONG_CONTEXT.test(model) ? "[1m]" : ""}`;
+export function launcherModel(model: string | null): string | null {
+  return model !== null && MODEL_RE.test(model) ? model : null;
 }
 
 /** Where a session's current model is kept: the hub's id, written when it starts on it and when it is switched. */
@@ -83,7 +44,6 @@ export type SwitchModelOptions = {
   sid: string;
   conversationId: string | undefined;
   model: string | null;
-  env?: Env;
   tmux: Pick<Tmux, "sendKeys">;
   write: (file: string, text: string) => void;
   settleMs?: number;
@@ -104,7 +64,6 @@ export async function switchModel({
   sid,
   conversationId,
   model,
-  env = process.env,
   tmux,
   write,
   settleMs = MODEL_SETTLE_MS,
@@ -113,9 +72,9 @@ export async function switchModel({
   if (model === null || conversationId === undefined || readText(modelPath(sid)) === model) {
     return "unchanged";
   }
-  const launched = launcherModel(model, env);
+  const launched = launcherModel(model);
   if (launched === null) {
-    say(`not switching to ${model}: no launcher model for it on this route`);
+    say(`not switching to ${model}: it is not the shape of a model id`);
     return "skipped";
   }
   const name = tmuxName(conversationId);
@@ -133,6 +92,6 @@ export async function switchModel({
     say(`switched to ${model} but could not record it: ${(e as Error).message}`);
   }
   await new Promise((resolve) => setTimeout(resolve, settleMs));
-  say(`switched the session to ${model} (${launched})`);
+  say(`switched the session to ${model}`);
   return "switched";
 }

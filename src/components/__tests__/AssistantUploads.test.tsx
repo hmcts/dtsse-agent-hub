@@ -3,7 +3,6 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CATALOGUE } from "@/assistant/models";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import type { ConversationView, UnsentChat } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
@@ -557,8 +556,6 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     product: "ccd",
     productLabel: "CCD",
     productHistory: [],
-    model: "claude-sonnet-5-5",
-    models: CATALOGUE.slice(0, 1),
     stopHistory: [],
     agentId: AGENT,
     agentStatus: "idle",
@@ -581,7 +578,6 @@ function actions(): ChatActions {
     warm: vi.fn(async () => ({ ok: true as const })),
     stop: vi.fn(async () => ({ ok: true as const, stopped: true })),
     setProduct: vi.fn(async () => ({ ok: true as const })),
-    setModel: vi.fn(async () => ({ ok: true as const })),
     rename: vi.fn(async () => ({ ok: true as const })),
     remove: vi.fn(async () => ({ ok: true as const })),
     answerQuestion: vi.fn(async () => ({ ok: true as const })),
@@ -706,7 +702,6 @@ describe("EmptyChat attaching before the chat exists", () => {
       open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
       send: vi.fn(async () => ({ ok: true as const })),
       setProduct: vi.fn(async () => ({ ok: true as const })),
-      setModel: vi.fn(async () => ({ ok: true as const })),
       ...overrides
     };
   }
@@ -731,7 +726,7 @@ describe("EmptyChat attaching before the chat exists", () => {
 
     await choose(file("letter.pdf", 2048));
 
-    expect(acts.open).toHaveBeenCalledWith({ product: "pcs", model: "claude-sonnet-5-5" });
+    expect(acts.open).toHaveBeenCalledWith({ product: "pcs" });
     expect(request().conversationId).toBe(CONVERSATION);
     expect(chips()[0]?.textContent).toContain("letter.pdf");
   });
@@ -796,7 +791,7 @@ describe("EmptyChat attaching before the chat exists", () => {
     });
 
     expect(acts.open).not.toHaveBeenCalled();
-    expect(acts.start).toHaveBeenCalledWith({ product: "general", model: "claude-sonnet-5-5", body: "just words" });
+    expect(acts.start).toHaveBeenCalledWith({ product: "general", body: "just words" });
     expect(push).toHaveBeenCalledWith("/assistant/started");
   });
 
@@ -857,8 +852,7 @@ describe("EmptyChat when the first message into an opened conversation is refuse
       start: vi.fn(async () => ({ ok: true as const, id: "started" })),
       open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
       send: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" })),
-      setProduct: vi.fn(async () => ({ ok: true as const })),
-      setModel: vi.fn(async () => ({ ok: true as const }))
+      setProduct: vi.fn(async () => ({ ok: true as const }))
     };
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} />);
     const box = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
@@ -889,8 +883,7 @@ describe("EmptyChat when the person changes their mind while the chat is being o
           })
       ),
       send: vi.fn(async () => ({ ok: true as const })),
-      setProduct: vi.fn(async () => ({ ok: true as const })),
-      setModel: vi.fn(async () => ({ ok: true as const }))
+      setProduct: vi.fn(async () => ({ ok: true as const }))
     };
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} />);
     await choose(file("letter.pdf", 2048));
@@ -915,8 +908,7 @@ describe("EmptyChat when a later change of product cannot be saved", () => {
       start: vi.fn(async () => ({ ok: true as const, id: "started" })),
       open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
       send: vi.fn(async () => ({ ok: true as const })),
-      setProduct: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" })),
-      setModel: vi.fn(async () => ({ ok: true as const }))
+      setProduct: vi.fn(async () => ({ ok: false as const, error: "that conversation no longer exists" }))
     };
     render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={acts} />);
     await choose(file("letter.pdf", 2048));
@@ -943,7 +935,6 @@ describe("EmptyChat remounted after a file was attached", () => {
       open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
       send: vi.fn(async () => ({ ok: true as const })),
       setProduct: vi.fn(async () => ({ ok: true as const })),
-      setModel: vi.fn(async () => ({ ok: true as const })),
       ...overrides
     };
   }
@@ -951,7 +942,6 @@ describe("EmptyChat remounted after a file was attached", () => {
   const unsent: UnsentChat = {
     id: CONVERSATION,
     product: "pcs",
-    model: "claude-sonnet-5-5",
     attachments: [{ id: "u1", name: "scanned letter.pdf", bytes: 2048, media_type: "application/pdf", available_until: HELD_UNTIL }]
   };
 
@@ -1039,7 +1029,7 @@ describe("EmptyChat remounted after a file was attached", () => {
     });
 
     expect(chips()).toHaveLength(0);
-    expect(acts.start).toHaveBeenCalledWith({ product: "general", model: "claude-sonnet-5-5", body: "just words" });
+    expect(acts.start).toHaveBeenCalledWith({ product: "general", body: "just words" });
   });
 });
 
@@ -1058,8 +1048,7 @@ describe("EmptyChat remembering the product with no conversation yet", () => {
           start: vi.fn(async () => ({ ok: true as const, id: "started" })),
           open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
           send: vi.fn(async () => ({ ok: true as const })),
-          setProduct: vi.fn(async () => ({ ok: true as const })),
-          setModel: vi.fn(async () => ({ ok: true as const }))
+          setProduct: vi.fn(async () => ({ ok: true as const }))
         }}
       />
     );
@@ -1101,8 +1090,7 @@ describe("EmptyChat when the tab will not keep anything", () => {
           start: vi.fn(async () => ({ ok: true as const, id: "started" })),
           open: vi.fn(async () => ({ ok: true as const, id: CONVERSATION })),
           send: vi.fn(async () => ({ ok: true as const })),
-          setProduct: vi.fn(async () => ({ ok: true as const })),
-          setModel: vi.fn(async () => ({ ok: true as const }))
+          setProduct: vi.fn(async () => ({ ok: true as const }))
         }}
       />
     );

@@ -6,6 +6,8 @@ import { HttpError } from "@/agent-api/http";
 import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
 import { requestJiraExport } from "@/assistant/jira-store";
+import { saveAssistantModel as saveModel } from "@/assistant/model-store";
+import { modelLabel } from "@/assistant/models";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import { sendToConversation } from "@/assistant/send";
 import {
@@ -18,7 +20,6 @@ import {
   deleteConversation as remove,
   renameConversation as rename,
   requestWake,
-  setModel,
   setProduct,
   stopAnswer,
   writeArtefact
@@ -90,7 +91,7 @@ async function send(oid: string, conversation: ConversationRow, typed: string, u
 }
 
 /** A new conversation, started with its first message: a starter card's prompt, or what the person typed. */
-export async function startConversation(input: { product: unknown; model?: unknown; body: unknown }): Promise<ActionResult<{ id: string }>> {
+export async function startConversation(input: { product: unknown; body: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("start conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
@@ -100,7 +101,7 @@ export async function startConversation(input: { product: unknown; model?: unkno
     if (typeof body !== "string") {
       return body;
     }
-    const conversation = await createConversation(prisma, viewer.oid, { product: input.product, model: input.model });
+    const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
     await send(viewer.oid, conversation, body);
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
@@ -118,13 +119,13 @@ export async function startConversation(input: { product: unknown; model?: unkno
  * It leaves an empty conversation behind if they attach and walk away. `sweepUploads` removes one whose only content
  * was an attachment nobody ever sent, a few hours later — see the note there for why it is swept rather than left.
  */
-export async function openConversation(input: { product: unknown; model?: unknown }): Promise<ActionResult<{ id: string }>> {
+export async function openConversation(input: { product: unknown }): Promise<ActionResult<{ id: string }>> {
   return await runAction<{ id: string }>("open conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
-    const conversation = await createConversation(prisma, viewer.oid, { product: input.product, model: input.model });
+    const conversation = await createConversation(prisma, viewer.oid, { product: input.product });
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
   });
@@ -220,15 +221,23 @@ export async function setConversationProduct(input: { conversationId: unknown; p
   });
 }
 
-/** The model the conversation's next message, and every one after it, is answered by. */
-export async function setConversationModel(input: { conversationId: unknown; model: unknown }): Promise<ActionResult> {
-  return await runAction("set conversation model", async () => {
+/**
+ * The Claude model all of the signed-in person's chats run on, from the settings dialog. The viewer is re-read and is
+ * the only person a request can reach, as the sibling settings actions are. Revalidates `/assistant` as a layout,
+ * because the dialog is rendered from the same tree on every page of it.
+ *
+ * Nothing is sent to the pod: a chat already running picks the change up from its next message's frame, which the pod
+ * switches the session on before delivering, and a session started later is started on it from the wake.
+ */
+export async function saveAssistantModel(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("save assistant model", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
-    await setModel(prisma, viewer.oid, text(input.conversationId), input.model);
-    return { ok: true };
+    const model = await saveModel(prisma, viewer.oid, form.get("model"));
+    revalidatePath("/assistant", "layout");
+    return { ok: true, confirmation: `Your chats now run on ${modelLabel(model)}` };
   });
 }
 

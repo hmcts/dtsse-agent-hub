@@ -3,8 +3,8 @@ import {
   deleteConversation,
   openConversation,
   renameConversation,
+  saveAssistantModel,
   sendAssistantMessage,
-  setConversationModel,
   setConversationProduct,
   startConversation
 } from "@/app/_actions/assistant";
@@ -23,7 +23,16 @@ import { AssistantShell, type ConversationActions } from "@/components/assistant
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
 import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { requireViewer } from "@/viewer/current";
-import { assistantExportDefaults, assistantFiles, assistantSize, assistantTemplates, claudeMdSettings, openAssistant, unsentNewChat } from "@/web/data";
+import {
+  assistantExportDefaults,
+  assistantFiles,
+  assistantModel,
+  assistantSize,
+  assistantTemplates,
+  claudeMdSettings,
+  openAssistant,
+  unsentNewChat
+} from "@/web/data";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +41,6 @@ const CHAT_ACTIONS: EmptyChatActions = {
   start: startConversation,
   open: openConversation,
   send: sendAssistantMessage,
-  setModel: setConversationModel,
   setProduct: setConversationProduct
 };
 
@@ -44,14 +52,15 @@ export default async function AssistantPage() {
   const viewer = await requireViewer();
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
-  const [home, unsent, claudeMd, mine, files, size, defaults] = await Promise.all([
+  const [home, unsent, claudeMd, mine, files, size, defaults, model] = await Promise.all([
     openAssistant(viewer),
     unsentNewChat(viewer),
     claudeMdSettings(viewer),
     assistantTemplates(viewer),
     assistantFiles(viewer),
     assistantSize(viewer),
-    assistantExportDefaults(viewer)
+    assistantExportDefaults(viewer),
+    assistantModel(viewer)
   ]);
   // The same sign-in the conversation page gives the document panel, for the settings' searches.
   const atlassian = {
@@ -74,17 +83,10 @@ export default async function AssistantPage() {
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
       files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
+      model={{ model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
     >
-      <EmptyChat
-        starters={STARTERS}
-        templates={offeredTemplates(mine)}
-        viewerOid={viewer.oid}
-        unsent={unsent}
-        actions={CHAT_ACTIONS}
-        models={home.assistant.models}
-        defaultModel={home.assistant.defaultModel}
-      />
+      <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
       <OnboardingGate
         assistant={home.assistant}
         statuses={home.credentials.available ? home.credentials.statuses : []}

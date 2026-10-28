@@ -2,7 +2,6 @@
 
 import { type Ref, type RefObject, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import type { Skill } from "@/agents/skills";
-import { type AssistantModel, modelLabel } from "@/assistant/models";
 import { type Filled, fillWith, type Template } from "@/assistant/starters";
 import type { MessageAttachment } from "@/assistant/upload-store";
 import { admitFiles, discardUpload, fileSizeLabel, pastedName, UploadAborted, uploadFile } from "@/components/assistant/uploadClient";
@@ -119,8 +118,7 @@ export function Composer({
   attached,
   skills = [],
   dropZone,
-  filler,
-  model
+  filler
 }: {
   templates: readonly Template[];
   /** Resolves to an error to show, or `null` once sent, which clears the box and its attachments. */
@@ -141,17 +139,11 @@ export function Composer({
   dropZone?: RefObject<HTMLElement | null>;
   /** Filled in with what lets the page put a template in the box, as the new-chat screen's starter cards do. */
   filler?: Ref<ComposerFiller>;
-  /**
-   * The Claude model the next message is answered by, and the models the person may change it to from the + menu:
-   * those their own credential answered, so the menu never offers one that would fail. Absent where no model can be
-   * chosen, which shows no Model item.
-   */
-  model?: { value: string; options: readonly AssistantModel[]; onChange: (id: string) => void };
 }) {
   const { body: text, setBody: setText, discard } = useDraft({ kind: "assistant-draft", viewerOid, draftId });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [menu, setMenu] = useState<"closed" | "open" | "templates" | "models">("closed");
+  const [menu, setMenu] = useState<"closed" | "open" | "templates">("closed");
   // Seeded once, on mount: `attached` is what the hub was holding when the page was rendered, and from then on this
   // list is the live one. A later render handing down a stale `attached` must not overwrite it.
   const [attachments, setAttachments] = useState<readonly Attachment[]>(() => chipsFor(attached));
@@ -574,57 +566,6 @@ export function Composer({
                         className="rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active"
                       >
                         {template.name}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                {model === undefined ? null : (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    aria-haspopup="menu"
-                    aria-expanded={menu === "models"}
-                    onClick={() => setMenu(menu === "models" ? "open" : "models")}
-                    className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active ${menu === "models" ? "bg-asst-active" : ""}`}
-                  >
-                    <span aria-hidden="true" className="w-[18px] text-center text-asst-accent">
-                      ✦
-                    </span>
-                    <span className="flex-1">Model</span>
-                    <span className="text-xs text-asst-faint">{modelLabel(model.value)}</span>
-                    <span aria-hidden="true" className="text-asst-faint">
-                      ›
-                    </span>
-                  </button>
-                )}
-                {model !== undefined && menu === "models" ? (
-                  <div
-                    role="menu"
-                    aria-label="Models"
-                    className="absolute bottom-0 left-[calc(100%+6px)] flex w-[260px] flex-col gap-0.5 rounded-xl border border-asst-strong bg-asst-hover p-1.5 shadow-2xl max-sm:bottom-[calc(100%+6px)] max-sm:left-0"
-                  >
-                    <p className="px-2.5 pb-1 pt-1.5 text-xs font-medium text-asst-faint">Answer the next message with</p>
-                    {model.options.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={option.id === model.value}
-                        onClick={() => {
-                          setMenu("closed");
-                          if (option.id !== model.value) {
-                            model.onChange(option.id);
-                          }
-                        }}
-                        className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-asst-active"
-                      >
-                        <span aria-hidden="true" className="w-[18px] text-center text-asst-accent">
-                          {option.id === model.value ? "✓" : ""}
-                        </span>
-                        <span className="flex flex-1 flex-col">
-                          <span>{option.label}</span>
-                          <span className="text-xs text-asst-muted">{option.description}</span>
-                        </span>
                       </button>
                     ))}
                   </div>

@@ -1,14 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEventHub } from "../realtime/hub.ts";
 import type { LookupFrame } from "./lookup-store.ts";
-import { checkModelsFrame, closeFrame, deleteUploadsFrame, interruptFrame, lookupFrame, sessionStream, wakeFrame } from "./session-stream.ts";
+import { closeFrame, deleteUploadsFrame, interruptFrame, lookupFrame, sessionStream, wakeFrame } from "./session-stream.ts";
 import type { Wake } from "./store.ts";
 
 const ASSISTANT = "va-1";
-const OWNER = "o";
 
 function wake(conversation: string, session = `s-${conversation}`): Wake {
-  return { conversation_id: conversation, session_id: session, resume: false, product: "general", model: "claude-sonnet-5-5" };
+  return { conversation_id: conversation, session_id: session, resume: false, product: "general", model: "sonnet" };
 }
 
 function changed(conversation: string, virtualAgent = ASSISTANT) {
@@ -48,7 +47,7 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const one = vi.fn(async (id: string) => wake(id));
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, deletions: none, lookup: noLookup, wakes: async () => [wake("c1"), wake("c2")], wake: one })(
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, wakes: async () => [wake("c1"), wake("c2")], wake: one })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -64,7 +63,7 @@ describe("sessionStream", () => {
   it("should send a wake once per connection when it is both replayed and notified", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, deletions: none, lookup: noLookup, wakes: async () => [wake("c1")], wake: async (id) => wake(id) })(
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, wakes: async () => [wake("c1")], wake: async (id) => wake(id) })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -79,7 +78,6 @@ describe("sessionStream", () => {
     const frames: string[] = [];
     sessionStream(ASSISTANT, {
       hub,
-      ownerOid: OWNER,
       ready,
       deletions: none,
       lookup: noLookup,
@@ -96,7 +94,7 @@ describe("sessionStream", () => {
   it("should send a close when the conversation has gone", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: async () => null })(
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: async () => null })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -109,7 +107,7 @@ describe("sessionStream", () => {
   it("should send nothing when a change leaves the conversation without a pending wake", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: async () => undefined })(
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: async () => undefined })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -123,10 +121,7 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const one = vi.fn(async (id: string) => wake(id));
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: one })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: one })((frame) => frames.push(frame), noFail);
     await settle();
     hub.publish(stopped("c1"));
     await settle();
@@ -138,7 +133,7 @@ describe("sessionStream", () => {
   it("should ignore an interrupt for another assistant's conversation", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: async () => undefined })(
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: async () => undefined })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -155,7 +150,6 @@ describe("sessionStream", () => {
     const frames: string[] = [];
     const close = await sessionStream(ASSISTANT, {
       hub,
-      ownerOid: OWNER,
       ready,
       deletions: none,
       lookup: noLookup,
@@ -177,10 +171,7 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const one = vi.fn(async (id: string) => wake(id));
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: one })(
-      (frame) => frames.push(frame),
-      noFail
-    );
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: one })((frame) => frames.push(frame), noFail);
     hub.publish(changed("c1", "va-other"));
     hub.publish({ type: "post", message_id: "1" });
     await settle();
@@ -193,7 +184,7 @@ describe("sessionStream", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const pending = [wake("c1")];
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, deletions: none, lookup: noLookup, wakes: async () => [...pending], wake: async () => undefined })(
+    sessionStream(ASSISTANT, { hub, ready, deletions: none, lookup: noLookup, wakes: async () => [...pending], wake: async () => undefined })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -210,7 +201,6 @@ describe("sessionStream", () => {
     const frames: string[] = [];
     const close = await sessionStream(ASSISTANT, {
       hub,
-      ownerOid: OWNER,
       ready,
       deletions: none,
       lookup: noLookup,
@@ -230,7 +220,6 @@ describe("sessionStream", () => {
     const frames: string[] = [];
     const fail = vi.fn();
     sessionStream(ASSISTANT, {
-      ownerOid: OWNER,
       hub,
       ready,
       deletions: none,
@@ -265,7 +254,6 @@ describe("sessionStream deletions", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     sessionStream(ASSISTANT, {
-      ownerOid: OWNER,
       hub,
       ready,
       wakes: async () => [wake("c1")],
@@ -282,7 +270,7 @@ describe("sessionStream deletions", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const deletions = vi.fn(async () => [DELETION]);
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, wakes: async () => [], wake: async () => undefined, deletions, lookup: noLookup })(
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions, lookup: noLookup })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -302,7 +290,6 @@ describe("sessionStream deletions", () => {
     const frames: string[] = [];
     sessionStream(ASSISTANT, {
       hub,
-      ownerOid: OWNER,
       ready,
       wakes: async () => [],
       wake: async () => undefined,
@@ -321,7 +308,7 @@ describe("sessionStream deletions", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const deletions = vi.fn(async () => [DELETION]);
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, wakes: async () => [], wake: async () => undefined, deletions, lookup: noLookup })(
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions, lookup: noLookup })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -338,7 +325,7 @@ describe("sessionStream deletions", () => {
   it("should send nothing when no deletion is outstanding", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, wakes: async () => [], wake: async () => undefined, deletions: none, lookup: noLookup })(
+    sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions: none, lookup: noLookup })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -351,7 +338,6 @@ describe("sessionStream deletions", () => {
     const hub = createEventHub();
     let failure: unknown;
     sessionStream(ASSISTANT, {
-      ownerOid: OWNER,
       hub,
       ready,
       wakes: async () => [],
@@ -375,7 +361,6 @@ describe("sessionStream deletions", () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const close = await sessionStream(ASSISTANT, {
-      ownerOid: OWNER,
       hub,
       ready,
       wakes: async () => [],
@@ -402,7 +387,7 @@ describe("sessionStream lookups", () => {
   }
 
   function open(lookup: (id: string) => Promise<LookupFrame | undefined>, frames: string[], hub = createEventHub()) {
-    const close = sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, wakes: async () => [], wake: async () => undefined, deletions: none, lookup })(
+    const close = sessionStream(ASSISTANT, { hub, ready, wakes: async () => [], wake: async () => undefined, deletions: none, lookup })(
       (frame) => frames.push(frame),
       noFail
     );
@@ -457,41 +442,5 @@ describe("sessionStream lookups", () => {
 
     // Assert
     expect(frames).toEqual([interruptFrame("c1")]);
-  });
-});
-
-describe("sessionStream and model checks", () => {
-  function open(hub: ReturnType<typeof createEventHub>, frames: string[]) {
-    sessionStream(ASSISTANT, { hub, ownerOid: OWNER, ready, deletions: none, lookup: noLookup, wakes: async () => [], wake: async () => undefined })(
-      (frame) => frames.push(frame),
-      noFail
-    );
-  }
-
-  it("should ask the pod to check its models when its owner stores or replaces their claude or bedrock credential", async () => {
-    const hub = createEventHub();
-    const frames: string[] = [];
-    open(hub, frames);
-    await settle();
-
-    hub.publish({ type: "credential", owner_oid: OWNER, kind: "claude" });
-    hub.publish({ type: "credential", owner_oid: OWNER, kind: "bedrock" });
-    await settle();
-
-    expect(frames).toEqual([checkModelsFrame(), checkModelsFrame()]);
-    expect(checkModelsFrame()).toBe("event: check_models\ndata: {}\n\n");
-  });
-
-  it("should not ask when another credential of theirs changes, or anyone else's does", async () => {
-    const hub = createEventHub();
-    const frames: string[] = [];
-    open(hub, frames);
-    await settle();
-
-    hub.publish({ type: "credential", owner_oid: OWNER, kind: "github" });
-    hub.publish({ type: "credential", owner_oid: "someone-else", kind: "claude" });
-    await settle();
-
-    expect(frames).toEqual([]);
   });
 });

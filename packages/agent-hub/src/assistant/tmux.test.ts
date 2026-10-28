@@ -90,13 +90,13 @@ describe("claudeCommand", () => {
     expect(shellWords(claudeCommand("sess-1", false)).at(-1)).toBe(PROMPT_FILE);
   });
 
-  // A Bedrock profile ends in `[1m]`, which an unquoted shell word would try as a glob.
+  // Quoted, so whatever the hub sends is one argument and nothing in it is read as a glob.
   it("should pass the model as one literal argument when the session is started on one", () => {
     // Act
-    const words = shellWords(claudeCommand("sess-1", true, "eu.anthropic.claude-sonnet-5-5[1m]"));
+    const words = shellWords(claudeCommand("sess-1", true, "sonnet"));
 
     // Assert
-    expect(words.slice(-2)).toEqual(["--model", "eu.anthropic.claude-sonnet-5-5[1m]"]);
+    expect(words.slice(-2)).toEqual(["--model", "sonnet"]);
     expect(words).toContain(PROMPT_FILE);
   });
 
