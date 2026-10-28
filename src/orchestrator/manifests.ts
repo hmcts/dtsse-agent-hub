@@ -187,9 +187,9 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
     // pod either, so hai cannot infer that it is already containerised. Without this marker it decides it is on a
     // bare host and tries `docker pull` and `docker run --privileged`, which a pod with no Docker socket and
     // `allowPrivilegeEscalation: false` cannot do: it exits 1 and every session dies at launch. Not
-    // `HAI_ENV_READY` as well — the two together short-circuit the route resolution that builds the Bedrock
-    // environment the `bedrock` route needs. The `gateway` route sets it itself, in stage 1, having built that
-    // route's environment by hand: hai's own gateway route reads the APIM key from a Key Vault a pod cannot reach.
+    // `HAI_ENV_READY` as well — the two together short-circuit the route resolution that builds the environment the
+    // `own_licence` route needs. The `gateway` route sets it itself, in stage 1, having built that route's
+    // environment by hand: hai's own gateway route reads the APIM key from a Key Vault a pod cannot reach.
     { name: "HAI_IN_CONTAINER", value: "1" },
     // A pod runs the hai its entrypoint installed at boot, for its whole lifetime. Boot resolves `@latest` once and
     // this pins that choice: left to itself hai checks npm on every session start, and `CONVERSATION_SESSIONS`

@@ -42,16 +42,16 @@ export function onboarded(needed: readonly CredentialKind[], stored: ReadonlySet
 /**
  * The credentials without which there is no chat to be had: GitHub, and the credential the assistant's model is
  * reached with. Which that is follows the assistant's route, as `neededCredentials` decides it — a Claude token on
- * the person's own licence, a Bedrock API key on Amazon Bedrock — so "Claude connected" means the one its pod will
- * use, never whichever of them happens to be stored. One for another route is no use to the pod.
+ * the person's own licence — so "Claude connected" means the one its pod will use, never whichever of them happens
+ * to be stored. One for another route is no use to the pod.
  *
  * On the `gateway` route that credential is their Azure sign-in: the gateway authorises the person, so there is no
  * key, and a pod whose `apiKeyHelper` has no sign-in to mint from fails every turn. So it gates chat there and
- * nowhere else — on `own-licence` and `bedrock` it stays the background sign-in it has always been. That the
- * sign-in is a device code the pod relays is no reason to leave it out: GitHub is relayed the same way, and the gate
- * is for the asks the person can satisfy, which both of those are.
+ * nowhere else — on `own-licence` it stays the background sign-in it has always been. That the sign-in is a device
+ * code the pod relays is no reason to leave it out: GitHub is relayed the same way, and the gate is for the asks the
+ * person can satisfy, which both of those are.
  */
-const CHAT_CREDENTIALS: readonly CredentialKind[] = ["github", "claude", "bedrock"];
+const CHAT_CREDENTIALS: readonly CredentialKind[] = ["github", "claude"];
 
 /** Azure as well, on the one route where it is the model credential rather than a convenience. */
 const GATEWAY_CHAT_CREDENTIALS: readonly CredentialKind[] = [...CHAT_CREDENTIALS, "azure"];

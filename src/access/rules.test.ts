@@ -396,10 +396,6 @@ describe("canUseCredentialRoutes", () => {
 });
 
 describe("canOwnerReadCredential", () => {
-  it("should let the owner read their key back when it is an Amazon Bedrock API key", () => {
-    expect(canOwnerReadCredential("bedrock")).toBe(true);
-  });
-
   it("should let the owner read their CLAUDE.md back when the page shows it for editing", () => {
     expect(canOwnerReadCredential("claude_md")).toBe(true);
   });
@@ -414,6 +410,7 @@ describe("canOwnerReadCredential", () => {
     "claude",
     "jenkins",
     "atlassian",
+    "bedrock",
     "Bedrock",
     "claude-md",
     "git-identity",
@@ -428,7 +425,6 @@ describe("canVirtualAgentStoreCredential", () => {
     "github",
     "azure",
     "claude",
-    "bedrock",
     "jenkins",
     "atlassian"
   ])("should let a pod store its owner's %s when it is a credential the pod signs in for", (kind) => {

@@ -15,9 +15,9 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * Saving and deleting the signed-in person's own credentials. The owner is the session's identity, never a value
  * from the form. Neither action returns a value, and no action reads one.
  *
- * A GitHub token, a Bedrock API key and a Jenkins API token can be pasted, and a Claude token when any agent of
- * theirs is on their own licence: the Azure token cache and the Atlassian sign-in come from the virtual agent's own
- * device-code logins. A Bedrock key is accepted on either route, since the workspace on a laptop reads it back too.
+ * A GitHub token and a Jenkins API token can be pasted, and a Claude token when any agent of theirs is on their own
+ * licence: the Azure token cache and the Atlassian sign-in come from the virtual agent's own device-code logins, and
+ * the gateway route has no model credential to paste at all.
  *
  * A CLAUDE.md and a git identity each have their own two actions, because they are written and reset on the virtual
  * agents page rather than pasted, and only exist for virtual agents.
@@ -32,7 +32,7 @@ function revalidate(): void {
   }
 }
 
-const PASTEABLE = { github: "GitHub token", claude: "Claude token", bedrock: "Amazon Bedrock API key", jenkins: "Jenkins API token" } as const;
+const PASTEABLE = { github: "GitHub token", claude: "Claude token", jenkins: "Jenkins API token" } as const;
 
 function isPasteable(kind: string): kind is keyof typeof PASTEABLE {
   return Object.hasOwn(PASTEABLE, kind);
@@ -43,7 +43,7 @@ export async function saveCredential(form: FormData): Promise<ActionResult<{ con
     const viewer = await requireViewer();
     const kind = text(form.get("kind"));
     if (!isPasteable(kind)) {
-      return { ok: false, error: "only a GitHub token, a Claude token, an Amazon Bedrock API key or a Jenkins API token can be pasted here" };
+      return { ok: false, error: "only a GitHub token, a Claude token or a Jenkins API token can be pasted here" };
     }
     // Asked of the agents rather than of the viewer: a pod boots on its row's route, so refusing by the route in the
     // session locks out anyone whose `AIGateway.User` app role changed after an agent of theirs was created.

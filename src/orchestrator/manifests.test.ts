@@ -14,7 +14,7 @@ const AGENT: ClaimedAgent = {
   statefulset_name: "va-0f8a6a1e",
   pvc_name: "work-va-0f8a6a1e-0",
   delete_disk: false,
-  model_route: "bedrock",
+  model_route: "own_licence",
   owner: { oid: "owner" }
 };
 
@@ -164,8 +164,8 @@ describe("statefulSet", () => {
 
   // The key is one service's rather than one agent's, so a pod that cannot use it must not carry it. The hub sends
   // it for no other route, and this is what makes a claim that sent one anyway no way to get it into another pod.
-  it.each(["bedrock", "own_licence"] as const)("should leave the gateway's APIM key out when the agent is on the %s route", (route) => {
-    const [container] = podSpec(statefulSet({ ...AGENT, model_route: route, gateway: GATEWAY }, SPEC, TOKEN)).containers;
+  it("should leave the gateway's APIM key out when the agent is on the own_licence route", () => {
+    const [container] = podSpec(statefulSet({ ...AGENT, model_route: "own_licence", gateway: GATEWAY }, SPEC, TOKEN)).containers;
 
     expect(container!.env.map((entry) => entry.name).filter((name) => name.startsWith("AI_GATEWAY_"))).toEqual([]);
   });

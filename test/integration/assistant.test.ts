@@ -204,8 +204,8 @@ describe("the person's assistant", () => {
 
   it("should use the person's first virtual agent when they already have several", async () => {
     await insertUser(ALICE);
-    const first = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "pcs-api" });
-    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "ccd" });
+    const first = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "pcs-api" });
+    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "ccd" });
 
     expect((await ensureAssistant(prisma, VIEWER)).id).toBe(first.id);
     expect(await prisma.virtualAgent.count({ where: { ownerOid: ALICE.oid } })).toBe(2);
@@ -215,16 +215,16 @@ describe("the person's assistant", () => {
     await insertUser(ALICE);
     await ensureAssistant(prisma, VIEWER);
     for (let index = 1; index < MAX_VIRTUAL_AGENTS_PER_USER; index += 1) {
-      await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: `agent-${index}` });
+      await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: `agent-${index}` });
     }
 
-    await expect(createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "one-too-many" })).rejects.toMatchObject({ status: 409 });
+    await expect(createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "one-too-many" })).rejects.toMatchObject({ status: 409 });
   });
 
   it("should move to the next virtual agent when the first is being deleted", async () => {
     await insertUser(ALICE);
     const first = await ensureAssistant(prisma, VIEWER);
-    const second = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "second" });
+    const second = await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "second" });
     await setDesired(prisma, ALICE.oid, first.id, "deleted");
 
     expect((await ensureAssistant(prisma, VIEWER)).id).toBe(second.id);
@@ -251,10 +251,10 @@ describe("the person's assistant", () => {
   // `/assistant` asks for must then be storable: it asks for the row's credentials, and the only Claude token the
   // hub will ever hand that pod is the one this page can take.
   it.each([
-    ["bedrock", "own-licence", ["github", "claude"], true],
-    ["own-licence", "bedrock", ["github", "bedrock"], true],
+    ["gateway", "own-licence", ["github", "claude"], true],
+    ["own-licence", "gateway", ["github", "azure"], true],
     ["own-licence", "own-licence", ["github", "claude"], true],
-    ["bedrock", "bedrock", ["github", "bedrock"], false]
+    ["gateway", "gateway", ["github", "azure"], false]
   ] as const)("should ask for the assistant's own credentials and allow every one of them when the viewer is on %s and the row on %s", async (viewerRoute, rowRoute, needed, claudeTokenUsable) => {
     await insertUser(ALICE);
     await createVirtualAgent(prisma, { owner: ALICE, modelRoute: rowRoute, name: "assistant" });
@@ -316,7 +316,7 @@ describe("conversations", () => {
   it("should refuse a registration naming another assistant's conversation", async () => {
     const { token } = await startedAssistant();
     await insertUser(BOB);
-    const bobs = await ensureAssistant(prisma, { oid: BOB.oid, modelRoute: "bedrock" });
+    const bobs = await ensureAssistant(prisma, { oid: BOB.oid, modelRoute: "gateway" });
     const conversation = await createConversation(prisma, BOB.oid, { product: "general" });
 
     expect(bobs.id).not.toBe(conversation.id);
@@ -388,7 +388,7 @@ describe("conversations", () => {
     const id = ((await actions.startConversation({ product: "probate", body: "hi" })) as { id: string }).id;
 
     expect(await assistantConversation(VIEWER, id)).toMatchObject({ id, productLabel: "Probate", agentStatus: "offline" });
-    expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "bedrock" }, id)).toBeUndefined();
+    expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "gateway" }, id)).toBeUndefined();
     actAs("bob");
     expect(await actions.sendAssistantMessage({ conversationId: id, body: "hi" })).toEqual({ ok: false, error: "that conversation no longer exists" });
   });
@@ -414,7 +414,7 @@ describe("conversations", () => {
     expect((await jsonOf(owner)).entries).toMatchObject([{ role: "tool_use", content: { id: "t1", name: "Agent" } }]);
 
     expect((await uiTranscript("bob", agentId)).status).toBe(404);
-    expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "bedrock" }, id)).toBeUndefined();
+    expect(await assistantConversation({ ...BOB, tid: "dev", modelRoute: "gateway" }, id)).toBeUndefined();
   });
 
   it("should carry the session's skills to the conversation page, and none before a session registers", async () => {
@@ -638,7 +638,7 @@ describe("conversations", () => {
 
 describe("the chat gate", () => {
   /** Leaves the person with only the credentials named, as rows, which is all the gate reads. */
-  async function storedOnly(...kinds: ("github" | "azure" | "claude" | "bedrock")[]): Promise<void> {
+  async function storedOnly(...kinds: ("github" | "azure" | "claude")[]): Promise<void> {
     await prisma.credential.deleteMany({ where: { ownerOid: ALICE.oid, kind: { notIn: kinds } } });
   }
 
@@ -657,7 +657,7 @@ describe("the chat gate", () => {
     await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hello" })) as { id: string }).id;
     const queued = await prisma.delivery.count();
-    await storedOnly("claude", "bedrock");
+    await storedOnly("claude");
 
     expect(await actions.sendAssistantMessage({ conversationId: id, body: "again" })).toEqual(BLOCKED);
     expect(await actions.warmConversation({ conversationId: id })).toEqual(BLOCKED);
@@ -666,7 +666,7 @@ describe("the chat gate", () => {
 
   it("should judge the model key by the assistant's own route when the viewer's differs from it", async () => {
     await insertUser(ALICE);
-    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "assistant" });
+    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "gateway", name: "assistant" });
     await storedOnly("github", "claude");
 
     expect(await actions.startConversation({ product: "general", body: "hello" })).toEqual(BLOCKED);
@@ -675,7 +675,7 @@ describe("the chat gate", () => {
 
   it("should open the chat when GitHub and the assistant's model key are stored without Azure", async () => {
     await startedAssistant();
-    await storedOnly("github", "claude", "bedrock");
+    await storedOnly("github", "claude");
 
     expect((await openAssistant(VIEWER)).chat).toBe("open");
     expect(await actions.startConversation({ product: "general", body: "hello" })).toMatchObject({ ok: true });
@@ -843,7 +843,7 @@ describe("the sessions stream and report", () => {
   it("should refuse the sessions routes to another virtual agent's launch token", async () => {
     const { token } = await startedAssistant();
     await insertUser(BOB);
-    const bobs = await createVirtualAgent(prisma, { owner: BOB, modelRoute: "bedrock", name: "bobs" });
+    const bobs = await createVirtualAgent(prisma, { owner: BOB, modelRoute: "gateway", name: "bobs" });
 
     expect((await pod(sessionsRoute.PUT, token, `/api/virtual/${bobs.id}/sessions`, { virtualAgentId: bobs.id }, "PUT", { sessions: [], max: 1 })).status).toBe(
       403

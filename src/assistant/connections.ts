@@ -62,11 +62,6 @@ export const CONNECTORS = {
   atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)", paste: null },
   jenkins: { name: "Jenkins", initial: "J", desc: "Builds and pipelines on Jenkins (optional)", paste: "Jenkins API token" },
   claude: { name: "Claude", initial: "C", desc: "Your Claude licence", paste: "Claude token" },
-  // Worded for the hub's own credentials page, which is the only surface that offers it. No assistant asks for it:
-  // `neededCredentials` names it for the `bedrock` route alone, and nobody is put on that route any more — a member
-  // of the AI Gateway's developer group goes through the gateway on their own Azure sign-in, and everyone else
-  // brings their own Claude licence. An administrator pastes the key for an agent created before that was true.
-  bedrock: { name: "AI model access", initial: "AI", desc: "An Amazon Bedrock API key an administrator stores for you", paste: "Amazon Bedrock API key" },
   // Neither is a sign-in: both are kept beside them because they may hold private context, and there is nothing to
   // connect for either, so no surface offers a row for them.
   claude_md: null,

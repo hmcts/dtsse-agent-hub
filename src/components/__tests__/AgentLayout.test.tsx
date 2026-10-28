@@ -27,7 +27,7 @@ const CARD: VirtualAgentCard = {
   desired: "running",
   status: "running",
   statusDetail: null,
-  modelRoute: "bedrock",
+  modelRoute: "gateway",
   size: "small",
   exposedPorts: [],
   localOnlyPorts: [],
@@ -65,8 +65,8 @@ function page(overrides: Partial<VirtualAgentPageView> = {}): VirtualAgentPageVi
   return {
     summary: { id: VIRTUAL_ID, name: "pcs-api", desired: "running", status: "running", agentId: null, owner: { oid: "alice", name: "Alice", tid: "a-tenant" } },
     manage: {
-      detail: { card: CARD, logins: [], needed: ["github", "azure", "bedrock"], optional: ["jenkins"] },
-      credentials: { available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: [] },
+      detail: { card: CARD, logins: [], needed: ["github", "azure"], optional: ["jenkins"] },
+      credentials: { available: true, modelRoute: "gateway", claudeTokenUsable: false, statuses: [] },
       chats: []
     },
     linked: null,

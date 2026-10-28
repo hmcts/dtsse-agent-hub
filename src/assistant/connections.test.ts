@@ -34,7 +34,7 @@ import {
 
 const NOW = Date.parse("2026-10-25T12:00:00.000Z");
 
-const ROUTES: ModelRoute[] = ["bedrock", "gateway", "own-licence"];
+const ROUTES: ModelRoute[] = ["gateway", "own-licence"];
 
 /** When a stored credential was saved, and a sign-in either side of it, so the two can be ordered on purpose. */
 const STORED_AT = "2026-10-24T09:00:00.000Z";
@@ -95,18 +95,16 @@ describe("CONNECTORS", () => {
     }
   });
 
-  // The owner's decision: an Amazon Bedrock API key is an administrator's to paste on the hub's own credentials page,
-  // and must never be asked of the person whose chats run on it. It is still worded, because `CONNECTORS` is total
-  // over `CredentialKind` and that page reads the same words.
-  it("should ask for no model key at all on the route everybody signing in is put on", () => {
-    expect(neededCredentials(modelRouteFor(true))).not.toContain("bedrock");
-    expect(neededCredentials(modelRouteFor(false))).not.toContain("bedrock");
-    expect(CONNECTORS.bedrock).not.toBeNull();
+  // A person reaches Claude through the gateway on their own Azure sign-in, or on their own licence. There is no
+  // pasted model key on either route and no screen that offers one, which is what this pins.
+  it("should offer no pasted model key on either route a sign-in puts somebody on", () => {
+    expect(Object.keys(CONNECTORS)).not.toContain("bedrock");
+    expect([...neededCredentials(modelRouteFor(true)), ...neededCredentials(modelRouteFor(false))]).not.toContain("bedrock");
   });
 });
 
 describe("isConnection", () => {
-  it.each(["github", "azure", "atlassian", "jenkins", "claude", "bedrock"] as const)("should count %s as a sign-in when asked", (kind) => {
+  it.each(["github", "azure", "atlassian", "jenkins", "claude"] as const)("should count %s as a sign-in when asked", (kind) => {
     expect(isConnection(kind)).toBe(true);
   });
 
@@ -115,7 +113,7 @@ describe("isConnection", () => {
   });
 
   it("should answer for every kind of credential the hub keeps when asked", () => {
-    expect(CREDENTIAL_KINDS.filter(isConnection)).toEqual(["github", "azure", "claude", "bedrock", "jenkins", "atlassian"]);
+    expect(CREDENTIAL_KINDS.filter(isConnection)).toEqual(["github", "azure", "claude", "jenkins", "atlassian"]);
   });
 });
 
@@ -230,7 +228,7 @@ describe("canSignInAgain", () => {
 
   it.each([
     ["it uses nothing else", NOTHING],
-    ["it uses its own route's credentials", neededCredentials("bedrock")],
+    ["it uses its own route's credentials", neededCredentials("own-licence")],
     ["it uses every credential there is", [...CREDENTIAL_KINDS]]
   ])("should offer every sign-in the assistant makes for itself when %s", (_what, uses) => {
     const offered = CREDENTIAL_KINDS.filter((kind) => canSignInAgain(kind, uses));
@@ -251,14 +249,7 @@ describe("canSignInAgain", () => {
   // so a lapsed Claude row would be an ask with a box that cannot be answered and no reconnect to fall back on.
   it("should offer no Claude sign-in to an assistant that does not run on the person's own licence", () => {
     expect(canSignInAgain("claude", neededCredentials("gateway"))).toBe(false);
-    expect(canSignInAgain("claude", neededCredentials("bedrock"))).toBe(false);
     expect(canSignInAgain("claude", neededCredentials("own-licence"))).toBe(true);
-  });
-
-  // The pasted key has no way back on any route a sign-in puts somebody on, which is what keeps it off every ask.
-  it("should offer no Bedrock key to an assistant on a route that does not use one", () => {
-    expect(canSignInAgain("bedrock", [...neededCredentials("gateway"), ...optionalCredentials("gateway")])).toBe(false);
-    expect(canSignInAgain("bedrock", [...neededCredentials("own-licence"), ...optionalCredentials("own-licence")])).toBe(false);
   });
 
   it("should offer nothing that is not a sign-in at all", () => {
@@ -337,9 +328,9 @@ describe("hasLapsed", () => {
 
 describe("connections", () => {
   it("should keep the order it is given when it builds the rows", () => {
-    const rows = list(["github", "azure", "bedrock", "jenkins", "atlassian"], []);
+    const rows = list(["github", "azure", "claude", "jenkins", "atlassian"], []);
 
-    expect(rows.map((row) => row.kind)).toEqual(["github", "azure", "bedrock", "jenkins", "atlassian"]);
+    expect(rows.map((row) => row.kind)).toEqual(["github", "azure", "claude", "jenkins", "atlassian"]);
   });
 
   it("should leave out a CLAUDE.md and a git identity when they are among the kinds", () => {
@@ -423,7 +414,7 @@ describe("connections", () => {
 
 describe("connectionsWarning", () => {
   it("should be nothing when every prompted sign-in is connected", () => {
-    const rows = list(["github", "azure", "bedrock", "atlassian"], [status("github", true), status("azure", true), status("atlassian", true)]);
+    const rows = list(["github", "azure", "claude", "atlassian"], [status("github", true), status("azure", true), status("atlassian", true)]);
 
     expect(connectionsWarning(rows)).toBeNull();
   });
@@ -526,8 +517,8 @@ describe("connectionsWarning", () => {
     expect(connectionsWarning(rows)).toBeNull();
   });
 
-  it("should not warn about model access when it is the only thing missing", () => {
-    const rows = list(["github", "azure", "bedrock", "atlassian"], [status("github", true), status("azure", true), status("atlassian", true)]);
+  it("should not warn about the Claude token when it is the only thing missing", () => {
+    const rows = list(["github", "azure", "claude", "atlassian"], [status("github", true), status("azure", true), status("atlassian", true)]);
 
     expect(connectionsWarning(rows)).toBeNull();
   });
@@ -597,12 +588,12 @@ describe("signInPrompt", () => {
 });
 
 describe("connectionsData", () => {
-  const assistant = { needed: ["github", "azure", "bedrock"] as CredentialKind[], optional: ["jenkins", "atlassian"] as CredentialKind[], logins: [] };
+  const assistant = { needed: ["github", "azure", "claude"] as CredentialKind[], optional: ["jenkins", "atlassian"] as CredentialKind[], logins: [] };
 
   it("should ask for the needed sign-ins before the optional ones when the credentials are readable", () => {
     const data = connectionsData(assistant, { available: true, statuses: [status("github", true)] });
 
-    expect(data.kinds).toEqual(["github", "azure", "bedrock", "jenkins", "atlassian"]);
+    expect(data.kinds).toEqual(["github", "azure", "claude", "jenkins", "atlassian"]);
     expect(data.statuses).toEqual([status("github", true)]);
     expect(data.unavailable).toBeNull();
   });
@@ -655,15 +646,8 @@ describe("offeredConnections", () => {
     expect(offerFor("gateway")).toEqual(["github", "azure", "atlassian"]);
   });
 
-  // Nothing on this route asks for the key, so there is no row to paste one into — and a lapsed ask for it is one
-  // `saveCredential` would refuse, which is the row `canSignInAgain` exists to keep off the screen. (A *live* relay
-  // of any kind is still offered, whatever route it is: see the test above. No pod relays this one.)
-  it.each(["failed", "expired"] as const)("should offer no Bedrock key row on the gateway route when a %s ask for one is on the record", (state) => {
-    expect(offerFor("gateway", [login("bedrock", state)])).not.toContain("bedrock");
-  });
-
   it("should offer the needed connections before the optional one it offers unasked", () => {
-    expect(offer(["github", "azure", "bedrock"])).toEqual(["github", "azure", "bedrock", "atlassian"]);
+    expect(offer(["github", "azure"])).toEqual(["github", "azure", "atlassian"]);
   });
 
   it("should offer no connection that is neither needed, nor asked for, nor the optional one it offers", () => {
@@ -673,33 +657,28 @@ describe("offeredConnections", () => {
   });
 
   it("should offer a row for an optional sign-in the pod has stopped to ask for", () => {
-    expect(offer(["github", "azure", "bedrock"], [login("jenkins", "pending")])).toEqual(["github", "azure", "bedrock", "jenkins", "atlassian"]);
+    expect(offer(["github", "azure"], [login("jenkins", "pending")])).toEqual(["github", "azure", "jenkins", "atlassian"]);
   });
 
   // Which kinds a pod relays is decided in another repo, so this holds whatever that answer becomes rather than only
   // for the kinds the hub's own `needed` and `optional` happen to name.
   it("should offer a row for a sign-in the pod asks for that is neither needed nor optional", () => {
-    expect(offer(["github", "azure", "bedrock"], [login("claude", "pending")])).toEqual(["github", "azure", "bedrock", "claude", "atlassian"]);
+    expect(offer(["github", "azure"], [login("claude", "pending")])).toEqual(["github", "azure", "claude", "atlassian"]);
   });
 
   it("should offer each asked-for connection once when it is needed as well", () => {
-    expect(offer(["github", "azure", "bedrock"], [login("azure", "pending"), login("atlassian", "pending")])).toEqual([
-      "github",
-      "azure",
-      "bedrock",
-      "atlassian"
-    ]);
+    expect(offer(["github", "azure"], [login("azure", "pending"), login("atlassian", "pending")])).toEqual(["github", "azure", "atlassian"]);
   });
 
   // The status does not move back when a code runs out, so the ask outlasts the code and the row has to as well.
   it("should offer a row for an asked-for sign-in whose code has run out", () => {
     const stale = login("jenkins", "pending", new Date(NOW - 600_000).toISOString());
 
-    expect(offer(["github", "azure", "bedrock"], [stale])).toContain("jenkins");
+    expect(offer(["github", "azure"], [stale])).toContain("jenkins");
   });
 
   it("should offer no row for an optional sign-in that is over and done with", () => {
-    expect(offer(["github", "azure", "bedrock"], [login("jenkins", "completed")])).not.toContain("jenkins");
+    expect(offer(["github", "azure"], [login("jenkins", "completed")])).not.toContain("jenkins");
   });
 
   /**
@@ -708,29 +687,29 @@ describe("offeredConnections", () => {
    * from this same set — so leaving it out is an ask pointing at a screen with nothing on it.
    */
   it.each(["expired", "failed"] as const)("should offer a row for an optional sign-in a pod reported %s", (state) => {
-    expect(offer(["github", "azure", "bedrock"], [login("jenkins", state)])).toContain("jenkins");
+    expect(offer(["github", "azure"], [login("jenkins", state)])).toContain("jenkins");
   });
 
   /**
-   * `saveCredential` refuses a Claude token from somebody whose agents run on Amazon Bedrock, and the only control a
+   * `saveCredential` refuses a Claude token from somebody whose agents run on the gateway, and the only control a
    * lapsed Claude row has is that box. Nothing clears the login row either — `startLogin` overwrites only on a new
    * relay, and the states that end one need a pod's report — so a row here would be a banner naming a sign-in the
    * person can neither satisfy nor dismiss, for good. The ask names from this set, so leaving it out covers both.
    */
   it.each(["expired", "failed"] as const)("should offer no row for a %s sign-in the hub would take no value for", (state) => {
-    expect(offer(["github", "azure", "bedrock"], [login("claude", state)])).not.toContain("claude");
+    expect(offer(["github", "azure"], [login("claude", state)])).not.toContain("claude");
   });
 
   it("should offer no row for a code that ran out for a kind the hub would take no value for", () => {
     const stale = login("claude", "pending", new Date(NOW - 1000).toISOString());
 
-    expect(offer(["github", "azure", "bedrock"], [stale])).not.toContain("claude");
+    expect(offer(["github", "azure"], [stale])).not.toContain("claude");
   });
 
   // A live one is always offered, whatever the kind: finishing it sends the code back to the pod through
   // `storePastedCode`, which is not route-aware, so there is always something to do about it.
   it("should offer a row for a live sign-in even for a kind the hub would take no value for", () => {
-    expect(offer(["github", "azure", "bedrock"], [login("claude", "pending")])).toContain("claude");
+    expect(offer(["github", "azure"], [login("claude", "pending")])).toContain("claude");
   });
 
   it("should offer no row for a credential that is not a connection", () => {
@@ -825,11 +804,11 @@ describe("connectionsPrompt", () => {
   });
 
   it("should name every connection left, in the order the screen lists them, when several are", () => {
-    expect(connectionsPrompt("connect", ["github", "azure", "bedrock"], new Set<CredentialKind>(["azure"]))?.message).toBe(
-      "Your assistant needs GitHub and AI model access before it can work for you."
+    expect(connectionsPrompt("connect", ["github", "azure", "claude"], new Set<CredentialKind>(["azure"]))?.message).toBe(
+      "Your assistant needs GitHub and Claude before it can work for you."
     );
-    expect(connectionsPrompt("connect", ["github", "azure", "bedrock"], NOTHING)?.message).toBe(
-      "Your assistant needs GitHub, Azure and AI model access before it can work for you."
+    expect(connectionsPrompt("connect", ["github", "azure", "claude"], NOTHING)?.message).toBe(
+      "Your assistant needs GitHub, Azure and Claude before it can work for you."
     );
   });
 

@@ -18,7 +18,6 @@ const TITLES: Record<CredentialKind, string> = {
   github: "GitHub token",
   azure: "Azure sign-in",
   claude: "Claude token",
-  bedrock: "Amazon Bedrock API key",
   jenkins: "Jenkins API token",
   claude_md: "CLAUDE.md",
   git_identity: "Git identity",
@@ -39,9 +38,6 @@ const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white ho
  * the agents they already have, whose route was fixed when each was created. Someone given the `AIGateway.User` app
  * role since then is on both at once, and is told so — rather than being told that the Claude token an agent of
  * theirs is still waiting for is not needed.
- *
- * `bedrock` is nobody's route now and is not worded for: a viewer on it is a development persona, and the sentence
- * the gateway gets is near enough true of it — both reach Claude through HMCTS rather than their own licence.
  */
 function modelRouteWords(route: ModelRoute, claudeTokenUsable: boolean): { detail: string; body: React.ReactNode } {
   const setupToken = <code className="font-mono">claude setup-token</code>;
@@ -146,8 +142,7 @@ export function CredentialSettingsView({ settings, actions }: { settings: Creden
         <>
           <p className="max-w-3xl text-[15px] text-hub-muted">
             You normally set these up on a virtual agent's page, by signing in with device codes, so pasting a token here is optional. This page never shows a
-            stored credential: you can only replace or delete it. Only an Amazon Bedrock API key can be read back, by you, through the agent API, so the
-            workspace on your laptop can use it; nothing reads back the others.
+            stored credential: you can only replace or delete it, and nothing reads one back.
           </p>
           {settings.statuses.map((status) => (
             <CredentialCard key={status.kind} status={status} claudeTokenUsable={settings.claudeTokenUsable} actions={actions} />

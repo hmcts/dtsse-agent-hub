@@ -17,7 +17,6 @@ const TITLES: Record<CredentialKind, string> = {
   github: "GitHub",
   azure: "Azure",
   claude: "Claude",
-  bedrock: "Amazon Bedrock API key",
   jenkins: "Jenkins API token",
   claude_md: "CLAUDE.md",
   git_identity: "Git identity",
@@ -26,7 +25,7 @@ const TITLES: Record<CredentialKind, string> = {
 
 /** The kinds the owner can paste here; GitHub, Azure and Atlassian come only from the virtual agent's own sign-in. */
 function isPasted(kind: CredentialKind): boolean {
-  return kind === "bedrock" || kind === "jenkins" || kind === "claude";
+  return kind === "jenkins" || kind === "claude";
 }
 
 /** What the owner pastes for `kind`: a Claude token, as opposed to the Claude sign-in. */
@@ -329,7 +328,7 @@ function Card({
 
 /**
  * What the virtual agent needs before it can work, one card per credential: stored, a sign-in waiting for the owner
- * with its code or a box to paste one into, lapsed, or nothing yet. A key the owner pastes (Bedrock, Claude, the
+ * with its code or a box to paste one into, lapsed, or nothing yet. A value the owner pastes (a Claude token, the
  * optional Jenkins token) offers its box until it is stored; GitHub, Azure and the optional Atlassian come from the
  * agent's own sign-in, which the owner can have it do again. Only the owner ever sees this page.
  *

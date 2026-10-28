@@ -20,7 +20,6 @@ const CASE_TIMEOUT = 300_000;
 // keeps the two lists in step.
 const CASES = [
   "first-boot",
-  "bedrock-route",
   "gateway-route",
   "gateway-route-unchecked",
   "gateway-route-unreadable",

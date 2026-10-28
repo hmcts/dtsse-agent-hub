@@ -116,7 +116,6 @@ export const OPTIONAL_CREDENTIALS: CredentialKind[] = ["azure", "jenkins", "atla
  * the credential and `github` the only other thing the pod waits for.
  */
 const NEEDED: Readonly<Record<ModelRoute, readonly CredentialKind[]>> = {
-  bedrock: ["github", "bedrock"],
   gateway: ["github", "azure"],
   "own-licence": ["github", "claude"]
 };

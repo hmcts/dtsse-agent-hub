@@ -79,14 +79,29 @@ const SELECT = {
   createdAt: true
 } as const;
 
-/** Postgres enum labels cannot hold a hyphen, so `own_licence` is the one value spelled differently in the row. */
-type StoredRoute = "bedrock" | "gateway" | "own_licence";
+/**
+ * What the column can hold, which is wider than what the application writes. Postgres enum labels cannot hold a
+ * hyphen, so `own_licence` is spelled differently in the row; and `bedrock` is still a label on the type, because
+ * `20261107090000_bedrock_gone` moves every row off it without dropping it — the previous release has to keep
+ * reading the column while it is still serving. So this is the read boundary, and `toRoute` is where the wider
+ * type becomes the two routes the rest of the code knows about.
+ */
+type StoredRoute = "gateway" | "own_licence" | "bedrock";
 
+/**
+ * `bedrock` reads as `gateway` because that is where the migration moved every row carrying it. Nothing should ever
+ * answer it — the label outlives the rows by one release — and a row that somehow did is better read as the route
+ * it was migrated to than as a value the rest of the code has no arm for.
+ */
 function toRoute(stored: StoredRoute): ModelRoute {
-  return stored === "own_licence" ? "own-licence" : stored;
+  if (stored === "own_licence") {
+    return "own-licence";
+  }
+  return stored === "bedrock" ? "gateway" : stored;
 }
 
-function fromRoute(route: ModelRoute): StoredRoute {
+/** Only the two live routes are ever written, so this needs no arm for the label the migration left behind. */
+function fromRoute(route: ModelRoute): Exclude<StoredRoute, "bedrock"> {
   return route === "own-licence" ? "own_licence" : route;
 }
 

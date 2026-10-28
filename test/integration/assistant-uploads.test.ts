@@ -325,7 +325,7 @@ describe("uploading a file", () => {
     // Arrange
     await startedAssistant();
     await insertUser(BOB);
-    await createVirtualAgent(prisma, { owner: BOB, modelRoute: "bedrock", name: "bobs" });
+    await createVirtualAgent(prisma, { owner: BOB, modelRoute: "gateway", name: "bobs" });
     const bobs = await createConversation(prisma, BOB.oid, { product: "pcs" });
 
     // Act
@@ -369,7 +369,7 @@ describe("uploading a file", () => {
     // Arrange
     await startedAssistant();
     await insertUser(BOB);
-    await createVirtualAgent(prisma, { owner: BOB, modelRoute: "bedrock", name: "bobs" });
+    await createVirtualAgent(prisma, { owner: BOB, modelRoute: "gateway", name: "bobs" });
     const bobs = await createConversation(prisma, BOB.oid, { product: "pcs" });
     const theirs = await prisma.assistantUpload.create({
       data: { conversationId: bobs.id, ownerOid: BOB.oid, fileName: "a.pdf", storedName: "a.pdf", mediaType: "application/pdf", bytes: 4n },
@@ -773,7 +773,7 @@ describe("downloading an attachment back", () => {
     // Arrange
     const { uploadId } = await sentFile("letter.pdf", filled(12, 5));
     await insertUser(BOB);
-    await createVirtualAgent(prisma, { owner: BOB, modelRoute: "bedrock", name: "bobs" });
+    await createVirtualAgent(prisma, { owner: BOB, modelRoute: "gateway", name: "bobs" });
 
     // Act
     const theirs = await download(uploadId, "bob");

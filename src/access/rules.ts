@@ -9,8 +9,8 @@
  *   owner.
  * - Only an owner changes their grants, and only to people the hub already knows.
  * - Only a person saves, replaces or deletes their own credentials. No grant extends to them. Of their values, they
- *   may read back their own Amazon Bedrock API key, their CLAUDE.md and their git identity, with their own token;
- *   every other kind is write-only for them. `canOwnerReadCredential` says why those three and nothing else.
+ *   may read back their CLAUDE.md and their git identity, with their own token; every other kind is write-only for
+ *   them. `canOwnerReadCredential` says why those two and nothing else.
  * - A virtual agent is visible to whoever may see its owner's agents, since its sessions are among them. Only that
  *   person manages it and sees its login codes. A virtual agent's launch token acts
  *   as its owner for that virtual agent and the agents its sessions registered, and for nothing else of theirs.
@@ -169,13 +169,13 @@ export function canManageCredential(actorOid: string, ownerOid: string): boolean
 
 /**
  * Whether a person may read back their own stored credential of `kind`, through `GET /api/agent/credentials/{kind}`
- * or the web UI. An Amazon Bedrock API key, because the workspace's launcher on their laptop fetches it to call
- * Bedrock; and their CLAUDE.md and git identity, because the page that edits them has to show them. Anyone holding
- * that person's agent-hub token can therefore read all three. Every other kind acts as the person in GitHub, Azure,
- * Claude, Jenkins or Atlassian, and stays write-only.
+ * or the web UI. Their CLAUDE.md and their git identity, because the page that edits them has to show them. Anyone
+ * holding that person's agent-hub token can therefore read both. No model credential is readable: the gateway route
+ * stores none at all, and every other kind acts as the person in GitHub, Azure, Claude, Jenkins or Atlassian, so it
+ * stays write-only.
  */
 export function canOwnerReadCredential(kind: string): boolean {
-  return kind === "bedrock" || kind === "claude_md" || kind === "git_identity";
+  return kind === "claude_md" || kind === "git_identity";
 }
 
 /**
@@ -355,7 +355,7 @@ export function canActAsVirtualAgent(tokenVirtualAgentId: string | undefined, vi
 
 /**
  * `/api/agent/credentials/{kind}` is for a person at their own command line. A pod stores and reads its owner's
- * credentials through its virtual agent's routes instead, so a launch token cannot read even a Bedrock key here.
+ * credentials through its virtual agent's routes instead, so a launch token cannot read anything here.
  */
 export function canUseCredentialRoutes(caller: { virtualAgentId?: string }): boolean {
   return caller.virtualAgentId === undefined;

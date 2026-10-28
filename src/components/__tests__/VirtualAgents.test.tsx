@@ -48,7 +48,7 @@ function card(overrides: Partial<VirtualAgentCard> = {}): VirtualAgentCard {
     desired: "running",
     status: "running",
     statusDetail: null,
-    modelRoute: "bedrock",
+    modelRoute: "gateway",
     size: "small",
     exposedPorts: [],
     localOnlyPorts: [],
@@ -119,7 +119,7 @@ describe("labels", () => {
 
 describe("VirtualAgentsView", () => {
   it("should list the viewer's agents with their status, idle time and a link to each", () => {
-    render(<VirtualAgentsView agents={[card()]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
+    render(<VirtualAgentsView agents={[card()]} route="gateway" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
     const list = screen.getByRole("list", { name: "Your virtual agents" });
     expect(within(list).getByRole("link", { name: "pcs-api" }).getAttribute("href")).toBe("/hub/agents/0f8a6a1e-0000-4000-8000-000000000001");
@@ -139,7 +139,7 @@ describe("VirtualAgentsView", () => {
             diskExpiresAt: "2026-10-07T12:00:00.000Z"
           })
         ]}
-        route="bedrock"
+        route="gateway"
         create={created()}
         now={NOW}
         plugins={NO_PLUGINS}
@@ -166,15 +166,9 @@ describe("VirtualAgentsView", () => {
     expect(screen.getByText("Model: Claude through the HMCTS AI Gateway, on your own Azure sign-in")).toBeTruthy();
   });
 
-  it("should name the stored key when an agent of the viewer's is still on the Bedrock route", () => {
-    render(<VirtualAgentsView agents={[]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
-
-    expect(screen.getByText("Model: Amazon Bedrock, with the API key stored for you")).toBeTruthy();
-  });
-
   it("should send the name to the create action and open the new agent's page when the form is submitted", async () => {
     const create = vi.fn(async () => ({ ok: true as const, id: "0f8a6a1e-0000-4000-8000-000000000009", confirmation: "pcs-api is starting" }));
-    render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} plugins={NO_PLUGINS} />);
+    render(<VirtualAgentsView agents={[]} route="gateway" create={create} now={NOW} plugins={NO_PLUGINS} />);
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "pcs-api" } });
     await act(async () => {
@@ -187,7 +181,7 @@ describe("VirtualAgentsView", () => {
   });
 
   it("should still offer the create form when the viewer has two agents running", () => {
-    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b" })]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
+    render(<VirtualAgentsView agents={[card(), card({ id: "b", name: "b" })]} route="gateway" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
     expect(screen.getByRole("form", { name: "Create a virtual agent" })).toBeTruthy();
     expect(screen.getByText("2 of 3")).toBeTruthy();
@@ -195,7 +189,7 @@ describe("VirtualAgentsView", () => {
 
   it("should offer no create form and say why when the viewer is at the limit", () => {
     const agents = [card(), card({ id: "b", name: "b" }), card({ id: "c", name: "c" })];
-    render(<VirtualAgentsView agents={agents} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
+    render(<VirtualAgentsView agents={agents} route="gateway" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
     expect(screen.queryByRole("form", { name: "Create a virtual agent" })).toBeNull();
     expect(screen.getByText("3 of 3")).toBeTruthy();
@@ -206,7 +200,7 @@ describe("VirtualAgentsView", () => {
     render(
       <VirtualAgentsView
         agents={[card(), card({ id: "b", name: "b", desired: "deleted" })]}
-        route="bedrock"
+        route="gateway"
         create={created()}
         now={NOW}
         plugins={NO_PLUGINS}
@@ -360,7 +354,7 @@ describe("RenameVirtualAgent", () => {
 describe("running agent detail", () => {
   it("should show what a running agent's pod last said, such as its background clone", () => {
     const detail = "Claude is ready; cloning repositories (12/241)";
-    render(<VirtualAgentsView agents={[card({ statusDetail: detail })]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
+    render(<VirtualAgentsView agents={[card({ statusDetail: detail })]} route="gateway" create={created()} now={NOW} plugins={NO_PLUGINS} />);
     render(<LifecyclePanel agent={card({ statusDetail: detail })} actions={{ start: ok(), stop: ok(), remove: ok() }} />);
 
     expect(screen.getAllByText(detail)).toHaveLength(2);
@@ -408,7 +402,7 @@ describe("the plugins choice", () => {
       },
       manage: {
         detail: { card: agent, logins: [], needed: ["github"], optional: [] },
-        credentials: { available: true, modelRoute: "bedrock", claudeTokenUsable: false, statuses: [stored("github")] },
+        credentials: { available: true, modelRoute: "gateway", claudeTokenUsable: false, statuses: [stored("github")] },
         chats: []
       },
       linked: null
@@ -417,7 +411,7 @@ describe("the plugins choice", () => {
 
   it("should offer a checkbox per plugin with its description on the create form and send the ticked ones", async () => {
     const create = created();
-    render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} plugins={OFFERED} />);
+    render(<VirtualAgentsView agents={[]} route="gateway" create={create} now={NOW} plugins={OFFERED} />);
 
     const group = screen.getByRole("group", { name: "Plugins" });
     expect(
@@ -436,7 +430,7 @@ describe("the plugins choice", () => {
   });
 
   it("should leave plugins off the create form, and say nothing about the configuration, when the hub legitimately offers none", () => {
-    render(<VirtualAgentsView agents={[]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
+    render(<VirtualAgentsView agents={[]} route="gateway" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
     expect(screen.queryByRole("group", { name: "Plugins" })).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
@@ -446,7 +440,7 @@ describe("the plugins choice", () => {
 
   it("should name VIRTUAL_AGENT_PLUGINS in place of the create form's picker, and leave the rest of /hub/virtual working, when the configuration cannot be read", async () => {
     const create = created();
-    render(<VirtualAgentsView agents={[card()]} route="bedrock" create={create} now={NOW} plugins={UNREADABLE} />);
+    render(<VirtualAgentsView agents={[card()]} route="gateway" create={create} now={NOW} plugins={UNREADABLE} />);
 
     expect(screen.getByRole("alert").textContent).toBe(FAULT);
     expect(screen.queryByRole("group", { name: "Plugins" })).toBeNull();
@@ -587,7 +581,7 @@ describe("the plugins choice", () => {
 describe("the size choice", () => {
   it("should offer every size on the create form, small first, and send the one chosen", async () => {
     const create = vi.fn(async () => ({ ok: true as const, id: "0f8a6a1e-0000-4000-8000-000000000009", confirmation: "big is starting" }));
-    render(<VirtualAgentsView agents={[]} route="bedrock" create={create} now={NOW} plugins={NO_PLUGINS} />);
+    render(<VirtualAgentsView agents={[]} route="gateway" create={create} now={NOW} plugins={NO_PLUGINS} />);
 
     const size = screen.getByLabelText("Size") as HTMLSelectElement;
     expect([...size.options].map((option) => option.textContent)).toEqual([
@@ -977,14 +971,14 @@ describe("OnboardingChecklist", () => {
     expect(screen.getByRole("form", { name: "Paste the Claude code" })).toBeTruthy();
   });
 
-  it("should offer a password box for the Amazon Bedrock API key and save it as the owner's credential when it is not stored", async () => {
-    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Your Amazon Bedrock API key is stored" }));
+  it("should offer a password box for the Claude token and save it as the owner's credential when it is not stored", async () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Your Claude token is stored" }));
     render(
       <OnboardingChecklist
         virtualAgentId="va-1"
         desired="running"
         reconnect={ok()}
-        needed={["github", "azure", "bedrock"]}
+        needed={["github", "azure", "claude"]}
         statuses={[]}
         logins={[]}
         paste={ok()}
@@ -994,28 +988,28 @@ describe("OnboardingChecklist", () => {
     );
 
     const item = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem")[2]!;
-    expect(item.querySelector("h3")?.textContent).toBe("Amazon Bedrock API key");
+    expect(item.querySelector("h3")?.textContent).toBe("Claude");
     expect(item.textContent).toContain("Not stored");
-    const input = within(item).getByLabelText("Paste your Amazon Bedrock API key");
+    const input = within(item).getByLabelText("Paste your Claude token");
     expect(input).toHaveProperty("type", "password");
-    fireEvent.change(input, { target: { value: "ABSK-pasted" } });
+    fireEvent.change(input, { target: { value: "sk-ant-pasted" } });
     await act(async () => {
-      fireEvent.submit(within(item).getByRole("form", { name: "Save your Amazon Bedrock API key" }));
+      fireEvent.submit(within(item).getByRole("form", { name: "Save your Claude token" }));
     });
 
     const sent = (save.mock.calls[0] as unknown as [FormData])[0];
-    expect([sent.get("kind"), sent.get("value")]).toEqual(["bedrock", "ABSK-pasted"]);
-    expect(within(item).getByRole("status").textContent).toBe("Your Amazon Bedrock API key is stored");
+    expect([sent.get("kind"), sent.get("value")]).toEqual(["claude", "sk-ant-pasted"]);
+    expect(within(item).getByRole("status").textContent).toBe("Your Claude token is stored");
   });
 
-  it("should tick a stored Amazon Bedrock API key, count it and not ask for it again when it is stored", () => {
+  it("should tick a stored Claude token, count it and not ask for it again when it is stored", () => {
     render(
       <OnboardingChecklist
         virtualAgentId="va-1"
         desired="running"
         reconnect={ok()}
-        needed={["github", "azure", "bedrock"]}
-        statuses={[stored("bedrock")]}
+        needed={["github", "azure", "claude"]}
+        statuses={[stored("claude")]}
         logins={[]}
         paste={ok()}
         save={ok()}
@@ -1028,7 +1022,7 @@ describe("OnboardingChecklist", () => {
     expect(within(item).queryByRole("form")).toBeNull();
     expect(within(item).queryByRole("textbox")).toBeNull();
     expect(item.querySelector("input")).toBeNull();
-    expect(within(item).getByRole("button", { name: "Replace your Amazon Bedrock API key" }).querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    expect(within(item).getByRole("button", { name: "Replace your Claude token" }).querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
     expect(screen.getByText("1 of 3 stored")).toBeTruthy();
   });
 
@@ -1090,9 +1084,9 @@ describe("OnboardingChecklist", () => {
         virtualAgentId="va-1"
         desired="running"
         reconnect={ok()}
-        needed={["github", "azure", "bedrock"]}
+        needed={["github", "azure", "claude"]}
         optional={["jenkins"]}
-        statuses={[stored("github"), stored("azure"), stored("bedrock")]}
+        statuses={[stored("github"), stored("azure"), stored("claude")]}
         logins={[]}
         paste={ok()}
         save={ok()}
@@ -1112,7 +1106,7 @@ describe("OnboardingChecklist", () => {
         virtualAgentId="va-1"
         desired="running"
         reconnect={ok()}
-        needed={["github", "claude", "bedrock"]}
+        needed={["github", "claude"]}
         optional={["jenkins"]}
         statuses={[]}
         logins={[login({ kind: "claude", prompt: "paste_code", userCode: null })]}
@@ -1123,7 +1117,7 @@ describe("OnboardingChecklist", () => {
     );
 
     const fields = Array.from(document.querySelectorAll("input:not([type=hidden])"));
-    expect(fields).toHaveLength(3);
+    expect(fields).toHaveLength(2);
     for (const field of fields) {
       expect(field.className).toContain("w-full");
       expect(field.className).toContain("min-w-0");

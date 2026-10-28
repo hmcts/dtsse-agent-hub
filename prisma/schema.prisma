@@ -57,6 +57,10 @@ enum CredentialKind {
   github
   azure
   claude
+  // Nothing reads or writes this: the pasted Amazon Bedrock API key is gone from every surface, and
+  // `CREDENTIAL_KINDS` in src/credentials/names.ts — which is what the application's `CredentialKind` is — does not
+  // carry it. It stays in the type only because `20261107090000_bedrock_gone` leaves the label in place for the
+  // length of a rolling deploy; the migration after it drops the value and this line with it.
   bedrock
   jenkins
   claude_md
@@ -106,6 +110,9 @@ enum VirtualAgentSize {
 
 
 enum ModelRoute {
+  // No row carries this: `20261107090000_bedrock_gone` moved every one of them to `gateway`, and `ModelRoute` in
+  // src/viewer/identity.ts has the two live routes only. Left in the type for the same rolling-deploy reason as
+  // `CredentialKind.bedrock`, and dropped by the same later migration.
   bedrock
   gateway
   own_licence
