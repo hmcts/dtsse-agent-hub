@@ -18,7 +18,7 @@ const TITLES: Record<CredentialKind, string> = {
   github: "GitHub token",
   azure: "Azure sign-in",
   claude: "Claude token",
-  bedrock: "Bedrock API key",
+  bedrock: "Claude Code key",
   jenkins: "Jenkins API token",
   claude_md: "CLAUDE.md",
   git_identity: "Git identity",
@@ -50,18 +50,18 @@ function modelRouteWords(route: ModelRoute, claudeTokenUsable: boolean): { detai
   }
   if (claudeTokenUsable) {
     return {
-      detail: "Amazon Bedrock and your own Claude licence",
+      detail: "HMCTS Claude Code access and your own Claude licence",
       body: (
         <>
-          A new virtual agent of yours uses Amazon Bedrock, with your Bedrock API key. One you created earlier is on your own Claude licence, and still needs
-          the Claude token {setupToken} prints.
+          A new virtual agent of yours connects to Claude Code through HMCTS, with your Claude Code key. One you created earlier is on your own Claude licence,
+          and still needs the Claude token {setupToken} prints.
         </>
       )
     };
   }
   return {
-    detail: "Amazon Bedrock",
-    body: "Your virtual agents use Amazon Bedrock, with your Bedrock API key, so they need that key and no Claude token of yours."
+    detail: "HMCTS Claude Code access",
+    body: "Your virtual agents connect to Claude Code through HMCTS, with your Claude Code key, so they need that key and no Claude token of yours."
   };
 }
 
@@ -83,7 +83,7 @@ function notPasteable(kind: CredentialKind, claudeTokenUsable: boolean): string 
     return "This comes from your virtual agent's own Atlassian device-code sign-in, and cannot be pasted here.";
   }
   if (kind === "claude" && !claudeTokenUsable) {
-    return "Not needed: your virtual agents use Amazon Bedrock, with your Bedrock API key.";
+    return "Not needed: your virtual agents connect to Claude Code through HMCTS, with your Claude Code key.";
   }
   return undefined;
 }
@@ -143,7 +143,7 @@ export function CredentialSettingsView({ settings, actions }: { settings: Creden
         <>
           <p className="max-w-3xl text-[15px] text-hub-muted">
             You normally set these up on a virtual agent's page, by signing in with device codes, so pasting a token here is optional. This page never shows a
-            stored credential: you can only replace or delete it. Only your Bedrock API key can be read back, by you, through the agent API, so the workspace on
+            stored credential: you can only replace or delete it. Only your Claude Code key can be read back, by you, through the agent API, so the workspace on
             your laptop can use it; nothing reads back the others.
           </p>
           {settings.statuses.map((status) => (
