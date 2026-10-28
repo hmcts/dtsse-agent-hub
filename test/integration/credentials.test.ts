@@ -244,7 +244,7 @@ describe("DELETE /api/agent/credentials/{kind}", () => {
     expect((await remove(ALICE, "ssh")).status).toBe(404);
   });
 
-  it("should remove a stored Bedrock API key when the owner deletes it from the command line", async () => {
+  it("should remove a stored Claude Code key when the owner deletes it from the command line", async () => {
     await put(ALICE, "bedrock", { value: BEDROCK });
 
     expect((await remove(ALICE, "bedrock")).status).toBe(204);
@@ -254,7 +254,7 @@ describe("DELETE /api/agent/credentials/{kind}", () => {
   });
 });
 
-describe("a Bedrock API key", () => {
+describe("a Claude Code key", () => {
   it("should store the caller's key from the command line when it is valid", async () => {
     expect((await put(ALICE, "bedrock", { value: ` ${BEDROCK}\n` })).status).toBe(204);
 
@@ -272,14 +272,14 @@ describe("a Bedrock API key", () => {
 
     expect(response.status).toBe(400);
     const body = await response.text();
-    expect(body).toContain("GitHub token, not an Amazon Bedrock API key");
+    expect(body).toContain("GitHub token, not a Claude Code key");
     expect(body).not.toContain(GITHUB);
     expect(await prisma.credential.count()).toBe(0);
   });
 });
 
 describe("reading credentials back", () => {
-  it("should give the owner their own Bedrock API key when it is stored", async () => {
+  it("should give the owner their own Claude Code key when it is stored", async () => {
     await put(ALICE, "bedrock", { value: BEDROCK });
 
     const response = await read(ALICE, "bedrock");
@@ -288,14 +288,14 @@ describe("reading credentials back", () => {
     expect(await jsonOf(response)).toEqual({ value: BEDROCK });
   });
 
-  it("should answer 404 when the owner has no Bedrock API key stored", async () => {
+  it("should answer 404 when the owner has no Claude Code key stored", async () => {
     const response = await read(ALICE, "bedrock");
 
     expect(response.status).toBe(404);
     expect(await jsonOf(response)).toEqual({ error: "no bedrock credential is stored" });
   });
 
-  it("should give each person only their own Bedrock API key when two have one stored", async () => {
+  it("should give each person only their own Claude Code key when two have one stored", async () => {
     await put(ALICE, "bedrock", { value: BEDROCK });
 
     expect((await read(BOB, "bedrock")).status).toBe(404);
@@ -418,10 +418,13 @@ describe("saveCredential and removeCredential", () => {
     expect(JSON.stringify(result)).not.toContain(GITHUB);
   });
 
-  it("should refuse a Claude token when the viewer's agents use Amazon Bedrock", async () => {
+  it("should refuse a Claude token when the viewer's agents use HMCTS Claude Code access", async () => {
     actAs("alice");
 
-    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toMatchObject({ ok: false, error: expect.stringContaining("Amazon Bedrock") });
+    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Claude Code through HMCTS")
+    });
     expect(await prisma.credential.count()).toBe(0);
   });
 
@@ -474,7 +477,10 @@ describe("saveCredential and removeCredential", () => {
     await setDesired(prisma, ALICE.oid, agent.id, "deleted");
     actAs("alice");
 
-    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toMatchObject({ ok: false, error: expect.stringContaining("Amazon Bedrock") });
+    expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Claude Code through HMCTS")
+    });
     expect(await prisma.credential.count()).toBe(0);
   });
 
@@ -485,18 +491,18 @@ describe("saveCredential and removeCredential", () => {
     expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" })).toMatchObject({ modelRoute: "bedrock", claudeTokenUsable: true });
   });
 
-  it.each(["alice", "own-licence"])("should save a pasted Bedrock API key from the web when the viewer is the %s persona", async (persona) => {
+  it.each(["alice", "own-licence"])("should save a pasted Claude Code key from the web when the viewer is the %s persona", async (persona) => {
     actAs(persona);
 
     const result = await saveCredential(form({ kind: "bedrock", value: BEDROCK }));
 
-    expect(result).toEqual({ ok: true, confirmation: "Your Bedrock API key is stored" });
+    expect(result).toEqual({ ok: true, confirmation: "Your Claude Code key is stored" });
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity(persona).oid, kind: "bedrock", updatedVia: "web" });
     expect(await readCredential(prisma, localStore(), devIdentity(persona).oid, "bedrock")).toBe(BEDROCK);
     expect(JSON.stringify(result)).not.toContain(BEDROCK);
   });
 
-  it("should delete a stored Bedrock API key from the web when asked", async () => {
+  it("should delete a stored Claude Code key from the web when asked", async () => {
     actAs("alice");
     await saveCredential(form({ kind: "bedrock", value: BEDROCK }));
 
@@ -508,7 +514,7 @@ describe("saveCredential and removeCredential", () => {
     ["an Azure cache, which comes from the virtual agent", { kind: "azure", value: AZURE }, "can be pasted here"],
     ["an unknown kind", { kind: "ssh", value: GITHUB }, "can be pasted here"],
     ["a property every object has", { kind: "toString", value: GITHUB }, "can be pasted here"],
-    ["a Claude token pasted as a Bedrock API key", { kind: "bedrock", value: CLAUDE }, "Claude token, not an Amazon Bedrock API key"],
+    ["a Claude token pasted as a Claude Code key", { kind: "bedrock", value: CLAUDE }, "Claude licence token, not a Claude Code key"],
     ["a malformed token", { kind: "github", value: "nope" }, "GitHub token"]
   ])("should refuse %s when it is pasted", async (_label, values, error) => {
     actAs("alice");

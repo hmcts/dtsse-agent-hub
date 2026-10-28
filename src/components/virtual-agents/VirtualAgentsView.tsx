@@ -12,7 +12,7 @@ import { idleFor, statusLabel, stopReasonLabel } from "./labels";
 export function ModelRouteLine({ route }: { route: ModelRoute }) {
   return (
     <p className="text-sm text-hub-text">
-      Model: {route === "bedrock" ? "Amazon Bedrock, with your Bedrock API key" : "your own Claude licence, so it will also need your Claude token"}
+      Model: {route === "bedrock" ? "Claude Code through HMCTS, with your Claude Code key" : "your own Claude licence, so it will also need your Claude token"}
     </p>
   );
 }

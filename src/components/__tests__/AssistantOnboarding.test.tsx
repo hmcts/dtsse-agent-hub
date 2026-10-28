@@ -253,8 +253,8 @@ describe("GettingReady connectors", () => {
     expect(within(bedrock).queryByRole("form")).toBeNull();
     fireEvent.click(within(bedrock).getByRole("button", { name: "Connect" }));
 
-    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Bedrock API key" });
-    expect((within(form).getByLabelText("Bedrock API key") as HTMLInputElement).type).toBe("password");
+    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Claude Code key" });
+    expect((within(form).getByLabelText("Claude Code key") as HTMLInputElement).type).toBe("password");
   });
 });
 
@@ -273,8 +273,8 @@ describe("GettingReady asks the person can act on", () => {
     const row = connector("AI model access");
     fireEvent.click(within(row).getByRole("button", { name: "Connect" }));
 
-    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Bedrock API key" });
-    expect(within(form).getByLabelText("Bedrock API key")).toBeTruthy();
+    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Claude Code key" });
+    expect(within(form).getByLabelText("Claude Code key")).toBeTruthy();
     expect((form.querySelector('input[name="kind"]') as HTMLInputElement).value).toBe("bedrock");
   });
 

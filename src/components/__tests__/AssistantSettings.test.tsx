@@ -469,7 +469,7 @@ describe("the Assistant's settings dialog", () => {
     expect(rows.map((row) => row.textContent)).toEqual([
       "GGitHubalice@hmcts.netConnected",
       "AzAzureYour HMCTS account, for pipelines and environmentsWaiting for you",
-      "AIAI model accessYour Amazon Bedrock API keyConnected",
+      "AIAI model accessYour Claude Code connectionConnected",
       "JJenkinsBuilds and pipelines on Jenkins (optional)Last sign-in failed",
       "AAtlassianJira tickets and Confluence pages (optional)Sign-in expired"
     ]);

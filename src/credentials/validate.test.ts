@@ -79,7 +79,7 @@ describe("checkCredential for bedrock", () => {
   ])("should refuse %s without echoing it when it is not a key", (_label, value) => {
     const checked = checkCredential("bedrock", value);
 
-    expect(checked).toEqual({ ok: false, error: expect.stringContaining("Amazon Bedrock API key") });
+    expect(checked).toEqual({ ok: false, error: expect.stringContaining("Claude Code key") });
     expect(JSON.stringify(checked)).not.toContain(value);
   });
 

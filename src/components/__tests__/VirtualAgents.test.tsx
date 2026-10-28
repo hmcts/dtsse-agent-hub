@@ -160,10 +160,10 @@ describe("VirtualAgentsView", () => {
     expect(screen.getByRole("form", { name: "Create a virtual agent" })).toBeTruthy();
   });
 
-  it("should name Amazon Bedrock and the viewer's Bedrock API key when the viewer is on the Bedrock route", () => {
+  it("should name HMCTS Claude Code access and the viewer's Claude Code key when the viewer is on the Bedrock route", () => {
     render(<VirtualAgentsView agents={[]} route="bedrock" create={created()} now={NOW} plugins={NO_PLUGINS} />);
 
-    expect(screen.getByText("Model: Amazon Bedrock, with your Bedrock API key")).toBeTruthy();
+    expect(screen.getByText("Model: Claude Code through HMCTS, with your Claude Code key")).toBeTruthy();
   });
 
   it("should send the name to the create action and open the new agent's page when the form is submitted", async () => {
@@ -930,8 +930,8 @@ describe("OnboardingChecklist", () => {
     expect(screen.getByRole("form", { name: "Paste the Claude code" })).toBeTruthy();
   });
 
-  it("should offer a password box for the Bedrock API key and save it as the owner's credential when it is not stored", async () => {
-    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Your Bedrock API key is stored" }));
+  it("should offer a password box for the Claude Code key and save it as the owner's credential when it is not stored", async () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Your Claude Code key is stored" }));
     render(
       <OnboardingChecklist
         virtualAgentId="va-1"
@@ -947,21 +947,21 @@ describe("OnboardingChecklist", () => {
     );
 
     const item = within(screen.getByRole("list", { name: "Sign-ins" })).getAllByRole("listitem")[2]!;
-    expect(item.querySelector("h3")?.textContent).toBe("Bedrock API key");
+    expect(item.querySelector("h3")?.textContent).toBe("Claude Code key");
     expect(item.textContent).toContain("Not stored");
-    const input = within(item).getByLabelText("Paste your Bedrock API key");
+    const input = within(item).getByLabelText("Paste your Claude Code key");
     expect(input).toHaveProperty("type", "password");
     fireEvent.change(input, { target: { value: "ABSK-pasted" } });
     await act(async () => {
-      fireEvent.submit(within(item).getByRole("form", { name: "Save your Bedrock API key" }));
+      fireEvent.submit(within(item).getByRole("form", { name: "Save your Claude Code key" }));
     });
 
     const sent = (save.mock.calls[0] as unknown as [FormData])[0];
     expect([sent.get("kind"), sent.get("value")]).toEqual(["bedrock", "ABSK-pasted"]);
-    expect(within(item).getByRole("status").textContent).toBe("Your Bedrock API key is stored");
+    expect(within(item).getByRole("status").textContent).toBe("Your Claude Code key is stored");
   });
 
-  it("should tick a stored Bedrock API key, count it and not ask for it again when it is stored", () => {
+  it("should tick a stored Claude Code key, count it and not ask for it again when it is stored", () => {
     render(
       <OnboardingChecklist
         virtualAgentId="va-1"
@@ -981,7 +981,7 @@ describe("OnboardingChecklist", () => {
     expect(within(item).queryByRole("form")).toBeNull();
     expect(within(item).queryByRole("textbox")).toBeNull();
     expect(item.querySelector("input")).toBeNull();
-    expect(within(item).getByRole("button", { name: "Replace your Bedrock API key" }).querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    expect(within(item).getByRole("button", { name: "Replace your Claude Code key" }).querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
     expect(screen.getByText("1 of 3 stored")).toBeTruthy();
   });
 
