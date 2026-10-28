@@ -7,6 +7,7 @@ import {
   canActAsVirtualAgent,
   canAgentMessageAgent,
   canAttachUpload,
+  canForkConversation,
   canGrant,
   canLaunchTokenActForAgent,
   canLaunchTokenReadMessage,
@@ -800,6 +801,54 @@ describe("the conversation share rules", () => {
       ["a stranger", STRANGER]
     ])("should refuse %s sharing someone else's conversation", (_label, actorOid) => {
       expect(canShareConversationWith(actorOid, CONVERSATION, STRANGER, true)).toBe(false);
+    });
+  });
+
+  describe("canForkConversation", () => {
+    const FORKER = "oid-forker";
+    const FORKS: ConversationShare[] = [
+      { conversationId: CONVERSATION.id, recipientOid: FORKER },
+      { conversationId: "conv-2", recipientOid: STRANGER }
+    ];
+
+    it("should allow the person named when the owner offered them the conversation to fork", () => {
+      expect(canForkConversation(FORKER, CONVERSATION, FORKS)).toBe(true);
+    });
+
+    it("should refuse the owner when they look at their own conversation, which is already theirs", () => {
+      expect(canForkConversation(OWNER, CONVERSATION, [...FORKS, { conversationId: CONVERSATION.id, recipientOid: OWNER }])).toBe(false);
+    });
+
+    it("should refuse a reader when they were shared the chat to read but not offered it to fork", () => {
+      // The read shares are not the fork rows; a caller handing them in by mistake still finds no fork for a reader.
+      expect(canForkConversation(RECIPIENT, CONVERSATION, FORKS)).toBe(false);
+    });
+
+    it("should refuse someone when they were offered only another conversation of the same owner", () => {
+      expect(canForkConversation(STRANGER, CONVERSATION, FORKS)).toBe(false);
+    });
+
+    it.each([
+      ["a read grantee of the owner's agents", READER],
+      ["a write grantee of the owner's agents", WRITER]
+    ])("should refuse %s when no fork names them", (_label, viewerOid) => {
+      expect(canForkConversation(viewerOid, CONVERSATION, FORKS)).toBe(false);
+    });
+
+    it("should refuse the person once offered when the offer has been withdrawn", () => {
+      expect(canForkConversation(FORKER, CONVERSATION, [])).toBe(false);
+    });
+
+    it("should let the person offered read the share page when their fork row is read beside the shares", () => {
+      expect(canViewSharedConversation(FORKER, CONVERSATION, [...SHARES, ...FORKS])).toBe(true);
+      expect(conversationAccess(FORKER, CONVERSATION, [...SHARES, ...FORKS])).toBe("reader");
+    });
+
+    it("should not let the person offered message the conversation's agent when they hold a fork of it", () => {
+      const agent: AgentRef = { id: "conversation-agent", ownerOid: OWNER, ownerOnly: true };
+      for (const rule of [canViewAgent, canViewTranscript, canPersonMessageAgent, canSeeAgentSkills]) {
+        expect(rule(FORKER, agent, [])).toBe(false);
+      }
     });
   });
 });

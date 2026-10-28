@@ -2,7 +2,7 @@
 
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { type Connection, type ConnectionsData, connections, connectionsWarning } from "@/assistant/connections";
+import { type Connection, type ConnectionsData, connections, connectionsWarning, offersConnect } from "@/assistant/connections";
 import { memoryPressure, memoryWarning } from "@/assistant/memory-report";
 import type { AssistantPluginsData } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
@@ -18,12 +18,24 @@ import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import { pluginChoices } from "@/components/virtual-agents/PluginsField";
 
+/**
+ * What a row needs to connect a sign-in the assistant makes only on request: the assistant it restarts and the action
+ * that does it, `reconnectSignIn`, which the getting-ready screen's "Sign in again" posts to as well.
+ */
+export interface AssistantConnect {
+  assistantId: string;
+  /** Whether it is meant to be running, which is whether connecting restarts it now or asks when it next starts. */
+  running: boolean;
+  reconnect: FormAction;
+}
+
 /** The plugins the dialog shows, with the action it posts a change to: the one the hub's `/agents/{id}` page uses. */
 export type AssistantPlugins = AssistantPluginsData & { save: FormAction };
 
 interface SettingsView {
   theme: Theme;
   list: Connection[];
+  connect: AssistantConnect | undefined;
   unavailable: string | null;
   warning: string | null;
   plugins: AssistantPlugins | undefined;
@@ -95,9 +107,77 @@ function CogIcon() {
   );
 }
 
-function Row({ row }: { row: Connection }) {
+/** What connecting asks first and what its button says, by whether a saved sign-in goes and whether it restarts. */
+function connectWords(name: string, stored: boolean, running: boolean): { question: string; confirm: string } {
+  if (stored) {
+    return {
+      question: running
+        ? `Delete your saved ${name} sign-in, which all your virtual agents use, and restart your assistant so it asks you to sign in again? Your chats are kept.`
+        : `Delete your saved ${name} sign-in, which all your virtual agents use? Your assistant is stopped, so it asks you to sign in when it next starts.`,
+      confirm: `Sign in to ${name}`
+    };
+  }
+  return {
+    question: running
+      ? `Restart your assistant so it asks you to sign in to ${name}? Your chats are kept.`
+      : `Have your assistant ask you to sign in to ${name}? It is stopped, so it asks when it next starts.`,
+    confirm: `Connect ${name}`
+  };
+}
+
+/**
+ * Connecting a sign-in made on request. Its pod relays one only once asked, and only as it starts, so connecting is
+ * `reconnectSignIn`: record the ask and restart. Behind a confirmation because the restart ends whatever the
+ * assistant is doing, and because a lapsed sign-in with a value saved deletes the one all their agents use. The code
+ * then arrives where every relayed code does, above the chats.
+ */
+function Connect({ row, connect, stored }: { row: Connection; connect: AssistantConnect; stored: boolean }) {
+  const [asking, setAsking] = useState(false);
+  const confirm = useRef<HTMLButtonElement>(null);
+  const words = connectWords(row.name, stored, connect.running);
+
+  useEffect(() => {
+    if (asking) {
+      confirm.current?.focus();
+    }
+  }, [asking]);
+
+  if (!asking) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAsking(true)}
+        aria-label={`Connect ${row.name}`}
+        className="shrink-0 rounded-[9px] border border-asst-accent-line px-3 py-1 text-xs font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink"
+      >
+        {row.state === "waiting" ? "Connect" : "Sign in again"}
+      </button>
+    );
+  }
   return (
-    <li className="flex items-center gap-3 border-b border-asst-line px-3.5 py-3 last:border-b-0">
+    <ActionForm action={connect.reconnect} label={`Connect ${row.name}`} className="flex basis-full flex-col gap-2 pt-1">
+      <input type="hidden" name="id" value={connect.assistantId} />
+      <input type="hidden" name="kind" value={row.kind} />
+      <p className="text-pretty text-[13px] font-semibold text-asst-text">{words.question}</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          ref={confirm}
+          type="submit"
+          className={`shrink-0 rounded-[10px] px-3.5 py-2 text-[13px] font-semibold ${stored ? "bg-asst-error text-asst-ink" : "bg-asst-accent text-asst-ink hover:bg-asst-accent-hover"}`}
+        >
+          {words.confirm}
+        </button>
+        <button type="button" onClick={() => setAsking(false)} className="shrink-0 text-[13px] font-medium text-asst-muted hover:text-asst-text">
+          Cancel
+        </button>
+      </div>
+    </ActionForm>
+  );
+}
+
+function Row({ row, connect }: { row: Connection; connect: AssistantConnect | undefined }) {
+  return (
+    <li className="flex flex-wrap items-center gap-3 border-b border-asst-line px-3.5 py-3 last:border-b-0">
       <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-asst-active text-xs font-semibold">
         {row.initial}
       </span>
@@ -106,6 +186,7 @@ function Row({ row }: { row: Connection }) {
         <span className="truncate text-xs text-asst-muted">{row.accountLabel ?? row.desc}</span>
       </div>
       <span className={`shrink-0 text-xs font-medium ${STATE_CLASS[row.state]}`}>{row.detail}</span>
+      {connect !== undefined && offersConnect(row) ? <Connect row={row} connect={connect} stored={row.stored} /> : null}
     </li>
   );
 }
@@ -124,7 +205,7 @@ function Appearance({ theme }: { theme: Theme }) {
   );
 }
 
-function Connections({ list, unavailable, warning }: Pick<SettingsView, "list" | "unavailable" | "warning">) {
+function Connections({ list, connect, unavailable, warning }: Pick<SettingsView, "list" | "connect" | "unavailable" | "warning">) {
   return (
     <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-connections" className="text-sm font-semibold">
@@ -149,7 +230,7 @@ function Connections({ list, unavailable, warning }: Pick<SettingsView, "list" |
       {list.length === 0 ? null : (
         <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
           {list.map((row) => (
-            <Row key={row.kind} row={row} />
+            <Row key={row.kind} row={row} connect={connect} />
           ))}
         </ul>
       )}
@@ -237,7 +318,7 @@ const SECTIONS: readonly SettingsSection[] = [
     label: "Connections",
     group: "General",
     shown: (view) => view.list.length > 0 || view.unavailable !== null,
-    panel: (view) => <Connections list={view.list} unavailable={view.unavailable} warning={view.warning} />
+    panel: (view) => <Connections list={view.list} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
   },
   {
     id: "templates",
@@ -620,6 +701,7 @@ function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) 
 export function AssistantSettings({
   theme = "system",
   connections: data,
+  connect,
   now: from,
   plugins,
   model,
@@ -631,6 +713,8 @@ export function AssistantSettings({
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
+  /** How a row connects a sign-in made on request; without it the rows only say where each stands. */
+  connect?: AssistantConnect;
   /** The page's own clock, so the cog's name and badge are the same in the HTML as in the first render. */
   now: number;
   plugins?: AssistantPlugins;
@@ -715,7 +799,20 @@ export function AssistantSettings({
       {open
         ? createPortal(
             <Dialog
-              view={{ theme: shownTheme, list, unavailable: data?.unavailable ?? null, warning, plugins, model, claudeMd, templates, files, size, exports }}
+              view={{
+                theme: shownTheme,
+                list,
+                connect,
+                unavailable: data?.unavailable ?? null,
+                warning,
+                plugins,
+                model,
+                claudeMd,
+                templates,
+                files,
+                size,
+                exports
+              }}
               onClose={close}
             />,
             themeRoot()

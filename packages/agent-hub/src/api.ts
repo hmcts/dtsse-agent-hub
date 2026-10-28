@@ -251,6 +251,8 @@ export type AgentsResponse = { agents: AgentSummary[] };
 export type TranscriptResponse = { accepted: number };
 export type CredentialResponse = { value: string };
 export type LoginCodeResponse = { code: string };
+/** Whether the owner has asked for a sign-in of this kind; see `GET /api/virtual/{id}/login/{kind}`. */
+export type SignInRequestResponse = { requested: boolean };
 
 /**
  * How every call in this module reads a response body: the service's JSON when it sent a JSON object, and
@@ -413,6 +415,11 @@ export type Api = {
   deleteMyCredential: (kind: CredentialKind) => Promise<null>;
   loginPrompt: (id: string, kind: CredentialKind, body: LoginPromptBody) => Promise<null>;
   loginCode: (id: string, kind: CredentialKind) => Promise<string | null>;
+  /**
+   * Whether the owner has asked for a sign-in of this kind, which a pod checks before relaying one it makes only on
+   * request. A hub with no such route answers `false`: nobody can have asked it.
+   */
+  signInRequested: (id: string, kind: CredentialKind) => Promise<boolean>;
   loginComplete: (id: string, kind: CredentialKind, body?: LoginCompleteBody) => Promise<null>;
   /** The other half of `loginComplete`: the pod owes the hub one of the two for every sign-in it relays. */
   loginFailed: (id: string, kind: CredentialKind, body: LoginFailedBody) => Promise<null>;
@@ -577,6 +584,17 @@ export function createApi({
     deleteMyCredential: (kind) => request<null>("DELETE", `/api/agent/credentials/${k(kind)}`),
     loginPrompt: (id, kind, body) => request<null>("POST", v(id, `login/${k(kind)}`), body),
     loginCode: async (id, kind) => (await request<LoginCodeResponse | null>("GET", v(id, `login/${k(kind)}/code`)))?.code ?? null,
+    signInRequested: async (id, kind) => {
+      try {
+        return (await request<SignInRequestResponse | null>("GET", v(id, `login/${k(kind)}`)))?.requested === true;
+      } catch (e) {
+        // 404 and 405 are a hub older than the route, which has no way to have been asked.
+        if (e instanceof ApiError && (e.status === 404 || e.status === 405)) {
+          return false;
+        }
+        throw e;
+      }
+    },
     loginComplete: (id, kind, body = {}) => request<null>("POST", v(id, `login/${k(kind)}/complete`), body),
     loginFailed: (id, kind, body) => request<null>("POST", v(id, `login/${k(kind)}/failed`), body),
     // A virtual agent's HMCTS Assistant conversations: wakes and closes on the sessions stream, and what its

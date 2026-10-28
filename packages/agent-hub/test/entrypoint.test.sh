@@ -23,7 +23,8 @@ CASES=(first-boot bedrock-route legacy-gateway-route unknown-route hai-install-b
     hai-installed-off-path hai-install-retries hai-install-keeps-failing hai-install-leaves-no-binary
     continues-a-conversation git-identity-fails later-boot-fails sigterm-mid-clone claude-md-stored
     claude-md-missing claude-md-error claude-md-restart atlassian-fails atlassian-not-signed-in atlassian-sigterm
-    atlassian-no-twg conversations prepare-workspace prepare-workspace-fails prepare-workspace-dies
+    atlassian-no-twg azure-restored azure-not-stored azure-requested azure-request-fails azure-wrong-account
+    azure-sigterm conversations prepare-workspace prepare-workspace-fails prepare-workspace-dies
     prepare-workspace-dies-silently prepare-workspace-sigterm
     no-clone-step client-on-path broken-workspace-shim)
 
@@ -109,6 +110,8 @@ for a; do f=$a; done
 cat "$f"
 EOF
     printf '#!/bin/sh\nexit 0\n' >"$F/bin/node"
+    # The owner's object id once the fake client has signed az in, and nothing before.
+    printf '#!/bin/sh\n[ -f "$FAKE_DIR/az-signed-in" ] || exit 1\necho 0f8a6a10-0000-4000-8000-000000000001\n' >"$F/bin/az"
 
     # Every backoff the entrypoint waits out is a `sleep` on this PATH — retry()'s 30s and 60s, the restart
     # delay, fatal()'s hour — and waiting them out is what made this suite take minutes. The schedule is
@@ -188,6 +191,22 @@ case "$1 $2" in
         tmux new-session -d -s "c-0f8a6a1$n" -c "$PWD" -e AGENT_HUB_CONVERSATION_ID=x "$REAL_SLEEP 1000"
         if [ "$n" -eq 1 ] && [ -n "${FAKE_SUPERVISOR_EXIT_FIRST:-}" ]; then "$REAL_SLEEP" 1; exit 1; fi
         exec "$REAL_SLEEP" 1000 ;;
+    # FAKE_AZURE_STORED is a stored sign-in that restores; FAKE_AZURE_ASKED_RC what a requested sign-in ends
+    # with, 4 (nobody asked) unless set. A sign-in that works signs the fake az in, which is what Jenkins reads.
+    "virtual azure-login")
+        echo "${3:-relay}" >>"$FAKE_DIR/azure.runs"
+        case "${3:-}" in
+            --restore-only)
+                [ -n "${FAKE_AZURE_STORED:-}" ] || exit 4
+                touch "$FAKE_DIR/az-signed-in" ;;
+            --if-requested)
+                [ -n "${FAKE_AZURE_HANG:-}" ] && { echo $$ >"$FAKE_DIR/azure.pid"; exec "$REAL_SLEEP" 1000; }
+                rc=${FAKE_AZURE_ASKED_RC:-4}
+                [ "$rc" = 0 ] && { "$REAL_SLEEP" 1; touch "$FAKE_DIR/az-signed-in"; }
+                exit "$rc" ;;
+            *) echo "the boot relayed an Azure sign-in nobody asked for" >>"$FAKE_DIR/azure.relayed" ;;
+        esac
+        exit 0 ;;
     "virtual atlassian-login")
         echo "$PPID" >>"$FAKE_DIR/atlassian.runs"
         [ -n "${FAKE_ATLASSIAN_HANG:-}" ] && { echo $$ >"$FAKE_DIR/atlassian.pid"; exec "$REAL_SLEEP" 1000; }
@@ -626,6 +645,76 @@ case_atlassian_no_twg() {
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
+JENKINS_OID_LINE="JENKINS_USERNAME=0f8a6a10-0000-4000-8000-000000000001"
+jenkins_configured() { grep -qxF "$JENKINS_OID_LINE" "$W/.claude/.jenkins.env" 2>/dev/null; }
+
+case_azure_restored() {
+    setup azure-restored
+    start FAKE_AZURE_STORED=1 FAKE_REPO_SECONDS=0.2
+    wait_for 10 test -f "$F/claude.log" && ok "should start Claude when a stored Azure sign-in is restored" || no "Claude did not start"
+    [ "$(cat "$F/azure.runs" 2>/dev/null)" = "--restore-only" ] &&
+        ok "should only restore, and start no sign-in, when the stored Azure sign-in works" || no "azure-login ran as: $(tr '\n' ' ' <"$F/azure.runs" 2>/dev/null)"
+    wait_for 5 jenkins_configured && ok "should configure Jenkins with the owner's object id when Azure is restored" || no "jenkins env: $(cat "$W/.claude/.jenkins.env" 2>/dev/null)"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+case_azure_not_stored() {
+    setup azure-not-stored
+    start FAKE_REPO_SECONDS=30
+    wait_for 10 test -f "$F/claude.log" && ok "should start Claude when no Azure sign-in is stored" || no "Claude did not start without Azure"
+    wait_for 5 grep -q 'azure: not connected; az, and the Jenkins tools that need it, stay unconfigured' "$T/out" &&
+        ok "should log that Azure stays unconfigured when nobody has asked for a sign-in" || no "did not log the unconnected Azure"
+    [ "$(tr '\n' ' ' <"$F/azure.runs" 2>/dev/null)" = "--restore-only --if-requested " ] &&
+        ok "should look for a requested sign-in in the background when no Azure sign-in is stored" || no "azure-login ran as: $(tr '\n' ' ' <"$F/azure.runs" 2>/dev/null)"
+    [ ! -f "$F/azure.relayed" ] && ok "should relay no Azure device code when nobody asked for one" || no "$(cat "$F/azure.relayed")"
+    grep -q '^awaiting_login' "$F/hub.log" && no "boot reported awaiting_login for Azure" || ok "should not report awaiting_login when no Azure sign-in is stored"
+    wait_for 5 grep -q "could not read the owner's Entra object id from az (is Azure connected?)" "$T/out" &&
+        ok "should leave Jenkins unconfigured, and say why, when Azure is not connected" || no "did not log the Jenkins fallback"
+    [ ! -f "$W/.claude/.jenkins.env" ] && ok "should write no Jenkins configuration when Azure is not connected" || no "wrote $W/.claude/.jenkins.env"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+case_azure_requested() {
+    setup azure-requested
+    start FAKE_AZURE_ASKED_RC=0 FAKE_REPO_SECONDS=30
+    wait_for 10 test -f "$F/claude.log" && ok "should start Claude while a requested Azure sign-in waits for the owner" || no "Claude did not start"
+    [ ! -f "$W/.claude/.jenkins.env" ] && ok "should start without Jenkins before the requested Azure sign-in completes" || no "Jenkins was configured before Azure"
+    wait_for 10 jenkins_configured && ok "should configure Jenkins once the requested Azure sign-in completes" || no "jenkins env: $(cat "$W/.claude/.jenkins.env" 2>/dev/null)"
+    wait_for 10 sh -c "[ \$(grep -c '^running' '$F/hub.log') -ge 2 ]" && ok "should report running again once the Azure sign-in is over" || no "running was not reported again"
+    [ "$(grep -c -- --if-requested "$F/azure.runs")" -eq 1 ] && ok "should run the requested sign-in once when it completes" || no "azure-login ran as: $(tr '\n' ' ' <"$F/azure.runs")"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+case_azure_request_fails() {
+    setup azure-request-fails
+    start FAKE_AZURE_ASKED_RC=1 FAKE_REPO_SECONDS=0.2
+    wait_for 10 test -f "$F/claude.log" && ok "should start Claude when the requested Azure sign-in fails" || no "Claude did not start"
+    wait_for 5 grep -q 'azure sign-in failed (exit 1); retrying in 60s' "$T/out" && ok "should retry later when the requested Azure sign-in fails" || no "did not log the failure"
+    wait_for 10 grep -q 'azure sign-in failed 3 times; Azure stays unconfigured until the next boot' "$T/out" &&
+        ok "should give up after AZURE_TRIES attempts when the Azure sign-in keeps failing" || no "did not give up"
+    [ "$(grep -c -- --if-requested "$F/azure.runs")" -eq 3 ] && ok "should run the sign-in AZURE_TRIES times when each attempt fails" || no "azure-login ran as: $(tr '\n' ' ' <"$F/azure.runs")"
+    grep -q '^failed' "$F/hub.log" && no "a failed Azure sign-in failed the agent" || ok "should not fail the agent when the Azure sign-in fails"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+case_azure_wrong_account() {
+    setup azure-wrong-account
+    start FAKE_AZURE_ASKED_RC=3 FAKE_REPO_SECONDS=30
+    wait_for 15 hub_has 'failed azure sign-in: the hub failed the agent' && ok "should report failed when the hub refuses the Azure account" || no "did not report failed"
+    wait_for 5 sh -c "! tmux has-session -t claude" && ok "should stop Claude when the hub refuses the Azure account" || no "Claude is still running"
+    stop && ok "should stop the entrypoint when it gets SIGTERM after failing" || no "the entrypoint did not stop on SIGTERM"
+}
+
+case_azure_sigterm() {
+    setup azure-sigterm
+    start FAKE_AZURE_HANG=1 FAKE_REPO_SECONDS=0.2
+    wait_for 10 test -f "$F/azure.pid" && wait_for 10 test -f "$F/claude.log" &&
+        ok "should start Claude while the Azure sign-in waits for the owner" || no "Claude did not start during the sign-in"
+    signin=$(cat "$F/azure.pid" 2>/dev/null)
+    stop && ok "should stop the entrypoint when it gets SIGTERM during the Azure sign-in" || no "the entrypoint did not stop on SIGTERM"
+    [ -n "$signin" ] && wait_for 5 dead "$signin" && ok "should stop the Azure sign-in when it gets SIGTERM" || no "the sign-in $signin is still running"
+}
+
 case_conversations() {
     setup conversations
     printf 'mine\n' >"$F/claude_md"
@@ -795,6 +884,12 @@ run_case() {
         atlassian-not-signed-in) case_atlassian_not_signed_in ;;
         atlassian-sigterm) case_atlassian_sigterm ;;
         atlassian-no-twg) case_atlassian_no_twg ;;
+        azure-restored) case_azure_restored ;;
+        azure-not-stored) case_azure_not_stored ;;
+        azure-requested) case_azure_requested ;;
+        azure-request-fails) case_azure_request_fails ;;
+        azure-wrong-account) case_azure_wrong_account ;;
+        azure-sigterm) case_azure_sigterm ;;
         conversations) case_conversations ;;
         prepare-workspace) case_prepare_workspace ;;
         prepare-workspace-fails) case_prepare_workspace_fails ;;

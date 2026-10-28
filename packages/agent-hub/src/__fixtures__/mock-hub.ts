@@ -11,6 +11,12 @@ const TRANSCRIPT_KEY_RE = /^[A-Za-z0-9:_-]{1,200}$/;
 const TRANSCRIPT_ROLES = new Set(["user", "assistant", "tool_use", "tool_result", "system"]);
 const TRANSCRIPT_MAX_REQUEST = 256 * 1024;
 const TRANSCRIPT_MAX_CONTENT = 16384;
+/**
+ * How long the hub offers a question for, mirroring `QUESTION_OFFER_WINDOW_MS` in its own
+ * `src/questions/questions.ts`. Reproduced here, like the other service rules in this fixture, so a client test
+ * cannot pass on a response the hub would never have sent. Exported for `ageQuestion`'s callers.
+ */
+export const QUESTION_OFFER_WINDOW_MS = 2 * 60 * 60_000;
 
 export type Person = { oid: string; name?: string; email?: string | null };
 export type Skill = { name?: unknown; description?: unknown };
@@ -62,6 +68,8 @@ export type VirtualRecord = {
   completes: Record<string, unknown>[];
   /** Sign-ins the pod relayed and gave up on; see `POST /api/virtual/{id}/login/{kind}/failed`. */
   loginFailures: Record<string, unknown>[];
+  /** The kinds the owner has asked a sign-in for and no pod has relayed yet; see `GET /api/virtual/{id}/login/{kind}`. */
+  signInRequests: Set<string>;
   ports: Record<string, unknown>[];
   wakes: Wake[];
   sessionReports: SessionsReport[];
@@ -188,7 +196,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const artefacts = new Map<string, Artefact>();
   const jiraReports: Record<string, unknown>[] = [];
   const confluenceReports: Record<string, unknown>[] = [];
-  /** The questions a session's `AskUserQuestion` hook put on screen, oldest first, one per `tool_use_id`. */
+  /**
+   * The questions a session's `AskUserQuestion` hook put on screen, oldest first, one per `tool_use_id`, each with
+   * the `asked_at` the offer window is read against. `ageQuestion` moves one backwards.
+   */
   const questions: Record<string, unknown>[] = [];
   // Every answer a supervisor gave to a lookup, in the order they came.
   const lookupAnswers: { virtual_id: string; lookup_id: string; body: Record<string, unknown> }[] = [];
@@ -207,6 +218,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       codes: new Map(),
       completes: [],
       loginFailures: [],
+      signInRequests: new Set(),
       ports: [],
       wakes: [],
       sessionReports: [],
@@ -455,7 +467,11 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     if (area === "login") {
       if (req.method === "POST" && !sub) {
         v.prompts.push({ kind, ...body });
+        v.signInRequests.delete(kind);
         return send(res, 204);
+      }
+      if (req.method === "GET" && !sub) {
+        return send(res, 200, { requested: v.signInRequests.has(kind) });
       }
       if (req.method === "GET" && sub === "code") {
         if (!v.codes.has(kind)) {
@@ -825,16 +841,24 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return send(res, 400, { error: "bad question" });
       }
       // Idempotent on (agent, tool_use_id), as the hub's unique constraint makes it: the same question again is the
-      // card already on screen, so it is success and nothing is written twice.
+      // card already on screen, so it is success and nothing is written twice — whatever its age, since it is a
+      // retry of that card rather than a new question.
       if (questions.some((already) => already.agent_id === agent.id && already.tool_use_id === body.tool_use_id)) {
         return send(res, 204);
       }
-      // A *different* question while one of this session's is unanswered is refused, because nothing is written and
-      // the caller must not be told there is a card waiting. The hub answers 409; see "Questions" in the contract.
-      if (questions.some((already) => already.agent_id === agent.id && already.session_id === body.session_id && !already.answered)) {
+      // A *different* question is refused only while one of this session's is unanswered **and still offered**:
+      // nothing is written, and the caller must not be told there is a card waiting. One past
+      // `QUESTION_OFFER_WINDOW_MS` cannot be answered by anyone, so it does not block — counting it would refuse
+      // this session for ever. The window is read against the newest unanswered question, so a stale row cannot
+      // mask a live one. The hub answers 409; see "Questions" in the contract.
+      const open = questions.filter((already) => already.agent_id === agent.id && already.session_id === body.session_id && !already.answered);
+      const newest = open.length === 0 ? null : Math.max(...open.map((already) => Date.parse(String(already.asked_at))));
+      if (newest !== null && Date.now() - newest < QUESTION_OFFER_WINDOW_MS) {
         return send(res, 409, { error: "this session already has a different question waiting for an answer" });
       }
-      questions.push({ agent_id: agent.id, ...body });
+      // `asked_at` after the body, so the window is read against the hub's own clock whatever a caller sent: the
+      // real route takes a strict body and would refuse the field outright.
+      questions.push({ agent_id: agent.id, ...body, asked_at: new Date().toISOString() });
       return send(res, 204);
     }
     if (action === "confluence" && req.method === "PUT") {
@@ -935,6 +959,17 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       const v = virtuals.get(virtualId) as VirtualRecord;
       v.wakes = v.wakes.filter((w) => w.conversation_id !== data.conversation_id);
       sessionStreams.get(virtualId)?.write(`event: close\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+    // Moves a stored question's `asked_at` back by `ms`, the way the integration suite backdates `asked_at` in
+    // Postgres, so a test can reach the offer window without waiting two hours. Throws for a `tool_use_id` nothing
+    // was stored under: a silent no-op would leave the test asserting the fresh path and passing for the wrong
+    // reason, which is the whole failure this models.
+    ageQuestion(toolUseId: string, ms: number) {
+      const stored = questions.find((already) => already.tool_use_id === toolUseId);
+      if (!stored) {
+        throw new Error(`no question stored for tool_use_id ${toolUseId}`);
+      }
+      stored.asked_at = new Date(Date.parse(String(stored.asked_at)) - ms).toISOString();
     },
     // The person editing their conversation's document in the web UI.
     editArtefactAsUser(agentId: string, markdown: string, title = "Draft") {

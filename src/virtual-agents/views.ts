@@ -47,7 +47,7 @@ export interface VirtualAgentCard {
 export interface VirtualAgentDetail {
   card: VirtualAgentCard;
   logins: LoginView[];
-  /** What this agent needs stored: GitHub and Azure always, and a Claude token on the owner's own licence. */
+  /** What this agent needs stored: GitHub always, and a Claude token on the owner's own licence or a Bedrock key. */
   needed: CredentialKind[];
   /** What it can use if stored, but starts without. */
   optional: CredentialKind[];
@@ -98,13 +98,15 @@ export async function virtualAgentCards(db: Database, ownerOid: string): Promise
 }
 
 /**
- * A Jenkins API token only adds the Jenkins tools, and an Atlassian sign-in only the `twg` CLI for Jira and
- * Confluence, so the pod never waits for either.
+ * An Azure sign-in only lets the agent run `az` as its owner (and gives Jenkins their object id), a Jenkins API token
+ * only adds the Jenkins tools, and an Atlassian sign-in only the `twg` CLI for Jira and Confluence, so the pod never
+ * waits for any of them. Azure is signed in to only when the owner asks, from the Assistant's settings or the agent's
+ * page.
  */
-export const OPTIONAL_CREDENTIALS: CredentialKind[] = ["jenkins", "atlassian"];
+export const OPTIONAL_CREDENTIALS: CredentialKind[] = ["azure", "jenkins", "atlassian"];
 
 export function neededCredentials(route: ModelRoute): CredentialKind[] {
-  return route === "own-licence" ? ["github", "azure", "claude"] : ["github", "azure", "bedrock"];
+  return route === "own-licence" ? ["github", "claude"] : ["github", "bedrock"];
 }
 
 /**

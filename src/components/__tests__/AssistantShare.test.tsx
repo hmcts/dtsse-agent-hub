@@ -10,10 +10,11 @@ import { SharedChat } from "@/components/assistant/SharedChat";
 import { ShareGate } from "@/components/assistant/ShareGate";
 
 const replaced: string[] = [];
+const pushed: string[] = [];
 const refresh = vi.fn();
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: (target: string) => void replaced.push(target), refresh, push: () => undefined }),
+  useRouter: () => ({ replace: (target: string) => void replaced.push(target), refresh, push: (target: string) => void pushed.push(target) }),
   usePathname: () => "/assistant"
 }));
 
@@ -61,6 +62,7 @@ async function type(value: string): Promise<void> {
 
 beforeEach(() => {
   replaced.length = 0;
+  pushed.length = 0;
   refresh.mockReset();
   vi.useFakeTimers();
   vi.stubGlobal(
@@ -354,6 +356,8 @@ function view(overrides: Partial<SharedConversationView> = {}): SharedConversati
     earlierHidden: false,
     document: null,
     access: "reader",
+    forked: null,
+    fork: null,
     ...overrides
   };
 }
@@ -418,5 +422,75 @@ describe("SharedChat", () => {
     render(<SharedChat view={view()} />);
 
     expect(screen.queryByRole("heading", { name: "Draft order" })).toBeNull();
+  });
+});
+
+describe("forking", () => {
+  const FORKED = {
+    fromOwnerName: "Alice Tester",
+    fromTitle: "Possession orders",
+    at: "2026-10-26T09:00:00.000Z",
+    thread: [{ type: "user" as const, key: "f0", at: "2026-10-26T09:00:00.000Z", text: "What goes in a possession order?", attachmentCount: 0 }],
+    earlierHidden: false
+  };
+
+  it("should name what a recipient can do when the dialog offers the chat to fork", () => {
+    render(dialog({ mode: "fork", people: [person("oid-bob", "Bob Tester")] }));
+
+    expect(screen.getByRole("heading", { name: "Let someone fork this chat" })).toBeTruthy();
+    expect(screen.getByLabelText("Who can fork it")).toBeTruthy();
+    expect(within(screen.getByRole("list", { name: "Offered to" })).getByText("can fork")).toBeTruthy();
+    expect(screen.getByText(/their own copy/)).toBeTruthy();
+  });
+
+  it("should offer no fork button when the reader was only shared the chat", () => {
+    render(<SharedChat view={view()} forkChat={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Continue in my Assistant" })).toBeNull();
+  });
+
+  it("should take the copy and go to it when the person offered the chat presses the button", async () => {
+    const forkChat = vi.fn(async () => ({ ok: true as const, id: "copy-1" }));
+    render(<SharedChat view={view({ fork: { copyId: null } })} forkChat={forkChat} />);
+
+    expect(screen.getByText(/to continue in your own Assistant/)).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue in my Assistant" }));
+    });
+
+    expect(forkChat).toHaveBeenCalledWith({ conversationId: CONVERSATION });
+    expect(pushed).toEqual(["/assistant/copy-1"]);
+  });
+
+  it("should show the refusal and stay on the page when the copy is refused", async () => {
+    const forkChat = vi.fn(async () => ({ ok: false as const, error: "no such conversation" }));
+    render(<SharedChat view={view({ fork: { copyId: null } })} forkChat={forkChat} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue in my Assistant" }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("no such conversation");
+    expect(pushed).toEqual([]);
+  });
+
+  it("should link to the copy rather than make another when the person already took one", () => {
+    render(<SharedChat view={view({ fork: { copyId: "copy-1" } })} forkChat={vi.fn()} />);
+
+    expect(screen.getByRole("link", { name: "Open your copy" }).getAttribute("href")).toBe("/assistant/copy-1");
+    expect(screen.queryByRole("button", { name: "Continue in my Assistant" })).toBeNull();
+  });
+
+  it("should show where a copy came from above its own words when a share of a copy is read", () => {
+    render(<SharedChat view={view({ forked: FORKED })} />);
+
+    expect(screen.getByText(/Forked from Alice Tester/)).toBeTruthy();
+    expect(within(screen.getByRole("list", { name: "Copied conversation" })).getByText("What goes in a possession order?")).toBeTruthy();
+  });
+
+  it("should leave out the copied part when the share starts part-way through the copy", () => {
+    render(<SharedChat view={view({ forked: FORKED, earlierHidden: true })} />);
+
+    expect(screen.queryByText(/Forked from Alice Tester/)).toBeNull();
   });
 });

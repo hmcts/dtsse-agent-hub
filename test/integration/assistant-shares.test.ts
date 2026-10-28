@@ -10,7 +10,7 @@ import { ensureAssistant, readArtefact, writeArtefact } from "../../src/assistan
 import { conversationMatches } from "../../src/assistant/views.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
-import { insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { connectForChat, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 
 /**
@@ -94,6 +94,7 @@ beforeEach(async () => {
   await insertUser(ALICE);
   await insertUser(BOB);
   await insertUser(CAROL);
+  await Promise.all([ALICE, BOB, CAROL].map(connectForChat));
   // Carol can see and message every agent Alice has. No part of that reaches a conversation.
   await setGrant(prisma, ALICE.oid, CAROL.oid, "write");
   actAs("alice");
@@ -232,7 +233,7 @@ describe("reading a shared conversation", () => {
 
     expect(await sharedChats(viewerOf(ALICE))).toMatchObject({ given: [{ id, withWhom: "1 person" }], received: [] });
     expect(await sharedChats(viewerOf(BOB))).toMatchObject({ given: [], received: [{ id, withWhom: ALICE.name }] });
-    expect(await sharedChats(viewerOf(CAROL))).toEqual({ given: [], received: [] });
+    expect(await sharedChats(viewerOf(CAROL))).toEqual({ given: [], received: [], offered: [], forkable: [] });
   });
 
   // The thread is read with the owner's own transcript access, so everything their session recorded is in reach of
@@ -421,7 +422,7 @@ describe("revoking a share", () => {
     await shareActions.unshareChat({ conversationId: id, recipientOid: BOB.oid });
 
     expect(await sharedChat(viewerOf(BOB), id)).toBeUndefined();
-    expect(await sharedChats(viewerOf(BOB))).toEqual({ given: [], received: [] });
+    expect(await sharedChats(viewerOf(BOB))).toEqual({ given: [], received: [], offered: [], forkable: [] });
   });
 
   it("should take the shares with the conversation when the owner deletes it", async () => {

@@ -6,9 +6,11 @@ import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
+import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
 import { readAssistantModel } from "../assistant/model-store.ts";
+import { type ChatGate, chatCredentials, chatGate } from "../assistant/onboarding.ts";
 import {
   accessToConversation,
   conversationRef,
@@ -56,6 +58,7 @@ import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
 import { liveModelRoutes } from "../virtual-agents/store.ts";
 import {
   claudeTokenUsable,
+  neededCredentials,
   type VirtualAgentCard,
   type VirtualAgentDetail,
   type VirtualAgentSummary,
@@ -290,10 +293,16 @@ export interface AssistantHome {
    * cannot be read, which is not the same as its offering nothing.
    */
   plugins: { available: PluginOption[]; checked: string[] } | null;
+  /** Whether the page may render the chat, or only the getting-ready screen; see `chatGate`. */
+  chat: ChatGate;
 }
 
 function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
   return new Set(credentials.available ? credentials.statuses.filter((status) => status.stored).map((status) => status.kind) : []);
+}
+
+function chatGateOf(toChat: readonly CredentialKind[], credentials: CredentialSettings): ChatGate {
+  return chatGate(toChat, storedKinds(credentials), credentials.available ? null : credentials.reason);
 }
 
 /**
@@ -334,12 +343,21 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const assistant = await ensureAssistant(prisma, viewer);
   const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
-  return {
-    assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)),
-    credentials,
-    conversations,
-    plugins: pluginSettings(assistant)
-  };
+  const summary = await assistantSummary(prisma, assistant, storedKinds(credentials));
+  return { assistant: summary, credentials, conversations, plugins: pluginSettings(assistant), chat: chatGateOf(summary.toChat, credentials) };
+}
+
+/**
+ * Whether the viewer may chat yet, for the server actions that start, open, warm or send to a conversation: the same
+ * `chatGate` the pages render from, read again here because a page loaded before a credential was deleted, or a
+ * request made without the page at all, must not get past what the page would have stopped.
+ *
+ * Read without `ensureAssistant`, since an action has no business creating an assistant. Someone with none yet is
+ * judged on their own route, which is the route the one `openAssistant` makes them would be on.
+ */
+export async function assistantChatGate(viewer: Viewer): Promise<ChatGate> {
+  const [assistant, credentials] = await Promise.all([findAssistant(prisma, viewer.oid), credentialSettings(viewer)]);
+  return chatGateOf(chatCredentials(neededCredentials(assistant?.modelRoute ?? viewer.modelRoute)), credentials);
 }
 
 /**
@@ -415,7 +433,7 @@ export async function sharedChat(viewer: Identity, id: string): Promise<SharedCo
   if (allowed === undefined) {
     return undefined;
   }
-  return await sharedConversation(prisma, allowed.conversation, allowed.access);
+  return await sharedConversation(prisma, allowed.conversation, allowed.access, await forkChoice(prisma, viewer.oid, allowed.conversation, allowed.forks));
 }
 
 /** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */
@@ -427,8 +445,27 @@ export async function chatShares(viewer: Identity, id: string): Promise<SharePer
   return await shareRecipients(prisma, id);
 }
 
-/** Both sides of the viewer's shares: their own chats they have shared, and the chats shared with them. */
-export async function sharedChats(viewer: Identity): Promise<{ given: SharedChatLink[]; received: SharedChatLink[] }> {
-  const [given, received] = await Promise.all([conversationsSharedBy(prisma, viewer.oid), conversationsSharedWith(prisma, viewer.oid)]);
-  return { given, received };
+/** Who one of the viewer's own conversations is offered to fork, or `undefined` when it is not theirs to offer. */
+export async function chatForks(viewer: Identity, id: string): Promise<SharePerson[] | undefined> {
+  const conversation = await conversationRef(prisma, id);
+  if (conversation === undefined || !canManageConversationShares(viewer.oid, conversation)) {
+    return undefined;
+  }
+  return await forkRecipients(prisma, id);
+}
+
+/**
+ * Both sides of the viewer's shares and fork offers: their own chats they have shared or offered, and the chats
+ * shared with or offered to them.
+ */
+export async function sharedChats(
+  viewer: Identity
+): Promise<{ given: SharedChatLink[]; received: SharedChatLink[]; offered: SharedChatLink[]; forkable: SharedChatLink[] }> {
+  const [given, received, offered, forkable] = await Promise.all([
+    conversationsSharedBy(prisma, viewer.oid),
+    conversationsSharedWith(prisma, viewer.oid),
+    conversationsOfferedBy(prisma, viewer.oid),
+    conversationsForkableBy(prisma, viewer.oid)
+  ]);
+  return { given, received, offered, forkable };
 }

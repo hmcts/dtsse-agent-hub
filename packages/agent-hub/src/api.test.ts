@@ -604,6 +604,36 @@ describe("createApi credentials", () => {
     expect(hub.virtuals.get(VID)?.prompts.at(-1)).toMatchObject({ kind: "claude", prompt: "paste_code" });
     expect(hub.virtuals.get(VID)?.completes.at(-1)).toEqual({ kind: "claude" });
   });
+
+  it("should say whether the owner has asked for a sign-in, and forget it once one is relayed", async () => {
+    // Arrange
+    hub.virtuals.get(VID)?.signInRequests.add("azure");
+
+    // Act
+    const asked = await pod.signInRequested(VID, "azure");
+    await pod.loginPrompt(VID, "azure", { prompt: "device_code", verification_uri: "https://login.microsoft.com/device", user_code: "ABC", expires_in: 900 });
+    const after = await pod.signInRequested(VID, "azure");
+
+    // Assert
+    expect(asked).toBe(true);
+    expect(after).toBe(false);
+  });
+
+  it.each([404, 405])("should answer that nobody asked when the hub answers %i for the route it does not have", async (status) => {
+    // Arrange
+    const api = createApi({ baseUrl: "http://hub", launchToken: "t", fetchImpl: async () => new Response("", { status }) });
+
+    // Act & Assert
+    expect(await api.signInRequested(VID, "azure")).toBe(false);
+  });
+
+  it("should throw when the hub cannot say whether a sign-in was asked for", async () => {
+    // Arrange
+    const api = createApi({ baseUrl: "http://hub", launchToken: "t", fetchImpl: async () => new Response("", { status: 500 }) });
+
+    // Act & Assert
+    await expect(api.signInRequested(VID, "azure")).rejects.toThrow(/500/);
+  });
 });
 
 describe("createApi conversations", () => {
@@ -709,7 +739,8 @@ describe("createApi questions", () => {
 
     // Assert
     expect(hub.calls.at(-1)?.path).toBe(`/api/agent/${agentId}/question`);
-    expect(hub.questions.at(-1)).toEqual({ agent_id: agentId, ...QUESTION });
+    // `asked_at` is the hub's own, not the caller's: the offer window is read against when the hub stored it.
+    expect(hub.questions.at(-1)).toEqual({ agent_id: agentId, asked_at: expect.any(String), ...QUESTION });
   });
 
   // The hook denies the tool whether or not the POST answered, so a retry after a lost response is a real case.

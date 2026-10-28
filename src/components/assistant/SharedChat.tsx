@@ -1,7 +1,9 @@
 import Link from "next/link";
-import type { SharedConversationView, SharedThreadItem } from "@/assistant/sharing";
+import type { SharedConversationView } from "@/assistant/sharing";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
-import { Mark } from "@/components/assistant/AssistantShell";
+import { ForkButton, type ForkChatAction } from "@/components/assistant/ForkButton";
+import { ForkedThread } from "@/components/assistant/ForkedThread";
+import { SharedItem } from "@/components/assistant/SharedItem";
 
 /**
  * A chat someone shared, to read.
@@ -9,58 +11,21 @@ import { Mark } from "@/components/assistant/AssistantShell";
  * A server component with nothing interactive in it, which is what read-only means here: there is no composer, no
  * menu, no document editor and no stream, so there is nothing on the page that could ask the hub to change the chat
  * even if a rule above it were wrong. It is also a snapshot — the thread as it stood when the page was read.
+ *
+ * The one control is the fork's, for someone the owner offered the chat to, and it writes nothing here either: it
+ * makes the viewer their own copy in their own Assistant.
  */
 
-function files(count: number): string {
-  return count === 1 ? "1 file sent with this message" : `${count} files sent with this message`;
+function headline(view: SharedConversationView): string {
+  if (view.access === "owner") {
+    return "Your chat, as the people you shared it with see it";
+  }
+  return view.fork === null
+    ? `Shared with you by ${view.ownerName}. You can read it only.`
+    : `Shared with you by ${view.ownerName}, to continue in your own Assistant if you want to.`;
 }
 
-function Item({ item }: { item: SharedThreadItem }) {
-  if (item.type === "product") {
-    return (
-      <li className="flex items-center gap-3 text-xs text-asst-faint">
-        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
-        Product changed to {item.label}
-        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
-      </li>
-    );
-  }
-  // Said of the owner rather than of the reader, who stopped nothing: without it an answer simply ends mid-thought.
-  if (item.type === "stopped") {
-    return (
-      <li className="flex items-center gap-3 text-xs text-asst-faint">
-        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
-        This answer was stopped
-        <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
-      </li>
-    );
-  }
-  if (item.type === "user") {
-    return (
-      <li className="flex flex-col items-end gap-1">
-        <span className="sr-only">They asked:</span>
-        {item.text === "" ? null : (
-          <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-[18px_18px_4px_18px] bg-asst-bubble px-4 py-2.5">{item.text}</div>
-        )}
-        {/* The names and sizes are the owner's; a share says only that files went with the message. */}
-        {item.attachmentCount === 0 ? null : <span className="text-xs text-asst-faint">{files(item.attachmentCount)}</span>}
-      </li>
-    );
-  }
-  return (
-    <li className="flex items-start gap-3.5">
-      <span className="mt-px">
-        <Mark size="sm" />
-      </span>
-      <div className="min-w-0 flex-1 text-asst-body">
-        <span className="sr-only">The assistant said:</span>
-        <AssistantMarkdown source={item.text} />
-      </div>
-    </li>
-  );
-}
-
-export function SharedChat({ view }: { view: SharedConversationView }) {
+export function SharedChat({ view, forkChat }: { view: SharedConversationView; forkChat?: ForkChatAction }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-asst-field px-4">
@@ -68,12 +33,12 @@ export function SharedChat({ view }: { view: SharedConversationView }) {
         <span className="shrink-0 rounded-md border border-asst-accent-line px-2 py-1 font-plex-mono text-[11px] uppercase leading-none tracking-wider text-asst-accent-soft">
           {view.productLabel}
         </span>
-        <span className="ml-auto shrink-0 text-xs text-asst-faint">
-          {view.access === "owner" ? "Your chat, as the people you shared it with see it" : `Shared with you by ${view.ownerName}. You can read it only.`}
-        </span>
+        <span className="ml-auto shrink-0 text-xs text-asst-faint">{headline(view)}</span>
+        {view.fork === null || forkChat === undefined ? null : <ForkButton conversationId={view.id} copyId={view.fork.copyId} forkChat={forkChat} />}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[900px] flex-col gap-[26px] px-5 pb-10 pt-7">
+          {view.forked === null || view.earlierHidden ? null : <ForkedThread forked={view.forked} />}
           {view.earlierHidden ? (
             <p className="text-center text-[13px] text-asst-muted">This is the most recent part of the chat. What came before it is not shown here.</p>
           ) : null}
@@ -82,7 +47,7 @@ export function SharedChat({ view }: { view: SharedConversationView }) {
           ) : (
             <ol aria-label="Conversation" className="flex flex-col gap-[26px]">
               {view.thread.map((item) => (
-                <Item key={item.key} item={item} />
+                <SharedItem key={item.key} item={item} />
               ))}
             </ol>
           )}

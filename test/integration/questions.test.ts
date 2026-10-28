@@ -173,11 +173,59 @@ describe("POST /api/agent/{agent_id}/question", () => {
     expect(await prisma.agentQuestion.count({ where: { agentId } })).toBe(1);
   });
 
-  it("should take a new question once the one before it has been answered", async () => {
+  /**
+   * The deadlock this guard had on its own: a question nobody answered inside its window can never be answered, so
+   * counting it would refuse every later question of the session for ever and leave the person with no card to
+   * clear. The stale row stays — the thread must not lose what was asked.
+   */
+  it("should take a new question when the one before it is past its offer window", async () => {
+    const { agentId, token } = await conversationSession();
+    await ask(token, agentId);
+    await prisma.agentQuestion.updateMany({ where: { agentId }, data: { askedAt: new Date(Date.now() - QUESTION_OFFER_WINDOW_MS - 1000) } });
+
+    const response = await ask(token, agentId, { ...QUESTION, tool_use_id: "toolu_second" });
+
+    expect(response.status).toBe(204);
+    expect(await prisma.agentQuestion.findMany({ where: { agentId }, select: { toolUseId: true }, orderBy: { askedAt: "asc" } })).toEqual([
+      { toolUseId: QUESTION.tool_use_id },
+      { toolUseId: "toolu_second" }
+    ]);
+  });
+
+  // The other side of that: inside the window the card is answerable and still on screen, so it still blocks.
+  it("should refuse a different question when the one before it is inside its offer window", async () => {
+    const { agentId, token } = await conversationSession();
+    await ask(token, agentId);
+    await prisma.agentQuestion.updateMany({ where: { agentId }, data: { askedAt: new Date(Date.now() - QUESTION_OFFER_WINDOW_MS + 60_000) } });
+
+    const response = await ask(token, agentId, { ...QUESTION, tool_use_id: "toolu_second" });
+
+    expect(response.status).toBe(409);
+    expect(await prisma.agentQuestion.findMany({ where: { agentId }, select: { toolUseId: true } })).toEqual([{ toolUseId: QUESTION.tool_use_id }]);
+  });
+
+  // The same tool call is the card on screen whatever the clock says, expired or not: a retry of that question,
+  // not a new one. Writing a second row for it would put two cards up for one tool call.
+  it("should answer the same question posted again with success when the stored one has expired", async () => {
+    const { agentId, token } = await conversationSession();
+    await ask(token, agentId);
+    await prisma.agentQuestion.updateMany({ where: { agentId }, data: { askedAt: new Date(Date.now() - QUESTION_OFFER_WINDOW_MS - 1000) } });
+
+    expect((await ask(token, agentId)).status).toBe(204);
+
+    expect(await prisma.agentQuestion.count({ where: { agentId } })).toBe(1);
+  });
+
+  // An answered question is nothing the session is waiting on, so its age never comes into it.
+  it.each([
+    ["inside its offer window", 0],
+    ["long past its offer window", QUESTION_OFFER_WINDOW_MS + 1000]
+  ])("should take a new question once the one before it has been answered, %s", async (_label, age) => {
     const { agentId, token } = await conversationSession();
     await ask(token, agentId);
     const first = await prisma.agentQuestion.findFirstOrThrow({ where: { agentId }, select: { id: true } });
     await answerAgentQuestion({ questionId: first.id, answers: { answers: [{ labels: ["Red"], text: null }] } });
+    await prisma.agentQuestion.update({ where: { id: first.id }, data: { askedAt: new Date(Date.now() - age) } });
 
     await ask(token, agentId, { ...QUESTION, tool_use_id: "toolu_second" });
 

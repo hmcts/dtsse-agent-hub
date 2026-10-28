@@ -39,6 +39,7 @@ afterEach(() => {
   v.prompts.length = 0;
   v.completes.length = 0;
   v.loginFailures.length = 0;
+  v.signInRequests.clear();
   v.credentials.clear();
   v.codes.clear();
   v.ports.length = 0;
@@ -145,6 +146,36 @@ describe("runVirtual azure-login", () => {
     // Assert
     expect(r.code).toBe(EXIT_FATAL);
     expect(r.stderr).toMatch(/not the agent owner/);
+  });
+
+  it("should exit 4 and relay nothing when it may only restore and nothing is stored", async () => {
+    // Act
+    const r = await virtualCommand(["azure-login", "--restore-only"]);
+
+    // Assert
+    expect(r.code).toBe(EXIT_NO_CREDENTIAL);
+    expect(virtual().prompts).toHaveLength(0);
+  });
+
+  it("should exit 4 and relay nothing when the owner has asked for no Azure sign-in", async () => {
+    // Act
+    const r = await virtualCommand(["azure-login", "--if-requested"]);
+
+    // Assert
+    expect(r.code).toBe(EXIT_NO_CREDENTIAL);
+    expect(virtual().prompts).toHaveLength(0);
+  });
+
+  it("should exit 0 once the sign-in the owner asked for completes", async () => {
+    // Arrange
+    virtual().signInRequests.add("azure");
+
+    // Act
+    const r = await virtualCommand(["azure-login", "--if-requested"]);
+
+    // Assert
+    expect(r.code).toBe(0);
+    expect(virtual().completes).toEqual([expect.objectContaining({ kind: "azure" })]);
   });
 });
 

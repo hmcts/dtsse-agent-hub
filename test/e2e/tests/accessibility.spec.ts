@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { askQuestion, buildChannel, PERSONA_COOKIE, registerAgent, sampleTranscript, unique, uploadTranscript } from "./hub";
+import { askQuestion, buildChannel, connectForChat, PERSONA_COOKIE, registerAgent, sampleTranscript, unique, uploadTranscript } from "./hub";
 
 const PERSONA = unique("a11y");
 
@@ -136,7 +136,8 @@ test.describe("accessibility @nightly", () => {
 
   /**
    * The Assistant, which is audited as a first visit renders it: the shell, its sidebar and the new-chat screen, with
-   * the connections banner asking for the accounts nothing has connected yet. That is the whole of the Assistant a
+   * the connections banner asking for the Azure sign-in nothing has made yet, GitHub and Claude having been stored so
+   * that the gate they are behind lets the page through. That is the whole of the Assistant a
    * deployment can show without a pod — a conversation, its thread and its document panel all need one running, so
    * they stay outside this gate.
    *
@@ -145,7 +146,8 @@ test.describe("accessibility @nightly", () => {
    * layout answers 404 while it is. So this runs against `next dev` with the flag on, and goes live here the moment a
    * deployment turns it on. A skip is the point of the status check: without it the spec would pass on the 404.
    */
-  test("should raise no WCAG A or AA violations on the Assistant's new chat and getting-ready screen @nightly @a11y", async ({ page }) => {
+  test("should raise no WCAG A or AA violations on the Assistant's new chat and getting-ready screen @nightly @a11y", async ({ page, request }) => {
+    await connectForChat(request, PERSONA);
     const response = await page.goto("/assistant");
     // Conditional on the deployment rather than a test put aside: `VIRTUAL_AGENTS_ENABLED` is `"false"` in every
     // environment `Jenkinsfile_nightly` targets, so the layout answers 404 there. Turning the flag on in one is all

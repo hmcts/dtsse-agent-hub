@@ -170,6 +170,8 @@ model User {
   assistantModelChoice   AssistantModelChoice?
   conversationsSharedWithThem AssistantConversationShare[] @relation("shareRecipient")
   conversationsTheyShared     AssistantConversationShare[] @relation("shareOwner")
+  conversationsForkedToThem   AssistantConversationFork[]  @relation("forkRecipient")
+  conversationsTheyForked     AssistantConversationFork[]  @relation("forkOwner")
 
   @@map("user")
 }
@@ -437,6 +439,8 @@ model VirtualAgent {
   stopDetail          String?                 @map("stop_detail")
   diskExpiresAt       DateTime?               @map("disk_expires_at") @db.Timestamptz(6)
   diskDeletedAt       DateTime?               @map("disk_deleted_at") @db.Timestamptz(6)
+  /// When the owner asked it to sign in to Azure, until its pod relays that sign-in. See src/virtual-agents/logins.ts.
+  azureSignInRequestedAt DateTime?            @map("azure_sign_in_requested_at") @db.Timestamptz(6)
   createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
 
@@ -528,6 +532,16 @@ model AssistantConversation {
   confluenceError       String?   @map("confluence_error")
   confluenceRequestedAt DateTime? @map("confluence_requested_at") @db.Timestamptz(6)
   confluenceExportedAt  DateTime? @map("confluence_exported_at") @db.Timestamptz(6)
+  /// Where a copy was forked from; null once the source is deleted, and for a conversation that is not a copy.
+  forkedFromId          String?   @map("forked_from_id") @db.Uuid
+  forkedFromOwnerName   String?   @map("forked_from_owner_name")
+  forkedFromTitle       String?   @map("forked_from_title")
+  forkedAt              DateTime? @map("forked_at") @db.Timestamptz(6)
+  /// The words copied from the source, in src/assistant/forks.ts's shape.
+  forkedThread          Json?     @map("forked_thread")
+  forkedEarlierHidden   Boolean   @default(false) @map("forked_earlier_hidden")
+  /// When the copied words went to the copy's session, with the first message sent in it.
+  forkContextSentAt     DateTime? @map("fork_context_sent_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
@@ -537,6 +551,9 @@ model AssistantConversation {
   sessions     Agent[]          @relation("assistantConversationSessions")
   uploads      AssistantUpload[]
   shares       AssistantConversationShare[]
+  forks        AssistantConversationFork[]
+  forkedFrom   AssistantConversation?  @relation("forkedFrom", fields: [forkedFromId], references: [id], onDelete: SetNull)
+  copies       AssistantConversation[] @relation("forkedFrom")
 
   @@index([ownerOid, lastActiveAt(sort: Desc)], map: "assistant_conversation_owner_active_idx")
   @@map("assistant_conversation")
@@ -558,6 +575,24 @@ model AssistantConversationShare {
   @@id([conversationId, recipientOid])
   @@index([recipientOid, createdAt], map: "assistant_conversation_share_recipient_idx")
   @@map("assistant_conversation_share")
+}
+
+/// An offer to one named person of their own copy of one conversation, to continue in their own Assistant. The rows
+/// are the whole of the offer, as a share's are. See src/assistant/fork-store.ts.
+model AssistantConversationFork {
+  conversationId String   @map("conversation_id") @db.Uuid
+  recipientOid   String   @map("recipient_oid")
+  /// The conversation's owner, who is the only person who can offer it.
+  sharedByOid    String   @map("shared_by_oid")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  recipient    User                  @relation("forkRecipient", fields: [recipientOid], references: [oid], onDelete: Cascade)
+  sharedBy     User                  @relation("forkOwner", fields: [sharedByOid], references: [oid], onDelete: Cascade)
+
+  @@id([conversationId, recipientOid])
+  @@index([recipientOid, createdAt], map: "assistant_conversation_fork_recipient_idx")
+  @@map("assistant_conversation_fork")
 }
 
 /// A file attached to an Assistant message: the metadata, which outlives the bytes in `AssistantUploadPart`.

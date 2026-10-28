@@ -228,6 +228,7 @@ export async function unsentConversation(db: Database, ownerOid: string): Promis
       FROM assistant_conversation c
      WHERE c.owner_oid = ${ownerOid}
        AND c.artefact_version = 0
+       AND c.forked_at IS NULL
        AND EXISTS (
              SELECT 1 FROM assistant_upload u
               WHERE u.conversation_id = c.id AND u.message_id IS NULL AND u.state = 'stored'
@@ -345,7 +346,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
 }
 
 /** Creates the conversation's agent: offline, the assistant's, under a session id the pod will start a session as. */
-async function createConversationAgent(db: Database, conversation: Pick<ConversationRow, "id" | "ownerOid" | "virtualAgentId">): Promise<string> {
+export async function createConversationAgent(db: Database, conversation: Pick<ConversationRow, "id" | "ownerOid" | "virtualAgentId">): Promise<string> {
   const [agent] = await db.$queryRaw<{ id: string }[]>`
     INSERT INTO agent (owner_oid, session_id, name, status, last_heartbeat_at, read_cursor, virtual_agent_id, assistant_conversation_id)
     SELECT ${conversation.ownerOid}, gen_random_uuid()::text, v.name, 'offline', now(), (SELECT COALESCE(max(id), 0) FROM message),

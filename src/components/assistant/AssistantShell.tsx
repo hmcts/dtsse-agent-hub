@@ -14,7 +14,7 @@ import type { AssistantExportDefaults } from "@/components/assistant/ExportSetti
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
-import { type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
+import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
@@ -97,6 +97,7 @@ export function AssistantShell({
   activeId,
   theme = "system",
   connections,
+  connect,
   now,
   plugins,
   model,
@@ -115,6 +116,8 @@ export function AssistantShell({
   theme?: Theme;
   /** The person's sign-ins, which the footer's settings lists and warns about. */
   connections?: ConnectionsData;
+  /** How the footer's settings connects a sign-in made only on request, such as Azure. */
+  connect?: AssistantConnect;
   /** The page's own clock, which the footer's settings reads its sign-ins against. */
   now: number;
   /** The workspace plugins the footer's settings lets the person tick. */
@@ -261,6 +264,7 @@ export function AssistantShell({
                           <ChatMenu
                             title={item.title}
                             shareHref={`/assistant/${item.id}?share=1`}
+                            forkHref={`/assistant/${item.id}?fork=1`}
                             label={`Options for ${item.title}`}
                             // The trigger appears when the row is hovered, but a keyboard or touch user never
                             // hovers, so it is shown as well while the focus is anywhere inside the row, at every
@@ -313,6 +317,7 @@ export function AssistantShell({
             <AssistantSettings
               theme={theme}
               connections={connections}
+              connect={connect}
               now={now}
               plugins={plugins}
               model={model}

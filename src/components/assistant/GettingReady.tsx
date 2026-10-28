@@ -13,7 +13,7 @@ import {
   offeredConnections,
   signInPrompt
 } from "@/assistant/connections";
-import { type ConnectionsAsk, connectionsAsk } from "@/assistant/onboarding";
+import { type ConnectionsAsk, chatGate, connectionsAsk } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
 import type { AssistantSummary } from "@/assistant/views";
 import { waitingCookie } from "@/assistant/waiting";
@@ -494,8 +494,9 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
  * so every row would say "Connect" about a sign-in that may well be there. It says why instead, and its button
  * leaves, because holding someone behind a checklist the hub cannot check is a door with no handle.
  *
- * `onLeave` is how the screen is closed while a connection is still missing, and it is why the screen may cover the
- * page at all: it is a thing the person opened from the banner and can close again, not a gate across the Assistant.
+ * `onLeave` is how the screen is closed while a connection is still missing: a thing the person opened from the banner
+ * and can close again. It is left out while `chatGate` is `blocked`, because then the screen is the gate across the
+ * Assistant, and "Go to your chats" would be a way to chats that cannot be had without GitHub and Claude.
  *
  * A row whose stored credential a pod has failed to use reads as lapsed rather than connected, and offers `reconnect`:
  * nothing else on this screen can mend a stored value, so without it the one row that needs the person is the one
@@ -574,10 +575,10 @@ export function GettingReady({
  * What the Assistant has to ask or tell someone about their connections, and the way to the screen it is about.
  *
  * A banner and not a screen over everything, because being wrong about this is not symmetric. "You must do this
- * first" is unrecoverable: it takes away the sidebar, every conversation and the settings that could fix it, over a
- * state the person may not be able to satisfy — a model route their session disagrees with, a credentials vault that
- * is down. A banner somebody scrolls past costs them only the thing they were already not doing. So the page stays
- * theirs, and the screen opens only when they ask for it.
+ * first" takes away the sidebar, every conversation and the settings, so it is kept for the one ask that is always
+ * satisfiable and without which nothing works: GitHub and the model key, which `chatGate` holds the screen on.
+ * Everything else — Azure, a credentials vault that cannot be read — is a banner somebody can scroll past at the cost
+ * only of the thing they were already not doing, and the screen opens only when they ask for it.
  *
  * `onHide` is left out for an ask there is something to do about, which is the whole of a `connect`: the ask has to
  * outlast their attention, or they lose the only thing telling them why nothing works. An `unknown` has it, because
@@ -724,7 +725,9 @@ function storedKinds(statuses: CredentialStatus[]): Set<CredentialKind> {
 /**
  * Which of the getting-ready surfaces the Assistant's pages show, if any.
  *
- * Someone with a connection still to make gets the banner, and the connections screen when they open it from there.
+ * Someone without GitHub or the key to their assistant's model gets the connections screen, and nothing takes them
+ * past it until both are stored. Someone with another connection still to make gets the banner, and the connections
+ * screen when they open it from there.
  * Someone who has onboarded waits instead when they arrive to an assistant that is not running: on the connections
  * screen while its pod is asking them to sign in, so they can act on it, and on the warming-up screen otherwise.
  * Every screen can be sent away, by its button or by Escape. What each leaves behind is what it still has to say: the
@@ -768,7 +771,12 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
   const [waiting] = useState(ask === "done" && assistant.status !== "running");
   const [done, setDone] = useState(false);
   const [asking, setAsking] = useState(false);
-  const [view, setView] = useState<"screen" | "notice" | "gone">(() => initialView(ask, dismissed));
+  // Without GitHub and Claude there is no chat to be had, so this one is a gate rather than a banner: no cookie, no
+  // Escape and no button takes the person past it, and the page behind it renders no chat while it holds. It lifts
+  // when the credential's row is written, whose event refreshes the page; the screen then stays, as one opened from
+  // the banner does, until the person chooses to start chatting.
+  const blocked = chatGate(assistant.toChat, storedKinds(props.statuses), props.unavailable) === "blocked";
+  const [view, setView] = useState<"screen" | "notice" | "gone">(() => (blocked ? "screen" : initialView(ask, dismissed)));
   const running = assistant.status === "running";
   // Latched while rendering rather than in an effect, which runs after paint: the frame the person would see at the
   // moment their assistant came up would be this screen saying it was ready, bar full, and then gone. Latched in the
@@ -825,16 +833,16 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
   useEffect(() => {
     setAnnounced(message);
   }, [message]);
-  const onboarding = (ask === "connect" || (needed && !done)) && view === "screen";
+  const onboarding = blocked || ((ask === "connect" || (needed && !done)) && view === "screen");
   const unknown = ask === "unknown" && view === "screen";
   const screen = waiting && !started && !onboarding && !unknown && view === "screen";
   const signIn = relayed !== null && asking && !onboarding && !unknown && !screen;
-  useEscape(onboarding || unknown || screen || signIn, unknown ? hide : signIn ? stopAsking : dismiss);
+  useEscape(!blocked && (onboarding || unknown || screen || signIn), unknown ? hide : signIn ? stopAsking : dismiss);
 
   /** Whichever surface is showing, if any, in the order they take precedence. */
   function surface(): React.ReactNode {
     if (onboarding) {
-      return <GettingReady {...props} now={now} onDone={() => setDone(true)} onLeave={dismiss} />;
+      return <GettingReady {...props} now={now} onDone={() => setDone(true)} onLeave={blocked ? undefined : dismiss} />;
     }
     if (unknown) {
       return <GettingReady {...props} now={now} onDone={hide} />;
