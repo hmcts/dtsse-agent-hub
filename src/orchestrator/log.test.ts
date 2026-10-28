@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLogger, describeError, oneLine } from "./log.ts";
+import { createLogger, describeError, oneLine, redacting, withoutSecrets } from "./log.ts";
 
 const AT = new Date("2026-10-05T12:00:00Z");
 
@@ -75,5 +75,54 @@ describe("describeError", () => {
 describe("oneLine", () => {
   it("should leave text without line breaks alone", () => {
     expect(oneLine("plain")).toBe("plain");
+  });
+});
+
+describe("withoutSecrets", () => {
+  it("should replace every appearance of each secret when the text quotes them", () => {
+    expect(withoutSecrets("apim-key sent twice: apim-key, and base-64", ["apim-key", "base-64"])).toBe("[redacted] sent twice: [redacted], and [redacted]");
+  });
+
+  it("should leave the text alone when it quotes no secret", () => {
+    expect(withoutSecrets("StatefulSet is invalid", ["apim-key"])).toBe("StatefulSet is invalid");
+  });
+
+  // An empty string appears between every character, so redacting on one would take the whole line out.
+  it("should leave the text alone when a secret is empty", () => {
+    expect(withoutSecrets("plain", [""])).toBe("plain");
+  });
+});
+
+describe("redacting", () => {
+  function lines(secrets: string[]) {
+    const written: string[] = [];
+    return {
+      log: redacting(
+        createLogger(
+          (line) => written.push(line),
+          () => new Date(0)
+        ),
+        secrets
+      ),
+      written
+    };
+  }
+
+  it("should take a secret out of the message and of every field, however deep, when a line quotes one", () => {
+    const { log, written } = lines(["apim-key"]);
+
+    log("error", "could not apply apim-key", { error: 'env[6].value: "apim-key"', env: [{ "apim-key": ["apim-key"] }] });
+
+    expect(written[0]).toBe(
+      '{"error":"env[6].value: \\"[redacted]\\"","env":[{"[redacted]":["[redacted]"]}],"time":"1970-01-01T00:00:00.000Z","level":"error","message":"could not apply [redacted]"}'
+    );
+  });
+
+  it("should write what it was given when there is no secret to take out", () => {
+    const { log, written } = lines([]);
+
+    log("info", "applied", { id: "a" });
+
+    expect(written[0]).toBe('{"id":"a","time":"1970-01-01T00:00:00.000Z","level":"info","message":"applied"}');
   });
 });

@@ -9,12 +9,14 @@ import type { VirtualAgentCard } from "@/virtual-agents/views";
 import { type CreateAction, CreateVirtualAgentForm } from "./CreateVirtualAgentForm";
 import { idleFor, statusLabel, stopReasonLabel } from "./labels";
 
+const MODEL_ROUTE_WORDS: Record<ModelRoute, string> = {
+  bedrock: "Amazon Bedrock, with the API key stored for you",
+  gateway: "Claude through the HMCTS AI Gateway, on your own Azure sign-in",
+  "own-licence": "your own Claude licence, so it will also need your Claude token"
+};
+
 export function ModelRouteLine({ route }: { route: ModelRoute }) {
-  return (
-    <p className="text-sm text-hub-text">
-      Model: {route === "bedrock" ? "Claude Code through HMCTS, with your Claude Code key" : "your own Claude licence, so it will also need your Claude token"}
-    </p>
-  );
+  return <p className="text-sm text-hub-text">Model: {MODEL_ROUTE_WORDS[route]}</p>;
 }
 
 /** The days left before a stopped agent's disk is deleted, once that is close, or that it has been. */

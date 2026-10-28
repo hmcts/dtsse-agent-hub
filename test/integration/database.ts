@@ -58,13 +58,15 @@ export async function insertAgent(
 export { prisma };
 
 /**
- * Marks the person as having connected GitHub and both model keys, which is what `chatGate` reads, so a suite about
- * something else can drive the Assistant's actions. Rows only: the gate never reads a value.
+ * Marks the person as having connected GitHub, Azure and both model keys, which is everything `chatGate` reads on any
+ * route, so a suite about something else can drive the Assistant's actions. Azure is among them because it is the
+ * model credential on the `gateway` route, which is where a persona whose name says nothing about a route lands.
+ * Rows only: the gate never reads a value.
  */
 export async function connectForChat(who: Person): Promise<void> {
   await insertUser(who);
   await prisma.credential.createMany({
-    data: (["github", "claude", "bedrock"] as const).map((kind) => ({
+    data: (["github", "azure", "claude", "bedrock"] as const).map((kind) => ({
       ownerOid: who.oid,
       kind,
       secretName: `u-${who.oid}-${kind}`,

@@ -354,6 +354,10 @@ describe("the bedrock migration", () => {
       { type: "credential_kind", label: "git_identity" },
       { type: "credential_kind", label: "atlassian" },
       { type: "model_route", label: "bedrock" },
+      // `migrate()` applies every migration from this one on, so the labels are the enums as they stand today, not as
+      // this migration left them: `20261106090000_model_route_gateway` adds `gateway` back after `bedrock` for the
+      // route that reaches Bedrock through the HMCTS AI Gateway. No row carries it — the rename above moved them all.
+      { type: "model_route", label: "gateway" },
       { type: "model_route", label: "own_licence" }
     ]);
   });

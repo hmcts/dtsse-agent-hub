@@ -30,6 +30,8 @@ const SPEC: VirtualAgentSpec = {
   publicDomain: "preview.platform.hmcts.net"
 };
 
+const GATEWAY = { base_url: "https://ai-gateway.sandbox.platform.hmcts.net", audience: "api://gateway-client/.default", apim_key: "apim-key" };
+
 const LABELS = {
   "app.kubernetes.io/name": "virtual-agent",
   "app.kubernetes.io/managed-by": "agent-hub-orchestrator",
@@ -150,6 +152,27 @@ describe("statefulSet", () => {
     const [container] = podSpec(statefulSet(AGENT, SPEC, TOKEN)).containers;
 
     expect(container!.env.map((entry) => entry.name)).not.toContain("HAI_ENV_READY");
+  });
+
+  it("should give the pod the gateway's URL, scope and APIM key when the claim carried them for a gateway agent", () => {
+    const [container] = podSpec(statefulSet({ ...AGENT, model_route: "gateway", gateway: GATEWAY }, SPEC, TOKEN)).containers;
+
+    expect(container!.env).toContainEqual({ name: "AI_GATEWAY_BASE_URL", value: GATEWAY.base_url });
+    expect(container!.env).toContainEqual({ name: "AI_GATEWAY_AUDIENCE", value: GATEWAY.audience });
+    expect(container!.env).toContainEqual({ name: "AI_GATEWAY_APIM_KEY", value: GATEWAY.apim_key });
+  });
+
+  // The key is one service's rather than one agent's, so a pod that cannot use it must not carry it. The hub sends
+  // it for no other route, and this is what makes a claim that sent one anyway no way to get it into another pod.
+  it.each(["bedrock", "own_licence"] as const)("should leave the gateway's APIM key out when the agent is on the %s route", (route) => {
+    const [container] = podSpec(statefulSet({ ...AGENT, model_route: route, gateway: GATEWAY }, SPEC, TOKEN)).containers;
+
+    expect(container!.env.map((entry) => entry.name).filter((name) => name.startsWith("AI_GATEWAY_"))).toEqual([]);
+  });
+
+  // A pod started without them could only boot, say which setting it was not given, and sit there.
+  it("should refuse to build a gateway pod when the claim carried no gateway settings", () => {
+    expect(() => statefulSet({ ...AGENT, model_route: "gateway" }, SPEC, TOKEN)).toThrow(/AI_GATEWAY/);
   });
 
   // The figures, not the constant, because a cap is a measured limit on what a pod of that size can hold: reading it

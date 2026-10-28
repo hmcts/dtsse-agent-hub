@@ -62,7 +62,11 @@ export const CONNECTORS = {
   atlassian: { name: "Atlassian", initial: "A", desc: "Jira tickets and Confluence pages (optional)", paste: null },
   jenkins: { name: "Jenkins", initial: "J", desc: "Builds and pipelines on Jenkins (optional)", paste: "Jenkins API token" },
   claude: { name: "Claude", initial: "C", desc: "Your Claude licence", paste: "Claude token" },
-  bedrock: { name: "AI model access", initial: "AI", desc: "Your Claude Code connection", paste: "Claude Code key" },
+  // Worded for the hub's own credentials page, which is the only surface that offers it. No assistant asks for it:
+  // `neededCredentials` names it for the `bedrock` route alone, and nobody is put on that route any more — a member
+  // of the AI Gateway's developer group goes through the gateway on their own Azure sign-in, and everyone else
+  // brings their own Claude licence. An administrator pastes the key for an agent created before that was true.
+  bedrock: { name: "AI model access", initial: "AI", desc: "An Amazon Bedrock API key an administrator stores for you", paste: "Amazon Bedrock API key" },
   // Neither is a sign-in: both are kept beside them because they may hold private context, and there is nothing to
   // connect for either, so no surface offers a row for them.
   claude_md: null,
@@ -258,6 +262,9 @@ export function connections(
  * is: nothing prompts for it, and a sign-in of it is raised as an ask only while the code they asked for is live. One
  * that lapsed is left to that section, where it says so and offers to connect again, rather than being put back in
  * front of somebody who may have changed their mind.
+ *
+ * On the `gateway` route it is also the model credential, so `neededCredentials` names it and the connections banner
+ * asks for it — but it is still signed in to on request, because the sign-in is the same device code either way.
  */
 export const ON_REQUEST: readonly CredentialKind[] = ["azure"];
 
@@ -300,10 +307,10 @@ export interface OfferedConnection {
  * connections their assistant cannot sign in to itself", and the reason this can read `paste` rather than importing
  * the server module that owns `SIGN_IN_KINDS`. It restarts the pod so it relays a fresh code. Anything the person
  * pastes has a way back only for a credential their
- * assistant uses, because `saveCredential` is route-aware — it refuses a Claude token from somebody whose agents run
- * on Amazon Bedrock. So a lapsed Claude sign-in relayed to a Bedrock-route person has no way back at all: the only
- * control for it is a box whose save is refused, and nothing ever clears the login row, since `startLogin` overwrites
- * only on a new relay and the two states that end one need a pod's report.
+ * assistant uses, because `saveCredential` is route-aware — it refuses a Claude token from somebody whose agents do
+ * not run on their own licence. So a lapsed Claude sign-in relayed to a gateway-route person has no way back at all:
+ * the only control for it is a box whose save is refused, and nothing ever clears the login row, since `startLogin`
+ * overwrites only on a new relay and the two states that end one need a pod's report.
  *
  * That is the one state an ask must never name — an ask it cannot satisfy and cannot dismiss — so it is left off the
  * screen as well, and the two cannot drift because this is the only place the question is asked.
@@ -415,7 +422,7 @@ export const PROMPTED_WHEN_MISSING: readonly CredentialKind[] = ["github"];
  * Anything their assistant has asked them for and they have not finished, whatever kind it is. Being stored is what
  * silences the connections banner, so a stored credential whose sign-in has since lapsed is a state no other surface
  * says anything about — which is exactly the one the badge is for, and leaving a kind out of it by name is how
- * Claude, Bedrock and Jenkins came to have no badge at all once their value was stored.
+ * Claude and Jenkins came to have no badge at all once their value was stored.
  *
  * `asksAbout` and nothing wider, so the badge cannot point at a prompt that is not raised: the cog says to close the
  * dialog and look above the chats, and `signInPrompt` is what is there. A `finishing` sign-in raises neither, and

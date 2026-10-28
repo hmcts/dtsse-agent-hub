@@ -629,6 +629,141 @@ bedrock_key() {
     return 1
 }
 
+# The HMCTS AI Gateway route. The owner's own Azure sign-in is the credential — the gateway authorises the person,
+# so there is no key for them to paste — and the only thing the hub injects is the APIM subscription key, which is
+# one service's rather than one person's, with the gateway's origin and the Entra scope to ask az for a token for.
+#
+# hai has a route of its own for this, and the pod cannot use it: hai reads the APIM key from sps-ai-kv-sbox itself,
+# which has no public endpoint and no name a pod can resolve, and there is no environment override for the value.
+# What there is, is HAI_ENV_READY — with HAI_IN_CONTAINER it makes hai use the environment exactly as handed over —
+# so the whole of that route's environment is built here instead. That is why every variable hai's ai-gateway route
+# sets is set below rather than only the two the gateway itself needs.
+GATEWAY_HELPER="$STATE/gateway-token.sh"
+GATEWAY_BEDROCK_PATH="/ai/platform/v1/bedrock"
+# The Entra group the gateway grants its Bedrock access by. Named in the failure detail because it is the one thing
+# the owner can act on, and nothing else in the pod can say it.
+GATEWAY_GROUP="DTSSE AI Gateway Bedrock Developer"
+# The app role that group assignment puts in the owner's token, which is the pod's one way of telling whether the
+# gateway will serve them: see gateway_ready.
+GATEWAY_ROLE="AI.Gateway.Standard"
+# The family aliases the hub's catalogue offers, pinned to ids on the gateway's allowedModels list. hai's own
+# defaults carry the [1m] long-context suffix, which that list does not hold, and an id outside it 404s at the
+# gateway — so these are set here rather than left to hai, which with HAI_ENV_READY=1 sets nothing anyway.
+GATEWAY_HAIKU_MODEL="eu.anthropic.claude-haiku-5-5"
+GATEWAY_SONNET_MODEL="eu.anthropic.claude-sonnet-5-5"
+GATEWAY_OPUS_MODEL="eu.anthropic.claude-opus-5-5"
+# Claude Code re-runs apiKeyHelper this often, which is what makes a token minted from an az sign-in that arrives
+# after boot reach a running session without restarting it.
+GATEWAY_TOKEN_TTL_MS=300000
+
+# Builds the gateway environment and the apiKeyHelper Claude Code mints each token with. Fatal on a missing setting:
+# falling through to another route would move who pays without anyone asking, and carrying on would be a pod that
+# 401s every turn with nothing saying why.
+gateway_env() {
+    [[ -n "${AI_GATEWAY_APIM_KEY:-}" ]] ||
+        fatal "the AI Gateway route needs its APIM subscription key, which this agent hub was not given; ask DTSSE to set AI_GATEWAY_APIM_KEY"
+    [[ -n "${AI_GATEWAY_AUDIENCE:-}" ]] ||
+        fatal "the AI Gateway route needs the gateway's Entra scope, which this agent hub was not given; ask DTSSE to set AI_GATEWAY_AUDIENCE"
+    [[ -n "${AI_GATEWAY_BASE_URL:-}" ]] ||
+        fatal "the AI Gateway route needs the gateway's URL, which this agent hub was not given; ask DTSSE to set AI_GATEWAY_BASE_URL"
+    # The helper path goes into the --settings JSON and then through the shell tmux runs the launch line in, and
+    # neither is escaped, so a quote in it would break both rather than be passed along.
+    case "$GATEWAY_HELPER" in
+        *[\"\\\']*) fatal "the pod's state directory cannot hold the gateway token helper: $GATEWAY_HELPER" ;;
+    esac
+    # The scope is interpolated into the helper inside a double-quoted shell string, where a quote, a backtick or a
+    # `$(…)` would run as the pod's user, and anything else wrong with it is a bare `401 invalid_token` at the
+    # gateway. An Entra Application ID URI needs none of those characters, so the whole of what one can hold is
+    # allowed here and a value outside it fails naming itself.
+    case "$AI_GATEWAY_AUDIENCE" in
+        api://*/.default) ;;
+        *) fatal "the AI Gateway route's Entra scope must be api://<client id>/.default, and AI_GATEWAY_AUDIENCE is $AI_GATEWAY_AUDIENCE" ;;
+    esac
+    case "$AI_GATEWAY_AUDIENCE" in
+        *[!A-Za-z0-9._:/-]*)
+            fatal "the AI Gateway route's Entra scope may hold only letters, digits and . _ : / -, and AI_GATEWAY_AUDIENCE is $AI_GATEWAY_AUDIENCE" ;;
+    esac
+    mkdir -p "$STATE" || fatal "cannot create $STATE for the gateway token helper"
+    # 0700 under the pod's own state directory: it names the scope but holds no secret, and only this user runs it.
+    (umask 077 && printf '#!/usr/bin/env bash\nset -euo pipefail\nexec az account get-access-token --scope "%s" --query accessToken -o tsv\n' \
+        "$AI_GATEWAY_AUDIENCE" >"$GATEWAY_HELPER") || fatal "cannot write the gateway token helper to $GATEWAY_HELPER"
+    chmod 700 "$GATEWAY_HELPER" || fatal "cannot make the gateway token helper executable"
+    CLAUDE_CODE_USE_BEDROCK=1
+    # The gateway signs the upstream call, so Claude Code must not try to sign with SigV4 of its own.
+    CLAUDE_CODE_SKIP_BEDROCK_AUTH=1
+    CLAUDE_CODE_API_KEY_HELPER_TTL_MS="$GATEWAY_TOKEN_TTL_MS"
+    AWS_REGION="${AWS_REGION:-eu-west-2}"
+    ANTHROPIC_BEDROCK_BASE_URL="${AI_GATEWAY_BASE_URL%/}$GATEWAY_BEDROCK_PATH"
+    ANTHROPIC_CUSTOM_HEADERS="Ocp-Apim-Subscription-Key: $AI_GATEWAY_APIM_KEY"
+    ANTHROPIC_DEFAULT_HAIKU_MODEL="$GATEWAY_HAIKU_MODEL"
+    ANTHROPIC_DEFAULT_SONNET_MODEL="$GATEWAY_SONNET_MODEL"
+    ANTHROPIC_DEFAULT_OPUS_MODEL="$GATEWAY_OPUS_MODEL"
+    HAI_ENV_READY=1
+    export CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_SKIP_BEDROCK_AUTH CLAUDE_CODE_API_KEY_HELPER_TTL_MS AWS_REGION \
+        ANTHROPIC_BEDROCK_BASE_URL ANTHROPIC_CUSTOM_HEADERS ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL \
+        ANTHROPIC_DEFAULT_OPUS_MODEL HAI_ENV_READY
+    log "gateway: Claude reaches $ANTHROPIC_BEDROCK_BASE_URL on the owner's own Azure sign-in"
+}
+
+# The claims of a token's payload as compact JSON, or nothing at all when it does not decode and parse as one.
+#
+# base64 and shell patterns rather than node or jq: neither is on PATH at this point in the boot, and the check this
+# feeds must never turn a decode it could not make into a refusal. A JWT payload is base64url and unpadded, so the
+# two substituted characters go back and the padding is restored before base64 will take it; the whitespace goes so
+# that a payload encoded with any goes through the same patterns as the compact one Entra mints.
+gateway_token_claims() {
+    local payload
+    [[ "$1" == *.*.* ]] || return 0
+    payload=${1#*.}
+    payload=${payload%%.*}
+    [[ -n "$payload" ]] || return 0
+    payload=${payload//-/+}
+    payload=${payload//_//}
+    while ((${#payload} % 4 != 0)); do payload+="="; done
+    payload=$(printf '%s' "$payload" | base64 -d 2>/dev/null) || return 0
+    payload=${payload//[[:space:]]/}
+    case "$payload" in
+        '{'*'}') printf '%s' "$payload" ;;
+    esac
+}
+
+# Whether the owner's own token carries the gateway's access, asked once before the first session.
+#
+# The gateway grants its Bedrock access through one Entra group, and a group's app-role assignment only ever reaches
+# a member's own token. So an owner outside that group holds a token the gateway accepts as a token and refuses as an
+# entitlement: every turn comes back 401 with no credential missing, so nothing is waiting on them, no sign-in is
+# relayed, and the pod reports healthy while nothing works. The role claim turns that into a failure naming the group.
+#
+# The token is the whole of the evidence because the gateway cannot be asked: every request a probe could make
+# without spending a model turn answers 404 whether the caller is entitled or not, so an HTTP check tells the two
+# apart not at all. Nothing here checks the signature — az minted this token on this pod moments ago, and it is read
+# for what it says about its own holder rather than trusted as an authorisation.
+#
+# Only a token that decodes and names no such role fails. One az cannot mint yet, or one whose payload will not
+# decode or parse, carries on unchecked: az is restored or signed in to in the background, and Claude Code re-runs
+# the helper every few minutes, so a sign-in that lands after boot reaches a running session. And none of them falls
+# back to the owner's own Claude licence, which would put HMCTS work on a personal subscription nobody offered.
+gateway_ready() {
+    local token claims roles
+    token=$("$GATEWAY_HELPER" 2>/dev/null)
+    if [[ -z "$token" ]]; then
+        log "gateway: az cannot mint a token yet, so the owner's access is unchecked; Claude Code runs the helper again every few minutes once Azure is connected"
+        return 0
+    fi
+    claims=$(gateway_token_claims "$token")
+    if [[ -z "$claims" ]]; then
+        log "gateway: the token's claims could not be read, so the owner's access is unchecked"
+        return 0
+    fi
+    roles=${claims#*\"roles\":[}
+    roles=${roles%%]*}
+    if [[ "$claims" == *\"roles\":[* && "$roles" == *\"$GATEWAY_ROLE\"* ]]; then
+        log "gateway: the owner's Azure sign-in carries $GATEWAY_ROLE, so the gateway will serve them"
+        return 0
+    fi
+    fatal "your Azure sign-in does not carry the HMCTS AI Gateway's $GATEWAY_ROLE access; ask to be added to the Entra group $GATEWAY_GROUP, then start this agent again"
+}
+
 JENKINS_ENV="$WS/.claude/.jenkins.env"
 jenkins_oid=""
 jenkins_state=""
@@ -731,8 +866,15 @@ case "$ROUTE" in
         done
         unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_USE_BEDROCK
         ;;
-    bedrock | gateway)
-        ROUTE=bedrock
+    gateway)
+        gateway_env
+        # Every other payer's credential: a personal OAuth token or a Bedrock key left in the environment would
+        # take precedence over the token the apiKeyHelper mints, and the session would be billed to whoever that
+        # credential belongs to while the launch line said the gateway.
+        unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN AWS_BEARER_TOKEN_BEDROCK
+        gateway_ready
+        ;;
+    bedrock)
         bedrock_key
         unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
         ;;
@@ -748,14 +890,26 @@ esac
 # turns instead of being held. AGENT_HUB_AUTO_ENABLE puts comms on without anyone to run
 # /enable-comms, and KNOWLEDGE_SWEEP_CHILD keeps the knowledge sweep out of a pod — it is read
 # before the workspace's knowledge sweep reaches anything else, so no session in a pod ever sweeps.
+#
+# On the gateway route it also carries apiKeyHelper, because that is the only way the helper reaches Claude Code at
+# all: hai sets it from its own gateway resolution, and HAI_ENV_READY=1 is precisely what skips that. The path holds
+# no quote of its own — gateway_env refuses one that does — so single-quoting this for tmux stays safe.
 CLAUDE_SETTINGS='{"crossSessionInbound":"accept","env":{"AGENT_HUB_AUTO_ENABLE":"true","KNOWLEDGE_SWEEP_CHILD":"1"}}'
+if [[ "$ROUTE" == gateway ]]; then
+    CLAUDE_SETTINGS="{\"crossSessionInbound\":\"accept\",\"apiKeyHelper\":\"$GATEWAY_HELPER\",\"env\":{\"AGENT_HUB_AUTO_ENABLE\":\"true\",\"KNOWLEDGE_SWEEP_CHILD\":\"1\"}}"
+fi
 
 # AGENT_HUB_MODEL_ROUTE is the hub's contract and says who pays for the agent; HAI_ROUTE says
 # which credential hai uses, and the route branch above has already exported that credential.
 # An explicit HAI_ROUTE means "use the credential you were handed", so byol spends the hub's
 # Claude token whatever Entra groups the owner happens to be in.
+#
+# On the gateway route HAI_ENV_READY=1 means hai never reads HAI_ROUTE, and ai-gateway is still what it is set to:
+# if that marker ever stopped being honoured, hai's own ai-gateway route fails naming the Key Vault it cannot read,
+# where any other value would quietly run the session on a credential this route did not choose.
 case "$ROUTE" in
     own_licence) HAI_ROUTE=byol ;;
+    gateway) HAI_ROUTE=ai-gateway ;;
     *) HAI_ROUTE=bedrock ;;
 esac
 
@@ -764,8 +918,9 @@ esac
 # containerd, which creates no /.dockerenv, and this is neither a devcontainer nor a Docker
 # sandbox. Without this, hai takes container mode and dies pulling an image, because a pod has
 # no Docker socket, no privilege escalation and no root. HAI_ENV_READY would also stop that, but
-# it short-circuits route resolution with it, and the bedrock route needs the environment that
-# resolution builds. HAI_NO_UPDATE=1 is the other half of the hai install above.
+# it short-circuits route resolution with it, and the bedrock and own_licence routes need the
+# environment that resolution builds; the gateway route builds its own and sets the marker itself,
+# in gateway_env. HAI_NO_UPDATE=1 is the other half of the hai install above.
 #
 # The hub's pod template sets both of these as well, and setting them here too is deliberate rather
 # than defensive: a running agent picks up a new runtime with its next client upgrade, but it does

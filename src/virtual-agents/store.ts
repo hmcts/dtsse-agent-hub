@@ -9,7 +9,7 @@ import { afterApplyError, awaitsOwner, nextStatus, type Observation, type PodPha
 import { checkName, createRefusal } from "./limits.ts";
 import { availablePlugins, checkPlugins, samePlugins, storedPlugins } from "./plugins.ts";
 import { normalisePorts, samePorts } from "./ports.ts";
-import { diskTtlDays, orchestratorLeaseSeconds } from "./settings.ts";
+import { diskTtlDays, type GatewaySettings, gatewaySettings, orchestratorLeaseSeconds } from "./settings.ts";
 import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
 import { announce, type StopReason } from "./stop.ts";
 
@@ -79,14 +79,15 @@ const SELECT = {
   createdAt: true
 } as const;
 
-type StoredRoute = "bedrock" | "own_licence";
+/** Postgres enum labels cannot hold a hyphen, so `own_licence` is the one value spelled differently in the row. */
+type StoredRoute = "bedrock" | "gateway" | "own_licence";
 
 function toRoute(stored: StoredRoute): ModelRoute {
-  return stored === "own_licence" ? "own-licence" : "bedrock";
+  return stored === "own_licence" ? "own-licence" : stored;
 }
 
 function fromRoute(route: ModelRoute): StoredRoute {
-  return route === "own-licence" ? "own_licence" : "bedrock";
+  return route === "own-licence" ? "own_licence" : route;
 }
 
 function toRow<R extends { modelRoute: StoredRoute; plugins: unknown }>(
@@ -571,6 +572,17 @@ export interface ClaimedVirtualAgent {
   owner: { oid: string };
   /** Only when this claim minted one. It is never stored and never returned again. */
   launch_token?: string;
+  /**
+   * What a `gateway` agent's pod needs to reach the HMCTS AI Gateway, for the orchestrator to put in its pod
+   * template. Only for an agent on that route that is meant to be running, which is the only thing a template is
+   * built for, and absent for every other agent — so no other pod carries the key, and neither does a claim that
+   * has no use for it. Absent too on a deployment with no gateway configured, where such a pod cannot start at all.
+   *
+   * It travels in the claim rather than in the orchestrator's own environment because the hub is what is configured:
+   * its chart holds the two plain values and reads the key from the `dtsse` vault, and the orchestrator's Deployment
+   * is in cnp-flux-config. The launch token takes the same path into the same pod template for the same reason.
+   */
+  gateway?: GatewaySettings;
 }
 
 export const CLAIM_LIMIT = 20;
@@ -698,6 +710,12 @@ async function takeOver(db: Database, cluster: string, now: Date): Promise<void>
  *
  * A launch token is minted, replacing any before it, when the agent is meant to be running and either has none or is
  * starting a new pod. Its plain value goes in this response and nowhere else.
+ *
+ * A running `gateway` agent also carries what its pod needs to reach the AI Gateway, read from this hub's own
+ * environment: `gatewaySettings` refuses a deployment that sets some of the three and not others, which fails the
+ * claim — and the whole transaction with it, so nothing is left claimed — rather than handing out a pod template
+ * that boots and then fails every turn. Only an agent on that route asks, so a deployment with nobody on the
+ * gateway is never refused for a gateway it has no use for.
  */
 export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, options: ClaimOptions = {}): Promise<ClaimResult> {
   const { limit = CLAIM_LIMIT, now = new Date(), leaseSeconds = orchestratorLeaseSeconds() } = options;
@@ -747,6 +765,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         });
         launchToken = minted.token;
       }
+      const gateway = row.model_route === "gateway" && row.desired === "running" ? (gatewaySettings() ?? undefined) : undefined;
       claimed.push({
         id: row.id,
         generation: row.generation,
@@ -760,7 +779,8 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         exposed_ports: row.exposed_ports,
         plugins: storedPlugins(row.plugins),
         owner: { oid: row.owner_oid },
-        ...(launchToken === undefined ? {} : { launch_token: launchToken })
+        ...(launchToken === undefined ? {} : { launch_token: launchToken }),
+        ...(gateway === undefined ? {} : { gateway })
       });
     }
     return { active: true, virtual_agents: claimed };

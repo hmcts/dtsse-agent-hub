@@ -31,12 +31,12 @@ test.describe("credentials @smoke", () => {
 
       const token = `ghp_${unique("e2e").replaceAll("-", "")}${"a".repeat(24)}`;
       const github = page.getByRole("form", { name: "Save GitHub token" });
-      await github.getByLabel("Paste a GitHub token").fill(token);
+      await github.getByLabel("Paste your GitHub token").fill(token);
       await github.getByRole("button", { name: "Save" }).click();
 
       await expect(page.getByRole("status").filter({ hasText: "Your GitHub token is stored" })).toBeVisible();
       await expect(page.getByRole("form", { name: "Delete GitHub token" })).toBeVisible();
-      await expect(page.getByLabel("Paste a Claude token")).toBeVisible();
+      await expect(page.getByLabel("Paste your Claude token")).toBeVisible();
       expect(await page.content()).not.toContain(token);
 
       await page.getByRole("form", { name: "Delete GitHub token" }).getByRole("button", { name: "Delete" }).click();

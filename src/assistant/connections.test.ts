@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import { CREDENTIAL_KINDS, type CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
+import { type ModelRoute, modelRouteFor } from "../viewer/identity.ts";
 import { isSignInKind, type LoginState, type LoginView } from "../virtual-agents/logins.ts";
-import { neededCredentials, OPTIONAL_CREDENTIALS } from "../virtual-agents/views.ts";
+import { neededCredentials, OPTIONAL_CREDENTIALS, optionalCredentials } from "../virtual-agents/views.ts";
 import {
   CONNECTION_STATES,
   CONNECTORS,
@@ -32,6 +33,8 @@ import {
 } from "./connections.ts";
 
 const NOW = Date.parse("2026-10-25T12:00:00.000Z");
+
+const ROUTES: ModelRoute[] = ["bedrock", "gateway", "own-licence"];
 
 /** When a stored credential was saved, and a sign-in either side of it, so the two can be ordered on purpose. */
 const STORED_AT = "2026-10-24T09:00:00.000Z";
@@ -86,10 +89,19 @@ describe("CONNECTORS", () => {
     expect(pasted).toEqual(CREDENTIAL_KINDS.filter((kind) => isConnection(kind) && !isSignInKind(kind)));
   });
 
-  it("should word every connection the Assistant can ask for, on either model route", () => {
-    for (const kind of [...neededCredentials("own-licence"), ...neededCredentials("bedrock"), ...OPTIONAL_CREDENTIALS]) {
+  it("should word every connection the Assistant can ask for, on every model route", () => {
+    for (const kind of [...ROUTES.flatMap(neededCredentials), ...OPTIONAL_CREDENTIALS]) {
       expect(CONNECTORS[kind]).not.toBeNull();
     }
+  });
+
+  // The owner's decision: an Amazon Bedrock API key is an administrator's to paste on the hub's own credentials page,
+  // and must never be asked of the person whose chats run on it. It is still worded, because `CONNECTORS` is total
+  // over `CredentialKind` and that page reads the same words.
+  it("should ask for no model key at all on the route everybody signing in is put on", () => {
+    expect(neededCredentials(modelRouteFor(true))).not.toContain("bedrock");
+    expect(neededCredentials(modelRouteFor(false))).not.toContain("bedrock");
+    expect(CONNECTORS.bedrock).not.toBeNull();
   });
 });
 
@@ -235,11 +247,18 @@ describe("canSignInAgain", () => {
     expect(canSignInAgain("jenkins", NOTHING)).toBe(false);
   });
 
-  // The state the rule exists for: `saveCredential` refuses a Claude token from somebody on the Bedrock route, so a
-  // lapsed Claude row would be an ask with a box that cannot be answered and no reconnect to fall back on.
-  it("should offer no Claude sign-in to an assistant that runs on Amazon Bedrock", () => {
+  // The state the rule exists for: `saveCredential` refuses a Claude token from somebody not on their own licence,
+  // so a lapsed Claude row would be an ask with a box that cannot be answered and no reconnect to fall back on.
+  it("should offer no Claude sign-in to an assistant that does not run on the person's own licence", () => {
+    expect(canSignInAgain("claude", neededCredentials("gateway"))).toBe(false);
     expect(canSignInAgain("claude", neededCredentials("bedrock"))).toBe(false);
     expect(canSignInAgain("claude", neededCredentials("own-licence"))).toBe(true);
+  });
+
+  // The pasted key has no way back on any route a sign-in puts somebody on, which is what keeps it off every ask.
+  it("should offer no Bedrock key to an assistant on a route that does not use one", () => {
+    expect(canSignInAgain("bedrock", [...neededCredentials("gateway"), ...optionalCredentials("gateway")])).toBe(false);
+    expect(canSignInAgain("bedrock", [...neededCredentials("own-licence"), ...optionalCredentials("own-licence")])).toBe(false);
   });
 
   it("should offer nothing that is not a sign-in at all", () => {
@@ -614,10 +633,33 @@ describe("offeredConnections", () => {
     return offeredConnections({ needed, optional: OPTIONAL_CREDENTIALS, logins }, NOW).map((row) => row.kind);
   }
 
-  it.each(["own-licence", "bedrock"] as const)("should offer a row for every credential the %s route needs", (route) => {
+  /** What one route's assistant is offered, with each of its own lists rather than every optional kind there is. */
+  function offerFor(route: ModelRoute, logins: LoginView[] = []) {
+    return offeredConnections({ needed: neededCredentials(route), optional: optionalCredentials(route), logins }, NOW).map((row) => row.kind);
+  }
+
+  it.each(ROUTES)("should offer a row for every credential the %s route needs", (route) => {
     const needed = neededCredentials(route);
 
     expect(offer(needed)).toEqual(expect.arrayContaining(needed));
+  });
+
+  // The ask and the row are the same list, so the screen offering a kind twice would be the banner naming it twice.
+  it.each(ROUTES)("should offer each kind once however many of its lists it is on, on the %s route", (route) => {
+    const offered = offerFor(route);
+
+    expect(offered).toEqual([...new Set(offered)]);
+  });
+
+  it("should offer GitHub, the Azure sign-in the gateway authorises and nothing else of the person's on the gateway route", () => {
+    expect(offerFor("gateway")).toEqual(["github", "azure", "atlassian"]);
+  });
+
+  // Nothing on this route asks for the key, so there is no row to paste one into — and a lapsed ask for it is one
+  // `saveCredential` would refuse, which is the row `canSignInAgain` exists to keep off the screen. (A *live* relay
+  // of any kind is still offered, whatever route it is: see the test above. No pod relays this one.)
+  it.each(["failed", "expired"] as const)("should offer no Bedrock key row on the gateway route when a %s ask for one is on the record", (state) => {
+    expect(offerFor("gateway", [login("bedrock", state)])).not.toContain("bedrock");
   });
 
   it("should offer the needed connections before the optional one it offers unasked", () => {

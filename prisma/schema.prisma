@@ -107,6 +107,7 @@ enum VirtualAgentSize {
 
 enum ModelRoute {
   bedrock
+  gateway
   own_licence
 
   @@map("model_route")

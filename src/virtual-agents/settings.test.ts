@@ -7,6 +7,7 @@ import {
   DEFAULT_ORCHESTRATOR_LEASE_SECONDS,
   diskTtlDays,
   eveningStop,
+  gatewaySettings,
   idleMinutes,
   orchestratorLeaseSeconds,
   orchestratorOids,
@@ -118,5 +119,68 @@ describe("publicDomain", () => {
 
   it("should be the setting when it is set", () => {
     expect(publicDomain({ VIRTUAL_AGENT_PUBLIC_DOMAIN: " example.net " })).toBe("example.net");
+  });
+});
+
+describe("gatewaySettings", () => {
+  const GATEWAY = {
+    AI_GATEWAY_BASE_URL: "https://ai-gateway.sandbox.platform.hmcts.net",
+    AI_GATEWAY_AUDIENCE: "api://b3bfa0f5-faa5-4d10-bba0-e284144aea89/.default",
+    AI_GATEWAY_APIM_KEY: "apim-key"
+  };
+
+  it("should read the gateway when all three settings are given", () => {
+    expect(gatewaySettings(GATEWAY)).toEqual({
+      base_url: GATEWAY.AI_GATEWAY_BASE_URL,
+      audience: GATEWAY.AI_GATEWAY_AUDIENCE,
+      apim_key: "apim-key"
+    });
+  });
+
+  it("should drop a trailing slash from the base URL when one is given, since the pod appends a path to it", () => {
+    expect(gatewaySettings({ ...GATEWAY, AI_GATEWAY_BASE_URL: "https://ai-gateway.sandbox.platform.hmcts.net//" })?.base_url).toBe(
+      "https://ai-gateway.sandbox.platform.hmcts.net"
+    );
+  });
+
+  it("should have no gateway when none of the three is set, since a deployment without one is not misconfigured", () => {
+    expect(gatewaySettings({})).toBeNull();
+    expect(gatewaySettings({ AI_GATEWAY_BASE_URL: " ", AI_GATEWAY_AUDIENCE: "", AI_GATEWAY_APIM_KEY: " " })).toBeNull();
+  });
+
+  // Half-configured is a pod that boots and then fails every turn, so the claim is refused rather than served.
+  it.each([
+    "AI_GATEWAY_BASE_URL",
+    "AI_GATEWAY_AUDIENCE",
+    "AI_GATEWAY_APIM_KEY"
+  ] as const)("should refuse the deployment naming the one missing setting when %s is left out", (missing) => {
+    const { [missing]: _left, ...rest } = GATEWAY;
+
+    expect(() => gatewaySettings(rest)).toThrow(VirtualAgentConfigurationError);
+    expect(() => gatewaySettings(rest)).toThrow(missing);
+  });
+
+  // A wrong audience is a bare `401 invalid_token` at the gateway, which says nothing about what was wrong — and one
+  // with a quote, a backtick or a `$(…)` in it is interpolated into a double-quoted shell string in the pod's token
+  // helper, where a shell would act on it rather than ask for a scope by that name.
+  it.each([
+    "b3bfa0f5",
+    "api://b3bfa0f5",
+    "https://gateway/.default",
+    'api://gw"/.default',
+    "api://gw`id`/.default",
+    "api://gw$(id)/.default",
+    "api://gw'/.default",
+    "api://gw;id/.default"
+  ])("should refuse %s as the gateway's scope", (audience) => {
+    expect(() => gatewaySettings({ ...GATEWAY, AI_GATEWAY_AUDIENCE: audience })).toThrow("AI_GATEWAY_AUDIENCE");
+  });
+
+  it("should refuse a base URL that is not http or https", () => {
+    expect(() => gatewaySettings({ ...GATEWAY, AI_GATEWAY_BASE_URL: "ai-gateway.sandbox.platform.hmcts.net" })).toThrow("AI_GATEWAY_BASE_URL");
+  });
+
+  it("should never put the APIM key in the refusal, because it is logged and answered with", () => {
+    expect(() => gatewaySettings({ AI_GATEWAY_APIM_KEY: "apim-key" })).toThrow(expect.not.stringContaining("apim-key"));
   });
 });

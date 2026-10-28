@@ -32,7 +32,7 @@ function revalidate(): void {
   }
 }
 
-const PASTEABLE = { github: "GitHub token", claude: "Claude token", bedrock: "Claude Code key", jenkins: "Jenkins API token" } as const;
+const PASTEABLE = { github: "GitHub token", claude: "Claude token", bedrock: "Amazon Bedrock API key", jenkins: "Jenkins API token" } as const;
 
 function isPasteable(kind: string): kind is keyof typeof PASTEABLE {
   return Object.hasOwn(PASTEABLE, kind);
@@ -43,12 +43,12 @@ export async function saveCredential(form: FormData): Promise<ActionResult<{ con
     const viewer = await requireViewer();
     const kind = text(form.get("kind"));
     if (!isPasteable(kind)) {
-      return { ok: false, error: "only a GitHub token, a Claude token, a Claude Code key or a Jenkins API token can be pasted here" };
+      return { ok: false, error: "only a GitHub token, a Claude token, an Amazon Bedrock API key or a Jenkins API token can be pasted here" };
     }
     // Asked of the agents rather than of the viewer: a pod boots on its row's route, so refusing by the route in the
     // session locks out anyone whose `AIGateway.User` app role changed after an agent of theirs was created.
     if (kind === "claude" && !claudeTokenUsable(viewer.modelRoute, await liveModelRoutes(prisma, viewer.oid))) {
-      return { ok: false, error: "your virtual agents connect to Claude Code through HMCTS, so they need no Claude token" };
+      return { ok: false, error: "your virtual agents reach Claude through HMCTS, so they need no Claude token" };
     }
     const backend = credentialBackend(prisma);
     if (!backend.available) {

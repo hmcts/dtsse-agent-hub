@@ -642,9 +642,9 @@ describe("the chat gate", () => {
     await prisma.credential.deleteMany({ where: { ownerOid: ALICE.oid, kind: { notIn: kinds } } });
   }
 
-  const BLOCKED = { ok: false, error: "connect GitHub and Claude before you start chatting" };
+  const BLOCKED = { ok: false, error: "connect your accounts before you start chatting" };
 
-  it("should refuse to start or open a conversation when the person has not connected GitHub and Claude", async () => {
+  it("should refuse to start or open a conversation when the person has not connected what the assistant's route needs", async () => {
     await startedAssistant();
     await storedOnly("azure");
 
