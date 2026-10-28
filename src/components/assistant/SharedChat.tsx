@@ -59,7 +59,10 @@ export function SharedChat({ view, forkChat }: { view: SharedConversationView; f
               <AssistantMarkdown source={view.document.markdown} document />
             </section>
           )}
-          <p className="text-center text-xs text-asst-faint">
+          <p className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-asst-faint">
+            <Link href="/assistant/shared" className="text-asst-accent underline hover:text-asst-accent-hover">
+              {view.access === "owner" ? "See all your shared chats" : "See other chats shared with you"}
+            </Link>
             <Link href="/assistant" className="text-asst-accent underline hover:text-asst-accent-hover">
               Open the HMCTS Assistant
             </Link>

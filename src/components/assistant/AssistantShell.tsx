@@ -240,6 +240,20 @@ export function AssistantShell({
               </span>
               New chat
             </Link>
+            {/* The way to chats that are not the person's own: those shared with them and those they have shared. The
+                list is its own page, outside this frame, so it is a link rather than a row of the list below. */}
+            <Link
+              href="/assistant/shared"
+              className="mt-1 flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-sm text-asst-body hover:bg-asst-hover hover:text-asst-text"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4 shrink-0 text-asst-muted">
+                <circle cx="4" cy="8" r="2" />
+                <circle cx="12" cy="3.5" r="2" />
+                <circle cx="12" cy="12.5" r="2" />
+                <path d="M5.8 7 10.2 4.5M5.8 9l4.4 2.5" />
+              </svg>
+              Shared chats
+            </Link>
           </div>
           <ConversationSearch>
             {groups.length === 0 ? <p className="px-2.5 text-[13px] text-asst-faint">Your chats appear here.</p> : null}
