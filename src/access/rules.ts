@@ -23,6 +23,9 @@
  *   reads the thread and the document on the share's own page and can do nothing else: not send, stop an answer,
  *   rename, delete, edit the document, download an attachment, search for the chat, or watch it live. The share does
  *   not reach the conversation's agent, so every rule above still answers `none` for a recipient.
+ * - The owner may also offer a conversation, one named person at a time, to be forked: the recipient reads it as a
+ *   share's recipient does, and may take their own copy into their own Assistant. The copy is theirs; the original
+ *   is still the owner's alone, and nothing about a fork lets its recipient write to it.
  *
  * A grant covers every agent its owner has, so every decision here is about owners, never about agent ids.
  */
@@ -413,6 +416,18 @@ export function canManageConversationShares(actorOid: string, conversation: Shar
  */
 export function canShareConversationWith(actorOid: string, conversation: SharedConversationRef, recipientOid: string, recipientKnown: boolean): boolean {
   return canManageConversationShares(actorOid, conversation) && recipientKnown && recipientOid !== conversation.ownerOid;
+}
+
+/**
+ * Whether `viewerOid` may take their own copy of a conversation to continue in their own Assistant: someone the owner
+ * named in a fork row of it, and nobody else — not the owner, whose chat it already is, and not a reader of a plain
+ * share, who was shown the chat and not offered it. `forks` are the conversation's fork rows, in a share's shape.
+ *
+ * Taking the copy is the only write a fork allows, and it is to the recipient's own Assistant: nothing here lets
+ * anyone but the owner write to the conversation itself, so a fork row widens none of the agent rules above.
+ */
+export function canForkConversation(viewerOid: string, conversation: SharedConversationRef, forks: readonly ConversationShare[]): boolean {
+  return viewerOid !== conversation.ownerOid && forks.some((fork) => fork.conversationId === conversation.id && fork.recipientOid === viewerOid);
 }
 
 /** A name typed into the share dialog has to be this specific before the hub will match anyone against it. */

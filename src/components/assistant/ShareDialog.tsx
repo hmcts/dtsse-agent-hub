@@ -21,6 +21,32 @@ import type { ActionResult } from "@/web/action";
  * typed to the textarea it is attached to.
  */
 
+/**
+ * `read` shares the chat to be read; `fork` offers it to be forked, which lets the people named read it on the same
+ * page and take their own copy into their own Assistant. One dialog for both, because choosing a person, the list and
+ * the revocation are the same in each, and the two differ only in what the person named can do.
+ */
+export type ShareMode = "read" | "fork";
+
+const WORDS: Record<ShareMode, { title: string; who: string; can: string; nobody: string; list: string; link: string }> = {
+  read: {
+    title: "Share this chat",
+    who: "Who can read it",
+    can: "can read",
+    nobody: "This chat is not shared with anyone.",
+    list: "Shared with",
+    link: "The link opens the chat for the people above. Anyone else who is sent it sees nothing."
+  },
+  fork: {
+    title: "Let someone fork this chat",
+    who: "Who can fork it",
+    can: "can fork",
+    nobody: "Nobody has been offered this chat to fork.",
+    list: "Offered to",
+    link: "The link opens the chat for the people above, with a button to continue it in their own Assistant. Anyone else who is sent it sees nothing."
+  }
+};
+
 export type ShareAction = (input: { conversationId: unknown; recipientOid: unknown }) => Promise<ActionResult<{ people: SharePerson[] }>>;
 
 interface Candidate {
@@ -36,8 +62,10 @@ export function ShareDialog({
   people: initial,
   share,
   unshare,
-  onClose
+  onClose,
+  mode = "read"
 }: {
+  mode?: ShareMode;
   conversationId: string;
   people: readonly SharePerson[];
   share: ShareAction;
@@ -45,6 +73,7 @@ export function ShareDialog({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const words = WORDS[mode];
   const ids = useId();
   const listId = `${ids}-people`;
   const [people, setPeople] = useState<readonly SharePerson[]>(initial);
@@ -179,14 +208,21 @@ export function ShareDialog({
         className="flex max-h-full w-full max-w-[520px] flex-col gap-4 overflow-y-auto rounded-2xl border border-asst-line bg-asst-hover p-[22px] shadow-2xl"
       >
         <h2 id={`${ids}-title`} className="text-lg font-semibold">
-          Share this chat
+          {words.title}
         </h2>
-        <p className="text-pretty text-[13px] text-asst-body">
-          The people you name can <strong className="font-semibold text-asst-text">read</strong> this chat and its document. They cannot reply, rename or delete
-          it, change the document, or open the files you attached — a message you attached files to says only how many, although a message you sent with a file
-          and no words of your own may name it, and so may the chat's own name. They see the most recent part of the chat as it stood when they opened it, not
-          as you carry on.
-        </p>
+        {mode === "fork" ? (
+          <p className="text-pretty text-[13px] text-asst-body">
+            The people you name can read this chat and its document, and can take <strong className="font-semibold text-asst-text">their own copy</strong> of it
+            to carry on in their own Assistant.
+          </p>
+        ) : (
+          <p className="text-pretty text-[13px] text-asst-body">
+            The people you name can <strong className="font-semibold text-asst-text">read</strong> this chat and its document. They cannot reply, rename or
+            delete it, change the document, or open the files you attached — a message you attached files to says only how many, although a message you sent
+            with a file and no words of your own may name it, and so may the chat's own name. They see the most recent part of the chat as it stood when they
+            opened it, not as you carry on.
+          </p>
+        )}
 
         <form
           method="post"
@@ -200,7 +236,7 @@ export function ShareDialog({
           }}
         >
           <label htmlFor={`${ids}-who`} className="text-xs text-asst-faint">
-            Who can read it
+            {words.who}
           </label>
           <div className="relative">
             <input
@@ -258,16 +294,16 @@ export function ShareDialog({
         </form>
 
         {people.length === 0 ? (
-          <p className="text-[13px] text-asst-muted">This chat is not shared with anyone.</p>
+          <p className="text-[13px] text-asst-muted">{words.nobody}</p>
         ) : (
-          <ul aria-label="Shared with" className="flex flex-col gap-1">
+          <ul aria-label={words.list} className="flex flex-col gap-1">
             {people.map((person) => (
               <li key={person.oid} className="flex items-center gap-2 rounded-lg border border-asst-line px-2.5 py-1.5 text-sm">
                 <span className="min-w-0 flex-1 truncate">
                   {person.name}
                   {person.email === null ? null : <span className="ml-2 text-xs text-asst-faint">{person.email}</span>}
                 </span>
-                <span className="shrink-0 text-xs text-asst-faint">can read</span>
+                <span className="shrink-0 text-xs text-asst-faint">{words.can}</span>
                 <button
                   type="button"
                   disabled={pending}
@@ -296,7 +332,7 @@ export function ShareDialog({
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
-          <p className="text-xs text-asst-faint">The link opens the chat for the people above. Anyone else who is sent it sees nothing.</p>
+          <p className="text-xs text-asst-faint">{words.link}</p>
         </div>
 
         {error === null ? null : (

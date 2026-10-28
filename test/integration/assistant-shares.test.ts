@@ -233,7 +233,7 @@ describe("reading a shared conversation", () => {
 
     expect(await sharedChats(viewerOf(ALICE))).toMatchObject({ given: [{ id, withWhom: "1 person" }], received: [] });
     expect(await sharedChats(viewerOf(BOB))).toMatchObject({ given: [], received: [{ id, withWhom: ALICE.name }] });
-    expect(await sharedChats(viewerOf(CAROL))).toEqual({ given: [], received: [] });
+    expect(await sharedChats(viewerOf(CAROL))).toEqual({ given: [], received: [], offered: [], forkable: [] });
   });
 
   // The thread is read with the owner's own transcript access, so everything their session recorded is in reach of
@@ -422,7 +422,7 @@ describe("revoking a share", () => {
     await shareActions.unshareChat({ conversationId: id, recipientOid: BOB.oid });
 
     expect(await sharedChat(viewerOf(BOB), id)).toBeUndefined();
-    expect(await sharedChats(viewerOf(BOB))).toEqual({ given: [], received: [] });
+    expect(await sharedChats(viewerOf(BOB))).toEqual({ given: [], received: [], offered: [], forkable: [] });
   });
 
   it("should take the shares with the conversation when the owner deletes it", async () => {

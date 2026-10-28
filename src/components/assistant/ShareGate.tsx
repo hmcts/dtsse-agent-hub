@@ -2,10 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import type { SharePerson } from "@/assistant/shares";
-import { type ShareAction, ShareDialog } from "@/components/assistant/ShareDialog";
+import { type ShareAction, ShareDialog, type ShareMode } from "@/components/assistant/ShareDialog";
 
 /**
- * Shows the share dialog over the chat while `?share=1` is on the chat's own address.
+ * Shows the share dialog over the chat while `?share=1` is on the chat's own address, and the same dialog offering it
+ * to be forked while `?fork=1` is.
  *
  * An address rather than a button, so the dialog can be reached from anywhere — the chat's options menu, a row of the
  * sidebar, the shared-chats page, the browser's history — and closing it takes the parameter off, which leaves the
@@ -23,8 +24,10 @@ export function ShareGate({
   open,
   people,
   share,
-  unshare
+  unshare,
+  mode = "read"
 }: {
+  mode?: ShareMode;
   conversationId: string;
   open: boolean;
   people: readonly SharePerson[];
@@ -38,6 +41,7 @@ export function ShareGate({
   }
   return (
     <ShareDialog
+      mode={mode}
       conversationId={conversationId}
       people={people}
       share={share}

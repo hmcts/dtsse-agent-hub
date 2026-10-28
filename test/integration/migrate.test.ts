@@ -124,6 +124,7 @@ describe("migrate", () => {
       "agent_grant",
       "agent_question",
       "assistant_conversation",
+      "assistant_conversation_fork",
       "assistant_conversation_share",
       "assistant_export_default",
       "assistant_lookup",

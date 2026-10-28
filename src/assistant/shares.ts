@@ -22,6 +22,20 @@ import { ConversationNotFound } from "./store.ts";
  * is `src/access/rules.ts`'s; this file only loads the rows it is applied to and makes the two writes it gates.
  */
 
+/**
+ * Every offer of one conversation to be forked, in a share's shape. A fork row lets its recipient read the share page
+ * as well as take a copy — nobody decides to carry on a chat they have not seen — so the read rules take these rows
+ * beside the shares, and `canForkConversation` takes them alone.
+ */
+export async function forksOf(db: Database, conversationId: string): Promise<ConversationShare[]> {
+  const rows = await db.assistantConversationFork.findMany({
+    where: { conversationId },
+    select: { conversationId: true, recipientOid: true },
+    orderBy: { recipientOid: "asc" }
+  });
+  return rows.map((row) => ({ conversationId: row.conversationId, recipientOid: row.recipientOid }));
+}
+
 /** The conversation as the share rules read it, whoever is asking. `findConversation` is the owner's read. */
 export interface SharedConversationRow extends SharedConversationRef {
   virtualAgentId: string;
@@ -54,16 +68,17 @@ export async function accessToConversation(
   db: Database,
   viewerOid: string,
   id: string
-): Promise<{ conversation: SharedConversationRow; access: ConversationAccess } | undefined> {
+): Promise<{ conversation: SharedConversationRow; access: ConversationAccess; forks: ConversationShare[] } | undefined> {
   const conversation = await conversationRef(db, id);
   if (conversation === undefined) {
     return undefined;
   }
-  const shares = await sharesOf(db, id);
-  if (!canViewSharedConversation(viewerOid, conversation, shares)) {
+  const [shares, forks] = await Promise.all([sharesOf(db, id), forksOf(db, id)]);
+  const readers = [...shares, ...forks];
+  if (!canViewSharedConversation(viewerOid, conversation, readers)) {
     return undefined;
   }
-  return { conversation, access: conversationAccess(viewerOid, conversation, shares) };
+  return { conversation, access: conversationAccess(viewerOid, conversation, readers), forks };
 }
 
 export interface SharePerson {

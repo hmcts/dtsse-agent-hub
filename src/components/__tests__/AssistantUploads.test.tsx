@@ -570,6 +570,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     jira: { status: "none" },
     confluence: { status: "none" },
     page: page(),
+    forked: null,
     questions: [],
     ...overrides
   };

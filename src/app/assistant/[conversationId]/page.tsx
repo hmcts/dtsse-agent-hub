@@ -15,6 +15,7 @@ import {
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
 import { resetClaudeMd, saveClaudeMd } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
+import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
@@ -35,6 +36,7 @@ import {
   assistantFiles,
   assistantSize,
   assistantTemplates,
+  chatForks,
   chatShares,
   claudeMdSettings,
   openAssistant
@@ -72,12 +74,14 @@ export default async function ConversationPage({
   // Who the chat is shared with is read only when the dialog is being shown, and then beside the rest: it is two
   // queries to fill a dialog, and this is the page that loads most often.
   const sharing = query.share === "1";
-  const [home, view, claudeMd, mine, shares, files, size, defaults] = await Promise.all([
+  const forking = !sharing && query.fork === "1";
+  const [home, view, claudeMd, mine, shares, forks, files, size, defaults] = await Promise.all([
     openAssistant(viewer),
     assistantConversation(viewer, conversationId),
     claudeMdSettings(viewer),
     assistantTemplates(viewer),
     sharing ? chatShares(viewer, conversationId) : undefined,
+    forking ? chatForks(viewer, conversationId) : undefined,
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer)
@@ -113,6 +117,7 @@ export default async function ConversationPage({
         <ChatView key={view.agentId} view={view} templates={offeredTemplates(mine)} viewerOid={viewer.oid} actions={ACTIONS} jira={jira} defaults={defaults} />
       </AssistantGate>
       <ShareGate conversationId={view.id} open={sharing} people={shares ?? []} share={shareChat} unshare={unshareChat} />
+      <ShareGate mode="fork" conversationId={view.id} open={forking} people={forks ?? []} share={offerChatFork} unshare={withdrawChatFork} />
     </AssistantShell>
   );
 }

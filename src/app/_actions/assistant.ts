@@ -5,6 +5,7 @@ import { canStopAssistantAnswer } from "@/access/rules";
 import { HttpError } from "@/agent-api/http";
 import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
+import { attachForkContext, forkContextPending } from "@/assistant/fork-store";
 import { requestJiraExport } from "@/assistant/jira-store";
 import { CHAT_BLOCKED } from "@/assistant/onboarding";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
@@ -25,7 +26,7 @@ import {
   writeArtefact
 } from "@/assistant/store";
 import { attachUploads, uploadNames } from "@/assistant/upload-store";
-import { attachedBody } from "@/assistant/uploads";
+import { attachedBody, MAX_ATTACHMENTS_PER_MESSAGE } from "@/assistant/uploads";
 import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import { prisma } from "@/store/prisma";
@@ -83,6 +84,11 @@ async function send(oid: string, conversation: ConversationRow, typed: string, u
   if (wordless && names.length === 0) {
     throw new HttpError(400, "one of those files is not ready to send; remove it and attach it again");
   }
+  // The first message in a copy of someone else's chat also carries its earlier turns, as one more file, and a pod
+  // reads no more than `MAX_ATTACHMENTS_PER_MESSAGE` off a message: past that the turns would be the file dropped.
+  if (uploadIds.length >= MAX_ATTACHMENTS_PER_MESSAGE && (await forkContextPending(prisma, conversation.id))) {
+    throw new HttpError(400, `the first message in a forked chat carries at most ${MAX_ATTACHMENTS_PER_MESSAGE - 1} files; remove one and send it again`);
+  }
   const body = wordless ? attachedBody(names) : typed;
   return await sendToConversation(prisma, oid, conversation, {
     body,
@@ -91,8 +97,10 @@ async function send(oid: string, conversation: ConversationRow, typed: string, u
     title: wordless ? (names[0] ?? body) : typed,
     // Attached inside the message's own transaction: an id that is not this person's, is not this conversation's, is
     // not finished uploading, or is already on another message refuses the whole send, and no message is written.
+    // The first message in a copy of someone else's chat also takes the copied turns, once.
     alongside: async (tx, messageId) => {
       await attachUploads(tx, { viewerOid: oid, conversationId: conversation.id, messageId, uploadIds });
+      await attachForkContext(tx, { conversationId: conversation.id, ownerOid: oid, messageId });
     }
   });
 }

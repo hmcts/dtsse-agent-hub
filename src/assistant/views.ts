@@ -12,6 +12,7 @@ import type { VirtualAgentRow } from "../virtual-agents/store.ts";
 import { neededCredentials, OPTIONAL_CREDENTIALS } from "../virtual-agents/views.ts";
 import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
+import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
@@ -181,6 +182,8 @@ export interface ConversationView {
   jira: JiraExportView;
   confluence: ConfluenceExportView;
   page: ConversationPage;
+  /** Where the chat was forked from and the words copied from it, shown above its own; `null` unless it is a copy. */
+  forked: ForkedView | null;
   /**
    * The questions this conversation's session asked, which the thread shows as cards. Read beside the page rather
    * than inside it: a question is a row of its own, not a transcript entry, and the transcript route that serves
@@ -194,14 +197,15 @@ export async function conversationView(db: Database, conversation: ConversationR
   // The conversation's own agent, which is its owner's alone: both reads below apply their own rule to it, and no
   // grant is passed because none extends to a conversation.
   const agent = { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true };
-  const [current, artefact, jira, confluence, page, questions, offer] = await Promise.all([
+  const [current, artefact, jira, confluence, page, questions, offer, fork] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true } }),
     readArtefact(db, conversation.id),
     readJiraExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),
     agentConversation(db, conversation.ownerOid, agent, []),
     agentQuestions(db, conversation.ownerOid, agent, []),
-    readModelOffer(db, conversation.virtualAgentId)
+    readModelOffer(db, conversation.virtualAgentId),
+    db.assistantConversation.findUnique({ where: { id: conversation.id }, select: FORKED_SELECT })
   ]);
   return {
     id: conversation.id,
@@ -222,6 +226,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     jira,
     confluence,
     page,
+    forked: fork === null ? null : forkedView(fork),
     questions
   };
 }

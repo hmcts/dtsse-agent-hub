@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { forkChat } from "@/app/_actions/forks";
 import { SharedChat } from "@/components/assistant/SharedChat";
 import { requireViewer } from "@/viewer/current";
 import { sharedChat } from "@/web/data";
@@ -11,7 +12,8 @@ export const dynamic = "force-dynamic";
  * Anyone else is not found, whether or not they were sent the link: the link reaches a share, it does not grant one.
  * The page is its own address rather than a mode of `/assistant/{id}`, so the owner's chat is untouched, and it does
  * not render the Assistant's shell: a recipient has no business being given an assistant of their own, and opening
- * the shell would create one.
+ * the shell would create one. Someone offered the chat to fork is the exception, and only when they ask for it:
+ * continuing in their own Assistant is what sets one up.
  */
 export default async function SharedChatPage({ params }: { params: Promise<{ conversationId: string }> }) {
   const viewer = await requireViewer();
@@ -20,5 +22,5 @@ export default async function SharedChatPage({ params }: { params: Promise<{ con
   if (view === undefined) {
     notFound();
   }
-  return <SharedChat view={view} />;
+  return <SharedChat view={view} forkChat={forkChat} />;
 }
