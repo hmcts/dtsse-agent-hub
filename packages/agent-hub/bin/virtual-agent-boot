@@ -171,12 +171,22 @@ checkout_workspace() {
     branch=$(git -C "$WORKSPACE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
     default=$(git -C "$WORKSPACE" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/master)
     default="${default#origin/}"
-    if [[ -n "$(git -C "$WORKSPACE" status --porcelain 2>/dev/null)" ]]; then
-        sync_detail="cft-workspace: local changes on $branch, not updated"
-    elif [[ "$branch" != "$default" ]]; then
+    # Nothing checks the working tree before the merge: `merge --ff-only` refuses precisely when an incoming
+    # change would overwrite a local one, tracked or untracked, and leaves HEAD where it was when it does. So a
+    # dirty checkout still follows the default branch and only a genuine collision holds it back. Any screen
+    # ahead of it can only be coarser — it would refuse the common case of an edit git was never going to touch,
+    # and then one uncommitted file holds the checkout at that commit on this boot and on every boot after it,
+    # which is how a pod ends up tens of commits behind with nothing but a line in its boot log to say so.
+    if [[ "$branch" != "$default" ]]; then
         sync_detail="cft-workspace: on branch $branch, not updated from $default"
     elif ! git -C "$WORKSPACE" merge --ff-only --quiet "origin/$default" 2>"$TMP/git.err"; then
-        sync_detail="cft-workspace: $branch cannot fast-forward to origin/$default, kept the local checkout"
+        # git's own words, because this is now the only path that leaves the checkout behind and "cannot
+        # fast-forward" alone does not say which file to go and look at. The names are on the lines after the
+        # first, so the message is flattened rather than cut to one line, and bounded like the fetch error
+        # above. `hint:` lines go first: the advice for diverging branches runs longer than the whole bound and
+        # would push git's own `fatal:` out of it.
+        err=$(sed '/^hint:/d' "$TMP/git.err" | head -c 200 | tr -s '\n\t ' ' ')
+        sync_detail="cft-workspace: $branch cannot fast-forward to origin/$default, kept the local checkout (${err% })"
     else
         log "fast-forwarded $WORKSPACE to origin/$default"
     fi
