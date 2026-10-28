@@ -709,7 +709,8 @@ describe("createApi questions", () => {
 
     // Assert
     expect(hub.calls.at(-1)?.path).toBe(`/api/agent/${agentId}/question`);
-    expect(hub.questions.at(-1)).toEqual({ agent_id: agentId, ...QUESTION });
+    // `asked_at` is the hub's own, not the caller's: the offer window is read against when the hub stored it.
+    expect(hub.questions.at(-1)).toEqual({ agent_id: agentId, asked_at: expect.any(String), ...QUESTION });
   });
 
   // The hook denies the tool whether or not the POST answered, so a retry after a lost response is a real case.
