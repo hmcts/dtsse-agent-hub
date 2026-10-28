@@ -230,15 +230,30 @@ export function AssistantShell({
               </span>
             </button>
           </div>
-          <div className="px-3 pb-3 pt-1">
+          <div className="flex gap-2 px-3 pb-3 pt-1">
             <Link
               href="/assistant"
-              className="flex w-full items-center gap-2.5 rounded-[10px] border border-asst-strong px-3 py-2.5 text-sm hover:bg-asst-hover"
+              className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[10px] border border-asst-strong px-3 py-2.5 text-sm hover:bg-asst-hover"
             >
               <span aria-hidden="true" className="text-lg leading-none text-asst-accent">
                 +
               </span>
               New chat
+            </Link>
+            {/* The way to chats that are not the person's own: those shared with them and those they have shared. The
+                list is its own page, outside this frame, so it is a link rather than a row of the list below. */}
+            <Link
+              href="/assistant/shared"
+              aria-label="Shared chats"
+              title="Shared chats"
+              className="flex w-[44px] shrink-0 items-center justify-center self-stretch rounded-[10px] border border-asst-strong text-asst-muted hover:bg-asst-hover hover:text-asst-text"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className="h-[18px] w-[18px]">
+                <circle cx="4" cy="8" r="2" />
+                <circle cx="12" cy="3.5" r="2" />
+                <circle cx="12" cy="12.5" r="2" />
+                <path d="M5.8 7 10.2 4.5M5.8 9l4.4 2.5" />
+              </svg>
             </Link>
           </div>
           <ConversationSearch>

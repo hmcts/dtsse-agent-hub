@@ -136,6 +136,12 @@ describe("ShareDialog", () => {
     expect(screen.getByText(/Anyone else who is sent it sees nothing/)).toBeTruthy();
   });
 
+  it("should link to every shared chat when the dialog is open", () => {
+    render(dialog());
+
+    expect(screen.getByRole("link", { name: "See all your shared chats" }).getAttribute("href")).toBe("/assistant/shared");
+  });
+
   it("should not display the empty list as a box under the name box when nobody is offered", async () => {
     people([]);
     render(dialog());
@@ -387,6 +393,18 @@ describe("SharedChat", () => {
     render(<SharedChat view={view({ access: "owner" })} />);
 
     expect(screen.getByText(/as the people you shared it with see it/)).toBeTruthy();
+  });
+
+  it("should link a reader to the other chats shared with them when the chat is not their own", () => {
+    render(<SharedChat view={view()} />);
+
+    expect(screen.getByRole("link", { name: "See other chats shared with you" }).getAttribute("href")).toBe("/assistant/shared");
+  });
+
+  it("should link the owner to every chat they have shared when the chat is their own", () => {
+    render(<SharedChat view={view({ access: "owner" })} />);
+
+    expect(screen.getByRole("link", { name: "See all your shared chats" }).getAttribute("href")).toBe("/assistant/shared");
   });
 
   it("should count a message's files without naming them", () => {

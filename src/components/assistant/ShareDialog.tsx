@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { MIN_PEOPLE_QUERY } from "@/access/rules";
@@ -343,7 +344,11 @@ export function ShareDialog({
           </p>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Every chat the person has shared or offered, and every one shared with them, in one place. */}
+          <Link href="/assistant/shared" className="text-[13px] text-asst-accent underline hover:text-asst-accent-hover">
+            See all your shared chats
+          </Link>
           <button type="button" onClick={onClose} className="rounded-[10px] border border-asst-strong px-4 py-2.5 text-sm hover:bg-asst-active">
             Done
           </button>
