@@ -48,8 +48,6 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
     // Empty, so `chatGate` stays open: most of these set `onboarded` without the statuses behind it, and are about
     // the banner and the sign-ins. The gate has tests of its own below that give it both.
     toChat: [],
-    models: [],
-    defaultModel: "claude-sonnet-5-5",
     ...overrides
   };
 }

@@ -241,13 +241,6 @@ export type MemoryReportBody = {
   anon_bytes: number;
 };
 
-/** What one model's check came to: see Model access. `unknown` never takes a model away on the hub. */
-export type ModelCheckStatus = "available" | "unavailable" | "unknown";
-
-export type ModelCheckResult = { model: string; status: ModelCheckStatus };
-
-export type ModelCheckBody = { models: ModelCheckResult[] };
-
 export type RegisterResponse = { agent_id: string; name: string };
 export type MessageResponse = { message: Message };
 export type MessagesResponse = { messages: Message[] };
@@ -437,8 +430,6 @@ export type Api = {
   putUploads: (virtualId: string, body: UploadsReportBody) => Promise<null>;
   /** What this container's memory cgroup says, which the hub has no way to see for itself either. */
   putMemory: (virtualId: string, body: MemoryReportBody) => Promise<null>;
-  /** Which models its owner's credential answered on this pod's route, from the supervisor's own check. */
-  postModels: (virtualId: string, body: ModelCheckBody) => Promise<null>;
   getArtefact: (agentId: string) => Promise<Artefact>;
   putArtefact: (agentId: string, body: ArtefactBody) => Promise<ArtefactResponse>;
   /**
@@ -613,7 +604,6 @@ export function createApi({
     conversations: (virtualId) => request<ConversationsResponse>("GET", v(virtualId, "conversations")),
     putUploads: (virtualId, body) => request<null>("PUT", v(virtualId, "uploads"), body),
     putMemory: (virtualId, body) => request<null>("PUT", v(virtualId, "memory"), body),
-    postModels: (virtualId, body) => request<null>("POST", v(virtualId, "models"), body),
     getArtefact: (agentId) => request<Artefact>("GET", `${a(agentId)}/artefact`),
     putArtefact: (agentId, body) => request<ArtefactResponse>("PUT", `${a(agentId)}/artefact`, body),
     postQuestion: (agentId, body, opts) => request<null>("POST", `${a(agentId)}/question`, body, opts),

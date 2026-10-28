@@ -18,6 +18,7 @@ import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings"
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
+import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantPlugins, AssistantSettings, FOCUSABLE } from "@/components/assistant/SettingsDialog";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, copyName } from "@/components/assistant/TemplateSettings";
@@ -1005,7 +1006,7 @@ describe("the Assistant's own templates", () => {
   it("should offer every section the page passes, each in the focus trap, when they are all passed", () => {
     open({ plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }) });
 
-    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Connections", "Templates"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Claude.md", "Tools"]);
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
     go("Connections");
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
@@ -1019,6 +1020,133 @@ describe("the Assistant's own templates", () => {
       expect(items).toContain(screen.getByRole("form", { name: form }).querySelector("button[type='submit']"));
       expect(items.at(-1)).toBe(screen.getByRole("button", { name: last }));
     }
+  });
+});
+
+const MODEL_FORM = "Choose the model your chats run on";
+
+function modelSetting(overrides: Partial<AssistantModelSetting> = {}): AssistantModelSetting {
+  return {
+    model: "sonnet",
+    honoured: true,
+    save: vi.fn(async () => ({ ok: true as const, confirmation: "Sonnet saved as the model for your chats" })),
+    ...overrides
+  };
+}
+
+/** The radio the form shows as the one in force. */
+function checkedModel(): string | null {
+  const form = screen.getByRole("form", { name: MODEL_FORM });
+  return (
+    within(form)
+      .getAllByRole("radio")
+      .find((radio) => (radio as HTMLInputElement).checked)
+      ?.getAttribute("value") ?? null
+  );
+}
+
+function modelPanel(): HTMLElement {
+  return screen.getByRole("region", { name: "Model" });
+}
+
+describe("the Assistant's model", () => {
+  it("should offer no Model section when the page passes none", () => {
+    open({ model: undefined });
+
+    expect(sections()).not.toContain("Model");
+    expect(screen.queryByRole("heading", { name: "Model" })).toBeNull();
+  });
+
+  it("should offer Sonnet and Opus, with what each is for and no version, when it is shown", () => {
+    open({ model: modelSetting() }, "Model");
+    const choices = within(screen.getByRole("form", { name: MODEL_FORM })).getAllByRole("radio");
+
+    expect(choices.map((choice) => choice.getAttribute("value"))).toEqual(["sonnet", "opus"]);
+    expect(modelPanel().textContent).toContain("Fast and capable, for most work");
+    expect(modelPanel().textContent).toContain("The most thorough, for harder problems");
+    expect(modelPanel().textContent).not.toMatch(/\d/);
+  });
+
+  it("should check the model the person is on when it is shown", () => {
+    open({ model: modelSetting({ model: "opus" }) }, "Model");
+
+    expect((within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  // One setting for every chat, which people read a settings dialog as being about the chat they opened it from.
+  it("should say it applies to all of their chats, and when a change reaches one, whenever it is shown", () => {
+    open({ model: modelSetting() }, "Model");
+
+    expect(modelPanel().textContent).toContain("This applies to all of your chats");
+    expect(modelPanel().textContent).toContain("takes the change with your next message");
+  });
+
+  it("should save the model the person picks and say so when they submit it", async () => {
+    const save = vi.fn(async () => ({ ok: true as const, confirmation: "Opus saved as the model for your chats" }));
+    open({ model: modelSetting({ save }) }, "Model");
+
+    fireEvent.click(within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: MODEL_FORM }));
+    });
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect((save.mock.calls[0] as unknown as [FormData])[0].get("model")).toBe("opus");
+    expect(screen.getByRole("status").textContent).toBe("Opus saved as the model for your chats");
+  });
+
+  // A refused save stored nothing, so the pick never became the choice: leaving it checked beside the refusal would
+  // show a selection that is not in force.
+  it("should say why and put the radios back to the stored choice when the save is refused", async () => {
+    const save = vi.fn(async () => ({ ok: false as const, error: "pick a model from the list" }));
+    open({ model: modelSetting({ save }) }, "Model");
+
+    fireEvent.click(within(screen.getByRole("form", { name: MODEL_FORM })).getByRole("radio", { name: /^Opus/ }));
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: MODEL_FORM }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe("pick a model from the list");
+    expect(checkedModel()).toBe("sonnet");
+  });
+
+  // Another tab, or the page's own revalidation, changes the stored choice under an open dialog.
+  it("should follow the stored choice when the server sends another one while the dialog is open", () => {
+    const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} model={modelSetting()} />);
+    fireEvent.click(cog());
+    go("Model");
+    expect(checkedModel()).toBe("sonnet");
+
+    rerender(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} model={modelSetting({ model: "opus" })} />);
+
+    expect(checkedModel()).toBe("opus");
+  });
+
+  it("should say the assistant takes the choice at its next start, and still offer it, when its pod cannot honour it", () => {
+    open({ model: modelSetting({ honoured: false }) }, "Model");
+
+    expect(modelPanel().textContent).toContain("Your assistant picks your choice up the next time it starts");
+    expect(
+      within(screen.getByRole("form", { name: MODEL_FORM }))
+        .getAllByRole("radio")
+        .every((radio) => !(radio as HTMLInputElement).disabled)
+    ).toBe(true);
+    expect(screen.getByRole("button", { name: "Save model" })).toBeTruthy();
+  });
+
+  it("should say nothing about the next start when its pod honours the choice now", () => {
+    open({ model: modelSetting({ honoured: true }) }, "Model");
+
+    expect(modelPanel().textContent).not.toContain("next time it starts");
+  });
+
+  it("should sit under Agent, above the CLAUDE.md, and leave the other sections reachable when it is shown", () => {
+    open({ model: modelSetting(), claudeMd: claudeMd(), plugins: plugins() }, "Model");
+
+    expect(sections()).toEqual(["Appearance", "Connections", "Model", "Claude.md", "Tools"]);
+    expect(screen.getByRole("heading", { name: "Model" })).toBeTruthy();
+    go("Claude.md");
+    expect(screen.getByRole("heading", { name: "Your CLAUDE.md" })).toBeTruthy();
   });
 });
 
@@ -1057,7 +1185,7 @@ describe("the Assistant's CLAUDE.md", () => {
   it("should sit under Agent, beside the tools, and leave the other sections reachable when it is shown", () => {
     open({ claudeMd: claudeMd(), plugins: plugins() }, "Claude.md");
 
-    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Connections"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Claude.md", "Tools"]);
     expect(screen.getByRole("heading", { name: "Your CLAUDE.md" })).toBeTruthy();
     go("Tools");
     expect(screen.getByRole("form", { name: FORM })).toBeTruthy();
@@ -1187,7 +1315,7 @@ describe("the Assistant's CLAUDE.md", () => {
 
 /** The whole dialog, which is what a person has when they open it: the navigation and every section it offers. */
 function everything(): Partial<Parameters<typeof AssistantSettings>[0]> {
-  return { plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }), files: files(), size: size() };
+  return { plugins: plugins(), model: modelSetting(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }), files: files(), size: size() };
 }
 
 function tabs(): HTMLElement[] {
@@ -1253,8 +1381,8 @@ describe("the Assistant's settings navigation", () => {
   it("should gather the sections under the headings they belong to when it opens", () => {
     open(everything());
 
-    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
-    expect(nav().textContent).toBe("GeneralAppearanceAgentClaude.mdToolsSizeConnectionsTemplatesFiles");
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Model", "Claude.md", "Tools", "Size", "Files"]);
+    expect(nav().textContent).toBe("GeneralAppearanceConnectionsTemplatesAgentModelClaude.mdToolsSizeFiles");
   });
 
   // A tablist owns tabs and nothing else, so the two group headings are shown rather than announced, and the panel's
@@ -1262,7 +1390,7 @@ describe("the Assistant's settings navigation", () => {
   it("should keep its group headings out of what a screen reader is read when it opens", () => {
     open(everything());
 
-    expect(within(nav()).getAllByRole("tab")).toHaveLength(7);
+    expect(within(nav()).getAllByRole("tab")).toHaveLength(8);
     for (const group of ["General", "Agent"]) {
       expect(within(nav()).getByText(group).getAttribute("aria-hidden")).toBe("true");
     }
@@ -1288,7 +1416,7 @@ describe("the Assistant's settings navigation", () => {
   });
 
   it.each([
-    ["ArrowDown", "Claude.md"],
+    ["ArrowDown", "Connections"],
     ["End", "Files"]
   ] as const)("should move focus down the navigation with %s when a section has focus", (key, expected) => {
     open(everything());
@@ -1340,7 +1468,7 @@ describe("the Assistant's settings navigation", () => {
 
     fireEvent.click(document.activeElement as HTMLElement);
 
-    expect(selected()).toBe("Claude.md");
+    expect(selected()).toBe("Connections");
   });
 
   // A roving tabindex: every section but the one with focus is deliberately not a tab stop, so `FOCUSABLE` must not
@@ -1385,7 +1513,7 @@ describe("the Assistant's settings on a narrow screen", () => {
       within(screen.getByRole("list", { name: "Settings sections" }))
         .getAllByRole("button")
         .map((item) => item.textContent)
-    ).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
+    ).toEqual(["Appearance", "Connections", "Templates", "Model", "Claude.md", "Tools", "Size", "Files"]);
     expect(screen.queryByRole("radiogroup", { name: "Appearance" })).toBeNull();
   });
 
@@ -1596,10 +1724,10 @@ describe("the Assistant's files", () => {
     expect(screen.queryByRole("heading", { name: "Files" })).toBeNull();
   });
 
-  it("should offer Files as its own section, after the templates, when the page passes it", () => {
+  it("should offer Files as its own section, after the agent's own, when the page passes it", () => {
     open({ ...everything(), files: files() });
 
-    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Model", "Claude.md", "Tools", "Size", "Files"]);
   });
 
   // Two figures, never one: the uploads are a share of a volume the repository clones are on too, and the second
@@ -1911,7 +2039,7 @@ describe("the Assistant's size", () => {
   it("should offer Size under Agent, after the tools, when the page passes it", () => {
     open(everything());
 
-    expect(sections()).toEqual(["Appearance", "Claude.md", "Tools", "Size", "Connections", "Templates", "Files"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Model", "Claude.md", "Tools", "Size", "Files"]);
   });
 
   // The figures a person reads, not a read-back of the constants they come from.
@@ -2038,7 +2166,7 @@ describe("the Assistant's size", () => {
   it("should carry its warning on the one settings cog, naming both reasons when a sign-in needs attention too", () => {
     render(<AssistantSettings now={Date.now()} connections={data(["azure", "bedrock", "atlassian"])} size={size({ use: use(0) })} />);
 
-    expect(cog().getAttribute("aria-label")).toBe("Settings. Your assistant is low on memory. GitHub needs your attention");
+    expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention. Your assistant is low on memory");
     expect(cog().textContent).toBe("!");
   });
 

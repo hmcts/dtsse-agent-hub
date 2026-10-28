@@ -89,22 +89,3 @@ export const memoryReportBody = z.object({
   peak_bytes: wholeCount,
   anon_bytes: wholeCount
 });
-
-/** More than the catalogue will hold for a long while, and few enough that a report is always small. */
-export const MAX_MODEL_RESULTS = 20;
-
-/**
- * What a pod's model check found: one result per model, each model once. `model` is checked for shape only, because
- * a pod client newer than this hub may ask about a model the catalogue does not hold yet; `reportModelAccess` ignores
- * those rather than refusing the report. `unknown` is accepted and stored as nothing.
- */
-export const modelCheckBody = z.object({
-  models: boundedArray(
-    z.object({
-      model: z.string().regex(/^[a-z0-9-]{1,64}$/),
-      status: z.enum(["available", "unavailable", "unknown"])
-    }),
-    MAX_MODEL_RESULTS,
-    { refine: { check: (results) => new Set(results.map((result) => result.model)).size === results.length, message: "each model is reported once" } }
-  )
-});

@@ -11,6 +11,7 @@ import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeM
 import { type AssistantExportDefaults, ExportSettings } from "@/components/assistant/ExportSettings";
 import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
+import { type AssistantModelSetting, ModelSettings } from "@/components/assistant/ModelSettings";
 import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
@@ -38,6 +39,7 @@ interface SettingsView {
   unavailable: string | null;
   warning: string | null;
   plugins: AssistantPlugins | undefined;
+  model: AssistantModelSetting | undefined;
   claudeMd: AssistantClaudeMd | undefined;
   templates: AssistantTemplates | undefined;
   files: AssistantFiles | undefined;
@@ -303,9 +305,43 @@ interface SettingsSection {
   panel: (view: SettingsView) => ReactNode;
 }
 
-/** In the order the navigation offers them. The first one the page has anything for is the one it opens on. */
+/**
+ * In the order the navigation offers them. The first one the page has anything for is the one it opens on.
+ *
+ * A group's items are kept together, because the heading is rendered for an item whose group differs from the one
+ * before it: a group split in two would be announced twice and read as two different things.
+ */
 const SECTIONS: readonly SettingsSection[] = [
   { id: "appearance", label: "Appearance", group: "General", shown: () => true, panel: (view) => <Appearance theme={view.theme} /> },
+  {
+    id: "connections",
+    label: "Connections",
+    group: "General",
+    shown: (view) => view.list.length > 0 || view.unavailable !== null,
+    panel: (view) => <Connections list={view.list} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
+  },
+  {
+    id: "templates",
+    label: "Templates",
+    group: "General",
+    shown: (view) => view.templates !== undefined,
+    panel: (view) => (view.templates === undefined ? null : <Templates templates={view.templates} />)
+  },
+  {
+    id: "exports",
+    label: "Jira & Confluence",
+    group: "General",
+    shown: (view) => view.exports !== undefined,
+    panel: (view) => (view.exports === undefined ? null : <ExportSettings exports={view.exports} />)
+  },
+  {
+    id: "model",
+    label: "Model",
+    // With the agent, because it is the one choice about how the agent answers rather than about this screen.
+    group: "Agent",
+    shown: (view) => view.model !== undefined,
+    panel: (view) => (view.model === undefined ? null : <ModelSettings model={view.model} />)
+  },
   {
     id: "claude-md",
     label: "Claude.md",
@@ -330,27 +366,6 @@ const SECTIONS: readonly SettingsSection[] = [
     group: "Agent",
     shown: (view) => view.size !== undefined,
     panel: (view) => (view.size === undefined ? null : <Size size={view.size} />)
-  },
-  {
-    id: "connections",
-    label: "Connections",
-    group: null,
-    shown: (view) => view.list.length > 0 || view.unavailable !== null,
-    panel: (view) => <Connections list={view.list} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
-  },
-  {
-    id: "templates",
-    label: "Templates",
-    group: null,
-    shown: (view) => view.templates !== undefined,
-    panel: (view) => (view.templates === undefined ? null : <Templates templates={view.templates} />)
-  },
-  {
-    id: "exports",
-    label: "Jira & Confluence",
-    group: null,
-    shown: (view) => view.exports !== undefined,
-    panel: (view) => (view.exports === undefined ? null : <ExportSettings exports={view.exports} />)
   },
   {
     id: "files",
@@ -689,6 +704,7 @@ export function AssistantSettings({
   connect,
   now: from,
   plugins,
+  model,
   claudeMd,
   templates,
   files,
@@ -702,6 +718,7 @@ export function AssistantSettings({
   /** The page's own clock, so the cog's name and badge are the same in the HTML as in the first render. */
   now: number;
   plugins?: AssistantPlugins;
+  model?: AssistantModelSetting;
   claudeMd?: AssistantClaudeMd;
   templates?: AssistantTemplates;
   files?: AssistantFiles;
@@ -726,8 +743,9 @@ export function AssistantSettings({
   const list = connections(data, checklistState, now);
   const warning = connectionsWarning(list);
   const memory = size === undefined ? null : memoryWarning(memoryPressure(size.view.use, size.view.openChats, size.view.size));
-  // In the order the dialog's sections come, so the name reads as a route through it. Empty is no mark at all.
-  const attention = [memory, warning].filter((reason): reason is string => reason !== null);
+  // In the order the dialog's sections come — Connections under General, then Size under Agent — so the name reads as
+  // a route through it. Empty is no mark at all.
+  const attention = [warning, memory].filter((reason): reason is string => reason !== null);
 
   /**
    * The element the `--asst-*` colours are declared on. The dialog is rendered into it rather than into `body`: it
@@ -781,7 +799,20 @@ export function AssistantSettings({
       {open
         ? createPortal(
             <Dialog
-              view={{ theme: shownTheme, list, connect, unavailable: data?.unavailable ?? null, warning, plugins, claudeMd, templates, files, size, exports }}
+              view={{
+                theme: shownTheme,
+                list,
+                connect,
+                unavailable: data?.unavailable ?? null,
+                warning,
+                plugins,
+                model,
+                claudeMd,
+                templates,
+                files,
+                size,
+                exports
+              }}
               onClose={close}
             />,
             themeRoot()

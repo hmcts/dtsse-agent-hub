@@ -67,8 +67,6 @@ function assistant(status: VirtualAgentStatus = "stopped", overrides: Partial<As
     logins: [],
     onboarded: true,
     toChat: [],
-    models: [],
-    defaultModel: "claude-sonnet-5-5",
     ...overrides
   };
 }

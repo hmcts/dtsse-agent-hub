@@ -6,8 +6,8 @@ import {
   exportArtefactToJira,
   renameConversation,
   saveArtefact,
+  saveAssistantModel,
   sendAssistantMessage,
-  setConversationModel,
   setConversationProduct,
   stopAssistantAnswer,
   warmConversation
@@ -34,6 +34,7 @@ import {
   assistantConversation,
   assistantExportDefaults,
   assistantFiles,
+  assistantModel,
   assistantSize,
   assistantTemplates,
   chatForks,
@@ -48,7 +49,6 @@ const ACTIONS: ChatActions = {
   send: sendAssistantMessage,
   warm: warmConversation,
   stop: stopAssistantAnswer,
-  setModel: setConversationModel,
   setProduct: setConversationProduct,
   rename: renameConversation,
   remove: deleteConversation,
@@ -75,7 +75,7 @@ export default async function ConversationPage({
   // queries to fill a dialog, and this is the page that loads most often.
   const sharing = query.share === "1";
   const forking = !sharing && query.fork === "1";
-  const [home, view, claudeMd, mine, shares, forks, files, size, defaults] = await Promise.all([
+  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model] = await Promise.all([
     openAssistant(viewer),
     assistantConversation(viewer, conversationId),
     claudeMdSettings(viewer),
@@ -84,7 +84,8 @@ export default async function ConversationPage({
     forking ? chatForks(viewer, conversationId) : undefined,
     assistantFiles(viewer),
     assistantSize(viewer),
-    assistantExportDefaults(viewer)
+    assistantExportDefaults(viewer),
+    assistantModel(viewer)
   ]);
   if (view === undefined) {
     notFound();
@@ -110,6 +111,7 @@ export default async function ConversationPage({
       templates={{ mine, save: saveTemplate, remove: deleteTemplate }}
       files={files === undefined ? undefined : { view: files, remove: deleteAssistantFile, removeAll: deleteAllAssistantFiles }}
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
+      model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: jira }}
     >
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>

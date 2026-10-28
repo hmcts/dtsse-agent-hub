@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { type AssistantModel, modelOffer } from "@/assistant/models";
 import { DEFAULT_PRODUCT, isProduct } from "@/assistant/products";
 import { fillWith, type Starter, type Template } from "@/assistant/starters";
 import type { UnsentChat } from "@/assistant/views";
@@ -11,11 +10,10 @@ import { Composer, type ComposerFiller } from "@/components/assistant/Composer";
 import { ProductSelect } from "@/components/assistant/ProductSelect";
 import type { ActionResult } from "@/web/action";
 
-export type StartAction = (input: { product: unknown; model: unknown; body: unknown }) => Promise<ActionResult<{ id: string }>>;
-export type OpenAction = (input: { product: unknown; model: unknown }) => Promise<ActionResult<{ id: string }>>;
+export type StartAction = (input: { product: unknown; body: unknown }) => Promise<ActionResult<{ id: string }>>;
+export type OpenAction = (input: { product: unknown }) => Promise<ActionResult<{ id: string }>>;
 export type SendAction = (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult>;
 export type ProductAction = (input: { conversationId: unknown; product: unknown }) => Promise<ActionResult>;
-export type ModelAction = (input: { conversationId: unknown; model: unknown }) => Promise<ActionResult>;
 
 export interface EmptyChatActions {
   /** A conversation and its first message in one go, for the ordinary case where nothing was attached. */
@@ -26,8 +24,6 @@ export interface EmptyChatActions {
   send: SendAction;
   /** The product, when it is changed after attaching has already created the conversation. */
   setProduct: ProductAction;
-  /** The model, when it is changed after attaching has already created the conversation. */
-  setModel: ModelAction;
 }
 
 /**
@@ -35,9 +31,6 @@ export interface EmptyChatActions {
  * and a conversation id is a UUID, so this can never be mistaken for one.
  */
 export const NEW_CHAT_DRAFT = "new";
-
-/** What is offered before any check has answered: the default alone. */
-const UNCHECKED = modelOffer(undefined);
 
 /** Where the new chat's product choice is remembered, scoped to the viewer as the drafts are and for the same reason. */
 const PRODUCT_KEY = "agent-hub:assistant-product:";
@@ -93,9 +86,7 @@ export function EmptyChat({
   templates,
   viewerOid,
   unsent,
-  actions,
-  models = UNCHECKED.models,
-  defaultModel = UNCHECKED.defaultModel
+  actions
 }: {
   starters: readonly Starter[];
   templates: readonly Template[];
@@ -104,15 +95,10 @@ export function EmptyChat({
   /** The conversation this screen already opened for a file and never sent, if there is one. */
   unsent?: UnsentChat;
   actions: EmptyChatActions;
-  /** The models the person's own credential answered, which the + menu offers, and the one a new chat starts on. */
-  models?: readonly AssistantModel[];
-  defaultModel?: string;
 }) {
   const router = useRouter();
   // The conversation's own product wins: it is what the file was attached under, and what the session will be told.
   const [product, setProduct] = useState(() => unsent?.product ?? rememberedProduct(viewerOid) ?? DEFAULT_PRODUCT);
-  // Not remembered across a remount the way the product is: picking the wrong model costs time, not a wrong answer.
-  const [model, setModel] = useState(() => unsent?.model ?? defaultModel);
   const [error, setError] = useState<string | null>(null);
 
   // The conversation attaching created, and the request that created it. The promise is held rather than the id so
@@ -127,7 +113,7 @@ export function EmptyChat({
       return opened.current;
     }
     opening.current ??= (async () => {
-      const result = await actions.open({ product, model });
+      const result = await actions.open({ product });
       if (!result.ok) {
         // Cleared so the next attempt tries again rather than replaying this failure for the rest of the session.
         opening.current = null;
@@ -153,20 +139,10 @@ export function EmptyChat({
     setError(result.ok ? null : result.error);
   }
 
-  async function changeModel(next: string): Promise<void> {
-    setModel(next);
-    const conversation = opened.current;
-    if (conversation === null) {
-      return;
-    }
-    const result = await actions.setModel({ conversationId: conversation, model: next });
-    setError(result.ok ? null : result.error);
-  }
-
   async function begin(body: string, uploadIds: string[] = []): Promise<string | null> {
     const conversation = opened.current;
     if (conversation === null) {
-      const result = await actions.start({ product, model, body });
+      const result = await actions.start({ product, body });
       if (!result.ok) {
         return result.error;
       }
@@ -235,7 +211,6 @@ export function EmptyChat({
             filler={composer}
             openConversation={openConversation}
             attached={unsent?.attachments}
-            model={{ value: model, options: models, onChange: (next) => void changeModel(next) }}
           />
         </div>
       </div>

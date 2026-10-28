@@ -6,8 +6,6 @@ import type { UploadDeletion } from "./upload-disk.ts";
 
 export interface SessionStreamSources {
   hub: EventHub;
-  /** The virtual agent's owner, whose credential changing is what asks its pod to check its models again. */
-  ownerOid: string;
   /** Resolves once the pod's `LISTEN` is active, so every NOTIFY committed after it reaches the hub. */
   ready: () => Promise<void>;
   /** Every pending wake of the assistant, oldest first. */
@@ -22,11 +20,6 @@ export interface SessionStreamSources {
 
 export function wakeFrame(wake: Wake): string {
   return sseEvent({ event: "wake", data: JSON.stringify(wake) });
-}
-
-/** Asks the pod to check which models its owner's credential can use: see Model access. */
-export function checkModelsFrame(): string {
-  return sseEvent({ event: "check_models", data: "{}" });
 }
 
 export function closeFrame(conversationId: string): string {
@@ -139,13 +132,6 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
         );
       } else if (event.type === "assistant_uploads" && event.virtual_agent_id === virtualAgentId) {
         enqueue(sendDeletions);
-      } else if (event.type === "credential" && event.owner_oid === sources.ownerOid && (event.kind === "claude" || event.kind === "bedrock")) {
-        // Sent once, like an interrupt, and never replayed: the pod checks when it starts anyway, and a credential
-        // stored while its stream was down is one it reads fresh at that check. Sent for a deletion as well as a
-        // save, which costs a check that finds no credential and reports nothing.
-        if (open) {
-          send(checkModelsFrame());
-        }
       } else if (event.type === "resync") {
         enqueue(replay);
       }

@@ -16,8 +16,6 @@ import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
-import { readModelOffer } from "./model-access-store.ts";
-import { type AssistantModel, storedModel } from "./models.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { productLabel } from "./products.ts";
 import { snippetOf } from "./search.ts";
@@ -44,9 +42,6 @@ export interface AssistantSummary {
   onboarded: boolean;
   /** The needed credentials without which the chat is not reachable at all; see `chatGate`. */
   toChat: CredentialKind[];
-  /** The models a new chat may be started on, which its own credential answered, and the one it starts on. */
-  models: AssistantModel[];
-  defaultModel: string;
 }
 
 export interface ConversationLink {
@@ -61,7 +56,6 @@ export const UNTITLED = "New chat";
 
 export async function assistantSummary(db: Database, assistant: VirtualAgentRow, stored: ReadonlySet<CredentialKind>): Promise<AssistantSummary> {
   const needed = neededCredentials(assistant.modelRoute);
-  const offer = await readModelOffer(db, assistant.id);
   return {
     id: assistant.id,
     name: assistant.name,
@@ -75,9 +69,7 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
     optional: OPTIONAL_CREDENTIALS,
     logins: await loginViews(db, assistant.id),
     onboarded: onboarded(needed, stored),
-    toChat: chatCredentials(needed),
-    models: offer.models,
-    defaultModel: offer.defaultModel
+    toChat: chatCredentials(needed)
   };
 }
 
@@ -122,7 +114,6 @@ export async function conversationMatches(db: Database, ownerOid: string, query:
 export interface UnsentChat {
   id: string;
   product: string;
-  model: string;
   attachments: MessageAttachment[];
 }
 
@@ -138,11 +129,9 @@ export async function unsentChat(db: Database, ownerOid: string): Promise<Unsent
   if (conversation === undefined) {
     return undefined;
   }
-  const offer = await readModelOffer(db, conversation.virtualAgentId);
   return {
     id: conversation.id,
     product: conversation.product,
-    model: storedModel(offer, conversation.model),
     attachments: await unsentAttachments(db, conversation.id)
   };
 }
@@ -153,9 +142,6 @@ export interface ConversationView {
   product: string;
   productLabel: string;
   productHistory: { product: string; at: string }[];
-  /** The model its messages are answered by, always one of `models`, which the composer offers to change it to. */
-  model: string;
-  models: AssistantModel[];
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
   stopHistory: { at: string }[];
   agentId: string;
@@ -197,14 +183,13 @@ export async function conversationView(db: Database, conversation: ConversationR
   // The conversation's own agent, which is its owner's alone: both reads below apply their own rule to it, and no
   // grant is passed because none extends to a conversation.
   const agent = { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true };
-  const [current, artefact, jira, confluence, page, questions, offer, fork] = await Promise.all([
+  const [current, artefact, jira, confluence, page, questions, fork] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true } }),
     readArtefact(db, conversation.id),
     readJiraExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),
     agentConversation(db, conversation.ownerOid, agent, []),
     agentQuestions(db, conversation.ownerOid, agent, []),
-    readModelOffer(db, conversation.virtualAgentId),
     db.assistantConversation.findUnique({ where: { id: conversation.id }, select: FORKED_SELECT })
   ]);
   return {
@@ -213,8 +198,6 @@ export async function conversationView(db: Database, conversation: ConversationR
     product: conversation.product,
     productLabel: productLabel(conversation.product),
     productHistory: conversation.productHistory,
-    model: storedModel(offer, conversation.model),
-    models: offer.models,
     stopHistory: conversation.stopHistory,
     agentId,
     agentStatus: current?.status ?? "offline",

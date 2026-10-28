@@ -1847,7 +1847,6 @@ describe("the unsent new chat the screen comes back to", () => {
     expect(resumed).toEqual({
       id,
       product: "pcs",
-      model: "claude-sonnet-5-5",
       attachments: [
         { id: first, name: "scanned letter.pdf", bytes: 6, media_type: "application/pdf", available_until: expect.any(String) },
         { id: second, name: "notes.txt", bytes: 3, media_type: "application/pdf", available_until: expect.any(String) }

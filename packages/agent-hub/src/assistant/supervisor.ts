@@ -306,7 +306,7 @@ export function createAssistantSupervisor({
   async function start(w: Wake): Promise<void> {
     const resume = w.resume || fs.existsSync(transcript(w.session_id));
     const name = tmuxName(w.conversation_id);
-    const launched = launcherModel(w.model, env);
+    const launched = launcherModel(w.model);
     const command = claudeCommand(w.session_id, resume, launched);
     // What the session starts on, for the bridge to compare each message's model with: it types `/model` only for a
     // message asking for another. Cleared when it starts on hai's default, so the first message that names a model

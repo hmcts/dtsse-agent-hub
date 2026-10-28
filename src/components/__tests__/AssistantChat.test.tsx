@@ -4,7 +4,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Skill } from "@/agents/skills";
-import { CATALOGUE } from "@/assistant/models";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
 import type { ConversationView } from "@/assistant/views";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
@@ -108,8 +107,6 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     product: "ccd",
     productLabel: "CCD",
     productHistory: [],
-    model: "claude-sonnet-5-5",
-    models: CATALOGUE.slice(0, 3),
     stopHistory: [],
     agentId: AGENT,
     agentStatus: "idle",
@@ -139,7 +136,6 @@ function actions(overrides: Partial<ChatActions> = {}): ChatActions {
     warm: ok(),
     stop: vi.fn(async () => ({ ok: true as const, stopped: true })),
     setProduct: ok(),
-    setModel: ok(),
     rename: ok(),
     remove: ok(),
     answerQuestion: ok(),
@@ -1227,8 +1223,7 @@ function emptyActions(start: EmptyChatActions["start"]): EmptyChatActions {
     start,
     open: vi.fn(async () => ({ ok: true as const, id: "opened" })),
     send: vi.fn(async () => ({ ok: true as const })),
-    setProduct: vi.fn(async () => ({ ok: true as const })),
-    setModel: vi.fn(async () => ({ ok: true as const }))
+    setProduct: vi.fn(async () => ({ ok: true as const }))
   };
 }
 
@@ -1538,7 +1533,7 @@ describe("EmptyChat", () => {
       fireEvent.keyDown(newChatBox(), { key: "Enter" });
     });
 
-    expect(start).toHaveBeenCalledWith({ product: "pcs", model: "claude-sonnet-5-5", body: starterText("Analysis") });
+    expect(start).toHaveBeenCalledWith({ product: "pcs", body: starterText("Analysis") });
     expect(push).toHaveBeenCalledWith("/assistant/abc");
   });
 
@@ -1561,7 +1556,7 @@ describe("EmptyChat", () => {
     expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("general");
     await type("my own words");
 
-    expect(start).toHaveBeenCalledWith({ product: "general", model: "claude-sonnet-5-5", body: "my own words" });
+    expect(start).toHaveBeenCalledWith({ product: "general", body: "my own words" });
     expect(push).toHaveBeenCalledWith("/assistant/abc");
   });
 
@@ -1623,137 +1618,14 @@ describe("EmptyChat", () => {
   });
 });
 
-/** The model the next message is answered by: shown on a chip beside the + button and changed from the + menu. */
-describe("Composer model choice", () => {
-  function openModels(): HTMLElement {
+/** The model is one setting per person in the Assistant's settings, so the composer's + menu offers nothing of it. */
+describe("Composer and the model", () => {
+  it("should offer no Model item in the + menu when it is opened", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
+
     fireEvent.click(screen.getByRole("button", { name: /add a template$/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Model/ }));
-    return screen.getByRole("menu", { name: "Models" });
-  }
-
-  function pickFromMenu(label: string): void {
-    fireEvent.click(within(openModels()).getByRole("menuitemradio", { name: new RegExp(`^${label}`) }));
-  }
-
-  function checkedModel(): (string | null)[] {
-    return within(openModels())
-      .getAllByRole("menuitemradio")
-      .filter((item) => item.getAttribute("aria-checked") === "true")
-      .map((item) => item.textContent);
-  }
-
-  it("should check Sonnet 5.5 in the + menu when the conversation is on the default model", () => {
-    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
-
-    expect(checkedModel()).toEqual([expect.stringMatching(/Sonnet 5\.5/)]);
-  });
-
-  it("should save the pick and check it in the + menu when the person chooses another model", async () => {
-    const setModel = ok();
-    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ setModel })} />);
-
-    pickFromMenu("Opus 5.5");
-    await act(async () => {});
-
-    expect(setModel).toHaveBeenCalledWith({ conversationId: CONVERSATION, model: "claude-opus-5-5" });
-    expect(screen.queryByRole("menu")).toBeNull();
-    expect(checkedModel()).toEqual([expect.stringMatching(/Opus 5\.5/)]);
-  });
-
-  it("should check the stored model when the person opens the models", () => {
-    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ model: "claude-haiku-5-5" })} templates={TEMPLATES} actions={actions()} />);
-
-    expect(checkedModel()).toEqual([expect.stringMatching(/Haiku 5\.5/)]);
-  });
-
-  it("should not show the model beside the + button when the + menu is closed", () => {
-    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions()} />);
-
-    expect(screen.queryByText("Sonnet 5.5")).toBeNull();
-  });
-
-  it("should save nothing when the person picks the model the conversation is already on", () => {
-    const setModel = ok();
-    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ setModel })} />);
-
-    pickFromMenu("Sonnet 5.5");
-
-    expect(setModel).not.toHaveBeenCalled();
-  });
-
-  it("should go back to the stored model and say why when the pick is refused", async () => {
-    const setModel = vi.fn(async () => ({ ok: false as const, error: "pick a model from the list" }));
-    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation()} templates={TEMPLATES} actions={actions({ setModel })} />);
-
-    pickFromMenu("Opus 5.5");
-    await act(async () => {});
-
-    expect(screen.getByRole("alert").textContent).toBe("pick a model from the list");
-    expect(checkedModel()).toEqual([expect.stringMatching(/Sonnet 5\.5/)]);
-  });
-
-  it("should offer no model when the composer is given none to show", () => {
-    render(<Composer templates={TEMPLATES} viewerOid={VIEWER} draftId={CONVERSATION} onSend={vi.fn(async () => null)} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
 
     expect(screen.queryByRole("menuitem", { name: /^Model/ })).toBeNull();
-  });
-
-  it("should start the new chat on the model the person picked when they send its first message", async () => {
-    const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(<EmptyChat viewerOid={VIEWER} starters={STARTERS} templates={TEMPLATES} actions={emptyActions(start)} models={CATALOGUE.slice(0, 3)} />);
-
-    pickFromMenu("Haiku 5.5");
-    fireEvent.change(newChatBox(), { target: { value: "a quick one" } });
-    await act(async () => {
-      fireEvent.keyDown(newChatBox(), { key: "Enter" });
-    });
-
-    expect(start).toHaveBeenCalledWith({ product: "general", model: "claude-haiku-5-5", body: "a quick one" });
-  });
-
-  it("should list only the models the person's credential answered when it offers them", () => {
-    render(
-      <ChatView
-        jira={NO_JIRA}
-        viewerOid={VIEWER}
-        view={conversation({ model: "claude-haiku-5-5", models: CATALOGUE.filter((m) => m.id === "claude-haiku-5-5" || m.id === "claude-fable-5-1") })}
-        templates={TEMPLATES}
-        actions={actions()}
-      />
-    );
-
-    const offered = within(openModels())
-      .getAllByRole("menuitemradio")
-      .map((item) => item.textContent);
-    expect(offered).toEqual([expect.stringMatching(/Haiku 5\.5/), expect.stringMatching(/Fable 5\.1/)]);
-  });
-
-  it("should keep the Model item, with the one model, when only one is offered", () => {
-    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ models: CATALOGUE.slice(0, 1) })} templates={TEMPLATES} actions={actions()} />);
-
-    expect(within(openModels()).getAllByRole("menuitemradio")).toHaveLength(1);
-  });
-
-  it("should start the new chat on the person's default when they pick nothing and Sonnet 5.5 is not offered", async () => {
-    const start = vi.fn(async () => ({ ok: true as const, id: "abc" }));
-    render(
-      <EmptyChat
-        viewerOid={VIEWER}
-        starters={STARTERS}
-        templates={TEMPLATES}
-        actions={emptyActions(start)}
-        models={CATALOGUE.slice(1, 3)}
-        defaultModel="claude-opus-5-5"
-      />
-    );
-
-    fireEvent.change(newChatBox(), { target: { value: "hello" } });
-    await act(async () => {
-      fireEvent.keyDown(newChatBox(), { key: "Enter" });
-    });
-
-    expect(start).toHaveBeenCalledWith({ product: "general", model: "claude-opus-5-5", body: "hello" });
+    expect(screen.queryByRole("menu", { name: "Models" })).toBeNull();
   });
 });

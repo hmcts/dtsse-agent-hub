@@ -13,6 +13,7 @@ import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
+import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
@@ -99,6 +100,7 @@ export function AssistantShell({
   connect,
   now,
   plugins,
+  model,
   claudeMd,
   templates,
   files,
@@ -120,6 +122,8 @@ export function AssistantShell({
   now: number;
   /** The workspace plugins the footer's settings lets the person tick. */
   plugins?: AssistantPlugins;
+  /** The Claude model the person's chats run on, which the footer's settings shows and changes. */
+  model?: AssistantModelSetting;
   /** The person's own CLAUDE.md, which the footer's settings shows and edits. */
   claudeMd?: AssistantClaudeMd;
   /** The person's own saved prompts, which the footer's settings lists and edits. */
@@ -316,6 +320,7 @@ export function AssistantShell({
               connect={connect}
               now={now}
               plugins={plugins}
+              model={model}
               claudeMd={claudeMd}
               templates={templates}
               files={files}

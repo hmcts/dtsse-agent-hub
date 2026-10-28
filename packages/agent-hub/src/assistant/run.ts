@@ -10,7 +10,6 @@ import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachment
 import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
-import { CHECK_EVERY_MS, type CheckModelsOptions, createModelChecker } from "./model-check.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
 
 const TICK_MS = 2000;
@@ -24,7 +23,7 @@ const STREAM_IDLE_MS = 45000;
 const RECONCILE_MS = 10 * 60 * 1000;
 
 export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOptions, "api" | "id"> & {
-  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations" | "putUploads" | "putLookup" | "putMemory" | "getCredential" | "postModels">;
+  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations" | "putUploads" | "putLookup" | "putMemory">;
   id: string;
   /** The filesystem the uploads report and the deletions use; a test passes its own. */
   uploadsFs?: DiskFs;
@@ -33,9 +32,6 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
   memoryFs?: MemoryFs;
   /** How lookups run twg and sign it in; a test passes its own rather than a twg on PATH. */
   lookups?: Partial<LookupDeps>;
-  /** How the model check runs `claude`, and where; a test passes its own rather than a `claude` on PATH. */
-  modelCheck?: Pick<CheckModelsOptions, "run" | "fs" | "tmpRoot" | "timeoutMs" | "concurrency">;
-  modelCheckEveryMs?: number;
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
   signal?: AbortSignal;
   tickMs?: number;
@@ -58,8 +54,6 @@ export async function runAssistantSupervisor({
   reconcileMs = Number(env.AGENT_HUB_UPLOAD_RECONCILE_MS) || RECONCILE_MS,
   uploadsFs,
   lookups: lookupDeps = {},
-  modelCheck = {},
-  modelCheckEveryMs = CHECK_EVERY_MS,
   cgroupRoot,
   memoryFs,
   ...options
@@ -75,8 +69,6 @@ export async function runAssistantSupervisor({
     login: lookupDeps.login ?? (async () => (await atlassianLogin({ env })) !== "not-signed-in"),
     ...(lookupDeps.env === undefined ? {} : { env: lookupDeps.env })
   });
-  // Beside the supervisor's chain too, for the same reason as lookups: a check is minutes of waiting on the API.
-  const models = createModelChecker({ api, id, env, say, ...modelCheck });
   const uploads = {
     api,
     id,
@@ -168,9 +160,6 @@ export async function runAssistantSupervisor({
           }
         } else if (event.event === "delete_uploads") {
           handle(removeUploads, event);
-        } else if (event.event === "check_models") {
-          // The owner stored or replaced the credential this pod pays with, so what it can use may have changed.
-          void models.request();
         } else if (event.event === "reconnect") {
           reconnect = true;
         }
@@ -241,8 +230,6 @@ export async function runAssistantSupervisor({
     // the tick above reports whenever the number of sessions changes, which is what moves the figure it warns on.
     sendMemory().catch((e) => say(`reporting memory failed: ${(e as Error).message}`));
   }, reconcileMs);
-  // Entitlements move rarely, so a running pod checks again daily; a new credential sends `check_models` at once.
-  const modelTimer = setInterval(() => void models.request(), modelCheckEveryMs);
   try {
     await supervisor.adopt();
     // Before the loop, because the hub drops the last pod's report when it asks for this one: until the first report
@@ -250,8 +237,6 @@ export async function runAssistantSupervisor({
     // the kubelet restarted after an OOM kill is the case that matters — the hub was never told it was replaced, so
     // this is the only thing that moves the figures off the ones that got it killed.
     await sendMemory().catch((e) => say(`reporting memory failed: ${(e as Error).message}`));
-    // The pod has its credentials by now: the entrypoint starts the supervisor only after the route's one is stored.
-    void models.request();
     say(`assistant supervisor started: at most ${supervisor.max} sessions at once, each stopped after ${idleMinutes(env)} idle minutes`);
     let retry: ReconnectDecision = { delay: 0, backoff: 0, rapidCloses: 0 };
     while (!stopping) {
@@ -294,7 +279,6 @@ export async function runAssistantSupervisor({
   } finally {
     clearInterval(timer);
     clearInterval(reconciler);
-    clearInterval(modelTimer);
     process.off("SIGTERM", onSignal);
     process.off("SIGINT", onSignal);
   }
