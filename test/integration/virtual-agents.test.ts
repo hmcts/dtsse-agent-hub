@@ -860,7 +860,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     const found = await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/jenkins`, { virtualAgentId: id, kind: "jenkins" });
 
     expect(await jsonOf(found)).toEqual({ value: jenkins });
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.optional).toEqual(["jenkins", "atlassian"]);
+    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.optional).toEqual(["azure", "jenkins", "atlassian"]);
   });
 
   it("should give the pod its owner's stored credential, and 404 when there is none", async () => {
@@ -1894,7 +1894,8 @@ describe("the web UI's reads and actions", () => {
     const page = await virtualAgentPage(viewer, id);
 
     expect(list.agents.map((agent) => agent.name)).toEqual(["pcs-api"]);
-    expect(page?.manage?.detail.needed).toEqual(["github", "azure", "bedrock"]);
+    expect(page?.manage?.detail.needed).toEqual(["github", "bedrock"]);
+    expect(page?.manage?.detail.optional).toEqual(["azure", "jenkins", "atlassian"]);
     expect(page?.linked?.agent.id).toBe(agentId);
     expect((await agentActivity(viewer, page!.linked!)).conversation.messages.map((message) => message.body)).toEqual(["hello"]);
     expect(await virtualAgentPage({ ...BOB, tid: "dev", modelRoute: "bedrock" }, id)).toBeUndefined();
@@ -1904,13 +1905,13 @@ describe("the web UI's reads and actions", () => {
   it("should need a Bedrock API key and no Claude token when the agent is on the Bedrock route", async () => {
     const agent = await create(ALICE, "pcs-api", "bedrock");
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "azure", "bedrock"]);
+    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "bedrock"]);
   });
 
   it("should need a Claude token and no Bedrock API key when the agent is on its owner's own licence", async () => {
     const agent = await create(ALICE, "pcs-api", "own-licence");
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "azure", "claude"]);
+    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "claude"]);
   });
 });
 
@@ -2643,6 +2644,60 @@ describe("signing in again", () => {
 
     expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBeUndefined();
     expect(await row(id)).toMatchObject({ generation: before.generation, desired: "stopped", status: before.status });
+  });
+
+  async function requested(id: string, token: string, kind: "azure" | "github"): Promise<unknown> {
+    const response = await pod(loginRoute.GET, token, `/api/virtual/${id}/login/${kind}`, { virtualAgentId: id, kind });
+    expect(response.status).toBe(200);
+    return (await jsonOf(response)).requested;
+  }
+
+  it("should tell no pod an Azure sign-in was asked for when the owner has not asked", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+
+    expect(await requested(id, token, "azure")).toBe(false);
+  });
+
+  it("should restart the agent and tell its new pod the owner asked for Azure when the owner connects Azure", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+
+    actAs("alice");
+    expect(await actions.reconnectSignIn(form({ id, kind: "azure" }))).toEqual({ ok: true, confirmation: "pcs-api is restarting to sign in to Azure again" });
+
+    expect(await row(id)).toMatchObject({ desired: "running", status: "provisioning" });
+    const claimed = (await claim()).find((entry) => entry.id === id);
+    const token = claimed!.launch_token!;
+    expect(await requested(id, token, "azure")).toBe(true);
+    // Only Azure is made on request; every other kind a pod relays whenever it has none.
+    expect(await requested(id, token, "github")).toBe(false);
+  });
+
+  it("should spend the Azure request once its pod relays the sign-in", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    actAs("alice");
+    await actions.reconnectSignIn(form({ id, kind: "azure" }));
+    const token = (await claim()).find((entry) => entry.id === id)!.launch_token!;
+
+    const relayed = await pod(loginRoute.POST, token, `/api/virtual/${id}/login/azure`, { virtualAgentId: id, kind: "azure" }, "POST", {
+      prompt: "device_code",
+      verification_uri: "https://microsoft.com/devicelogin",
+      user_code: "ABCDEFGHI",
+      expires_in: 900
+    });
+
+    expect(relayed.status).toBe(204);
+    expect(await requested(id, token, "azure")).toBe(false);
+    expect((await row(id)).status).toBe("awaiting_login");
+  });
+
+  it("should keep the Azure request for its next start when the owner connects Azure on a stopped agent", async () => {
+    const { id } = await started(ALICE, "pcs-api");
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+
+    actAs("alice");
+    await actions.reconnectSignIn(form({ id, kind: "azure" }));
+
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id } })).azureSignInRequestedAt).not.toBeNull();
   });
 
   it("should delete the Atlassian sign-in and restart the agent when the owner signs in to Atlassian again", async () => {

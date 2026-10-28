@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { NextRequest } from "next/server";
 import { assistantEnvelope, type EnvelopeMessage, fetchAttachments, type PodApi, parseAssistantFrame, parseAttachments } from "pod-client";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as attachmentFetchedRoute from "../../src/app/api/agent/[agentId]/attachments/[uploadId]/fetched/route.ts";
 import * as attachmentPartRoute from "../../src/app/api/agent/[agentId]/attachments/[uploadId]/parts/[index]/route.ts";
 import * as streamRoute from "../../src/app/api/agent/[agentId]/stream/route.ts";
@@ -29,7 +29,8 @@ import { realtime } from "../../src/realtime/process.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { DEV_PERSONA_COOKIE } from "../../src/viewer/identity.ts";
 import { type ClaimResult, createVirtualAgent } from "../../src/virtual-agents/store.ts";
-import { insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { assistantSuite } from "./assistant-suite.ts";
+import { insertUser, type Person, prisma } from "./database.ts";
 import { jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
 
@@ -42,7 +43,6 @@ vi.mock("next/cache", async () => {
   return { revalidatePath: (path: string) => void revalidated.push(path) };
 });
 
-const { actAs } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/assistant.ts");
 const { assistantConversation } = await import("../../src/web/data.ts");
 
@@ -167,25 +167,7 @@ function filled(length: number, value: number): Uint8Array<ArrayBuffer> {
   return new Uint8Array(length).fill(value);
 }
 
-beforeAll(async () => {
-  await realtime().listener.ready();
-});
-
-beforeEach(async () => {
-  vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
-  vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
-  await resetDatabase();
-  actAs("alice");
-});
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
-afterAll(async () => {
-  await realtime().listener.stop();
-  await prisma.$disconnect();
-});
+assistantSuite([ALICE, BOB]);
 
 describe("uploading a file", () => {
   it("should become stored once every part has arrived, whatever order they arrive in", async () => {

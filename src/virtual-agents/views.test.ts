@@ -3,9 +3,9 @@ import { claudeTokenUsable, neededCredentials, OPTIONAL_CREDENTIALS } from "./vi
 
 describe("neededCredentials", () => {
   it.each([
-    ["own-licence", ["github", "azure", "claude"]],
-    ["bedrock", ["github", "azure", "bedrock"]]
-  ] as const)("should need GitHub, Azure and the model key, and nothing optional, when the agent is on the %s route", (route, expected) => {
+    ["own-licence", ["github", "claude"]],
+    ["bedrock", ["github", "bedrock"]]
+  ] as const)("should need GitHub and the model key, and nothing optional, when the agent is on the %s route", (route, expected) => {
     expect(neededCredentials(route)).toEqual(expected);
     expect(neededCredentials(route).some((kind) => OPTIONAL_CREDENTIALS.includes(kind))).toBe(false);
   });
@@ -37,7 +37,11 @@ describe("claudeTokenUsable", () => {
 });
 
 describe("OPTIONAL_CREDENTIALS", () => {
-  it("should offer Jenkins and Atlassian when an agent can start without either", () => {
-    expect(OPTIONAL_CREDENTIALS).toEqual(["jenkins", "atlassian"]);
+  it("should offer Azure, Jenkins and Atlassian when an agent can start without any of them", () => {
+    expect(OPTIONAL_CREDENTIALS).toEqual(["azure", "jenkins", "atlassian"]);
+  });
+
+  it.each(["own-licence", "bedrock"] as const)("should not need Azure when the agent is on the %s route", (route) => {
+    expect(neededCredentials(route)).not.toContain("azure");
   });
 });

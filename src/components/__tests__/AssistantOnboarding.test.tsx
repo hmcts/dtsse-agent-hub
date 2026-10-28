@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONNECTORS, canSignInAgain, connectionsPrompt, offeredConnections } from "@/assistant/connections";
+import { CONNECTORS, canSignInAgain, connectionsPrompt, offeredConnections, signsInOnRequest } from "@/assistant/connections";
 import { readiness } from "@/assistant/onboarding";
 import type { AssistantSummary } from "@/assistant/views";
 import { GettingReady, OnboardingGate } from "@/components/assistant/GettingReady";
@@ -12,6 +12,7 @@ import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
 import type { LoginView } from "@/virtual-agents/logins";
+import { neededCredentials, OPTIONAL_CREDENTIALS } from "@/virtual-agents/views";
 
 const refresh = vi.fn();
 const push = vi.fn();
@@ -40,10 +41,13 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
     statusChangedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
     readiness: readiness(status),
-    needed: ["github", "azure", "claude"],
-    optional: ["jenkins", "atlassian"],
+    needed: neededCredentials("own-licence"),
+    optional: OPTIONAL_CREDENTIALS,
     logins: [],
     onboarded: false,
+    // Empty, so `chatGate` stays open: most of these set `onboarded` without the statuses behind it, and are about
+    // the banner and the sign-ins. The gate has tests of its own below that give it both.
+    toChat: [],
     models: [],
     defaultModel: "claude-sonnet-5-5",
     ...overrides
@@ -144,15 +148,22 @@ describe("GettingReady progress", () => {
 });
 
 describe("GettingReady connectors", () => {
-  it("should list the needed connections and Atlassian but not Jenkins when rendering the connections", () => {
+  it("should list the needed connections and Atlassian but neither Azure nor Jenkins when rendering the connections", () => {
     render(ready());
 
     const items = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("listitem");
-    expect(items).toHaveLength(4);
-    ["GitHub", "Azure", "Claude", "Atlassian"].forEach((name, index) => {
+    expect(items).toHaveLength(3);
+    ["GitHub", "Claude", "Atlassian"].forEach((name, index) => {
       expect(within(items[index] as HTMLElement).getByText(name, { exact: true })).toBeTruthy();
     });
     expect(screen.queryByText("Jenkins")).toBeNull();
+    expect(screen.queryByText("Azure")).toBeNull();
+  });
+
+  it("should list an Azure row with its code when the person asked for an Azure sign-in", () => {
+    render(ready({ assistant: assistant("awaiting_login", { logins: [login("azure")] }) }));
+
+    expect(within(connector("Azure")).getByText("ABCD-1234")).toBeTruthy();
   });
 
   it("should show a stored connection as connected", () => {
@@ -514,22 +525,44 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  // Nothing covers the page until the person asks for it. The connections screen is `fixed inset-0`, so showing it
-  // unbidden takes away the sidebar, every conversation and the settings that could fix whatever is missing — and
-  // whether a needed credential can be stored at all is not only up to them.
+  // Short of GitHub and Claude, which the gate's own tests cover, nothing covers the page until the person asks for
+  // it. The connections screen is `fixed inset-0`, so showing it unbidden takes away the sidebar, every conversation
+  // and the settings.
   it("should ask on a banner, over nothing, when the person has a connection still to make", () => {
     render(gate(assistant("awaiting_credentials"), statuses("github")));
 
     expect(screen.queryByRole("dialog")).toBeNull();
     const banner = screen.getByRole("region", { name: "Connect your accounts" });
-    expect(banner.textContent).toContain("Your assistant needs Azure and Claude before it can work for you.");
+    expect(banner.textContent).toContain("Your assistant needs Claude before it can work for you.");
     expect(within(banner).getByRole("button", { name: "Connect accounts" })).toBeTruthy();
   });
 
   it("should name every needed connection when the person has stored none of them", () => {
     render(gate(assistant()));
 
-    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).toContain("needs GitHub, Azure and Claude");
+    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).toContain("needs GitHub and Claude");
+  });
+
+  it("should not mention Azure anywhere above the chats when Azure is not connected", () => {
+    render(gate(assistant("awaiting_credentials"), statuses("github")));
+
+    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).not.toContain("Azure");
+  });
+
+  it("should raise no banner, and count the person as onboarded, when only Azure is missing", () => {
+    const summary = assistant("running", { onboarded: true });
+    render(gate(summary, statuses("github", "claude")));
+
+    expect(screen.queryByRole("region", { name: "Connect your accounts" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Sign in" })).toBeNull();
+    expect(document.body.textContent).not.toContain("Azure");
+  });
+
+  it("should raise no sign-in ask for an Azure sign-in the person asked for and let lapse", () => {
+    const summary = assistant("running", { onboarded: true, logins: [lapsed("azure")] });
+    render(gate(summary, statuses("github", "claude")));
+
+    expect(screen.queryByRole("region", { name: "Sign in" })).toBeNull();
   });
 
   it("should open the connections when the person asks for them from the banner", () => {
@@ -866,9 +899,10 @@ describe("OnboardingGate", () => {
 
         // Asserted rather than skipped past, so every case says something. A code they have already sent back waits
         // on nobody. A live one always asks, because finishing it goes back through the pod rather than through a
-        // credential the hub has to accept for them. A lapsed one asks only while there is a way back it will take.
+        // credential the hub has to accept for them. A lapsed one asks only while there is a way back it will take,
+        // and never for a sign-in made on request, whose way back is in settings.
         const asked = screen.queryByRole("region", { name: "Sign in" }) !== null;
-        expect(asked).toBe(live === true || (live === false && canSignInAgain(kind, [...NEEDS, ...OFFERS])));
+        expect(asked).toBe(live === true || (live === false && canSignInAgain(kind, [...NEEDS, ...OFFERS]) && !signsInOnRequest(kind)));
         if (!asked) {
           return;
         }
@@ -921,6 +955,101 @@ describe("OnboardingGate", () => {
  * server component for that reason: it is a real time, and React serialises it, so the browser's first render is
  * made from the same number and there is nothing for hydration to disagree about.
  */
+describe("OnboardingGate holding the person at GitHub and Claude", () => {
+  const OWN_LICENCE: Partial<AssistantSummary> = { needed: ["github", "azure", "claude"], toChat: ["github", "claude"] };
+  const BEDROCK: Partial<AssistantSummary> = { needed: ["github", "azure", "bedrock"], toChat: ["github", "bedrock"] };
+
+  function held(summary: AssistantSummary, stored: CredentialStatus[] = [], options: { dismissed?: boolean; unavailable?: string | null } = {}) {
+    return (
+      <OnboardingGate
+        assistant={summary}
+        statuses={stored}
+        unavailable={options.unavailable ?? null}
+        paste={ok()}
+        save={ok()}
+        reconnect={ok()}
+        now={Date.now()}
+        dismissed={options.dismissed ?? false}
+      />
+    );
+  }
+
+  it("should hold the person on the connections screen when neither GitHub nor Claude is connected", () => {
+    render(held(assistant("awaiting_credentials", OWN_LICENCE)));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Connect your accounts" })).toBeNull();
+  });
+
+  it("should offer no way past the screen when GitHub is connected and Claude is not", () => {
+    render(held(assistant("awaiting_credentials", OWN_LICENCE), statuses("github", "azure")));
+
+    expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Connect the accounts above to continue" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+  });
+
+  it("should hold the screen when Claude is connected and GitHub is not", () => {
+    render(held(assistant("awaiting_login", OWN_LICENCE), statuses("azure", "claude")));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
+  });
+
+  it("should hold the screen when the person sent the getting-ready screen away on an earlier page", () => {
+    render(held(assistant("awaiting_credentials", OWN_LICENCE), [], { dismissed: true }));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+  });
+
+  it("should hold the screen when the assistant is already running and a chat credential has gone", () => {
+    render(held(assistant("running", { ...OWN_LICENCE, onboarded: false }), statuses("azure", "claude")));
+
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+  });
+
+  it("should hold the screen on the Bedrock key and not take a Claude token for it when the assistant runs on Bedrock", () => {
+    render(held(assistant("awaiting_credentials", BEDROCK), statuses("github", "claude")));
+
+    expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
+  });
+
+  it("should let the person through to their chats when the assistant runs on Bedrock and GitHub and its key are connected", () => {
+    render(held(assistant("running", { ...BEDROCK, onboarded: true }), statuses("github", "azure", "bedrock")));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("should ask for Azure on the banner rather than hold the screen when GitHub and Claude are connected", () => {
+    render(held(assistant("awaiting_login", OWN_LICENCE), statuses("github", "claude")));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Connect your accounts" }).textContent).toContain("needs Azure");
+  });
+
+  it("should not hold the person when the hub cannot read the credentials", () => {
+    render(held(assistant("running", OWN_LICENCE), [], { unavailable: "this deployment has no credentials vault, so credentials cannot be stored here" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "Your sign-ins cannot be checked" })).toBeTruthy();
+  });
+
+  it("should offer the way to the chats when GitHub and Claude are connected during the visit", () => {
+    const { rerender } = render(held(assistant("awaiting_credentials", OWN_LICENCE), statuses("azure")));
+    expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
+
+    rerender(held(assistant("cloning", { ...OWN_LICENCE, onboarded: true }), statuses("github", "azure", "claude")));
+
+    expect((screen.getByRole("button", { name: "Start chatting" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Start chatting" }));
+    expect(screen.queryByRole("list", { name: "Connections" })).toBeNull();
+  });
+});
+
 describe("the HTML the server sends", () => {
   const AN_HOUR_AGO = () => new Date(Date.now() - 60 * 60_000).toISOString();
 

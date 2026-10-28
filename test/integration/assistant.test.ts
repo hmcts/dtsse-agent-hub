@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { setGrant } from "../../src/access/load.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
@@ -22,13 +22,15 @@ import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
 import { reportModelAccess } from "../../src/assistant/model-access-store.ts";
 import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
+import { credentialBackend } from "../../src/credentials/backend.ts";
+import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { expireDeliveries } from "../../src/messages/store.ts";
-import { realtime } from "../../src/realtime/process.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
-import { insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { assistantSuite } from "./assistant-suite.ts";
+import { insertUser, type Person, prisma } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
 
@@ -142,35 +144,37 @@ async function sessionOf(conversationId: string): Promise<{ agentId: string; ses
   return { agentId: conversation.agent!.id, sessionId: conversation.agent!.sessionId };
 }
 
-beforeAll(async () => {
-  await realtime().listener.ready();
-});
-
-beforeEach(async () => {
-  vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
-  vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
-  await resetDatabase();
-  actAs("alice");
-});
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
-afterAll(async () => {
-  await realtime().listener.stop();
-  await prisma.$disconnect();
-});
+assistantSuite([ALICE, BOB]);
 
 describe("the person's assistant", () => {
   it("should create a virtual agent on the first visit of someone who has none, and reuse it on the next", async () => {
     await insertUser(ALICE);
+    // A first visit is someone who has connected nothing yet, not the suite's connected Alice.
+    await prisma.credential.deleteMany({ where: { ownerOid: ALICE.oid } });
     const first = await openAssistant(VIEWER);
     const second = await openAssistant(VIEWER);
 
     expect(second.assistant.id).toBe(first.assistant.id);
     expect(await prisma.virtualAgent.findMany({ where: { ownerOid: ALICE.oid }, select: { name: true } })).toEqual([{ name: "assistant" }]);
-    expect(first.assistant).toMatchObject({ needed: ["github", "azure", "claude"], onboarded: false, readiness: { percent: 10 } });
+    expect(first.assistant).toMatchObject({ needed: ["github", "claude"], onboarded: false, readiness: { percent: 10 } });
+  });
+
+  it("should count the person as onboarded with GitHub and the model key stored and no Azure", async () => {
+    await insertUser(ALICE);
+    const backend = credentialBackend(prisma);
+    if (!backend.available) {
+      throw new Error(backend.reason);
+    }
+    for (const [kind, value] of [
+      ["github", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"],
+      ["claude", `sk-ant-oat01-${"a".repeat(40)}`]
+    ] as const) {
+      await putCredential(prisma, backend.store, { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind, value, via: "web" });
+    }
+
+    const home = await openAssistant(VIEWER);
+
+    expect(home.assistant).toMatchObject({ needed: ["github", "claude"], optional: ["azure", "jenkins", "atlassian"], onboarded: true });
   });
 
   it("should offer the plugins the hub is configured with, and the ones the assistant loads", async () => {
@@ -270,10 +274,10 @@ describe("the person's assistant", () => {
   // `/assistant` asks for must then be storable: it asks for the row's credentials, and the only Claude token the
   // hub will ever hand that pod is the one this page can take.
   it.each([
-    ["bedrock", "own-licence", ["github", "azure", "claude"], true],
-    ["own-licence", "bedrock", ["github", "azure", "bedrock"], true],
-    ["own-licence", "own-licence", ["github", "azure", "claude"], true],
-    ["bedrock", "bedrock", ["github", "azure", "bedrock"], false]
+    ["bedrock", "own-licence", ["github", "claude"], true],
+    ["own-licence", "bedrock", ["github", "bedrock"], true],
+    ["own-licence", "own-licence", ["github", "claude"], true],
+    ["bedrock", "bedrock", ["github", "bedrock"], false]
   ] as const)("should ask for the assistant's own credentials and allow every one of them when the viewer is on %s and the row on %s", async (viewerRoute, rowRoute, needed, claudeTokenUsable) => {
     await insertUser(ALICE);
     await createVirtualAgent(prisma, { owner: ALICE, modelRoute: rowRoute, name: "assistant" });
@@ -637,6 +641,61 @@ describe("conversations", () => {
     expect(await actions.warmConversation({ conversationId: id })).toEqual({ ok: true });
 
     expect((await pendingWakes(prisma, assistantId)).map((wake) => wake.conversation_id)).toEqual([id]);
+  });
+});
+
+describe("the chat gate", () => {
+  /** Leaves the person with only the credentials named, as rows, which is all the gate reads. */
+  async function storedOnly(...kinds: ("github" | "azure" | "claude" | "bedrock")[]): Promise<void> {
+    await prisma.credential.deleteMany({ where: { ownerOid: ALICE.oid, kind: { notIn: kinds } } });
+  }
+
+  const BLOCKED = { ok: false, error: "connect GitHub and Claude before you start chatting" };
+
+  it("should refuse to start or open a conversation when the person has not connected GitHub and Claude", async () => {
+    await startedAssistant();
+    await storedOnly("azure");
+
+    expect(await actions.startConversation({ product: "general", body: "hello" })).toEqual(BLOCKED);
+    expect(await actions.openConversation({ product: "general" })).toEqual(BLOCKED);
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+
+  it("should refuse to send or warm when a chat credential is deleted after the conversation was started", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hello" })) as { id: string }).id;
+    const queued = await prisma.delivery.count();
+    await storedOnly("claude", "bedrock");
+
+    expect(await actions.sendAssistantMessage({ conversationId: id, body: "again" })).toEqual(BLOCKED);
+    expect(await actions.warmConversation({ conversationId: id })).toEqual(BLOCKED);
+    expect(await prisma.delivery.count()).toBe(queued);
+  });
+
+  it("should judge the model key by the assistant's own route when the viewer's differs from it", async () => {
+    await insertUser(ALICE);
+    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "bedrock", name: "assistant" });
+    await storedOnly("github", "claude");
+
+    expect(await actions.startConversation({ product: "general", body: "hello" })).toEqual(BLOCKED);
+    expect((await openAssistant(VIEWER)).chat).toBe("blocked");
+  });
+
+  it("should open the chat when GitHub and the assistant's model key are stored without Azure", async () => {
+    await startedAssistant();
+    await storedOnly("github", "claude", "bedrock");
+
+    expect((await openAssistant(VIEWER)).chat).toBe("open");
+    expect(await actions.startConversation({ product: "general", body: "hello" })).toMatchObject({ ok: true });
+  });
+
+  it("should not hold the person when the hub cannot read the credentials", async () => {
+    await startedAssistant();
+    await storedOnly();
+    vi.stubEnv("SESSION_SECRET", "");
+
+    expect((await openAssistant(VIEWER)).chat).toBe("open");
+    expect(await actions.startConversation({ product: "general", body: "hello" })).toMatchObject({ ok: true });
   });
 });
 

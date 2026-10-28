@@ -13,20 +13,20 @@ import {
   warmConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { resetClaudeMd, saveClaudeMd, saveCredential } from "@/app/_actions/credentials";
+import { resetClaudeMd, saveClaudeMd } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { pasteLoginCode, reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
 import { offeredTemplates } from "@/assistant/templates";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
-import { WAITING_COOKIE, waitingDismissed } from "@/assistant/waiting";
+import { WAITING_COOKIE } from "@/assistant/waiting";
+import { AssistantGate } from "@/components/assistant/AssistantGate";
 import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
-import { OnboardingGate } from "@/components/assistant/GettingReady";
 import { ShareGate } from "@/components/assistant/ShareGate";
 import { requireViewer } from "@/viewer/current";
 import {
@@ -99,6 +99,7 @@ export default async function ConversationPage({
       theme={theme}
       actions={ACTIONS}
       connections={connectionsData(home.assistant, home.credentials)}
+      connect={{ assistantId: home.assistant.id, running: home.assistant.desired === "running", reconnect: reconnectSignIn }}
       now={Date.now()}
       plugins={pluginSettings}
       claudeMd={{ settings: claudeMd, save: saveClaudeMd, reset: resetClaudeMd }}
@@ -107,19 +108,10 @@ export default async function ConversationPage({
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       exports={{ defaults, save: saveExportDefaults, access: jira }}
     >
-      {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
-      <ChatView key={view.agentId} view={view} templates={offeredTemplates(mine)} viewerOid={viewer.oid} actions={ACTIONS} jira={jira} defaults={defaults} />
-      <OnboardingGate
-        assistant={home.assistant}
-        statuses={home.credentials.available ? home.credentials.statuses : []}
-        unavailable={home.credentials.available ? null : home.credentials.reason}
-        paste={pasteLoginCode}
-        save={saveCredential}
-        reconnect={reconnectSignIn}
-        now={Date.now()}
-        dismissed={waitingDismissed(jar.get(WAITING_COOKIE)?.value, home.assistant.id, home.assistant.startedAt)}
-        theme={theme}
-      />
+      <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>
+        {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
+        <ChatView key={view.agentId} view={view} templates={offeredTemplates(mine)} viewerOid={viewer.oid} actions={ACTIONS} jira={jira} defaults={defaults} />
+      </AssistantGate>
       <ShareGate conversationId={view.id} open={sharing} people={shares ?? []} share={shareChat} unshare={unshareChat} />
     </AssistantShell>
   );

@@ -6,6 +6,7 @@ import { HttpError } from "@/agent-api/http";
 import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
 import { requestJiraExport } from "@/assistant/jira-store";
+import { CHAT_BLOCKED } from "@/assistant/onboarding";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import { sendToConversation } from "@/assistant/send";
 import {
@@ -31,6 +32,7 @@ import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { type ActionResult, runAction, text } from "@/web/action";
+import { assistantChatGate } from "@/web/data";
 
 /**
  * The HMCTS Assistant's writes, each for the signed-in person's own conversations only: `findConversation` reports
@@ -42,6 +44,12 @@ import { type ActionResult, runAction, text } from "@/web/action";
 const OFF: { ok: false; error: string } = { ok: false, error: "the HMCTS Assistant is not available on this deployment" };
 
 const MISSING: { ok: false; error: string } = { ok: false, error: "that conversation no longer exists" };
+
+/**
+ * Refused while the person has yet to connect GitHub and Claude: `assistantChatGate` is the same gate the pages hold
+ * the getting-ready screen on, so a page loaded before it closed, or a request made without the page, gets no further.
+ */
+const BLOCKED: { ok: false; error: string } = { ok: false, error: CHAT_BLOCKED };
 
 /**
  * The message body, or the refusal. A message of files and no words is a message: handing the assistant a document is
@@ -96,6 +104,9 @@ export async function startConversation(input: { product: unknown; model?: unkno
       return OFF;
     }
     const viewer = await requireViewer();
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return BLOCKED;
+    }
     const body = checkBody(input.body, 0);
     if (typeof body !== "string") {
       return body;
@@ -124,6 +135,9 @@ export async function openConversation(input: { product: unknown; model?: unknow
       return OFF;
     }
     const viewer = await requireViewer();
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return BLOCKED;
+    }
     const conversation = await createConversation(prisma, viewer.oid, { product: input.product, model: input.model });
     revalidatePath("/assistant");
     return { ok: true, id: conversation.id };
@@ -141,6 +155,9 @@ export async function sendAssistantMessage(input: {
       return OFF;
     }
     const viewer = await requireViewer();
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return BLOCKED;
+    }
     const uploadIds = uploadIdsOf(input.uploadIds);
     const body = checkBody(input.body, uploadIds.length);
     if (typeof body !== "string") {
@@ -161,6 +178,9 @@ export async function warmConversation(input: { conversationId: unknown }): Prom
       return OFF;
     }
     const viewer = await requireViewer();
+    if ((await assistantChatGate(viewer)) === "blocked") {
+      return BLOCKED;
+    }
     const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
     if (conversation === undefined) {
       return MISSING;

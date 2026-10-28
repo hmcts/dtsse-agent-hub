@@ -74,7 +74,7 @@ export function CreateVirtualAgent({ route, create, refusal, plugins }: { route:
     <Section heading="Create a virtual agent">
       <div className="space-y-3 text-sm">
         <p role="note" className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-amber-200">
-          A virtual agent acts with your GitHub and Azure access.
+          A virtual agent acts with your GitHub access, and with your Azure access if you connect Azure.
         </p>
         <ModelRouteLine route={route} />
         {refusal ? <p className="text-hub-muted">{refusal}</p> : <CreateVirtualAgentForm create={create} plugins={plugins} />}

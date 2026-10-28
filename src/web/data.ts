@@ -8,6 +8,7 @@ import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import type { DateGroup } from "../assistant/grouping.ts";
 import { type AssistantMemory, assistantMemory } from "../assistant/memory.ts";
+import { type ChatGate, chatCredentials, chatGate } from "../assistant/onboarding.ts";
 import {
   accessToConversation,
   conversationRef,
@@ -55,6 +56,7 @@ import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
 import { liveModelRoutes } from "../virtual-agents/store.ts";
 import {
   claudeTokenUsable,
+  neededCredentials,
   type VirtualAgentCard,
   type VirtualAgentDetail,
   type VirtualAgentSummary,
@@ -289,10 +291,16 @@ export interface AssistantHome {
    * cannot be read, which is not the same as its offering nothing.
    */
   plugins: { available: PluginOption[]; checked: string[] } | null;
+  /** Whether the page may render the chat, or only the getting-ready screen; see `chatGate`. */
+  chat: ChatGate;
 }
 
 function storedKinds(credentials: CredentialSettings): Set<CredentialKind> {
   return new Set(credentials.available ? credentials.statuses.filter((status) => status.stored).map((status) => status.kind) : []);
+}
+
+function chatGateOf(toChat: readonly CredentialKind[], credentials: CredentialSettings): ChatGate {
+  return chatGate(toChat, storedKinds(credentials), credentials.available ? null : credentials.reason);
 }
 
 /**
@@ -333,12 +341,21 @@ function pluginSettings(assistant: { plugins: string[] }): AssistantHome["plugin
 export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const assistant = await ensureAssistant(prisma, viewer);
   const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
-  return {
-    assistant: await assistantSummary(prisma, assistant, storedKinds(credentials)),
-    credentials,
-    conversations,
-    plugins: pluginSettings(assistant)
-  };
+  const summary = await assistantSummary(prisma, assistant, storedKinds(credentials));
+  return { assistant: summary, credentials, conversations, plugins: pluginSettings(assistant), chat: chatGateOf(summary.toChat, credentials) };
+}
+
+/**
+ * Whether the viewer may chat yet, for the server actions that start, open, warm or send to a conversation: the same
+ * `chatGate` the pages render from, read again here because a page loaded before a credential was deleted, or a
+ * request made without the page at all, must not get past what the page would have stopped.
+ *
+ * Read without `ensureAssistant`, since an action has no business creating an assistant. Someone with none yet is
+ * judged on their own route, which is the route the one `openAssistant` makes them would be on.
+ */
+export async function assistantChatGate(viewer: Viewer): Promise<ChatGate> {
+  const [assistant, credentials] = await Promise.all([findAssistant(prisma, viewer.oid), credentialSettings(viewer)]);
+  return chatGateOf(chatCredentials(neededCredentials(assistant?.modelRoute ?? viewer.modelRoute)), credentials);
 }
 
 /**

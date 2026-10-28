@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { connectionsAsk, onboarded, readiness } from "./onboarding.ts";
+import type { CredentialKind } from "../credentials/names.ts";
+import { neededCredentials } from "../virtual-agents/views.ts";
+import { chatCredentials, chatGate, connectionsAsk, onboarded, readiness } from "./onboarding.ts";
 
 describe("readiness", () => {
   it("should be complete and ready when the assistant is running", () => {
@@ -22,6 +24,13 @@ describe("readiness", () => {
 });
 
 describe("onboarded", () => {
+  it.each([
+    ["own-licence", ["github", "claude"]],
+    ["bedrock", ["github", "bedrock"]]
+  ] as const)("should be onboarded without Azure when the %s route's needed credentials are stored", (route, stored) => {
+    expect(onboarded(neededCredentials(route), new Set(stored))).toBe(true);
+  });
+
   it("should be onboarded when every needed credential is stored", () => {
     expect(onboarded(["github", "azure", "claude"], new Set(["github", "azure", "claude", "jenkins"]))).toBe(true);
   });
@@ -46,5 +55,38 @@ describe("connectionsAsk", () => {
 
   it("should not ask for the accounts when the hub could not read the credentials it judged that on", () => {
     expect(connectionsAsk(false, "this deployment has no credentials vault")).toBe("unknown");
+  });
+});
+
+describe("chatCredentials", () => {
+  it("should need GitHub and a Claude token when the assistant runs on the person's own licence", () => {
+    expect(chatCredentials(["github", "azure", "claude"])).toEqual(["github", "claude"]);
+  });
+
+  it("should need GitHub and a Bedrock API key when the assistant runs on Amazon Bedrock", () => {
+    expect(chatCredentials(["github", "azure", "bedrock"])).toEqual(["github", "bedrock"]);
+  });
+});
+
+describe("chatGate", () => {
+  const OWN_LICENCE: CredentialKind[] = ["github", "claude"];
+  const BEDROCK: CredentialKind[] = ["github", "bedrock"];
+
+  it.each([
+    ["neither GitHub nor Claude is stored", OWN_LICENCE, ["azure"]],
+    ["GitHub is stored and Claude is not", OWN_LICENCE, ["github", "azure"]],
+    ["Claude is stored and GitHub is not", OWN_LICENCE, ["claude", "azure"]],
+    ["a Claude token is stored and the assistant runs on Bedrock", BEDROCK, ["github", "claude"]],
+    ["a Bedrock key is stored and the assistant runs on the person's own licence", OWN_LICENCE, ["github", "bedrock"]]
+  ] as const)("should be blocked when %s", (_, toChat, stored) => {
+    expect(chatGate(toChat, new Set<CredentialKind>(stored), null)).toBe("blocked");
+  });
+
+  it("should be open when GitHub and the assistant's model key are stored, even without Azure", () => {
+    expect(chatGate(OWN_LICENCE, new Set(["github", "claude"]), null)).toBe("open");
+  });
+
+  it("should be open when the hub cannot read the credentials it would judge that on", () => {
+    expect(chatGate(OWN_LICENCE, new Set(), "this deployment has no credentials vault")).toBe("open");
   });
 });

@@ -71,6 +71,7 @@ afterEach(() => {
   v.prompts.length = 0;
   v.completes.length = 0;
   v.loginFailures.length = 0;
+  v.signInRequests.clear();
   v.credentials.clear();
   v.codes.clear();
   pod.reset();
@@ -535,6 +536,117 @@ describe("azureLogin", () => {
     expect(result).toBe("signed-in");
     expect(stderr).toMatch(/azure: could not restore the stored sign-in \(.*\); signing in again/);
   });
+
+  it("should restore a stored cache that works when it may only restore", async () => {
+    // Arrange
+    await api().putCredential(VID, "azure", packAzureCache(JSON.stringify(msalCache())).value);
+    fs.writeFileSync(path.join(pod.stateDir, "az-ok"), "");
+
+    // Act
+    const { result } = await captureStderr(() => azureLogin({ api: api(), env: pod.env(), mode: "restore" }));
+
+    // Assert
+    expect(result).toBe("restored");
+    expect(virtual().prompts).toHaveLength(0);
+  });
+
+  it("should relay nothing and say Azure stays unconfigured when it may only restore and nothing is stored", async () => {
+    // Act
+    const { result, stderr } = await captureStderr(() => azureLogin({ api: api(), env: pod.env(), mode: "restore" }));
+
+    // Assert
+    expect(result).toBe("not-connected");
+    expect(virtual().prompts).toHaveLength(0);
+    expect(virtual().status).toHaveLength(0);
+    expect(stderr).toContain("azure: no sign-in is stored; Azure stays unconfigured until the owner connects it");
+  });
+
+  it("should relay nothing when it may only restore and the stored cache no longer works", async () => {
+    // Arrange: no `az-ok`, so the restored sign-in fails `az account get-access-token`.
+    await api().putCredential(VID, "azure", packAzureCache(JSON.stringify(msalCache())).value);
+
+    // Act
+    const { result, stderr } = await captureStderr(() => azureLogin({ api: api(), env: pod.env(), mode: "restore" }));
+
+    // Assert
+    expect(result).toBe("not-connected");
+    expect(virtual().prompts).toHaveLength(0);
+    expect(stderr).toContain("azure: the stored sign-in no longer works; Azure stays unconfigured until the owner connects it");
+  });
+
+  it("should relay nothing when only a requested sign-in may be relayed and the owner has asked for none", async () => {
+    // Act
+    const result = await azureLogin({ api: api(), env: pod.env(), mode: "requested" });
+
+    // Assert
+    expect(result).toBe("not-connected");
+    expect(virtual().prompts).toHaveLength(0);
+  });
+
+  it("should relay the device code and sign in when the owner has asked for an Azure sign-in", async () => {
+    // Arrange
+    virtual().signInRequests.add("azure");
+
+    // Act
+    const { result } = await captureStderr(() => azureLogin({ api: api(), env: pod.env(), mode: "requested" }));
+
+    // Assert
+    expect(result).toBe("signed-in");
+    expect(virtual().prompts).toHaveLength(1);
+    expect(virtual().completes).toEqual([{ kind: "azure", account_oid: OWNER.oid, account_label: "olive@hmcts.net" }]);
+    expect(virtual().signInRequests.has("azure")).toBe(false);
+  });
+
+  it("should tell the hub and stay unconnected when a requested sign-in is not completed", async () => {
+    // Arrange
+    virtual().signInRequests.add("azure");
+
+    // Act
+    const { result, stderr } = await captureStderr(() => azureLogin({ api: api(), env: pod.env({ FAKE_AZ_LOGIN_RC: "1" }), mode: "requested" }));
+
+    // Assert
+    expect(result).toBe("not-connected");
+    expect(virtual().loginFailures).toEqual([{ kind: "azure", state: "failed", detail: "azure: the sign-in was not completed (az login exited 1)" }]);
+    expect(virtual().completes).toHaveLength(0);
+    expect(stderr).toContain("Azure stays unconfigured");
+  });
+
+  it("should say so and still stay unconnected when the hub cannot be told the requested sign-in failed", async () => {
+    // Arrange
+    const real = api();
+    const failing: Api = { ...real, loginFailed: async () => Promise.reject(new ApiError(500, { error: "down" }, "POST", "/x")) };
+    virtual().signInRequests.add("azure");
+
+    // Act
+    const { result, stderr } = await captureStderr(() => azureLogin({ api: failing, env: pod.env({ FAKE_AZ_LOGIN_RC: "1" }), mode: "requested" }));
+
+    // Assert
+    expect(result).toBe("not-connected");
+    expect(stderr).toContain("azure: could not tell agent-hub the sign-in was not completed");
+  }, 30_000);
+
+  it("should still throw when the default relay's az login fails", async () => {
+    // Act
+    const { error } = await captureStderrOfFailure(() => azureLogin({ api: api(), env: pod.env({ FAKE_AZ_LOGIN_RC: "1" }) }));
+
+    // Assert
+    expect((error as Error).message).toBe("az login exited 1");
+    expect(virtual().loginFailures).toHaveLength(0);
+  });
+
+  it("should report a failed sign-in and stay unconnected when a requested code could not be relayed", async () => {
+    // Arrange: the code reaches the hub, which then refuses the status that follows it.
+    const real = api();
+    const refusing: Api = { ...real, virtualStatus: async () => Promise.reject(new ApiError(400, { error: "no" }, "POST", "/x")) };
+    virtual().signInRequests.add("azure");
+
+    // Act
+    const { result } = await captureStderr(() => azureLogin({ api: refusing, env: pod.env(), mode: "requested" }));
+
+    // Assert
+    expect(result).toBe("not-connected");
+    expect(virtual().loginFailures[0]).toMatchObject({ kind: "azure", state: "failed" });
+  }, 30_000);
 });
 
 describe("githubLogin", () => {

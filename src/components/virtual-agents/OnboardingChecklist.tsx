@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { type ConnectionState, codeCollectable, connectionState, hasLapsed } from "@/assistant/connections";
+import { type ConnectionState, codeCollectable, connectionState, hasLapsed, signsInOnRequest } from "@/assistant/connections";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { AtlassianHint } from "@/components/credentials/AtlassianHint";
 import { JenkinsHint } from "@/components/credentials/JenkinsHint";
@@ -70,6 +70,12 @@ const SIGN_IN_DETAIL: Record<ConnectionState, string> = {
   failed: "Last sign-in failed",
   waiting: "Waiting for your virtual agent to ask"
 };
+
+/**
+ * The same states for a sign-in the agent makes only when the owner asks (`ON_REQUEST`): it never asks by itself, so
+ * "waiting" is simply not connected, and the card's reconnect is how the owner asks.
+ */
+const ON_REQUEST_DETAIL: Record<ConnectionState, string> = { ...SIGN_IN_DETAIL, waiting: "Not connected (optional)" };
 
 /** The same states for a key the owner pastes, where the question is whether a value is there rather than signed in. */
 const PASTED_DETAIL: Record<ConnectionState, string> = { ...SIGN_IN_DETAIL, connected: "✓ Stored", waiting: "Not stored" };
@@ -197,7 +203,8 @@ function PastedCard({ kind, stored, state, save }: { kind: CredentialKind; store
 /** What the confirmation asks and what the button that answers it is called, by what the action will actually do. */
 function reconnectWords(title: string, stored: boolean, running: boolean): { question: string; confirm: string } {
   if (!stored) {
-    // Nothing to delete: the value went with the sign-in, or there never was one. All this does is restart.
+    // Nothing to delete: the value went with the sign-in, or there never was one, or it is a first connect of a
+    // sign-in the agent makes only on request. All this does is restart.
     return {
       question: running
         ? `Restart this virtual agent so it asks you to sign in to ${title} again?`
@@ -296,10 +303,11 @@ function Card({
   } else if (isPasted(kind)) {
     body = <PastedCard kind={kind} stored={stored} state={connection} save={save} />;
   } else {
+    const onRequest = signsInOnRequest(kind);
     body = (
       <>
-        <Header kind={kind} detail={SIGN_IN_DETAIL[connection]} ticked={connection === "connected"}>
-          {(stored || hasLapsed(connection)) && desired !== "deleted" ? (
+        <Header kind={kind} detail={(onRequest ? ON_REQUEST_DETAIL : SIGN_IN_DETAIL)[connection]} ticked={connection === "connected"}>
+          {(stored || hasLapsed(connection) || (onRequest && connection === "waiting")) && desired !== "deleted" ? (
             <Reconnect virtualAgentId={virtualAgentId} kind={kind} stored={stored} running={desired === "running"} reconnect={reconnect} />
           ) : null}
         </Header>

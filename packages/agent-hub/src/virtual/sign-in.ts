@@ -95,7 +95,17 @@ export type ClaudeLoginOptions = LoginOptions & {
   tokenTimeoutMs?: number;
 };
 
-export type AzureLoginResult = "restored" | "signed-in";
+/**
+ * What `azureLogin` does when the pod has no working Azure sign-in. Azure is optional, so a pod's boot restores a
+ * stored one (`restore`) and relays a device code only once the owner has asked for one from their settings
+ * (`requested`), in the background. `relay` relays whether or not anybody asked, for a hand-run in a pod.
+ */
+export type AzureLoginMode = "relay" | "restore" | "requested";
+
+export type AzureLoginOptions = LoginOptions & { mode?: AzureLoginMode };
+
+/** `not-connected` is a pod left without Azure: nothing usable stored and nobody asking, or a sign-in not finished. */
+export type AzureLoginResult = "restored" | "signed-in" | "not-connected";
 export type ClaudeLoginResult = "stored" | "signed-in";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -434,31 +444,78 @@ async function azOk(env: Env): Promise<boolean> {
   return r.code === 0;
 }
 
-/** Restores the Azure sign-in the hub holds, or relays a device-code sign-in to the owner. */
-export async function azureLogin({ api = createApi(), env = process.env }: LoginOptions = {}): Promise<AzureLoginResult> {
+/**
+ * Tells the hub a requested Azure sign-in is over unfinished, so the owner's screen withdraws the code and the agent
+ * leaves `awaiting_login`. A few tries only: Azure is optional, and a hub that cannot be told is not worth holding
+ * the sign-in's caller for.
+ */
+async function reportAzureNotConnected(api: Pick<Api, "loginFailed">, id: string, state: "expired" | "failed", detail: string): Promise<void> {
+  say(`${detail}; Azure stays unconfigured`);
+  await withRetry(() => api.loginFailed(id, "azure", { state, detail }), { attempts: 3 }).catch((e: unknown) => {
+    say(`azure: could not tell agent-hub the sign-in was not completed (${(e as Error).message})`);
+  });
+}
+
+/**
+ * Restores the Azure sign-in the hub holds, or, by `mode`, relays a device-code sign-in to the owner. See
+ * `AzureLoginMode`: a pod's boot never relays one the owner did not ask for, because Azure only lets Claude act as
+ * them with `az` and gives Jenkins their object id, and nothing else in the pod waits for it.
+ */
+export async function azureLogin({ api = createApi(), env = process.env, mode = "relay" }: AzureLoginOptions = {}): Promise<AzureLoginResult> {
   const { id } = requireVirtualAgent(env);
-  const stored = await withRetry(() => api.getCredential(id, "azure"));
-  if (stored) {
-    try {
-      restoreAzureCache(stored, { env });
-      if (await azOk(env)) {
-        say("azure: restored the stored sign-in");
-        await syncAzureCache({ api, id, env });
-        return "restored";
+  // A pod asked to sign in has already found what is stored unusable at boot, so it goes straight to asking.
+  if (mode !== "requested") {
+    const then = mode === "relay" ? "signing in again" : "Azure stays unconfigured until the owner connects it";
+    const stored = await withRetry(() => api.getCredential(id, "azure"));
+    if (stored) {
+      try {
+        restoreAzureCache(stored, { env });
+        if (await azOk(env)) {
+          say("azure: restored the stored sign-in");
+          await syncAzureCache({ api, id, env });
+          return "restored";
+        }
+        say(`azure: the stored sign-in no longer works; ${then}`);
+      } catch (e) {
+        say(`azure: could not restore the stored sign-in (${(e as Error).message}); ${then}`);
       }
-      say("azure: the stored sign-in no longer works; signing in again");
-    } catch (e) {
-      say(`azure: could not restore the stored sign-in (${(e as Error).message}); signing in again`);
+    } else if (mode === "restore") {
+      say(`azure: no sign-in is stored; ${then}`);
     }
+    if (mode === "restore") {
+      return "not-connected";
+    }
+  } else if (!(await withRetry(() => api.signInRequested(id, "azure")))) {
+    return "not-connected";
   }
   const tenant = env.AZURE_TENANT_ID;
   const args = ["login", "--use-device-code", "--allow-no-subscriptions", "-o", "none"];
   if (tenant) {
     args.splice(2, 0, "--tenant", tenant);
   }
-  const { code } = await relayDeviceLogin({ api, id, kind: "azure", cmd: "az", args, env, parse: parseAzDeviceCode, label: "azure" });
-  if (code !== 0) {
-    throw new Error(`az login exited ${code}`);
+  let relayed: RelayDeviceLoginResult;
+  try {
+    relayed = await relayDeviceLogin({ api, id, kind: "azure", cmd: "az", args, env, parse: parseAzDeviceCode, label: "azure" });
+  } catch (e) {
+    // A code the owner may be looking at is owed a `failed`; one that never reached them is retried by the caller.
+    if (mode === "requested" && e instanceof DeviceLoginError && e.shown) {
+      await reportAzureNotConnected(api, id, "failed", `azure: the sign-in could not be relayed (${e.message})`);
+      return "not-connected";
+    }
+    throw e;
+  }
+  if (relayed.code !== 0) {
+    if (mode !== "requested") {
+      throw new Error(`az login exited ${relayed.code}`);
+    }
+    // The owner asked once, so one code is all they are shown: the next is theirs to ask for from their settings.
+    await reportAzureNotConnected(
+      api,
+      id,
+      relayed.expired ? "expired" : "failed",
+      relayed.expired ? "azure: the sign-in code ran out before it was used" : `azure: the sign-in was not completed (az login exited ${relayed.code})`
+    );
+    return "not-connected";
   }
   const who = await run("az", ["ad", "signed-in-user", "show", "--query", "{id:id,upn:userPrincipalName}", "-o", "json"], { env });
   if (who.code !== 0) {
