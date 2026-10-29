@@ -1,4 +1,3 @@
-import { AccessDenied } from "../access/load.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { InvalidTopics } from "../topics/slug.ts";
 import { NotSignedIn } from "../viewer/identity.ts";
@@ -11,7 +10,7 @@ export type ActionResult<T extends object = object> = ({ ok: true } & T) | { ok:
 
 /** A refusal the person can act on, or `undefined` for a fault that belongs in the log instead. */
 export function refusalMessage(error: unknown): string | undefined {
-  if (error instanceof HttpError || error instanceof InvalidTopics || error instanceof AccessDenied) {
+  if (error instanceof HttpError || error instanceof InvalidTopics) {
     return error.message;
   }
   if (error instanceof NotSignedIn) {

@@ -548,8 +548,9 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
  * leaves, because holding someone behind a checklist the hub cannot check is a door with no handle.
  *
  * `onLeave` is how the screen is closed while a connection is still missing: a thing the person opened from the banner
- * and can close again. It is left out while `chatGate` is `blocked`, because then the screen is the gate across the
- * Assistant, and "Go to your chats" would be a way to chats that cannot be had without GitHub and Claude.
+ * and can close again. It is left out while `OnboardingGate` is holding the person here, because then the screen is
+ * the gate across the Assistant, and "Go to your chats" would be a way to chats that cannot be had without GitHub
+ * and Claude. It is offered on a page whose chat has no pod, where the screen is one they opened and those chats can.
  *
  * A row whose stored credential a pod has failed to use reads as lapsed rather than connected, and offers `reconnect`:
  * nothing else on this screen can mend a stored value, so without it the one row that needs the person is the one
@@ -782,8 +783,9 @@ function storedKinds(statuses: CredentialStatus[]): Set<CredentialKind> {
  * Which of the getting-ready surfaces the Assistant's pages show, if any.
  *
  * Someone without GitHub or the key to their assistant's model gets the connections screen, and nothing takes them
- * past it until both are stored. Someone with another connection still to make gets the banner, and the connections
- * screen when they open it from there.
+ * past it until both are stored — unless `local` says the page's chat has no pod, where there is nothing the screen
+ * could be asking on behalf of and the ask falls back to its banner. Someone with another connection still to make
+ * gets the banner, and the connections screen when they open it from there.
  * Someone who has onboarded waits instead when they arrive to an assistant that is not running: on the connections
  * screen while its pod is asking them to sign in, so they can act on it, and on the warming-up screen otherwise.
  * Every screen can be sent away, by its button or by Escape. What each leaves behind is what it still has to say: the
@@ -814,7 +816,11 @@ function storedKinds(statuses: CredentialStatus[]): Set<CredentialKind> {
  * `router.refresh()` the stream causes, of which a relay is only one. The sentence says which sign-in and what kind
  * of thing to do, so a count of asks would name neither, and a fresh code arriving over a lapsed one is a change.
  */
-export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean }) {
+export function OnboardingGate({
+  dismissed = false,
+  local = false,
+  ...props
+}: Omit<Parameters<typeof GettingReady>[0], "onDone" | "returning"> & { dismissed?: boolean; local?: boolean }) {
   const { assistant } = props;
   const visit = useVisit();
   // One clock for the banner and for the screen it opens, started from the page's own and handed down rather than
@@ -831,7 +837,12 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
   // Escape and no button takes the person past it, and the page behind it renders no chat while it holds. It lifts
   // when the credential's row is written, whose event refreshes the page; the screen then stays, as one opened from
   // the banner does, until the person chooses to start chatting.
-  const blocked = chatGate(assistant.toChat, storedKinds(props.statuses), props.unavailable) === "blocked";
+  //
+  // Except on a page whose chat has no pod, which is what `local` says. The gate asks for what a pod needs, and a
+  // session on the person's own computer needs none of it, so a screen over that page would be an undismissable
+  // door in front of a chat that already works. The ask itself is not dropped — with nothing connected the surface
+  // below is the connections banner, which is how the person reaches the screen and connects the two.
+  const blocked = !local && chatGate(assistant.toChat, storedKinds(props.statuses), props.unavailable) === "blocked";
   const [view, setView] = useState<"screen" | "notice" | "gone">(() => (blocked ? "screen" : initialView(ask, dismissed)));
   const running = assistant.status === "running";
   // Latched while rendering rather than in an effect, which runs after paint: the frame the person would see at the

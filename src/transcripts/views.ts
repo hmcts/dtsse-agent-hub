@@ -1,4 +1,4 @@
-import { type AgentRef, canViewTranscript, type Grant } from "../access/rules.ts";
+import { type AgentRef, canViewTranscript } from "../access/rules.ts";
 import { agentThread } from "../messages/direct-thread.ts";
 import type { Database } from "../store/prisma.ts";
 import { type ConversationPage, mergeEntries, type TranscriptEntryView } from "./conversation.ts";
@@ -63,15 +63,9 @@ const EMPTY: ConversationPage = { messages: [], entries: [], olderBefore: null, 
  *
  * A viewer who may not read the transcript gets the thread alone.
  */
-export async function agentConversation(
-  db: Database,
-  viewerOid: string,
-  agent: AgentRef,
-  grants: readonly Grant[],
-  cursor: ConversationCursor = {}
-): Promise<ConversationPage> {
-  if (!canViewTranscript(viewerOid, agent, grants)) {
-    return "after" in cursor || "before" in cursor ? EMPTY : { ...EMPTY, messages: await agentThread(db, viewerOid, agent.id, grants) };
+export async function agentConversation(db: Database, viewerOid: string, agent: AgentRef, cursor: ConversationCursor = {}): Promise<ConversationPage> {
+  if (!canViewTranscript(viewerOid, agent)) {
+    return "after" in cursor || "before" in cursor ? EMPTY : { ...EMPTY, messages: await agentThread(db, viewerOid, agent.id) };
   }
 
   if ("after" in cursor) {
@@ -108,7 +102,7 @@ export async function agentConversation(
   ]);
   const kept = rows.slice(0, CONVERSATION_PAGE_SIZE).reverse();
   const oldest = rows.length > CONVERSATION_PAGE_SIZE ? kept[0] : undefined;
-  const messages = await agentThread(db, viewerOid, agent.id, grants, {
+  const messages = await agentThread(db, viewerOid, agent.id, {
     ...(oldest === undefined ? {} : { since: oldest.occurredAt }),
     ...(anchor === null ? {} : { until: anchor.occurredAt })
   });

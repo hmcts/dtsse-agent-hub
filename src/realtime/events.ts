@@ -14,6 +14,13 @@ export type DeliveredState = "delivered" | "expired";
 export type HubEvent =
   | { type: "post"; message_id: string }
   | { type: "direct"; message_id: string; target_agent_id: string | null; author_agent_id: string | null }
+  /**
+   * A post tagged `agent_id`, so that agent's stream sends it the post beside its direct messages. One event per
+   * tagged agent, named by the agent rather than by the post, because that is what an agent stream matches on: a
+   * post has no single target to put in a `direct`, and a payload carrying the whole list would have every stream
+   * search it. The `post` event goes out beside these, since the post is on its topics for everyone as well.
+   */
+  | { type: "tagged_post"; message_id: string; agent_id: string }
   | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus }
   /** The skills `owner_oid`'s agent reported changed. Never carries the list, which only some viewers may see. */
   | { type: "agent_skills"; agent_id: string; owner_oid: string }
@@ -24,8 +31,6 @@ export type HubEvent =
   | { type: "agent_question"; agent_id: string; owner_oid: string }
   /** A direct message's delivery to its target agent left `queued`, so a UI thread showing it can update. */
   | { type: "delivery"; message_id: string; agent_id: string; state: DeliveredState }
-  /** `owner_oid`'s grant to `grantee_oid` was set, changed or revoked, so which agents the grantee may see changed. */
-  | { type: "grant"; owner_oid: string; grantee_oid: string }
   /** New entries in an agent's transcript, the newest `last_id`, so a UI showing its conversation can read them. */
   | { type: "transcript"; agent_id: string; owner_oid: string; last_id: string }
   /** `owner_oid`'s stored credential of `kind` was saved or deleted. Never carries the value. */
@@ -34,9 +39,12 @@ export type HubEvent =
   | { type: "virtual_agent"; virtual_agent_id: string; owner_oid: string }
   /**
    * `owner_oid`'s assistant conversation changed: created, renamed, deleted, its product, its artefact, its session or
-   * a wake. `virtual_agent_id` is the assistant's, so its pod's sessions stream hears of wakes and deletions.
+   * a wake. `virtual_agent_id` is the assistant's, so its pod's sessions stream hears of wakes and deletions; null for
+   * a conversation that is a person's own local session, which has no pod. The owner's open tabs are the subscriber
+   * either way — `src/realtime/ui-stream.ts` selects this frame on `owner_oid` — so a null is a frame with a reader
+   * rather than one with nowhere to go, and the sessions stream drops it by comparing against a real id.
    */
-  | { type: "assistant_conversation"; conversation_id: string; virtual_agent_id: string; owner_oid: string }
+  | { type: "assistant_conversation"; conversation_id: string; virtual_agent_id: string | null; owner_oid: string }
   /**
    * The person stopped the answer their conversation was working on, so its pod should interrupt the session.
    *
@@ -108,6 +116,8 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
       return isId(event.message_id) && isOptionalId(event.target_agent_id) && isOptionalId(event.author_agent_id)
         ? { type: "direct", message_id: event.message_id, target_agent_id: event.target_agent_id, author_agent_id: event.author_agent_id }
         : undefined;
+    case "tagged_post":
+      return isId(event.message_id) && isId(event.agent_id) ? { type: "tagged_post", message_id: event.message_id, agent_id: event.agent_id } : undefined;
     case "agent_status":
       return isId(event.agent_id) && isId(event.owner_oid) && typeof event.status === "string" && STATUSES.includes(event.status)
         ? { type: "agent_status", agent_id: event.agent_id, owner_oid: event.owner_oid, status: event.status as AgentStatus }
@@ -119,8 +129,6 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
       return isId(event.message_id) && isId(event.agent_id) && typeof event.state === "string" && DELIVERED_STATES.includes(event.state)
         ? { type: "delivery", message_id: event.message_id, agent_id: event.agent_id, state: event.state as DeliveredState }
         : undefined;
-    case "grant":
-      return isId(event.owner_oid) && isId(event.grantee_oid) ? { type: "grant", owner_oid: event.owner_oid, grantee_oid: event.grantee_oid } : undefined;
     case "transcript":
       return isId(event.agent_id) && isId(event.owner_oid) && isId(event.last_id)
         ? { type: "transcript", agent_id: event.agent_id, owner_oid: event.owner_oid, last_id: event.last_id }
@@ -132,7 +140,7 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
         ? { type: "virtual_agent", virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
         : undefined;
     case "assistant_conversation":
-      return isId(event.conversation_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)
+      return isId(event.conversation_id) && isOptionalId(event.virtual_agent_id) && isId(event.owner_oid)
         ? { type: "assistant_conversation", conversation_id: event.conversation_id, virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
         : undefined;
     case "assistant_stop":

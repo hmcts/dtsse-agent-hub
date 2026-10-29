@@ -52,8 +52,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function link(id: string, title: string): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z" };
+function link(id: string, title: string, local = false): ConversationLink {
+  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", local };
 }
 
 function shell(props: Partial<Parameters<typeof AssistantShell>[0]> = {}) {
@@ -93,6 +93,19 @@ describe("AssistantShell", () => {
     expect(within(nav).getByRole("link", { name: "Event help" }).getAttribute("aria-current")).toBeNull();
     expect(screen.getByRole("link", { name: /New chat/ }).getAttribute("href")).toBe("/assistant");
     expect(screen.getByText("page")).toBeTruthy();
+  });
+
+  // The icon alone would say nothing to a screen reader, and where a chat runs is the one thing about it that is not
+  // in its title: a local chat takes no files, cannot be stopped from here and answers only while the laptop is on.
+  it("should mark a chat that is a session on the person's own computer, in words as well as an icon", () => {
+    render(shell({ groups: [{ label: "Today", items: [link("a", "Event help"), link("b", "Fixing the sweep", true)] }] }));
+
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    const row = within(nav).getByRole("link", { name: /On your computer/ });
+    expect(row.getAttribute("href")).toBe("/assistant/b");
+    // The words lead the title, so where the chat runs is the first thing read out rather than trailing it.
+    expect(row.textContent).toBe("On your computer: Fixing the sweep");
+    expect(within(nav).getByRole("link", { name: "Event help" }).textContent).toBe("Event help");
   });
 
   it("should link to the shared chats when the person has no chats of their own as well", () => {
@@ -698,7 +711,9 @@ describe("AssistantChatsPanel", () => {
   it("should link each chat on the virtual agent to the Assistant when it has some", async () => {
     const { AssistantChatsPanel } = await import("@/components/virtual-agents/AssistantChatsPanel");
     render(
-      <AssistantChatsPanel chats={[{ id: "c1", title: "Listing story", product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-22T09:00:00.000Z" }]} />
+      <AssistantChatsPanel
+        chats={[{ id: "c1", title: "Listing story", product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-22T09:00:00.000Z", local: false }]}
+      />
     );
 
     expect(screen.getByRole("link", { name: "Listing story" }).getAttribute("href")).toBe("/assistant/c1");

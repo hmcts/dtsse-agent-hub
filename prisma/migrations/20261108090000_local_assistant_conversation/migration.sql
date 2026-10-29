@@ -1,0 +1,12 @@
+-- A conversation no longer has to belong to a virtual agent. A person's local Claude Code session is a conversation
+-- too, and it runs on their own laptop rather than on a pod, so there is no `virtual_agent` row to point at.
+--
+-- No foreign-key change is needed: a nullable FK is simply not enforced for NULL, and `ON DELETE CASCADE` still
+-- applies to every row that does name a virtual agent.
+-- No index comes with it. A conversation with no pod is listed and searched beside the ones that have one, never on
+-- its own: `listConversations` asks `owner_oid = $1 AND (virtual_agent_id IS NULL OR <the pod is not going>)`, which
+-- the planner answers from `assistant_conversation_owner_active_idx` in `last_active_at` order, and the search joins
+-- over the same predicate. A partial index on the NULL could not serve either — neither query lets the planner prove
+-- every row it wants satisfies the predicate — so it would be maintained on every write and read by nothing. Add one
+-- with the first query that asks for local chats alone, if there ever is one.
+ALTER TABLE "assistant_conversation" ALTER COLUMN "virtual_agent_id" DROP NOT NULL;

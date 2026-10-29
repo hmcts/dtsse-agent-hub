@@ -1,3 +1,4 @@
+import { likeLiteral } from "../store/like.ts";
 import type { Database } from "../store/prisma.ts";
 import type { Identity } from "./identity.ts";
 
@@ -40,11 +41,6 @@ export async function usersByEmail(db: Database, email: string): Promise<KnownUs
   `;
 }
 
-/** The characters `LIKE` reads as pattern rather than text, so a typed `%` matches a literal one. */
-function literal(value: string): string {
-  return value.toLowerCase().replace(/[\\%_]/g, (character) => `\\${character}`);
-}
-
 /**
  * People the hub knows whose name starts a word with `query`, or whose address starts with it, nearest the start of
  * the name first. A search, never a list: `peopleLookup` in `src/access/rules.ts` is what decides that a query is
@@ -53,8 +49,8 @@ function literal(value: string): string {
  * A word prefix rather than a substring, so "nor" finds Linus Norton without "or" finding everyone.
  */
 export async function searchUsers(db: Database, query: string, limit: number): Promise<KnownUser[]> {
-  const starts = `${literal(query)}%`;
-  const word = `% ${literal(query)}%`;
+  const starts = `${likeLiteral(query)}%`;
+  const word = `% ${likeLiteral(query)}%`;
   return await db.$queryRaw<KnownUser[]>`
     SELECT oid, name, email, tid
       FROM "user"

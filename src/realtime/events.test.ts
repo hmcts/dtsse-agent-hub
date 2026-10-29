@@ -24,13 +24,14 @@ describe("encodeEvent and decodeEvent", () => {
     ["a post without an id", JSON.stringify({ type: "post" })],
     ["a numeric id", JSON.stringify({ type: "post", message_id: 1 })],
     ["a direct with a missing target field", JSON.stringify({ type: "direct", message_id: "1", author_agent_id: null })],
+    ["a tagged post without an agent", JSON.stringify({ type: "tagged_post", message_id: "1" })],
+    ["a tagged post without a message", JSON.stringify({ type: "tagged_post", agent_id: "a" })],
     ["an unknown status", JSON.stringify({ type: "agent_status", agent_id: "a", owner_oid: "o", status: "asleep" })],
     ["a status without an owner", JSON.stringify({ type: "agent_status", agent_id: "a", status: "idle" })],
     ["skills without an agent", JSON.stringify({ type: "agent_skills", owner_oid: "o" })],
     ["skills without an owner", JSON.stringify({ type: "agent_skills", agent_id: "a" })],
     ["a delivery back to queued", JSON.stringify({ type: "delivery", message_id: "1", agent_id: "a", state: "queued" })],
     ["a delivery without an agent", JSON.stringify({ type: "delivery", message_id: "1", state: "delivered" })],
-    ["a grant without a grantee", JSON.stringify({ type: "grant", owner_oid: "o" })],
     ["a transcript without its last id", JSON.stringify({ type: "transcript", agent_id: "a", owner_oid: "o" })],
     ["a transcript without an owner", JSON.stringify({ type: "transcript", agent_id: "a", last_id: "1" })],
     ["a credential without a kind", JSON.stringify({ type: "credential", owner_oid: "o" })],
@@ -42,7 +43,12 @@ describe("encodeEvent and decodeEvent", () => {
     ["a conversation without an owner", JSON.stringify({ type: "assistant_conversation", conversation_id: "c", virtual_agent_id: "va" })],
     ["a stop without a conversation", JSON.stringify({ type: "assistant_stop", virtual_agent_id: "va", owner_oid: "o" })],
     ["a stop without its assistant", JSON.stringify({ type: "assistant_stop", conversation_id: "c", owner_oid: "o" })],
-    ["a stop without an owner", JSON.stringify({ type: "assistant_stop", conversation_id: "c", virtual_agent_id: "va" })]
+    ["a stop without an owner", JSON.stringify({ type: "assistant_stop", conversation_id: "c", virtual_agent_id: "va" })],
+    // Only `assistant_conversation` takes a null assistant. The other three are instructions *to* a pod, so one
+    // naming no pod has nowhere to go and is a bug in whatever published it rather than a local chat.
+    ["a stop naming no assistant", JSON.stringify({ type: "assistant_stop", conversation_id: "c", virtual_agent_id: null, owner_oid: "o" })],
+    ["an uploads deletion naming no assistant", JSON.stringify({ type: "assistant_uploads", virtual_agent_id: null, owner_oid: "o" })],
+    ["a lookup naming no assistant", JSON.stringify({ type: "assistant_lookup", lookup_id: "l", virtual_agent_id: null, owner_oid: "o" })]
   ])("should ignore %s", (_label, payload) => {
     expect(decodeEvent(payload)).toBeUndefined();
   });

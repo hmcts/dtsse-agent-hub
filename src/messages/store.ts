@@ -12,7 +12,8 @@ export const MESSAGE_SELECT = {
   createdAt: true,
   authorAgent: { select: { id: true, name: true } },
   author: { select: { name: true, email: true } },
-  topics: { select: { topic: { select: { slug: true } } } }
+  topics: { select: { topic: { select: { slug: true } } } },
+  tags: { select: { agent: { select: { id: true, name: true } } } }
 } as const;
 
 /** The messages with these ids, oldest first. Ids with no message are skipped. */
@@ -41,6 +42,12 @@ export interface NewPost {
   title: string | null;
   body: string;
   inReplyTo: bigint | null;
+  /**
+   * The agents this post tags, already resolved and checked by `taggedAgents` in `send.ts`. Optional, and absent
+   * means a post that tagged nobody: a caller that leaves it out writes the post every caller wrote before tagging
+   * existed, which is why silence is safe here and is not for `client_features`.
+   */
+  taggedAgentIds?: readonly string[];
 }
 
 /**
@@ -49,8 +56,14 @@ export interface NewPost {
  *
  * The upsert locks each topic row until commit, so the rows are taken in slug order under the "C" collation whatever order the caller
  * named them in: two posts naming the same topics in opposite orders would otherwise deadlock.
+ *
+ * Each tagged agent gets a `message_tag` row, which is what the post says, and a queued `delivery`, which is what
+ * its stream sends — the same row a direct message queues, so a tagged post replays, is acked and expires exactly as
+ * a direct does. Its `tagged_post` NOTIFY goes out in this transaction beside the `post` one, so an agent's stream
+ * hears of it on commit and never for a rollback, and so a post that could not be written reaches nobody.
  */
 export async function createPost(prisma: PrismaClient, post: NewPost): Promise<ApiMessage> {
+  const tagged = post.taggedAgentIds ?? [];
   const id = await prisma.$transaction(async (tx) => {
     const topics = await tx.$queryRaw<{ id: number }[]>`
       INSERT INTO topic (slug, last_message_at)
@@ -71,7 +84,14 @@ export async function createPost(prisma: PrismaClient, post: NewPost): Promise<A
       select: { id: true }
     });
     await tx.messageTopic.createMany({ data: topics.map((topic) => ({ messageId: message.id, topicId: topic.id })) });
+    if (tagged.length > 0) {
+      await tx.messageTag.createMany({ data: tagged.map((agentId) => ({ messageId: message.id, agentId })) });
+      await tx.delivery.createMany({ data: tagged.map((agentId) => ({ messageId: message.id, agentId })) });
+    }
     await notify(tx, { type: "post", message_id: message.id.toString() });
+    for (const agentId of tagged) {
+      await notify(tx, { type: "tagged_post", message_id: message.id.toString(), agent_id: agentId });
+    }
     return message.id;
   });
   return (await loadMessage(prisma, id))!;
@@ -122,7 +142,7 @@ export async function createDirect(prisma: PrismaClient, direct: NewDirect): Pro
 
 const STREAMED_SELECT = { ...MESSAGE_SELECT, authorOid: true, targetAgent: { select: { ownerOid: true } } } as const;
 
-/** The direct messages with these ids as an agent's stream sends them, oldest first. */
+/** The messages with these ids as an agent's stream sends them, oldest first: its directs and the posts it was tagged in. */
 async function loadStreamed(db: Database, ids: readonly bigint[]): Promise<StreamedDirect[]> {
   if (ids.length === 0) {
     return [];
@@ -131,7 +151,7 @@ async function loadStreamed(db: Database, ids: readonly bigint[]): Promise<Strea
   return rows.map(toStreamedDirect);
 }
 
-/** Every direct message still queued for the agent, oldest first. */
+/** Every message still queued for the agent, oldest first: a direct to it, or a post that tagged it. */
 export async function queuedDeliveries(db: Database, agentId: string): Promise<StreamedDirect[]> {
   const rows = await db.delivery.findMany({
     where: { agentId, state: "queued" },
@@ -174,9 +194,13 @@ export async function ackDelivery(prisma: PrismaClient, agentId: string, message
  * a transaction, so the NOTIFYs go out only if the expiry commits.
  *
  * An offline agent's heartbeat revives it, so the cut-off is measured from the later of its last heartbeat and its
- * end. An assistant conversation's agent is offline whenever its session is idle, and a message to it is what wakes
- * one, so its deliveries expire only once they have themselves been queued that long. `SKIP LOCKED` leaves a delivery
- * being acked to the ack. Returns how many expired.
+ * end. A *pod* conversation's agent is offline whenever its session is idle, and a message to it is what wakes one,
+ * so its deliveries expire only once they have themselves been queued that long. That exemption is the pod's alone:
+ * a conversation with no pod is a session on somebody's laptop, which nothing here can wake, so its deliveries run on
+ * the offline clock like any other session's — otherwise a message to a laptop that was last seen last week would
+ * read as "queued" in the sender's thread for a further day. An agent in a conversation with no virtual agent is that
+ * laptop session, as `isPodConversationAgent` in `src/access/rules.ts` reads the same two columns to decide.
+ * `SKIP LOCKED` leaves a delivery being acked to the ack. Returns how many expired.
  */
 export async function expireDeliveries(db: Database, offlineForSeconds: number, limit: number): Promise<number> {
   const expired = await db.$queryRaw<{ message_id: string; agent_id: string }[]>`
@@ -187,7 +211,8 @@ export async function expireDeliveries(db: Database, offlineForSeconds: number, 
        WHERE d.state = 'queued'
          AND a.status = 'offline'
          AND GREATEST(a.last_heartbeat_at, a.ended_at) < now() - make_interval(secs => ${offlineForSeconds}::double precision)
-         AND (a.assistant_conversation_id IS NULL OR d.created_at < now() - make_interval(secs => ${offlineForSeconds}::double precision))
+         AND (a.assistant_conversation_id IS NULL OR a.virtual_agent_id IS NULL
+              OR d.created_at < now() - make_interval(secs => ${offlineForSeconds}::double precision))
        ORDER BY d.message_id
        LIMIT ${limit}::int
          FOR UPDATE OF d SKIP LOCKED

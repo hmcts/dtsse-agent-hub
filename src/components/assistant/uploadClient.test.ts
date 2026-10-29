@@ -221,6 +221,7 @@ describe("refusalIn", () => {
   it.each([
     ["unavailable", 404, "Attaching files is not switched on here yet."],
     ["no_such_conversation", 404, "This chat no longer exists, so the file could not be attached."],
+    ["local_session", 409, "This chat is a Claude Code session on your own computer, which can open the file itself. Tell it where the file is instead."],
     ["no_such_upload", 404, "This file is no longer being uploaded. Remove it and attach it again."],
     ["file_too_big", 400, "This file is too big. Each file must be 25 MB or less."],
     ["too_many_files", 409, "This message already has 4 files. Send it, then attach the rest to your next one."],

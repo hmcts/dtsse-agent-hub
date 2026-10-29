@@ -46,9 +46,9 @@ async function startMonitoring(): Promise<void> {
 
 /**
  * Marks silent agents offline, and expires deliveries to long-offline ones, every 30 seconds; and trims transcripts
- * to their retention and per-agent cap, and drops the bytes of Assistant uploads nothing fetched, every 10 minutes;
- * and, with virtual agents on, fails, expires and stops virtual agents every minute. Imported dynamically, after
- * `readSecrets`, because
+ * to their retention and per-agent cap, drops the bytes of Assistant uploads nothing fetched, and collects the local
+ * chats nothing ever happened in, every 10 minutes; and, with virtual agents on, fails, expires and stops virtual
+ * agents every minute. Imported dynamically, after `readSecrets`, because
  * `store/prisma.ts` resolves `POSTGRES_*` at module load and would otherwise capture the local default.
  */
 async function startSweeping(): Promise<void> {
@@ -60,6 +60,8 @@ async function startSweeping(): Promise<void> {
     startTranscriptSweep(prisma);
     const { startUploadSweep } = await import("./assistant/upload-sweep.ts");
     startUploadSweep(prisma);
+    const { startLocalConversationSweep } = await import("./assistant/local-sweep.ts");
+    startLocalConversationSweep(prisma);
     if (virtualAgentsEnabled()) {
       const { startVirtualAgentSweep } = await import("./virtual-agents/sweep.ts");
       startVirtualAgentSweep(prisma);

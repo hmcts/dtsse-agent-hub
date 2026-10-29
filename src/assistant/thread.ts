@@ -2,7 +2,7 @@ import type { DeliveryView } from "../messages/direct-thread.ts";
 import type { QuestionView } from "../questions/views.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { byCodePoint } from "../topics/slug.ts";
-import type { ConversationItem } from "../transcripts/conversation.ts";
+import { type ConversationItem, toolSummary } from "../transcripts/conversation.ts";
 import { productLabel } from "./products.ts";
 import type { MessageAttachment } from "./upload-store.ts";
 
@@ -11,6 +11,11 @@ import type { MessageAttachment } from "./upload-store.ts";
  * question it asked them, and where they changed the product. Tool calls, their results and system lines are left
  * out; what the assistant is doing shows as one friendly line while it works. Pure, so the server's first render and
  * the browser's live updates agree.
+ *
+ * A chat that is a Claude Code session on the person's own computer reads differently, which is what `local` asks
+ * for: the words it is answering were typed at that laptop rather than sent from here, so they are in the transcript
+ * rather than in the hub's thread, and the person reading is the developer whose session it is, so the tool calls
+ * are theirs to see. Everything else is the same thread.
  */
 
 export type ThreadItem =
@@ -27,7 +32,16 @@ export type ThreadItem =
    */
   | { type: "question"; key: string; at: string; question: QuestionView }
   /** Where the person stopped an answer. Whatever the assistant had said by then stays above it. */
-  | { type: "stopped"; key: string; at: string };
+  | { type: "stopped"; key: string; at: string }
+  /**
+   * One tool call, shown only in a local chat: the tool's name and `toolSummary`'s one line of what it was given.
+   * What came back is left out — a tool result is the session's working-out, and the row is here to say what it did.
+   *
+   * `failed` only where the result that answered this call said so. A result nobody can pair — a redacted one, which
+   * keeps no `tool_use_id` — leaves every call it might have answered neutral, because marking a call failed on a
+   * guess is worse than saying nothing about how it went.
+   */
+  | { type: "tool"; key: string; at: string; name: string; summary: string; failed: boolean };
 
 export interface ProductMark {
   product: string;
@@ -46,9 +60,78 @@ function textOf(content: unknown): string | undefined {
   return undefined;
 }
 
+/** A tool call the session made, with what came back. */
+interface ToolCall {
+  key: string;
+  at: string;
+  /** `undefined` for a redacted call that kept neither its id nor its name, which nothing can be paired to. */
+  id: string | undefined;
+  name: string | undefined;
+  input: unknown;
+  /** `undefined` while nothing has answered the call, which for a subagent means it is still running. */
+  result: { failed: boolean } | undefined;
+}
+
+/** What a tool call whose name was redacted away is called, so the row still says something happened. */
+const UNNAMED_TOOL = "Tool call";
+
+/**
+ * The tool calls in `items` at or after `since`, each paired with the result written against its `tool_use_id`, and
+ * whether any result could not be paired at all.
+ *
+ * The one place that matching happens: both the rows a local chat shows and the count of subagents an answer is
+ * waiting on are the same question of the same two roles, and a second matcher would be a second set of decisions
+ * about redacted entries. A redacted `tool_use` keeps `{id, name, redacted}` and so still pairs and still names its
+ * tool; a redacted `tool_result` keeps neither, so it is counted as unpaired and attached to nothing.
+ */
+function toolCalls(items: readonly ConversationItem[], since = ""): { calls: ToolCall[]; unpaired: boolean } {
+  const calls: Omit<ToolCall, "result">[] = [];
+  const results = new Map<string, { failed: boolean }>();
+  let unpaired = false;
+  for (const item of items) {
+    if (item.type !== "entry" || byCodePoint(item.at, since) < 0) {
+      continue;
+    }
+    const { role, content } = item.entry;
+    if (role === "tool_use") {
+      calls.push({
+        key: item.key,
+        at: item.at,
+        id: "id" in content && typeof content.id === "string" ? content.id : undefined,
+        name: "name" in content && typeof content.name === "string" ? content.name : undefined,
+        input: "input" in content ? content.input : undefined
+      });
+    } else if (role === "tool_result") {
+      if ("tool_use_id" in content) {
+        results.set(content.tool_use_id, { failed: content.is_error });
+      } else {
+        unpaired = true;
+      }
+    }
+  }
+  return { calls: calls.map((call) => ({ ...call, result: call.id === undefined ? undefined : results.get(call.id) })), unpaired };
+}
+
+/** A local chat's tool rows, in the order the transcript recorded the calls. */
+function toolRows(items: readonly ConversationItem[]): ThreadItem[] {
+  return toolCalls(items).calls.map((call) => ({
+    type: "tool",
+    key: call.key,
+    at: call.at,
+    name: call.name ?? UNNAMED_TOOL,
+    summary: toolSummary(call.input),
+    failed: call.result?.failed === true
+  }));
+}
+
 /**
  * By time, then by kind so a product change at the same instant as a message sits before it and a stop sits after
  * it: a stop is always something the person did to what was already on the screen.
+ *
+ * A tool call ranks with the words, which leaves the sort unable to separate it from the ones it shares an instant
+ * with — one line of a session's log is read as several entries carrying the one timestamp. The sort is stable and
+ * the rows are added after the words, which is the order such a line holds them in: the assistant says what it is
+ * about to do, then does it.
  */
 function byTime(left: ThreadItem, right: ThreadItem): number {
   const rank = (item: ThreadItem) => (item.type === "product" ? 0 : item.type === "stopped" ? 2 : 1);
@@ -68,7 +151,26 @@ function awaitingAnswer(thread: readonly ThreadItem[]): boolean {
   return thread.some((item) => item.type === "question" && item.question.offered && (said === undefined || byCodePoint(item.at, said.at) > 0));
 }
 
-export function threadItems(items: readonly ConversationItem[], products: readonly ProductMark[] = [], stops: readonly StopMark[] = []): ThreadItem[] {
+/**
+ * The thread, oldest first. `local` is whether the conversation is a session on the person's own computer, which is
+ * what the two extra kinds of row hang on:
+ *
+ * - the person's own prompts, which that session typed into its own terminal and uploaded as `user` entries. A pod
+ *   chat has none of its own — every word the person said there arrived as a hub message, which is already in the
+ *   thread, and the `user` entry recording it is the session's echo of that same message. `conversationItems` drops
+ *   the echo of a message on the page, but a page whose oldest entry is such an echo can have been read without the
+ *   message that made it, so a pod chat is left exactly as it was rather than shown a bubble twice;
+ * - a row per tool call. A pod chat is a plain-language conversation for someone who is not an engineer and shows
+ *   none; a developer reading their own session is the one reader for whom "Searching" is less use than the search.
+ *
+ * `system` entries stay out either way: they are the compact summaries a long session writes to itself.
+ */
+export function threadItems(
+  items: readonly ConversationItem[],
+  products: readonly ProductMark[] = [],
+  stops: readonly StopMark[] = [],
+  local = false
+): ThreadItem[] {
   const thread: ThreadItem[] = [];
   for (const item of items) {
     if (item.type === "message") {
@@ -85,11 +187,20 @@ export function threadItems(items: readonly ConversationItem[], products: readon
       if (text !== undefined) {
         thread.push({ type: "assistant", key: item.key, at: item.at, text });
       }
+    } else if (local && item.entry.role === "user") {
+      // A prompt whose words were redacted is left out rather than shown as an empty bubble, as a wordless assistant
+      // entry is: `textOf` answers nothing for the `{redacted}` content such an entry keeps.
+      const text = textOf(item.entry.content);
+      if (text !== undefined) {
+        // No delivery and no attachments: this is what was typed at the laptop, not a message the hub carried there.
+        thread.push({ type: "user", key: item.key, at: item.at, text, delivery: null, attachments: [] });
+      }
     }
   }
+  const tools = local ? toolRows(items) : [];
   const marks = products.map((mark): ThreadItem => ({ type: "product", key: `p${mark.at}`, at: mark.at, label: productLabel(mark.product) }));
   const stopped = stops.map((mark): ThreadItem => ({ type: "stopped", key: `s${mark.at}`, at: mark.at }));
-  return [...thread, ...marks, ...stopped].sort(byTime);
+  return [...thread, ...tools, ...marks, ...stopped].sort(byTime);
 }
 
 /** What Claude Code's tools do, in words for someone who has never seen one. */
@@ -143,36 +254,28 @@ export const MAX_HELPERS = 20;
  *   reads as finished, which is the honest answer to what this line says: the answer is not waiting on it.
  */
 export function runningHelpers(items: readonly ConversationItem[], since: string): number {
-  const launched = new Set<string>();
-  const answered = new Set<string>();
-  for (const item of items) {
-    if (item.type !== "entry" || byCodePoint(item.at, since) < 0) {
-      continue;
-    }
-    const { role, content } = item.entry;
-    if (
-      role === "tool_use" &&
-      "id" in content &&
-      typeof content.id === "string" &&
-      "name" in content &&
-      typeof content.name === "string" &&
-      HELPER_TOOLS.includes(content.name)
-    ) {
-      launched.add(content.id);
-    } else if (role === "tool_result") {
-      if (!("tool_use_id" in content)) {
-        return 0;
-      }
-      answered.add(content.tool_use_id);
-    }
+  const { calls, unpaired } = toolCalls(items, since);
+  if (unpaired) {
+    return 0;
   }
-  let running = 0;
-  for (const id of launched) {
-    if (!answered.has(id)) {
-      running += 1;
-    }
-  }
+  const running = calls.filter((call) => call.name !== undefined && HELPER_TOOLS.includes(call.name) && call.result === undefined).length;
   return Math.min(running, MAX_HELPERS);
+}
+
+/**
+ * What to say about an offline agent the person's last message is waiting on.
+ *
+ * Three different things, and only one of them is ever true of a given chat. A pod's session is either being started
+ * for it or waiting its turn for a slot on the pod — `sessionState` is the pod's supervisor saying which. A session
+ * on somebody's laptop is neither: nothing starts it and there is no queue it could be in, so all that can be said is
+ * that it is not connected, and `local` is checked first because `sessionState` is only ever written by a pod's
+ * supervisor and so is null for every local chat — leaving the `queued` arm unreachable there rather than wrong.
+ */
+function wakingLabel(session: SessionState, local: boolean): string {
+  if (local) {
+    return "Waiting for your session to reconnect…";
+  }
+  return session === "queued" ? "Waiting for a free assistant…" : "Starting your assistant…";
 }
 
 /**
@@ -181,11 +284,22 @@ export function runningHelpers(items: readonly ConversationItem[], since: string
  * The session's own `busy` is what says it is working: its `UserPromptSubmit` hook sets it as a turn starts and its
  * `Stop` hook clears it as the turn ends. A turn the person interrupted runs no `Stop` hook at all, so the pod's
  * interrupt writes `idle` itself; without that, this line would spin for ever on a stopped answer. Before `busy`, a
- * message still queued on the hub is on its way, and an offline agent is one the pod is starting. Nothing is said in
- * any other case: a line claiming work nobody is doing is worse than no line.
+ * message still queued on the hub is on its way, and an offline agent is one the pod is starting — or, for a local
+ * chat, one that is simply not connected; see `wakingLabel`. Nothing is said in any other case: a line claiming work
+ * nobody is doing is worse than no line.
  */
-export function progress(items: readonly ConversationItem[], thread: readonly ThreadItem[], agentStatus: AgentStatus, session: SessionState): Progress {
-  const spoken = thread.filter((item) => item.type !== "product");
+export function progress(
+  items: readonly ConversationItem[],
+  thread: readonly ThreadItem[],
+  agentStatus: AgentStatus,
+  session: SessionState,
+  local = false
+): Progress {
+  // The words and the marks on them. A product change is not something either of them said, and nor is a tool row:
+  // a local chat's thread ends on one for most of every answer, and reading that as the last thing to have happened
+  // would take away the line saying the person's message is still waiting on a session that is not connected. What
+  // the tool calls are read for is the activity itself, below, which takes them from `items` rather than from here.
+  const spoken = thread.filter((item) => item.type !== "product" && item.type !== "tool");
   const last = spoken.at(-1);
   // Before `busy` is read, because the status is a few seconds behind the stop and until it catches up "Thinking…"
   // would sit directly under the line saying they stopped it. Only a mask over that window: what actually ends the
@@ -202,7 +316,7 @@ export function progress(items: readonly ConversationItem[], thread: readonly Th
   }
   const asked = last?.type === "user" ? last : undefined;
   if (asked !== undefined && asked.delivery !== "expired" && agentStatus === "offline") {
-    return { state: "waking", label: session === "queued" ? "Waiting for a free assistant…" : "Starting your assistant…" };
+    return { state: "waking", label: wakingLabel(session, local) };
   }
   if (agentStatus === "busy") {
     const since = last?.at ?? "";

@@ -191,7 +191,6 @@ describe("proxy hub address redirect", () => {
   });
 
   it.each([
-    ["/access", "/hub/access"],
     ["/agents/0f8a", "/hub/agents/0f8a"],
     ["/c", "/hub/c"],
     ["/channels/new", "/hub/channels/new"],
@@ -220,6 +219,15 @@ describe("proxy hub address redirect", () => {
       expect((await proxy(askWith("GET", path))).status).toBe(200);
     }
   );
+
+  it.each(["/access", "/hub/access"])("should redirect the retired %s to the shared chats, ahead of the sign-in check", async (from) => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+
+    const response = await proxy(askWith("GET", from));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant/shared");
+  });
 
   it("should redirect before the sign-in check, so the login's redirect= carries the new address", async () => {
     vi.stubEnv("AUTH_DISABLED", "");

@@ -341,8 +341,8 @@ describe("who may see and clear an assistant's files", () => {
     return { assistant, upload };
   }
 
-  // A grant is over sessions a person chose to share, and what is on their assistant's volume is neither. The rule
-  // in `src/access/rules.ts` is what refuses it, not the shape of a query.
+  // What is on a person's assistant's volume is not a session and not something they shared. The rule in
+  // `src/access/rules.ts` is what refuses it, not the shape of a query.
   it("should tell somebody else nothing about an assistant's files, by the rule and not by the query", async () => {
     const { assistant } = await alicesFile();
     await insertUser(BOB);

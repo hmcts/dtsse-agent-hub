@@ -39,6 +39,8 @@ export type Message = {
   title: string | null;
   body: string;
   topics: string[];
+  /** The agents a post tagged. Absent from a hub that predates tagging, so every reader must tolerate that. */
+  tagged_agents?: { id: string; name: string }[];
   in_reply_to: string | null;
   target_agent_id: string | null;
   created_at: string;
@@ -114,6 +116,12 @@ export type PostBody = {
   title?: string | null;
   body: string;
   in_reply_to?: string | null;
+  /**
+   * The agents the post tags, as ids or names: they are sent it on their streams whether or not they subscribe to
+   * its topics. Optional on the wire, and a hub that predates tagging ignores it, so no client feature is claimed
+   * for it — nothing the hub sends depends on this client understanding a new field.
+   */
+  tag_agents?: string[];
 };
 
 export type DirectBody = {

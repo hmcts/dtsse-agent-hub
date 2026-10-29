@@ -3,6 +3,7 @@
 import { MAX_BODY, MAX_TITLE, messageIdOf } from "@/messages/limits";
 import { postAs } from "@/messages/send";
 import type { ApiMessage } from "@/messages/shape";
+import { postTags } from "@/messages/tags";
 import { prisma } from "@/store/prisma";
 import { postTopics } from "@/topics/slug";
 import { requireViewer } from "@/viewer/current";
@@ -17,6 +18,7 @@ export async function postToTopics(input: {
   title?: unknown;
   body: unknown;
   inReplyTo?: unknown;
+  tags?: unknown;
 }): Promise<ActionResult<{ message: ApiMessage }>> {
   return await runAction<{ message: ApiMessage }>("post", async () => {
     const viewer = await requireViewer();
@@ -37,7 +39,11 @@ export async function postToTopics(input: {
     if (inReplyTo === undefined) {
       return { ok: false, error: "that is not a post to reply to" };
     }
-    const message = await postAs(prisma, { oid: viewer.oid, agentId: null }, { topics, title: title === "" ? null : title, body, inReplyTo });
+    const message = await postAs(
+      prisma,
+      { oid: viewer.oid, agentId: null },
+      { topics, title: title === "" ? null : title, body, inReplyTo, tags: postTags(input.tags) }
+    );
     return { ok: true, message };
   });
 }

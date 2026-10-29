@@ -107,7 +107,14 @@ export const postBody = z.object({
   topics,
   title: optionalText(MAX_TITLE),
   body,
-  in_reply_to: messageId.nullish()
+  in_reply_to: messageId.nullish(),
+  // Shape, cap and refusals are `postTags`'s, as the topics' are `postTopics`': the web UI's action takes the same
+  // field and has no schema, so one of the two paths would otherwise accept what the other refuses.
+  // `.optional()` explicitly: `z.unknown()` was implicitly optional in Zod 3 and is not in Zod 4, where a missing
+  // key is refused as `expected nonoptional`. Without it every post that tags nobody answers 400. The shape, the cap
+  // and every refusal are `postTags`' rather than this schema's, so that the web action — which has no schema — and
+  // this one cannot disagree about what a tag list is.
+  tag_agents: z.unknown().optional()
 });
 
 export const directBody = z

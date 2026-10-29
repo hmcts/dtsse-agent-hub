@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { MIN_PEOPLE_QUERY } from "@/access/rules";
 import type { SharePerson } from "@/assistant/shares";
+import { useSuggestions } from "@/components/useSuggestions";
 import type { ActionResult } from "@/web/action";
 
 /**
@@ -19,7 +20,8 @@ import type { ActionResult } from "@/web/action";
  * `ChannelBuilder`, and the combobox semantics from `SkillMenu` — `aria-expanded`, `aria-controls`,
  * `aria-activedescendant`, `listbox`/`option`, and up, down, Enter and Escape. `useSkillMenu` itself does not fit:
  * it matches a "/" token inside a message as it is typed, locally, against a list the page already has, and is
- * typed to the textarea it is attached to.
+ * typed to the textarea it is attached to. Both halves of the behaviour are `useSuggestions`, which the post
+ * composer's tag box shares; the markup stays here, because the two are styled for different pages.
  */
 
 /**
@@ -56,8 +58,6 @@ interface Candidate {
   email: string | null;
 }
 
-const SUGGEST_DEBOUNCE_MS = 200;
-
 export function ShareDialog({
   conversationId,
   people: initial,
@@ -79,10 +79,6 @@ export function ShareDialog({
   const listId = `${ids}-people`;
   const [people, setPeople] = useState<readonly SharePerson[]>(initial);
   const [fromPage, setFromPage] = useState(initial);
-  const [query, setQuery] = useState("");
-  const [matches, setMatches] = useState<Candidate[]>([]);
-  const [active, setActive] = useState(0);
-  const [dismissed, setDismissed] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -114,31 +110,14 @@ export function ShareDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  useEffect(() => {
-    const asked = query.trim();
-    if (asked.length < MIN_PEOPLE_QUERY) {
-      setMatches([]);
-      return;
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      fetch(`/api/ui/people?q=${encodeURIComponent(asked)}`, { signal: controller.signal })
-        .then((response) => (response.ok ? response.json() : { people: [] }))
-        .then((body: { people: Candidate[] }) => {
-          setMatches(body.people);
-          setActive(0);
-        })
-        .catch(() => undefined);
-    }, SUGGEST_DEBOUNCE_MS);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [query]);
-
-  const shown = matches.filter((candidate) => !people.some((person) => person.oid === candidate.oid));
-  const open = !dismissed && shown.length > 0;
-  const current = open ? Math.min(active, shown.length - 1) : -1;
+  const suggestions = useSuggestions<Candidate>({
+    path: "/api/ui/people",
+    field: "people",
+    minQuery: MIN_PEOPLE_QUERY,
+    exclude: (candidate) => people.some((person) => person.oid === candidate.oid),
+    onChoose: (candidate) => void run(share, candidate.oid)
+  });
+  const { shown, open, current } = suggestions;
   const optionId = (index: number) => `${listId}-${index}`;
 
   async function run(action: ShareAction, recipientOid: string): Promise<void> {
@@ -148,8 +127,7 @@ export function ShareDialog({
       const result = await action({ conversationId, recipientOid });
       if (result.ok) {
         setPeople(result.people);
-        setQuery("");
-        setMatches([]);
+        suggestions.clear();
         // The chat's own page shows nothing about its shares, but the sidebar and the shared list do.
         router.refresh();
       } else {
@@ -159,31 +137,6 @@ export function ShareDialog({
       setError("that could not be saved; check your connection and try again");
     } finally {
       setPending(false);
-    }
-  }
-
-  function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
-    if (!open) {
-      return;
-    }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      setActive((current + (event.key === "ArrowDown" ? 1 : shown.length - 1)) % shown.length);
-      return;
-    }
-    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      const chosen = shown[current];
-      if (chosen !== undefined) {
-        void run(share, chosen.oid);
-      }
-      return;
-    }
-    if (event.key === "Escape") {
-      // The list first, the dialog only once there is no list to shut.
-      event.preventDefault();
-      event.stopPropagation();
-      setDismissed(true);
     }
   }
 
@@ -243,7 +196,7 @@ export function ShareDialog({
             <input
               ref={box}
               id={`${ids}-who`}
-              value={query}
+              value={suggestions.query}
               disabled={pending}
               autoComplete="off"
               placeholder="Start typing a name"
@@ -252,11 +205,8 @@ export function ShareDialog({
               aria-expanded={open}
               aria-controls={listId}
               aria-activedescendant={open ? optionId(current) : undefined}
-              onChange={(event) => {
-                setDismissed(false);
-                setQuery(event.target.value);
-              }}
-              onKeyDown={onKeyDown}
+              onChange={(event) => suggestions.setQuery(event.target.value)}
+              onKeyDown={suggestions.onKeyDown}
               className="w-full rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-hidden focus:border-asst-accent-line"
             />
             <div

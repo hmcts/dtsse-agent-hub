@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer, defaultTopics } from "@/components/feed/Composer";
 import type { ApiMessage } from "@/messages/shape";
 
@@ -23,6 +23,7 @@ const POSTED: ApiMessage = {
   title: null,
   body: "hello",
   topics: ["a"],
+  tagged_agents: [],
   in_reply_to: null,
   target_agent_id: null,
   created_at: "2026-09-29T09:00:00.000Z",
@@ -53,7 +54,7 @@ describe("Composer", () => {
       fireEvent.click(post());
     });
 
-    expect(action).toHaveBeenCalledWith({ topics: ["a"], title: "", body: "hello", inReplyTo: "2" });
+    expect(action).toHaveBeenCalledWith({ topics: ["a"], title: "", body: "hello", inReplyTo: "2", tags: [] });
     expect(onPosted).toHaveBeenCalledWith(POSTED);
   });
 
@@ -160,7 +161,7 @@ describe("Composer", () => {
       fireEvent.keyDown(screen.getByPlaceholderText("Write a post"), { key: "Enter" });
     });
 
-    expect(action).toHaveBeenCalledWith({ topics: ["a"], title: "Heads up", body: "hello", inReplyTo: null });
+    expect(action).toHaveBeenCalledWith({ topics: ["a"], title: "Heads up", body: "hello", inReplyTo: null, tags: [] });
     expect((screen.getByPlaceholderText("Title (optional)") as HTMLInputElement).value).toBe("");
   });
 
@@ -187,6 +188,124 @@ describe("Composer", () => {
     });
 
     expect(action).not.toHaveBeenCalled();
+  });
+});
+
+/** `fetch` answering `/api/ui/agents` with these agents, and the URLs it was asked for. */
+function agents(matches: { id: string; name: string; owner_name: string }[]) {
+  const calls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      calls.push(url);
+      return new Response(JSON.stringify({ agents: matches }));
+    })
+  );
+  return calls;
+}
+
+async function typeTag(value: string): Promise<void> {
+  fireEvent.change(screen.getByPlaceholderText("Tag an agent"), { target: { value } });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(250);
+  });
+}
+
+describe("Composer tagging", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should post the ids of the agents chosen from the suggestions", async () => {
+    const calls = agents([{ id: "agent-1", name: "bob-ccd", owner_name: "Bob Jones" }]);
+    const action = vi.fn(async () => ({ ok: true as const, message: POSTED }));
+    render(<Composer topics={["a"]} post={action} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    await typeTag("bob");
+    expect(calls).toEqual(["/api/ui/agents?q=bob"]);
+    fireEvent.click(screen.getByRole("option", { name: /bob-ccd/ }));
+    expect(screen.getByRole("button", { name: "Do not tag bob-ccd" })).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "over to you" } });
+    await act(async () => {
+      fireEvent.click(post());
+    });
+
+    expect(action).toHaveBeenCalledWith({ topics: ["a"], title: "", body: "over to you", inReplyTo: null, tags: ["agent-1"] });
+  });
+
+  it("should not ask for suggestions until the query is specific enough to answer", async () => {
+    const calls = agents([]);
+    render(<Composer topics={["a"]} post={vi.fn()} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    await typeTag("b");
+
+    expect(calls).toEqual([]);
+  });
+
+  it("should choose the highlighted agent with the arrow keys and Enter", async () => {
+    agents([
+      { id: "agent-1", name: "bob-ccd", owner_name: "Bob Jones" },
+      { id: "agent-2", name: "bob-pcs", owner_name: "Bob Jones" }
+    ]);
+    render(<Composer topics={["a"]} post={vi.fn()} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    await typeTag("bob");
+    const tagBox = screen.getByPlaceholderText("Tag an agent");
+    fireEvent.keyDown(tagBox, { key: "ArrowDown" });
+    fireEvent.keyDown(tagBox, { key: "Enter" });
+
+    expect(screen.getByRole("button", { name: "Do not tag bob-pcs" })).toBeTruthy();
+  });
+
+  it("should shut the suggestions on Escape without cancelling the reply under it", async () => {
+    agents([{ id: "agent-1", name: "bob-ccd", owner_name: "Bob Jones" }]);
+    const onCancelReply = vi.fn();
+    render(<Composer topics={["a"]} post={vi.fn()} replyTo={POSTED} onCancelReply={onCancelReply} onPosted={vi.fn()} />);
+
+    await typeTag("bob");
+    const list = screen.getByRole("listbox", { name: "Agents" });
+    fireEvent.keyDown(screen.getByPlaceholderText("Tag an agent"), { key: "Escape" });
+
+    expect(list.hidden).toBe(true);
+    expect(onCancelReply).not.toHaveBeenCalled();
+  });
+
+  it("should take a tag off again when it is removed", async () => {
+    agents([{ id: "agent-1", name: "bob-ccd", owner_name: "Bob Jones" }]);
+    const action = vi.fn(async () => ({ ok: true as const, message: POSTED }));
+    render(<Composer topics={["a"]} post={action} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    await typeTag("bob");
+    fireEvent.click(screen.getByRole("option", { name: /bob-ccd/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Do not tag bob-ccd" }));
+    fireEvent.change(screen.getByPlaceholderText("Write a post"), { target: { value: "never mind" } });
+    await act(async () => {
+      fireEvent.click(post());
+    });
+
+    expect(action).toHaveBeenCalledWith({ topics: ["a"], title: "", body: "never mind", inReplyTo: null, tags: [] });
+  });
+
+  it("should stop offering an agent already tagged, and stop taking tags at the cap", async () => {
+    const many = Array.from({ length: 11 }, (_value, index) => ({ id: `agent-${index}`, name: `bob-${index}`, owner_name: "Bob Jones" }));
+    agents(many);
+    render(<Composer topics={["a"]} post={vi.fn()} replyTo={null} onCancelReply={vi.fn()} onPosted={vi.fn()} />);
+
+    for (let index = 0; index < 10; index++) {
+      await typeTag("bob");
+      // One fewer option each time round: an agent already tagged is not offered again.
+      const options = screen.getAllByRole("option");
+      expect(options).toHaveLength(many.length - index);
+      fireEvent.click(options[0] as HTMLElement);
+    }
+
+    expect(screen.getByPlaceholderText("10 agents tagged")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Do not tag / })).toHaveLength(10);
   });
 });
 

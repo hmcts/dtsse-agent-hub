@@ -21,13 +21,6 @@ enum AgentStatus {
   @@map("agent_status")
 }
 
-enum GrantLevel {
-  read
-  write
-
-  @@map("grant_level")
-}
-
 enum MessageKind {
   post
   direct
@@ -165,8 +158,6 @@ model User {
   lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
 
   agents      Agent[]
-  grantsGiven AgentGrant[] @relation("grantOwner")
-  grantsHeld  AgentGrant[] @relation("grantee")
   messages    Message[]
   channels    Channel[]
   credentials   Credential[]
@@ -205,7 +196,8 @@ model Agent {
   /// What its client claimed it understands of the hub's optional wire fields, as ["name"], or null from a client
   /// that reported nothing, which claims nothing. See src/agents/client-features.ts.
   clientFeatures  Json?       @map("client_features")
-  /// The assistant conversation this agent is a session of, if any. Visible to and messageable by its owner only.
+  /// The assistant conversation this agent is a session of, if any. With a virtual agent as well, it is a pod's chat
+  /// session and no post may tag it; with none, it is a session on its owner's own computer.
   assistantConversationId String? @map("assistant_conversation_id") @db.Uuid
 
   owner         User              @relation(fields: [ownerOid], references: [oid])
@@ -213,6 +205,7 @@ model Agent {
   received      Message[]         @relation("targetAgent")
   subscriptions Subscription[]
   deliveries    Delivery[]
+  tagged        MessageTag[]
   transcript    TranscriptEntry[]
   virtualAgent  VirtualAgent?     @relation("virtualAgentSessions", fields: [virtualAgentId], references: [id], onDelete: SetNull)
   currentOf     VirtualAgent[]    @relation("virtualAgentCurrent")
@@ -223,21 +216,6 @@ model Agent {
   @@index([ownerOid])
   @@index([name])
   @@map("agent")
-}
-
-/// Covers every agent the owner has, current and future.
-model AgentGrant {
-  ownerOid   String     @map("owner_oid")
-  granteeOid String     @map("grantee_oid")
-  level      GrantLevel
-  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  owner   User @relation("grantOwner", fields: [ownerOid], references: [oid])
-  grantee User @relation("grantee", fields: [granteeOid], references: [oid])
-
-  @@id([ownerOid, granteeOid])
-  @@index([granteeOid])
-  @@map("agent_grant")
 }
 
 model Topic {
@@ -270,6 +248,7 @@ model Message {
   parent      Message?       @relation("thread", fields: [inReplyTo], references: [id], onDelete: SetNull)
   replies     Message[]      @relation("thread")
   topics      MessageTopic[]
+  tags        MessageTag[]
   deliveries  Delivery[]
   transcript  TranscriptEntry[]
   uploads     AssistantUpload[]
@@ -288,6 +267,19 @@ model MessageTopic {
   @@id([messageId, topicId])
   @@index([topicId, messageId])
   @@map("message_topic")
+}
+
+/// One row per agent a post tagged: who the post was written for. Each one also queues a `Delivery`, so the agent is
+/// sent the post on its stream whether or not it subscribes to the post's topics. Never written for a direct message.
+model MessageTag {
+  messageId BigInt @map("message_id")
+  agentId   String @map("agent_id") @db.Uuid
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  agent   Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, agentId])
+  @@map("message_tag")
 }
 
 model Subscription {
@@ -500,7 +492,9 @@ model VirtualAgentLogin {
 model AssistantConversation {
   id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   ownerOid          String    @map("owner_oid")
-  virtualAgentId    String    @map("virtual_agent_id") @db.Uuid
+  /// The virtual agent whose pod runs the conversation's sessions; null for a conversation that is a person's own
+  /// local Claude Code session, which runs on their laptop and so has no pod.
+  virtualAgentId    String?   @map("virtual_agent_id") @db.Uuid
   agentId           String?   @map("agent_id") @db.Uuid
   title             String?
   /// One of src/assistant/products.ts.
@@ -555,7 +549,7 @@ model AssistantConversation {
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   owner        User             @relation(fields: [ownerOid], references: [oid])
-  virtualAgent VirtualAgent     @relation(fields: [virtualAgentId], references: [id], onDelete: Cascade)
+  virtualAgent VirtualAgent?    @relation(fields: [virtualAgentId], references: [id], onDelete: Cascade)
   agent        Agent?           @relation("assistantConversationCurrent", fields: [agentId], references: [id], onDelete: SetNull)
   sessions     Agent[]          @relation("assistantConversationSessions")
   uploads      AssistantUpload[]

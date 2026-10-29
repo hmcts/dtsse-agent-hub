@@ -1417,7 +1417,7 @@ describe("VirtualAgentRefresh", () => {
 });
 
 describe("Sidebar", () => {
-  const data = { mine: [], shared: [], channels: { mine: [], shared: [] }, topics: [] };
+  const data = { agents: [], channels: { mine: [], shared: [] }, topics: [] };
   const viewer = { oid: "dev-alice", tid: "dev", name: "Alice" };
 
   it("should link to the viewer's virtual agents and not to a separate credentials page when the feature is on", () => {
