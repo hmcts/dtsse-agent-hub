@@ -66,11 +66,15 @@ export async function sweepTranscripts(prisma: PrismaClient, options: Transcript
     if (lock?.locked !== true) {
       return undefined;
     }
+    // created_at, set here on insert, and not occurred_at, which the client sends and nothing bounds above: an entry
+    // stamped in the future is never reached by a cut-off measured against occurred_at, and the trim below ranks it
+    // as the agent's newest, so between them they kept it for good. This is the one rule that answers for every
+    // entry whatever its contents claim, so it is the one that has to key on a column the hub owns.
     const expired = await tx.$executeRaw`
       DELETE FROM transcript_entry
        WHERE id IN (
          SELECT id FROM transcript_entry
-          WHERE occurred_at < now() - make_interval(days => ${retentionDays}::int)
+          WHERE created_at < now() - make_interval(days => ${retentionDays}::int)
           LIMIT ${batch}::int
        )
     `;

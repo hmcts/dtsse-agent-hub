@@ -302,6 +302,11 @@ describe("transcript events on the UI stream", () => {
   });
 });
 
+/** Backdates when the hub stored an entry, which is what retention measures against. */
+async function storedAt(entryKey: string, at: number): Promise<void> {
+  await prisma.transcriptEntry.updateMany({ where: { entryKey }, data: { createdAt: new Date(at) } });
+}
+
 describe("sweepTranscripts", () => {
   it("should delete entries past retention and the oldest beyond an agent's cap, and keep the rest", async () => {
     const now = Date.now();
@@ -314,12 +319,25 @@ describe("sweepTranscripts", () => {
     ]);
     const response = await send(CAROL, carolsAgent, { session_id: "s", entries: [entry("c1", { occurred_at: iso(now - 1000) })] });
     expect(response.status).toBe(200);
+    // Retention goes by when the hub stored an entry, so the one that is past it has to have been stored back then.
+    await storedAt("old", now - 31 * DAY_MS);
 
     expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 1, trimmed: 1 });
 
     const kept = await prisma.transcriptEntry.findMany({ orderBy: { id: "asc" } });
     expect(kept.map((row) => row.entryKey)).toEqual(["a2", "a3", "c1"]);
     expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 0, trimmed: 0 });
+  });
+
+  it("should delete an entry stamped in the future once the hub has held it for the retention period", async () => {
+    const now = Date.now();
+    await accepted(alicesAgent, [entry("ahead", { occurred_at: new Date(now + 60 * DAY_MS).toISOString() })]);
+    // Nothing bounds occurred_at above, and the cap is not applied to an agent nothing is arriving for, so retention
+    // measured against this entry's own timestamp would never have reached it and nothing else would have.
+    await storedAt("ahead", now - 31 * DAY_MS);
+
+    expect(await sweepTranscripts(prisma)).toEqual({ expired: 1, trimmed: 0 });
+    expect(await prisma.transcriptEntry.count()).toBe(0);
   });
 
   it("should apply the cap only to an agent heard from lately, and again as soon as one is", async () => {
@@ -387,6 +405,7 @@ describe("startTranscriptSweep", () => {
   it("should log what a tick deleted, and nothing for a tick that deleted nothing", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     await accepted(alicesAgent, [entry("old", { occurred_at: new Date(Date.now() - 31 * DAY_MS).toISOString() })]);
+    await storedAt("old", Date.now() - 31 * DAY_MS);
     const transaction = vi.spyOn(prisma, "$transaction");
     const sweeper = startTranscriptSweep(prisma, 10);
     try {
