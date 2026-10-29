@@ -10,6 +10,7 @@ function message(id: string, createdAt: string): ThreadMessage {
     title: null,
     body: `message ${id}`,
     topics: [],
+    tagged_agents: [],
     in_reply_to: null,
     target_agent_id: "agent-1",
     created_at: createdAt,

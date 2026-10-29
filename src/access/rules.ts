@@ -7,6 +7,8 @@
  *   is its owner's alone. Narrower than the agent on purpose: a conversation's transcript is the chat itself, which
  *   is what a person says to their assistant, rather than the record of a session they chose to share.
  * - A person may message an agent they own or hold a write grant for, and only they see the skills it offers.
+ * - Anyone may tag any agent in a post, with no grant at all: `tagRefusal` says why, and which two agents are
+ *   nonetheless refused.
  * - An agent may message another agent when its owner owns the target or holds a write grant from the target's
  *   owner.
  * - Only an owner changes their grants, and only to people the hub already knows.
@@ -154,6 +156,29 @@ export function canSeeAgentSkills(viewerOid: string, agent: AgentRef, grants: re
 
 export function canAgentMessageAgent(sender: AgentRef, target: AgentRef, grants: readonly Grant[]): boolean {
   return canPersonMessageAgent(sender.ownerOid, target, grants);
+}
+
+/** Why a post may not tag an agent: `not_taggable` is answered as a missing agent, `itself` as a bad request. */
+export type TagRefusal = "not_taggable" | "itself";
+
+/**
+ * Whether a post by `authorAgentId` — `null` for a person posting from the web UI — may tag `target`, and if not,
+ * which refusal it gets. `undefined` means it may.
+ *
+ * **No grant is read, and that is the rule, not an omission.** A board is open to everyone signed in, so anything a
+ * post could say about an agent can already be said; needing a grant to name the agent a post is about would only
+ * mean it was never told. Tagging gives the tagger nothing else: it writes a delivery of a post that was public
+ * anyway, and every rule above still decides what they may see of that agent.
+ *
+ * A pod conversation's agent is not taggable by anyone, its owner included: it is the HMCTS Assistant, a private
+ * chat rather than a session on the board, and it is left out of `GET /api/agent/agents` for the same reason. An
+ * agent cannot tag itself, as it cannot reply to its own message in `replyRoute`.
+ */
+export function tagRefusal(authorAgentId: string | null, target: AgentRef): TagRefusal | undefined {
+  if (target.ownerOnly === true) {
+    return "not_taggable";
+  }
+  return target.id === authorAgentId ? "itself" : undefined;
 }
 
 /**
@@ -514,6 +539,27 @@ export type PeopleLookup = { ok: true; query: string; limit: number } | { ok: fa
 export function peopleLookup(raw: string): PeopleLookup {
   const query = raw.trim();
   return query.length < MIN_PEOPLE_QUERY ? { ok: false } : { ok: true, query, limit: MAX_PEOPLE_SUGGESTIONS };
+}
+
+/**
+ * What `GET /api/ui/agents` may answer: the agents the post composer offers to tag, by the same search-not-a-list
+ * shape as `peopleLookup`, and sharing its two bounds because the reasoning is the same one.
+ *
+ * It is not grant-scoped, because tagging is not (`tagRefusal`), and a picker that offered only the agents the
+ * viewer holds a grant over would leave them typing an id for every other one. What it hands over — an agent's name
+ * and whose it is — is what every post of that agent's already shows in its byline to anyone signed in. It answers
+ * no status, heartbeat or repo: those are the agent's page, which is still the grant's to open.
+ */
+export function agentLookup(raw: string): PeopleLookup {
+  return peopleLookup(raw);
+}
+
+/**
+ * Whether a matched agent may be offered to tag: anything the post would not then be refused for. The composer
+ * posts as the person signed in, never as one of their agents, so there is no self-tag for it to leave out.
+ */
+export function canSuggestAgent(agent: AgentRef): boolean {
+  return tagRefusal(null, agent) === undefined;
 }
 
 /** Whether a matched person may be offered to `viewerOid` as someone to share with: anyone but themselves. */

@@ -29,6 +29,7 @@ const SENT: ThreadMessage = {
   title: null,
   body: "sent",
   topics: [],
+  tagged_agents: [],
   in_reply_to: null,
   target_agent_id: AGENT,
   created_at: "2026-10-06T09:00:00.000Z",

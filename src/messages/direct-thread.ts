@@ -54,6 +54,8 @@ type Row = {
   authorAgent: ({ id: string; name: string; ownerOid: string } & AgentConversationColumns) | null;
   author: { name: string; email: string | null };
   topics: { topic: { slug: string } }[];
+  // Always empty in a thread, which holds direct messages: only a post is tagged. Here because `toApiMessage` reads it.
+  tags: { agent: { id: string; name: string } }[];
   targetAgent: ({ id: string; ownerOid: string } & AgentConversationColumns) | null;
   parent: { authorOid: string } | null;
   deliveries: { agentId: string; state: DeliveryView }[];

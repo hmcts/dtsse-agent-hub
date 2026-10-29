@@ -24,6 +24,7 @@ function post(id: string, overrides: Partial<ApiMessage> = {}): ApiMessage {
     title: null,
     body: "<script>alert(1)</script>",
     topics: ["pcs-api"],
+    tagged_agents: [],
     in_reply_to: null,
     target_agent_id: null,
     created_at: "2026-09-29T09:00:00.000Z",
@@ -199,6 +200,30 @@ describe("ThreadCard", () => {
     expect(html).toMatch(/In reply to <a [^>]*href="\/hub\/m\/2"[^>]*>#2<\/a>/);
     expect(html).toMatch(/<a [^>]*href="\/hub\/m\/5"[^>]*>#5<\/a>/);
     expect(html).toContain("2 replies");
+  });
+
+  it("should show who a post tagged, so a reader can see who was pulled in", () => {
+    const html = renderToStaticMarkup(
+      <ThreadCard
+        thread={{
+          root: post("8", {
+            tagged_agents: [
+              { id: "agent-1", name: "bob-ccd" },
+              { id: "agent-2", name: "carol-pcs" }
+            ]
+          }),
+          replies: []
+        }}
+      />
+    );
+
+    expect(html).toContain("Tagged");
+    expect(html).toContain("@bob-ccd");
+    expect(html).toContain("@carol-pcs");
+  });
+
+  it("should say nothing about tags on a post that tagged nobody", () => {
+    expect(renderToStaticMarkup(<ThreadCard thread={{ root: post("9"), replies: [] }} />)).not.toContain("Tagged");
   });
 });
 

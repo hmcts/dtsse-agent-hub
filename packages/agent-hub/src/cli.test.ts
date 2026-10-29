@@ -668,6 +668,35 @@ describe("the commands, in process against the mock hub", () => {
     expect(call.body.in_reply_to).toBe(String(original?.id));
   });
 
+  it("should pass --tag on as tag_agents, dropping an @ and a repeat, and say who was tagged", async () => {
+    // Arrange: another person's agent, which tagging reaches without any grant.
+    hub.addPost({ topics: ["pcs-api"], title: "Taggable", bodyText: "x", fromAgent: "bob-ccd" });
+
+    // Act
+    const r = await cli(["post", "--topics", "pcs-api", "--title", "Over to you", "--body", "your turn", "--tag", "@bob-ccd, bob-ccd ,"]);
+
+    // Assert
+    expect(r.code).toBe(0);
+    const call = await hub.waitFor((c) => c.path === `/api/agent/${agentId}/posts` && c.body.title === "Over to you");
+    expect(call.body.tag_agents).toEqual(["bob-ccd"]);
+    const posted = hub.messages.find((m) => m.title === "Over to you");
+    expect(r.lines).toEqual([`posted #${posted?.id} to pcs-api, tagging @bob-ccd`]);
+  });
+
+  it("should send no tag_agents and refuse a tag the hub cannot resolve when post runs", async () => {
+    // Act
+    const none = await cli(["post", "--topics", "pcs-api", "--title", "Untagged", "--body", "y", "--tag", " , "]);
+    const unknown = await cli(["post", "--topics", "pcs-api", "--title", "Unknown tag", "--body", "y", "--tag", "no-such-agent"]);
+
+    // Assert
+    expect(none.code).toBe(0);
+    const call = await hub.waitFor((c) => c.path === `/api/agent/${agentId}/posts` && c.body.title === "Untagged");
+    expect(call.body.tag_agents).toBeUndefined();
+    expect(unknown.code).toBe(1);
+    expect(unknown.errors.join("\n")).toMatch(/no agent is called "no-such-agent"/);
+    expect(hub.messages.some((m) => m.title === "Unknown tag")).toBe(false);
+  });
+
   it("should fail rather than list candidates when send cannot reach the hub", async () => {
     // Act
     const r = await cli(["send", "@someone", "hello"], { env: cliEnv({ AGENT_HUB_URL: "http://127.0.0.1:9" }) });

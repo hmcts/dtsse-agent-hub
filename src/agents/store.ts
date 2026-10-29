@@ -1,9 +1,10 @@
-import { agentsMessageableBy } from "../access/load.ts";
+import { agentsMessageableBy, POD_CONVERSATION_AGENT } from "../access/load.ts";
 import { conversationFlags } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
 import { linkLocalSession, linkSession } from "../assistant/store.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
+import { likeLiteral } from "../store/like.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { upsertUser } from "../users/store.ts";
 import { normaliseSkills, type Skill, skillsChanged, storedSkills } from "./skills.ts";
@@ -279,6 +280,51 @@ export async function listMessageableAgents(db: Database, oid: string): Promise<
   }));
 }
 
+/** One agent the post composer offers to tag. Carries what a post's byline already shows of it, and nothing more. */
+export interface SuggestedAgent {
+  id: string;
+  ownerOid: string;
+  name: string;
+  ownerName: string;
+  /** Read by `canSuggestAgent`, so the rule and not this query is the last word on what may be offered. */
+  ownerOnly: boolean;
+}
+
+/**
+ * Agents whose name starts with `query`, or carries it after a hyphen, live ones first and then most recently heard
+ * from. A search, never a list: `agentLookup` in `src/access/rules.ts` decides that a query is specific enough to
+ * answer at all and how many agents one answer may carry.
+ *
+ * A hyphen rather than any substring, so "pcs" finds `alice-pcs-api` without "api" finding every agent that has one
+ * in its name. Not grant-scoped, because tagging is not; the pod conversation's agents it leaves out are the ones
+ * nobody may tag.
+ */
+export async function searchTaggableAgents(db: Database, query: string, limit: number): Promise<SuggestedAgent[]> {
+  const starts = `${likeLiteral(query)}%`;
+  const afterHyphen = `%-${likeLiteral(query)}%`;
+  // The pod conversations are left out here as well as by the rule, rather than only by it: a person with a dozen
+  // chats has a dozen agents all named after their assistant, and a query matching that name would otherwise spend
+  // the whole limit on rows the rule then drops and answer with nothing.
+  const rows = await db.$queryRaw<
+    { id: string; owner_oid: string; name: string; owner_name: string; conversation_id: string | null; virtual_agent_id: string | null }[]
+  >`
+    SELECT a.id::text AS id, a.owner_oid, a.name, u.name AS owner_name,
+           a.assistant_conversation_id::text AS conversation_id, a.virtual_agent_id::text AS virtual_agent_id
+      FROM agent a JOIN "user" u ON u.oid = a.owner_oid
+     WHERE (lower(a.name) LIKE ${starts} OR lower(a.name) LIKE ${afterHyphen})
+       AND NOT (a.assistant_conversation_id IS NOT NULL AND a.virtual_agent_id IS NOT NULL)
+     ORDER BY (a.status = 'offline'), a.last_heartbeat_at DESC, a.id
+     LIMIT ${limit}
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    ownerOid: row.owner_oid,
+    name: row.name,
+    ownerName: row.owner_name,
+    ownerOnly: conversationFlags({ assistantConversationId: row.conversation_id, virtualAgentId: row.virtual_agent_id }).ownerOnly
+  }));
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isUuid(value: string): boolean {
@@ -299,14 +345,21 @@ export interface Candidate {
 }
 
 /**
- * The agents `to_agent` could mean for a sender owned by `senderOid`: the agent with that id, or the messageable
- * agents with that name. Live agents are preferred over offline ones, so a session name reused across days
+ * What a name is matched among. `message` is the agents the sender may message, which `to_agent` resolves in; `tag`
+ * is every agent but a pod conversation's, because tagging one in a post needs no grant (`tagRefusal` in
+ * `src/access/rules.ts` is where that is decided and said).
+ */
+export type TargetScope = "message" | "tag";
+
+/**
+ * The agents a reference could mean for a sender owned by `senderOid`: the agent with that id, or the agents with
+ * that name inside `scope`. Live agents are preferred over offline ones, so a session name reused across days
  * resolves to today's session; more than one live match is for the caller to report as ambiguous.
  *
- * An id is looked up without the access query, because `canAgentMessageAgent` decides on what comes back and the
- * caller's refusal says whether the agent exists; the conversation columns come back for that rule to read.
+ * An id is looked up without the access query in either scope, because the caller's rule decides on what comes back
+ * and its refusal says whether the agent exists; the conversation columns come back for that rule to read.
  */
-export async function resolveTargets(db: Database, senderOid: string, toAgent: string): Promise<Candidate[]> {
+export async function resolveTargets(db: Database, senderOid: string, toAgent: string, scope: TargetScope = "message"): Promise<Candidate[]> {
   const select = {
     id: true,
     ownerOid: true,
@@ -319,9 +372,10 @@ export async function resolveTargets(db: Database, senderOid: string, toAgent: s
     assistantConversationId: true,
     virtualAgentId: true
   } as const;
+  const named = scope === "message" ? agentsMessageableBy(senderOid) : { NOT: POD_CONVERSATION_AGENT };
   const rows = isUuid(toAgent)
     ? await db.agent.findMany({ where: { id: toAgent }, select })
-    : await db.agent.findMany({ where: { AND: [{ name: toAgent }, agentsMessageableBy(senderOid)] }, select, orderBy: { lastHeartbeatAt: "desc" } });
+    : await db.agent.findMany({ where: { AND: [{ name: toAgent }, named] }, select, orderBy: { lastHeartbeatAt: "desc" } });
   const candidates = rows.map(({ owner, assistantConversationId, virtualAgentId, ...row }) => ({
     ...row,
     ownerName: owner.name,

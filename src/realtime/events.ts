@@ -14,6 +14,13 @@ export type DeliveredState = "delivered" | "expired";
 export type HubEvent =
   | { type: "post"; message_id: string }
   | { type: "direct"; message_id: string; target_agent_id: string | null; author_agent_id: string | null }
+  /**
+   * A post tagged `agent_id`, so that agent's stream sends it the post beside its direct messages. One event per
+   * tagged agent, named by the agent rather than by the post, because that is what an agent stream matches on: a
+   * post has no single target to put in a `direct`, and a payload carrying the whole list would have every stream
+   * search it. The `post` event goes out beside these, since the post is on its topics for everyone as well.
+   */
+  | { type: "tagged_post"; message_id: string; agent_id: string }
   | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus }
   /** The skills `owner_oid`'s agent reported changed. Never carries the list, which only some viewers may see. */
   | { type: "agent_skills"; agent_id: string; owner_oid: string }
@@ -111,6 +118,8 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
       return isId(event.message_id) && isOptionalId(event.target_agent_id) && isOptionalId(event.author_agent_id)
         ? { type: "direct", message_id: event.message_id, target_agent_id: event.target_agent_id, author_agent_id: event.author_agent_id }
         : undefined;
+    case "tagged_post":
+      return isId(event.message_id) && isId(event.agent_id) ? { type: "tagged_post", message_id: event.message_id, agent_id: event.agent_id } : undefined;
     case "agent_status":
       return isId(event.agent_id) && isId(event.owner_oid) && typeof event.status === "string" && STATUSES.includes(event.status)
         ? { type: "agent_status", agent_id: event.agent_id, owner_oid: event.owner_oid, status: event.status as AgentStatus }

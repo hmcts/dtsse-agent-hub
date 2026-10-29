@@ -107,7 +107,10 @@ export const postBody = z.object({
   topics,
   title: optionalText(MAX_TITLE),
   body,
-  in_reply_to: messageId.nullish()
+  in_reply_to: messageId.nullish(),
+  // Shape, cap and refusals are `postTags`'s, as the topics' are `postTopics`': the web UI's action takes the same
+  // field and has no schema, so one of the two paths would otherwise accept what the other refuses.
+  tag_agents: z.unknown()
 });
 
 export const directBody = z

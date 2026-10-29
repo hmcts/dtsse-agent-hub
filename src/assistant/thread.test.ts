@@ -14,6 +14,7 @@ function person(body: string, at: string, delivery: ThreadMessage["delivery"] = 
     title: null,
     body,
     topics: [],
+    tagged_agents: [],
     in_reply_to: null,
     target_agent_id: "agent",
     created_at: at,

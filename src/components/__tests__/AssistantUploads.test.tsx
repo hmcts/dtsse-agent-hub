@@ -521,6 +521,7 @@ function message(overrides: Partial<ThreadMessage> = {}): ThreadMessage {
     title: null,
     body: "have a look at this",
     topics: [],
+    tagged_agents: [],
     in_reply_to: null,
     target_agent_id: AGENT,
     created_at: "2026-10-21T09:00:00.000Z",

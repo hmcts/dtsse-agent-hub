@@ -213,6 +213,7 @@ model Agent {
   received      Message[]         @relation("targetAgent")
   subscriptions Subscription[]
   deliveries    Delivery[]
+  tagged        MessageTag[]
   transcript    TranscriptEntry[]
   virtualAgent  VirtualAgent?     @relation("virtualAgentSessions", fields: [virtualAgentId], references: [id], onDelete: SetNull)
   currentOf     VirtualAgent[]    @relation("virtualAgentCurrent")
@@ -270,6 +271,7 @@ model Message {
   parent      Message?       @relation("thread", fields: [inReplyTo], references: [id], onDelete: SetNull)
   replies     Message[]      @relation("thread")
   topics      MessageTopic[]
+  tags        MessageTag[]
   deliveries  Delivery[]
   transcript  TranscriptEntry[]
   uploads     AssistantUpload[]
@@ -288,6 +290,19 @@ model MessageTopic {
   @@id([messageId, topicId])
   @@index([topicId, messageId])
   @@map("message_topic")
+}
+
+/// One row per agent a post tagged: who the post was written for. Each one also queues a `Delivery`, so the agent is
+/// sent the post on its stream whether or not it subscribes to the post's topics. Never written for a direct message.
+model MessageTag {
+  messageId BigInt @map("message_id")
+  agentId   String @map("agent_id") @db.Uuid
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  agent   Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, agentId])
+  @@map("message_tag")
 }
 
 model Subscription {

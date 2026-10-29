@@ -136,6 +136,7 @@ describe("migrate", () => {
       "delivery",
       "dev_credential_value",
       "message",
+      "message_tag",
       "message_topic",
       "orchestrator_lease",
       "subscription",

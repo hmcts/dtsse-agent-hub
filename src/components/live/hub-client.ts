@@ -18,10 +18,12 @@ import { sessionEnded } from "./session.ts";
  * an instruction to a conversation's pod, and the thread redraws from the `assistant_conversation` beside it.
  * `assistant_uploads` is the same: an instruction to the pod, with the page revalidated by the action that caused it.
  * `assistant_lookup` and its answer are as well: the request that asked for one waits on its own response.
+ * `tagged_post` is not a frame because it says nothing a browser does not already get: it is how one agent's stream
+ * picks a post of its own out, and the post arrives here as the `post` beside it, tags included.
  */
 export type HubEventType = Exclude<
   HubEvent["type"],
-  "grant" | "credential" | "assistant_stop" | "assistant_uploads" | "assistant_lookup" | "assistant_lookup_answered"
+  "grant" | "credential" | "tagged_post" | "assistant_stop" | "assistant_uploads" | "assistant_lookup" | "assistant_lookup_answered"
 >;
 
 /**

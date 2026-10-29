@@ -24,6 +24,8 @@ describe("encodeEvent and decodeEvent", () => {
     ["a post without an id", JSON.stringify({ type: "post" })],
     ["a numeric id", JSON.stringify({ type: "post", message_id: 1 })],
     ["a direct with a missing target field", JSON.stringify({ type: "direct", message_id: "1", author_agent_id: null })],
+    ["a tagged post without an agent", JSON.stringify({ type: "tagged_post", message_id: "1" })],
+    ["a tagged post without a message", JSON.stringify({ type: "tagged_post", agent_id: "a" })],
     ["an unknown status", JSON.stringify({ type: "agent_status", agent_id: "a", owner_oid: "o", status: "asleep" })],
     ["a status without an owner", JSON.stringify({ type: "agent_status", agent_id: "a", status: "idle" })],
     ["skills without an agent", JSON.stringify({ type: "agent_skills", owner_oid: "o" })],

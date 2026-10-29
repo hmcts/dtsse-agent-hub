@@ -11,7 +11,8 @@ const ROW: MessageRow = {
   createdAt: new Date("2026-09-29T09:00:00.000Z"),
   authorAgent: { id: "agent-1", name: "alice-pcs-api" },
   author: { name: "Alice Smith", email: "alice@justice.gov.uk" },
-  topics: [{ topic: { slug: "pcs-api" } }, { topic: { slug: "database" } }]
+  topics: [{ topic: { slug: "pcs-api" } }, { topic: { slug: "database" } }],
+  tags: [{ agent: { id: "agent-3", name: "bob-ccd" } }, { agent: { id: "agent-2", name: "alice-ccd" } }]
 };
 
 describe("toApiMessage", () => {
@@ -24,6 +25,20 @@ describe("toApiMessage", () => {
 
   it("should sort topics by code point so two reads of one message agree", () => {
     expect(toApiMessage(ROW).topics).toEqual(["database", "pcs-api"]);
+  });
+
+  it("should sort tagged agents by name, and by id when two of them share one", () => {
+    expect(toApiMessage(ROW).tagged_agents).toEqual([
+      { id: "agent-2", name: "alice-ccd" },
+      { id: "agent-3", name: "bob-ccd" }
+    ]);
+
+    const twins = { ...ROW, tags: [{ agent: { id: "agent-9", name: "twin" } }, { agent: { id: "agent-4", name: "twin" } }] };
+    expect(toApiMessage(twins).tagged_agents.map((agent) => agent.id)).toEqual(["agent-4", "agent-9"]);
+  });
+
+  it("should give a message that tagged nobody an empty list", () => {
+    expect(toApiMessage({ ...ROW, tags: [] }).tagged_agents).toEqual([]);
   });
 
   it("should describe an agent author with its owner", () => {

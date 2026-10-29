@@ -22,6 +22,7 @@ function message(id: string, overrides: Partial<ThreadMessage> = {}): ThreadMess
     title: null,
     body: `message ${id}`,
     topics: [],
+    tagged_agents: [],
     in_reply_to: null,
     target_agent_id: AGENT,
     created_at: "2026-09-29T09:00:00.000Z",

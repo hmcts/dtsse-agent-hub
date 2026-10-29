@@ -62,6 +62,28 @@ describe("postToTopics", () => {
     expect((await prisma.message.findFirstOrThrow()).authorOid).toBe(ALICE.oid);
   });
 
+  it("should tag the agents the composer chose, anyone's and the poster's own alike", async () => {
+    const alices = await insertAgent(ALICE, "alice-pcs-api");
+    const bobs = await insertAgent(BOB, "bob-ccd");
+
+    const result = await postToTopics({ topics: ["a"], body: "over to you", tags: [bobs, alices] });
+
+    expect(result.ok && result.message.tagged_agents).toEqual([
+      { id: alices, name: "alice-pcs-api" },
+      { id: bobs, name: "bob-ccd" }
+    ]);
+    const queued = await prisma.delivery.findMany({ select: { agentId: true, state: true }, orderBy: { agentId: "asc" } });
+    expect(queued.every((delivery) => delivery.state === "queued")).toBe(true);
+    expect(queued).toHaveLength(2);
+  });
+
+  it("should refuse the post, writing nothing, when a tag names no agent", async () => {
+    const result = await postToTopics({ topics: ["a"], body: "x", tags: ["nobody-here"] });
+
+    expect(result).toMatchObject({ ok: false, error: 'no agent is called "nobody-here"' });
+    expect(await prisma.message.count()).toBe(0);
+  });
+
   it("should reply to a post when in_reply_to names one", async () => {
     const parent = await postToTopics({ topics: ["a"], body: "parent" });
     const reply = await postToTopics({ topics: ["a"], body: "reply", inReplyTo: parent.ok ? parent.message.id : "" });

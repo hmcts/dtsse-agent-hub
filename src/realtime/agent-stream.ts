@@ -22,7 +22,8 @@ export function directFrame(direct: StreamedDirect): string {
 
 /**
  * What `GET /api/agent/{agent_id}/stream` sends: every queued delivery on connect, then each new direct message to
- * the agent as its NOTIFY arrives.
+ * the agent, and each post that tagged it, as its NOTIFY arrives. Both are the same `delivery` row and leave as the
+ * same `direct` frame, so a client needs nothing new to receive a tagged post.
  *
  * The order on open is subscribe to the hub, wait for `LISTEN` to be active, then read the replay. A message
  * committed before the replay's read is in the replay; one committed after it is notified, because `LISTEN` was
@@ -65,7 +66,9 @@ export function agentStream(agentId: string, sources: AgentStreamSources): OnOpe
     };
 
     const unsubscribe = sources.hub.subscribe((event) => {
-      if (event.type === "direct" && event.target_agent_id === agentId) {
+      // A post that tagged this agent queued it a delivery, so from here on it is read, sent and acked exactly as a
+      // direct message is: the two events differ only in how the stream recognises one of its own.
+      if ((event.type === "direct" && event.target_agent_id === agentId) || (event.type === "tagged_post" && event.agent_id === agentId)) {
         const messageId = BigInt(event.message_id);
         enqueue(async () => {
           if (!sent.has(event.message_id)) {

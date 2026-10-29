@@ -15,6 +15,7 @@ export const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Ex
     { type: "direct", message_id: "14", target_agent_id: null, author_agent_id: "agent-a" },
     { type: "direct", message_id: "15", target_agent_id: "agent-b", author_agent_id: null }
   ],
+  tagged_post: [{ type: "tagged_post", message_id: "12", agent_id: "agent-b" }],
   agent_status: [{ type: "agent_status", agent_id: "agent-a", owner_oid: "oid-a", status: "offline" }],
   agent_skills: [{ type: "agent_skills", agent_id: "agent-a", owner_oid: "oid-a" }],
   agent_question: [{ type: "agent_question", agent_id: "agent-a", owner_oid: "oid-a" }],

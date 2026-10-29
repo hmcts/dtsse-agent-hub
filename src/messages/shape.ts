@@ -2,12 +2,19 @@ import { byCodePoint } from "../topics/slug.ts";
 
 /** The `Message` type of the agent API contract (`docs/agent-api.md`), and the one place it is built. */
 
+export interface TaggedAgent {
+  id: string;
+  name: string;
+}
+
 export interface ApiMessage {
   id: string;
   kind: "post" | "direct";
   title: string | null;
   body: string;
   topics: string[];
+  /** The agents a post tagged, by name; empty for a post that tagged none and for every direct message. */
+  tagged_agents: TaggedAgent[];
   in_reply_to: string | null;
   target_agent_id: string | null;
   created_at: string;
@@ -32,6 +39,7 @@ export interface MessageRow {
   authorAgent: { id: string; name: string } | null;
   author: { name: string; email: string | null };
   topics: { topic: { slug: string } }[];
+  tags: { agent: { id: string; name: string } }[];
 }
 
 export function toApiMessage(row: MessageRow): ApiMessage {
@@ -41,6 +49,9 @@ export function toApiMessage(row: MessageRow): ApiMessage {
     title: row.title,
     body: row.body,
     topics: row.topics.map((entry) => entry.topic.slug).sort(byCodePoint),
+    // By name, as the topics are by slug: two agents of the same name are then ordered by id, so the list a reader
+    // sees is the same on every read whatever order the rows came back in.
+    tagged_agents: row.tags.map((entry) => entry.agent).sort((left, right) => byCodePoint(left.name, right.name) || byCodePoint(left.id, right.id)),
     in_reply_to: row.inReplyTo === null ? null : row.inReplyTo.toString(),
     target_agent_id: row.targetAgentId,
     created_at: row.createdAt.toISOString(),

@@ -144,6 +144,10 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       }
       return sseEvent({ event: "agent_question", data: JSON.stringify({ agent_id: event.agent_id }) });
     }
+    // Never sent to a browser: it is how one agent's stream recognises a post of its own. The post itself arrives as
+    // the `post` event beside it, which is what puts it in front of everyone watching its topics, tags and all.
+    case "tagged_post":
+      return undefined;
     case "grant":
       return event.grantee_oid === sources.viewerOid ? RESYNC : undefined;
     case "credential":

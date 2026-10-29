@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type AgentRef,
   agentAccess,
+  agentLookup,
   attachmentDownload,
   type ConversationShare,
   canActAsVirtualAgent,
@@ -28,6 +29,7 @@ import {
   canSessionUseAttachment,
   canShareConversationWith,
   canStopAssistantAnswer,
+  canSuggestAgent,
   canSuggestPerson,
   canUseCredentialRoutes,
   canViewAgent,
@@ -47,6 +49,7 @@ import {
   peopleLookup,
   replyRoute,
   type SharedConversationRef,
+  tagRefusal,
   type UploadRef
 } from "./rules.ts";
 
@@ -972,6 +975,47 @@ describe("the people lookup rules", () => {
     it("should not offer the viewer themselves", () => {
       expect(canSuggestPerson(OWNER, { oid: OWNER })).toBe(false);
     });
+  });
+
+  describe("agentLookup", () => {
+    it("should take the same bounds as the people lookup, since the reasoning is the same", () => {
+      expect(agentLookup("  pcs  ")).toEqual({ ok: true, query: "pcs", limit: MAX_PEOPLE_SUGGESTIONS });
+      expect(agentLookup("p")).toEqual({ ok: false });
+    });
+  });
+
+  describe("canSuggestAgent", () => {
+    it("should offer an agent of anyone's, grant or no grant, since tagging needs none", () => {
+      expect(canSuggestAgent(TARGET)).toBe(true);
+      expect(canSuggestAgent(agentOf(STRANGER))).toBe(true);
+      expect(canSuggestAgent(LOCAL_CHAT_AGENT)).toBe(true);
+    });
+
+    it("should not offer a pod conversation's agent, which nobody may tag", () => {
+      expect(canSuggestAgent(POD_CHAT_AGENT)).toBe(false);
+    });
+  });
+});
+
+describe("tagRefusal", () => {
+  it("should let a post tag any agent, of any owner, with no grant between them", () => {
+    expect(tagRefusal(null, TARGET)).toBeUndefined();
+    expect(tagRefusal("agent-of-oid-stranger", TARGET)).toBeUndefined();
+    expect(tagRefusal(null, agentOf(STRANGER))).toBeUndefined();
+  });
+
+  it("should let a post tag a session on somebody's laptop, which is an ordinary agent", () => {
+    expect(tagRefusal(null, LOCAL_CHAT_AGENT)).toBeUndefined();
+  });
+
+  it("should refuse a pod conversation's agent, its owner's own post included", () => {
+    expect(tagRefusal(null, POD_CHAT_AGENT)).toBe("not_taggable");
+    expect(tagRefusal("agent-of-oid-owner", POD_CHAT_AGENT)).toBe("not_taggable");
+  });
+
+  it("should refuse an agent tagging itself, and not the same agent in a person's post", () => {
+    expect(tagRefusal(TARGET.id, TARGET)).toBe("itself");
+    expect(tagRefusal(null, TARGET)).toBeUndefined();
   });
 });
 
