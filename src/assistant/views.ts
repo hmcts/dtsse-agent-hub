@@ -1,4 +1,5 @@
 import { storedClientFeatures } from "../agents/client-features.ts";
+import { repoFileBase } from "../agents/github.ts";
 import { type Skill, storedSkills } from "../agents/skills.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import { agentQuestions, type QuestionView } from "../questions/views.ts";
@@ -167,6 +168,12 @@ export interface ConversationView {
   agentId: string;
   agentStatus: AgentStatus;
   /**
+   * Where a repo-relative path in an answer points, from the repo and branch the conversation's session registered;
+   * `null` when it reported no repo. A session working in a clone cites paths rather than URLs, and without this the
+   * whole of a `[text](path)` is shown as the text the author wrote.
+   */
+  repoBase: string | null;
+  /**
    * What the composer's "/" autocomplete offers: the skills the conversation's session reported. Empty until one has
    * registered, so a chat whose assistant is not running yet gets no list. No access check guards it, unlike the
    * hub's agent page: a conversation is only ever read by its owner, who is the only person who can message it.
@@ -207,7 +214,7 @@ export async function conversationView(db: Database, conversation: ConversationR
   // literals are not a claim about the agent that some rule elsewhere has to keep agreeing with.
   const agent = { id: agentId, ownerOid: conversation.ownerOid };
   const [current, artefact, jira, confluence, page, questions, fork] = await Promise.all([
-    db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true } }),
+    db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     readArtefact(db, conversation.id),
     readJiraExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),
@@ -225,6 +232,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     local: !hasPod(conversation),
     agentId,
     agentStatus: current?.status ?? "offline",
+    repoBase: repoFileBase(current?.repo ?? null, current?.branch ?? null),
     skills: storedSkills(current?.skills),
     clientFeatures: storedClientFeatures(current?.clientFeatures),
     sessionState: conversation.sessionState,

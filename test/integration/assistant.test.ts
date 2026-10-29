@@ -96,12 +96,14 @@ function register(
   token: string,
   sessionId: string,
   conversationId?: string,
-  reported: { skills?: { name: string; description: string }[]; clientFeatures?: string[] } = {}
+  reported: { skills?: { name: string; description: string }[]; clientFeatures?: string[]; repo?: string; branch?: string } = {}
 ): Promise<Response> {
   return pod(registerRoute.POST, token, "/api/agent/register", {}, "POST", {
     session_id: sessionId,
     name: "session",
     ...(conversationId === undefined ? {} : { conversation_id: conversationId }),
+    ...(reported.repo === undefined ? {} : { repo: reported.repo }),
+    ...(reported.branch === undefined ? {} : { branch: reported.branch }),
     ...(reported.skills === undefined ? {} : { skills: reported.skills }),
     // Left out unless a test is a newer client: a pod runs whatever client version its image booted with.
     ...(reported.clientFeatures === undefined ? {} : { client_features: reported.clientFeatures })
@@ -470,6 +472,22 @@ describe("conversations", () => {
       { name: "cft-explain", description: "Answer a what is X question" },
       { name: "cft-how-to", description: "Find a how-to recipe" }
     ]);
+  });
+
+  /** Where a repo-relative path in an answer resolves to, which is the registering session's repo and branch. */
+  it("should carry the session's repo and branch to the conversation page as a GitHub base, and none before it registers", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+
+    expect((await assistantConversation(VIEWER, id))?.repoBase).toBeNull();
+
+    await register(token, sessionId, id, { repo: "cft-workspace", branch: "feat/repo-relative-links" });
+    expect((await assistantConversation(VIEWER, id))?.repoBase).toBe("https://github.com/hmcts/cft-workspace/blob/feat/repo-relative-links/");
+
+    // A session with no branch to report — a detached HEAD, or a worktree git answered nothing for — still links.
+    await register(token, sessionId, id, { repo: "cft-workspace" });
+    expect((await assistantConversation(VIEWER, id))?.repoBase).toBe("https://github.com/hmcts/cft-workspace/blob/HEAD/");
   });
 
   it("should record each change of product, and leave it alone when it is the same", async () => {

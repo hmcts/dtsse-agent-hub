@@ -112,6 +112,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     local: false,
     agentId: AGENT,
     agentStatus: "idle",
+    repoBase: null,
     skills: [],
     clientFeatures: null,
     sessionState: null,
@@ -251,6 +252,34 @@ describe("ChatView thread", () => {
 
     expect(screen.getByRole("menuitem", { name: "Share" }).getAttribute("href")).toBe(`/assistant/${CONVERSATION}?share=1`);
     expect(screen.getByRole("menuitem", { name: "Fork" }).getAttribute("href")).toBe(`/assistant/${CONVERSATION}?fork=1`);
+  });
+
+  // What a session working in a clone actually wrote, which the reader saw as the raw markdown of it.
+  const FOLLOW_UPS =
+    "Follow-ups: [Decentralise a service](apps/ccd/docs/how-to/decentralise-a-service.md) (step-by-step), " +
+    "[Decentralised callbacks reference](apps/ccd/docs/reference/decentralised-callbacks.md)";
+  const CITED = page({ entries: [entry("2", { content: { text: FOLLOW_UPS } })] });
+
+  it("should link a repo path the assistant cited to GitHub when the conversation's session reported its repo", () => {
+    const view = conversation({ page: CITED, repoBase: "https://github.com/hmcts/cft-workspace/blob/master/" });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
+
+    const thread = screen.getByRole("list", { name: "Conversation" });
+    expect(within(thread).getByRole("link", { name: "Decentralise a service" }).getAttribute("href")).toBe(
+      "https://github.com/hmcts/cft-workspace/blob/master/apps/ccd/docs/how-to/decentralise-a-service.md"
+    );
+    expect(within(thread).getByRole("link", { name: "Decentralised callbacks reference" }).getAttribute("href")).toBe(
+      "https://github.com/hmcts/cft-workspace/blob/master/apps/ccd/docs/reference/decentralised-callbacks.md"
+    );
+    expect(within(thread).queryByText(/\]\(apps\/ccd/)).toBeNull();
+  });
+
+  it("should leave a cited repo path as the text it was written as when the session reported no repo", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: CITED })} templates={TEMPLATES} actions={actions()} />);
+
+    const thread = screen.getByRole("list", { name: "Conversation" });
+    expect(within(thread).queryByRole("link")).toBeNull();
+    expect(within(thread).getByText(FOLLOW_UPS)).toBeTruthy();
   });
 });
 

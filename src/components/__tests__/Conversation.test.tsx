@@ -299,6 +299,36 @@ describe("Conversation direct messages", () => {
     expect(screen.getAllByText("queued")).toHaveLength(1);
     expect(screen.getByText("delivered").closest("li")?.getAttribute("data-message-id")).toBe("1");
   });
+
+  const REPO_BASE = "https://github.com/hmcts/cft-workspace/blob/master/";
+  const CITED = "see [the guide](apps/ccd/docs/how-to/decentralise-a-service.md)";
+
+  it("should link a repo path this agent cited to its repo on GitHub", () => {
+    render(
+      view({
+        repoBase: REPO_BASE,
+        initial: page({
+          messages: [
+            message("1", {
+              body: CITED,
+              target_agent_id: null,
+              delivery: null,
+              author: { type: "agent", agent_id: AGENT, agent_name: "pcs", owner_name: "Bob", owner_email: null }
+            })
+          ]
+        })
+      })
+    );
+
+    expect(screen.getByRole("link", { name: "the guide" }).getAttribute("href")).toBe(`${REPO_BASE}apps/ccd/docs/how-to/decentralise-a-service.md`);
+  });
+
+  it("should leave a repo path as text when the message came from somewhere other than this agent", () => {
+    render(view({ repoBase: REPO_BASE, initial: page({ messages: [message("1", { body: CITED })] }) }));
+
+    expect(screen.queryByRole("link", { name: "the guide" })).toBeNull();
+    expect(screen.getByText(CITED)).toBeTruthy();
+  });
 });
 
 describe("Conversation skills", () => {
@@ -611,6 +641,24 @@ describe("Conversation transcript entries", () => {
 
     expect(screen.getAllByText("from the hub")).toHaveLength(1);
     expect(screen.getByText("from the hub").closest("li")?.getAttribute("data-message-id")).toBe("5");
+  });
+
+  it("should link a repo path in either side of a turn, since both were written in this agent's clone", () => {
+    const base = "https://github.com/hmcts/cft-workspace/blob/master/";
+    render(
+      view({
+        repoBase: base,
+        initial: page({
+          entries: [
+            entry("1", { role: "user", content: { text: "read [the parser](src/messages/markup.ts)" } }),
+            entry("2", { content: { text: "it is in [the tests](src/messages/markup.test.ts)" }, occurred_at: "2026-09-29T09:02:00.000Z" })
+          ]
+        })
+      })
+    );
+
+    expect(screen.getByRole("link", { name: "the parser" }).getAttribute("href")).toBe(`${base}src/messages/markup.ts`);
+    expect(screen.getByRole("link", { name: "the tests" }).getAttribute("href")).toBe(`${base}src/messages/markup.test.ts`);
   });
 });
 

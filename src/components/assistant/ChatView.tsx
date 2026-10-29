@@ -100,7 +100,7 @@ export function localOfflineNote(): string {
   return `This chat is a Claude Code session on your own computer, and it is not connected. Your message is kept and delivered when it reconnects, for up to ${duration(EXPIRE_AFTER_SECONDS)} offline.`;
 }
 
-function Item({ item, answerQuestion }: { item: ThreadItem; answerQuestion: AnswerQuestionAction }) {
+function Item({ item, answerQuestion, repoBase }: { item: ThreadItem; answerQuestion: AnswerQuestionAction; repoBase: string | null }) {
   if (item.type === "question") {
     return (
       <li>
@@ -158,7 +158,7 @@ function Item({ item, answerQuestion }: { item: ThreadItem; answerQuestion: Answ
       </span>
       <div className="min-w-0 flex-1 text-asst-body">
         <span className="sr-only">The assistant said:</span>
-        <AssistantMarkdown source={item.text} />
+        <AssistantMarkdown source={item.text} repoBase={repoBase} />
       </div>
     </li>
   );
@@ -441,7 +441,7 @@ export function ChatView({
             )}
             <ol aria-label="Conversation" className="flex flex-col gap-[26px]">
               {thread.map((item) => (
-                <Item key={item.key} item={item} answerQuestion={actions.answerQuestion} />
+                <Item key={item.key} item={item} answerQuestion={actions.answerQuestion} repoBase={view.repoBase} />
               ))}
             </ol>
             {doing.state === "idle" ? null : (

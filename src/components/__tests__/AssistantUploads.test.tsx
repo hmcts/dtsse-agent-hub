@@ -561,6 +561,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     local: false,
     agentId: AGENT,
     agentStatus: "idle",
+    repoBase: null,
     skills: [],
     clientFeatures: null,
     sessionState: null,
