@@ -178,17 +178,25 @@ a launch token travels into the same pod template. The orchestrator puts them in
 `gateway` pod it was sent none for. All three or none: `gatewaySettings` refuses a claim on a half-configured
 deployment rather than handing out a pod that boots and then fails every turn. Nothing in `cnp-flux-config` has to
 change for the route to work; the one step outside this repository is that
-`apim-subscription-dtsse-ai-gateway-bedrock-swe` in `sps-ai-kv-sbox` has to be copied into the `dtsse` vault as
+`apim-subscription-dtsse-ai-gateway-bedrock-swe` in `sps-ai-kv-stg` has to be copied into the `dtsse` vault as
 `agent-hub-ai-gateway-apim-key` before the chart ships, since that vault has no public endpoint and the hub's pods
 cannot start without a secret the chart names.
 
+**Which gateway, and why it is the staging one.** Both gateways are internal: APIM is `virtual_network_type =
+"Internal"` behind an App Gateway with no public listener, and each hostname resolves only inside the networks its
+private DNS zone is linked to. `ai-gateway.sandbox.platform.hmcts.net` resolves from the F5 VPN but not from a CFT
+cluster, so a pod given the sandbox pair boots, reports itself healthy, and then fails every turn with `ENOTFOUND` —
+stage 1's check mints its token with `az` and never calls the gateway, so it cannot catch this. `cnp-flux-config`'s
+plum-fastapi-backend is the precedent for which to use where: its `aat.yaml` calls staging and its `sbox.yaml` calls
+sandbox. The hostname, the audience and the APIM key are one set and always move together.
+
 Stage 1 builds the whole of the route's environment from the three and sets `HAI_ENV_READY=1`, because `hai`'s own
-`ai-gateway` route reads the APIM key from `sps-ai-kv-sbox`, which a pod cannot reach. The key is one service's
+`ai-gateway` route reads the APIM key from a `sps-ai-kv-*` vault, which a pod cannot reach. The key is one service's
 rather than one person's, so the orchestrator redacts it by value from every log line and every apply error it
 reports for that agent: the API server's refusal of an apply can quote the spec it was given, and an apply error is
 stored as the agent's `status_detail` and shown to its owner.
 
-**The sandbox gateway's APIM subscription is rate-limited to 30 requests a minute and 1000 a day**, counted across
+**The gateway's APIM subscription is rate-limited to 30 requests a minute and 1000 a day**, counted across
 the key rather than per caller, and every `gateway` pod shares the one key — so the ceiling is the whole route's, not
 each person's. Worth sizing a rollout against before adding people to the Entra group.
 
