@@ -558,6 +558,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     productLabel: "CCD",
     productHistory: [],
     stopHistory: [],
+    local: false,
     agentId: AGENT,
     agentStatus: "idle",
     skills: [],

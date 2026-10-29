@@ -17,6 +17,7 @@ import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
+import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { snippetOf } from "./search.ts";
 import { type Artefact, type ConversationRow, listConversations, readArtefact, type SessionState, searchConversations, unsentConversation } from "./store.ts";
@@ -50,6 +51,14 @@ export interface ConversationLink {
   product: string;
   productLabel: string;
   lastActiveAt: string;
+  /**
+   * Where the chat runs: `true` for a Claude Code session on the person's own computer, which has no pod behind it.
+   *
+   * On every link rather than only the sidebar's, because it is the one thing about a chat that no title can say and
+   * that changes what the chat can do — a local one takes no files, cannot be stopped from here and answers only
+   * while the laptop is connected. `hasPod` is what decides it, so the screens and the stores cannot disagree.
+   */
+  local: boolean;
 }
 
 export const UNTITLED = "New chat";
@@ -73,13 +82,14 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
   };
 }
 
-function toLink(row: Pick<ConversationRow, "id" | "title" | "product" | "lastActiveAt">): ConversationLink {
+function toLink(row: Pick<ConversationRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId">): ConversationLink {
   return {
     id: row.id,
     title: row.title ?? UNTITLED,
     product: row.product,
     productLabel: productLabel(row.product),
-    lastActiveAt: row.lastActiveAt.toISOString()
+    lastActiveAt: row.lastActiveAt.toISOString(),
+    local: !hasPod(row)
   };
 }
 
@@ -144,6 +154,12 @@ export interface ConversationView {
   productHistory: { product: string; at: string }[];
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
   stopHistory: { at: string }[];
+  /**
+   * Where the chat runs, as `ConversationLink.local`. The one thing the chat's own screen reads it for is which of
+   * its controls make sense: everything a pod does for a conversation — carrying a file to its session, interrupting
+   * a turn, starting one on demand — there is nobody to do for a session on somebody's laptop.
+   */
+  local: boolean;
   agentId: string;
   agentStatus: AgentStatus;
   /**
@@ -202,6 +218,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     productLabel: productLabel(conversation.product),
     productHistory: conversation.productHistory,
     stopHistory: conversation.stopHistory,
+    local: !hasPod(conversation),
     agentId,
     agentStatus: current?.status ?? "offline",
     skills: storedSkills(current?.skills),

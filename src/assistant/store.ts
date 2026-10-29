@@ -293,6 +293,8 @@ export async function conversationIdsOf(db: Database, virtualAgentId: string): P
 export interface ConversationMatchRow {
   id: string;
   ownerOid: string;
+  /** Null for a match that is a session on the owner's own computer, which a result says as the sidebar's list does. */
+  virtualAgentId: string | null;
   title: string | null;
   product: string;
   lastActiveAt: Date;
@@ -327,7 +329,9 @@ export async function searchConversations(db: Database, ownerOid: string, query:
   if (terms.length === 0) {
     return [];
   }
-  const rows = await db.$queryRaw<{ id: string; ownerOid: string; title: string | null; product: string; lastActiveAt: Date; excerpt: string | null }[]>`
+  const rows = await db.$queryRaw<
+    { id: string; ownerOid: string; virtualAgentId: string | null; title: string | null; product: string; lastActiveAt: Date; excerpt: string | null }[]
+  >`
     WITH query AS (
       -- quote_literal is what makes a typed term safe to put in a query. A single-quoted string in a tsquery is
       -- re-lexed by the text-search parser, and several tokens out of one become a phrase, joined by <->, never
@@ -344,7 +348,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
       -- LEFT JOIN, with the null counted in: a conversation with no pod is one of the viewer's own chats and is
       -- searchable like any other. An inner join would drop every local chat from the sidebar's search, since there
       -- is no virtual_agent row for it to match.
-      SELECT c.id, c.owner_oid, c.title, c.product, c.last_active_at
+      SELECT c.id, c.owner_oid, c.virtual_agent_id, c.title, c.product, c.last_active_at
         FROM assistant_conversation c
         LEFT JOIN virtual_agent v ON v.id = c.virtual_agent_id
        WHERE c.owner_oid = ${ownerOid} AND (v.id IS NULL OR v.desired <> 'deleted')
@@ -364,7 +368,8 @@ export async function searchConversations(db: Database, ownerOid: string, query:
         LEFT JOIN in_body b ON b.conversation_id = o.id AND b.n = q.n
        WHERE to_tsvector('english', COALESCE(o.title, '')) @@ q.tsq OR b.body IS NOT NULL
     )
-    SELECT o.id::text AS id, o.owner_oid AS "ownerOid", o.title, o.product, o.last_active_at AS "lastActiveAt", e.excerpt
+    SELECT o.id::text AS id, o.owner_oid AS "ownerOid", o.virtual_agent_id::text AS "virtualAgentId", o.title, o.product,
+           o.last_active_at AS "lastActiveAt", e.excerpt
       FROM owned o
       JOIN (SELECT id FROM hit GROUP BY id HAVING count(*) = (SELECT count(*) FROM query)) matched ON matched.id = o.id
       LEFT JOIN LATERAL (
@@ -455,8 +460,18 @@ export async function createLocalConversation(db: Database, session: { ownerOid:
 /**
  * Marks the conversation as needing a session, and starts its assistant if it is stopped. A wake already pending
  * keeps its time, so the sessions stream replays wakes in the order they were asked for.
+ *
+ * Nothing at all for a conversation with no pod, and the column is left null rather than written and left for
+ * something to clear. A wake is an instruction to a pod's supervisor — `pendingWakes` selects on the virtual agent,
+ * so no stream carries one for a conversation that has none — and nothing clears it either: `linkLocalSession`
+ * deliberately does not, because a laptop registering is not a supervisor reporting it started what the hub asked
+ * for, and `reportSessions` only ever sees a pod's own conversations. So a wake recorded here would be a row that
+ * said a session had been asked for, for ever, with nobody having been asked and nothing able to answer.
  */
 export async function requestWake(prisma: PrismaClient, conversation: ConversationRow, now: Date = new Date()): Promise<void> {
+  if (!hasPod(conversation)) {
+    return;
+  }
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`
       UPDATE assistant_conversation
@@ -465,8 +480,7 @@ export async function requestWake(prisma: PrismaClient, conversation: Conversati
     `;
     await announce(tx, conversation);
   });
-  // A conversation with no pod has nothing to start: the wake is recorded on the row either way.
-  const assistant = hasPod(conversation) ? await findVirtualAgent(prisma, conversation.virtualAgentId) : undefined;
+  const assistant = await findVirtualAgent(prisma, conversation.virtualAgentId);
   if (assistant?.desired === "stopped") {
     await setDesired(prisma, conversation.ownerOid, assistant.id, "running", now);
   }

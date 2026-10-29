@@ -139,6 +139,15 @@ export function DownloadIcon() {
   );
 }
 
+export function LaptopIcon() {
+  return (
+    <Icon>
+      <rect x="4.5" y="4" width="11" height="8" rx="1" />
+      <path d="M2.5 15.5h15" />
+    </Icon>
+  );
+}
+
 export function ChatIcon() {
   return (
     <Icon>

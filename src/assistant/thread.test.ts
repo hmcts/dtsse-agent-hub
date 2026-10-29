@@ -111,6 +111,113 @@ describe("threadItems", () => {
   });
 });
 
+describe("threadItems for a local chat", () => {
+  /** A developer's own session: what they typed at it, what it ran, a compact summary, and what it answered. */
+  function session() {
+    return conversationItems(
+      [],
+      [
+        entry("user", { text: "why did that delivery expire?" }, T(1)),
+        entry("tool_use", { id: "t1", name: "Grep", input: { pattern: "expireDeliveries" } }, T(2)),
+        entry("tool_result", { tool_use_id: "t1", output: "3 matches", is_error: false }, T(3)),
+        entry("system", { text: "This session is being continued from…" }, T(4)),
+        entry("assistant", { text: "It ran on the offline clock." }, T(5))
+      ]
+    );
+  }
+
+  it("should show what was typed at the laptop, which is the only record a local chat has of what it was asked", () => {
+    const thread = threadItems(session(), [], [], true);
+
+    expect(thread.map((item) => item.type)).toEqual(["user", "tool", "assistant"]);
+    expect(thread[0]).toEqual({ type: "user", key: expect.any(String), at: T(1), text: "why did that delivery expire?", delivery: null, attachments: [] });
+  });
+
+  it("should leave out the compact summary a long session writes to itself, as a pod chat does", () => {
+    expect(threadItems(session(), [], [], true).map((item) => "text" in item && item.text)).not.toContain("This session is being continued from…");
+  });
+
+  it("should leave a pod chat's thread exactly as it was, showing neither its tool calls nor any user entry", () => {
+    expect(threadItems(session()).map((item) => item.type)).toEqual(["assistant"]);
+  });
+
+  it("should show a message sent from the composer once, and not again as the session's echo of it", () => {
+    const sent = person("and now the other one", T(1));
+    const items = conversationItems([sent], [entry("user", { text: "[agent-hub] Direct message #1\n\nand now the other one" }, T(2), sent.id)]);
+
+    expect(threadItems(items, [], [], true).map((item) => [item.type, "text" in item ? item.text : ""])).toEqual([["user", "and now the other one"]]);
+  });
+
+  it("should leave a prompt whose words were redacted out rather than show an empty bubble", () => {
+    const items = conversationItems([], [{ ...entry("user", { redacted: "an access token" }, T(1)), redacted: true }]);
+
+    expect(threadItems(items, [], [], true)).toEqual([]);
+  });
+});
+
+describe("threadItems tool rows", () => {
+  function rows(entries: TranscriptEntryView[]) {
+    return threadItems(conversationItems([], entries), [], [], true);
+  }
+
+  it("should say which tool ran and what it was given, and nothing about what came back", () => {
+    const thread = rows([
+      entry("tool_use", { id: "t1", name: "Bash", input: { command: "yarn test", description: "Run the unit suite" } }, T(1)),
+      entry("tool_result", { tool_use_id: "t1", output: "4353 passed", is_error: false }, T(2))
+    ]);
+
+    expect(thread).toEqual([{ type: "tool", key: expect.any(String), at: T(1), name: "Bash", summary: "Run the unit suite", failed: false }]);
+  });
+
+  it("should mark the call the result that answered it said had failed", () => {
+    const thread = rows([
+      entry("tool_use", { id: "t1", name: "Bash", input: { command: "yarn lint" } }, T(1)),
+      entry("tool_result", { tool_use_id: "t1", output: "1 error", is_error: true }, T(2))
+    ]);
+
+    expect(thread).toEqual([expect.objectContaining({ name: "Bash", summary: "yarn lint", failed: true })]);
+  });
+
+  it("should leave a call nothing has answered yet neutral, since it has not failed", () => {
+    expect(rows([entry("tool_use", { id: "t1", name: "Read", input: { file_path: "src/x.ts" } }, T(1))])).toEqual([
+      expect.objectContaining({ name: "Read", summary: "src/x.ts", failed: false })
+    ]);
+  });
+
+  // A redacted call keeps `{id, name, redacted}`, so the row still says which tool ran; its input is what has gone.
+  it("should still name the tool when the call itself was redacted", () => {
+    const thread = rows([{ ...entry("tool_use", { id: "t1", name: "Bash", redacted: "an access token" }, T(1)), redacted: true }]);
+
+    expect(thread).toEqual([expect.objectContaining({ name: "Bash", summary: "", failed: false })]);
+  });
+
+  it("should still show a row for a call that kept nothing but the pattern it matched", () => {
+    const thread = rows([{ ...entry("tool_use", { redacted: "an access token" }, T(1)), redacted: true }]);
+
+    expect(thread).toEqual([expect.objectContaining({ name: "Tool call", summary: "", failed: false })]);
+  });
+
+  // A redacted result keeps no `tool_use_id`, so nothing can say which call it answered. Reading it as this call's
+  // would put "failed" against a call that may well have worked.
+  it("should leave a call neutral when the result that could have answered it cannot be paired", () => {
+    const thread = rows([
+      entry("tool_use", { id: "t1", name: "Bash", input: { command: "git push" } }, T(1)),
+      { ...entry("tool_result", { redacted: "an access token" }, T(2)), redacted: true }
+    ]);
+
+    expect(thread).toEqual([expect.objectContaining({ name: "Bash", failed: false })]);
+  });
+
+  it("should keep a call after the words it shares an instant with, which is the order the session wrote them", () => {
+    const thread = rows([
+      entry("assistant", { text: "Let me look at that file." }, T(1)),
+      entry("tool_use", { id: "t1", name: "Read", input: { file_path: "src/x.ts" } }, T(1))
+    ]);
+
+    expect(thread.map((item) => item.type)).toEqual(["assistant", "tool"]);
+  });
+});
+
 describe("threadItems questions", () => {
   it("should place a question the assistant asked in time, with its options for the card to show", () => {
     // Arrange
@@ -206,6 +313,45 @@ describe("progress", () => {
     const items = conversationItems([person("hi", T(1), "queued")], []);
 
     expect(state(items, "offline", "queued")).toEqual({ state: "waking", label: "Waiting for a free assistant…" });
+  });
+
+  // Neither of the two wordings above is true of a laptop: nothing is starting it and there is no queue it could be
+  // in. The message is not lost — it waits on the stream the session opens when it comes back — so the line says
+  // what is actually the case.
+  it("should say the session is not connected when the chat is one on the person's own computer", () => {
+    const items = conversationItems([person("hi", T(1), "queued")], []);
+
+    expect(progress(items, threadItems(items), "offline", null, true)).toEqual({ state: "waking", label: "Waiting for your session to reconnect…" });
+  });
+
+  // `sessionState` is a pod supervisor's report and is null for every local chat, so the queued wording cannot be
+  // reached there; this is what holds that true if one is ever written by something else.
+  it("should say the same for a local chat however its session state reads", () => {
+    const items = conversationItems([person("hi", T(1), "queued")], []);
+
+    expect(progress(items, threadItems(items), "offline", "queued", true)).toMatchObject({ label: "Waiting for your session to reconnect…" });
+  });
+
+  it("should wait on a prompt typed at the laptop as it waits on a message, neither having been answered", () => {
+    const items = conversationItems([], [entry("user", { text: "fix the test" }, T(1))]);
+
+    expect(progress(items, threadItems(items, [], [], true), "offline", null, true)).toEqual({
+      state: "waking",
+      label: "Waiting for your session to reconnect…"
+    });
+  });
+
+  // A local chat's thread ends on a tool row for most of every answer. Read as the last thing to have happened, it
+  // would take the line away from the message that is in fact still waiting on a session nobody can reach.
+  it("should still wait on the person's message when the thread ends on a tool call", () => {
+    const items = conversationItems(
+      [person("look into it", T(1), "queued")],
+      [entry("tool_use", { id: "t1", name: "Grep", input: { pattern: "expireDeliveries" } }, T(2))]
+    );
+    const thread = threadItems(items, [], [], true);
+
+    expect(thread.at(-1)?.type).toBe("tool");
+    expect(progress(items, thread, "offline", null, true)).toEqual({ state: "waking", label: "Waiting for your session to reconnect…" });
   });
 
   it("should name the latest tool since the message when the assistant is working on it", () => {
@@ -359,6 +505,11 @@ describe("progressLabel and progressAnnouncement", () => {
   it.each([
     [{ state: "idle" } as const, "", ""],
     [{ state: "waking", label: "Starting your assistant…" } as const, "Starting your assistant…", "Starting your assistant"],
+    [
+      { state: "waking", label: "Waiting for your session to reconnect…" } as const,
+      "Waiting for your session to reconnect…",
+      "Waiting for your session to reconnect"
+    ],
     [{ state: "working", label: "Reading", helpers: 0 } as const, "Reading", "Working on your answer"],
     [
       { state: "working", label: "Working through it", helpers: 1 } as const,

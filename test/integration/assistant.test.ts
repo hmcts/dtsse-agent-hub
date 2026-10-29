@@ -699,6 +699,32 @@ describe("conversations", () => {
     expect(await prisma.delivery.count({ where: { agentId: laptop.id } })).toBe(1);
   });
 
+  /**
+   * Where a chat runs is on every view of it, from `hasPod` and nowhere else, because the screens change on it: the
+   * sidebar marks it, and its own page shows the tool calls, hides the attach and offers no stop.
+   */
+  it("should say on every view of a chat whether it is a session on the person's own computer", async () => {
+    const { token } = await startedAssistant();
+    const onPod = ((await actions.startConversation({ product: "general", body: "on my assistant" })) as { id: string }).id;
+    await register(token, (await sessionOf(onPod)).sessionId, onPod);
+    await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+    const onLaptop = (await prisma.assistantConversation.findFirstOrThrow({ where: { virtualAgentId: null } })).id;
+
+    expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
+    expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
+    const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
+    expect(new Map(listed.map((item) => [item.id, item.local]))).toEqual(
+      new Map([
+        [onLaptop, true],
+        [onPod, false]
+      ])
+    );
+  });
+
   it("should wake a conversation when its composer is focused and the session is offline", async () => {
     const { id: assistantId, token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
@@ -755,6 +781,54 @@ describe("the chat gate", () => {
 
     expect((await openAssistant(VIEWER)).chat).toBe("open");
     expect(await actions.startConversation({ product: "general", body: "hello" })).toMatchObject({ ok: true });
+  });
+
+  /**
+   * The gate tests the credentials a *pod* needs, so it has nothing to say about a chat that is a session on the
+   * person's own computer: that session is already running, on their own Claude Code and their own sign-ins, and all
+   * the hub has to do is carry the message to it. Gated, somebody who had never set up an Assistant could read their
+   * laptop chats and not answer one, refused in the name of accounts the session never touches.
+   */
+  it("should let the person send to a chat on their own computer with nothing connected at all", async () => {
+    await insertUser(ALICE);
+    const laptop = await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+    const id = (await prisma.assistantConversation.findFirstOrThrow()).id;
+    await storedOnly();
+
+    expect(await actions.sendAssistantMessage({ conversationId: id, body: "carry on where you left off" })).toMatchObject({ ok: true });
+
+    expect(await prisma.delivery.count({ where: { agentId: laptop.id, state: "queued" } })).toBe(1);
+  });
+
+  /**
+   * Nothing to wake, and nothing that would ever clear the column if it were written: `pendingWakes` selects on the
+   * virtual agent, `linkLocalSession` deliberately leaves the wake alone, and `reportSessions` only sees a pod's own
+   * conversations. A wake here would be a row claiming for ever that a session had been asked for.
+   */
+  it("should ask for no wake on a chat with no pod, whether a message is sent to it or its box is focused", async () => {
+    await insertUser(ALICE);
+    await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+    const id = (await prisma.assistantConversation.findFirstOrThrow()).id;
+    const yesterday = new Date(Date.now() - 86_400_000);
+    await prisma.assistantConversation.update({ where: { id }, data: { lastActiveAt: yesterday } });
+    await prisma.agent.updateMany({ where: { sessionId: "alices-laptop" }, data: { status: "offline" } });
+    await storedOnly();
+
+    expect(await actions.sendAssistantMessage({ conversationId: id, body: "when you are back" })).toMatchObject({ ok: true });
+    expect(await actions.warmConversation({ conversationId: id })).toEqual({ ok: true });
+
+    const conversation = (await findConversation(prisma, ALICE.oid, id))!;
+    expect(conversation.wakeRequestedAt).toBeNull();
+    // The chat still moves up the sidebar when something is sent to it: `touchConversation` does that, not the wake.
+    expect(conversation.lastActiveAt.getTime()).toBeGreaterThan(yesterday.getTime());
   });
 
   it("should not hold the person when the hub cannot read the credentials", async () => {

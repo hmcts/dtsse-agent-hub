@@ -3,6 +3,7 @@ import type { Database } from "../store/prisma.ts";
 import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
+import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import type { SharedConversationRow } from "./shares.ts";
 import { readArtefact } from "./store.ts";
@@ -49,6 +50,11 @@ export type SharedThreadItem =
  * assistant asked, which are controls rather than words — a recipient must not answer one, and an answered question
  * is quoted back in the owner's own answering message, which a share does show.
  *
+ * The tool calls go too. A share carries the words, and the one reader a tool row is for is the developer whose own
+ * session made the call: it names a path on their disk, a command they ran or a repository they were in, none of
+ * which is anything the chat was about. `sharedConversation` asks for the thread without them in any case, since
+ * only a local chat has them; this is the type refusing to carry one that reached here another way.
+ *
  * Every other kind of item passes through, which is deliberate: a kind the thread grows is part of what was said
  * until someone decides otherwise, and the type above is what makes that decision explicit rather than silent.
  */
@@ -59,7 +65,7 @@ export function sharedThreadItems(items: readonly ThreadItem[]): SharedThreadIte
       shared.push({ type: "user", key: item.key, at: item.at, text: item.text, attachmentCount: item.attachments.length });
     } else if (item.type === "assistant") {
       shared.push({ type: "assistant", key: item.key, at: item.at, text: item.text });
-    } else if (item.type !== "question") {
+    } else if (item.type !== "question" && item.type !== "tool") {
       shared.push(item);
     }
   }
@@ -152,7 +158,10 @@ export async function sharedConversation(
     title: row.title ?? UNTITLED,
     productLabel: productLabel(row.product),
     ownerName: row.owner.name,
-    thread: sharedThreadItems(threadItems(items, productMarks(row.productHistory), stopMarks(row.stopHistory))),
+    // `local` so a shared laptop chat reads as a conversation rather than as a monologue of answers: the person's
+    // prompts are transcript entries there, not hub messages. `sharedThreadItems` drops the tool rows it also lets
+    // through, so what a recipient gets is still the words alone.
+    thread: sharedThreadItems(threadItems(items, productMarks(row.productHistory), stopMarks(row.stopHistory), !hasPod(conversation))),
     forked: forkedView(row),
     // `olderBefore` is the entry the owner's own page would ask for the previous page before; here it only says that
     // there is one.

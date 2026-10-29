@@ -109,6 +109,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     productLabel: "CCD",
     productHistory: [],
     stopHistory: [],
+    local: false,
     agentId: AGENT,
     agentStatus: "idle",
     skills: [],
@@ -612,6 +613,81 @@ describe("ChatView stopping an answer", () => {
     // The live region stays in the page with nothing in it, which is how it says the answer has settled.
     expect(screen.getByRole("status").textContent).toBe("");
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+});
+
+describe("ChatView on a local chat", () => {
+  /** A chat that is a Claude Code session on the person's own computer: the same chat, with no pod behind it. */
+  function laptop(overrides: Partial<ConversationView> = {}): ConversationView {
+    return conversation({ local: true, ...overrides });
+  }
+
+  it("should show the prompts typed at the laptop and a quiet row per tool call", () => {
+    const transcript = page({
+      entries: [
+        entry("1", { role: "user", content: { text: "why did that delivery expire?" } }),
+        entry("2", { role: "tool_use", content: { id: "t1", name: "Grep", input: { pattern: "expireDeliveries" } } }),
+        entry("3", { role: "tool_result", content: { tool_use_id: "t1", output: "three matches in two files", is_error: false } }),
+        entry("4", { role: "assistant", content: { text: "It ran on the offline clock." } })
+      ]
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={laptop({ page: transcript })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByText("why did that delivery expire?")).toBeTruthy();
+    expect(screen.getByText("Grep")).toBeTruthy();
+    expect(screen.getByText("expireDeliveries")).toBeTruthy();
+    // What came back is the session's working-out and stays out, as it does in a chat on a pod.
+    expect(screen.queryByText("three matches in two files")).toBeNull();
+  });
+
+  // The laptop client does claim `stop`, and means it — it is the same client — but the interrupt is sent to the
+  // conversation's pod, so `stopAnswer` finds nothing running for one that has none.
+  it("should offer no stop mid-answer, since there is no pod to send the interrupt to", () => {
+    const working = laptop({ agentStatus: "busy", clientFeatures: ["stop"], page: page({ messages: [message("1")] }) });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={working} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByText("Thinking")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+
+  it("should offer no way of attaching a file, which this chat cannot take", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={laptop()} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByRole("button", { name: "Add a template" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Attach a file/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add a template" }));
+    expect(screen.queryByRole("menuitem", { name: "Attach files" })).toBeNull();
+  });
+
+  // The box stays live: the message queues and is handed over when the session comes back. What it must not do is
+  // promise that for ever, so the note carries the bound the sweep actually enforces.
+  it("should say a message to a session that is not connected is kept, and for how long", () => {
+    const offline = laptop({ agentStatus: "offline", page: page({ messages: [message("1")] }) });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={offline} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByText(/not connected/)).toBeTruthy();
+    expect(screen.getByText(/for up to 24 hours offline/)).toBeTruthy();
+    expect(screen.getByText("Waiting for your session to reconnect")).toBeTruthy();
+    // Said rather than shut: there is something to be gained by typing to a laptop that is away.
+    expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it("should say nothing about a connected session, and ask for no wake when the box is focused", () => {
+    const live = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={laptop({ agentStatus: "idle" })} templates={TEMPLATES} actions={live} />);
+    fireEvent.focus(screen.getByRole("textbox", { name: "Message" }));
+
+    expect(screen.queryByText(/not connected/)).toBeNull();
+    expect(live.warm).not.toHaveBeenCalled();
+  });
+
+  // Nothing starts a laptop session, so the warm has nothing to ask for; the chat on a pod is what it is for.
+  it("should still warm a chat on a pod when its session is offline", () => {
+    const pod = actions();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ agentStatus: "offline" })} templates={TEMPLATES} actions={pod} />);
+    fireEvent.focus(screen.getByRole("textbox", { name: "Message" }));
+
+    expect(pod.warm).toHaveBeenCalledWith({ conversationId: CONVERSATION });
   });
 });
 

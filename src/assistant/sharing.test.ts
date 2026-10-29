@@ -43,6 +43,21 @@ describe("sharedThreadItems", () => {
     expect(sharedThreadItems(thread)).toEqual(thread);
   });
 
+  // Only a local chat has them, and `sharedConversation` asks for a thread without them; this is the type refusing
+  // one that reached here another way. A tool row names a path on the owner's disk or a command they ran, none of
+  // which is what they shared.
+  it("should leave out a tool call, which is the owner's own session's working-out", () => {
+    const thread: ThreadItem[] = [
+      user(),
+      { type: "tool", key: "t2", at: "2026-10-25T09:00:01.000Z", name: "Read", summary: "/home/alice/notes.md", failed: false }
+    ];
+
+    const shared = sharedThreadItems(thread);
+
+    expect(shared.map((item) => item.type)).toEqual(["user"]);
+    expect(JSON.stringify(shared)).not.toContain("/home/alice/notes.md");
+  });
+
   it("should reduce the files on a message to how many there were, naming none of them", () => {
     const shared = sharedThreadItems([user({ attachments: [ATTACHMENT, { ...ATTACHMENT, id: "upload-2", name: "tenancy.docx" }] })]);
 

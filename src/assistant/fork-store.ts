@@ -6,6 +6,7 @@ import { conversationItems, mergeEntries, type TranscriptEntryView } from "../tr
 import { agentConversation } from "../transcripts/views.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { FORK_CONTEXT_FILE_NAME, FORK_CONTEXT_MEDIA_TYPE, FORKED_SELECT, forkContextMarkdown, forkedView, forkThread } from "./forks.ts";
+import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { conversationRef, forksOf, type SharedChatLink, type SharedConversationRow, type SharePerson } from "./shares.ts";
 import { productMarks, type SharedThreadItem, sharedThreadItems, stopMarks } from "./sharing.ts";
@@ -142,7 +143,9 @@ async function sourceThread(
   }
   const items = conversationItems([...messages.values()], entries);
   return {
-    thread: sharedThreadItems(threadItems(items, productMarks(row.productHistory), stopMarks(row.stopHistory))),
+    // `local` for the same reason `sharedConversation` passes it: on a laptop chat the person's prompts are transcript
+    // entries rather than hub messages, so a copy taken without it would carry the answers and not the questions.
+    thread: sharedThreadItems(threadItems(items, productMarks(row.productHistory), stopMarks(row.stopHistory), !hasPod(conversation))),
     earlierHidden: page.olderBefore !== null
   };
 }

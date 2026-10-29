@@ -290,6 +290,23 @@ describe("a chat with no assistant behind it", () => {
     expect(await found(ALICE, "possession")).toEqual(["A possession claim with no assistant"]);
   });
 
+  // The sidebar's results carry the same marker as the rows in the list below them, so the search has to read the
+  // column that decides it rather than leave every result looking like a chat on a pod.
+  it("should say of each result whether it is a session on the person's own computer", async () => {
+    const local = await chat(ALICE, ["A possession claim with no assistant"]);
+    await withoutPod(local);
+    await chat(ALICE, ["A possession claim on my assistant"]);
+
+    const matches = await conversationMatches(prisma, ALICE.oid, "possession");
+
+    expect(new Map(matches.map((match) => [match.title, match.local]))).toEqual(
+      new Map([
+        ["A possession claim with no assistant", true],
+        ["A possession claim on my assistant", false]
+      ])
+    );
+  });
+
   it("should find nothing of another person's chat that has no assistant either", async () => {
     const local = await chat(BOB, ["Bob asked about a possession claim"]);
     await withoutPod(local);

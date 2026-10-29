@@ -10,7 +10,7 @@ const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh: () => undefined }), usePathname: () => "/assistant" }));
 
 function match(id: string, title: string, snippet: string | null = null): ConversationMatch {
-  return { id, title, product: "pcs", productLabel: "Possession Claims (PCS)", lastActiveAt: "2026-10-24T09:00:00.000Z", snippet };
+  return { id, title, product: "pcs", productLabel: "Possession Claims (PCS)", lastActiveAt: "2026-10-24T09:00:00.000Z", local: false, snippet };
 }
 
 const search = vi.fn<(query: string, signal: AbortSignal) => Promise<ConversationMatch[]>>();
@@ -87,6 +87,17 @@ describe("ConversationSearch", () => {
     const results = screen.getByRole("listbox", { name: "Chats found" });
     expect(within(results).getByRole("option", { name: "Possession claim help" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe("1 chat found.");
+  });
+
+  // A result is the same chat as the row in the list below, so it carries the same marker: a local chat found by
+  // searching must not be the one place it looks like any other.
+  it("should mark a chat on the person's own computer among the results", async () => {
+    search.mockResolvedValue([{ ...match("c1", "Fixing the sweep"), local: true }]);
+    render_();
+
+    await type("sweep");
+
+    expect(screen.getByRole("option", { name: /On your computer/ }).textContent).toContain("On your computer: Fixing the sweep");
   });
 
   it("should show where a chat matched when the match was in a message rather than its title", async () => {
