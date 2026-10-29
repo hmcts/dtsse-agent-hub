@@ -57,8 +57,7 @@ change it first when the contract changes.
 - **Schema changes are a new directory under `prisma/migrations/`** with hand-written SQL, plus the matching change to
   `schema.prisma`. Never edit an applied migration: its checksum is in the ledger. Table names are singular; `"user"`
   is quoted everywhere because it is reserved.
-- **Dependencies are pinned exactly**, with no `^` or `~`, at the same versions as dtsse-github-metrics where both use
-  a package.
+- **Dependencies are pinned exactly**, with no `^` or `~`.
 - **Never a bare `.sort()`.** Pass a comparator; strings sort by code point.
 - **Comments say why**, state the current rule rather than its history, and are changed with the behaviour they
   describe.
