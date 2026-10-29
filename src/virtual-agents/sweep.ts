@@ -156,18 +156,19 @@ export async function sweepVirtualAgents(prisma: PrismaClient, options: VirtualA
 }
 
 export interface VirtualAgentSweeper {
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 /** Runs `sweepVirtualAgents` on an interval, with the timer unreferenced as the other sweeps' are. */
 export function startVirtualAgentSweep(prisma: PrismaClient, intervalMs: number = VIRTUAL_AGENT_SWEEP_INTERVAL_MS): VirtualAgentSweeper {
   let running = false;
+  let tick: Promise<void> = Promise.resolve();
   const timer = setInterval(() => {
     if (running) {
       return;
     }
     running = true;
-    sweepVirtualAgents(prisma)
+    tick = sweepVirtualAgents(prisma)
       .then((result) => {
         const stops =
           result === undefined
@@ -189,5 +190,12 @@ export function startVirtualAgentSweep(prisma: PrismaClient, intervalMs: number 
       });
   }, intervalMs);
   timer.unref();
-  return { stop: () => clearInterval(timer) };
+  // Waits for the tick in flight as the offline sweep's `stop` does, and for the same reason: its transaction is
+  // still holding locks the caller's next statement may want.
+  return {
+    stop: async () => {
+      clearInterval(timer);
+      await tick;
+    }
+  };
 }

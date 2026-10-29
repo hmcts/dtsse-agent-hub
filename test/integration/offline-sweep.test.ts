@@ -190,7 +190,7 @@ describe("startOfflineSweep", () => {
 
       expect(info.mock.calls).toEqual([["offline sweep: 1 silent agents marked offline, 1 queued deliveries expired"]]);
     } finally {
-      sweeper.stop();
+      await sweeper.stop();
       await other.end();
     }
   });
@@ -209,7 +209,7 @@ describe("startOfflineSweep", () => {
     try {
       await until(() => warn.mock.calls.length >= 2);
     } finally {
-      sweeper.stop();
+      await sweeper.stop();
     }
 
     expect(warn.mock.calls.slice(0, 2)).toEqual([["the offline sweep failed: database gone"], ["the offline sweep failed: not an error"]]);

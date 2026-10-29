@@ -54,18 +54,19 @@ export async function sweepOffline(prisma: PrismaClient, options: SweepOptions =
 }
 
 export interface Sweeper {
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 /** Runs `sweepOffline` on an interval. The timer is unreferenced: the server's socket keeps the process alive, not this. */
 export function startOfflineSweep(prisma: PrismaClient, intervalMs: number = SWEEP_INTERVAL_MS): Sweeper {
   let running = false;
+  let tick: Promise<void> = Promise.resolve();
   const timer = setInterval(() => {
     if (running) {
       return;
     }
     running = true;
-    sweepOffline(prisma)
+    tick = sweepOffline(prisma)
       .then((result) => {
         if (result !== undefined && (result.offline.length > 0 || result.expired > 0)) {
           console.info(`offline sweep: ${result.offline.length} silent agents marked offline, ${result.expired} queued deliveries expired`);
@@ -79,5 +80,12 @@ export function startOfflineSweep(prisma: PrismaClient, intervalMs: number = SWE
       });
   }, intervalMs);
   timer.unref();
-  return { stop: () => clearInterval(timer) };
+  // `stop` waits for the tick in flight, not just the timer: that transaction holds row locks on `agent` and then
+  // takes them on `delivery`, so a caller free to touch those tables the moment `stop` returns deadlocks against it.
+  return {
+    stop: async () => {
+      clearInterval(timer);
+      await tick;
+    }
+  };
 }

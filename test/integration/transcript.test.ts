@@ -416,7 +416,7 @@ describe("startTranscriptSweep", () => {
       const calls = transaction.mock.calls.length;
       await until(() => transaction.mock.calls.length >= calls + 2);
     } finally {
-      sweeper.stop();
+      await sweeper.stop();
     }
 
     expect(info.mock.calls).toEqual([["transcript sweep: 1 entries past retention and 0 over the per-agent cap deleted"]]);
@@ -436,7 +436,7 @@ describe("startTranscriptSweep", () => {
     try {
       await until(() => warn.mock.calls.length >= 2);
     } finally {
-      sweeper.stop();
+      await sweeper.stop();
     }
 
     expect(warn.mock.calls.slice(0, 2)).toEqual([["the transcript sweep failed: database gone"], ["the transcript sweep failed: not an error"]]);
