@@ -340,27 +340,29 @@ describe("sweepTranscripts", () => {
     expect(await prisma.transcriptEntry.count()).toBe(0);
   });
 
-  it("should apply the cap only to an agent heard from lately, and again as soon as one is", async () => {
+  it("should apply the cap only to an agent written to lately, and again as soon as it is", async () => {
     const now = Date.now();
     const iso = (ms: number) => new Date(ms).toISOString();
-    const heardFrom = async (at: number) => await prisma.agent.update({ where: { id: alicesAgent }, data: { lastHeartbeatAt: new Date(at) } });
     await accepted(alicesAgent, [
       entry("q1", { occurred_at: iso(now - 3000) }),
       entry("q2", { occurred_at: iso(now - 2000) }),
       entry("q3", { occurred_at: iso(now - 1000) })
     ]);
+    // Nothing stored for it since the day before yesterday, so nothing is still arriving and the cap is not applied.
+    // What decides is when the hub stored an entry, never a timestamp the entry carries or a heartbeat beside it:
+    // these three say they occurred seconds ago, and the agent's last heartbeat is now.
+    for (const key of ["q1", "q2", "q3"]) {
+      await storedAt(key, now - 2 * DAY_MS);
+    }
 
-    // Silent since the day before yesterday, so nothing is still arriving for it and the cap is not applied. The
-    // entries are recent: it is the agent's own last heartbeat that decides, never a timestamp its client sent.
-    await heardFrom(now - 2 * DAY_MS);
     expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 0, trimmed: 0 });
     expect(await prisma.transcriptEntry.count()).toBe(3);
 
-    await heardFrom(now);
+    await accepted(alicesAgent, [entry("q4", { occurred_at: iso(now) })]);
 
-    expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 0, trimmed: 1 });
+    expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 0, trimmed: 2 });
     const kept = await prisma.transcriptEntry.findMany({ orderBy: { id: "asc" } });
-    expect(kept.map((row) => row.entryKey)).toEqual(["q2", "q3"]);
+    expect(kept.map((row) => row.entryKey)).toEqual(["q3", "q4"]);
   });
 
   it("should stand down while another pod holds the transcript sweep lock", async () => {

@@ -8,23 +8,25 @@ export const TRANSCRIPT_SWEEP_INTERVAL_MS = 10 * 60_000;
 export const TRANSCRIPT_SWEEP_BATCH = 5_000;
 
 /**
- * How recently an agent must have been heard from for the per-agent cap to be applied to it.
+ * How recently an agent must have been written to for the per-agent cap to be applied to it.
  *
  * Only an agent entries are still arriving for can newly pass the cap, and counting every agent the hub has ever
  * held to find out which ones have is a read of every entry it has ever stored, on every tick, to answer "none of
  * them" nearly every time. So the trim asks the cheap question first and only counts the entries of the agents that
  * pass it.
  *
- * `last_heartbeat_at` rather than an entry's `occurred_at`: the hub sets it, on registration and on every heartbeat,
- * where `occurred_at` is whatever the client read off its own transcript line. Gating on that would let a host with
- * a clock set back, or one backfilling an old session's file, upload entries that never look recent and so never
- * have the cap applied at all. It is also a safe over-estimate of what we want — a bridge uploads every 3 seconds
- * and heartbeats every 30, so an agent receiving entries always has a heartbeat at least as recent, while an agent
- * that is merely connected and quiet costs one count query and is found to be under the cap.
+ * Measured against `created_at`, which this hub writes on insert, so the question is exactly "did an entry arrive for
+ * this agent since the cut-off". The two near misses are worth recording, because both answer something subtly
+ * different:
  *
- * A day, so that an agent stays eligible for about 144 ticks after its session ends — far more than the
+ * - an entry's `occurred_at` is whatever the client read off its own transcript line, and nothing bounds it. A host
+ *   with its clock set back would upload entries that never look recent and so never have the cap applied.
+ * - `agent.last_heartbeat_at` is ours, but no upload path writes it — only registering and heartbeating do. A client
+ *   still uploading after its heartbeat loop has died, or a replay against a stored agent id, would be missed.
+ *
+ * A day, so that an agent stays eligible for about 144 ticks after its last upload — far more than the
  * `TRANSCRIPT_SWEEP_BATCH` steps any real overshoot needs to drain. The trade is at the far end: an agent that
- * passes the cap and is then never heard from again keeps whatever it was over by until `RETENTION_DAYS` ages those
+ * passes the cap and is then never written to again keeps whatever it was over by until `RETENTION_DAYS` ages those
  * entries out, retention being the backstop for exactly that.
  */
 export const TRIM_ACTIVE_WITHIN_DAYS = 1;
@@ -47,9 +49,9 @@ export interface TranscriptSweepResult {
 }
 
 /**
- * Deletes a batch of the entries that occurred longer ago than `retentionDays`, then a batch of the oldest entries
- * beyond its newest `maxPerAgent` of each agent heard from within `activeWithinDays`. Nothing is announced: a page
- * already showing an entry keeps it until it re-reads.
+ * Deletes a batch of the entries the hub stored longer ago than `retentionDays` — by `created_at`, not by what an
+ * entry says about itself — then a batch of the oldest entries beyond its newest `maxPerAgent` of each agent written
+ * to within `activeWithinDays`. Nothing is announced: a page already showing an entry keeps it until it re-reads.
  *
  * The same transaction-scoped `pg_try_advisory_xact_lock` as the offline sweep, so one pod sweeps per tick.
  * `undefined` means another pod held the lock.
@@ -84,7 +86,7 @@ export async function sweepTranscripts(prisma: PrismaClient, options: Transcript
          SELECT id FROM (
            SELECT id, row_number() OVER (PARTITION BY agent_id ORDER BY occurred_at DESC, id DESC) AS newest
              FROM transcript_entry
-            -- The agents now over the cap, of those heard from lately. ANY (ARRAY(...)) rather than IN (...) at both
+            -- The agents now over the cap, of those written to lately. ANY (ARRAY(...)) rather than IN (...) at both
             -- steps: IN is planned as a semi-join, and with no useful row estimate for either set Postgres picks a
             -- merge join and reads the whole of an index to find the handful of rows it wants. Each array is built
             -- once, so every step above it stays an index-only scan of just the agents named in it.
@@ -92,9 +94,12 @@ export async function sweepTranscripts(prisma: PrismaClient, options: Transcript
                     SELECT agent_id
                       FROM transcript_entry
                      WHERE agent_id = ANY (ARRAY(
-                             SELECT a.id
-                               FROM agent a
-                              WHERE a.last_heartbeat_at >= now() - make_interval(days => ${activeWithinDays}::int)
+                             -- Index-only over the recent range, which is what agent_id is doing in
+                             -- transcript_entry_created_at_agent_id_idx; without it this costs a heap page per few
+                             -- entries. Bounded by how much the hub has stored lately, not by how much it holds.
+                             SELECT DISTINCT agent_id
+                               FROM transcript_entry
+                              WHERE created_at >= now() - make_interval(days => ${activeWithinDays}::int)
                            ))
                      GROUP BY agent_id
                     HAVING count(*) > ${maxPerAgent}::int
