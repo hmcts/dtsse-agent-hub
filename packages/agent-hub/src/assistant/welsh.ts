@@ -295,7 +295,7 @@ export function failureDetail(stderr: string, code: number): string {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "" && !line.startsWith("usage:") && !line.startsWith("at "));
-  const message = lines.find((line) => line.startsWith("welsh ") || /^Error:/.test(line)) ?? lines.at(-1) ?? "";
+  const message = lines.find((line) => line.startsWith("welsh ") || line.startsWith("Error:")) ?? lines.at(-1) ?? "";
   const clean = message.replace(/^welsh \w[\w-]*: /, "").replace(/^Error: /, "");
   const text = clean === "" ? "That did not work. Try again." : clean;
   return text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL - 1)}…` : text;

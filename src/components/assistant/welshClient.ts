@@ -34,7 +34,11 @@ async function answer(response: Response, fallback: string): Promise<WelshRespon
 /** The hub's refusals are lowercase fragments; the page shows sentences. */
 function sentence(text: string): string {
   const trimmed = text.trim();
-  return trimmed === "" ? trimmed : `${trimmed[0]?.toUpperCase()}${trimmed.slice(1)}${/[.!?]$/.test(trimmed) ? "" : "."}`;
+  if (trimmed === "") {
+    return trimmed;
+  }
+  const stop = /[.!?]$/.test(trimmed) ? "" : ".";
+  return `${trimmed[0]?.toUpperCase()}${trimmed.slice(1)}${stop}`;
 }
 
 export const welshClient: WelshClient = {
