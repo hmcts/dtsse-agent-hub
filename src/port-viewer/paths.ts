@@ -84,15 +84,39 @@ export function landingPath(value: string | null | undefined): string {
  * port's prefix, counts, and only a path from `/` that is not the viewer's own `AUTH_PATH`.
  */
 export function refererTarget(referer: string | null, viewerHost: string, pathAndQuery: string): string | undefined {
-  if (referer === null || !URL.canParse(referer) || !pathAndQuery.startsWith("/") || pathAndQuery.startsWith("//")) {
+  if (referer === null || !URL.canParse(referer)) {
     return undefined;
   }
   const from = new URL(referer);
   if (from.protocol !== "https:" || from.host !== viewerHost) {
     return undefined;
   }
-  const page = parseViewerPath(from.pathname);
+  return underPage(parseViewerPath(from.pathname), pathAndQuery);
+}
+
+/**
+ * The cookie naming the port whose page the browser was last sent, on the viewer's whole host: a single-page app
+ * that changes its own URL with `history.pushState` leaves its prefix, so its later requests carry a `Referer` from
+ * `/` that names no port. Only where to send a request, never whether it may be served: that is still the port's own
+ * cookie's to say. Named under `VIEWER_COOKIE_PREFIX`, so it is never forwarded to a pod and no pod can set it.
+ */
+export const LAST_PORT_COOKIE = `${VIEWER_COOKIE_PREFIX}last`;
+
+export function lastPortCookie(virtualAgentId: string, port: number, maxAge: number): string {
+  return `${LAST_PORT_COOKIE}=${virtualAgentId}/${port}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+/** Where `pathAndQuery` belongs under the port `LAST_PORT_COOKIE` names, by the same rules as `refererTarget`. */
+export function lastPortTarget(value: string | undefined, pathAndQuery: string): string | undefined {
+  return value === undefined ? undefined : underPage(parseViewerPath(`/${value}/`), pathAndQuery);
+}
+
+/** `pathAndQuery` under the prefix of `page`, when it is a port's and the path is from `/` and not the viewer's own. */
+function underPage(page: ViewerPath, pathAndQuery: string): string | undefined {
   if (page.kind !== "port" && page.kind !== "bare-port") {
+    return undefined;
+  }
+  if (!pathAndQuery.startsWith("/") || pathAndQuery.startsWith("//")) {
     return undefined;
   }
   const queryAt = pathAndQuery.indexOf("?");
