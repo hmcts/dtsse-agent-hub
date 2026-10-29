@@ -140,31 +140,29 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
 export const CONVERSATION_SESSIONS: Readonly<Record<VirtualAgentSize, number>> = { small: 4, medium: 6, large: 8 };
 
 /**
- * What a `gateway` pod needs to reach the AI Gateway, from the claim that brought the agent, and nothing at all for
- * a pod on another route, so no other pod carries the key.
+ * What a `gateway` pod needs of the hub to reach the AI Gateway, from the claim that brought the agent, and nothing
+ * at all for a pod on another route, so no other pod carries the key.
  *
- * A `gateway` agent the claim gave none for is refused rather than built: the hub sends them for every running agent
- * on that route unless it has no gateway configured at all, and a pod started without them could only boot, say which
- * setting it was not given, and sit there. Failing the apply says the same thing without spending a pod on it.
+ * Only the APIM subscription key: `hai` resolves the gateway host, the Entra scope, the `apiKeyHelper` and the model
+ * ids in the pod, and `HAI_GATEWAY_APIM_KEY` is the one value it cannot fetch there, its own source being a Key Vault
+ * with no public endpoint. A `gateway` agent the claim gave none for is refused rather than built: the hub sends it
+ * for every running agent on that route, and a pod started without it could only boot, say which setting it was not
+ * given, and sit there. Failing the apply says the same thing without spending a pod on it.
  *
- * The APIM subscription key is a plain value in the pod template, as the launch token is, because the orchestrator
- * deliberately has no access to Secrets. Unlike the launch token it is not this agent's alone: it is one service's
- * key, so anyone who can read StatefulSets in the namespace can read the key every `gateway` pod uses. That is the
- * same set of people who can `kubectl exec` into those pods and read it out of the environment anyway, and the
- * alternative is a Secret and the RBAC to read one. Worth revisiting if the namespace ever widens.
+ * The key is a plain value in the pod template, as the launch token is, because the orchestrator deliberately has no
+ * access to Secrets. Unlike the launch token it is not this agent's alone: it is one service's key, so anyone who can
+ * read StatefulSets in the namespace can read the key every `gateway` pod uses. That is the same set of people who
+ * can `kubectl exec` into those pods and read it out of the environment anyway, and the alternative is a Secret and
+ * the RBAC to read one. Worth revisiting if the namespace ever widens.
  */
 function gatewayEnv(agent: ClaimedAgent) {
   if (agent.model_route !== "gateway") {
     return [];
   }
   if (agent.gateway === undefined) {
-    throw new Error("this agent is on the AI Gateway route and the hub sent no gateway settings; ask DTSSE to set AI_GATEWAY_* on the agent hub");
+    throw new Error("this agent is on the AI Gateway route and the hub sent no APIM subscription key; ask DTSSE to set AI_GATEWAY_APIM_KEY on the agent hub");
   }
-  return [
-    { name: "AI_GATEWAY_BASE_URL", value: agent.gateway.base_url },
-    { name: "AI_GATEWAY_AUDIENCE", value: agent.gateway.audience },
-    { name: "AI_GATEWAY_APIM_KEY", value: agent.gateway.apim_key }
-  ];
+  return [{ name: "HAI_GATEWAY_APIM_KEY", value: agent.gateway.apim_key }];
 }
 
 /**
@@ -187,9 +185,8 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
     // pod either, so hai cannot infer that it is already containerised. Without this marker it decides it is on a
     // bare host and tries `docker pull` and `docker run --privileged`, which a pod with no Docker socket and
     // `allowPrivilegeEscalation: false` cannot do: it exits 1 and every session dies at launch. Not
-    // `HAI_ENV_READY` as well — the two together short-circuit the route resolution that builds the environment the
-    // `own_licence` route needs. The `gateway` route sets it itself, in stage 1, having built that route's
-    // environment by hand: hai's own gateway route reads the APIM key from a Key Vault a pod cannot reach.
+    // `HAI_ENV_READY` as well — the two together short-circuit the route resolution that builds the environment both
+    // routes need, the `gateway` route's gateway host, Entra scope and `apiKeyHelper` included.
     { name: "HAI_IN_CONTAINER", value: "1" },
     // A pod runs the hai its entrypoint installed at boot, for its whole lifetime. Boot resolves `@latest` once and
     // this pins that choice: left to itself hai checks npm on every session start, and `CONVERSATION_SESSIONS`
