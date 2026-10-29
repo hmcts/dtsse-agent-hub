@@ -543,7 +543,7 @@ database: localhost:5432/agent_hub
 
 ```bash
 yarn test                # unit
-yarn test:integration    # needs `yarn deps:up`; creates and migrates agent_hub_test itself
+yarn test:integration    # needs `yarn deps:up`; a database per worker, migrated on use
 yarn lint
 yarn typecheck
 ```
@@ -559,9 +559,22 @@ AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev &
 yarn test:e2e
 ```
 
-The integration suite truncates every table between cases, so by default it uses its own `agent_hub_test` database
-on the compose server, creating it if it is missing, and leaves `yarn dev`'s `agent_hub` alone. An explicit
-`DATABASE_URL` replaces that default, as the pipeline's does; do not point it at anything you want to keep.
+The integration suite truncates every table between cases, so its files cannot share a database. Each worker gets
+one of its own on the compose server — `agent_hub_test_{checkout}_w{n}`, created on first use, migrated on use and
+never dropped, so only the first run on a checkout pays to create them — and `yarn dev`'s `agent_hub` is left alone.
+A database per worker rather than a schema per worker because `LISTEN`/`NOTIFY` and the advisory locks the sweeps
+take are scoped per database, and the tests that cover contention would otherwise see each other. The `{checkout}`
+part keeps this clone's databases separate from each worktree's; two runs of the *same* checkout at once still share
+them, so give one of them an explicit `DATABASE_URL`. An explicit `DATABASE_URL` names the server and the stem the
+worker names are built from, as the pipeline's does; do not point it at anything you want to keep.
+
+`INTEGRATION_WORKERS` sets how many workers run (default 6). The ceiling is the server's `max_connections`, which is
+the stock 100 against a Prisma pool of 10 per worker — not the cores available.
+
+`migrate.test.ts` sits in a `migrations` project of its own, with one worker and a longer timeout. It creates and
+drops whole databases, and each of those forces a checkpoint that flushes every dirty page the server is holding —
+so it is charged for whatever else has been written to that server. On a quiet one it takes 3s; sharing one with the
+rest of this suite it has taken 80s and more, which is what the longer timeout is measured against.
 
 ## Deployment
 

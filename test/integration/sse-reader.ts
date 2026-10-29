@@ -8,6 +8,14 @@ export interface Frame {
   retry?: string;
 }
 
+/**
+ * How long a wait for an expected frame gives up after. It is a deadline, not a delay: a reader returns as soon as
+ * the frames arrive, so this only sets how patient a *failing* wait is. Generous, because the suite's files run in
+ * parallel and a loaded machine can be slow to deliver a NOTIFY without anything being wrong. A test asserting that
+ * a frame never arrives passes its own short timeout instead.
+ */
+const WAIT_MS = 15_000;
+
 /** Reads SSE frames from a response body as they arrive. */
 export function frames(response: Response) {
   const reader = response.body!.getReader();
@@ -50,7 +58,7 @@ export function frames(response: Response) {
   return {
     received,
     /** Resolves with every `direct` event once there are `count` of them. */
-    async directs(count: number, timeoutMs = 5000): Promise<{ id: string; message: ApiMessage }[]> {
+    async directs(count: number, timeoutMs = WAIT_MS): Promise<{ id: string; message: ApiMessage }[]> {
       const deadline = Date.now() + timeoutMs;
       const directs = () => received.filter((frame) => frame.event === "direct");
       while (directs().length < count) {
@@ -65,7 +73,7 @@ export function frames(response: Response) {
       return directs().map((frame) => ({ id: frame.id!, message: JSON.parse(frame.data!).message }));
     },
     /** Resolves with every frame of `event` once there are `count` of them. */
-    async named(event: string, count: number, timeoutMs = 5000): Promise<Frame[]> {
+    async named(event: string, count: number, timeoutMs = WAIT_MS): Promise<Frame[]> {
       const deadline = Date.now() + timeoutMs;
       const matching = () => received.filter((frame) => frame.event === event);
       while (matching().length < count) {
@@ -90,7 +98,7 @@ export function frames(response: Response) {
       }
     },
     /** Reads until the server ends the response, failing if it has not within `timeoutMs`. */
-    async end(timeoutMs = 10_000): Promise<Frame[]> {
+    async end(timeoutMs = WAIT_MS): Promise<Frame[]> {
       const deadline = Date.now() + timeoutMs;
       while (!ended) {
         if (Date.now() > deadline) {
