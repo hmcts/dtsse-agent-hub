@@ -1,6 +1,6 @@
 import { canOpenVirtualAgentPort } from "../access/rules.ts";
 import { publicUrl } from "../virtual-agents/ports.ts";
-import { type Fetch, forward, UpstreamUnreachable } from "./forward.ts";
+import { declaresTooLongBody, type Fetch, forward, PROXY_BODY_LIMIT_BYTES, UpstreamUnreachable } from "./forward.ts";
 import { AUTH_PATH, landingPath, parseViewerPath, TICKET_PARAMETER, ticketPath, viewerCookieName, viewerPrefix } from "./paths.ts";
 import type { ViewerSettings } from "./settings.ts";
 import { openTicket, openViewerCookie, sealTicket, sealViewerCookie, VIEWER_COOKIE_MAX_AGE } from "./tickets.ts";
@@ -112,6 +112,12 @@ export async function serveViewer(request: Request, pathAndQuery: string, deps: 
       const agent = await deps.loadAgent(virtualAgentId);
       if (!stillServed(agent, grant.oid, port)) {
         return text(404, `Nothing is being served on port ${port} of this agent.`);
+      }
+      if (declaresTooLongBody(request.headers)) {
+        return text(
+          413,
+          `The viewer cannot carry a request body larger than ${PROXY_BODY_LIMIT_BYTES / (1024 * 1024)} MiB. Reach the web server over the VPN to send this.`
+        );
       }
       try {
         return await forward(

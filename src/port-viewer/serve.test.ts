@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Fetch } from "./forward.ts";
+import { type Fetch, PROXY_BODY_LIMIT_BYTES } from "./forward.ts";
 import { cookieValue, serveViewer, stillServed, ticketUrl, type ViewerAgent, type ViewerDependencies } from "./serve.ts";
 import type { ViewerSettings } from "./settings.ts";
 import { openTicket, openViewerCookie, sealTicket, sealViewerCookie } from "./tickets.ts";
@@ -147,6 +147,35 @@ describe("serveViewer", () => {
 
     expect((await serveViewer(await withCookie(`${PREFIX}/`), `${PREFIX}/`, gone)).status).toBe(404);
     expect((await serveViewer(await withCookie(`${PREFIX}/`), `${PREFIX}/`, moved)).status).toBe(404);
+  });
+
+  // Next's proxy ends the body clone at the limit and only warns, so without this the pod would be handed the first
+  // 6 MiB of the upload as if that were all of it.
+  it("should answer 413 rather than forward a body the proxy has truncated", async () => {
+    const fetchImpl = vi.fn<Fetch>(async () => new Response("never asked for"));
+    const request = await withCookie(`${PREFIX}/upload`, {
+      method: "POST",
+      body: "x",
+      headers: { "content-length": String(PROXY_BODY_LIMIT_BYTES + 1) }
+    });
+
+    const response = await serveViewer(request, `${PREFIX}/upload`, deps({ fetch: fetchImpl }));
+
+    expect(response.status).toBe(413);
+    expect(await response.text()).toContain("cannot carry a request body larger than 6 MiB");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("should forward a body up to the limit, which arrives whole", async () => {
+    const fetchImpl = vi.fn<Fetch>(async () => new Response("thanks"));
+    const request = await withCookie(`${PREFIX}/upload`, {
+      method: "POST",
+      body: "x",
+      headers: { "content-length": String(PROXY_BODY_LIMIT_BYTES) }
+    });
+
+    expect((await serveViewer(request, `${PREFIX}/upload`, deps({ fetch: fetchImpl }))).status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalled();
   });
 
   it("should answer 502 when the pod does not answer", async () => {

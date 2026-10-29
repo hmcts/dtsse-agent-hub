@@ -194,6 +194,28 @@ export function forwardedResponseHeaders(incoming: Headers, target: Pick<Forward
   return headers;
 }
 
+/**
+ * The most of a request body that reaches a route handler whole.
+ *
+ * Next clones every proxy-matched request's body through `getCloneableBody` in `next/dist/server/body-streams`, which
+ * ends both streams at `experimental.proxyClientMaxBodySize` and only `console.warn`s: past it the handler reads a
+ * short body and an ordinary end of stream, with `Content-Length` left as the client sent it. The hub's own routes
+ * read theirs through `readJson`, which refuses what is left as too long anyway, but a forwarded body is sent to the
+ * pod as it is, so the viewer refuses it instead of handing a pod half a request.
+ *
+ * **Kept the same as `experimental.proxyClientMaxBodySize` in next.config.mjs**, which `forward.test.ts` checks.
+ */
+export const PROXY_BODY_LIMIT_BYTES = 6 * 1024 * 1024;
+
+/**
+ * Whether a request declares a body longer than the proxy carries whole. A chunked body declares no length and so
+ * cannot be caught here: it is truncated silently, as it was before this check, and only `next`'s warning says so.
+ */
+export function declaresTooLongBody(headers: Headers): boolean {
+  const declared = Number(headers.get("content-length"));
+  return Number.isFinite(declared) && declared > PROXY_BODY_LIMIT_BYTES;
+}
+
 /** A body is sent only for methods that may have one, since `fetch` refuses a body on `GET` or `HEAD`. */
 function hasBody(method: string): boolean {
   return method !== "GET" && method !== "HEAD";

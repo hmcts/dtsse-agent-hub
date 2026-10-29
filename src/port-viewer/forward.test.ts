@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
+import nextConfig from "../../next.config.mjs";
 import {
+  declaresTooLongBody,
   type Fetch,
   type ForwardTarget,
   forward,
   forwardedCookie,
   forwardedRequestHeaders,
   forwardedResponseHeaders,
+  PROXY_BODY_LIMIT_BYTES,
   rewriteLocation,
   rewriteSetCookie,
   UpstreamUnreachable
@@ -116,6 +119,30 @@ describe("rewriteSetCookie", () => {
 
   it("should give a __Host- cookie the Path=/ it needs when the pod sent none", () => {
     expect(rewriteSetCookie("__Host-sid=1; Secure", PREFIX)).toBe("__Host-sid=1; Secure; Path=/");
+  });
+});
+
+describe("PROXY_BODY_LIMIT_BYTES", () => {
+  // Drift either way is silent: raise the config alone and the viewer refuses what would now arrive whole; lower it
+  // alone and the viewer forwards a truncated body again.
+  it("should be the limit next.config.mjs sets on the proxy's body clone", () => {
+    expect(nextConfig.experimental?.proxyClientMaxBodySize).toBe(`${PROXY_BODY_LIMIT_BYTES / (1024 * 1024)}mb`);
+  });
+});
+
+describe("declaresTooLongBody", () => {
+  it.each([
+    [String(PROXY_BODY_LIMIT_BYTES + 1), true],
+    ["25000000", true],
+    [String(PROXY_BODY_LIMIT_BYTES), false],
+    ["0", false],
+    ["not a number", false]
+  ])("should read Content-Length %j as declaring too long a body: %j", (declared, tooLong) => {
+    expect(declaresTooLongBody(new Headers({ "content-length": declared }))).toBe(tooLong);
+  });
+
+  it("should let a request with no Content-Length through, there being nothing to compare", () => {
+    expect(declaresTooLongBody(new Headers())).toBe(false);
   });
 });
 
