@@ -4,6 +4,7 @@ import {
   chatPersona,
   connectForChat,
   dismissGettingReady,
+  localChatRow,
   openLocalChat,
   readAgentStream,
   registerAgent,
@@ -72,8 +73,9 @@ test.describe("local chats @regression", () => {
       // Created as the session registered, so it is today's.
       await expect(chats.getByRole("heading", { level: 2, name: "Today" })).toBeVisible();
       // The marker is words before an icon, which is the whole point of it: a small laptop outline says nothing on
-      // its own. They lead the title, so the row's accessible name is the two joined.
-      const row = chats.getByRole("link", { name: `On your computer: ${name}` });
+      // its own, and neither does the colour it carries the session's state in. They lead the title, so the row's
+      // accessible name is the two joined.
+      const row = localChatRow(page, name);
       await expect(row).toBeVisible();
       expect(await row.getAttribute("href")).toMatch(/^\/assistant\/[0-9a-f-]{36}$/);
     } finally {
@@ -309,7 +311,7 @@ test.describe("local chats @regression", () => {
       await page.getByRole("menuitem", { name: "Delete chat" }).click();
       await page.getByRole("button", { name: "Delete", exact: true }).click();
       await page.waitForURL(/\/assistant$/);
-      await expect(page.getByRole("navigation", { name: "Chats" }).getByRole("link", { name: `On your computer: ${name}` })).toHaveCount(0);
+      await expect(localChatRow(page, name)).toHaveCount(0);
       expect((await page.goto(path))?.status()).toBe(404);
 
       // The session on the laptop is untouched. Removing the chat detaches it rather than deleting it, because the

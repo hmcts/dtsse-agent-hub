@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 import { MAX_QUERY, searchTerms } from "@/assistant/search";
 import type { ConversationMatch } from "@/assistant/views";
-import { LocalMark } from "@/components/assistant/LocalMark";
+import { ChatMark } from "@/components/assistant/ChatMark";
 
 /**
  * Finding one of the person's own chats from the sidebar, by a word in its title or in anything said in it.
@@ -182,7 +182,7 @@ export function ConversationSearch({ search = fetchChats, children }: { search?:
                 {/* Marked as the grouped list marks it, from the same component: a chat found by searching is the
                     same chat, and a result that looked like any other would be the one place the mark was missing. */}
                 <span className="flex min-w-0 items-center gap-1.5 text-sm">
-                  {chat.local ? <LocalMark /> : null}
+                  <ChatMark mark={chat.mark} />
                   <span className="min-w-0 truncate">{chat.title}</span>
                 </span>
                 {chat.snippet === null ? null : <span className="line-clamp-2 text-xs text-asst-faint">{chat.snippet}</span>}

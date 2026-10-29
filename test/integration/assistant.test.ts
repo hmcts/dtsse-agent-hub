@@ -736,22 +736,50 @@ describe("conversations", () => {
     const { token } = await startedAssistant();
     const onPod = ((await actions.startConversation({ product: "general", body: "on my assistant" })) as { id: string }).id;
     await register(token, (await sessionOf(onPod)).sessionId, onPod);
-    await registerAgent(
-      prisma,
-      { ...ALICE, tid: "dev" },
-      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
-    );
-    const onLaptop = (await prisma.assistantConversation.findFirstOrThrow({ where: { virtualAgentId: null } })).id;
+    const onLaptop = await laptopChat();
 
     expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
     expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
-    expect(new Map(listed.map((item) => [item.id, item.local]))).toEqual(
+    expect(new Map(listed.map((item) => [item.id, item.mark?.where ?? null]))).toEqual(
       new Map([
-        [onLaptop, true],
-        [onPod, false]
+        [onLaptop, "computer"],
+        [onPod, "assistant"]
       ])
     );
+  });
+
+  /**
+   * A local chat's mark is coloured by the state of its session, which lives on the agent rather than on the
+   * conversation: the sidebar's read has to bring `agent.status` back with each row or every laptop would be marked
+   * the same whatever its session was doing.
+   */
+  it.each([
+    ["busy", "working"],
+    ["idle", "ready"],
+    ["offline", "disconnected"]
+  ] as const)("should mark a listed local chat as %s with the state of its session", async (status, session) => {
+    await startedAssistant();
+    const onLaptop = await laptopChat();
+    await prisma.agent.updateMany({ where: { assistantConversationId: onLaptop }, data: { status } });
+
+    const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
+
+    expect(listed.map((item) => [item.id, item.mark])).toEqual([[onLaptop, { where: "computer", session }]]);
+  });
+
+  /**
+   * The cloud is there only to tell a pod chat from a local one, so somebody who has never run a session on their
+   * own computer sees no marks at all. One read answers it for the whole list; see `hasLocalConversation`.
+   */
+  it("should mark no chat when every one of the person's chats runs on their assistant", async () => {
+    const { token } = await startedAssistant();
+    const onPod = ((await actions.startConversation({ product: "general", body: "on my assistant" })) as { id: string }).id;
+    await register(token, (await sessionOf(onPod)).sessionId, onPod);
+
+    const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
+
+    expect(listed.map((item) => [item.id, item.mark])).toEqual([[onPod, null]]);
   });
 
   it("should wake a conversation when its composer is focused and the session is offline", async () => {

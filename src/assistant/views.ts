@@ -22,7 +22,17 @@ import { chatCredentials, onboarded, type Readiness, readiness } from "./onboard
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { snippetOf } from "./search.ts";
-import { type Artefact, type ConversationRow, listConversations, readArtefact, type SessionState, searchConversations, unsentConversation } from "./store.ts";
+import {
+  type Artefact,
+  type ConversationListRow,
+  type ConversationRow,
+  hasLocalConversation,
+  listConversations,
+  readArtefact,
+  type SessionState,
+  searchConversations,
+  unsentConversation
+} from "./store.ts";
 import { type MessageAttachment, unsentAttachments } from "./upload-store.ts";
 
 /** The HMCTS Assistant as its pages show it. Only ever the viewer's own: nobody sees anyone else's assistant. */
@@ -49,20 +59,48 @@ export interface AssistantSummary {
   toChat: CredentialKind[];
 }
 
+/**
+ * Which of three states the session of a chat on the person's own computer is in: answering, connected and waiting,
+ * or not connected at all. The agent's status in the words the mark says it in, so the colour, the tooltip and the
+ * row's name are three renderings of one value rather than three mappings that can drift apart.
+ */
+export type LocalSession = "ready" | "working" | "disconnected";
+
+/**
+ * The three states the laptop mark shows, named for what they mean to a person reading the list.
+ *
+ * Coloured as `StatusDot` colours the same three statuses on the hub — `idle` green, `busy` amber, `offline` grey —
+ * so one session does not read as green in one place and amber in another. That makes `idle` the welcoming state:
+ * `offline` is a heartbeat gone for 90 seconds and so the only one that is really "not connected", while `idle` is a
+ * live session with nothing in hand, which is when it will answer you fastest. `busy` is mid-turn, which is worth a
+ * different colour precisely because a message sent then waits.
+ */
+const LOCAL_SESSION: Record<AgentStatus, LocalSession> = { idle: "ready", busy: "working", offline: "disconnected" };
+
+/**
+ * What a chat's row in the sidebar, and its result in the search, is marked with.
+ *
+ * Decided here rather than in either list, so a chat found by searching is marked exactly as the same chat in the
+ * list below it. Three cases and no more:
+ *
+ * - `computer` — a Claude Code session on the person's own machine, which has no pod behind it. It is the one thing
+ *   about a chat that no title can say and that changes what the chat can do: it takes no files, cannot be stopped
+ *   from here and answers only while the laptop is connected. `hasPod` is what decides it, so the screens and the
+ *   stores cannot disagree. The state of its session rides along, because that is the other thing the person cannot
+ *   see from the title and the mark is the only place it is said in the list.
+ * - `assistant` — a chat running on their assistant's pod, marked only to tell it apart from a local one.
+ * - `null` — nothing to mark. Every one of the person's chats runs on their assistant, so a cloud against each of
+ *   them would distinguish them from nothing; see `hasLocalConversation`.
+ */
+export type ConversationMark = { where: "computer"; session: LocalSession } | { where: "assistant" } | null;
+
 export interface ConversationLink {
   id: string;
   title: string;
   product: string;
   productLabel: string;
   lastActiveAt: string;
-  /**
-   * Where the chat runs: `true` for a Claude Code session on the person's own computer, which has no pod behind it.
-   *
-   * On every link rather than only the sidebar's, because it is the one thing about a chat that no title can say and
-   * that changes what the chat can do — a local one takes no files, cannot be stopped from here and answers only
-   * while the laptop is connected. `hasPod` is what decides it, so the screens and the stores cannot disagree.
-   */
-  local: boolean;
+  mark: ConversationMark;
 }
 
 export const UNTITLED = "New chat";
@@ -87,25 +125,42 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
   };
 }
 
-function toLink(row: Pick<ConversationRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId">): ConversationLink {
+type LinkRow = Pick<ConversationListRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId" | "agentStatus">;
+
+/** `anyLocal` is `hasLocalConversation`'s answer for the whole of the person's list; see `ConversationMark`. */
+function markOf(row: LinkRow, anyLocal: boolean): ConversationMark {
+  if (!hasPod(row)) {
+    return { where: "computer", session: LOCAL_SESSION[row.agentStatus] };
+  }
+  return anyLocal ? { where: "assistant" } : null;
+}
+
+function toLink(row: LinkRow, anyLocal: boolean): ConversationLink {
   return {
     id: row.id,
     title: row.title ?? UNTITLED,
     product: row.product,
     productLabel: productLabel(row.product),
     lastActiveAt: row.lastActiveAt.toISOString(),
-    local: !hasPod(row)
+    mark: markOf(row, anyLocal)
   };
 }
 
 /** The chats running on one of the owner's virtual agents, for its page in the hub. */
 export async function conversationLinks(db: Database, ownerOid: string, virtualAgentId: string): Promise<ConversationLink[]> {
-  return (await listConversations(db, ownerOid, 200, virtualAgentId)).map(toLink);
+  // Every chat here runs on the pod being asked about, so none of them is local; the question is still asked,
+  // because `mark` is a statement about the person's list and not about the page that happens to be reading it.
+  const [rows, anyLocal] = await Promise.all([listConversations(db, ownerOid, 200, virtualAgentId), hasLocalConversation(db, ownerOid)]);
+  return rows.map((row) => toLink(row, anyLocal));
 }
 
 export async function conversationGroups(db: Database, ownerOid: string, now: Date = new Date()): Promise<{ label: DateGroup; items: ConversationLink[] }[]> {
-  const rows = await listConversations(db, ownerOid);
-  return groupByDate(rows.map(toLink), (link) => new Date(link.lastActiveAt), now);
+  const [rows, anyLocal] = await Promise.all([listConversations(db, ownerOid), hasLocalConversation(db, ownerOid)]);
+  return groupByDate(
+    rows.map((row) => toLink(row, anyLocal)),
+    (link) => new Date(link.lastActiveAt),
+    now
+  );
 }
 
 export interface ConversationMatch extends ConversationLink {
@@ -113,10 +168,16 @@ export interface ConversationMatch extends ConversationLink {
   snippet: string | null;
 }
 
-/** The viewer's own chats matching every word of `query`, for the sidebar's search. */
+/**
+ * The viewer's own chats matching every word of `query`, for the sidebar's search.
+ *
+ * Marked through the same `toLink` and the same `hasLocalConversation` as the grouped list, so the search cannot
+ * answer differently from the page for the same person: the mark is on the result rather than left to the browser to
+ * work out from a list it can only see a page of.
+ */
 export async function conversationMatches(db: Database, ownerOid: string, query: string): Promise<ConversationMatch[]> {
-  const rows = await searchConversations(db, ownerOid, query);
-  return rows.map((row) => ({ ...toLink(row), snippet: snippetOf(row.excerpt) }));
+  const [rows, anyLocal] = await Promise.all([searchConversations(db, ownerOid, query), hasLocalConversation(db, ownerOid)]);
+  return rows.map((row) => ({ ...toLink(row, anyLocal), snippet: snippetOf(row.excerpt) }));
 }
 
 /**
