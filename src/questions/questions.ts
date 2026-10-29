@@ -65,33 +65,29 @@ export function offerExpired(askedAt: Date, now: Date): boolean {
 
 const label = z.string().trim().min(1).max(MAX_OPTION_LABEL);
 
-export const questionOption = z.object({ label, description: z.string().trim().max(MAX_OPTION_DESCRIPTION) }).strict();
+export const questionOption = z.strictObject({ label, description: z.string().trim().max(MAX_OPTION_DESCRIPTION) });
 
-export const question = z
-  .object({
-    question: z.string().trim().min(1).max(MAX_QUESTION),
-    header: z.string().trim().min(1).max(MAX_HEADER),
-    // Distinct labels, because the label is the whole of what an answer names: the card keys a press by it and the
-    // message the session receives says it, so two options sharing one would be a choice nobody could resolve.
-    options: boundedArray(questionOption, MAX_OPTIONS, {
-      min: MIN_OPTIONS,
-      refine: {
-        check: (options) => new Set(options.map((option) => option.label)).size === options.length,
-        message: "each option needs its own label"
-      }
-    }),
-    multiSelect: z.boolean()
-  })
-  .strict();
+export const question = z.strictObject({
+  question: z.string().trim().min(1).max(MAX_QUESTION),
+  header: z.string().trim().min(1).max(MAX_HEADER),
+  // Distinct labels, because the label is the whole of what an answer names: the card keys a press by it and the
+  // message the session receives says it, so two options sharing one would be a choice nobody could resolve.
+  options: boundedArray(questionOption, MAX_OPTIONS, {
+    min: MIN_OPTIONS,
+    refine: {
+      check: (options) => new Set(options.map((option) => option.label)).size === options.length,
+      message: "each option needs its own label"
+    }
+  }),
+  multiSelect: z.boolean()
+});
 
 /** `POST /api/agent/{agent_id}/question`. */
-export const questionPostBody = z
-  .object({
-    session_id: z.string().trim().min(1).max(MAX_SESSION_ID),
-    tool_use_id: z.string().trim().min(1).max(MAX_TOOL_USE_ID),
-    questions: boundedArray(question, MAX_QUESTIONS, { min: 1 })
-  })
-  .strict();
+export const questionPostBody = z.strictObject({
+  session_id: z.string().trim().min(1).max(MAX_SESSION_ID),
+  tool_use_id: z.string().trim().min(1).max(MAX_TOOL_USE_ID),
+  questions: boundedArray(question, MAX_QUESTIONS, { min: 1 })
+});
 
 export type QuestionOption = z.infer<typeof questionOption>;
 export type Question = z.infer<typeof question>;

@@ -38,8 +38,10 @@ const httpsUrl = z
   .string()
   .trim()
   .max(MAX_URI)
-  .url()
-  .refine((value) => new URL(value).protocol === "https:", "must be an https URL");
+  .pipe(z.url())
+  // `URL.parse` rather than the constructor, which throws on a string that is not a URL: a refinement still runs
+  // after the format check before it has failed, so the constructor would make a 500 of what the contract gives a 400.
+  .refine((value) => URL.parse(value)?.protocol === "https:", "must be an https URL");
 
 export const loginBody = z
   .object({

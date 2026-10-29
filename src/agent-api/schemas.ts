@@ -33,9 +33,9 @@ const optionalText = (max: number) =>
  * The cast restores the input type `z.preprocess` erases — it types its input `unknown` — so a `transform` or
  * `default` built on the result is still checked against the values the schema accepts, as it is for `boundedArray`.
  */
-function listOrAbsent<S extends z.ZodTypeAny>(schema: S): z.ZodType<z.output<S> | undefined, z.ZodTypeDef, z.input<S> | undefined> {
+function listOrAbsent<S extends z.ZodType>(schema: S): z.ZodType<z.output<S> | undefined, z.input<S> | undefined> {
   const tolerant = z.preprocess((value) => (Array.isArray(value) ? value : undefined), schema.optional());
-  return tolerant as unknown as z.ZodType<z.output<S> | undefined, z.ZodTypeDef, z.input<S> | undefined>;
+  return tolerant as unknown as z.ZodType<z.output<S> | undefined, z.input<S> | undefined>;
 }
 
 /** A description over the limit is cut rather than refused, so one long description does not lose the whole list. */
