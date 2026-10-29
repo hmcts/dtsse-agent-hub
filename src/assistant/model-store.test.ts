@@ -59,19 +59,15 @@ describe("saveAssistantModel", () => {
     expect(writes).toEqual([{ ownerOid: ALICE, model: "opus" }]);
   });
 
-  it.each([
-    ["claude-sonnet-5-5"],
-    ["eu.anthropic.claude-sonnet-5-5[1m]"],
-    ["sonnet --dangerously-skip-permissions"],
-    [""],
-    [null],
-    [{ model: "opus" }]
-  ])("should refuse %j and store nothing when it is not a catalogue id", async (model) => {
-    const { db, writes } = stub(null);
+  it.each([["claude-sonnet-5-5"], ["eu.anthropic.claude-sonnet-5-5[1m]"], ["sonnet --dangerously-skip-permissions"], [""], [null], [{ model: "opus" }]])(
+    "should refuse %j and store nothing when it is not a catalogue id",
+    async (model) => {
+      const { db, writes } = stub(null);
 
-    await expect(saveAssistantModel(db, ALICE, model)).rejects.toMatchObject({ status: 400, message: "pick a model from the list" });
-    expect(writes).toEqual([]);
-  });
+      await expect(saveAssistantModel(db, ALICE, model)).rejects.toMatchObject({ status: 400, message: "pick a model from the list" });
+      expect(writes).toEqual([]);
+    }
+  );
 });
 
 /**

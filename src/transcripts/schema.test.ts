@@ -86,16 +86,16 @@ describe("transcriptBody", () => {
       "entries.0.content",
       /\{id, name, redacted\} or \{redacted\}/
     ],
-    ["content that is not an object", { content: "hello" }, "entries.0.content", /object/],
-    ["content that is an array", { content: [] }, "entries.0.content", /object/],
-    ["an unknown role", { role: "narrator" }, "entries.0.role", /Invalid enum value/],
+    ["content that is not an object", { content: "hello" }, "entries.0.content", /expected record/],
+    ["content that is an array", { content: [] }, "entries.0.content", /expected record/],
+    ["an unknown role", { role: "narrator" }, "entries.0.role", /Invalid option/],
     ["a key with a space", { key: "has space" }, "entries.0.key", /letters, digits/],
-    ["an empty key", { key: "" }, "entries.0.key", /at least 1/],
-    ["a key over 200 characters", { key: "k".repeat(201) }, "entries.0.key", /at most 200/],
+    ["an empty key", { key: "" }, "entries.0.key", />=1 characters/],
+    ["a key over 200 characters", { key: "k".repeat(201) }, "entries.0.key", /<=200 characters/],
     ["a time with no offset", { occurred_at: "2026-10-02T09:00:00" }, "entries.0.occurred_at", /datetime/],
     ["a time that is not one", { occurred_at: "yesterday" }, "entries.0.occurred_at", /datetime/],
     ["a message id that is not one", { message_id: "12a" }, "entries.0.message_id", /must be a message id/],
-    ["a numeric message id", { message_id: 12 }, "entries.0.message_id", /Expected string/]
+    ["a numeric message id", { message_id: 12 }, "entries.0.message_id", /expected string/]
   ])("should refuse %s", (_label, overrides, path, message) => {
     const refused = failure([entry(overrides)]);
 

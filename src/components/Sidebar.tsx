@@ -60,7 +60,7 @@ export function Sidebar({
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {signInDisabled ? null : (
-              <a href="/auth/logout" className="rounded px-2 py-1 text-xs text-hub-muted hover:bg-hub-hover hover:text-white">
+              <a href="/auth/logout" className="rounded-sm px-2 py-1 text-xs text-hub-muted hover:bg-hub-hover hover:text-white">
                 Sign out
               </a>
             )}
@@ -131,7 +131,7 @@ export function Sidebar({
                 name="q"
                 aria-keyshortcuts="/"
                 placeholder="Search topics (/)"
-                className="w-full rounded-md border border-hub-line bg-hub-pane px-3 py-1 text-[13px] text-hub-text placeholder:text-hub-muted focus:border-hub-link focus:outline-none"
+                className="w-full rounded-md border border-hub-line bg-hub-pane px-3 py-1 text-[13px] text-hub-text placeholder:text-hub-muted focus:border-hub-link focus:outline-hidden"
               />
             </form>
             {data.topics.length === 0 ? (

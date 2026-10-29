@@ -338,7 +338,7 @@ export function ChatView({
               id="chat-product"
               value={product}
               onChange={(event) => setPendingProduct(event.target.value)}
-              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 outline-none"
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 outline-hidden"
             >
               {PRODUCTS.map((offered) => (
                 <option key={offered.slug} value={offered.slug} className="bg-asst-raised normal-case">

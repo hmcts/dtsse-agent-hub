@@ -49,27 +49,25 @@ export function searchable(query: string): boolean {
 const text = (max: number) => z.string().trim().min(1).max(max);
 
 /** One Jira project, as the pod answers it. */
-export const jiraProjectAnswer = z.object({ key: z.string().regex(JIRA_PROJECT_RE), name: text(200) }).strict();
+export const jiraProjectAnswer = z.strictObject({ key: z.string().regex(JIRA_PROJECT_RE), name: text(200) });
 
 /** One Confluence page, as the pod answers it: the ids an export needs and the titles that say where it is. */
-export const confluencePageAnswer = z
-  .object({
-    id: z.string().regex(NUMERIC_ID_RE),
-    title: text(255),
-    space_id: z.string().regex(NUMERIC_ID_RE),
-    space_key: z.string().regex(SPACE_KEY_RE),
-    space_name: text(200),
-    ancestors: boundedArray(text(255), MAX_LOOKUP_ANCESTORS)
-  })
-  .strict();
+export const confluencePageAnswer = z.strictObject({
+  id: z.string().regex(NUMERIC_ID_RE),
+  title: text(255),
+  space_id: z.string().regex(NUMERIC_ID_RE),
+  space_key: z.string().regex(SPACE_KEY_RE),
+  space_name: text(200),
+  ancestors: boundedArray(text(255), MAX_LOOKUP_ANCESTORS)
+});
 
 export type JiraProjectAnswer = z.infer<typeof jiraProjectAnswer>;
 export type ConfluencePageAnswer = z.infer<typeof confluencePageAnswer>;
 
 /** The pod's answer to one lookup: what it found, or why it found nothing. */
 export const lookupAnswerBody = z.union([
-  z.object({ results: boundedArray(z.unknown(), MAX_LOOKUP_RESULTS) }).strict(),
-  z.object({ error: z.enum(["signed_out", "failed", "superseded"]), detail: z.string().trim().max(MAX_LOOKUP_DETAIL).optional() }).strict()
+  z.strictObject({ results: boundedArray(z.unknown(), MAX_LOOKUP_RESULTS) }),
+  z.strictObject({ error: z.enum(["signed_out", "failed", "superseded"]), detail: z.string().trim().max(MAX_LOOKUP_DETAIL).optional() })
 ]);
 
 export type LookupAnswer = z.infer<typeof lookupAnswerBody>;

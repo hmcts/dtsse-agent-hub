@@ -48,16 +48,12 @@ describe("checkParent", () => {
     expect(checkParent(DEFAULT_CONFLUENCE_PARENT)).toEqual(builtIn);
   });
 
-  it.each([
-    [{ id: "../1" }],
-    [{ space_id: "CCD" }],
-    [{ space_key: 'CCD" OR 1=1' }],
-    [{ title: " " }],
-    [{ title: "x".repeat(256) }],
-    [{ space_name: 3 }]
-  ])("should refuse a parent with %j when it is not one the search could have found", (change) => {
-    expect(checkParent({ ...PARENT, ...change })).toBeUndefined();
-  });
+  it.each([[{ id: "../1" }], [{ space_id: "CCD" }], [{ space_key: 'CCD" OR 1=1' }], [{ title: " " }], [{ title: "x".repeat(256) }], [{ space_name: 3 }]])(
+    "should refuse a parent with %j when it is not one the search could have found",
+    (change) => {
+      expect(checkParent({ ...PARENT, ...change })).toBeUndefined();
+    }
+  );
 
   it("should refuse something that is not an object", () => {
     expect(checkParent(null)).toBeUndefined();

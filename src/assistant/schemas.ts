@@ -37,16 +37,16 @@ export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/;
 export const MAX_JIRA_ERROR = 300;
 
 export const jiraExportReportBody = z.union([
-  z.object({ export_id: z.string().uuid(), key: z.string().regex(JIRA_KEY_RE) }).strict(),
-  z.object({ export_id: z.string().uuid(), error: z.string().trim().min(1).max(MAX_JIRA_ERROR) }).strict()
+  z.strictObject({ export_id: z.uuid(), key: z.string().regex(JIRA_KEY_RE) }),
+  z.strictObject({ export_id: z.uuid(), error: z.string().trim().min(1).max(MAX_JIRA_ERROR) })
 ]);
 
 /** The longest error a pod may report for a Confluence export; the migration checks the same. */
 export const MAX_CONFLUENCE_ERROR = 300;
 
 export const confluenceExportReportBody = z.union([
-  z.object({ export_id: z.string().uuid(), page_id: z.string().regex(/^[0-9]{1,20}$/), title: z.string().trim().min(1).max(255).optional() }).strict(),
-  z.object({ export_id: z.string().uuid(), error: z.string().trim().min(1).max(MAX_CONFLUENCE_ERROR) }).strict()
+  z.strictObject({ export_id: z.uuid(), page_id: z.string().regex(/^[0-9]{1,20}$/), title: z.string().trim().min(1).max(255).optional() }),
+  z.strictObject({ export_id: z.uuid(), error: z.string().trim().min(1).max(MAX_CONFLUENCE_ERROR) })
 ]);
 
 const wholeCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);

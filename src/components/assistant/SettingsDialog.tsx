@@ -677,7 +677,9 @@ function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) 
               {...(wide ? { role: "tabpanel", id: panelId, "aria-labelledby": section === null ? undefined : tabId(section) } : {})}
               // biome-ignore lint/a11y/noNoninteractiveTabindex: a section holding nothing focusable, as Connections is, has to be focusable itself or a keyboard cannot reach or scroll it
               tabIndex={0}
-              className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-0.5 outline-none focus-visible:outline-1 focus-visible:outline-asst-accent-line"
+              // `outline-hidden` leaves the outline style at `none`, and a width and a colour alone draw nothing, so
+              // the focus ring says `outline-solid` as well.
+              className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-0.5 outline-hidden focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-asst-accent-line"
             >
               {open?.panel(view) ?? null}
             </div>

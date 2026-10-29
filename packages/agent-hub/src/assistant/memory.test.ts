@@ -78,15 +78,12 @@ describe("measureMemory", () => {
 
   // `anon` is what the hub's warning is computed from, so a `memory.stat` without it is a report the hub could not
   // say the one useful thing about -- the three other figures are not a weaker version of that.
-  it.each([
-    "file 2576980378\n",
-    "anonymous 123\n",
-    "anon\n",
-    "anon notanumber\n",
-    "anon -1\n"
-  ])("should report nothing when memory.stat reads %j and so carries no anon", (stat) => {
-    expect(measureMemory({ root: pod({ "memory.stat": stat }) })).toBeUndefined();
-  });
+  it.each(["file 2576980378\n", "anonymous 123\n", "anon\n", "anon notanumber\n", "anon -1\n"])(
+    "should report nothing when memory.stat reads %j and so carries no anon",
+    (stat) => {
+      expect(measureMemory({ root: pod({ "memory.stat": stat }) })).toBeUndefined();
+    }
+  );
 
   it.each(["", "  ", "-1", "not a number", "9007199254740993"])("should report nothing when a figure reads %j", (value) => {
     expect(measureMemory({ root: pod({ "memory.peak": value }) })).toBeUndefined();

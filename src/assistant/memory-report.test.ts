@@ -91,15 +91,12 @@ describe("memoryUse", () => {
 
   // A row carrying a date and not the figures, or the other way round, is not a report. Half of one would be shown as
   // a measurement, which is the one thing none of this may do.
-  it.each([
-    "memoryLimitBytes",
-    "memoryCurrentBytes",
-    "memoryPeakBytes",
-    "memoryAnonBytes",
-    "memoryReportedAt"
-  ] as const)("should report nothing when %s alone is missing", (missing) => {
-    expect(memoryUse(row({ [missing]: null }))).toEqual({ reported: false, reason: "waiting" });
-  });
+  it.each(["memoryLimitBytes", "memoryCurrentBytes", "memoryPeakBytes", "memoryAnonBytes", "memoryReportedAt"] as const)(
+    "should report nothing when %s alone is missing",
+    (missing) => {
+      expect(memoryUse(row({ [missing]: null }))).toEqual({ reported: false, reason: "waiting" });
+    }
+  );
 
   // What every row written before `memory_anon_bytes` existed looks like: three figures and a date, and no `anon`.
   // The warning cannot be computed from it, so it is not a report — and the pod that wrote it is on a client that

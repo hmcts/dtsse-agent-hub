@@ -33,17 +33,12 @@ describe("awaitsOwner", () => {
     expect(awaitsOwner(phase)).toBe(true);
   });
 
-  it.each([
-    "provisioning",
-    "cloning",
-    "running",
-    "failed",
-    "requested",
-    "stopping",
-    "stopped"
-  ])("should say a pod reporting %s is not waiting on its owner", (phase) => {
-    expect(awaitsOwner(phase)).toBe(false);
-  });
+  it.each(["provisioning", "cloning", "running", "failed", "requested", "stopping", "stopped"])(
+    "should say a pod reporting %s is not waiting on its owner",
+    (phase) => {
+      expect(awaitsOwner(phase)).toBe(false);
+    }
+  );
 });
 
 describe("nextStatus from the pod", () => {
@@ -59,13 +54,14 @@ describe("nextStatus from the pod", () => {
     }
   });
 
-  it.each(
-    VIRTUAL_AGENT_STATUSES.flatMap((status) => (["stopped", "deleted"] as const).map((desired) => [status, desired] as const))
-  )("should refuse any report from the pod of a %s agent when it is meant to be %s", (status, desired) => {
-    expect(nextStatus({ status, desired }, { source: "pod", phase: "running" })).toEqual({
-      refused: `the agent is meant to be ${desired}, so its pod's reports no longer apply`
-    });
-  });
+  it.each(VIRTUAL_AGENT_STATUSES.flatMap((status) => (["stopped", "deleted"] as const).map((desired) => [status, desired] as const)))(
+    "should refuse any report from the pod of a %s agent when it is meant to be %s",
+    (status, desired) => {
+      expect(nextStatus({ status, desired }, { source: "pod", phase: "running" })).toEqual({
+        refused: `the agent is meant to be ${desired}, so its pod's reports no longer apply`
+      });
+    }
+  );
 
   it("should clear the detail when the pod sends none", () => {
     expect(nextStatus({ status: "cloning", desired: "running" }, { source: "pod", phase: "running" })).toEqual({ status: "running", detail: null });

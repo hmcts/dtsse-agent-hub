@@ -1,4 +1,4 @@
-FROM hmctsprod.azurecr.io/base/node:22-alpine AS base
+FROM hmctsprod.azurecr.io/base/node:24-alpine AS base
 
 USER root
 RUN corepack enable
@@ -24,7 +24,7 @@ FROM dependencies AS build
 
 WORKDIR /app
 
-COPY --chown=hmcts:hmcts tsconfig.json tsconfig.cli.json next.config.mjs biome.json prisma.config.ts tailwind.config.ts postcss.config.mjs ./
+COPY --chown=hmcts:hmcts tsconfig.json tsconfig.cli.json next.config.mjs biome.json prisma.config.ts postcss.config.mjs ./
 COPY --chown=hmcts:hmcts src ./src
 COPY --chown=hmcts:hmcts prisma ./prisma
 

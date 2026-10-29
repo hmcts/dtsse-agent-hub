@@ -17,7 +17,7 @@ export interface AssistantTemplates {
 }
 
 const FIELD =
-  "block w-full rounded-lg border border-asst-strong bg-asst-field px-2.5 py-2 text-[13px] leading-5 text-asst-text outline-none focus:border-asst-accent-line";
+  "block w-full rounded-lg border border-asst-strong bg-asst-field px-2.5 py-2 text-[13px] leading-5 text-asst-text outline-hidden focus:border-asst-accent-line";
 
 function count(value: number): string {
   return value.toLocaleString("en-GB");
