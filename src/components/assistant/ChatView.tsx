@@ -288,8 +288,9 @@ export function ChatView({
   const product = storedProduct(view.product);
   /**
    * Whether a pod is behind this chat, which is the one question every control that instructs one hangs on: the
-   * stop, the attach and the warm on focus all reach the session through its pod, and there is none for a session on
-   * the person's own computer. One reading of `view.local`, so the controls cannot disagree about where the chat is.
+   * stop, the attach, the warm on focus and the document's two exports all reach the session through its pod, and
+   * there is none for a session on the person's own computer. One reading of `view.local`, so the controls cannot
+   * disagree about where the chat is.
    */
   const pod = !view.local;
   const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
@@ -504,9 +505,18 @@ export function ChatView({
           productLabel={view.productLabel}
           save={actions.saveArtefact}
           onClose={() => setPanel(false)}
-          jira={{ exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira }}
+          /*
+           * The document itself stays on a local chat — it is a hub row the person and the session both edit, and
+           * `saveArtefact` works there — but neither export is offered, which is what `pod` takes away here. An
+           * export is carried out by the conversation's session, instructed through `assistantFrame`, and that frame
+           * reaches a pod's session alone: `requestJiraExport` would set the status pending, the footer would say
+           * "Creating ticket…" until the 15-minute timeout and then report a generic failure, and a retry the same.
+           * The panel keeps copy, download and print, which are the ways a document leaves a local chat.
+           * `requestJiraExport` and `requestConfluenceExport` refuse it as well, so this is the convenience half.
+           */
+          jira={pod ? { exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira } : undefined}
           confluence={
-            actions.exportToConfluence === undefined
+            !pod || actions.exportToConfluence === undefined
               ? undefined
               : { exported: view.confluence, access: jira, exportTo: actions.exportToConfluence, defaultPage: defaults.confluence }
           }

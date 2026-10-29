@@ -128,6 +128,9 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
 
 const NO_JIRA = { connected: false, login: null };
 
+/** Atlassian connected, so the export footers name what they do rather than offering to connect first. */
+const JIRA = { connected: true, login: null };
+
 function ok() {
   return vi.fn(async () => ({ ok: true as const }));
 }
@@ -681,6 +684,23 @@ describe("ChatView on a local chat", () => {
     expect(live.warm).not.toHaveBeenCalled();
   });
 
+  /**
+   * The document stays — it is a hub row the person and the session both edit, and saving it works here. Only the
+   * exports go, because the steps for one reach the session through `assistantFrame`, which a conversation with no
+   * pod never gets: the footer would say "Creating ticket…" for fifteen minutes and then report a failure.
+   */
+  it("should offer the document but neither export, which nothing behind this chat could carry out", () => {
+    const written = laptop({ artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } });
+    render(<ChatView jira={JIRA} viewerOid={VIEWER} view={written} templates={TEMPLATES} actions={actions({ exportToConfluence: ok() })} />);
+    fireEvent.click(screen.getByRole("button", { name: /Open document/ }));
+
+    expect(screen.getByRole("region", { name: "Document" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Document title" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Export to Jira backlog/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Publish to Confluence/ })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Send this document to" })).toBeNull();
+  });
+
   // Nothing starts a laptop session, so the warm has nothing to ask for; the chat on a pod is what it is for.
   it("should still warm a chat on a pod when its session is offline", () => {
     const pod = actions();
@@ -874,6 +894,20 @@ describe("ChatView document", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close document" }));
     expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
+  });
+
+  // The other half of the local chat's "neither export": on a pod there is a session the frame reaches, so both are
+  // offered, and taking them away everywhere would have been a regression rather than a fix.
+  it("should offer both exports on a chat that has a pod to carry them out", () => {
+    const written = conversation({ artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } });
+    render(<ChatView jira={JIRA} viewerOid={VIEWER} view={written} templates={TEMPLATES} actions={actions({ exportToConfluence: ok() })} />);
+    fireEvent.click(screen.getByRole("button", { name: /Open document/ }));
+
+    expect(screen.getByRole("group", { name: "Send this document to" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Export to Jira backlog/ })).toBeTruthy();
+    // The footer shows one destination at a time, so Confluence's control is reached by choosing it.
+    fireEvent.click(screen.getByRole("radio", { name: /Confluence page/ }));
+    expect(screen.getByRole("button", { name: /Publish to Confluence/ })).toBeTruthy();
   });
 
   it("should offer to open the document when one has been written", () => {
