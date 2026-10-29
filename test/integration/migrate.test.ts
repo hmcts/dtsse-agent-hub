@@ -120,7 +120,6 @@ describe("migrate", () => {
     expect(tables.map((row) => row.table_name)).toEqual([
       "_prisma_migrations",
       "agent",
-      "agent_grant",
       "agent_question",
       "assistant_conversation",
       "assistant_conversation_fork",

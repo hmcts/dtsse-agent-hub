@@ -21,13 +21,6 @@ enum AgentStatus {
   @@map("agent_status")
 }
 
-enum GrantLevel {
-  read
-  write
-
-  @@map("grant_level")
-}
-
 enum MessageKind {
   post
   direct
@@ -165,8 +158,6 @@ model User {
   lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
 
   agents      Agent[]
-  grantsGiven AgentGrant[] @relation("grantOwner")
-  grantsHeld  AgentGrant[] @relation("grantee")
   messages    Message[]
   channels    Channel[]
   credentials   Credential[]
@@ -205,7 +196,8 @@ model Agent {
   /// What its client claimed it understands of the hub's optional wire fields, as ["name"], or null from a client
   /// that reported nothing, which claims nothing. See src/agents/client-features.ts.
   clientFeatures  Json?       @map("client_features")
-  /// The assistant conversation this agent is a session of, if any. Visible to and messageable by its owner only.
+  /// The assistant conversation this agent is a session of, if any. With a virtual agent as well, it is a pod's chat
+  /// session and no post may tag it; with none, it is a session on its owner's own computer.
   assistantConversationId String? @map("assistant_conversation_id") @db.Uuid
 
   owner         User              @relation(fields: [ownerOid], references: [oid])
@@ -224,21 +216,6 @@ model Agent {
   @@index([ownerOid])
   @@index([name])
   @@map("agent")
-}
-
-/// Covers every agent the owner has, current and future.
-model AgentGrant {
-  ownerOid   String     @map("owner_oid")
-  granteeOid String     @map("grantee_oid")
-  level      GrantLevel
-  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  owner   User @relation("grantOwner", fields: [ownerOid], references: [oid])
-  grantee User @relation("grantee", fields: [granteeOid], references: [oid])
-
-  @@id([ownerOid, granteeOid])
-  @@index([granteeOid])
-  @@map("agent_grant")
 }
 
 model Topic {

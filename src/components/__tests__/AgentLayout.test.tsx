@@ -56,10 +56,8 @@ const LINKED: AgentView = {
     host: null,
     createdAt: "2026-10-05T10:00:00.000Z"
   },
-  access: "read",
-  grants: [],
   skills: [],
-  ref: { id: SESSION_ID, ownerOid: "alice", ownerOnly: false, inConversation: false }
+  ref: { id: SESSION_ID, ownerOid: "alice", ownerOnly: false }
 };
 
 function page(overrides: Partial<VirtualAgentPageView> = {}): VirtualAgentPageView {
@@ -130,21 +128,13 @@ describe("VirtualAgentPanel", () => {
   });
 
   it("should show the current session's details after the owner's panels when a session has registered", () => {
-    render(
-      <VirtualAgentPanel
-        page={page({ linked: { ...LINKED, access: "owner" } })}
-        actions={ACTIONS}
-        now={NOW}
-        session={<p>the session</p>}
-        plugins={NO_PLUGINS}
-      />
-    );
+    render(<VirtualAgentPanel page={page({ linked: LINKED })} actions={ACTIONS} now={NOW} session={<p>the session</p>} plugins={NO_PLUGINS} />);
 
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
     expect(screen.getByText("the session")).toBeTruthy();
   });
 
-  it("should tell a grantee whose it is and offer none of the owner's controls when the viewer does not own it", () => {
+  it("should name whose it is and offer none of the owner's controls when the panel is given no management", () => {
     render(<VirtualAgentPanel page={page({ manage: null, linked: LINKED })} actions={ACTIONS} now={NOW} session={<p>the session</p>} plugins={NO_PLUGINS} />);
 
     expect(screen.getByText(/A virtual agent the hub runs for Alice/)).toBeTruthy();

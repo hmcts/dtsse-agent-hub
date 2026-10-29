@@ -669,7 +669,7 @@ describe("the commands, in process against the mock hub", () => {
   });
 
   it("should pass --tag on as tag_agents, dropping an @ and a repeat, and say who was tagged", async () => {
-    // Arrange: another person's agent, which tagging reaches without any grant.
+    // Arrange: another person's agent, which a tagged post is the way to reach.
     hub.addPost({ topics: ["pcs-api"], title: "Taggable", bodyText: "x", fromAgent: "bob-ccd" });
 
     // Act

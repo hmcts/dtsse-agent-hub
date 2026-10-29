@@ -1,5 +1,5 @@
 import { agentsMessageableBy, POD_CONVERSATION_AGENT } from "../access/load.ts";
-import { conversationFlags } from "../access/rules.ts";
+import { isPodConversationAgent } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
 import { linkLocalSession, linkSession } from "../assistant/store.ts";
 import type { AgentStatus } from "../realtime/events.ts";
@@ -148,10 +148,8 @@ export interface AgentRow {
   status: AgentStatus;
   /** The virtual agent whose session registered it, if any. */
   virtualAgentId: string | null;
-  /** A pod conversation's agent, which no grant extends to. */
+  /** A pod conversation's agent: the HMCTS Assistant, which no post may tag. */
   ownerOnly: boolean;
-  /** An agent in a conversation of either kind, whose transcript is its owner's alone. */
-  inConversation: boolean;
 }
 
 export async function findAgent(db: Database, id: string): Promise<AgentRow | undefined> {
@@ -163,7 +161,7 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
     return undefined;
   }
   const { assistantConversationId, ...agent } = row;
-  return { ...agent, ...conversationFlags(row) };
+  return { ...agent, ownerOnly: isPodConversationAgent(row) };
 }
 
 /** Locks the agent's row for the rest of the transaction, and reads what a status or skills change is compared against. */
@@ -251,7 +249,11 @@ export interface ListedAgent {
 
 export const MAX_LISTED_AGENTS = 200;
 
-/** The agents `oid` may message, live ones first and then most recently heard from. */
+/**
+ * The agents `oid` may message, live ones first and then most recently heard from: their own sessions, which is what
+ * a direct message is between. Somebody else's agent is reached by tagging it in a post, and the agents a tag may
+ * name are `searchTaggableAgents`' rather than this list's.
+ */
 export async function listMessageableAgents(db: Database, oid: string): Promise<ListedAgent[]> {
   const rows = await db.agent.findMany({
     where: agentsMessageableBy(oid),
@@ -296,8 +298,8 @@ export interface SuggestedAgent {
  * answer at all and how many agents one answer may carry.
  *
  * A hyphen rather than any substring, so "pcs" finds `alice-pcs-api` without "api" finding every agent that has one
- * in its name. Not grant-scoped, because tagging is not; the pod conversation's agents it leaves out are the ones
- * nobody may tag.
+ * in its name. Every owner's, because tagging reaches every owner's; the pod conversation's agents it leaves out are
+ * the ones nobody may tag.
  */
 export async function searchTaggableAgents(db: Database, query: string, limit: number): Promise<SuggestedAgent[]> {
   const starts = `${likeLiteral(query)}%`;
@@ -321,7 +323,7 @@ export async function searchTaggableAgents(db: Database, query: string, limit: n
     ownerOid: row.owner_oid,
     name: row.name,
     ownerName: row.owner_name,
-    ownerOnly: conversationFlags({ assistantConversationId: row.conversation_id, virtualAgentId: row.virtual_agent_id }).ownerOnly
+    ownerOnly: isPodConversationAgent({ assistantConversationId: row.conversation_id, virtualAgentId: row.virtual_agent_id })
   }));
 }
 
@@ -345,8 +347,8 @@ export interface Candidate {
 }
 
 /**
- * What a name is matched among. `message` is the agents the sender may message, which `to_agent` resolves in; `tag`
- * is every agent but a pod conversation's, because tagging one in a post needs no grant (`tagRefusal` in
+ * What a name is matched among. `message` is the agents the sender may message — its owner's own — which `to_agent`
+ * resolves in; `tag` is every agent but a pod conversation's, because anyone may tag anyone's (`tagRefusal` in
  * `src/access/rules.ts` is where that is decided and said).
  */
 export type TargetScope = "message" | "tag";
@@ -379,7 +381,7 @@ export async function resolveTargets(db: Database, senderOid: string, toAgent: s
   const candidates = rows.map(({ owner, assistantConversationId, virtualAgentId, ...row }) => ({
     ...row,
     ownerName: owner.name,
-    ownerOnly: conversationFlags({ assistantConversationId, virtualAgentId }).ownerOnly
+    ownerOnly: isPodConversationAgent({ assistantConversationId, virtualAgentId })
   }));
   const live = candidates.filter((candidate) => candidate.status !== "offline");
   return live.length > 0 ? live : candidates;

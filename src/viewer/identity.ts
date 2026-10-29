@@ -8,8 +8,8 @@ import type { Identity } from "../users/identity.ts";
  * stream use, read from the sealed session cookie and never from anything the browser sends as an argument.
  *
  * With `AUTH_DISABLED=true` (a preview, the pipeline's `-staging` release, `yarn dev`) nobody can sign in, so the
- * viewer is a fixed development identity instead. It is a real `user` row, so owning channels and granting access
- * work as they do signed in. Its oid is `dev-…` and its tenant `dev`: an Entra oid is a GUID, so a persona can never
+ * viewer is a fixed development identity instead. It is a real `user` row, so owning channels and sharing chats work
+ * as they do signed in. Its oid is `dev-…` and its tenant `dev`: an Entra oid is a GUID, so a persona can never
  * be mistaken for a real person, and the agent API's `X-Dev-User` gets the same prefix, so it names a persona too.
  * `AUTH_DEV_USER` is the one deliberate exception: it acts as the real person it names.
  */
@@ -24,7 +24,8 @@ export const ANONYMOUS_PERSONA = "anonymous";
 
 /**
  * A development identity. `persona` lets a second browser act as someone else while sign-in is off, which is what
- * a test of grants between two people needs; anything that is not a short slug falls back to `anonymous`.
+ * a test of two people needs — a chat shared from one browser and read in the other; anything that is not a short
+ * slug falls back to `anonymous`.
  */
 export function devIdentity(persona: string | undefined = ANONYMOUS_PERSONA): Identity {
   const name = persona !== undefined && PERSONA.test(persona) ? persona : ANONYMOUS_PERSONA;

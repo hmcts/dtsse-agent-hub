@@ -68,7 +68,6 @@ beforeEach(async () => {
   alicesAgent = await insertAgent(ALICE, "alices-agent");
   carolsAgent = await insertAgent(CAROL, "carols-agent");
   await insertUser(BOB);
-  await prisma.agentGrant.create({ data: { ownerOid: ALICE.oid, granteeOid: BOB.oid, level: "read" } });
 });
 
 afterAll(async () => {
@@ -191,10 +190,12 @@ describe("POST /api/agent/{agent_id}/transcript", () => {
 });
 
 describe("GET /api/ui/agents/{id}/transcript", () => {
+  // A transcript is its owner's, and an agent that is not the caller's is reported as not existing rather than
+  // as forbidden: the same answer a malformed id gets, so nothing here confirms an id.
   it.each([
     ["the owner", "alice", 200],
-    ["a read grantee", "bob", 200],
-    ["a stranger, as missing", "carol", 404]
+    ["a colleague with no agents, as missing", "bob", 404],
+    ["another owner, as missing", "carol", 404]
   ])("should answer %s", async (_label, as, status) => {
     await accepted(alicesAgent, [entry("1")]);
 
@@ -214,7 +215,8 @@ describe("GET /api/ui/agents/{id}/transcript", () => {
     const direct = await createDirect(prisma, { author: { oid: BOB.oid, agentId: null }, targetAgentId: alicesAgent, inReplyTo: null, body: "hello" });
     await accepted(alicesAgent, [entry("a", { role: "user", message_id: direct.id, occurred_at: at(2000) }), entry("b", { occurred_at: at(1000) })]);
 
-    const result = await page("bob", alicesAgent);
+    // Read as the owner: a transcript is its owner's alone, so Bob authoring the direct does not let him read it.
+    const result = await page("alice", alicesAgent);
 
     expect(result.messages.map((message) => message.body)).toEqual(["hello"]);
     expect(result.entries.map((item) => [item.key, item.message_id])).toEqual([
@@ -270,9 +272,9 @@ describe("GET /api/ui/agents/{id}/transcript", () => {
 
 /**
  * A conversation of a session on somebody's own laptop, which has no pod. Its agent is one of the owner's ordinary
- * sessions: a colleague holding a write grant still sees it on the roster, picks it out of a list and messages it.
- * Only the words of the chat are the owner's alone. A pod conversation's agent, the HMCTS Assistant, is in none of
- * those places for anyone but its owner, and is here as the contrast.
+ * sessions: on their roster, in their messageable list, and taggable by anyone in a post. A pod conversation's
+ * agent, the HMCTS Assistant, is in none of those places — not even for its owner, who reaches that chat through
+ * the Assistant — and is here as the contrast.
  *
  * The local one is a real registration, so these read the rows the hub itself writes.
  */
@@ -281,7 +283,6 @@ describe("an agent in a conversation", () => {
   let pod: string;
 
   beforeEach(async () => {
-    await prisma.agentGrant.update({ where: { ownerOid_granteeOid: { ownerOid: ALICE.oid, granteeOid: BOB.oid } }, data: { level: "write" } });
     local = (
       await registerAgent(
         prisma,
@@ -295,37 +296,49 @@ describe("an agent in a conversation", () => {
     await prisma.agent.update({ where: { id: pod }, data: { assistantConversationId: chat.id, virtualAgentId: assistant.id } });
   });
 
-  it("should keep a local session on the write grantee's roster and leave the pod conversation's agent off it", async () => {
-    const { shared } = await visibleAgents(prisma, BOB.oid);
+  it("should keep a local session on its owner's roster and leave the pod conversation's agent off it", async () => {
+    const mine = await visibleAgents(prisma, ALICE.oid);
 
-    expect(shared.map((card) => card.id)).toContain(local);
-    expect(shared.map((card) => card.id)).not.toContain(pod);
-    expect((await visibleAgents(prisma, ALICE.oid)).mine.map((card) => card.id)).not.toContain(pod);
+    expect(mine.map((card) => card.id)).toContain(local);
+    expect(mine.map((card) => card.id)).not.toContain(pod);
+    // Neither is anyone else's to see, whichever kind it is.
+    expect((await visibleAgents(prisma, BOB.oid)).map((card) => card.id)).toEqual([]);
   });
 
-  it("should let the write grantee message a local session by name and by id, and refuse the pod conversation's", async () => {
+  // A direct message is between one person's own sessions, so the sender here is another agent of Alice's. The pod
+  // conversation's agent is off the list and unreachable by name even for her, which is the exclusion in
+  // `agentsMessageableBy`; by id it is still one of her own sessions, as it always was, and that is what the
+  // Assistant's own composer sends through.
+  it("should let the owner's own agent message a local session by name and by id, and not name the pod conversation's", async () => {
+    const alicesOther = await insertAgent(ALICE, "alices-other");
+    const sender = (await findAgent(prisma, alicesOther))!;
     const bobsAgent = await insertAgent(BOB, "bobs-agent");
-    const sender = (await findAgent(prisma, bobsAgent))!;
+    const colleague = (await findAgent(prisma, bobsAgent))!;
 
-    expect((await listMessageableAgents(prisma, BOB.oid)).map((listed) => listed.id)).toEqual(expect.arrayContaining([local]));
-    expect((await listMessageableAgents(prisma, BOB.oid)).map((listed) => listed.id)).not.toContain(pod);
+    expect((await listMessageableAgents(prisma, ALICE.oid)).map((listed) => listed.id)).toEqual(expect.arrayContaining([local]));
+    expect((await listMessageableAgents(prisma, ALICE.oid)).map((listed) => listed.id)).not.toContain(pod);
     expect((await directAsAgent(prisma, sender, { toAgent: "alices-local-chat", body: "still reachable" })).target_agent_id).toBe(local);
     expect((await directAsAgent(prisma, sender, { toAgent: local, body: "and by id" })).target_agent_id).toBe(local);
-    await expect(directAsAgent(prisma, sender, { toAgent: pod, body: "not this one" })).rejects.toThrow(/may not message that agent/);
     await expect(directAsAgent(prisma, sender, { toAgent: "alices-assistant", body: "nor by name" })).rejects.toThrow(/no agent you may message/);
+    // And a colleague's agent reaches neither, by name or by id: it posts and tags the local one instead.
+    await expect(directAsAgent(prisma, colleague, { toAgent: local, body: "not yours" })).rejects.toThrow(/tag that agent/);
+    await expect(directAsAgent(prisma, colleague, { toAgent: "alices-local-chat", body: "nor by name" })).rejects.toThrow(/no agent you may message/);
   });
 
-  it("should refuse the write grantee the local session's transcript and report the pod conversation's as missing", async () => {
+  it("should report both kinds of conversation agent as missing to a colleague asking for the transcript", async () => {
     await accepted(local, [entry("1")]);
 
-    expect((await read("bob", local)).status).toBe(403);
     expect((await read("alice", local)).status).toBe(200);
+    expect((await read("bob", local)).status).toBe(404);
     expect((await read("bob", pod)).status).toBe(404);
   });
 
-  it("should send a transcript event for a local session to its owner and not to the write grantee", async () => {
+  it("should send a transcript event for a local session to its owner, and open no stream at all for a colleague", async () => {
+    const refused = await stream(uiRequest("bob", `/api/ui/stream?agent=${local}`, new AbortController().signal));
+    expect(refused.status).toBe(404);
+
     const watchers = await Promise.all(
-      ["alice", "bob"].map(async (as) => {
+      ["alice"].map(async (as) => {
         const controller = new AbortController();
         const response = await stream(uiRequest(as, `/api/ui/stream?agent=${local}`, controller.signal));
         expect(response.status).toBe(200);
@@ -334,14 +347,12 @@ describe("an agent in a conversation", () => {
         return { controller, reader };
       })
     );
-    const [alice, bob] = watchers;
+    const [alice] = watchers;
 
     try {
       await accepted(local, [entry("1")]);
-      await alice!.reader.named("transcript", 1);
-      await bob!.reader.drain(300);
 
-      expect(bob!.reader.received.filter((received) => received.event === "transcript")).toEqual([]);
+      expect(await alice!.reader.named("transcript", 1)).toHaveLength(1);
     } finally {
       for (const { controller, reader } of watchers) {
         controller.abort();
@@ -371,20 +382,20 @@ describe("transcript events on the UI stream", () => {
     }
   });
 
-  it("should tell the watchers who may read the transcript, once per batch, and nothing for a batch already stored", async () => {
-    const bob = await watch("bob", `agent=${alicesAgent}`);
+  it("should tell each owner about their own agent, once per batch, and nothing for a batch already stored", async () => {
+    const alice = await watch("alice", `agent=${alicesAgent}`);
     const carol = await watch("carol", `agent=${carolsAgent}`);
 
     await accepted(alicesAgent, [entry("1"), entry("2")]);
-    const [frame] = await bob.named("transcript", 1);
+    const [frame] = await alice.named("transcript", 1);
     const stored = await prisma.transcriptEntry.findMany({ orderBy: { id: "asc" } });
     expect(JSON.parse(frame!.data!)).toEqual({ agent_id: alicesAgent, last_id: stored.at(-1)!.id.toString() });
 
     await accepted(alicesAgent, [entry("1")]);
-    await bob.drain(300);
+    await alice.drain(300);
     await carol.drain(100);
 
-    expect(bob.received.filter((received) => received.event === "transcript")).toHaveLength(1);
+    expect(alice.received.filter((received) => received.event === "transcript")).toHaveLength(1);
     expect(carol.received.filter((received) => received.event === "transcript")).toEqual([]);
   });
 });

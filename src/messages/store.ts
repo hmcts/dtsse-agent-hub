@@ -199,7 +199,7 @@ export async function ackDelivery(prisma: PrismaClient, agentId: string, message
  * a conversation with no pod is a session on somebody's laptop, which nothing here can wake, so its deliveries run on
  * the offline clock like any other session's — otherwise a message to a laptop that was last seen last week would
  * read as "queued" in the sender's thread for a further day. An agent in a conversation with no virtual agent is that
- * laptop session, as `conversationFlags` in `src/access/rules.ts` reads the same two columns to decide.
+ * laptop session, as `isPodConversationAgent` in `src/access/rules.ts` reads the same two columns to decide.
  * `SKIP LOCKED` leaves a delivery being acked to the ack. Returns how many expired.
  */
 export async function expireDeliveries(db: Database, offlineForSeconds: number, limit: number): Promise<number> {

@@ -1,5 +1,5 @@
-import { grantsHeldBy, loadMessageRef } from "../access/load.ts";
-import { type AgentRef, canAgentMessageAgent, canPersonMessageAgent, canViewAgent, replyRoute, tagRefusal } from "../access/rules.ts";
+import { loadMessageRef } from "../access/load.ts";
+import { type AgentRef, canAgentMessageAgent, canPersonMessageAgent, replyRoute, tagRefusal } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { type Candidate, findAgent, isUuid, resolveTargets } from "../agents/store.ts";
 import type { PrismaClient } from "../store/prisma.ts";
@@ -35,7 +35,7 @@ function candidateView(candidate: Candidate): Record<string, unknown> {
 
 /**
  * The agents a post's `tag_agents` names, as ids. Each reference resolves as `to_agent` does, but among every agent
- * rather than the ones the author may message: tagging needs no grant, and `tagRefusal` is where that is said.
+ * rather than the ones the author may message: anyone may tag anyone's, and `tagRefusal` is where that is said.
  *
  * Every reference is resolved before the post is written, and one that cannot be is a refusal of the whole post:
  * a post that reached some of the agents it named and dropped the rest would read as having reached all of them.
@@ -83,14 +83,13 @@ export type DirectRequest = { toAgent: string; body: string } | { replyTo: bigin
 
 export async function directAsAgent(prisma: PrismaClient, sender: AgentRef, request: DirectRequest): Promise<ApiMessage> {
   const author = { oid: sender.ownerOid, agentId: sender.id };
-  const grants = await grantsHeldBy(prisma, sender.ownerOid);
 
   if ("replyTo" in request) {
     const original = await loadMessageRef(prisma, request.replyTo);
     if (original === undefined) {
       throw new HttpError(404, "no such message");
     }
-    const route = replyRoute(sender, original, grants);
+    const route = replyRoute(sender, original);
     if (route.to === "nobody") {
       throw new HttpError(route.status, route.reason);
     }
@@ -112,16 +111,19 @@ export async function directAsAgent(prisma: PrismaClient, sender: AgentRef, requ
     });
   }
   const target = candidates[0]!;
-  if (!canAgentMessageAgent(sender, target, grants)) {
-    throw new HttpError(403, "you may not message that agent");
+  if (!canAgentMessageAgent(sender, target)) {
+    throw new HttpError(403, "a direct message is between your own sessions; post on a topic and tag that agent instead");
   }
   return await createDirect(prisma, { author, targetAgentId: target.id, inReplyTo: null, body: request.body });
 }
 
 /**
  * A person's direct message to an agent from its page in the UI. The same write as an agent's, so it queues a
- * delivery the agent's stream sends and NOTIFYs every pod. An agent the sender cannot see is reported as missing,
- * not forbidden, so the refusal does not confirm that it exists.
+ * delivery the agent's stream sends and NOTIFYs every pod.
+ *
+ * One refusal, and it is the missing one: an agent is its owner's, so somebody else's is reported as not existing
+ * rather than as forbidden, which is how every other rule answers for an agent that is not the caller's. `404` is
+ * also what the caller gets for an id that is not a UUID at all, so no answer here confirms an id.
  */
 /** `alongside` is `NewDirect`'s: work that shares the message's transaction, which the Assistant attaches files in. */
 export async function directAsPerson(
@@ -132,12 +134,8 @@ export async function directAsPerson(
   alongside?: NewDirect["alongside"]
 ): Promise<ApiMessage> {
   const target = isUuid(agentId) ? await findAgent(prisma, agentId) : undefined;
-  const grants = await grantsHeldBy(prisma, senderOid);
-  if (target === undefined || !canViewAgent(senderOid, target, grants)) {
+  if (target === undefined || !canPersonMessageAgent(senderOid, target)) {
     throw new HttpError(404, "no such agent");
-  }
-  if (!canPersonMessageAgent(senderOid, target, grants)) {
-    throw new HttpError(403, "you have read access to this agent, not write access");
   }
   return await createDirect(prisma, { author: { oid: senderOid, agentId: null }, targetAgentId: target.id, inReplyTo: null, body, alongside });
 }

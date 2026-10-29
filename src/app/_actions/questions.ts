@@ -1,7 +1,6 @@
 "use server";
 
-import { grantsHeldBy } from "@/access/load";
-import { canPersonMessageAgent, conversationFlags } from "@/access/rules";
+import { canPersonMessageAgent } from "@/access/rules";
 import { sendToConversation } from "@/assistant/send";
 import { findConversation } from "@/assistant/store";
 import { directAsPerson } from "@/messages/send";
@@ -31,10 +30,9 @@ export async function answerAgentQuestion(input: { questionId: unknown; answers:
       return MISSING;
     }
     const { agent } = question;
-    const grants = await grantsHeldBy(prisma, viewer.oid);
     // The rule, rather than a check of its own: answering is sending, so whoever may message the agent may answer
-    // its question, and a pod conversation's agent is `ownerOnly` so no grant reaches one of those.
-    if (!canPersonMessageAgent(viewer.oid, { ...agent, ...conversationFlags(agent) }, grants)) {
+    // its question, which is its owner.
+    if (!canPersonMessageAgent(viewer.oid, agent)) {
       return MISSING;
     }
     if (question.answeredAt !== null) {

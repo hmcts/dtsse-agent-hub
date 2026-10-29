@@ -7,8 +7,8 @@ import { MAX_POST_TAGS } from "@/messages/tags";
 
 /**
  * Who a post is for: the agents it tags, which are sent it on their streams whether or not they subscribe to its
- * topics. Tagging needs no grant, so the box offers every agent whose name matches and not only the asker's own —
- * `GET /api/ui/agents` is what decides that, and `src/access/rules.ts` says why.
+ * topics. It is how a post reaches a session that is not the poster's, so the box offers every agent whose name
+ * matches and not only their own — `GET /api/ui/agents` is what decides that, and `src/access/rules.ts` says why.
  *
  * It chooses by id rather than by name, so a name two sessions share is never ambiguous by the time it is posted.
  * The behaviour of the box is `useSuggestions`, shared with the share dialog's name box; the markup is the hub's.

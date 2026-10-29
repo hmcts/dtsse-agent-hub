@@ -1,4 +1,4 @@
-import { type AgentRef, canReadMessage, canSeeAgentSkills, canViewAgent, canViewTranscript, canViewVirtualAgent, type Grant } from "../access/rules.ts";
+import { type AgentRef, canReadMessage, canSeeAgentSkills, canViewAgent, canViewTranscript, canViewVirtualAgent } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
 import type { Match, PostScope } from "../messages/feed.ts";
 import type { ApiMessage } from "../messages/shape.ts";
@@ -24,20 +24,19 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   sent; the page re-reads, which hands its composer the new list.
  * - `agent_question`: the watched agent asked a question, or one of its questions was answered, when the viewer can
  *   still see that agent. Only the id is sent; the page re-reads, which hands the thread the cards.
- * - `virtual_agent`: a virtual agent the viewer may see changed, their own or one a grant from its owner reaches, so
- *   the live view keeps up with the page rather than quietly going stale. Only the id is sent, which is no more than
- *   the page already shows them: its login codes and settings are its owner's alone, and the page re-reads each under
- *   its own rule.
+ * - `virtual_agent`: one of the viewer's own virtual agents changed, so the live view keeps up with the page rather
+ *   than quietly going stale. Only the id is sent, which is no more than the page already shows them: its login codes
+ *   and settings are read under their own rule when the page re-reads.
  * - `assistant_conversation`: one of the viewer's own assistant conversations changed. Only the id is sent, and only
  *   to its owner; the page re-reads it.
- * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, a grant the viewer holds changed
- *   and the agents they may see with it, or the viewer saved or deleted a credential, perhaps from the CLI; either
- *   way the page should re-read. Also sent once `LISTEN` becomes active
+ * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, or the viewer saved or deleted a
+ *   credential, perhaps from the CLI; either way the page should re-read. Also sent once `LISTEN` becomes active
  *   when the stream opened before it was, since anything committed until then was never notified.
  *
- * A post is read once per pod and shared by every stream, since anyone may read it. The viewer's grants are read
- * once per stream and read again after a `grant` event naming them as grantee, so a revocation stops the events
- * after it rather than the next connection. Work is chained so frames leave in the order the hub published them.
+ * A post is read once per pod and shared by every stream, since anyone may read it. Nothing else is cached or
+ * re-read: every rule below is answered from the event's own `owner_oid` or from the agent the stream opened on, and
+ * what either says cannot change while a connection is open — an agent does not change hands. Work is chained so
+ * frames leave in the order the hub published them.
  */
 
 export interface UiWatch {
@@ -52,8 +51,6 @@ export interface UiStreamSources {
   hub: EventHub;
   listener: Pick<Listener, "ready" | "connected">;
   viewerOid: string;
-  /** Every grant the viewer holds. `uiStream` caches it until a `grant` event names the viewer. */
-  grants: () => Promise<Grant[]>;
   post: (id: bigint) => Promise<ApiMessage | undefined>;
   direct: (id: bigint) => Promise<LoadedThreadMessage | undefined>;
 }
@@ -96,7 +93,7 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       return sseEvent({ id: message.id, event: "post", data: JSON.stringify({ message }) });
     }
     case "agent_status": {
-      if (!canViewAgent(sources.viewerOid, { id: event.agent_id, ownerOid: event.owner_oid }, await sources.grants())) {
+      if (!canViewAgent(sources.viewerOid, { id: event.agent_id, ownerOid: event.owner_oid })) {
         return undefined;
       }
       return sseEvent({ event: "agent_status", data: JSON.stringify({ agent_id: event.agent_id, status: event.status }) });
@@ -106,40 +103,39 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       if (agent === null || (event.target_agent_id !== agent.id && event.author_agent_id !== agent.id)) {
         return undefined;
       }
-      const grants = await sources.grants();
-      if (!canViewAgent(sources.viewerOid, agent, grants)) {
+      if (!canViewAgent(sources.viewerOid, agent)) {
         return undefined;
       }
       const loaded = await sources.direct(BigInt(event.message_id));
-      if (loaded === undefined || !canReadMessage(sources.viewerOid, loaded.ref, grants)) {
+      if (loaded === undefined || !canReadMessage(sources.viewerOid, loaded.ref)) {
         return undefined;
       }
       return sseEvent({ id: loaded.message.id, event: "direct", data: JSON.stringify({ message: loaded.message }) });
     }
     case "delivery": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !canViewAgent(sources.viewerOid, agent, await sources.grants())) {
+      if (agent === null || event.agent_id !== agent.id || !canViewAgent(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "delivery", data: JSON.stringify({ message_id: event.message_id, state: event.state }) });
     }
     case "transcript": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !canViewTranscript(sources.viewerOid, agent, await sources.grants())) {
+      if (agent === null || event.agent_id !== agent.id || !canViewTranscript(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "transcript", data: JSON.stringify({ agent_id: event.agent_id, last_id: event.last_id }) });
     }
     case "agent_skills": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !canSeeAgentSkills(sources.viewerOid, agent, await sources.grants())) {
+      if (agent === null || event.agent_id !== agent.id || !canSeeAgentSkills(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "agent_skills", data: JSON.stringify({ agent_id: event.agent_id }) });
     }
     case "agent_question": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !canViewAgent(sources.viewerOid, agent, await sources.grants())) {
+      if (agent === null || event.agent_id !== agent.id || !canViewAgent(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "agent_question", data: JSON.stringify({ agent_id: event.agent_id }) });
@@ -148,12 +144,10 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     // the `post` event beside it, which is what puts it in front of everyone watching its topics, tags and all.
     case "tagged_post":
       return undefined;
-    case "grant":
-      return event.grantee_oid === sources.viewerOid ? RESYNC : undefined;
     case "credential":
       return event.owner_oid === sources.viewerOid ? RESYNC : undefined;
     case "virtual_agent":
-      return canViewVirtualAgent(sources.viewerOid, { id: event.virtual_agent_id, ownerOid: event.owner_oid }, await sources.grants())
+      return canViewVirtualAgent(sources.viewerOid, { id: event.virtual_agent_id, ownerOid: event.owner_oid })
         ? sseEvent({ event: "virtual_agent", data: JSON.stringify({ virtual_agent_id: event.virtual_agent_id }) })
         : undefined;
     case "assistant_conversation":
@@ -178,34 +172,10 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
   }
 }
 
-/** The viewer's grants, read on first use and again after `invalidate`. A failed read is not kept. */
-export function cachedGrants(load: () => Promise<Grant[]>): { get: () => Promise<Grant[]>; invalidate: () => void } {
-  let current: Promise<Grant[]> | undefined;
-  return {
-    get: () => {
-      if (current === undefined) {
-        const attempt = load();
-        current = attempt;
-        attempt.catch(() => {
-          if (current === attempt) {
-            current = undefined;
-          }
-        });
-      }
-      return current;
-    },
-    invalidate: () => {
-      current = undefined;
-    }
-  };
-}
-
 export function uiStream(watch: UiWatch, { hub, listener, ...sources }: UiStreamSources): OnOpen {
   return (send: Send) => {
     let chain: Promise<void> = Promise.resolve();
     let open = true;
-    const grants = cachedGrants(sources.grants);
-    const cached = { ...sources, grants: grants.get };
 
     if (!listener.connected()) {
       chain = listener.ready().then(() => {
@@ -218,10 +188,7 @@ export function uiStream(watch: UiWatch, { hub, listener, ...sources }: UiStream
     const unsubscribe = hub.subscribe((event) => {
       chain = chain
         .then(async () => {
-          if (event.type === "grant" && event.grantee_oid === sources.viewerOid) {
-            grants.invalidate();
-          }
-          const frame = await selectFrame(event, watch, cached);
+          const frame = await selectFrame(event, watch, sources);
           if (open && frame !== undefined) {
             send(frame);
           }

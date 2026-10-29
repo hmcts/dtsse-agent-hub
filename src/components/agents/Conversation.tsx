@@ -1,9 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import type { AgentAccess } from "@/access/rules";
 import type { Skill } from "@/agents/skills";
-import { DirectComposer, mayMessage, type SendAction } from "@/components/agents/DirectComposer";
+import { DirectComposer, type SendAction } from "@/components/agents/DirectComposer";
 import { DirectMessage, senderName } from "@/components/agents/DirectMessage";
 import { TranscriptEntry } from "@/components/agents/TranscriptEntry";
 import { useLiveConversation } from "@/components/agents/useLiveConversation";
@@ -22,7 +21,7 @@ export { transcriptUrl } from "@/components/agents/useLiveConversation";
 /**
  * An agent's conversation, updated live: the direct messages to and from it and its session's transcript, in time
  * order. A `transcript` event names the newest entry, and the entries after the newest shown are read then; earlier
- * entries are read a page at a time above. The composer appears only with write access. An `agent_skills` event
+ * entries are read a page at a time above. An `agent_skills` event
  * re-reads the page, since it carries only the id, so the composer's "/" autocomplete offers the agent's new skills.
  */
 export function Conversation({
@@ -32,7 +31,6 @@ export function Conversation({
   virtualAgentId = null,
   viewerOid,
   status,
-  access,
   initial,
   questions = [],
   skills = [],
@@ -47,7 +45,6 @@ export function Conversation({
   /** Who is reading, which the composer keys its draft on. */
   viewerOid: string;
   status: AgentStatus;
-  access: Exclude<AgentAccess, "none">;
   initial: ConversationPage;
   /** The questions this agent's sessions asked, which the time line shows as cards. */
   questions?: readonly QuestionView[];
@@ -114,12 +111,8 @@ export function Conversation({
                   <DirectMessage key={item.key} agentId={agentId} message={item.message} />
                 ) : item.type === "question" ? (
                   <li key={item.key} className="px-5 py-2">
-                    {/*
-                      The action goes to whoever may message the agent, and nobody else: the same rule the composer
-                      is behind. A read-grant viewer is offered no controls, because the action would refuse them
-                      and its refusal says the question is no longer waiting for an answer, which is not true.
-                    */}
-                    <QuestionCard view={item.question} tone="hub" answer={mayMessage(access) ? answerQuestion : undefined} />
+                    {/* The action is offered unconditionally: this page is the agent owner's, and an owner may always answer. */}
+                    <QuestionCard view={item.question} tone="hub" answer={answerQuestion} />
                   </li>
                 ) : (
                   <TranscriptEntry key={item.key} entry={item.entry} agentName={agentName} ownerName={ownerName} />
@@ -137,7 +130,6 @@ export function Conversation({
           virtualAgentId={virtualAgentId}
           viewerOid={viewerOid}
           status={status}
-          access={access}
           skills={skills}
           send={send}
           onSent={addMessage}

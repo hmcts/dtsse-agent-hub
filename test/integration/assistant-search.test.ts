@@ -300,11 +300,11 @@ describe("a chat with no assistant behind it", () => {
 });
 
 /**
- * The half that matters. Conversations are owner-only: no grant reaches one and none is on any roster, so search is
- * the one surface that could have widened. Each of these asserts that the *same words* that find a person's own chat
- * find nothing at all for anybody else — by title, by what they wrote, and by what the assistant answered them — so
- * the test fails both if the query stopped filtering by owner and if it filtered by something weaker, such as the
- * virtual agent or a grant.
+ * The half that matters. A conversation is its owner's, and a share of one is reached by its own address rather than
+ * offered among anybody's chats, so search is the one surface that could have widened. Each of these asserts that
+ * the *same words* that find a person's own chat find nothing at all for anybody else — by title, by what they
+ * wrote, and by what the assistant answered them — so the test fails both if the query stopped filtering by owner
+ * and if it filtered by something weaker, such as the virtual agent.
  */
 describe("searching someone else's conversations", () => {
   let bobsTitle: string;

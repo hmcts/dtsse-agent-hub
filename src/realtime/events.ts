@@ -31,8 +31,6 @@ export type HubEvent =
   | { type: "agent_question"; agent_id: string; owner_oid: string }
   /** A direct message's delivery to its target agent left `queued`, so a UI thread showing it can update. */
   | { type: "delivery"; message_id: string; agent_id: string; state: DeliveredState }
-  /** `owner_oid`'s grant to `grantee_oid` was set, changed or revoked, so which agents the grantee may see changed. */
-  | { type: "grant"; owner_oid: string; grantee_oid: string }
   /** New entries in an agent's transcript, the newest `last_id`, so a UI showing its conversation can read them. */
   | { type: "transcript"; agent_id: string; owner_oid: string; last_id: string }
   /** `owner_oid`'s stored credential of `kind` was saved or deleted. Never carries the value. */
@@ -131,8 +129,6 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
       return isId(event.message_id) && isId(event.agent_id) && typeof event.state === "string" && DELIVERED_STATES.includes(event.state)
         ? { type: "delivery", message_id: event.message_id, agent_id: event.agent_id, state: event.state as DeliveredState }
         : undefined;
-    case "grant":
-      return isId(event.owner_oid) && isId(event.grantee_oid) ? { type: "grant", owner_oid: event.owner_oid, grantee_oid: event.grantee_oid } : undefined;
     case "transcript":
       return isId(event.agent_id) && isId(event.owner_oid) && isId(event.last_id)
         ? { type: "transcript", agent_id: event.agent_id, owner_oid: event.owner_oid, last_id: event.last_id }

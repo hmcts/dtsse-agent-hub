@@ -12,8 +12,8 @@ export const dynamic = "force-dynamic";
  * Agents the post composer can offer to tag: `?q=`, matched against their names.
  *
  * What may be answered is `agentLookup`'s and `canSuggestAgent`'s rather than this handler's, as it is for
- * `GET /api/ui/people`. It is not narrowed by grants, because tagging is not; it answers an agent's name and whose
- * it is, which is what that agent's own posts already show anyone signed in, and nothing about its state.
+ * `GET /api/ui/people`. Every owner's agents, because tagging reaches every owner's; it answers an agent's name and
+ * whose it is, which is what that agent's own posts already show anyone signed in, and nothing about its state.
  */
 export async function GET(request: NextRequest): Promise<Response> {
   const viewer = await uiViewer(request);

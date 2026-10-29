@@ -3,7 +3,6 @@ import type { Database } from "../store/prisma.ts";
 import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
-import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import type { SharedConversationRow } from "./shares.ts";
 import { readArtefact } from "./store.ts";
@@ -33,7 +32,7 @@ import { UNTITLED } from "./views.ts";
  *
  * Nothing here is live. A share is a snapshot: a recipient sees whatever is there when they open the page, because
  * the hub tells only an owner's own tabs that their conversation changed, and the conversation's agent — which is
- * what a UI stream would have to be allowed to watch — is owner-only.
+ * what a UI stream would have to be allowed to watch — is its owner's.
  */
 
 export type SharedThreadItem =
@@ -109,10 +108,17 @@ export function stopMarks(value: unknown): StopMark[] {
 /**
  * The share page's read, for a viewer `canViewSharedConversation` has already allowed.
  *
- * The thread is read as the conversation's owner, because every message in it is between them and their assistant
- * and `canReadMessage` would otherwise keep all of it from the very person the owner shared it with. That the
- * recipient is allowed this much, and no more, is settled above this call rather than here; `sharedThreadItems` is
- * what holds "no more" to the words.
+ * **The thread is read as the conversation's owner, and that is the design rather than a shortcut.** A share is
+ * read-through access to one chat: every message in it is between the owner and their assistant, so `canReadMessage`
+ * answering for the recipient would keep all of it from the very person the owner shared it with. Whether that
+ * recipient is allowed this much at all is settled before this call, by the share rows and `conversationAccess`
+ * reading them — the one place anyone reads anything of somebody else's. What holds the recipient to *no more* than
+ * this is `sharedThreadItems` below, which cuts the thread back to the words.
+ *
+ * So the agent ref here is the owner's own, built from the conversation's two columns: it says who to read as and
+ * nothing more. It is not a claim about the agent that some rule elsewhere has to agree with, and nothing about a
+ * share reaches any rule that is about the agent — a recipient is refused that agent's page, its routes and its
+ * stream exactly as a stranger is.
  */
 export async function sharedConversation(
   db: Database,
@@ -137,14 +143,7 @@ export async function sharedConversation(
   }
   const agentId = row.agentId;
   const [page, artefact] = await Promise.all([
-    agentId === null
-      ? undefined
-      : agentConversation(
-          db,
-          conversation.ownerOid,
-          { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: hasPod(conversation), inConversation: true },
-          []
-        ),
+    agentId === null ? undefined : agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid }),
     readArtefact(db, conversation.id)
   ]);
   const items = page === undefined ? [] : conversationItems(page.messages, page.entries);

@@ -48,19 +48,7 @@ function composer(
   send: SendAction = vi.fn(async () => ({ ok: true as const, message: SENT })),
   overrides: Partial<React.ComponentProps<typeof DirectComposer>> = {}
 ) {
-  render(
-    <DirectComposer
-      agentId={AGENT}
-      agentName="pcs"
-      viewerOid={VIEWER}
-      status="idle"
-      access="owner"
-      skills={skills}
-      send={send}
-      onSent={vi.fn()}
-      {...overrides}
-    />
-  );
+  render(<DirectComposer agentId={AGENT} agentName="pcs" viewerOid={VIEWER} status="idle" skills={skills} send={send} onSent={vi.fn()} {...overrides} />);
   return send;
 }
 
@@ -446,7 +434,6 @@ describe("DirectComposer draft", () => {
       agentName: "pcs",
       viewerOid: VIEWER,
       status: "idle" as const,
-      access: "owner" as const,
       skills: SKILLS,
       send,
       onSent: vi.fn()

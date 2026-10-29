@@ -1,6 +1,5 @@
 import { gzipSync } from "node:zlib";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setGrant } from "../../src/access/load.ts";
 import * as directRoute from "../../src/app/api/agent/[agentId]/direct/route.ts";
 import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
 import * as personalCredentialRoute from "../../src/app/api/agent/credentials/[kind]/route.ts";
@@ -1212,14 +1211,6 @@ describe("logins", () => {
     expect(await virtualAgentDetail(prisma, BOB.oid, id)).toBeUndefined();
   });
 
-  it("should hide the virtual agent from a grantee who can see the owner's other agents", async () => {
-    const { id } = await started(ALICE, "pcs-api");
-    await insertUser(BOB);
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
-
-    expect(await virtualAgentDetail(prisma, BOB.oid, id)).toBeUndefined();
-  });
-
   it("should hand a pasted code to the pod exactly once, keeping it sealed until then", async () => {
     const { id, token } = await started(ALICE, "pcs-api", "own-licence");
     await startLogin(id, token, "claude", { prompt: "paste_code", verification_uri: "https://claude.ai/oauth/authorize?code=true", expires_in: 900 });
@@ -1558,18 +1549,15 @@ describe("from_owner on an agent's stream", () => {
   it("should be true only for a message its owner wrote from the UI", async () => {
     const { token } = await started(ALICE, "pcs-api");
     const target = (await jsonOf(await register(token, "va-session-1"))).agent_id;
-    await insertUser(BOB);
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
     const aliceLaptop = await insertAgent(ALICE, "laptop");
 
     const fromOwner = await directAsPerson(prisma, ALICE.oid, target, "please run the tests");
-    const fromGrantee = await directAsPerson(prisma, BOB.oid, target, "and lint");
+    // Its owner's own other session, which is the one thing besides the person that can send it a direct message.
     const fromAgent = await directAsAgent(prisma, { id: aliceLaptop, ownerOid: ALICE.oid }, { toAgent: target, body: "from the laptop" });
 
     const streamed = await queuedDeliveries(prisma, target);
     expect(streamed.map((entry) => [entry.message.id, entry.from_owner])).toEqual([
       [fromOwner.id, true],
-      [fromGrantee.id, false],
       [fromAgent.id, false]
     ]);
     expect(await queuedDelivery(prisma, target, BigInt(fromOwner.id))).toMatchObject({ from_owner: true });
@@ -2562,7 +2550,7 @@ describe("/hub/agents/{id}", () => {
     const { id, token } = await started(ALICE, "pcs-api");
     const agentId = (await jsonOf(await register(token, "va-session-1"))).agent_id;
 
-    expect(await agentRoute(ALICE_VIEWER, id)).toMatchObject({ variant: "virtual", page: { linked: { agent: { id: agentId }, access: "owner" } } });
+    expect(await agentRoute(ALICE_VIEWER, id)).toMatchObject({ variant: "virtual", page: { linked: { agent: { id: agentId } } } });
   });
 
   it("should redirect to the virtual agent when a session it registered is visited, including one a /clear superseded", async () => {
@@ -2581,23 +2569,8 @@ describe("/hub/agents/{id}", () => {
     const laptop = await insertAgent(ALICE, "laptop");
     actAs("alice");
 
-    expect(await agentRoute(ALICE_VIEWER, laptop)).toMatchObject({ variant: "local", view: { agent: { id: laptop, virtualAgentId: null }, access: "owner" } });
+    expect(await agentRoute(ALICE_VIEWER, laptop)).toMatchObject({ variant: "local", view: { agent: { id: laptop, virtualAgentId: null } } });
     await expect(visit(laptop)).resolves.toBeDefined();
-  });
-
-  it("should show a grantee the virtual agent and its session without its owner's controls when they hold a grant", async () => {
-    const { id, token } = await started(ALICE, "pcs-api");
-    const agentId = (await jsonOf(await register(token, "va-session-1"))).agent_id;
-    await insertUser(BOB);
-    await setGrant(prisma, ALICE.oid, BOB.oid, "read");
-
-    const route = await agentRoute(BOB_VIEWER, id);
-
-    expect(route).toMatchObject({
-      variant: "virtual",
-      page: { summary: { id, owner: { oid: ALICE.oid } }, manage: null, linked: { agent: { id: agentId }, access: "read" } }
-    });
-    expect(await agentRoute(BOB_VIEWER, agentId)).toEqual({ variant: "moved", to: `/hub/agents/${id}` });
   });
 
   it("should answer not found when a stranger visits a virtual agent, its session, or an id that is nothing", async () => {

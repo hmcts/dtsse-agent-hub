@@ -6,7 +6,6 @@ import { conversationItems, mergeEntries, type TranscriptEntryView } from "../tr
 import { agentConversation } from "../transcripts/views.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { FORK_CONTEXT_FILE_NAME, FORK_CONTEXT_MEDIA_TYPE, FORKED_SELECT, forkContextMarkdown, forkedView, forkThread } from "./forks.ts";
-import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { conversationRef, forksOf, type SharedChatLink, type SharedConversationRow, type SharePerson } from "./shares.ts";
 import { productMarks, type SharedThreadItem, sharedThreadItems, stopMarks } from "./sharing.ts";
@@ -124,10 +123,13 @@ async function sourceThread(
   if (row.agentId === null) {
     return { thread: [], earlierHidden: false };
   }
-  const agent = { id: row.agentId, ownerOid: conversation.ownerOid, ownerOnly: hasPod(conversation), inConversation: true };
+  // Read as the owner, as `conversationView` and `sharedConversation` do: the fork copies the owner's own chat, and
+  // who may be offered that copy is settled by the fork rows before this is called. The ref says who to read as and
+  // nothing else.
+  const agent = { id: row.agentId, ownerOid: conversation.ownerOid };
   const messages = new Map<string, ThreadMessage>();
   let entries: TranscriptEntryView[] = [];
-  let page = await agentConversation(db, conversation.ownerOid, agent, []);
+  let page = await agentConversation(db, conversation.ownerOid, agent);
   for (let read = 1; ; read += 1) {
     for (const message of page.messages) {
       messages.set(message.id, message);
@@ -136,7 +138,7 @@ async function sourceThread(
     if (page.olderBefore === null || read >= FORK_PAGE_LIMIT) {
       break;
     }
-    page = await agentConversation(db, conversation.ownerOid, agent, [], { before: BigInt(page.olderBefore) });
+    page = await agentConversation(db, conversation.ownerOid, agent, { before: BigInt(page.olderBefore) });
   }
   const items = conversationItems([...messages.values()], entries);
   return {

@@ -684,13 +684,13 @@ export async function setProduct(prisma: PrismaClient, ownerOid: string, id: str
  * because that decides what its agent is.
  *
  * A pod conversation's agent exists only to be this chat's session: the hub created it with the conversation, it is
- * its owner's alone, and nobody else can see or message it. So it goes too — and with it, by cascade, its transcript,
+ * its owner's and nobody else can see or message it, and no post may tag it. So it goes too — and with it, by cascade, its transcript,
  * its deliveries and its subscriptions — along with every direct message to or from it, since those are the words of
  * the chat. The announcement tells the pod to stop the session.
  *
  * A conversation with no pod is detached instead: `agent.assistant_conversation_id` is cleared and the row then
  * deleted, and no message is touched. Its agent is a session running on the person's own laptop and one of their
- * ordinary sessions — on the hub roster, messageable by a colleague holding a write grant, holding the transcript it
+ * ordinary sessions — on the hub roster, taggable in anyone's post, holding the transcript it
  * uploaded, its topic subscriptions, its questions and a direct thread that includes board messages with colleagues
  * that have nothing to do with this chat. Deleting the conversation row without clearing the column first would
  * cascade through all of that, and the session would then 404, re-register as a brand-new agent and bring the chat

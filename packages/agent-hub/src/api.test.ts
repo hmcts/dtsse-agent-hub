@@ -416,7 +416,7 @@ describe("createApi requests", () => {
   });
 
   it("should tag agents in a post, which queues each of them a delivery of it", async () => {
-    // Arrange: another person's agent, which tagging reaches without any grant.
+    // Arrange: another person's agent, which a tagged post is the way to reach.
     const other = await createApi({ env: {}, baseUrl: url, devUser: "oid-bob|Bob Jones|bob@example.com" }).register({
       session_id: "sid-api-tagged",
       name: "bob-ccd",

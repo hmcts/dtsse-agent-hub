@@ -6,7 +6,6 @@ import { agentPath } from "@/agents/path";
 import type { AgentCard } from "@/agents/views";
 import { Avatar } from "@/components/Avatar";
 import { HeardAge } from "@/components/agents/LastHeard";
-import { DevBadge } from "@/components/DevBadge";
 import { useHubEvent } from "@/components/live/HubStream";
 import { NavLink } from "@/components/NavLink";
 import type { AgentStatus } from "@/realtime/events";
@@ -25,7 +24,7 @@ function byStatusThenName(statusOf: (agent: AgentCard) => AgentStatus) {
   };
 }
 
-function Row({ agent, heard, showOwner }: { agent: AgentCard; heard: Heard; showOwner: boolean }) {
+function Row({ agent, heard }: { agent: AgentCard; heard: Heard }) {
   const { status } = heard;
   const offline = status === "offline";
   // The list, not the section, scrolls: every row is an h-7 NavLink whatever it shows, so 12.25rem is exactly 7 rows
@@ -46,20 +45,12 @@ function Row({ agent, heard, showOwner }: { agent: AgentCard; heard: Heard; show
         <span className="truncate">{agent.name}</span>
         {agent.virtualAgentId === null ? null : <span className="shrink-0 text-[10px] uppercase tracking-wide text-hub-muted">virtual</span>}
         <span className="sr-only">{status}</span>
-        {showOwner || offline ? (
+        {offline ? (
           <span className="ml-auto flex min-w-0 items-baseline gap-1.5 text-xs text-hub-muted">
-            {showOwner ? (
-              <span className="truncate">
-                {agent.owner.name}
-                <DevBadge tid={agent.owner.tid} />
-              </span>
-            ) : null}
-            {offline ? (
-              <span className="shrink-0 whitespace-nowrap">
-                <span className="sr-only">, last heard </span>
-                <HeardAge heard={heard} />
-              </span>
-            ) : null}
+            <span className="shrink-0 whitespace-nowrap">
+              <span className="sr-only">, last heard </span>
+              <HeardAge heard={heard} />
+            </span>
           </span>
         ) : null}
       </NavLink>
@@ -68,25 +59,24 @@ function Row({ agent, heard, showOwner }: { agent: AgentCard; heard: Heard; show
 }
 
 /**
- * The viewer's agents and those shared with them, connected ones first. Statuses follow the stream, so an agent
- * that goes offline sinks below those still working, and says how long it has been silent.
+ * The viewer's own agents, connected ones first. Every agent is theirs — nobody else's is ever on anyone's roster —
+ * so no row names an owner. Statuses follow the stream, so an agent that goes offline sinks below those still
+ * working, and says how long it has been silent.
  */
-export function AgentRoster({ mine, shared }: { mine: AgentCard[]; shared: AgentCard[] }) {
+export function AgentRoster({ agents }: { agents: AgentCard[] }) {
   const [heard, setHeard] = useState<Record<string, Heard>>({});
-  const all = [...mine.map((agent) => ({ agent, shared: false })), ...shared.map((agent) => ({ agent, shared: true }))];
   const heardOf = (agent: AgentCard): Heard => heard[agent.id] ?? initialHeard(agent);
 
   useHubEvent<{ agent_id: string; status: AgentStatus }>("agent_status", ({ agent_id, status }) => {
-    const known = all.find(({ agent }) => agent.id === agent_id)?.agent;
+    const known = agents.find((agent) => agent.id === agent_id);
     if (known === undefined) {
       return;
     }
     setHeard((current) => ({ ...current, [agent_id]: onStatus(current[agent_id] ?? initialHeard(known), status, Date.now()) }));
   });
 
-  const order = byStatusThenName((agent) => heardOf(agent).status);
-  all.sort((left, right) => order(left.agent, right.agent));
-  const connected = all.filter(({ agent }) => heardOf(agent).status !== "offline").length;
+  const all = [...agents].sort(byStatusThenName((agent) => heardOf(agent).status));
+  const connected = all.filter((agent) => heardOf(agent).status !== "offline").length;
 
   // The list, not the section, scrolls: every row is an h-7 NavLink whatever it shows, so 12.25rem is exactly 7 rows
   // and never half of one. The section's 45% only bites on a short window, where the list shrinks to fit.
@@ -96,15 +86,15 @@ export function AgentRoster({ mine, shared }: { mine: AgentCard[]; shared: Agent
         Agents
         <span className="text-xs">{all.length === 0 ? "" : `${connected} connected`}</span>
       </h2>
-      {mine.length === 0 ? <p className="shrink-0 px-5 text-xs text-hub-muted">None yet. Run /enable-comms in a Claude Code session.</p> : null}
-      {all.length === 0 ? <p className="shrink-0 px-5 pt-1 text-xs text-hub-muted">Nobody has granted you access.</p> : null}
-      {all.length > 0 ? (
+      {all.length === 0 ? (
+        <p className="shrink-0 px-5 text-xs text-hub-muted">None yet. Run /enable-comms in a Claude Code session.</p>
+      ) : (
         <ul aria-label="Agents" className="max-h-[12.25rem] min-h-0 overflow-y-auto">
-          {all.map(({ agent, shared: isShared }) => (
-            <Row key={agent.id} agent={agent} heard={heardOf(agent)} showOwner={isShared} />
+          {all.map((agent) => (
+            <Row key={agent.id} agent={agent} heard={heardOf(agent)} />
           ))}
         </ul>
-      ) : null}
+      )}
     </section>
   );
 }

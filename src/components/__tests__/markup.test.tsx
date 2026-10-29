@@ -61,12 +61,11 @@ describe("SignInBanner", () => {
 });
 
 describe("Sidebar", () => {
-  it("should list own and shared agents with status, channels and topics when there are some", () => {
+  it("should list the viewer's agents with status, channels and topics when there are some", () => {
     const html = renderToStaticMarkup(
       <Sidebar
         data={{
-          mine: [agent("1", "me", { status: "busy" })],
-          shared: [agent("2", "bob")],
+          agents: [agent("1", "me", { status: "busy" }), agent("2", "me")],
           channels: {
             mine: [{ id: "c1", name: "Mine", topics: ["a"], match: "any", shared: false, owner: { oid: "me", name: "Me" } }],
             shared: [{ id: "c2", name: "Theirs", topics: ["b"], match: "all", shared: true, owner: { oid: "bob", name: "Bob" } }]
@@ -80,7 +79,6 @@ describe("Sidebar", () => {
 
     expect(html).toContain('href="/hub/agents/1"');
     expect(html).toContain('data-status="busy"');
-    expect(html).toContain("Bob Owner");
     expect(html).toContain('href="/hub/channels/c2"');
     expect(html).toContain('href="/hub/topics/pcs-api"');
     expect(html).toContain('aria-current="page"');
@@ -91,8 +89,7 @@ describe("Sidebar", () => {
     const html = renderToStaticMarkup(
       <Sidebar
         data={{
-          mine: [agent("1", "me")],
-          shared: [],
+          agents: [agent("1", "me")],
           channels: { mine: [{ id: "c1", name: "Mine", topics: ["a"], match: "any", shared: false, owner: { oid: "me", name: "Me" } }], shared: [] },
           topics: [{ slug: "pcs-api", message_count: 4, last_message_at: null }]
         }}
@@ -110,7 +107,7 @@ describe("Sidebar", () => {
   it("should put the topic search under the Topics heading and above its topics when there are some", () => {
     const html = renderToStaticMarkup(
       <Sidebar
-        data={{ mine: [], shared: [], channels: { mine: [], shared: [] }, topics: [{ slug: "pcs-api", message_count: 4, last_message_at: null }] }}
+        data={{ agents: [], channels: { mine: [], shared: [] }, topics: [{ slug: "pcs-api", message_count: 4, last_message_at: null }] }}
         viewer={VIEWER}
         signInDisabled
       />
@@ -126,8 +123,7 @@ describe("Sidebar", () => {
     const html = renderToStaticMarkup(
       <Sidebar
         data={{
-          mine: Array.from({ length: 8 }, (_, index) => agent(String(index), "me")),
-          shared: [],
+          agents: Array.from({ length: 8 }, (_, index) => agent(String(index), "me")),
           channels: { mine: [], shared: [] },
           topics: []
         }}
@@ -144,8 +140,7 @@ describe("Sidebar", () => {
     const html = renderToStaticMarkup(
       <Sidebar
         data={{
-          mine: [agent("1", "me", { status: "offline" }), agent("2", "me", { status: "idle" })],
-          shared: [],
+          agents: [agent("1", "me", { status: "offline" }), agent("2", "me", { status: "idle" })],
           channels: { mine: [], shared: [] },
           topics: []
         }}
@@ -159,12 +154,9 @@ describe("Sidebar", () => {
   });
 
   it("should say what is missing when the viewer has nothing", () => {
-    const html = renderToStaticMarkup(
-      <Sidebar data={{ mine: [], shared: [], channels: { mine: [], shared: [] }, topics: [] }} viewer={VIEWER} signInDisabled />
-    );
+    const html = renderToStaticMarkup(<Sidebar data={{ agents: [], channels: { mine: [], shared: [] }, topics: [] }} viewer={VIEWER} signInDisabled />);
 
     expect(html).toContain("/enable-comms");
-    expect(html).toContain("Nobody has granted you access.");
     expect(html).toContain("No saved channels.");
     expect(html).toContain("No posts this week.");
   });

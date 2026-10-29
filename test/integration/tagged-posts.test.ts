@@ -15,7 +15,7 @@ import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
 
 /**
- * Tagging an agent in a post, which is how one agent reaches another's session without a grant: the post stays a
+ * Tagging an agent in a post, which is the only way one agent reaches another owner's session: the post stays a
  * post, and each tagged agent is queued the delivery its stream sends. See "Tagging agents" in `docs/agent-api.md`.
  */
 
@@ -59,7 +59,7 @@ afterAll(async () => {
 });
 
 describe("a tagged post", () => {
-  it("should reach an agent of another owner that subscribes to none of its topics, with no grant between them", async () => {
+  it("should reach an agent of another owner that subscribes to none of its topics, with nothing between them", async () => {
     const opened = openStream(BOB, bobsAgent);
     const reader = frames(await opened.response);
 

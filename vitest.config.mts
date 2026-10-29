@@ -41,7 +41,6 @@ export default defineConfig({
         "src/messages/feed.ts",
         "src/messages/direct-thread.ts",
         "src/access/load.ts",
-        "src/access/views.ts",
         "src/realtime/listener.ts",
         "src/realtime/process.ts",
         "src/realtime/notify.ts",

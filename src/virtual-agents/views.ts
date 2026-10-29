@@ -1,4 +1,3 @@
-import { grantsHeldBy } from "../access/load.ts";
 import { canManageVirtualAgent, canViewVirtualAgent } from "../access/rules.ts";
 import { isUuid } from "../agents/store.ts";
 import type { CredentialKind } from "../credentials/names.ts";
@@ -175,7 +174,7 @@ export async function virtualAgentSummary(db: Database, viewerOid: string, id: s
     where: { id },
     select: { id: true, ownerOid: true, name: true, desired: true, status: true, agentId: true, owner: { select: { oid: true, name: true, tid: true } } }
   });
-  if (row === null || !canViewVirtualAgent(viewerOid, row, await grantsHeldBy(db, viewerOid))) {
+  if (row === null || !canViewVirtualAgent(viewerOid, row)) {
     return undefined;
   }
   return { id: row.id, name: row.name, desired: row.desired, status: row.status, agentId: row.agentId, owner: row.owner };

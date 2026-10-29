@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { directAsAgent } from "../../src/messages/send.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
-import { insertAgent, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
+import { insertAgent, type Person, prisma, resetDatabase } from "./database.ts";
 
 vi.mock("next/headers", async () => {
   const { jar } = await import("./web-session.ts");
@@ -15,7 +15,6 @@ vi.mock("next/cache", async () => {
 const { actAs, revalidated } = await import("./web-session.ts");
 const { postToTopics } = await import("../../src/app/_actions/posts.ts");
 const { sendDirect } = await import("../../src/app/_actions/direct.ts");
-const { grantAccess, revokeAccess } = await import("../../src/app/_actions/grants.ts");
 const { createChannel, removeChannel } = await import("../../src/app/_actions/channels.ts");
 
 function persona(name: string): Person {
@@ -119,29 +118,15 @@ describe("sendDirect", () => {
     expect(await prisma.delivery.findMany({ select: { agentId: true, state: true } })).toEqual([{ agentId: agent, state: "queued" }]);
   });
 
-  it("should let a write grantee message the agent", async () => {
-    const agent = await insertAgent(BOB, "bobs-agent");
-    await insertUser(ALICE);
-    await prisma.agentGrant.create({ data: { ownerOid: BOB.oid, granteeOid: ALICE.oid, level: "write" } });
-
-    expect((await sendDirect({ agentId: agent, body: "hi" })).ok).toBe(true);
-  });
-
-  it("should refuse a read grantee and write nothing", async () => {
-    const agent = await insertAgent(BOB, "bobs-agent");
-    await insertUser(ALICE);
-    await prisma.agentGrant.create({ data: { ownerOid: BOB.oid, granteeOid: ALICE.oid, level: "read" } });
-
-    expect(await sendDirect({ agentId: agent, body: "hi" })).toEqual({ ok: false, error: "you have read access to this agent, not write access" });
-    expect(await prisma.message.count()).toBe(0);
-  });
-
+  // Somebody else's session is among them: it is reported as not existing rather than as forbidden, which is how
+  // every rule about an agent answers for one that is not the caller's.
   it.each([
-    ["an agent the sender cannot see", async () => await insertAgent(BOB, "bobs-agent")],
+    ["an agent of somebody else's", async () => await insertAgent(BOB, "bobs-agent")],
     ["an id that is not an agent", async () => "00000000-0000-0000-0000-000000000000"],
     ["something that is not an id", async () => "bobs-agent"]
-  ])("should report %s as missing", async (_label, target) => {
+  ])("should report %s as missing, and write nothing", async (_label, target) => {
     expect(await sendDirect({ agentId: await target(), body: "hi" })).toEqual({ ok: false, error: "no such agent" });
+    expect(await prisma.message.count()).toBe(0);
   });
 
   it("should refuse an empty or oversized message", async () => {
@@ -159,71 +144,6 @@ describe("sendDirect", () => {
     const reply = await directAsAgent(prisma, { id: agent, ownerOid: ALICE.oid }, { replyTo: BigInt(message!.id), body: "answer" });
 
     expect(reply).toMatchObject({ target_agent_id: null, in_reply_to: message!.id });
-  });
-});
-
-describe("grantAccess and revokeAccess", () => {
-  it("should grant a known person access to the signed-in person's agents by email, then revoke it", async () => {
-    await insertUser(ALICE);
-    await insertUser(BOB);
-
-    const granted = await grantAccess(form({ email: " BOB@dev.invalid ", level: "write" }));
-
-    expect(granted).toEqual({ ok: true, confirmation: `${BOB.name} now has write access to your agents` });
-    expect(await prisma.agentGrant.findMany({ select: { ownerOid: true, granteeOid: true, level: true } })).toEqual([
-      { ownerOid: ALICE.oid, granteeOid: BOB.oid, level: "write" }
-    ]);
-    expect(revalidated).toContain("/hub/access");
-
-    expect(await revokeAccess(form({ grantee: BOB.oid }))).toEqual({ ok: true });
-    expect(await prisma.agentGrant.count()).toBe(0);
-  });
-
-  it("should change the level when the grant exists, defaulting to read", async () => {
-    await insertUser(BOB);
-    await grantAccess(form({ email: BOB.email, level: "write" }));
-
-    await grantAccess(form({ email: BOB.email, level: "admin" }));
-
-    expect((await prisma.agentGrant.findFirstOrThrow()).level).toBe("read");
-  });
-
-  it("should refuse someone the hub has never seen", async () => {
-    expect(await grantAccess(form({ email: "nobody@dev.invalid", level: "read" }))).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("has used the hub yet")
-    });
-  });
-
-  it("should refuse an empty address", async () => {
-    expect((await grantAccess(form({ email: "", level: "read" }))).ok).toBe(false);
-  });
-
-  it("should refuse an address shared by two people", async () => {
-    await insertUser({ oid: "one", name: "One", email: "shared@example.com" });
-    await insertUser({ oid: "two", name: "Two", email: "SHARED@example.com" });
-
-    expect(await grantAccess(form({ email: "shared@example.com", level: "read" }))).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("more than one")
-    });
-  });
-
-  it("should refuse a grant to yourself", async () => {
-    await insertUser(ALICE);
-
-    expect(await grantAccess(form({ email: ALICE.email, level: "read" }))).toEqual({ ok: false, error: "you cannot grant yourself access" });
-  });
-
-  it("should only ever revoke the signed-in person's own grants", async () => {
-    await insertUser(ALICE);
-    await insertUser(BOB);
-    await prisma.agentGrant.create({ data: { ownerOid: BOB.oid, granteeOid: ALICE.oid, level: "write" } });
-
-    await revokeAccess(form({ grantee: ALICE.oid }));
-
-    expect(await prisma.agentGrant.count()).toBe(1);
-    expect((await revokeAccess(form({}))).ok).toBe(false);
   });
 });
 

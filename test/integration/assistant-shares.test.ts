@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { setGrant } from "../../src/access/load.ts";
 import { GET as agentsRoster } from "../../src/app/api/agent/agents/route.ts";
 import { GET as people } from "../../src/app/api/ui/people/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
@@ -17,9 +16,9 @@ import { WAIT_MS } from "./waits.ts";
 /**
  * Sharing an HMCTS Assistant conversation, read-only, with people the owner names.
  *
- * Alice owns the chat, Bob is named in a share of it, Carol is not. Carol holds a write grant over every agent
- * Alice has, which is what makes her the right stranger: she is as close to the chat as the hub's older access model
- * can put anyone, and still sees nothing of it.
+ * Alice owns the chat, Bob is named in a share of it, Carol is not. A share row is the only thing that names
+ * anyone, so Carol is a stranger to this chat however much else she has: no agent of Alice's is hers to see and no
+ * other row can put her on the list.
  */
 
 vi.mock("next/headers", async () => {
@@ -96,8 +95,6 @@ beforeEach(async () => {
   await insertUser(BOB);
   await insertUser(CAROL);
   await Promise.all([ALICE, BOB, CAROL].map(connectForChat));
-  // Carol can see and message every agent Alice has. No part of that reaches a conversation.
-  await setGrant(prisma, ALICE.oid, CAROL.oid, "write");
   actAs("alice");
 });
 
@@ -320,15 +317,14 @@ describe("reading a shared conversation", () => {
 });
 
 /**
- * The test that matters. Carol is signed in, holds a write grant over every agent Alice has, and has been handed
- * the exact address of the share — the conversation's id is the whole of the link. Each expectation below asserts
- * that she learns nothing from it: not the page, not who it is shared with, not the thread through the conversation's
- * agent on the hub's API, not the agent on the roster, and not a live event through the UI stream. The id is all a
- * link carries, so "handed the link" and "knows the id" are the same thing, and this is what proves a link does not
- * grant access.
+ * The test that matters. Carol is signed in and has been handed the exact address of the share — the conversation's
+ * id is the whole of the link. Each expectation below asserts that she learns nothing from it: not the page, not who
+ * it is shared with, not the thread through the conversation's agent on the hub's API, not the agent on the roster,
+ * and not a live event through the UI stream. The id is all a link carries, so "handed the link" and "knows the id"
+ * are the same thing, and this is what proves a link does not grant access.
  */
 describe("a stranger handed the link", () => {
-  it("should see nothing of the conversation, however close to it their other access is", async () => {
+  it("should see nothing of the conversation, the address included", async () => {
     const { id, agentId } = await chat();
     await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
-import type { AgentAccess } from "@/access/rules";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { Skill } from "@/agents/skills";
 import { useLiveStatus } from "@/components/agents/LiveStatus";
@@ -18,11 +17,6 @@ import type { ActionResult } from "@/web/action";
 import { duration } from "@/web/format";
 
 export type SendAction = (input: { agentId: string; body: string }) => Promise<ActionResult<{ message: ThreadMessage }>>;
-
-/** Only an owner or a write grantee may message an agent; `canPersonMessageAgent` decides the same on the server. */
-export function mayMessage(access: Exclude<AgentAccess, "none">): boolean {
-  return access === "owner" || access === "write";
-}
 
 /** Why a message to an offline agent is not lost, and how long it is kept. */
 export function offlineNote(agentName: string | undefined): string {
@@ -41,9 +35,10 @@ const SKILL_MENU: SkillMenuTheme = {
 };
 
 /**
- * The box for a direct message to an agent, which appears only with write access; a person with read access sees why
- * it is missing. While the agent is offline the box says what happens to the message. An unsent message is kept as a
- * per-agent draft, so going to another agent and back finds it where it was.
+ * The box for a direct message to an agent. An agent's page is its owner's, and an owner may always message their own
+ * session, so there is nothing to gate it on; `canPersonMessageAgent` decides the same on the server. While the agent
+ * is offline the box says what happens to the message. An unsent message is kept as a per-agent draft, so going to
+ * another agent and back finds it where it was.
  */
 export function DirectComposer({
   agentId,
@@ -51,7 +46,6 @@ export function DirectComposer({
   virtualAgentId = null,
   viewerOid,
   status: initialStatus,
-  access,
   skills = [],
   send,
   onSent
@@ -63,7 +57,6 @@ export function DirectComposer({
   /** Who is reading, so the box never shows the draft of whoever signed in on this tab before them. */
   viewerOid: string;
   status: AgentStatus;
-  access: Exclude<AgentAccess, "none">;
   /** The agent's skills, offered when the message starts with "/". */
   skills?: readonly Skill[];
   send: SendAction;
@@ -108,14 +101,6 @@ export function DirectComposer({
     } finally {
       setPending(false);
     }
-  }
-
-  if (!mayMessage(access)) {
-    return (
-      <p className="rounded-lg border border-hub-line px-3 py-3 text-[13px] text-hub-muted" data-testid="read-only-thread">
-        You have read access to this agent. Its owner can grant you write access to message it.
-      </p>
-    );
   }
 
   return (

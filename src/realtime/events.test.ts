@@ -32,7 +32,6 @@ describe("encodeEvent and decodeEvent", () => {
     ["skills without an owner", JSON.stringify({ type: "agent_skills", agent_id: "a" })],
     ["a delivery back to queued", JSON.stringify({ type: "delivery", message_id: "1", agent_id: "a", state: "queued" })],
     ["a delivery without an agent", JSON.stringify({ type: "delivery", message_id: "1", state: "delivered" })],
-    ["a grant without a grantee", JSON.stringify({ type: "grant", owner_oid: "o" })],
     ["a transcript without its last id", JSON.stringify({ type: "transcript", agent_id: "a", owner_oid: "o" })],
     ["a transcript without an owner", JSON.stringify({ type: "transcript", agent_id: "a", last_id: "1" })],
     ["a credential without a kind", JSON.stringify({ type: "credential", owner_oid: "o" })],

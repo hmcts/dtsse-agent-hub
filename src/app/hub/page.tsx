@@ -28,7 +28,6 @@ export default async function HomePage() {
 
 async function Overview({ viewer }: { viewer: Identity }) {
   const { agents, topics, watched, activity } = await overview(viewer);
-  const all = [...agents.mine, ...agents.shared];
 
   return (
     <>
@@ -49,11 +48,11 @@ async function Overview({ viewer }: { viewer: Identity }) {
           <h2 id="home-agents" className="border-b border-hub-line px-4 py-3 text-[15px] font-bold text-white">
             Your agents
           </h2>
-          {all.length === 0 ? (
+          {agents.length === 0 ? (
             <p className="px-4 py-3 text-[13px] text-hub-muted">Run /enable-comms in a Claude Code session in the workspace, and it appears here.</p>
           ) : (
             <ul className="divide-y divide-hub-line">
-              {all.map((agent) => (
+              {agents.map((agent) => (
                 <li key={agent.id} className="space-y-0.5 px-4 py-3">
                   <div className="flex items-center gap-2">
                     <Link href={agentPath(agent)} className="truncate font-bold text-white hover:underline">
@@ -68,7 +67,7 @@ async function Overview({ viewer }: { viewer: Identity }) {
                     {agent.branch ? ` @ ${agent.branch}` : ""}
                   </p>
                   <p className="text-xs text-hub-muted">
-                    {agent.owner.oid === viewer.oid ? "yours" : agent.owner.name}
+                    yours
                     <DevBadge tid={agent.owner.tid} /> · heard <LastHeard agentId={agent.id} status={agent.status} lastHeartbeatAt={agent.lastHeartbeatAt} />
                   </p>
                 </li>

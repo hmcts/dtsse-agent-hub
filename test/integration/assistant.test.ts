@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
-import { setGrant } from "../../src/access/load.ts";
 import { registerAgent } from "../../src/agents/store.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
@@ -25,7 +24,7 @@ import { assistantFrame, createConversation, ensureAssistant, findConversation, 
 import { credentialBackend } from "../../src/credentials/backend.ts";
 import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
-import { expireDeliveries } from "../../src/messages/store.ts";
+import { createDirect, expireDeliveries } from "../../src/messages/store.ts";
 import { subscribe, subscriptions } from "../../src/topics/store.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
@@ -391,10 +390,9 @@ describe("conversations", () => {
     expect(await prisma.delivery.count({ where: { agentId: laptop.id, state: "expired" } })).toBe(1);
   });
 
-  it("should keep a conversation's agent from the person's grantees and the messageable list", async () => {
+  it("should keep a conversation's agent from everyone else and off the messageable list", async () => {
     await startedAssistant();
     await insertUser(BOB);
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
     const id = ((await actions.startConversation({ product: "general", body: "private" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
@@ -428,7 +426,6 @@ describe("conversations", () => {
   it("should send a session's tool calls to the owner and to nobody else, so only they see what it is doing", async () => {
     const { token } = await startedAssistant();
     await insertUser(BOB);
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
     const id = ((await actions.startConversation({ product: "general", body: "look into this" })) as { id: string }).id;
     const { agentId, sessionId } = await sessionOf(id);
     await register(token, sessionId, id);
@@ -663,7 +660,6 @@ describe("conversations", () => {
    * that could not announce one with no pod would roll back and leave a chat nobody can rename or get rid of.
    */
   it("should detach a conversation with no pod and leave the session on the laptop standing", async () => {
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
     const laptop = await registerAgent(
       prisma,
       { ...ALICE, tid: "dev" },
@@ -681,7 +677,15 @@ describe("conversations", () => {
         occurredAt: new Date()
       }
     });
-    const board = await directAsPerson(prisma, BOB.oid, laptop.id, "nothing to do with that chat");
+    // Seeded rather than sent: nobody can direct another owner's session any more, so a cross-owner direct is a row
+    // written before that changed. It is here because the old delete took every message of the agent with it,
+    // including ones that had nothing to do with the chat being removed.
+    const board = await createDirect(prisma, {
+      author: { oid: BOB.oid, agentId: null },
+      targetAgentId: laptop.id,
+      inReplyTo: null,
+      body: "nothing to do with that chat"
+    });
 
     expect(await actions.renameConversation({ conversationId: id, title: "On my laptop" })).toEqual({ ok: true });
     expect((await findConversation(prisma, ALICE.oid, id))!.title).toBe("On my laptop");
@@ -901,10 +905,8 @@ describe("the sessions stream and report", () => {
     await register(token, sessionId, id, { clientFeatures: ["stop"] });
     await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
     await insertUser(BOB);
-    // A write grant is the most anyone else can hold, and it lets them message any other agent of Alice's. The
-    // refusal comes from the owner-scoped read rather than from `canStopAssistantAnswer`, which the action names
+    // The refusal comes from the owner-scoped read rather than from `canStopAssistantAnswer`, which the action names
     // after it and `rules.test.ts` covers; this is the end of it that the person would meet.
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
     actAs("bob");
 
     expect(await actions.stopAssistantAnswer({ conversationId: id })).toMatchObject({ ok: false });

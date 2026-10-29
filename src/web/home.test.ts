@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultUi, homeFor, movedHubPath } from "./home.ts";
+import { defaultUi, homeFor, movedHubPath, retiredHubPath } from "./home.ts";
 
 describe("homeFor", () => {
   it.each(["/hub", "/hub/topics", "/hub/agents/0f8a", "/hub/nonsense"])("should send someone back into the hub from %s", (pathname) => {
@@ -28,7 +28,6 @@ describe("defaultUi", () => {
 
 describe("movedHubPath", () => {
   it.each([
-    ["/access", "/hub/access"],
     ["/agents/0f8a", "/hub/agents/0f8a"],
     ["/c", "/hub/c"],
     ["/channels/new", "/hub/channels/new"],
@@ -64,7 +63,29 @@ describe("movedHubPath", () => {
 
   it("should match a whole segment only, so a path that merely starts with one is untouched", () => {
     expect(movedHubPath("/topicsfoo")).toBeUndefined();
-    expect(movedHubPath("/accessible")).toBeUndefined();
     expect(movedHubPath("/cx")).toBeUndefined();
   });
+
+  it("should leave the retired access page to `retiredHubPath`, which answers for both of its addresses", () => {
+    expect(movedHubPath("/access")).toBeUndefined();
+    expect(movedHubPath("/hub/access")).toBeUndefined();
+  });
+});
+
+describe("retiredHubPath", () => {
+  it.each(["/access", "/hub/access"])("should send %s to the shared chats, which is the only access anyone grants", (pathname) => {
+    expect(retiredHubPath(pathname, true)).toBe("/assistant/shared");
+  });
+
+  // There are no conversations to share with virtual agents off, and the Assistant's pages are not found at all.
+  it.each(["/access", "/hub/access"])("should send %s to the hub instead when virtual agents are off", (pathname) => {
+    expect(retiredHubPath(pathname, false)).toBe("/hub");
+  });
+
+  it.each(["/", "/hub", "/accessible", "/hub/accessible", "/hub/topics", "/assistant/shared"])(
+    "should leave %s alone, which is not the page that went",
+    (pathname) => {
+      expect(retiredHubPath(pathname, true)).toBeUndefined();
+    }
+  );
 });

@@ -29,15 +29,7 @@ test.describe("accessibility @nightly", () => {
   });
 
   // With virtual agents on, /hub/settings/credentials redirects to /hub/virtual#credentials, so this audits that section.
-  for (const path of [
-    "/hub",
-    "/hub/topics",
-    "/hub/channels/new",
-    "/hub/access",
-    "/hub/settings/credentials",
-    "/hub/c?topics=e2e-a11y",
-    "/hub/topics/e2e-a11y"
-  ]) {
+  for (const path of ["/hub", "/hub/topics", "/hub/channels/new", "/hub/settings/credentials", "/hub/c?topics=e2e-a11y", "/hub/topics/e2e-a11y"]) {
     test(`should raise no WCAG A or AA violations on ${path} @nightly @a11y`, async ({ page }) => {
       await audit(page, path);
     });

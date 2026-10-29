@@ -23,15 +23,6 @@ export function HomeIcon() {
   );
 }
 
-export function KeyIcon() {
-  return (
-    <Icon>
-      <circle cx="7" cy="12" r="3.5" />
-      <path d="m9.5 9.5 6-6M13 6l2 2M11.5 7.5l1.5 1.5" />
-    </Icon>
-  );
-}
-
 export function LockIcon() {
   return (
     <Icon>

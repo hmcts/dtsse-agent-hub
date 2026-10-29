@@ -1,5 +1,4 @@
 import type { NextRequest } from "next/server";
-import { grantsHeldBy } from "@/access/load";
 import { canViewAgent } from "@/access/rules";
 import { errorResponse } from "@/agent-api/http";
 import { findAgent, isUuid } from "@/agents/store";
@@ -36,10 +35,10 @@ export async function GET(request: NextRequest): Promise<Response> {
   let agent = null;
   if (agentId !== null) {
     const found = isUuid(agentId) ? await findAgent(prisma, agentId) : undefined;
-    if (found === undefined || !canViewAgent(viewer.oid, found, await grantsHeldBy(prisma, viewer.oid))) {
+    if (found === undefined || !canViewAgent(viewer.oid, found)) {
       return errorResponse(404, "no such agent");
     }
-    agent = { id: found.id, ownerOid: found.ownerOid, ownerOnly: found.ownerOnly, inConversation: found.inConversation };
+    agent = { id: found.id, ownerOid: found.ownerOid, ownerOnly: found.ownerOnly };
   }
 
   const { hub, listener } = realtime();
@@ -56,7 +55,6 @@ export async function GET(request: NextRequest): Promise<Response> {
         hub,
         listener,
         viewerOid: viewer.oid,
-        grants: () => grantsHeldBy(prisma, viewer.oid),
         post: sharedPostLoader(prisma),
         direct: (id) => loadThreadMessage(prisma, id)
       }

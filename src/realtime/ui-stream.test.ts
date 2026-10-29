@@ -1,17 +1,20 @@
 import { readFile } from "node:fs/promises";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Grant, MessageRef } from "../access/rules.ts";
+import type { MessageRef } from "../access/rules.ts";
 import type { LoadedThreadMessage } from "../messages/direct-thread.ts";
 import type { ApiMessage } from "../messages/shape.ts";
 import type { HubEvent } from "./events.ts";
 import { createEventHub } from "./hub.ts";
 import { sharedLoads } from "./shared-load.ts";
-import { cachedGrants, matchesTopics, selectFrame, sharedPostLoader, type UiStreamSources, type UiWatch, uiStream } from "./ui-stream.ts";
+import { matchesTopics, selectFrame, sharedPostLoader, type UiStreamSources, type UiWatch, uiStream } from "./ui-stream.ts";
 
 const VIEWER = "oid-viewer";
-const OWNER = "oid-owner";
-const STRANGER = "oid-stranger";
-const AGENT = { id: "agent-owned", ownerOid: OWNER };
+/** Somebody else, whose agents and virtual agents the viewer is told nothing about. */
+const OTHER = "oid-other";
+/** The viewer's own agent, which is the only kind any of these frames is about. */
+const AGENT = { id: "agent-owned", ownerOid: VIEWER };
+/** One of `OTHER`'s, to watch when the question is what the stream refuses. */
+const THEIR_AGENT = { id: "agent-elsewhere", ownerOid: OTHER };
 
 function post(id: string, topics: string[]): ApiMessage {
   return {
@@ -31,14 +34,13 @@ function post(id: string, topics: string[]): ApiMessage {
 function direct(id: string, ref: Partial<MessageRef> = {}): LoadedThreadMessage {
   return {
     message: { ...post(id, []), kind: "direct", target_agent_id: AGENT.id, delivery: "queued" },
-    ref: { kind: "direct", authorOid: STRANGER, authorAgent: null, targetAgent: AGENT, parentAuthorOid: null, ...ref }
+    ref: { kind: "direct", authorOid: OTHER, authorAgent: null, targetAgent: AGENT, parentAuthorOid: null, ...ref }
   };
 }
 
-function sources(grants: Grant[], messages: { posts?: ApiMessage[]; directs?: LoadedThreadMessage[] } = {}): Omit<UiStreamSources, "hub" | "listener"> {
+function sources(messages: { posts?: ApiMessage[]; directs?: LoadedThreadMessage[] } = {}): Omit<UiStreamSources, "hub" | "listener"> {
   return {
     viewerOid: VIEWER,
-    grants: async () => grants,
     post: async (id) => messages.posts?.find((message) => message.id === id.toString()),
     direct: async (id) => messages.directs?.find((loaded) => loaded.message.id === id.toString())
   };
@@ -46,12 +48,12 @@ function sources(grants: Grant[], messages: { posts?: ApiMessage[]; directs?: Lo
 
 const LISTENING = { ready: async () => undefined, connected: () => true };
 
-const READ: Grant[] = [{ ownerOid: OWNER, granteeOid: VIEWER, level: "read" }];
-const WRITE: Grant[] = [{ ownerOid: OWNER, granteeOid: VIEWER, level: "write" }];
 const TOPICS: UiWatch = { topics: ["pcs-api", "database"], match: "any", agent: null };
 const THREAD: UiWatch = { topics: [], match: "any", agent: AGENT };
-/** The same agent once it is a local session's conversation: shared through grants, with a transcript that is not. */
-const CHAT_THREAD: UiWatch = { topics: [], match: "any", agent: { ...AGENT, ownerOnly: false, inConversation: true } };
+/** The viewer's own agent once it is a conversation's session: an agent of theirs like any other, to this stream. */
+const CHAT_THREAD: UiWatch = { topics: [], match: "any", agent: { ...AGENT, ownerOnly: true } };
+/** Somebody else's agent, which no stream of the viewer's is ever opened on; every arm re-checks anyway. */
+const THEIR_THREAD: UiWatch = { topics: [], match: "any", agent: THEIR_AGENT };
 const EVERYTHING: UiWatch = { topics: "everything", match: "any", agent: null };
 
 describe("matchesTopics", () => {
@@ -81,21 +83,21 @@ describe("selectFrame", () => {
     [{ type: "assistant_lookup" as const, lookup_id: "l", virtual_agent_id: "va", owner_oid: "dev-alice" }],
     [{ type: "assistant_lookup_answered" as const, lookup_id: "l", virtual_agent_id: "va", owner_oid: "dev-alice" }]
   ])("should send no frame for %j when it is an instruction to the owner's pod", async (event) => {
-    expect(await selectFrame(event, TOPICS, sources([]))).toBeUndefined();
+    expect(await selectFrame(event, TOPICS, sources())).toBeUndefined();
   });
 
   it("should send a post on a watched topic when the page watches it", async () => {
-    const frame = await selectFrame({ type: "post", message_id: "5" }, TOPICS, sources([], { posts: [post("5", ["pcs-api"])] }));
+    const frame = await selectFrame({ type: "post", message_id: "5" }, TOPICS, sources({ posts: [post("5", ["pcs-api"])] }));
 
     expect(frame).toBe(`id: 5\nevent: post\ndata: ${JSON.stringify({ message: post("5", ["pcs-api"]) })}\n\n`);
   });
 
   it("should not send a post on other topics when the page watches different ones", async () => {
-    expect(await selectFrame({ type: "post", message_id: "5" }, TOPICS, sources([], { posts: [post("5", ["ccd"])] }))).toBeUndefined();
+    expect(await selectFrame({ type: "post", message_id: "5" }, TOPICS, sources({ posts: [post("5", ["ccd"])] }))).toBeUndefined();
   });
 
   it("should not read a post at all when the page watches no topics", async () => {
-    const loaded = sources([], { posts: [post("5", ["pcs-api"])] });
+    const loaded = sources({ posts: [post("5", ["pcs-api"])] });
     const read = vi.spyOn(loaded, "post");
 
     expect(await selectFrame({ type: "post", message_id: "5" }, THREAD, loaded)).toBeUndefined();
@@ -103,7 +105,7 @@ describe("selectFrame", () => {
   });
 
   it("should send a post on any topic when the page watches everything", async () => {
-    const frame = await selectFrame({ type: "post", message_id: "5" }, EVERYTHING, sources([], { posts: [post("5", ["ccd"])] }));
+    const frame = await selectFrame({ type: "post", message_id: "5" }, EVERYTHING, sources({ posts: [post("5", ["ccd"])] }));
 
     expect(frame).toBe(`id: 5\nevent: post\ndata: ${JSON.stringify({ message: post("5", ["ccd"]) })}\n\n`);
   });
@@ -111,270 +113,178 @@ describe("selectFrame", () => {
   it("should not send a message that is not a post when the page watches everything", async () => {
     const loaded = { ...post("5", []), kind: "direct" as const };
 
-    expect(await selectFrame({ type: "post", message_id: "5" }, EVERYTHING, sources([], { posts: [loaded] }))).toBeUndefined();
+    expect(await selectFrame({ type: "post", message_id: "5" }, EVERYTHING, sources({ posts: [loaded] }))).toBeUndefined();
   });
 
   it("should not send a post that has gone when it is read", async () => {
-    expect(await selectFrame({ type: "post", message_id: "5" }, TOPICS, sources([]))).toBeUndefined();
+    expect(await selectFrame({ type: "post", message_id: "5" }, TOPICS, sources())).toBeUndefined();
   });
 
-  it.each<[string, string, Grant[], boolean]>([
-    ["the viewer's own agent", VIEWER, [], true],
-    ["an agent the viewer holds a read grant for", OWNER, READ, true],
-    ["an agent the viewer has no grant for", STRANGER, READ, false]
-  ])("should decide whether to send the status of %s", async (_label, owner, grants, sent) => {
+  it.each<[string, string, boolean]>([
+    ["the viewer's own agent", VIEWER, true],
+    ["an agent of somebody else's", OTHER, false]
+  ])("should decide whether to send the status of %s", async (_label, owner, sent) => {
     const event: HubEvent = { type: "agent_status", agent_id: "agent-1", owner_oid: owner, status: "busy" };
 
-    const frame = await selectFrame(event, TOPICS, sources(grants));
+    const frame = await selectFrame(event, TOPICS, sources());
 
     expect(frame).toBe(sent ? `event: agent_status\ndata: ${JSON.stringify({ agent_id: "agent-1", status: "busy" })}\n\n` : undefined);
   });
 
-  it("should send a direct message in the watched agent's thread when the viewer can see the agent", async () => {
+  it("should send a direct message in the watched agent's thread when the viewer owns the agent", async () => {
     const frame = await selectFrame(
       { type: "direct", message_id: "7", target_agent_id: AGENT.id, author_agent_id: null },
       THREAD,
-      sources(READ, { directs: [direct("7")] })
+      sources({ directs: [direct("7")] })
     );
 
     expect(frame).toBe(`id: 7\nevent: direct\ndata: ${JSON.stringify({ message: direct("7").message })}\n\n`);
   });
 
-  it("should send a message the watched agent wrote when the viewer can see the agent", async () => {
-    const sent = direct("8", { authorOid: OWNER, authorAgent: AGENT, targetAgent: null, parentAuthorOid: STRANGER });
+  it("should send a message the watched agent wrote when the viewer owns the agent", async () => {
+    const sent = direct("8", { authorOid: VIEWER, authorAgent: AGENT, targetAgent: null, parentAuthorOid: OTHER });
 
     const frame = await selectFrame(
       { type: "direct", message_id: "8", target_agent_id: null, author_agent_id: AGENT.id },
       THREAD,
-      sources(READ, { directs: [sent] })
+      sources({ directs: [sent] })
     );
 
     expect(frame).toContain("event: direct");
   });
 
-  it("should not send a direct message once the viewer's grant is revoked", async () => {
+  it("should not send a direct message of an agent the viewer does not own", async () => {
+    const theirs = direct("7", { targetAgent: THEIR_AGENT });
+
     expect(
-      await selectFrame({ type: "direct", message_id: "7", target_agent_id: AGENT.id, author_agent_id: null }, THREAD, sources([], { directs: [direct("7")] }))
+      await selectFrame(
+        { type: "direct", message_id: "7", target_agent_id: THEIR_AGENT.id, author_agent_id: null },
+        THEIR_THREAD,
+        sources({ directs: [theirs] })
+      )
     ).toBeUndefined();
   });
 
   it("should not send a direct message for another agent's thread", async () => {
     expect(
-      await selectFrame(
-        { type: "direct", message_id: "7", target_agent_id: "agent-other", author_agent_id: null },
-        THREAD,
-        sources(READ, { directs: [direct("7")] })
-      )
+      await selectFrame({ type: "direct", message_id: "7", target_agent_id: "agent-other", author_agent_id: null }, THREAD, sources({ directs: [direct("7")] }))
     ).toBeUndefined();
   });
 
   it("should not send a direct message when the page watches no agent", async () => {
     expect(
-      await selectFrame(
-        { type: "direct", message_id: "7", target_agent_id: AGENT.id, author_agent_id: null },
-        TOPICS,
-        sources(READ, { directs: [direct("7")] })
-      )
+      await selectFrame({ type: "direct", message_id: "7", target_agent_id: AGENT.id, author_agent_id: null }, TOPICS, sources({ directs: [direct("7")] }))
     ).toBeUndefined();
   });
 
-  it("should not send a message the viewer may not read when it is in the watched thread", async () => {
-    // The watched agent's message to someone else's agent: its grantees cannot read it.
-    const overheard = direct("9", { authorOid: OWNER, authorAgent: AGENT, targetAgent: { id: "agent-elsewhere", ownerOid: STRANGER } });
+  it("should not send a message the viewer may not read when the event names the watched agent", async () => {
+    // Two people's agents, neither of them the viewer's: the event claims the watched thread and the message is not
+    // in it, so the rule and not the event is what decides.
+    const overheard = direct("9", { authorOid: OTHER, authorAgent: THEIR_AGENT, targetAgent: { id: "agent-third", ownerOid: OTHER } });
 
     expect(
-      await selectFrame(
-        { type: "direct", message_id: "9", target_agent_id: "agent-elsewhere", author_agent_id: AGENT.id },
-        THREAD,
-        sources(READ, { directs: [overheard] })
-      )
+      await selectFrame({ type: "direct", message_id: "9", target_agent_id: AGENT.id, author_agent_id: AGENT.id }, THREAD, sources({ directs: [overheard] }))
     ).toBeUndefined();
   });
 
   it("should not send a direct message that has gone when it is read", async () => {
-    expect(await selectFrame({ type: "direct", message_id: "7", target_agent_id: AGENT.id, author_agent_id: null }, THREAD, sources(READ))).toBeUndefined();
+    expect(await selectFrame({ type: "direct", message_id: "7", target_agent_id: AGENT.id, author_agent_id: null }, THREAD, sources())).toBeUndefined();
   });
 
-  it("should send a delivery change on the watched agent when the viewer can see it", async () => {
-    const frame = await selectFrame({ type: "delivery", message_id: "7", agent_id: AGENT.id, state: "delivered" }, THREAD, sources(READ));
+  it("should send a delivery change on the watched agent when the viewer owns it", async () => {
+    const frame = await selectFrame({ type: "delivery", message_id: "7", agent_id: AGENT.id, state: "delivered" }, THREAD, sources());
 
     expect(frame).toBe(`event: delivery\ndata: ${JSON.stringify({ message_id: "7", state: "delivered" })}\n\n`);
   });
 
-  it.each<[string, UiWatch, Grant[]]>([
-    ["no agent is watched", TOPICS, READ],
-    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: OWNER } }, READ],
-    ["the viewer can no longer see the agent", THREAD, []]
-  ])("should not send a delivery change when %s", async (_label, watch, grants) => {
-    expect(await selectFrame({ type: "delivery", message_id: "7", agent_id: AGENT.id, state: "delivered" }, watch, sources(grants))).toBeUndefined();
+  it.each<[string, UiWatch]>([
+    ["no agent is watched", TOPICS],
+    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: VIEWER } }],
+    ["the watched agent is somebody else's", { ...THEIR_THREAD, agent: { ...THEIR_AGENT, id: AGENT.id } }]
+  ])("should not send a delivery change when %s", async (_label, watch) => {
+    expect(await selectFrame({ type: "delivery", message_id: "7", agent_id: AGENT.id, state: "delivered" }, watch, sources())).toBeUndefined();
   });
 
-  it("should send the newest transcript id of the watched agent when the viewer may read its transcript", async () => {
-    const frame = await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: OWNER, last_id: "21" }, THREAD, sources(READ));
+  it("should send the newest transcript id of the watched agent when the viewer owns it", async () => {
+    const frame = await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: VIEWER, last_id: "21" }, THREAD, sources());
 
     expect(frame).toBe(`event: transcript\ndata: ${JSON.stringify({ agent_id: AGENT.id, last_id: "21" })}\n\n`);
   });
 
-  it.each<[string, UiWatch, Grant[]]>([
-    ["no agent is watched", TOPICS, READ],
-    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: OWNER } }, READ],
-    ["the viewer can no longer read the transcript", THREAD, []],
-    // The agent itself stays visible and messageable to a grantee; it is the words of the chat that do not.
-    ["the agent is in a conversation and the viewer only holds a write grant", CHAT_THREAD, WRITE]
-  ])("should not send a transcript change when %s", async (_label, watch, grants) => {
-    expect(await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: OWNER, last_id: "21" }, watch, sources(grants))).toBeUndefined();
-  });
-
-  it("should send the transcript id of an agent in a conversation to its owner, who is the only one it is sent to", async () => {
-    const owner = { ...sources([]), viewerOid: OWNER };
-
-    const frame = await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: OWNER, last_id: "21" }, CHAT_THREAD, owner);
+  it("should send the transcript id of the viewer's own conversation agent, which is an agent of theirs like any other", async () => {
+    const frame = await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: VIEWER, last_id: "21" }, CHAT_THREAD, sources());
 
     expect(frame).toBe(`event: transcript\ndata: ${JSON.stringify({ agent_id: AGENT.id, last_id: "21" })}\n\n`);
   });
 
-  it("should still send a direct and a delivery of an agent in a local conversation to a grantee", async () => {
-    const loaded = direct("8");
-
-    expect(
-      await selectFrame(
-        { type: "direct", message_id: "8", target_agent_id: AGENT.id, author_agent_id: null },
-        CHAT_THREAD,
-        sources(READ, { directs: [loaded] })
-      )
-    ).toContain("event: direct");
-    expect(await selectFrame({ type: "delivery", message_id: "8", agent_id: AGENT.id, state: "delivered" }, CHAT_THREAD, sources(READ))).toContain(
-      "event: delivery"
-    );
+  it.each<[string, UiWatch]>([
+    ["no agent is watched", TOPICS],
+    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: VIEWER } }],
+    ["the watched agent is somebody else's", { ...THEIR_THREAD, agent: { ...THEIR_AGENT, id: AGENT.id } }]
+  ])("should not send a transcript change when %s", async (_label, watch) => {
+    expect(await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: VIEWER, last_id: "21" }, watch, sources())).toBeUndefined();
   });
 
   it("should name the watched agent whose skills changed when the viewer may see its skills", async () => {
-    const frame = await selectFrame({ type: "agent_skills", agent_id: AGENT.id, owner_oid: OWNER }, THREAD, sources(WRITE));
+    const frame = await selectFrame({ type: "agent_skills", agent_id: AGENT.id, owner_oid: VIEWER }, THREAD, sources());
 
     expect(frame).toBe(`event: agent_skills\ndata: ${JSON.stringify({ agent_id: AGENT.id })}\n\n`);
   });
 
-  it.each<[string, UiWatch, Grant[]]>([
-    ["no agent is watched", TOPICS, WRITE],
-    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: OWNER } }, WRITE],
-    ["the viewer may only read the agent", THREAD, READ],
-    ["the viewer can no longer see the agent", THREAD, []]
-  ])("should not send a skills change when %s", async (_label, watch, grants) => {
-    expect(await selectFrame({ type: "agent_skills", agent_id: AGENT.id, owner_oid: OWNER }, watch, sources(grants))).toBeUndefined();
+  it.each<[string, UiWatch]>([
+    ["no agent is watched", TOPICS],
+    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: VIEWER } }],
+    ["the watched agent is somebody else's", { ...THEIR_THREAD, agent: { ...THEIR_AGENT, id: AGENT.id } }]
+  ])("should not send a skills change when %s", async (_label, watch) => {
+    expect(await selectFrame({ type: "agent_skills", agent_id: AGENT.id, owner_oid: VIEWER }, watch, sources())).toBeUndefined();
   });
 
-  it("should name the watched agent whose questions changed when the viewer may see the agent", async () => {
-    const frame = await selectFrame({ type: "agent_question", agent_id: AGENT.id, owner_oid: OWNER }, THREAD, sources(READ));
+  it("should name the watched agent whose questions changed when the viewer owns it", async () => {
+    const frame = await selectFrame({ type: "agent_question", agent_id: AGENT.id, owner_oid: VIEWER }, THREAD, sources());
 
     expect(frame).toBe(`event: agent_question\ndata: ${JSON.stringify({ agent_id: AGENT.id })}\n\n`);
   });
 
-  it.each<[string, UiWatch, Grant[]]>([
-    ["no agent is watched", TOPICS, READ],
-    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: OWNER } }, READ],
-    ["the viewer can no longer see the agent", THREAD, []]
-  ])("should not send a question change when %s", async (_label, watch, grants) => {
-    expect(await selectFrame({ type: "agent_question", agent_id: AGENT.id, owner_oid: OWNER }, watch, sources(grants))).toBeUndefined();
+  it.each<[string, UiWatch]>([
+    ["no agent is watched", TOPICS],
+    ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: VIEWER } }],
+    ["the watched agent is somebody else's", { ...THEIR_THREAD, agent: { ...THEIR_AGENT, id: AGENT.id } }]
+  ])("should not send a question change when %s", async (_label, watch) => {
+    expect(await selectFrame({ type: "agent_question", agent_id: AGENT.id, owner_oid: VIEWER }, watch, sources())).toBeUndefined();
   });
 
   it("should tell the page to re-read when the listener resyncs", async () => {
-    expect(await selectFrame({ type: "resync" }, TOPICS, sources([]))).toBe("event: resync\ndata: {}\n\n");
-  });
-
-  it("should tell the page to re-read when a grant the viewer holds changes", async () => {
-    expect(await selectFrame({ type: "grant", owner_oid: OWNER, grantee_oid: VIEWER }, TOPICS, sources([]))).toBe("event: resync\ndata: {}\n\n");
-  });
-
-  it("should send nothing when a grant to someone else changes", async () => {
-    expect(await selectFrame({ type: "grant", owner_oid: VIEWER, grantee_oid: STRANGER }, TOPICS, sources([]))).toBeUndefined();
+    expect(await selectFrame({ type: "resync" }, TOPICS, sources())).toBe("event: resync\ndata: {}\n\n");
   });
 
   it("should tell the page to re-read when the viewer's own credential changes", async () => {
-    expect(await selectFrame({ type: "credential", owner_oid: VIEWER, kind: "github" }, TOPICS, sources([]))).toBe("event: resync\ndata: {}\n\n");
+    expect(await selectFrame({ type: "credential", owner_oid: VIEWER, kind: "github" }, TOPICS, sources())).toBe("event: resync\ndata: {}\n\n");
   });
 
   it("should send nothing when someone else's credential changes", async () => {
-    expect(await selectFrame({ type: "credential", owner_oid: STRANGER, kind: "github" }, TOPICS, sources([]))).toBeUndefined();
+    expect(await selectFrame({ type: "credential", owner_oid: OTHER, kind: "github" }, TOPICS, sources())).toBeUndefined();
   });
 
   it("should tell the owner which virtual agent changed when it is theirs", async () => {
-    expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: VIEWER }, TOPICS, sources([]))).toBe(
+    expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: VIEWER }, TOPICS, sources())).toBe(
       `event: virtual_agent\ndata: ${JSON.stringify({ virtual_agent_id: "va-1" })}\n\n`
     );
   });
 
-  it("should tell a grant-holder which virtual agent changed when they may see its owner's agents", async () => {
-    expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: OWNER }, TOPICS, sources(READ))).toBe(
-      `event: virtual_agent\ndata: ${JSON.stringify({ virtual_agent_id: "va-1" })}\n\n`
-    );
-  });
-
-  it.each<[string, string, Grant[]]>([
-    ["the viewer holds no grant over its owner", OWNER, []],
-    ["the viewer's only grant is from someone else", STRANGER, READ]
-  ])("should send nothing about a virtual agent the viewer does not own when %s", async (_label, ownerOid, grants) => {
-    expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: ownerOid }, TOPICS, sources(grants))).toBeUndefined();
+  it("should send nothing about a virtual agent of somebody else's", async () => {
+    expect(await selectFrame({ type: "virtual_agent", virtual_agent_id: "va-1", owner_oid: OTHER }, TOPICS, sources())).toBeUndefined();
   });
 
   it("should tell the owner which of their assistant conversations changed when it is theirs", async () => {
-    expect(
-      await selectFrame({ type: "assistant_conversation", conversation_id: "c-1", virtual_agent_id: "va-1", owner_oid: VIEWER }, TOPICS, sources([]))
-    ).toBe(`event: assistant_conversation\ndata: ${JSON.stringify({ conversation_id: "c-1" })}\n\n`);
+    expect(await selectFrame({ type: "assistant_conversation", conversation_id: "c-1", virtual_agent_id: "va-1", owner_oid: VIEWER }, TOPICS, sources())).toBe(
+      `event: assistant_conversation\ndata: ${JSON.stringify({ conversation_id: "c-1" })}\n\n`
+    );
   });
 
-  it("should send nothing about an assistant conversation when it is someone else's, whatever the grants", async () => {
+  it("should send nothing about an assistant conversation when it is someone else's", async () => {
     expect(
-      await selectFrame({ type: "assistant_conversation", conversation_id: "c-1", virtual_agent_id: "va-1", owner_oid: OWNER }, TOPICS, sources(READ))
+      await selectFrame({ type: "assistant_conversation", conversation_id: "c-1", virtual_agent_id: "va-1", owner_oid: OTHER }, TOPICS, sources())
     ).toBeUndefined();
-  });
-});
-
-describe("cachedGrants", () => {
-  it("should read once when asked repeatedly", async () => {
-    const load = vi.fn(async () => READ);
-    const grants = cachedGrants(load);
-
-    await grants.get();
-    await grants.get();
-
-    expect(load).toHaveBeenCalledTimes(1);
-  });
-
-  it("should read again when it has been invalidated", async () => {
-    const load = vi.fn<() => Promise<Grant[]>>().mockResolvedValueOnce(READ).mockResolvedValueOnce([]);
-    const grants = cachedGrants(load);
-
-    expect(await grants.get()).toEqual(READ);
-    grants.invalidate();
-
-    expect(await grants.get()).toEqual([]);
-  });
-
-  it("should read again when the last read failed", async () => {
-    const load = vi.fn<() => Promise<Grant[]>>().mockRejectedValueOnce(new Error("database gone")).mockResolvedValueOnce(READ);
-    const grants = cachedGrants(load);
-
-    await expect(grants.get()).rejects.toThrow("database gone");
-
-    expect(await grants.get()).toEqual(READ);
-  });
-
-  it("should keep the newer read when a read from before an invalidation fails", async () => {
-    let fail: (error: Error) => void = () => undefined;
-    const stale = new Promise<Grant[]>((_resolve, reject) => {
-      fail = reject;
-    });
-    const load = vi.fn<() => Promise<Grant[]>>().mockReturnValueOnce(stale).mockResolvedValueOnce(READ);
-    const grants = cachedGrants(load);
-
-    const first = grants.get();
-    grants.invalidate();
-    await grants.get();
-    fail(new Error("database gone"));
-    await expect(first).rejects.toThrow("database gone");
-
-    expect(await grants.get()).toEqual(READ);
-    expect(load).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -409,7 +319,7 @@ describe("uiStream", () => {
     const shared = sharedLoads(load, { ttlMs: 10_000 });
     const tabs = Array.from({ length: 5 }, () => {
       const frames: string[] = [];
-      const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), post: shared })((frame) => frames.push(frame), vi.fn()) as () => void;
+      const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources(), post: shared })((frame) => frames.push(frame), vi.fn()) as () => void;
       return { frames, close };
     });
 
@@ -424,53 +334,20 @@ describe("uiStream", () => {
     }
   });
 
-  it("should read the viewer's grants once when status events keep arriving", async () => {
+  // Nothing is cached or re-read per connection: an agent does not change hands, so each status event is answered
+  // from its own `owner_oid` and the frames just keep coming.
+  it("should send a frame for every status event of the viewer's own agents", async () => {
     const hub = createEventHub();
-    const grants = vi.fn(async () => READ);
     const frames: string[] = [];
-    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), grants })((frame) => frames.push(frame), vi.fn()) as () => void;
+    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources() })((frame) => frames.push(frame), vi.fn()) as () => void;
 
-    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "busy" });
-    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "idle" });
+    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: VIEWER, status: "busy" });
+    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: VIEWER, status: "idle" });
+    hub.publish({ type: "agent_status", agent_id: "agent-2", owner_oid: OTHER, status: "busy" });
     await settle();
     await settle();
 
-    expect(grants).toHaveBeenCalledTimes(1);
-    expect(frames).toHaveLength(2);
-    close();
-  });
-
-  it("should re-read the viewer's grants and resync when a grant they hold is revoked", async () => {
-    const hub = createEventHub();
-    const grants = vi.fn<() => Promise<Grant[]>>().mockResolvedValueOnce(READ).mockResolvedValueOnce([]);
-    const frames: string[] = [];
-    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), grants })((frame) => frames.push(frame), vi.fn()) as () => void;
-
-    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "busy" });
-    hub.publish({ type: "grant", owner_oid: OWNER, grantee_oid: VIEWER });
-    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "idle" });
-    await settle();
-    await settle();
-
-    expect(grants).toHaveBeenCalledTimes(2);
-    expect(frames.map((frame) => frame.split("\n")[0])).toEqual(["event: agent_status", "event: resync"]);
-    close();
-  });
-
-  it("should keep the cached grants when a grant to someone else changes", async () => {
-    const hub = createEventHub();
-    const grants = vi.fn(async () => READ);
-    const frames: string[] = [];
-    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([]), grants })((frame) => frames.push(frame), vi.fn()) as () => void;
-
-    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "busy" });
-    hub.publish({ type: "grant", owner_oid: OWNER, grantee_oid: STRANGER });
-    hub.publish({ type: "agent_status", agent_id: "agent-1", owner_oid: OWNER, status: "idle" });
-    await settle();
-    await settle();
-
-    expect(grants).toHaveBeenCalledTimes(1);
-    expect(frames).toHaveLength(2);
+    expect(frames.map((frame) => frame.split("\n")[0])).toEqual(["event: agent_status", "event: agent_status"]);
     close();
   });
 
@@ -481,7 +358,7 @@ describe("uiStream", () => {
     const slow = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const loaded = sources([], { posts: [post("1", ["pcs-api"]), post("2", ["pcs-api"])] });
+    const loaded = sources({ posts: [post("1", ["pcs-api"]), post("2", ["pcs-api"])] });
     const close = uiStream(TOPICS, {
       hub,
       listener: LISTENING,
@@ -509,7 +386,7 @@ describe("uiStream", () => {
   it("should stop sending and unsubscribe when it closes", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
-    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources([], { posts: [post("1", ["pcs-api"])] }) })(
+    const close = uiStream(TOPICS, { hub, listener: LISTENING, ...sources({ posts: [post("1", ["pcs-api"])] }) })(
       (frame) => frames.push(frame),
       vi.fn()
     ) as () => void;
@@ -529,7 +406,7 @@ describe("uiStream", () => {
     const close = uiStream(TOPICS, {
       hub,
       listener: LISTENING,
-      ...sources([]),
+      ...sources(),
       post: async () => {
         throw new Error("database gone");
       }
@@ -551,10 +428,7 @@ describe("uiStream", () => {
     const frames: string[] = [];
     let listening: () => void = () => undefined;
     const listener = { ready: () => new Promise<void>((resolve) => (listening = resolve)), connected: () => false };
-    const close = uiStream(TOPICS, { hub, listener, ...sources([], { posts: [post("1", ["pcs-api"])] }) })(
-      (frame) => frames.push(frame),
-      vi.fn()
-    ) as () => void;
+    const close = uiStream(TOPICS, { hub, listener, ...sources({ posts: [post("1", ["pcs-api"])] }) })((frame) => frames.push(frame), vi.fn()) as () => void;
     await settle();
     expect(frames).toEqual([]);
 
@@ -571,7 +445,7 @@ describe("uiStream", () => {
     const frames: string[] = [];
     let listening: () => void = () => undefined;
     const listener = { ready: () => new Promise<void>((resolve) => (listening = resolve)), connected: () => false };
-    const close = uiStream(TOPICS, { hub, listener, ...sources([]) })((frame) => frames.push(frame), vi.fn()) as () => void;
+    const close = uiStream(TOPICS, { hub, listener, ...sources() })((frame) => frames.push(frame), vi.fn()) as () => void;
 
     close();
     listening();

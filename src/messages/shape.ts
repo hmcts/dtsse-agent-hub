@@ -67,8 +67,8 @@ export function toApiMessage(row: MessageRow): ApiMessage {
 
 /**
  * A direct message as an agent's stream sends it. `from_owner` is true when a person wrote it from the UI and that
- * person owns the agent it is for, so the agent may treat it as its owner's own instruction; a message from an agent,
- * or from a grantee, is never `from_owner`.
+ * person owns the agent it is for, so the agent may treat it as its owner's own instruction; a message from another
+ * agent, and a post the agent was tagged in, are never `from_owner`.
  */
 export interface StreamedDirect {
   message: ApiMessage;

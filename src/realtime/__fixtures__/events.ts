@@ -20,7 +20,6 @@ export const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Ex
   agent_skills: [{ type: "agent_skills", agent_id: "agent-a", owner_oid: "oid-a" }],
   agent_question: [{ type: "agent_question", agent_id: "agent-a", owner_oid: "oid-a" }],
   delivery: [{ type: "delivery", message_id: "16", agent_id: "agent-b", state: "delivered" }],
-  grant: [{ type: "grant", owner_oid: "oid-a", grantee_oid: "oid-b" }],
   transcript: [{ type: "transcript", agent_id: "agent-a", owner_oid: "oid-a", last_id: "17" }],
   credential: [{ type: "credential", owner_oid: "oid-a", kind: "github" }],
   virtual_agent: [{ type: "virtual_agent", virtual_agent_id: "va-a", owner_oid: "oid-a" }],

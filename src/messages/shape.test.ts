@@ -72,7 +72,7 @@ describe("isFromOwner", () => {
 
   it.each([
     ["an agent wrote it, even one of the owner's", { authorAgent: { id: "agent-1" }, authorOid: "oid-owner", targetAgent: { ownerOid: "oid-owner" } }],
-    ["a grantee wrote it", { authorAgent: null, authorOid: "oid-grantee", targetAgent: { ownerOid: "oid-owner" } }],
+    ["somebody else wrote it from the UI", { authorAgent: null, authorOid: "oid-someone-else", targetAgent: { ownerOid: "oid-owner" } }],
     ["it has no target agent", { authorAgent: null, authorOid: "oid-owner", targetAgent: null }]
   ])("should be false when %s", (_label, row) => {
     expect(isFromOwner(row)).toBe(false);
