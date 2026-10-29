@@ -19,8 +19,9 @@ import {
   directEnvelope,
   type EnvelopeOptions,
   type JiraExportFrame,
-  ownerDirectEnvelope,
-  ownerEnvelope
+  ownerEnvelope,
+  ownerLaptopEnvelope,
+  taggedPostEnvelope
 } from "./envelope.ts";
 import { describeInbound, type InboundOptions, type InboundResult, inboundAccepted, inboundFix } from "./inbound.ts";
 import { acquirePidFile, isEnabled, log, pidAlive, readJson, readText, releasePidFile, sessionInfo, statePath, writeJson } from "./session.ts";
@@ -98,6 +99,14 @@ export type DirectEventAuthor = {
 /** Exactly the fields of a `direct` event's message that the bridge, the envelopes and `directs` read. */
 export type DirectEventMessage = {
   id: string;
+  /**
+   * `direct` for a message written to this agent, `post` for a board post that tagged it. The two arrive in the same
+   * frame, so this is what tells them apart and picks the envelope; absent from no hub that has ever sent one, but
+   * optional because the stream is untrusted input.
+   */
+  kind?: string;
+  title?: string | null;
+  topics?: string[];
   body: string;
   in_reply_to?: string | null;
   created_at?: string;
@@ -146,6 +155,9 @@ export function parseDirectEventMessage(value: unknown): DirectEventMessage | nu
   }
   return {
     id,
+    kind: asOptionalString(raw.kind),
+    title: asNullableString(raw.title),
+    topics: Array.isArray(raw.topics) ? raw.topics.filter((topic): topic is string => typeof topic === "string") : undefined,
     body: typeof raw.body === "string" ? raw.body : "",
     in_reply_to: asNullableString(raw.in_reply_to),
     created_at: asOptionalString(raw.created_at),
@@ -540,17 +552,24 @@ export async function runBridge({
       }
       const info = sessionInfo(sid, env);
       const fromUser = virtualAgent(env) !== null && fromOwner;
-      // The owner reads this session's transcript on the hub, so a conversational answer reaches them and a
-      // CLI reply would duplicate it — but only while the upload is on, or that reply is their only channel.
-      const ownerReads = !fromUser && fromOwner && !transcriptOff(sid, env);
+      // Owner framing wherever the session runs: `from_owner` is the hub's own answer that it signed this person in
+      // and that they own this agent. A separate flag, because what `fromUser` gates besides the envelope — the
+      // conversation frame, the model switch, the attachment fetch and leaving the direct thread alone — belongs to
+      // a virtual agent's pod and to nothing on a laptop.
+      const ownerOnLaptop = fromOwner && !fromUser;
+      // Where the answer goes, not what it grants: the owner reads a conversational answer only while the transcript
+      // upload is on, and a CLI reply would duplicate it; with the upload off that reply is their only channel.
+      const ownerReads = ownerOnLaptop && !transcriptOff(sid, env);
       // Only the person whose conversation it is gets the assistant framing; anyone else is still a peer.
       const assistant = fromUser ? parseAssistantFrame(payload.assistant) : null;
       const previousProduct = assistant ? parseAssistantProduct(readJson(productPath(sid))) : null;
       const envelope: (message: DirectEventMessage, options?: EnvelopeOptions) => string = fromUser
         ? ownerEnvelope
-        : ownerReads
-          ? ownerDirectEnvelope
-          : directEnvelope;
+        : ownerOnLaptop
+          ? (own, options) => ownerLaptopEnvelope(own, { ...options, reads: ownerReads })
+          : message.kind === "post"
+            ? taggedPostEnvelope
+            : directEnvelope;
       // Fetched before the message is delivered, so the envelope can name the absolute path and the session has the
       // file the moment it reads about it. Nothing here throws: a file that could not be fetched comes back as an
       // outcome the envelope says so about, because a message delivered with the attachment silently missing would
