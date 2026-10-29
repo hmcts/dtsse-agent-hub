@@ -344,12 +344,12 @@ describe("proxy redirects staying on their own origin", () => {
     expect(new URL(response.headers.get("location") ?? "").origin).toBe("https://agent-hub.example");
   });
 
-  it.each([
-    "//elsewhere.example/",
-    "//elsewhere.example?token=11a2b3c4d5e6f708192a3b4c5d"
-  ])("should never name another origin in the Location for %s", async (path) => {
-    const response = await proxy(asked(`https://agent-hub.example${path}`));
+  it.each(["//elsewhere.example/", "//elsewhere.example?token=11a2b3c4d5e6f708192a3b4c5d"])(
+    "should never name another origin in the Location for %s",
+    async (path) => {
+      const response = await proxy(asked(`https://agent-hub.example${path}`));
 
-    expect(new URL(response.headers.get("location") ?? "").host).toBe("agent-hub.example");
-  });
+      expect(new URL(response.headers.get("location") ?? "").host).toBe("agent-hub.example");
+    }
+  );
 });

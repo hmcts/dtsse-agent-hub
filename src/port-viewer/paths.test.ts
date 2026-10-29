@@ -33,18 +33,12 @@ describe("parseViewerPath", () => {
     expect(parseViewerPath(`/${ID}/8080?x=1`)).toEqual({ kind: "bare-port", virtualAgentId: ID, port: 8080, search: "?x=1" });
   });
 
-  it.each([
-    "/",
-    "/favicon.ico",
-    `/${ID}`,
-    `/not-a-uuid/8080/`,
-    `/${ID.toUpperCase()}/8080/`,
-    `/${ID}/80/`,
-    `/${ID}/08080/`,
-    "/_auth/extra"
-  ])("should match nothing when the path is %s", (path) => {
-    expect(parseViewerPath(path)).toEqual({ kind: "none" });
-  });
+  it.each(["/", "/favicon.ico", `/${ID}`, `/not-a-uuid/8080/`, `/${ID.toUpperCase()}/8080/`, `/${ID}/80/`, `/${ID}/08080/`, "/_auth/extra"])(
+    "should match nothing when the path is %s",
+    (path) => {
+      expect(parseViewerPath(path)).toEqual({ kind: "none" });
+    }
+  );
 });
 
 describe("the names a port is known by", () => {
