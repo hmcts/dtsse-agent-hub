@@ -32,6 +32,7 @@ import {
   offersConnect,
   PROMPTED_WHEN_MISSING,
   type StoredCredential,
+  screenDetail,
   signInPrompt,
   signsInOnRequest
 } from "./connections.ts";
@@ -77,6 +78,11 @@ function lapsed(kind: CredentialKind, state: "expired" | "failed" = "expired"): 
 /** The rows for one route's list, where only the wording of the Azure row depends on which route that is. */
 function list(kinds: CredentialKind[], statuses: CredentialStatus[], logins: LoginView[] = [], route: ModelRoute = "own-licence"): Connection[] {
   return connections({ route, kinds, statuses, logins, unavailable: null }, checklistState, NOW);
+}
+
+/** The rows one route really asks for, in `connectionsData`'s order: its needed kinds, then its optional ones. */
+function rowsFor(route: ModelRoute, statuses: CredentialStatus[], logins: LoginView[] = []): Connection[] {
+  return list([...neededCredentials(route), ...optionalCredentials(route)], statuses, logins, route);
 }
 
 /**
@@ -454,13 +460,53 @@ describe("connectorFor", () => {
 });
 
 /**
+ * The getting-ready screen's words for where a sign-in stands, which both of its rows read: the sign-in's own and the
+ * derived model-access row above it. One answer per state, so the two cannot describe one credential two ways.
+ */
+describe("screenDetail", () => {
+  it("should tick a connected sign-in, which the settings list does not", () => {
+    expect(screenDetail("connected", null, false)).toBe("✓ Connected");
+    expect(CONNECTION_DETAILS.connected).toBe("Connected");
+  });
+
+  // What the person does about either is the same — enter the code their assistant is holding — and the screen is
+  // where they do it, so it does not split them the way the settings list does.
+  it("should word both ways a sign-in waits on the person alike", () => {
+    expect(screenDetail("refreshing", null, false)).toBe("Waiting for you");
+    expect(screenDetail("signing-in", null, false)).toBe("Waiting for you");
+  });
+
+  it("should say a sign-in is on its way while the assistant is still starting", () => {
+    expect(screenDetail("waiting", null, true)).toBe("Connecting…");
+  });
+
+  it("should say so when a sign-in the assistant makes for itself has lapsed", () => {
+    expect(screenDetail("expired", null, false)).toBe(CONNECTION_DETAILS.expired);
+    expect(screenDetail("failed", null, false)).toBe(CONNECTION_DETAILS.failed);
+  });
+
+  // Where the row has a control, the words are the control's: a Connect for one nobody has started, and the box again
+  // for a lapsed value the person pastes.
+  it("should leave a row with something to press to say it in the control rather than in words", () => {
+    expect(screenDetail("waiting", null, false)).toBeNull();
+    expect(screenDetail("expired", "Claude token", false)).toBeNull();
+    expect(screenDetail("waiting", "Claude token", true)).toBeNull();
+  });
+
+  // The derived row has no control of its own, so a state with no words would be a row with an empty status column.
+  it.each(CONNECTION_STATES)("should word %s for a sign-in the assistant makes for itself while it is starting", (state) => {
+    expect(screenDetail(state, null, true)).not.toBeNull();
+  });
+});
+
+/**
  * How someone's agents reach Claude, which on the gateway route no credential of theirs is: the pod mints a gateway
  * token from their Azure sign-in, so nothing in the list would mention Claude or the gateway without this row.
  */
 describe("modelAccess", () => {
   /** The rows of somebody on the gateway route: GitHub, and the Azure sign-in the model-access row is read from. */
   function gatewayRows(statuses: CredentialStatus[], logins: LoginView[] = []): Connection[] {
-    return list(neededCredentials("gateway"), statuses, logins, "gateway");
+    return rowsFor("gateway", statuses, logins);
   }
 
   it("should name Claude and the gateway, and where its access comes from, on the gateway route", () => {
@@ -548,8 +594,26 @@ describe("connectionsWarning", () => {
     expect(connectionsWarning(rows)).toBeNull();
   });
 
-  it("should say nothing about an Azure sign-in that lapsed, which settings offers to connect again", () => {
+  it("should say nothing about an Azure sign-in that lapsed on a route that needs nothing of it", () => {
     const rows = list(["github", "azure"], [status("github", true), status("azure", true)], [lapsed("azure", "failed")]);
+
+    expect(connectionsWarning(rows)).toBeNull();
+  });
+
+  /**
+   * The same sign-in on the route that reaches Claude through it. Nothing else says anything: the credential is
+   * stored, so `onboarded` is true, `connectionsAsk` answers `done` and `chatGate` opens, while the pod can mint no
+   * gateway token from it and fails every turn. A badge nobody can clear is the reason lapsed on-request sign-ins are
+   * left to settings, and this is the one where there is something to do and nothing else asking for it.
+   */
+  it.each(["expired", "failed"] as const)("should warn about an Azure sign-in that %s on the gateway route, where Claude is reached through it", (state) => {
+    const rows = rowsFor("gateway", [status("github", true), status("azure", true)], [lapsed("azure", state)]);
+
+    expect(connectionsWarning(rows)).toBe("Azure needs your attention");
+  });
+
+  it.each(["expired", "failed"] as const)("should leave an Azure sign-in that %s to settings on the own-licence route", (state) => {
+    const rows = rowsFor("own-licence", [status("github", true), status("claude", true), status("azure", true)], [lapsed("azure", state)]);
 
     expect(connectionsWarning(rows)).toBeNull();
   });
@@ -703,6 +767,20 @@ describe("signInPrompt", () => {
       checklistState,
       NOW
     );
+
+    expect(signInPrompt(rows)).toBeNull();
+  });
+
+  // The way back is the Connect this prompt's screen offers on the Azure row, which `offersConnect` still gives it:
+  // the pod relays a fresh code when it restarts, and nothing else ever asks it to.
+  it.each(["expired", "failed"] as const)("should ask for an Azure sign-in that %s on the gateway route, where Claude is reached through it", (state) => {
+    const rows = rowsFor("gateway", [status("github", true), status("azure", true)], [lapsed("azure", state)]);
+
+    expect(signInPrompt(rows)?.message).toBe("Your assistant could not sign in to Azure, and is not asking again by itself.");
+  });
+
+  it.each(["expired", "failed"] as const)("should say nothing of an Azure sign-in that %s on the own-licence route", (state) => {
+    const rows = rowsFor("own-licence", [status("github", true), status("claude", true), status("azure", true)], [lapsed("azure", state)]);
 
     expect(signInPrompt(rows)).toBeNull();
   });

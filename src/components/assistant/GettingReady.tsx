@@ -2,7 +2,6 @@
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
-  CONNECTION_DETAILS,
   type Connection,
   type ConnectionsPrompt,
   type Connector,
@@ -14,8 +13,8 @@ import {
   type ModelAccess,
   modelAccess,
   modelAccessAfter,
-  needsPerson,
   offeredConnections,
+  screenDetail,
   signInPrompt
 } from "@/assistant/connections";
 import { type ConnectionsAsk, chatGate, connectionsAsk } from "@/assistant/onboarding";
@@ -334,18 +333,11 @@ function ConnectionRow({
   // replace. Whether one is only changes what the action takes with it, which `SignInAgain` is what says. Anything
   // the person pastes keeps offering its box instead, because they can simply paste a new value.
   const again = hasLapsed(state) && pasted === null;
+  // Where this stands in the screen's words, which the derived model-access row reads from as well so the two cannot
+  // word one credential two ways. `null` is a row with a control to press instead of anything to read.
+  const words = screenDetail(state, pasted, connecting || starting);
   let right: React.ReactNode;
-  if (state === "connected") {
-    right = <span className="shrink-0 text-[13px] font-medium text-asst-ok">✓ Connected</span>;
-  } else if (again) {
-    right = <span className="shrink-0 text-[13px] text-asst-warn">{CONNECTION_DETAILS[state]}</span>;
-  } else if (answer === "login" || (!pasted && (connecting || starting))) {
-    right = (
-      <span className="shrink-0 text-[13px] text-asst-accent-soft">
-        {answer === "login" ? (state === "finishing" ? CONNECTION_DETAILS[state] : "Waiting for you") : "Connecting…"}
-      </span>
-    );
-  } else {
+  if (words === null) {
     right = (
       <button
         type="button"
@@ -355,6 +347,12 @@ function ConnectionRow({
         Connect
       </button>
     );
+  } else if (state === "connected") {
+    right = <span className="shrink-0 text-[13px] font-medium text-asst-ok">{words}</span>;
+  } else if (again) {
+    right = <span className="shrink-0 text-[13px] text-asst-warn">{words}</span>;
+  } else {
+    right = <span className="shrink-0 text-[13px] text-asst-accent-soft">{words}</span>;
   }
   // One thing to do at a time, chosen here rather than by three conditions that have to agree: a relayed sign-in and
   // a field for the same credential, side by side, is two password boxes posting to different places, and a token
@@ -414,15 +412,17 @@ function ConnectionRow({
  * else: it is read from the sign-in listed below it, which is the row that carries the action, and a second control
  * for the same sign-in would be two things to press for one job.
  *
- * Coloured as that sign-in's own state is: the same fact, so the same colour, and a row with nothing to do about it
- * stays quiet about a sign-in nobody has started.
+ * Worded and coloured by `screenDetail` as that sign-in's own row is, from the same state, so the two cannot say
+ * different things about one credential. The one state it words for itself is the one where that row has a Connect
+ * and no words at all: nothing to press here, so where it stands is all there is to say.
  *
  * Always separated from the row above, since `modelAccessAfter` never puts it at the head of the list, where the
  * `first` rows get their separator left off.
  */
-function ModelAccessRow({ row }: { row: ModelAccess }) {
+function ModelAccessRow({ row, starting }: { row: ModelAccess; starting: boolean }) {
+  const words = screenDetail(row.state, null, starting);
   const tone =
-    row.state === "connected" ? "text-asst-ok" : hasLapsed(row.state) ? "text-asst-warn" : needsPerson(row.state) ? "text-asst-accent-soft" : "text-asst-muted";
+    row.state === "connected" ? "text-asst-ok" : hasLapsed(row.state) ? "text-asst-warn" : words === null ? "text-asst-muted" : "text-asst-accent-soft";
   return (
     <li className="flex flex-col gap-2.5 border-t border-asst-line bg-asst-bg px-4 py-3.5">
       <div className="flex items-center gap-3.5">
@@ -433,7 +433,7 @@ function ModelAccessRow({ row }: { row: ModelAccess }) {
           <span className="text-[15px] font-medium">{row.name}</span>
           <span className="text-[13px] text-asst-muted">{row.desc}</span>
         </div>
-        <span className={`shrink-0 text-[13px] ${tone}`}>{row.state === "connected" ? "✓ Connected" : row.detail}</span>
+        <span className={`shrink-0 text-[13px] ${tone}`}>{words ?? row.detail}</span>
       </div>
     </li>
   );
@@ -607,7 +607,7 @@ export function GettingReady({
                 now={now}
                 first={index === 0}
               />
-              {access !== null && modelAccessAfter(index) ? <ModelAccessRow row={access} /> : null}
+              {access !== null && modelAccessAfter(index) ? <ModelAccessRow row={access} starting={starting} /> : null}
             </Fragment>
           ))}
         </ul>

@@ -170,6 +170,35 @@ export function needsPerson(state: ConnectionState): boolean {
 }
 
 /**
+ * What the getting-ready screen says on the right of a row, or `null` where the row offers a control instead of
+ * saying anything — a Connect for a sign-in nobody has started, or the box again for a lapsed value the person
+ * pastes. `pasted` is the connector's paste box, and `pressed` is whether a sign-in is already on its way: the person
+ * asked for one, or the assistant has yet to finish starting and asks for this as it does.
+ *
+ * Its words are the screen's rather than `CONNECTION_DETAILS`, which is settings': a tick where that has none, and
+ * one wording for both ways a sign-in waits on the person, since what they do about it is the same either way.
+ *
+ * Both rows of that screen read from here, the derived model-access row with no paste box and nothing pressed, so one
+ * cannot word a state the other words differently. "Not connected" above "Connecting…", about a single credential,
+ * is each row calling the other a liar.
+ */
+export function screenDetail(state: ConnectionState, pasted: string | null, pressed: boolean): string | null {
+  if (state === "connected") {
+    return "✓ Connected";
+  }
+  if (hasLapsed(state)) {
+    return pasted === null ? CONNECTION_DETAILS[state] : null;
+  }
+  if (needsPerson(state)) {
+    return "Waiting for you";
+  }
+  if (state === "finishing") {
+    return CONNECTION_DETAILS.finishing;
+  }
+  return pasted === null && pressed ? "Connecting…" : null;
+}
+
+/**
  * Whether the code the person pasted is still there for the pod to collect. The column being set is not that:
  * `takePastedCode` hands over nothing once the deadline has passed and leaves the column alone.
  */
@@ -219,6 +248,12 @@ export interface Connection extends Connector {
   accountLabel: string | null;
   /** Whether a value is saved, which signing in again would delete; true of a lapsed sign-in as much as a working one. */
   stored: boolean;
+  /**
+   * Whether this is the sign-in the route's model access is read from, which is the one thing no ask may go quiet
+   * about: without it the pod has no model to run and every turn fails. Carried on the row rather than asked of the
+   * route again, so the rules below need no route of their own and cannot be asked with a different one.
+   */
+  modelCredential: boolean;
 }
 
 /**
@@ -250,6 +285,44 @@ export function connectionState(checklist: ChecklistAnswer, login: LoginView | u
 }
 
 /**
+ * How the person's agents reach Claude, as a row of the Connections list. Named as the sign-in it stands in for is,
+ * so the section reads the same on both routes, and worded by the route, because the two reach it differently.
+ */
+export interface ModelAccess {
+  name: string;
+  /** The letters the list shows in place of a logo. */
+  initial: string;
+  desc: string;
+  state: ConnectionState;
+  detail: string;
+}
+
+/**
+ * The model-access row each route needs derived, and the sign-in its state is read from, or `null` for a route whose
+ * model credential is a row of the list already. A table over the whole union, so a route added without an answer
+ * does not build rather than quietly saying nothing about Claude.
+ *
+ * The name and the letters are the Claude connector's, so the row reads the same whichever route the person is on and
+ * there is one copy of both.
+ *
+ * `behind` is the one place the hub says which credential a route's model access rests on, and both things that have
+ * to know read it: the derived row's state, and `leftToSettings`, which is why a lapsed one is put in front of the
+ * person on that route and not on the other.
+ */
+const MODEL_ACCESS: Readonly<Record<ModelRoute, { behind: ConnectionKind; row: Omit<ModelAccess, "state" | "detail"> } | null>> = {
+  gateway: {
+    behind: "azure",
+    row: { name: CONNECTORS.claude.name, initial: CONNECTORS.claude.initial, desc: "Through the HMCTS AI Gateway, on your Azure sign-in" }
+  },
+  "own-licence": null
+};
+
+/** Whether this route's model access is read from this sign-in, which is `connections`' answer for each row. */
+function isModelCredential(route: ModelRoute, kind: CredentialKind): boolean {
+  return MODEL_ACCESS[route]?.behind === kind;
+}
+
+/**
  * One row per sign-in `data.kinds` asks for, in that order, leaving out anything that is not a sign-in. `checklist`
  * is `checklistState` from the onboarding checklist, passed in so the two views cannot drift apart.
  *
@@ -277,39 +350,11 @@ export function connections(
       state,
       detail: CONNECTION_DETAILS[state],
       accountLabel: status?.accountLabel ?? null,
-      stored: status?.stored === true
+      stored: status?.stored === true,
+      modelCredential: isModelCredential(data.route, kind)
     };
   });
 }
-
-/**
- * How the person's agents reach Claude, as a row of the Connections list. Named as the sign-in it stands in for is,
- * so the section reads the same on both routes, and worded by the route, because the two reach it differently.
- */
-export interface ModelAccess {
-  name: string;
-  /** The letters the list shows in place of a logo. */
-  initial: string;
-  desc: string;
-  state: ConnectionState;
-  detail: string;
-}
-
-/**
- * The model-access row each route needs derived, and the sign-in its state is read from, or `null` for a route whose
- * model credential is a row of the list already. A table over the whole union, so a route added without an answer
- * does not build rather than quietly saying nothing about Claude.
- *
- * The name and the letters are the Claude connector's, so the row reads the same whichever route the person is on and
- * there is one copy of both.
- */
-const MODEL_ACCESS: Readonly<Record<ModelRoute, { behind: ConnectionKind; row: Omit<ModelAccess, "state" | "detail"> } | null>> = {
-  gateway: {
-    behind: "azure",
-    row: { name: CONNECTORS.claude.name, initial: CONNECTORS.claude.initial, desc: "Through the HMCTS AI Gateway, on your Azure sign-in" }
-  },
-  "own-licence": null
-};
 
 /**
  * The row saying how this person's agents reach Claude, where no credential of theirs is what gets them there, or
@@ -325,7 +370,10 @@ const MODEL_ACCESS: Readonly<Record<ModelRoute, { behind: ConnectionKind; row: O
  *
  * It is not a `Connection` and has no kind, so `offersConnect`, `connectionsWarning` and `signInPrompt` cannot be
  * asked about it. That is the point: the credential's own row carries the action and raises the prompt, and a second
- * prompt for one sign-in, on a row with nothing to press, is the fault `offeredConnections` exists to prevent.
+ * prompt for one sign-in, on a row with nothing to press, is the fault `offeredConnections` exists to prevent. That
+ * the other row really does raise one in every state is `leftToSettings`' half of this, which reads `behind` from the
+ * same table: without it a lapsed model credential is announced by neither row, which is this row's own fault over
+ * again and worse for being by design.
  */
 export function modelAccess(route: ModelRoute, list: readonly Connection[]): ModelAccess | null {
   const derived = MODEL_ACCESS[route];
@@ -362,9 +410,24 @@ export function signsInOnRequest(kind: CredentialKind): boolean {
   return ON_REQUEST.includes(kind);
 }
 
-/** Whether a sign-in in `state` is one the Assistant asks the person about, rather than leaving it to settings. */
-function asksAbout(kind: CredentialKind, state: ConnectionState): boolean {
-  return needsPerson(state) && !(signsInOnRequest(kind) && hasLapsed(state));
+/**
+ * Whether a lapsed sign-in of this row's kind is left to the settings section rather than put back in front of the
+ * person. One made on request is: nothing in a chat waits for `az`, so a lapsed one says so in settings and offers to
+ * connect again rather than nagging somebody who may have changed their mind.
+ *
+ * The route's model credential never is, however it is signed in to. Being stored is what silences every other
+ * surface — `onboarded` is true, `connectionsAsk` answers `done` and `chatGate` opens — while a pod that cannot use
+ * it has no model at all and fails every turn, and no pod re-relays this by itself. So leaving it to settings is
+ * leaving it to a row inside a dialog nobody has a reason to open, which is the invisibility the model-access row
+ * exists to end rather than to inherit.
+ */
+function leftToSettings(row: Pick<Connection, "kind" | "modelCredential">): boolean {
+  return signsInOnRequest(row.kind) && !row.modelCredential;
+}
+
+/** Whether a sign-in in this state is one the Assistant asks the person about, rather than leaving it to settings. */
+function asksAbout(row: Pick<Connection, "kind" | "state" | "modelCredential">): boolean {
+  return needsPerson(row.state) && !(leftToSettings(row) && hasLapsed(row.state));
 }
 
 /**
@@ -516,10 +579,10 @@ export const PROMPTED_WHEN_MISSING: readonly CredentialKind[] = ["github"];
  *
  * `asksAbout` and nothing wider, so the badge cannot point at a prompt that is not raised: the cog says to close the
  * dialog and look above the chats, and `signInPrompt` is what is there. A `finishing` sign-in raises neither, and
- * nor does a lapsed one made `ON_REQUEST`.
+ * nor does a lapsed one `leftToSettings`.
  */
 function needsAttention(row: Connection): boolean {
-  return asksAbout(row.kind, row.state) || (PROMPTED_WHEN_MISSING.includes(row.kind) && row.state === "waiting");
+  return asksAbout(row) || (PROMPTED_WHEN_MISSING.includes(row.kind) && row.state === "waiting");
 }
 
 /**
@@ -551,7 +614,7 @@ export function connectionsWarning(list: readonly Connection[]): string | null {
  * thing to do changed.
  */
 export function signInPrompt(list: readonly Connection[]): ConnectionsPrompt | null {
-  const asking = list.filter((row) => asksAbout(row.kind, row.state));
+  const asking = list.filter((row) => asksAbout(row));
   if (asking.length === 0) {
     return null;
   }

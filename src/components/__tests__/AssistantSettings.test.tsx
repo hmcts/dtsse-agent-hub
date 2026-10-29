@@ -658,6 +658,26 @@ describe("how the Assistant's settings say its agents reach Claude", () => {
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. Azure needs your attention");
   });
+
+  /**
+   * The state with nowhere else to show: the credential is stored, so every other surface is satisfied, while the pod
+   * can mint no gateway token from it and fails every turn. On this route the cog is what says so.
+   */
+  it("should mark the cog when a stored Azure sign-in has lapsed on the gateway route", () => {
+    const over = login("azure", "failed", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
+    render(<AssistantSettings now={Date.now()} connections={routeData("gateway", ["github", "azure"], [over])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Azure needs your attention");
+    expect(cog().textContent).toBe("!");
+  });
+
+  it("should leave a lapsed Azure sign-in to this section on the own-licence route, where no model access rests on it", () => {
+    const over = login("azure", "failed", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
+    render(<AssistantSettings now={Date.now()} connections={routeData("own-licence", ALL_SIGNED_IN, [over])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings");
+    expect(cog().textContent).toBe("");
+  });
 });
 
 describe("connecting Azure from the Assistant's settings", () => {

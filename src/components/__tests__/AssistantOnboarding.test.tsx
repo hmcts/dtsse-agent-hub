@@ -301,6 +301,29 @@ describe("GettingReady connectors", () => {
     expect(within(connector("Claude")).getByText("✓ Connected")).toBeTruthy();
   });
 
+  /**
+   * One credential, so one answer: the derived row and the sign-in it is read from have to say the same words, or the
+   * screen has Claude calling Azure a liar about the state of a single thing. These are the two states the two rows
+   * used to word differently — the screen says "Connecting…" for a sign-in on its way and "Waiting for you" for
+   * either way one waits on the person, where the settings list has its own words for both.
+   */
+  it.each([
+    ["is on its way while the assistant starts", "awaiting_credentials", [] as CredentialKind[], [] as LoginView[], "Connecting…"],
+    ["waits on the person for a fresh code", "awaiting_login", ["azure"] as CredentialKind[], [login("azure")], "Waiting for you"]
+  ] as const)("should word Claude as the Azure sign-in behind it is worded when that %s", (_what, status, stored, logins, words) => {
+    const summary = assistant(status, {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway"),
+      logins: [...logins]
+    });
+    render(ready({ assistant: summary, statuses: statuses("github", ...stored) }));
+
+    for (const name of ["Claude", "Azure"]) {
+      expect(within(connector(name)).getByText(words)).toBeTruthy();
+    }
+  });
+
   it("should offer a form for the Claude token once the person clicks Connect, even while the assistant starts", () => {
     render(ready({ assistant: assistant("provisioning", { needed: ["github", "azure", "claude"] }) }));
 
@@ -593,6 +616,24 @@ describe("OnboardingGate", () => {
     render(gate(summary, statuses("github", "claude")));
 
     expect(screen.queryByRole("region", { name: "Sign in" })).toBeNull();
+  });
+
+  /**
+   * The same sign-in on the route that reaches Claude through it, where letting it lapse is not a choice somebody
+   * made but the end of every turn: the credential is still stored, so the connect ask is satisfied and the chat gate
+   * is open, and no pod relays this one by itself. Nothing but this would say so.
+   */
+  it("should ask for a lapsed Azure sign-in on the gateway route, where it is what the agents reach Claude on", () => {
+    const summary = assistant("running", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway"),
+      onboarded: true,
+      logins: [lapsed("azure")]
+    });
+    render(gate(summary, statuses("github", "azure")));
+
+    expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("could not sign in to Azure");
   });
 
   it("should open the connections when the person asks for them from the banner", () => {
