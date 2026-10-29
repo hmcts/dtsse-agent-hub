@@ -8,6 +8,7 @@ import {
   checkParent,
   confluenceExportView
 } from "./confluence.ts";
+import { hasPod } from "./pods.ts";
 import { MAX_CONFLUENCE_ERROR } from "./schemas.ts";
 import { announce, type ConversationRow } from "./store.ts";
 
@@ -26,6 +27,10 @@ export async function readConfluenceExport(db: Database, conversationId: string,
  * Starts an export of the conversation's document to a new page under `parent`, for its session to carry out, and
  * answers the parent as checked. Refused when the document is already in Confluence or an export is still pending, so
  * a second click or tab cannot ask for a second page: the check and the write are one statement.
+ *
+ * Refused outright for a conversation with no pod, for the same reason as `requestJiraExport`: the steps reach the
+ * session only through `assistantFrame`, which no conversation without a pod gets, so a claimed export would hold
+ * `confluence_status = 'pending'` until it timed out and could never do anything else.
  */
 export async function requestConfluenceExport(
   prisma: PrismaClient,
@@ -33,6 +38,9 @@ export async function requestConfluenceExport(
   rawParent: unknown,
   now: Date = new Date()
 ): Promise<ConfluenceParent> {
+  if (!hasPod(conversation)) {
+    throw new HttpError(409, "this chat is a session on your own computer, which cannot publish to Confluence; download the document and publish it yourself");
+  }
   const parent = checkParent(rawParent);
   if (parent === undefined) {
     throw new HttpError(400, "pick a Confluence page to put the document under");

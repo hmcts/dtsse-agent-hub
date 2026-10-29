@@ -122,6 +122,15 @@ async function sessionOf(conversationId: string): Promise<{ agentId: string; ses
   return { agentId: conversation.agent!.id, sessionId: conversation.agent!.sessionId };
 }
 
+/**
+ * Alice's Claude Code session on her own laptop, and the conversation the hub gives it: an ordinary registration
+ * that is nobody's pod and names no conversation, which is the whole of what makes a chat local.
+ */
+async function laptopChat(sessionId = "alices-laptop"): Promise<string> {
+  await registerAgent(prisma, { ...ALICE, tid: "dev" }, { sessionId, name: sessionId, cwd: null, repo: null, branch: null, host: null });
+  return (await prisma.assistantConversation.findFirstOrThrow({ where: { virtualAgentId: null }, orderBy: { createdAt: "desc" } })).id;
+}
+
 assistantSuite([ALICE, BOB]);
 
 describe("the person's assistant", () => {
@@ -1185,6 +1194,27 @@ describe("jira export", () => {
     expect(await actions.exportArtefactToJira({ conversationId: id, project: "ccd" })).toEqual({ ok: false, error: "pick a Jira project to export to" });
   });
 
+  /**
+   * A local chat's document is real — `saveArtefact` works there, because the document is a hub row — so the export's
+   * own `artefact_version > 0` is satisfied and the only thing standing between the person and a 15-minute wait is
+   * this refusal. There is no carrier: `assistantFrame` is the only way the steps reach a session, and the stream
+   * route suppresses it for a conversation with no pod. The UI offers no export either; this is the server's half.
+   */
+  it("should refuse an export from a chat that is a session on the person's own computer, and claim nothing", async () => {
+    const id = await laptopChat();
+    await actions.saveArtefact({ conversationId: id, title: "Notes", markdown: "# What I found", baseVersion: 0 });
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({
+      ok: false,
+      error: "this chat is a session on your own computer, which cannot export to Jira; download the document and attach it yourself"
+    });
+
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { jiraStatus: true, jiraExportId: true } })).toEqual({
+      jiraStatus: null,
+      jiraExportId: null
+    });
+  });
+
   it("should start a stopped assistant when the person exports", async () => {
     const { id } = await written();
     const assistantId = (await findConversation(prisma, ALICE.oid, id))!.virtualAgentId!;
@@ -1291,6 +1321,23 @@ describe("confluence export", () => {
 
     await report(token, agentId, { export_id: first, page_id: "1" });
     expect((await assistantConversation(VIEWER, id))?.confluence.status).toBe("pending");
+  });
+
+  // The same refusal and for the same reason as the Jira export's: the steps go out in `assistantFrame`, which no
+  // conversation without a pod gets, so a claimed export could only ever time out.
+  it("should refuse a publish from a chat that is a session on the person's own computer, and claim nothing", async () => {
+    const id = await laptopChat();
+    await actions.saveArtefact({ conversationId: id, title: "Notes", markdown: "# What I found", baseVersion: 0 });
+
+    expect(await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT })).toEqual({
+      ok: false,
+      error: "this chat is a session on your own computer, which cannot publish to Confluence; download the document and publish it yourself"
+    });
+
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { confluenceStatus: true, confluenceExportId: true } })).toEqual({
+      confluenceStatus: null,
+      confluenceExportId: null
+    });
   });
 
   it("should refuse a parent page that is not one, and a report that breaks the contract or is not a conversation's", async () => {
