@@ -49,7 +49,7 @@ change it first when the contract changes.
 - **ESM with explicit `.ts` extensions** on relative imports outside `src/app/`. Anything reachable from `src/cli/` must
   not use the `@/` alias: `tsc -p tsconfig.cli.json` emits it for Node to run directly.
 - **Nothing imports `store/prisma.ts` before the Key Vault secrets load.** It resolves `POSTGRES_*` at module load;
-  `instrumentation.ts` and `cli/migrate.ts` import it dynamically for that reason.
+  `instrumentation-node.ts` and `cli/migrate.ts` import it dynamically for that reason.
 - **Access decisions go through `src/access/rules.ts`.** A route that decides who may see or message an agent inline
   is a rule that is not tested. Every `/api/agent/{agent_id}/…` handler uses `ownedAgentRoute`.
 - **Every write that other pods must hear about calls `notify` inside its transaction**, so the NOTIFY is delivered on

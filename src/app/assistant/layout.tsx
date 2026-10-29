@@ -24,7 +24,7 @@ export default async function AssistantLayout({ children }: { children: React.Re
   }
   const theme = themeOf((await cookies()).get(THEME_COOKIE)?.value);
   return (
-    <div className="asst-theme flex min-h-0 flex-1 flex-col" data-theme={theme}>
+    <div className="asst-theme flex min-h-0 flex-1 flex-col bg-asst-bg text-asst-text" data-theme={theme}>
       <AssistantRefresh />
       <AssistantVisit>{children}</AssistantVisit>
     </div>

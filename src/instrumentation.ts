@@ -1,61 +1,11 @@
-import { createRequire } from "node:module";
-import { loadSecrets } from "./platform/secrets.ts";
-import { startRealtime } from "./realtime/start.ts";
-import { virtualAgentsEnabled } from "./virtual-agents/settings.ts";
-
-type Platform = typeof import("@hmcts-cft/cloud-native-platform");
-
-const load = createRequire(import.meta.url);
-
-function platform(): Platform {
-  return load("@hmcts-cft/cloud-native-platform") as Platform;
-}
-
-export async function register(): Promise<void> {
-  await readSecrets();
-  startMonitoring();
-  await startRealtime();
-  await startSweeping();
-}
-
-async function readSecrets(): Promise<void> {
-  await loadSecrets((chartPath) => platform().getPropertiesVolumeSecrets({ chartPath, failOnError: false }));
-}
-
-function startMonitoring(): void {
-  const connectionString = process.env.APPLICATIONINSIGHTS_CONNECTION_STRING;
-  if (!connectionString) {
-    return;
-  }
-
-  try {
-    new (platform().MonitoringService)(connectionString, "dtsse-agent-hub");
-  } catch (error) {
-    console.warn(`could not start Application Insights: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
 /**
- * Marks silent agents offline, and expires deliveries to long-offline ones, every 30 seconds; and trims transcripts
- * to their retention and per-agent cap, and drops the bytes of Assistant uploads nothing fetched, every 10 minutes;
- * and, with virtual agents on, fails, expires and stops virtual agents every minute. Imported dynamically, after
- * `readSecrets`, because
- * `store/prisma.ts` resolves `POSTGRES_*` at module load and would otherwise capture the local default.
+ * Next calls `register` in the Edge runtime as well as Node. Everything the hub starts needs Node, so it is imported
+ * only there: a top-level Node import here fails the Edge build, and in development that failure reloads every open
+ * page whenever it recompiles.
  */
-async function startSweeping(): Promise<void> {
-  try {
-    const { prisma } = await import("./store/prisma.ts");
-    const { startOfflineSweep } = await import("./agents/sweep.ts");
-    startOfflineSweep(prisma);
-    const { startTranscriptSweep } = await import("./transcripts/sweep.ts");
-    startTranscriptSweep(prisma);
-    const { startUploadSweep } = await import("./assistant/upload-sweep.ts");
-    startUploadSweep(prisma);
-    if (virtualAgentsEnabled()) {
-      const { startVirtualAgentSweep } = await import("./virtual-agents/sweep.ts");
-      startVirtualAgentSweep(prisma);
-    }
-  } catch (error) {
-    console.warn(`could not start the sweeps: ${error instanceof Error ? error.message : String(error)}`);
+export async function register(): Promise<void> {
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { register: registerNode } = await import("./instrumentation-node.ts");
+    await registerNode();
   }
 }
