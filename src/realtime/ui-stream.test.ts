@@ -49,6 +49,8 @@ const READ: Grant[] = [{ ownerOid: OWNER, granteeOid: VIEWER, level: "read" }];
 const WRITE: Grant[] = [{ ownerOid: OWNER, granteeOid: VIEWER, level: "write" }];
 const TOPICS: UiWatch = { topics: ["pcs-api", "database"], match: "any", agent: null };
 const THREAD: UiWatch = { topics: [], match: "any", agent: AGENT };
+/** The same agent once it is a local session's conversation: shared through grants, with a transcript that is not. */
+const CHAT_THREAD: UiWatch = { topics: [], match: "any", agent: { ...AGENT, ownerOnly: false, inConversation: true } };
 const EVERYTHING: UiWatch = { topics: "everything", match: "any", agent: null };
 
 describe("matchesTopics", () => {
@@ -215,9 +217,34 @@ describe("selectFrame", () => {
   it.each<[string, UiWatch, Grant[]]>([
     ["no agent is watched", TOPICS, READ],
     ["another agent is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: OWNER } }, READ],
-    ["the viewer can no longer read the transcript", THREAD, []]
+    ["the viewer can no longer read the transcript", THREAD, []],
+    // The agent itself stays visible and messageable to a grantee; it is the words of the chat that do not.
+    ["the agent is in a conversation and the viewer only holds a write grant", CHAT_THREAD, WRITE]
   ])("should not send a transcript change when %s", async (_label, watch, grants) => {
     expect(await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: OWNER, last_id: "21" }, watch, sources(grants))).toBeUndefined();
+  });
+
+  it("should send the transcript id of an agent in a conversation to its owner, who is the only one it is sent to", async () => {
+    const owner = { ...sources([]), viewerOid: OWNER };
+
+    const frame = await selectFrame({ type: "transcript", agent_id: AGENT.id, owner_oid: OWNER, last_id: "21" }, CHAT_THREAD, owner);
+
+    expect(frame).toBe(`event: transcript\ndata: ${JSON.stringify({ agent_id: AGENT.id, last_id: "21" })}\n\n`);
+  });
+
+  it("should still send a direct and a delivery of an agent in a local conversation to a grantee", async () => {
+    const loaded = direct("8");
+
+    expect(
+      await selectFrame(
+        { type: "direct", message_id: "8", target_agent_id: AGENT.id, author_agent_id: null },
+        CHAT_THREAD,
+        sources(READ, { directs: [loaded] })
+      )
+    ).toContain("event: direct");
+    expect(await selectFrame({ type: "delivery", message_id: "8", agent_id: AGENT.id, state: "delivered" }, CHAT_THREAD, sources(READ))).toContain(
+      "event: delivery"
+    );
   });
 
   it("should name the watched agent whose skills changed when the viewer may see its skills", async () => {

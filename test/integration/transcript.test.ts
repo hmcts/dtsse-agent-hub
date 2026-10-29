@@ -1,8 +1,11 @@
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { findAgent, listMessageableAgents } from "../../src/agents/store.ts";
+import { visibleAgents } from "../../src/agents/views.ts";
 import { POST as upload } from "../../src/app/api/agent/[agentId]/transcript/route.ts";
 import { GET as conversation } from "../../src/app/api/ui/agents/[id]/transcript/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
+import { directAsAgent } from "../../src/messages/send.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import type { PrismaClient } from "../../src/store/prisma.ts";
@@ -261,6 +264,83 @@ describe("GET /api/ui/agents/{id}/transcript", () => {
 
   it("should give an empty page when the entry it pages before has gone", async () => {
     expect(await page("alice", alicesAgent, "?before=12345")).toEqual({ messages: [], entries: [], olderBefore: null, lastId: null, more: false });
+  });
+});
+
+/**
+ * A conversation of a session on somebody's own laptop, which has no pod. Its agent is one of the owner's ordinary
+ * sessions: a colleague holding a write grant still sees it on the roster, picks it out of a list and messages it.
+ * Only the words of the chat are the owner's alone. A pod conversation's agent, the HMCTS Assistant, is in none of
+ * those places for anyone but its owner, and is here as the contrast.
+ */
+describe("an agent in a conversation", () => {
+  let local: string;
+  let pod: string;
+
+  beforeEach(async () => {
+    await prisma.agentGrant.update({ where: { ownerOid_granteeOid: { ownerOid: ALICE.oid, granteeOid: BOB.oid } }, data: { level: "write" } });
+    local = await insertAgent(ALICE, "alices-local-chat");
+    const laptop = await prisma.assistantConversation.create({ data: { ownerOid: ALICE.oid, agentId: local }, select: { id: true } });
+    await prisma.agent.update({ where: { id: local }, data: { assistantConversationId: laptop.id } });
+    pod = await insertAgent(ALICE, "alices-assistant");
+    const assistant = await prisma.virtualAgent.create({ data: { ownerOid: ALICE.oid, name: "assistant", modelRoute: "gateway" }, select: { id: true } });
+    const chat = await prisma.assistantConversation.create({ data: { ownerOid: ALICE.oid, virtualAgentId: assistant.id, agentId: pod }, select: { id: true } });
+    await prisma.agent.update({ where: { id: pod }, data: { assistantConversationId: chat.id, virtualAgentId: assistant.id } });
+  });
+
+  it("should keep a local session on the write grantee's roster and leave the pod conversation's agent off it", async () => {
+    const { shared } = await visibleAgents(prisma, BOB.oid);
+
+    expect(shared.map((card) => card.id)).toContain(local);
+    expect(shared.map((card) => card.id)).not.toContain(pod);
+    expect((await visibleAgents(prisma, ALICE.oid)).mine.map((card) => card.id)).not.toContain(pod);
+  });
+
+  it("should let the write grantee message a local session by name and by id, and refuse the pod conversation's", async () => {
+    const bobsAgent = await insertAgent(BOB, "bobs-agent");
+    const sender = (await findAgent(prisma, bobsAgent))!;
+
+    expect((await listMessageableAgents(prisma, BOB.oid)).map((listed) => listed.id)).toEqual(expect.arrayContaining([local]));
+    expect((await listMessageableAgents(prisma, BOB.oid)).map((listed) => listed.id)).not.toContain(pod);
+    expect((await directAsAgent(prisma, sender, { toAgent: "alices-local-chat", body: "still reachable" })).target_agent_id).toBe(local);
+    expect((await directAsAgent(prisma, sender, { toAgent: local, body: "and by id" })).target_agent_id).toBe(local);
+    await expect(directAsAgent(prisma, sender, { toAgent: pod, body: "not this one" })).rejects.toThrow(/may not message that agent/);
+    await expect(directAsAgent(prisma, sender, { toAgent: "alices-assistant", body: "nor by name" })).rejects.toThrow(/no agent you may message/);
+  });
+
+  it("should refuse the write grantee the local session's transcript and report the pod conversation's as missing", async () => {
+    await accepted(local, [entry("1")]);
+
+    expect((await read("bob", local)).status).toBe(403);
+    expect((await read("alice", local)).status).toBe(200);
+    expect((await read("bob", pod)).status).toBe(404);
+  });
+
+  it("should send a transcript event for a local session to its owner and not to the write grantee", async () => {
+    const watchers = await Promise.all(
+      ["alice", "bob"].map(async (as) => {
+        const controller = new AbortController();
+        const response = await stream(uiRequest(as, `/api/ui/stream?agent=${local}`, controller.signal));
+        expect(response.status).toBe(200);
+        const reader = frames(response);
+        await reader.drain(100);
+        return { controller, reader };
+      })
+    );
+    const [alice, bob] = watchers;
+
+    try {
+      await accepted(local, [entry("1")]);
+      await alice!.reader.named("transcript", 1);
+      await bob!.reader.drain(300);
+
+      expect(bob!.reader.received.filter((received) => received.event === "transcript")).toEqual([]);
+    } finally {
+      for (const { controller, reader } of watchers) {
+        controller.abort();
+        await reader.cancel();
+      }
+    }
   });
 });
 

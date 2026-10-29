@@ -6,6 +6,7 @@ import { conversationItems, mergeEntries, type TranscriptEntryView } from "../tr
 import { agentConversation } from "../transcripts/views.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { FORK_CONTEXT_FILE_NAME, FORK_CONTEXT_MEDIA_TYPE, FORKED_SELECT, forkContextMarkdown, forkedView, forkThread } from "./forks.ts";
+import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { conversationRef, forksOf, type SharedChatLink, type SharedConversationRow, type SharePerson } from "./shares.ts";
 import { productMarks, type SharedThreadItem, sharedThreadItems, stopMarks } from "./sharing.ts";
@@ -123,7 +124,7 @@ async function sourceThread(
   if (row.agentId === null) {
     return { thread: [], earlierHidden: false };
   }
-  const agent = { id: row.agentId, ownerOid: conversation.ownerOid, ownerOnly: true };
+  const agent = { id: row.agentId, ownerOid: conversation.ownerOid, ownerOnly: hasPod(conversation), inConversation: true };
   const messages = new Map<string, ThreadMessage>();
   let entries: TranscriptEntryView[] = [];
   let page = await agentConversation(db, conversation.ownerOid, agent, []);

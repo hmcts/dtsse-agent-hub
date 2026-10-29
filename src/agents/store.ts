@@ -1,4 +1,5 @@
 import { agentsMessageableBy } from "../access/load.ts";
+import { conversationFlags } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
 import { linkSession } from "../assistant/store.ts";
 import type { AgentStatus } from "../realtime/events.ts";
@@ -121,8 +122,10 @@ export interface AgentRow {
   status: AgentStatus;
   /** The virtual agent whose session registered it, if any. */
   virtualAgentId: string | null;
-  /** An assistant conversation's agent, which no grant extends to. */
+  /** A pod conversation's agent, which no grant extends to. */
   ownerOnly: boolean;
+  /** An agent in a conversation of either kind, whose transcript is its owner's alone. */
+  inConversation: boolean;
 }
 
 export async function findAgent(db: Database, id: string): Promise<AgentRow | undefined> {
@@ -134,7 +137,7 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
     return undefined;
   }
   const { assistantConversationId, ...agent } = row;
-  return { ...agent, ownerOnly: assistantConversationId !== null };
+  return { ...agent, ...conversationFlags(row) };
 }
 
 /** Locks the agent's row for the rest of the transaction, and reads what a status or skills change is compared against. */
@@ -266,12 +269,17 @@ export interface Candidate {
   branch: string | null;
   lastHeartbeatAt: Date;
   ownerName: string;
+  /** A pod conversation's agent: carried so the id arm below is held to the same rule the name arm's query applies. */
+  ownerOnly: boolean;
 }
 
 /**
  * The agents `to_agent` could mean for a sender owned by `senderOid`: the agent with that id, or the messageable
  * agents with that name. Live agents are preferred over offline ones, so a session name reused across days
  * resolves to today's session; more than one live match is for the caller to report as ambiguous.
+ *
+ * An id is looked up without the access query, because `canAgentMessageAgent` decides on what comes back and the
+ * caller's refusal says whether the agent exists; the conversation columns come back for that rule to read.
  */
 export async function resolveTargets(db: Database, senderOid: string, toAgent: string): Promise<Candidate[]> {
   const select = {
@@ -282,12 +290,18 @@ export async function resolveTargets(db: Database, senderOid: string, toAgent: s
     repo: true,
     branch: true,
     lastHeartbeatAt: true,
-    owner: { select: { name: true } }
+    owner: { select: { name: true } },
+    assistantConversationId: true,
+    virtualAgentId: true
   } as const;
   const rows = isUuid(toAgent)
     ? await db.agent.findMany({ where: { id: toAgent }, select })
     : await db.agent.findMany({ where: { AND: [{ name: toAgent }, agentsMessageableBy(senderOid)] }, select, orderBy: { lastHeartbeatAt: "desc" } });
-  const candidates = rows.map(({ owner, ...row }) => ({ ...row, ownerName: owner.name }));
+  const candidates = rows.map(({ owner, assistantConversationId, virtualAgentId, ...row }) => ({
+    ...row,
+    ownerName: owner.name,
+    ownerOnly: conversationFlags({ assistantConversationId, virtualAgentId }).ownerOnly
+  }));
   const live = candidates.filter((candidate) => candidate.status !== "offline");
   return live.length > 0 ? live : candidates;
 }

@@ -103,11 +103,10 @@ export async function channel(viewer: Identity, id: string) {
 
 /** The rest of an agent's page, which it streams in once `agentRoute` has decided the viewer may see the agent. */
 export async function agentActivity(viewer: Identity, view: AgentView) {
-  const agent = { id: view.agent.id, ownerOid: view.agent.owner.oid };
   const [conversation, posts, questions] = await Promise.all([
-    agentConversation(prisma, viewer.oid, agent, view.grants),
+    agentConversation(prisma, viewer.oid, view.ref, view.grants),
     agentPosts(prisma, view.agent.id, 20),
-    agentQuestions(prisma, viewer.oid, agent, view.grants)
+    agentQuestions(prisma, viewer.oid, view.ref, view.grants)
   ]);
   return { conversation, posts, questions };
 }

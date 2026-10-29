@@ -34,7 +34,9 @@ function cursorOf(query: URLSearchParams): ConversationCursor {
 
 /**
  * A page of an agent's conversation: `?before=<entry id>` for earlier entries, `?after=<entry id>` for those stored
- * since. An agent the viewer cannot see is refused as missing.
+ * since. An agent the viewer cannot see is refused as missing. An agent they can see whose transcript they may not
+ * read is refused with 403, not 404: the agent's own page already says it exists, and an agent in a conversation is
+ * the one kind that answers this way for a grantee.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
   const viewer = await uiViewer(request);
@@ -56,5 +58,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   } catch (error) {
     return errorResponse(400, error instanceof HttpError ? error.message : "bad request");
   }
-  return json(await agentConversation(prisma, viewer.oid, { id: agent.id, ownerOid: agent.ownerOid, ownerOnly: agent.ownerOnly }, grants, cursor));
+  return json(
+    await agentConversation(
+      prisma,
+      viewer.oid,
+      { id: agent.id, ownerOid: agent.ownerOid, ownerOnly: agent.ownerOnly, inConversation: agent.inConversation },
+      grants,
+      cursor
+    )
+  );
 }

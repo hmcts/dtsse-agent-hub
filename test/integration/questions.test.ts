@@ -338,7 +338,12 @@ describe("who may read a question", () => {
     await insertUser(BOB);
     await setGrant(prisma, ALICE.oid, BOB.oid, "write");
 
-    const seen = await agentQuestions(prisma, BOB.oid, { id: agentId, ownerOid: ALICE.oid, ownerOnly: true }, await grantsHeldBy(prisma, BOB.oid));
+    const seen = await agentQuestions(
+      prisma,
+      BOB.oid,
+      { id: agentId, ownerOid: ALICE.oid, ownerOnly: true, inConversation: true },
+      await grantsHeldBy(prisma, BOB.oid)
+    );
 
     expect(seen).toEqual([]);
   });

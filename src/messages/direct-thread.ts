@@ -1,4 +1,4 @@
-import { canReadMessage, type Grant, type MessageRef } from "../access/rules.ts";
+import { type AgentConversationColumns, canReadMessage, conversationFlags, type Grant, type MessageRef } from "../access/rules.ts";
 import { ATTACHMENT_SELECT, attachmentView, type MessageAttachment } from "../assistant/upload-store.ts";
 import type { Database } from "../store/prisma.ts";
 import { type ApiMessage, toApiMessage } from "./shape.ts";
@@ -27,11 +27,16 @@ export interface LoadedThreadMessage {
   ref: MessageRef;
 }
 
+// The two conversation columns on each agent, because `canReadMessage` narrows a conversation's thread to its owner
+// and reads them off the ref. Without them here the rule sees `undefined` and falls back to the grant, which is the
+// whole of what it is there to refuse.
+const AGENT_ACCESS = { assistantConversationId: true, virtualAgentId: true } as const;
+
 const SELECT = {
   ...MESSAGE_SELECT,
   authorOid: true,
-  authorAgent: { select: { id: true, name: true, ownerOid: true } },
-  targetAgent: { select: { id: true, ownerOid: true } },
+  authorAgent: { select: { id: true, name: true, ownerOid: true, ...AGENT_ACCESS } },
+  targetAgent: { select: { id: true, ownerOid: true, ...AGENT_ACCESS } },
   parent: { select: { authorOid: true } },
   deliveries: { select: { agentId: true, state: true } },
   uploads: { select: ATTACHMENT_SELECT, orderBy: { createdAt: "asc" } }
@@ -46,10 +51,10 @@ type Row = {
   targetAgentId: string | null;
   createdAt: Date;
   authorOid: string;
-  authorAgent: { id: string; name: string; ownerOid: string } | null;
+  authorAgent: ({ id: string; name: string; ownerOid: string } & AgentConversationColumns) | null;
   author: { name: string; email: string | null };
   topics: { topic: { slug: string } }[];
-  targetAgent: { id: string; ownerOid: string } | null;
+  targetAgent: ({ id: string; ownerOid: string } & AgentConversationColumns) | null;
   parent: { authorOid: string } | null;
   deliveries: { agentId: string; state: DeliveryView }[];
   uploads: { id: string; fileName: string; bytes: bigint; mediaType: string; state: string; createdAt: Date }[];
@@ -63,8 +68,8 @@ function toLoaded(row: Row): LoadedThreadMessage {
     ref: {
       kind: row.kind,
       authorOid: row.authorOid,
-      authorAgent: row.authorAgent === null ? null : { id: row.authorAgent.id, ownerOid: row.authorAgent.ownerOid },
-      targetAgent: row.targetAgent,
+      authorAgent: row.authorAgent === null ? null : { id: row.authorAgent.id, ownerOid: row.authorAgent.ownerOid, ...conversationFlags(row.authorAgent) },
+      targetAgent: row.targetAgent === null ? null : { id: row.targetAgent.id, ownerOid: row.targetAgent.ownerOid, ...conversationFlags(row.targetAgent) },
       parentAuthorOid: row.parent?.authorOid ?? null
     }
   };

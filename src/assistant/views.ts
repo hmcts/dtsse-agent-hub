@@ -17,6 +17,7 @@ import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
+import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { snippetOf } from "./search.ts";
 import { type Artefact, type ConversationRow, listConversations, readArtefact, type SessionState, searchConversations, unsentConversation } from "./store.ts";
@@ -180,9 +181,10 @@ export interface ConversationView {
 
 /** One of the viewer's conversations with its first page; `agentId` is the conversation's current agent. */
 export async function conversationView(db: Database, conversation: ConversationRow, agentId: string): Promise<ConversationView> {
-  // The conversation's own agent, which is its owner's alone: both reads below apply their own rule to it, and no
-  // grant is passed because none extends to a conversation.
-  const agent = { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true };
+  // The conversation's own agent, whose transcript is its owner's alone: both reads below apply their own rule to
+  // it, and no grant is passed because none reaches a chat. `ownerOnly` is the pod kind, where the agent itself is
+  // the owner's too; a laptop session's agent is on the hub like any other and only its chat is private.
+  const agent = { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: hasPod(conversation), inConversation: true };
   const [current, artefact, jira, confluence, page, questions, fork] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true } }),
     readArtefact(db, conversation.id),

@@ -58,7 +58,8 @@ const LINKED: AgentView = {
   },
   access: "read",
   grants: [],
-  skills: []
+  skills: [],
+  ref: { id: SESSION_ID, ownerOid: "alice", ownerOnly: false, inConversation: false }
 };
 
 function page(overrides: Partial<VirtualAgentPageView> = {}): VirtualAgentPageView {

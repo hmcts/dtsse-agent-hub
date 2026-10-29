@@ -38,6 +38,7 @@ import {
   canVirtualAgentStoreCredential,
   canWriteUpload,
   conversationAccess,
+  conversationFlags,
   type Grant,
   grantLevel,
   MAX_PEOPLE_SUGGESTIONS,
@@ -212,6 +213,23 @@ describe("canReadMessage", () => {
     expect(canReadMessage(ELSEWHERE, reply, GRANTS)).toBe(false);
   });
 
+  /**
+   * A conversation's words live in two places — the session's transcript and the directs the composer sends — so the
+   * grant has to be refused in both or the narrowed transcript buys nothing. Both kinds of conversation, because a
+   * laptop session's agent stays visible and messageable to a grantee and so reaches this rule by a route a pod
+   * conversation's agent does not.
+   */
+  it.each([
+    ["a pod conversation's", { ...TARGET, ownerOnly: true, inConversation: true }],
+    ["a laptop conversation's", { ...TARGET, inConversation: true }]
+  ])("should keep %s thread from a grantee who may otherwise read the agent's directs", (_label, target) => {
+    const message: MessageRef = { kind: "direct", authorOid: OWNER, authorAgent: null, targetAgent: target, parentAuthorOid: null };
+
+    expect(canReadMessage(OWNER, message, GRANTS)).toBe(true);
+    expect(canReadMessage(READER, message, GRANTS)).toBe(false);
+    expect(canReadMessage(WRITER, message, GRANTS)).toBe(false);
+  });
+
   it("should not widen a targeted direct message to the author of the message it replies to", () => {
     const reply: MessageRef = { kind: "direct", authorOid: ELSEWHERE, authorAgent: agentOf(ELSEWHERE), targetAgent: TARGET, parentAuthorOid: STRANGER };
 
@@ -283,16 +301,20 @@ describe("agentAccess", () => {
   });
 });
 
-describe("an assistant conversation's agent", () => {
-  const CONVERSATION: AgentRef = { id: "agent-conversation", ownerOid: OWNER, ownerOnly: true };
+/** A pod conversation's agent: the HMCTS Assistant, which is its owner's alone. */
+const POD_CHAT_AGENT: AgentRef = { id: "agent-conversation", ownerOid: OWNER, ownerOnly: true, inConversation: true };
 
+/** A conversation of a session on the owner's own laptop: an ordinary shared session with a private chat. */
+const LOCAL_CHAT_AGENT: AgentRef = { id: "agent-local-conversation", ownerOid: OWNER, ownerOnly: false, inConversation: true };
+
+describe("an assistant conversation's agent", () => {
   it.each<[Role, ReturnType<typeof agentAccess>]>([
     ["owner", "owner"],
     ["read grantee", "none"],
     ["write grantee", "none"],
     ["stranger", "none"]
   ])("should give the %s %s access when the agent is owner-only, whatever their grants", (role, access) => {
-    expect(agentAccess(ROLES[role], CONVERSATION, GRANTS)).toBe(access);
+    expect(agentAccess(ROLES[role], POD_CHAT_AGENT, GRANTS)).toBe(access);
   });
 
   it.each<[boolean, Role]>([
@@ -300,15 +322,85 @@ describe("an assistant conversation's agent", () => {
     [false, "read grantee"],
     [false, "write grantee"]
   ])("should answer %s when the %s views, reads or messages an owner-only agent", (expected, role) => {
-    expect(canViewAgent(ROLES[role], CONVERSATION, GRANTS)).toBe(expected);
-    expect(canViewTranscript(ROLES[role], CONVERSATION, GRANTS)).toBe(expected);
-    expect(canPersonMessageAgent(ROLES[role], CONVERSATION, GRANTS)).toBe(expected);
-    expect(canSeeAgentSkills(ROLES[role], CONVERSATION, GRANTS)).toBe(expected);
+    expect(canViewAgent(ROLES[role], POD_CHAT_AGENT, GRANTS)).toBe(expected);
+    expect(canViewTranscript(ROLES[role], POD_CHAT_AGENT, GRANTS)).toBe(expected);
+    expect(canPersonMessageAgent(ROLES[role], POD_CHAT_AGENT, GRANTS)).toBe(expected);
+    expect(canSeeAgentSkills(ROLES[role], POD_CHAT_AGENT, GRANTS)).toBe(expected);
   });
 
   it("should not let a write grantee's agent message an owner-only agent when it holds the grant", () => {
-    expect(canAgentMessageAgent(agentOf(WRITER), CONVERSATION, GRANTS)).toBe(false);
-    expect(canAgentMessageAgent(agentOf(OWNER), CONVERSATION, GRANTS)).toBe(true);
+    expect(canAgentMessageAgent(agentOf(WRITER), POD_CHAT_AGENT, GRANTS)).toBe(false);
+    expect(canAgentMessageAgent(agentOf(OWNER), POD_CHAT_AGENT, GRANTS)).toBe(true);
+  });
+});
+
+/**
+ * The access split a local chat rests on: a session on someone's laptop is shared through grants exactly as it was
+ * before it had a conversation, and only the words of the chat narrow to its owner.
+ */
+describe("a local session's conversation agent", () => {
+  it.each<[Role, boolean]>([
+    ["owner", true],
+    ["read grantee", true],
+    ["write grantee", true],
+    ["stranger", false]
+  ])("should still show the agent to the %s when it is in a local conversation", (role, expected) => {
+    expect(canViewAgent(ROLES[role], LOCAL_CHAT_AGENT, GRANTS)).toBe(expected);
+  });
+
+  it.each<[Role, boolean]>([
+    ["owner", true],
+    ["read grantee", false],
+    ["write grantee", true],
+    ["stranger", false]
+  ])("should let the %s message it as a person or through their own agent when they could before", (role, expected) => {
+    expect(canPersonMessageAgent(ROLES[role], LOCAL_CHAT_AGENT, GRANTS)).toBe(expected);
+    expect(canAgentMessageAgent(agentOf(ROLES[role]), LOCAL_CHAT_AGENT, GRANTS)).toBe(expected);
+    expect(canSeeAgentSkills(ROLES[role], LOCAL_CHAT_AGENT, GRANTS)).toBe(expected);
+  });
+
+  it("should refuse a write grantee the pod conversation's agent it may not reach, which is the other kind", () => {
+    expect(canPersonMessageAgent(WRITER, POD_CHAT_AGENT, GRANTS)).toBe(false);
+    expect(canAgentMessageAgent(agentOf(WRITER), POD_CHAT_AGENT, GRANTS)).toBe(false);
+    expect(canViewAgent(WRITER, POD_CHAT_AGENT, GRANTS)).toBe(false);
+  });
+
+  it.each<[Role, ReturnType<typeof agentAccess>]>([
+    ["owner", "owner"],
+    ["read grantee", "read"],
+    ["write grantee", "write"],
+    ["stranger", "none"]
+  ])("should report the %s as %s, as it would for a session with no conversation", (role, access) => {
+    expect(agentAccess(ROLES[role], LOCAL_CHAT_AGENT, GRANTS)).toBe(access);
+  });
+});
+
+describe("canViewTranscript", () => {
+  it.each<[string, AgentRef, Record<Role, boolean>]>([
+    ["no conversation", TARGET, { owner: true, "read grantee": true, "write grantee": true, stranger: false }],
+    ["a pod conversation", POD_CHAT_AGENT, { owner: true, "read grantee": false, "write grantee": false, stranger: false }],
+    ["a local conversation", LOCAL_CHAT_AGENT, { owner: true, "read grantee": false, "write grantee": false, stranger: false }]
+  ])("should answer for every role when the agent is in %s", (_label, agent, expected) => {
+    for (const [role, allowed] of Object.entries(expected) as [Role, boolean][]) {
+      expect(canViewTranscript(ROLES[role], agent, GRANTS)).toBe(allowed);
+    }
+  });
+
+  it("should refuse a grantee of a local conversation's agent it may otherwise see and message", () => {
+    expect(canViewAgent(WRITER, LOCAL_CHAT_AGENT, GRANTS)).toBe(true);
+    expect(canPersonMessageAgent(WRITER, LOCAL_CHAT_AGENT, GRANTS)).toBe(true);
+    expect(canViewTranscript(WRITER, LOCAL_CHAT_AGENT, GRANTS)).toBe(false);
+  });
+});
+
+describe("conversationFlags", () => {
+  it.each<[string, string | null, string | null, { ownerOnly: boolean; inConversation: boolean }]>([
+    ["a session on a laptop", null, null, { ownerOnly: false, inConversation: false }],
+    ["a virtual agent's session", null, "va-1", { ownerOnly: false, inConversation: false }],
+    ["a pod conversation's agent", "chat-1", "va-1", { ownerOnly: true, inConversation: true }],
+    ["a local conversation's agent", "chat-1", null, { ownerOnly: false, inConversation: true }]
+  ])("should derive both flags from the row alone for %s", (_label, assistantConversationId, virtualAgentId, expected) => {
+    expect(conversationFlags({ assistantConversationId, virtualAgentId })).toEqual(expected);
   });
 });
 
@@ -743,7 +835,7 @@ describe("the conversation share rules", () => {
   // A share is of the conversation, never of its agent, so everything decided about the agent still answers for a
   // recipient exactly as it does for a stranger: the UI stream's watch, the agent API's routes and the rosters.
   describe("what a share does not widen", () => {
-    const agent: AgentRef = { id: "conversation-agent", ownerOid: OWNER, ownerOnly: true };
+    const agent: AgentRef = { id: "conversation-agent", ownerOid: OWNER, ownerOnly: true, inConversation: true };
     const asGrants: Grant[] = [...GRANTS, { ownerOid: OWNER, granteeOid: RECIPIENT, level: "write" }];
 
     it.each([
@@ -841,7 +933,7 @@ describe("the conversation share rules", () => {
     });
 
     it("should not let the person offered message the conversation's agent when they hold a fork of it", () => {
-      const agent: AgentRef = { id: "conversation-agent", ownerOid: OWNER, ownerOnly: true };
+      const agent: AgentRef = { id: "conversation-agent", ownerOid: OWNER, ownerOnly: true, inConversation: true };
       for (const rule of [canViewAgent, canViewTranscript, canPersonMessageAgent, canSeeAgentSkills]) {
         expect(rule(FORKER, agent, [])).toBe(false);
       }

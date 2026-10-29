@@ -3,6 +3,7 @@ import type { Database } from "../store/prisma.ts";
 import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
+import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import type { SharedConversationRow } from "./shares.ts";
 import { readArtefact } from "./store.ts";
@@ -136,7 +137,14 @@ export async function sharedConversation(
   }
   const agentId = row.agentId;
   const [page, artefact] = await Promise.all([
-    agentId === null ? undefined : agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true }, []),
+    agentId === null
+      ? undefined
+      : agentConversation(
+          db,
+          conversation.ownerOid,
+          { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: hasPod(conversation), inConversation: true },
+          []
+        ),
     readArtefact(db, conversation.id)
   ]);
   const items = page === undefined ? [] : conversationItems(page.messages, page.entries);

@@ -1,6 +1,6 @@
 import { notify } from "../realtime/notify.ts";
 import type { Database, Prisma, PrismaClient } from "../store/prisma.ts";
-import { canGrant, type Grant, type GrantLevel, type MessageRef } from "./rules.ts";
+import { canGrant, conversationFlags, type Grant, type GrantLevel, type MessageRef } from "./rules.ts";
 
 /** The loaders the rules in `rules.ts` are applied over, and the two writes those rules gate. */
 
@@ -12,18 +12,25 @@ export async function grantsHeldBy(db: Database, oid: string): Promise<Grant[]> 
   return rows.map((row) => ({ ownerOid: row.ownerOid, granteeOid: row.granteeOid, level: row.level }));
 }
 
-/** Agents `oid` may see: `canViewAgent`, as a query. No grant reaches an assistant conversation's agent. */
+/**
+ * A pod conversation's agent, as a query: `conversationFlags`' `ownerOnly`, which no grant reaches. Both columns,
+ * because a conversation with no virtual agent is a session on its owner's laptop and grants reach that as ever.
+ */
+export const POD_CONVERSATION_AGENT: Prisma.AgentWhereInput = { assistantConversationId: { not: null }, virtualAgentId: { not: null } };
+
+/** Agents `oid` may see: `canViewAgent`, as a query. No grant reaches a pod conversation's agent. */
 export function agentsVisibleTo(oid: string): Prisma.AgentWhereInput {
-  return { OR: [{ ownerOid: oid }, { assistantConversationId: null, owner: { grantsGiven: { some: { granteeOid: oid } } } }] };
+  return { OR: [{ ownerOid: oid }, { NOT: POD_CONVERSATION_AGENT, owner: { grantsGiven: { some: { granteeOid: oid } } } }] };
 }
 
 /**
  * Agents `oid`, or any agent `oid` owns, may message by name or pick from a list: `canPersonMessageAgent`, as a
- * query, less every assistant conversation's agent, which only its own conversation's page messages.
+ * query, less every pod conversation's agent, which only its own conversation's page messages. That exclusion is an
+ * AND rather than part of the grant arm, so not even its owner picks one of those out of a list of sessions.
  */
 export function agentsMessageableBy(oid: string): Prisma.AgentWhereInput {
   return {
-    assistantConversationId: null,
+    NOT: POD_CONVERSATION_AGENT,
     OR: [{ ownerOid: oid }, { owner: { grantsGiven: { some: { granteeOid: oid, level: "write" } } } }]
   };
 }
@@ -39,16 +46,23 @@ export async function loadMessageRef(db: Database, id: bigint): Promise<LoadedMe
       id: true,
       kind: true,
       authorOid: true,
-      authorAgent: { select: { id: true, ownerOid: true } },
-      targetAgent: { select: { id: true, ownerOid: true } },
+      // The conversation columns as well: `canReadMessage` narrows a conversation's thread to its owner and reads
+      // them off these refs, and without them it sees `undefined` and falls back to the grant.
+      authorAgent: { select: { id: true, ownerOid: true, assistantConversationId: true, virtualAgentId: true } },
+      targetAgent: { select: { id: true, ownerOid: true, assistantConversationId: true, virtualAgentId: true } },
       parent: { select: { authorOid: true } }
     }
   });
   if (row === null) {
     return undefined;
   }
-  const { parent, ...ref } = row;
-  return { ...ref, parentAuthorOid: parent?.authorOid ?? null };
+  const { parent, authorAgent, targetAgent, ...rest } = row;
+  return {
+    ...rest,
+    authorAgent: authorAgent === null ? null : { id: authorAgent.id, ownerOid: authorAgent.ownerOid, ...conversationFlags(authorAgent) },
+    targetAgent: targetAgent === null ? null : { id: targetAgent.id, ownerOid: targetAgent.ownerOid, ...conversationFlags(targetAgent) },
+    parentAuthorOid: parent?.authorOid ?? null
+  };
 }
 
 /** Sets `actorOid`'s grant to `granteeOid`, and tells the grantee's open streams on commit. */
