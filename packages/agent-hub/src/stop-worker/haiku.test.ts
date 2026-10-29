@@ -77,6 +77,42 @@ describe("haikuCommand", () => {
     expect(settingsOf({}, root)).toEqual({ apiKeyHelper: `${cd}.claude/project.sh`, awsAuthRefresh: `${cd}scripts/aws-refresh`, disableAllHooks: true });
     expect(settingsOf({ AGENT_HUB_CLAUDE_SETTINGS: '{"apiKeyHelper":".claude/token.sh"}' }, root).apiKeyHelper).toBe(`${cd}.claude/token.sh`);
   });
+
+  it("should name the apiKeyHelper hai published when the session is on the gateway route", () => {
+    // Arrange: the route's base url and APIM header reach the summariser by inheritance, so the
+    // helper is the only part of the credential it has to name for itself.
+    const helper = "/home/hmcts/.local/state/hai/gateway-token.sh";
+
+    // Act & Assert: rooted like every other helper, which an absolute path is unaffected by.
+    expect(settingsOf({ HAI_API_KEY_HELPER: helper }, home.root)).toEqual({
+      apiKeyHelper: `cd '${home.root}' && ${helper}`,
+      disableAllHooks: true
+    });
+  });
+
+  it("should authenticate as it did before when hai published no helper", () => {
+    // Act & Assert: an own-licence session has no helper at all, and so does a pod running a hai
+    // that predates the variable.
+    expect(settingsOf({}, home.root)).toEqual({ disableAllHooks: true });
+    expect(settingsOf({ HAI_API_KEY_HELPER: "" }, home.root)).toEqual({ disableAllHooks: true });
+    expect(settingsOf({ HAI_API_KEY_HELPER: "   " }, home.root)).toEqual({ disableAllHooks: true });
+  });
+
+  it("should let hai's published helper win over a settings file and lose to AGENT_HUB_CLAUDE_SETTINGS", () => {
+    // Arrange
+    const root = fs.mkdtempSync(path.join(home.root, "ws-precedence-"));
+    fs.mkdirSync(path.join(root, ".claude"));
+    fs.writeFileSync(path.join(root, ".claude", "settings.json"), JSON.stringify({ apiKeyHelper: ".claude/project.sh" }));
+    const cd = `cd '${root}' && `;
+    const published = "/home/hmcts/.local/state/hai/gateway-token.sh";
+
+    // Act & Assert: hai names the credential the session is running on, rather than a file that
+    // may describe another; an operator naming one explicitly is still the last word.
+    expect(settingsOf({ HAI_API_KEY_HELPER: published }, root).apiKeyHelper).toBe(`${cd}${published}`);
+    expect(settingsOf({ HAI_API_KEY_HELPER: published, AGENT_HUB_CLAUDE_SETTINGS: '{"apiKeyHelper":".claude/token.sh"}' }, root).apiKeyHelper).toBe(
+      `${cd}.claude/token.sh`
+    );
+  });
 });
 
 describe("summariserSettings", () => {
