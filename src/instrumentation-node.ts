@@ -1,35 +1,44 @@
-import { createRequire } from "node:module";
 import { loadSecrets } from "./platform/secrets.ts";
 import { startRealtime } from "./realtime/start.ts";
 import { virtualAgentsEnabled } from "./virtual-agents/settings.ts";
 
 type Platform = typeof import("@hmcts-cft/cloud-native-platform");
 
-const load = createRequire(import.meta.url);
-
-function platform(): Platform {
-  return load("@hmcts-cft/cloud-native-platform") as Platform;
+/**
+ * The platform package, through `await import` rather than a `createRequire` shim.
+ *
+ * It is ESM-only and named in `serverExternalPackages`, so Node resolves it at runtime and the bundler leaves it
+ * alone — which is how `cli/migrate.ts` has always reached it, with a plain static import. Next 16.4.3 answered the
+ * require shim with a namespace carrying none of the named exports, and because the only caller of
+ * `getPropertiesVolumeSecrets` is inside `loadSecrets`, that surfaced as a warning rather than a failure: the pod
+ * kept its local Postgres default and every page that reads the database answered 500 behind a healthy `/health`.
+ *
+ * `import()` caches, so the two callers below share one load.
+ */
+function platform(): Promise<Platform> {
+  return import("@hmcts-cft/cloud-native-platform");
 }
 
 export async function register(): Promise<void> {
   await readSecrets();
-  startMonitoring();
+  await startMonitoring();
   await startRealtime();
   await startSweeping();
 }
 
 async function readSecrets(): Promise<void> {
-  await loadSecrets((chartPath) => platform().getPropertiesVolumeSecrets({ chartPath, failOnError: false }));
+  await loadSecrets(async (chartPath) => await (await platform()).getPropertiesVolumeSecrets({ chartPath, failOnError: false }));
 }
 
-function startMonitoring(): void {
+async function startMonitoring(): Promise<void> {
   const connectionString = process.env.APPLICATIONINSIGHTS_CONNECTION_STRING;
   if (!connectionString) {
     return;
   }
 
   try {
-    new (platform().MonitoringService)(connectionString, "dtsse-agent-hub");
+    const { MonitoringService } = await platform();
+    new MonitoringService(connectionString, "dtsse-agent-hub");
   } catch (error) {
     console.warn(`could not start Application Insights: ${error instanceof Error ? error.message : String(error)}`);
   }
