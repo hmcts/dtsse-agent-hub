@@ -31,6 +31,12 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // the hub's own, even when the rest of the viewer's settings are missing.
   const host = viewerRouteHost();
   if (host !== undefined && requestHost(request.headers, request.nextUrl.host) === host) {
+    // Except the health routes, which the Application Gateway in front probes on every host it serves, at
+    // `/health/liveness`: answered by the viewer they are a 404, and the gateway marks the backend unhealthy and
+    // gives 502 for the whole host. An agent's pages are only ever under `/<id>/<port>/`, so none is shadowed.
+    if (isHealthPath(pathname)) {
+      return NextResponse.next();
+    }
     return viewerSettings() === undefined ? new NextResponse(null, { status: 404 }) : toViewer(request);
   }
   if (pathname === VIEWER_ROUTE || pathname.startsWith(`${VIEWER_ROUTE}/`)) {
@@ -67,6 +73,11 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const login = new URL("/auth/login", request.nextUrl.origin);
   login.searchParams.set("redirect", `${request.nextUrl.pathname}${request.nextUrl.search}`);
   return NextResponse.redirect(login, 307);
+}
+
+/** `/health` and what is under it, as `src/app/health/` serves. */
+function isHealthPath(pathname: string): boolean {
+  return pathname === "/health" || pathname.startsWith("/health/");
 }
 
 /**
