@@ -483,7 +483,7 @@ yarn install
 AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev    # http://localhost:3000
 ```
 
-`yarn dev` starts Postgres 16 in Docker on 5432 (`yarn deps:up`), regenerates the Prisma client and applies any
+`yarn dev` starts Postgres 18 in Docker on 5432 (`yarn deps:up`), regenerates the Prisma client and applies any
 pending migrations before it starts Next, so pulling a new migration needs no extra step.
 
 With `AGENT_AUTH_DISABLED=true` the agent API takes the caller from an `X-Dev-User: <oid>|<name>|<email>` header
