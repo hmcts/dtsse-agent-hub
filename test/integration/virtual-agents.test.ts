@@ -130,12 +130,12 @@ async function homeOf(id: string): Promise<string | null> {
 
 const LATER = () => new Date(Date.now() + 3 * 60_000);
 
-/** The gateway as a deployment configures it on the hub; `gatewaySettings` reads these per claim. */
-const GATEWAY_ENV = {
-  AI_GATEWAY_BASE_URL: "https://ai-gateway.sandbox.platform.hmcts.net",
-  AI_GATEWAY_AUDIENCE: "api://gw/.default",
-  AI_GATEWAY_APIM_KEY: "apim-key"
-};
+/**
+ * The whole of what a deployment configures about the gateway, which `gatewaySettings` reads per claim. Stubbed for
+ * every test below, because the agents here are on the `gateway` route by default and a claim for one is refused
+ * without it.
+ */
+const GATEWAY_APIM_KEY = "apim-key";
 
 async function observe(id: string, body: Record<string, unknown>): Promise<Response> {
   return await orchestrator(observedRoute.POST, `/api/orchestrator/virtual-agents/${id}/observed`, { id }, "POST", body);
@@ -191,6 +191,7 @@ beforeEach(async () => {
   vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
   vi.stubEnv("SESSION_SECRET", SECRET);
   vi.stubEnv("ENTRA_TENANT_ID", TENANT);
+  vi.stubEnv("AI_GATEWAY_APIM_KEY", GATEWAY_APIM_KEY);
   await resetDatabase();
 });
 
@@ -322,47 +323,42 @@ describe("POST /api/orchestrator/claim", () => {
     expect(claimed?.model_route).toBe("gateway");
   });
 
-  // The hub reads the gateway's three settings and hands them to the orchestrator here, which is what keeps the
-  // configuration in this repository's chart rather than in the orchestrator's own Deployment.
-  it("should pass the gateway route to the orchestrator with what its pod needs when a gateway is configured", async () => {
+  // The hub reads the APIM subscription key and hands it to the orchestrator here, which is what keeps the one value
+  // hai cannot fetch for itself in this repository's chart rather than in the orchestrator's own Deployment.
+  it("should pass the gateway route to the orchestrator with the APIM key when a gateway is configured", async () => {
     await create(ALICE, "pcs-api", "gateway");
-    for (const [name, value] of Object.entries(GATEWAY_ENV)) {
-      vi.stubEnv(name, value);
-    }
 
     const [claimed] = await claim();
 
     expect(claimed?.model_route).toBe("gateway");
-    expect(claimed?.gateway).toEqual({ base_url: "https://ai-gateway.sandbox.platform.hmcts.net", audience: "api://gw/.default", apim_key: "apim-key" });
+    expect(claimed?.gateway).toEqual({ apim_key: GATEWAY_APIM_KEY });
   });
 
   // One service's key rather than one agent's, so a pod that cannot use it must never be handed it.
-  it("should send the gateway's settings to no agent on another route", async () => {
+  it("should send the gateway's APIM key to no agent on another route", async () => {
     await create(ALICE, "pcs-api", "own-licence");
-    for (const [name, value] of Object.entries(GATEWAY_ENV)) {
-      vi.stubEnv(name, value);
-    }
 
     const [claimed] = await claim();
 
     expect(claimed?.gateway).toBeUndefined();
   });
 
-  it("should give a gateway agent no settings when this deployment has no gateway configured, so its pod says so itself", async () => {
+  // A pod with no key boots and then fails every turn, so the claim is refused instead.
+  it("should refuse the claim when a gateway agent's deployment has no APIM key", async () => {
     await create(ALICE, "pcs-api", "gateway");
-
-    const [claimed] = await claim();
-
-    expect(claimed?.gateway).toBeUndefined();
-  });
-
-  // Half-configured is a pod that boots and then fails every turn, so the claim is refused instead.
-  it("should refuse the claim when the gateway is half configured", async () => {
-    await create(ALICE, "pcs-api", "gateway");
-    vi.stubEnv("AI_GATEWAY_BASE_URL", GATEWAY_ENV.AI_GATEWAY_BASE_URL);
-    vi.stubEnv("AI_GATEWAY_AUDIENCE", GATEWAY_ENV.AI_GATEWAY_AUDIENCE);
+    vi.stubEnv("AI_GATEWAY_APIM_KEY", "");
 
     await expect(claimVirtualAgents(prisma, "cluster-a")).rejects.toThrow("AI_GATEWAY_APIM_KEY");
+  });
+
+  // Nobody is on the gateway, so there is no gateway to be misconfigured for.
+  it("should claim an own_licence agent when the deployment has no APIM key", async () => {
+    await create(ALICE, "pcs-api", "own-licence");
+    vi.stubEnv("AI_GATEWAY_APIM_KEY", "");
+
+    const [claimed] = await claim();
+
+    expect(claimed?.model_route).toBe("own_licence");
   });
 
   it("should claim at most the limit at once, leaving the rest for the next claim", async () => {

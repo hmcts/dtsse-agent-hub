@@ -17,9 +17,8 @@ function urlFor(database: string): string {
 
 /**
  * Unique per process, so two concurrent runs never create and drop one another's scratch databases mid-suite. It is
- * not derived from `DATABASE_URL`, because the two ways this suite is normally run both leave that at a fixed name —
- * `vitest.integration.config.mts` falls back to `agent_hub_test`, and `Jenkinsfile_CNP` sets `agent_hub` — so a name
- * derived from it would collide for exactly the people who have not overridden it.
+ * not derived from `DATABASE_URL`, which is this worker's own database and so already unique to the run: these are
+ * databases beside it on the same server, named from scratch, and the uniqueness has to be their own.
  */
 const RUN = `${process.pid.toString(36)}_${randomBytes(4).toString("hex")}`;
 

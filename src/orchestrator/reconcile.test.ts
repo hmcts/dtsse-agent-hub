@@ -40,7 +40,7 @@ const SETTINGS: OrchestratorSettings = {
   }
 };
 
-const GATEWAY = { base_url: "https://ai-gateway.sandbox.platform.hmcts.net", audience: "api://gateway-client/.default", apim_key: "apim-key" };
+const GATEWAY = { apim_key: "apim-key" };
 
 function agent(overrides: Partial<ClaimedAgent> = {}): ClaimedAgent {
   const id = overrides.id ?? ID;
