@@ -54,10 +54,10 @@ export const MAX_WELSH_STRINGS = 200;
 export const MAX_WELSH_STRING = 2000;
 export const MAX_WELSH_CHOICES = 200;
 
-export const WELSH_REF_RE = /^CY-[0-9A-F]{8}$/;
-export const WELSH_ROW_ID_RE = /^[0-9a-f]{10}$/;
-export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}-[0-9]{1,7}$/;
-export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const WELSH_REF_RE = /^CY-[\dA-F]{8}$/;
+export const WELSH_ROW_ID_RE = /^[\da-f]{10}$/;
+export const JIRA_KEY_RE = /^[A-Z][A-Z\d_]{1,9}-\d{1,7}$/;
+export const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const REPO_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 /**

@@ -44,7 +44,7 @@ export interface WelshPageProps {
  * Every task runs in the person's own assistant with their own sign-ins, and none of them translates; see "Welsh
  * translation jobs" in docs/agent-api.md.
  */
-export function WelshPage({ products, initialProduct = null, initialTask = null, client = welshClient }: WelshPageProps) {
+export function WelshPage({ products, initialProduct = null, initialTask = null, client = welshClient }: Readonly<WelshPageProps>) {
   const [task, setTask] = useState<WelshTask | null>(initialTask);
   const [product, setProduct] = useState<string | null>(initialProduct);
   const [changing, setChanging] = useState(false);
@@ -159,7 +159,7 @@ export function WelshPage({ products, initialProduct = null, initialTask = null,
   );
 }
 
-function ServiceFacts({ info }: { info: WelshInfo }) {
+function ServiceFacts({ info }: Readonly<{ info: WelshInfo }>) {
   if (!info.initialised) {
     return (
       <span className="text-asst-warn">
@@ -177,7 +177,7 @@ function ServiceFacts({ info }: { info: WelshInfo }) {
   );
 }
 
-function TaskSteps({ task, product, info, client }: { task: WelshTask; product: string; info: WelshInfo; client: WelshClient }) {
+function TaskSteps({ task, product, info, client }: Readonly<{ task: WelshTask; product: string; info: WelshInfo; client: WelshClient }>) {
   const repos = info.repos;
   switch (task) {
     case "search":

@@ -213,7 +213,7 @@ export interface StoryRow {
   options: CatalogueOption[];
 }
 
-const STATES: readonly StoryRowState[] = ["filled", "required", "ambiguous", "hand-edited"];
+const STATES: ReadonlySet<string> = new Set<StoryRowState>(["filled", "required", "ambiguous", "hand-edited"]);
 
 export function storyPreviewView(result: Json): { rows: StoryRow[]; verified: boolean; failures: string[] } {
   const verify = rec(result.verify);
@@ -225,7 +225,7 @@ export function storyPreviewView(result: Json): { rows: StoryRow[]; verified: bo
         english: str(r.english),
         welsh: str(r.welsh),
         source: str(r.source),
-        state: STATES.includes(state) ? state : "required",
+        state: STATES.has(state) ? state : "required",
         options: options(r.options)
       };
     }),

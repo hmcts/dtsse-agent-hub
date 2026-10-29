@@ -48,11 +48,11 @@ export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, no
   if (assistant === undefined || !canUseWelsh(question.viewerOid, assistant)) {
     throw new HttpError(404, "you have no assistant to run that with yet");
   }
-  for (const fileId of fileIdsOf(question.args)) {
-    const file = await prisma.assistantWelshFile.findUnique({ where: { id: fileId }, select: { ownerOid: true, jobId: true } });
-    if (file === null || file.ownerOid !== question.viewerOid || file.jobId !== null) {
-      throw new HttpError(404, "that spreadsheet is not there any more; upload it again");
-    }
+  const files = await Promise.all(
+    fileIdsOf(question.args).map((id) => prisma.assistantWelshFile.findUnique({ where: { id }, select: { ownerOid: true, jobId: true } }))
+  );
+  if (files.some((file) => file === null || file.ownerOid !== question.viewerOid || file.jobId !== null)) {
+    throw new HttpError(404, "that spreadsheet is not there any more; upload it again");
   }
   if (assistant.desired === "stopped") {
     await setDesired(prisma, question.viewerOid, assistant.id, "running", now);

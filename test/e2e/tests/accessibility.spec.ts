@@ -168,6 +168,8 @@ test.describe("accessibility @nightly", () => {
   test("should raise no WCAG A or AA violations on the Assistant's Welsh page @nightly @a11y", async ({ page, request }) => {
     await connectForChat(request, PERSONA);
     const response = await page.goto("/assistant/welsh");
+    // Skipped only where the deployment has the Assistant off (VIRTUAL_AGENTS_ENABLED "false" answers 404), as the
+    // new-chat audit above is; it runs unchanged wherever the flag is on.
     test.skip(response?.status() === 404, "the Assistant is off on this deployment");
     expect(response?.status()).toBe(200);
 

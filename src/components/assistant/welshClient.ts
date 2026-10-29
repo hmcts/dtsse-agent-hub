@@ -83,17 +83,38 @@ export async function runWelshJob(
   request: WelshJobRequest,
   { signal, onProgress }: { signal?: AbortSignal; onProgress?: (state: "waking" | "pending") => void } = {}
 ): Promise<WelshResponse> {
-  let response = await client.start(request, signal);
-  for (let retry = 0; response.status === "waking" && retry < WAKING_RETRIES && !signal?.aborted; retry++) {
-    onProgress?.("waking");
-    await client.wait(WELSH_WAKING_RETRY_MS, signal);
-    response = await client.start(request, signal);
+  const started = await startWhenAwake(client, request, signal, onProgress, WAKING_RETRIES);
+  return await followToEnd(client, started, signal, onProgress);
+}
+
+/** Starts the job, asking again every few seconds while the assistant starts, up to `retries` times. */
+async function startWhenAwake(
+  client: WelshClient,
+  request: WelshJobRequest,
+  signal: AbortSignal | undefined,
+  onProgress: ((state: "waking" | "pending") => void) | undefined,
+  retries: number
+): Promise<WelshResponse> {
+  const response = await client.start(request, signal);
+  if (response.status !== "waking" || retries === 0 || signal?.aborted) {
+    return response;
   }
-  while (response.status === "pending" && !signal?.aborted) {
-    onProgress?.("pending");
-    const jobId = response.job_id;
-    await client.wait(WELSH_POLL_MS, signal);
-    response = await client.read(jobId, signal);
+  onProgress?.("waking");
+  await client.wait(WELSH_WAKING_RETRY_MS, signal);
+  return await startWhenAwake(client, request, signal, onProgress, retries - 1);
+}
+
+/** Reads a running job back every couple of seconds until it is no longer pending. */
+async function followToEnd(
+  client: WelshClient,
+  response: WelshResponse,
+  signal: AbortSignal | undefined,
+  onProgress: ((state: "waking" | "pending") => void) | undefined
+): Promise<WelshResponse> {
+  if (response.status !== "pending" || signal?.aborted) {
+    return response;
   }
-  return response;
+  onProgress?.("pending");
+  await client.wait(WELSH_POLL_MS, signal);
+  return await followToEnd(client, await client.read(response.job_id, signal), signal, onProgress);
 }

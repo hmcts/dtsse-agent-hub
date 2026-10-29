@@ -9,7 +9,9 @@ export const dynamic = "force-dynamic";
  * The Welsh page: a business analyst's tools for a service's Welsh, run in their own assistant. `?product=` picks the
  * service and `?task=` the task it opens on, so a chat about one service can link straight to its Welsh.
  */
-export default async function WelshTranslationsPage({ searchParams }: { searchParams: Promise<{ product?: string | string[]; task?: string | string[] }> }) {
+export default async function WelshTranslationsPage({
+  searchParams
+}: Readonly<{ searchParams: Promise<{ product?: string | string[]; task?: string | string[] }> }>) {
   await requireViewer();
   const { product, task } = await searchParams;
   const initial = WELSH_PRODUCTS.find((p) => p.slug === product)?.slug ?? null;

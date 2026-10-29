@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { WelshFileView, WelshResponse } from "@/assistant/welsh";
 import { messageOf, safeLink } from "@/assistant/welsh-views";
 import { runWelshJob, type WelshClient, type WelshJobRequest, welshDownloadUrl } from "@/components/assistant/welshClient";
@@ -77,28 +77,28 @@ export function problemText(response: WelshResponse | undefined): string {
   }
 }
 
-/** An always-mounted live region saying where a job has got to, so a screen reader hears each change. */
-export function JobStatus({ state, working }: { state: JobState; working: string }) {
-  const text =
-    state.phase === "pending"
-      ? working
-      : state.phase === "waking"
-        ? "Your assistant is starting. This takes a minute or two, then this carries on by itself."
-        : state.phase === "failed"
-          ? problemText(state.response)
-          : "";
+const WAKING = "Your assistant is starting. This takes a minute or two, then this carries on by itself.";
+
+/**
+ * Where a job has got to: an always-mounted `<output>` live region for progress, so a screen reader hears each change,
+ * and an alert when it failed.
+ */
+export function JobStatus({ state, working }: Readonly<{ state: JobState; working: string }>) {
+  const progress: Record<JobPhase, string> = { idle: "", pending: working, waking: WAKING, done: "", failed: "" };
   return (
-    <p
-      role={state.phase === "failed" ? "alert" : "status"}
-      className={state.phase === "failed" ? "text-[13px] text-asst-error" : "text-[13px] text-asst-muted"}
-    >
-      {text}
-    </p>
+    <>
+      <output className="block text-[13px] text-asst-muted">{progress[state.phase]}</output>
+      {state.phase === "failed" ? (
+        <p role="alert" className="text-[13px] text-asst-error">
+          {problemText(state.response)}
+        </p>
+      ) : null}
+    </>
   );
 }
 
 /** The spreadsheets a job made, to download. */
-export function Downloads({ files, label }: { files: readonly WelshFileView[]; label: string }) {
+export function Downloads({ files, label }: Readonly<{ files: readonly WelshFileView[]; label: string }>) {
   if (files.length === 0) {
     return null;
   }
@@ -116,7 +116,7 @@ export function Downloads({ files, label }: { files: readonly WelshFileView[]; l
 }
 
 /** A pull request or Jira link: a link only to GitHub or HMCTS Atlassian, otherwise the address as text. */
-export function OutLink({ url, children }: { url: string | null; children: React.ReactNode }) {
+export function OutLink({ url, children }: Readonly<{ url: string | null; children: React.ReactNode }>) {
   const safe = safeLink(url);
   if (safe === null) {
     return url ? <span className="break-all text-[13px] text-asst-muted">{url}</span> : null;
@@ -130,7 +130,7 @@ export function OutLink({ url, children }: { url: string | null; children: React
 }
 
 /** What the Welsh tools said, folded away: useful when a figure needs explaining, noise otherwise. */
-export function ToolMessage({ result }: { result: Record<string, unknown> }) {
+export function ToolMessage({ result }: Readonly<{ result: Record<string, unknown> }>) {
   const message = messageOf(result);
   if (message === "") {
     return null;
@@ -181,7 +181,7 @@ export function WelshSourceNote() {
 }
 
 /** A numbered list of steps: what to do next is always the lowest step not yet done. */
-export function Steps({ children, label }: { children: React.ReactNode; label: string }) {
+export function Steps({ children, label }: Readonly<{ children: React.ReactNode; label: string }>) {
   return (
     <ol aria-label={label} className="flex flex-col">
       {children}
@@ -199,13 +199,13 @@ export function Step({
   done = false,
   summary,
   children
-}: {
+}: Readonly<{
   n: number;
   title: string;
   done?: boolean;
   summary?: React.ReactNode;
   children?: React.ReactNode;
-}) {
+}>) {
   return (
     <li className="group relative flex gap-3 pb-6 last:pb-0">
       <span aria-hidden="true" className="absolute left-[13px] top-7 bottom-0 w-px bg-asst-line group-last:hidden" />
@@ -224,5 +224,86 @@ export function Step({
         {children}
       </div>
     </li>
+  );
+}
+
+/**
+ * A label over its control, joined by `htmlFor`: `children` is given the id to put on the control. The label is its own
+ * element, so no whitespace between it and the control is left to chance.
+ */
+export function Labelled({ label, children, className = "" }: Readonly<{ label: string; children: (id: string) => React.ReactNode; className?: string }>) {
+  const id = useId();
+  return (
+    <div className={`flex flex-col gap-1 text-[13px] text-asst-muted ${className}`}>
+      <label htmlFor={id}>{label}</label>
+      {children(id)}
+    </div>
+  );
+}
+
+/** Which of a service's repos to work on, by its name alone. */
+export function RepoSelect({
+  repos,
+  value,
+  onChange,
+  label = "Repo"
+}: Readonly<{ repos: readonly string[]; value: string; onChange: (repo: string) => void; label?: string }>) {
+  return (
+    <Labelled label={label}>
+      {(id) => (
+        <select id={id} value={value} onChange={(event) => onChange(event.target.value)} className={`${FIELD} max-w-xs`}>
+          {repos.map((r) => (
+            <option key={r} value={r}>
+              {repoName(r)}
+            </option>
+          ))}
+        </select>
+      )}
+    </Labelled>
+  );
+}
+
+export function repoName(path: string): string {
+  return path.split("/").pop() ?? path;
+}
+
+/** Whether any of these jobs is still going, which disables what would start another. */
+export function isBusy(...states: readonly JobState[]): boolean {
+  return states.some((state) => state.phase === "pending" || state.phase === "waking");
+}
+
+/**
+ * A write that happens as the person — a pull request, a Jira edit — behind two clicks: the first says what will
+ * happen, the second does it. Nothing is written from the first.
+ */
+export function Confirm({
+  ask,
+  explain,
+  confirm,
+  busy,
+  onConfirm
+}: Readonly<{ ask: string; explain: React.ReactNode; confirm: string; busy: boolean; onConfirm: () => void }>) {
+  const [confirming, setConfirming] = useState(false);
+  if (!confirming) {
+    return (
+      <div>
+        <button type="button" className={PRIMARY} disabled={busy} onClick={() => setConfirming(true)}>
+          {ask}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2 rounded-lg bg-asst-field px-3 py-2 text-[13px]">
+      <p>{explain}</p>
+      <div className="flex gap-2">
+        <button type="button" className={PRIMARY} disabled={busy} onClick={onConfirm}>
+          {confirm}
+        </button>
+        <button type="button" className={SECONDARY} disabled={busy} onClick={() => setConfirming(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
