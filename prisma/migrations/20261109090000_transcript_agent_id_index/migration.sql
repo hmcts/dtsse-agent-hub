@@ -1,0 +1,18 @@
+-- An agent's entries by id. Two reads key on `(agent_id, id)` and neither can use
+-- `transcript_entry_agent_id_occurred_at_id_idx`: with `occurred_at` between the two columns, `id` is only an
+-- in-index filter there, so both walk the whole of the agent's range however few rows they want.
+--
+--   * the live top-up, `WHERE agent_id = $1 AND id > $2 ORDER BY id` — bounded by the per-agent cap, so at 20,000
+--     entries it read 228 index pages to answer with nothing;
+--   * `max(id)` for one agent, which the conversation's first page reads beside it to tell the browser what to ask
+--     for next. That one has no bound at all: with nothing to seek on, Postgres walks the primary key backwards
+--     from the newest row in the table until it reaches one of this agent's, so the cost is every row the hub has
+--     written since this agent last wrote. Measured at 4,778 buffers for an agent 20,000 rows back, growing with
+--     the hub's write rate rather than with the agent.
+--
+-- Both become index scans of a few pages. The write cost is one more index per insert, and a narrow one: two fixed
+-- width columns against the three of the index above, which stays because it is what orders a page by `occurred_at`.
+--
+-- Not CONCURRENTLY: src/store/migrate.ts wraps each migration in BEGIN/COMMIT, which rules it out. The build takes
+-- a ShareLock, so uploads block for as long as it runs; at the hub's present size that is well under a second.
+CREATE INDEX "transcript_entry_agent_id_id_idx" ON "transcript_entry" ("agent_id", "id");
