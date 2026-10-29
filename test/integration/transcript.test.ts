@@ -13,7 +13,7 @@ import { CONVERSATION_PAGE_SIZE } from "../../src/transcripts/views.ts";
 import { connect, insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
-import { WAIT_MS } from "./waits.ts";
+import { until } from "./waits.ts";
 
 const ALICE = person("alice");
 const BOB = person("bob");
@@ -389,16 +389,6 @@ describe("sweepTranscripts", () => {
     expect(await prisma.transcriptEntry.count()).toBe(0);
   });
 });
-
-async function until(check: () => boolean, timeoutMs = WAIT_MS): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!check()) {
-    if (Date.now() > deadline) {
-      throw new Error("timed out waiting for the sweeper");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 describe("startTranscriptSweep", () => {
   afterEach(() => {

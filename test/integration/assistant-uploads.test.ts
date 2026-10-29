@@ -23,10 +23,11 @@ import * as discardRoute from "../../src/app/api/ui/uploads/[uploadId]/route.ts"
 import * as uploadRoute from "../../src/app/api/ui/uploads/route.ts";
 import * as conversationsRoute from "../../src/app/api/virtual/[virtualAgentId]/conversations/route.ts";
 import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
-import { sweepUploads } from "../../src/assistant/upload-sweep.ts";
+import { startUploadSweep, sweepUploads } from "../../src/assistant/upload-sweep.ts";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_BYTES, MAX_UPLOAD_BYTES, PART_BYTES } from "../../src/assistant/uploads.ts";
 import { unsentChat } from "../../src/assistant/views.ts";
 import { realtime } from "../../src/realtime/process.ts";
+import type { PrismaClient } from "../../src/store/prisma.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { DEV_PERSONA_COOKIE } from "../../src/viewer/identity.ts";
 import { type ClaimResult, createVirtualAgent } from "../../src/virtual-agents/store.ts";
@@ -34,6 +35,7 @@ import { assistantSuite } from "./assistant-suite.ts";
 import { insertUser, type Person, prisma } from "./database.ts";
 import { jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
+import { until } from "./waits.ts";
 
 vi.mock("next/headers", async () => {
   const { jar } = await import("./web-session.ts");
@@ -1055,6 +1057,64 @@ describe("the upload sweep", () => {
     // Assert
     expect([one, two].filter((result) => result === undefined).length).toBeLessThanOrEqual(1);
     expect(await prisma.assistantUploadPart.count()).toBe(0);
+  });
+
+  describe("startUploadSweep", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("should log what a tick took, and nothing for a tick that found nothing", async () => {
+      // Arrange: one upload past the window, which the default retention is the same 3 hours as every test above
+      // passes explicitly. The spy goes on after the fixtures, which announce an orchestrator lease of their own.
+      await startedAssistant();
+      await stale(await spokenIn(), 5, "stored");
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const transaction = vi.spyOn(prisma, "$transaction");
+
+      // Act
+      const sweeper = startUploadSweep(prisma, 10);
+      try {
+        await until(() => info.mock.calls.length > 0);
+        // Two more ticks after the one that took it, so the quiet is a tick that ran and found nothing rather than
+        // a tick that had yet to happen.
+        const calls = transaction.mock.calls.length;
+        await until(() => transaction.mock.calls.length >= calls + 2);
+      } finally {
+        await sweeper.stop();
+      }
+
+      // Assert
+      expect(info.mock.calls).toEqual([["upload sweep: 1 uploads past their window expired, 1 part rows deleted"]]);
+      expect(await prisma.assistantUploadPart.count()).toBe(0);
+    });
+
+    it("should warn when a tick fails, and skip ticks while one is still running", async () => {
+      // Arrange: a client whose every tick rejects, the second with something that is not an `Error`, since the
+      // warning reads the message off one.
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const failures: unknown[] = [new Error("database gone"), "not an error"];
+      let started = 0;
+      const failing = {
+        $transaction: () => {
+          const failure = failures[started++ % failures.length];
+          return new Promise((_unused, reject) => setTimeout(() => reject(failure), 50));
+        }
+      } as unknown as PrismaClient;
+
+      // Act: an interval an order of magnitude shorter than a tick takes, so a tick is always still running when
+      // the next one is due.
+      const sweeper = startUploadSweep(failing, 5);
+      try {
+        await until(() => warn.mock.calls.length >= 2);
+      } finally {
+        await sweeper.stop();
+      }
+
+      // Assert
+      expect(warn.mock.calls.slice(0, 2)).toEqual([["the upload sweep failed: database gone"], ["the upload sweep failed: not an error"]]);
+      expect(started).toBeLessThanOrEqual(warn.mock.calls.length + 1);
+    });
   });
 });
 
