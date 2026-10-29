@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import nextConfig from "../../next.config.mjs";
 import {
+  BASE_REWRITE_LIMIT_BYTES,
   declaresTooLongBody,
   type Fetch,
   type ForwardTarget,
@@ -8,7 +9,9 @@ import {
   forwardedCookie,
   forwardedRequestHeaders,
   forwardedResponseHeaders,
+  isRewritableHtml,
   PROXY_BODY_LIMIT_BYTES,
+  rewriteBaseHref,
   rewriteLocation,
   rewriteSetCookie,
   UpstreamUnreachable
@@ -172,7 +175,68 @@ describe("forwardedResponseHeaders", () => {
   });
 });
 
+describe("rewriteBaseHref", () => {
+  it("should move a base from `/` under the prefix, whatever its quotes, case or other attributes", () => {
+    expect(rewriteBaseHref(`<head><base href="/"/></head>`, PREFIX)).toBe(`<head><base href="${PREFIX}/"/></head>`);
+    expect(rewriteBaseHref(`<BASE target="_self" HREF='/app/'>`, PREFIX)).toBe(`<BASE target="_self" HREF='${PREFIX}/app/'>`);
+  });
+
+  it.each([
+    `<base href="//elsewhere.example/">`,
+    `<base href="/\\elsewhere.example/">`,
+    `<base href="https://elsewhere.example/">`,
+    `<base href="app/">`,
+    "<p>/</p>"
+  ])("should leave %s alone", (html) => {
+    expect(rewriteBaseHref(html, PREFIX)).toBe(html);
+  });
+
+  it("should move the first base only", () => {
+    expect(rewriteBaseHref(`<base href="/"><base href="/">`, PREFIX)).toBe(`<base href="${PREFIX}/"><base href="/">`);
+  });
+});
+
+describe("isRewritableHtml", () => {
+  it.each<[string, boolean]>([
+    ["text/html", true],
+    ["text/html; charset=utf-8", true],
+    ['Text/HTML; Charset="UTF-8"', true],
+    ["text/html; charset=iso-8859-1", false],
+    ["application/json", false],
+    ["", false]
+  ])("should say %j is %s", (type, expected) => {
+    expect(isRewritableHtml(new Headers(type === "" ? {} : { "content-type": type }))).toBe(expected);
+  });
+});
+
 describe("forward", () => {
+  it("should move an HTML page's base under the prefix", async () => {
+    const fetchImpl = vi.fn<Fetch>(
+      async () => new Response(`<html><head><base href="/"></head></html>`, { headers: { "content-type": "text/html; charset=utf-8" } })
+    );
+
+    const response = await forward(new Request("https://agent-hub-viewer.example/x"), TARGET, fetchImpl);
+
+    expect(await response.text()).toBe(`<html><head><base href="${PREFIX}/"></head></html>`);
+  });
+
+  it("should leave a body that is not HTML as it came", async () => {
+    const fetchImpl = vi.fn<Fetch>(async () => new Response(`{"html":"<base href=\\"/\\">"}`, { headers: { "content-type": "application/json" } }));
+
+    const response = await forward(new Request("https://agent-hub-viewer.example/x"), TARGET, fetchImpl);
+
+    expect(await response.text()).toBe(`{"html":"<base href=\\"/\\">"}`);
+  });
+
+  it("should stream a page larger than the rewrite limit on whole and unchanged", async () => {
+    const page = `<base href="/">${"x".repeat(BASE_REWRITE_LIMIT_BYTES)}`;
+    const fetchImpl = vi.fn<Fetch>(async () => new Response(page, { headers: { "content-type": "text/html" } }));
+
+    const response = await forward(new Request("https://agent-hub-viewer.example/x"), TARGET, fetchImpl);
+
+    expect(await response.text()).toBe(page);
+  });
+
   it("should fetch the rest of the path and the query from the upstream origin without following its redirects", async () => {
     const fetchImpl = vi.fn<Fetch>(async () => new Response("hello", { status: 201, statusText: "Created", headers: { "content-type": "text/plain" } }));
 
