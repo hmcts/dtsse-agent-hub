@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { landingPath, parseViewerPath, portOf, ticketPath, viewerCookieName, viewerPrefix, viewerUrl } from "./paths.ts";
+import { landingPath, parseViewerPath, portOf, refererTarget, ticketPath, viewerCookieName, viewerPrefix, viewerUrl } from "./paths.ts";
 
 const ID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 
@@ -61,5 +61,28 @@ describe("landingPath", () => {
     ["/docs\nSet-Cookie: x=1", "/"]
   ])("should land %j at %j", (value, path) => {
     expect(landingPath(value)).toBe(path);
+  });
+});
+
+describe("refererTarget", () => {
+  const HOST = "agent-hub-viewer.example";
+  const PAGE = `https://${HOST}/${ID}/8080/dashboard?tab=1`;
+
+  it("should move a root-relative path, query and all, under the prefix of the page that asked for it", () => {
+    expect(refererTarget(PAGE, HOST, "/style.css")).toBe(`/${ID}/8080/style.css`);
+    expect(refererTarget(PAGE, HOST, "/api?x=1")).toBe(`/${ID}/8080/api?x=1`);
+    expect(refererTarget(`https://${HOST}/${ID}/8080`, HOST, "/")).toBe(`/${ID}/8080/`);
+  });
+
+  it.each<[string, string | null, string]>([
+    ["no Referer", null, "/style.css"],
+    ["a Referer that is not a URL", "not a url", "/style.css"],
+    ["a page on another host", `https://agent-hub.example/${ID}/8080/`, "/style.css"],
+    ["a page over http", `http://${HOST}/${ID}/8080/`, "/style.css"],
+    ["a page outside every prefix", `https://${HOST}/`, "/style.css"],
+    ["the viewer's own ticket exchange", PAGE, "/_auth?ticket=x"],
+    ["a scheme-relative path", PAGE, "//evil.example/"]
+  ])("should leave nothing to redirect for %s", (_case, referer, path) => {
+    expect(refererTarget(referer, HOST, path)).toBeUndefined();
   });
 });
