@@ -13,6 +13,7 @@ import { CONVERSATION_PAGE_SIZE } from "../../src/transcripts/views.ts";
 import { connect, insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
+import { WAIT_MS } from "./waits.ts";
 
 const ALICE = person("alice");
 const BOB = person("bob");
@@ -389,7 +390,7 @@ describe("sweepTranscripts", () => {
   });
 });
 
-async function until(check: () => boolean, timeoutMs = 5000): Promise<void> {
+async function until(check: () => boolean, timeoutMs = WAIT_MS): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!check()) {
     if (Date.now() > deadline) {

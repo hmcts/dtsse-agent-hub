@@ -14,7 +14,9 @@ def yarnBuilder = new uk.gov.hmcts.contino.YarnBuilder(this)
 
 // The integration suite needs a real Postgres, so `before('test')` starts one on the agent. The image is the ACR
 // mirror, so the pull is not rate-limited. The container name and host port are both per build: two builds can share
-// an agent, and a shared name let one build's teardown destroy the other's database mid-suite.
+// an agent, and a shared name let one build's teardown destroy the other's database mid-suite. It runs with
+// durability off, as `docker-compose.yml` does and for the same reason — the container is this build's alone and is
+// discarded with it, and the suite spends most of its time committing.
 def postgresImage = 'hmctsprod.azurecr.io/imported/postgres:16-alpine'
 def buildRef = env.BRANCH_NAME == null ? null : "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
 def postgresContainer = "agent-hub-test-postgres-${buildRef}".replaceAll('[^A-Za-z0-9_.-]', '-')
@@ -53,7 +55,8 @@ withPipeline(type, product, component) {
       docker inspect ${postgresImage} > /dev/null 2>&1 || docker pull ${postgresImage}
       docker run --rm --name ${postgresContainer} --publish 0:5432 \
         -e POSTGRES_DB=agent_hub -e POSTGRES_USER=hmcts -e POSTGRES_HOST_AUTH_METHOD=trust \
-        -d ${postgresImage}
+        -d ${postgresImage} \
+        postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off
       for attempt in \$(seq 1 30); do
         docker exec ${postgresContainer} pg_isready -h 127.0.0.1 -U hmcts -d agent_hub && break
         sleep 2

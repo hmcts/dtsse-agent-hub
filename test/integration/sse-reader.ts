@@ -1,4 +1,5 @@
 import type { ApiMessage } from "../../src/messages/shape.ts";
+import { WAIT_MS } from "./waits.ts";
 
 export interface Frame {
   id?: string;
@@ -50,7 +51,7 @@ export function frames(response: Response) {
   return {
     received,
     /** Resolves with every `direct` event once there are `count` of them. */
-    async directs(count: number, timeoutMs = 5000): Promise<{ id: string; message: ApiMessage }[]> {
+    async directs(count: number, timeoutMs = WAIT_MS): Promise<{ id: string; message: ApiMessage }[]> {
       const deadline = Date.now() + timeoutMs;
       const directs = () => received.filter((frame) => frame.event === "direct");
       while (directs().length < count) {
@@ -65,7 +66,7 @@ export function frames(response: Response) {
       return directs().map((frame) => ({ id: frame.id!, message: JSON.parse(frame.data!).message }));
     },
     /** Resolves with every frame of `event` once there are `count` of them. */
-    async named(event: string, count: number, timeoutMs = 5000): Promise<Frame[]> {
+    async named(event: string, count: number, timeoutMs = WAIT_MS): Promise<Frame[]> {
       const deadline = Date.now() + timeoutMs;
       const matching = () => received.filter((frame) => frame.event === event);
       while (matching().length < count) {
@@ -90,7 +91,7 @@ export function frames(response: Response) {
       }
     },
     /** Reads until the server ends the response, failing if it has not within `timeoutMs`. */
-    async end(timeoutMs = 10_000): Promise<Frame[]> {
+    async end(timeoutMs = WAIT_MS): Promise<Frame[]> {
       const deadline = Date.now() + timeoutMs;
       while (!ended) {
         if (Date.now() > deadline) {
