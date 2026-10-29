@@ -10,7 +10,7 @@ export interface GitIdentityActions {
 }
 
 const INPUT = "mt-1 w-96 max-w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 text-sm text-hub-text";
-const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
+const BUTTON = "rounded-sm bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
 
 /** The viewer's optional override of the git identity their virtual agents commit as. */
 export function GitIdentityCard({ settings, actions }: { settings: GitIdentitySettings; actions: GitIdentityActions }) {

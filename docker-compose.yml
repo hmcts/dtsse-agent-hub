@@ -2,6 +2,9 @@
 # on a fixed name. They do still share the 5432 binding, which is correct — they would be the same `DATABASE_URL`.
 services:
   postgres:
+    # Held at 16 to match the integration-test container in `Jenkinsfile_CNP` and the AAT server in
+    # `infrastructure/postgres.tf`: the migrations here are hand-written SQL, so a local server ahead of those would
+    # accept syntax the gate and the deployed database reject.
     image: postgres:16-alpine
     # Durability off, because nothing on this server is worth recovering: it holds `yarn dev`'s database and the
     # integration suite's, both of which are rebuilt by a migrate. It is the largest single thing the suite's speed

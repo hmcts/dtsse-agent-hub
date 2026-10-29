@@ -147,7 +147,7 @@ export function ConversationSearch({ search = fetchChats, children }: { search?:
           aria-expanded={chats.length > 0}
           aria-controls={listId}
           aria-activedescendant={current === -1 ? undefined : optionId(current)}
-          className="w-full rounded-[10px] border border-asst-strong bg-asst-field px-3 py-2 text-sm text-asst-text outline-none placeholder:text-asst-faint focus:border-asst-accent-line"
+          className="w-full rounded-[10px] border border-asst-strong bg-asst-field px-3 py-2 text-sm text-asst-text outline-hidden placeholder:text-asst-faint focus:border-asst-accent-line"
         />
       </div>
       <nav aria-label="Chats" className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-2 pb-4 pt-1">

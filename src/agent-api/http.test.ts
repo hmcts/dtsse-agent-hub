@@ -195,14 +195,12 @@ describe("registerBody", () => {
     expect(() => parse(registerBody, { session_id: "s", name: "n", skills })).toThrow(/skills/);
   });
 
-  it.each([
-    [null],
-    ["cft-explain"],
-    [7],
-    [{ name: "x" }]
-  ])("should read skills sent as %j as skills not sent, rather than keep a client off the hub", (skills) => {
-    expect(parse(registerBody, { session_id: "s", name: "n", skills }).skills).toBeUndefined();
-  });
+  it.each([[null], ["cft-explain"], [7], [{ name: "x" }]])(
+    "should read skills sent as %j as skills not sent, rather than keep a client off the hub",
+    (skills) => {
+      expect(parse(registerBody, { session_id: "s", name: "n", skills }).skills).toBeUndefined();
+    }
+  );
 });
 
 describe("heartbeatBody", () => {

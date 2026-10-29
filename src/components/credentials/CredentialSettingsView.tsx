@@ -31,7 +31,7 @@ const VIA: Record<CredentialVia, string> = {
 };
 
 const INPUT = "mt-1 w-96 max-w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 font-mono text-sm text-hub-text";
-const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
+const BUTTON = "rounded-sm bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
 
 /**
  * `route` is the viewer's own, so it describes what a new agent of theirs would run on; `claudeTokenUsable` describes

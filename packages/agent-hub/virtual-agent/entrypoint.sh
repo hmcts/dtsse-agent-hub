@@ -108,6 +108,13 @@ shutdown() {
     fi
     exit 0
 }
+
+# bash re-parses a trap's handler at the moment the signal lands, and up to and including 5.2 that parse
+# inherits the state of a command substitution the shell was in the middle of parsing: the handler fails with
+# `trap: line 2: unexpected EOF while looking for matching ')'` whatever it says, is never run, and the pod is
+# SIGKILLed at the grace period with Claude, the bridges and the clone step all still up. 5.3 parses it
+# cleanly. So nothing on the supervision loop below reads a value back with `$(…)` or `<(…)` on every pass,
+# and that, rather than anything about this handler, is what keeps it reachable.
 trap shutdown TERM INT
 
 # The hub has failed the agent (or it cannot work at all): say why and wait to be stopped, rather
@@ -208,7 +215,7 @@ HAI_REGISTRY="--@hmcts-cft:registry=https://pkgs.dev.azure.com/hmcts/Artifacts/_
 #     missing from the image is checked above for the same reason.
 HAI_INSTALL_TRIES=3
 hai_tries=0
-# Empty unless boot fell back; repos_detail appends it to the running detail.
+# Empty unless boot fell back; set_repos_detail appends it to the running detail.
 hai_note=""
 install_hai() {
     local out rc=0 prefix version reason
@@ -374,7 +381,8 @@ repos_state=""
 repos_done=0
 repos_total=0
 reported=""
-reported_at=0
+# One interval ago, in the SECONDS the rate limit below counts in, so the first report is never held back.
+reported_at=$((-REPORT_EVERY))
 
 # Runs the clone step in the background at low priority behind Claude, with its own process group so that
 # SIGTERM stops it and the git clones under it, and its exit status in repos.rc once it is over.
@@ -402,7 +410,7 @@ read_repos_state() {
             total=*) repos_total="${line#total=}" ;;
         esac
     done <"$REPOS_STATE"
-    # Which of the two the step is doing is only ever said in state=, and repos_detail needs it after the
+    # Which of the two the step is doing is only ever said in state=, and set_repos_detail needs it after the
     # state has moved on to failed.
     case "$repos_state" in cloning | syncing) repos_kind="$repos_state" ;; esac
     [[ "$repos_done" =~ ^[0-9]+$ ]] || repos_done=0
@@ -412,18 +420,26 @@ read_repos_state() {
 # Writes the clone step's state as this file knows it. Never a note= line: the sentence a session is given
 # belongs to whatever did the cloning, and the client has a generic one of its own for a state that carries
 # none, which is better than a stale sentence from a step that is no longer running.
+#
+# date(1) writes the updated= value itself inside the group rather than being read back with `$(…)`: this runs
+# on every pass while the repositories arrive, and a SIGTERM that lands in that command substitution's parse
+# takes the shutdown handler with it. See the trap above.
 write_repos_state() {
-    printf 'state=%s\ndone=%s\ntotal=%s\nupdated=%s\n' "$repos_state" "$repos_done" "$repos_total" \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$REPOS_STATE.tmp" && mv "$REPOS_STATE.tmp" "$REPOS_STATE"
+    {
+        printf 'state=%s\ndone=%s\ntotal=%s\nupdated=' "$repos_state" "$repos_done" "$repos_total"
+        date -u +%Y-%m-%dT%H:%M:%SZ
+    } >"$REPOS_STATE.tmp" && mv "$REPOS_STATE.tmp" "$REPOS_STATE"
 }
 
-# What the clone step is doing, as a verb for a sentence about it: "arrive" until it has said which of the two
-# it is, because only state= ever says so.
-repos_verb() {
+# What the clone step is doing, as a verb for a sentence about it, left in repos_verb: "arrive" until it has
+# said which of the two it is, because only state= ever says so. Assigned rather than printed for its callers
+# to read back with `$(…)`, for the reason the trap above gives.
+repos_verb=arrive
+set_repos_verb() {
     case "$repos_kind" in
-        cloning) printf 'clone' ;;
-        syncing) printf 'sync' ;;
-        *) printf 'arrive' ;;
+        cloning) repos_verb=clone ;;
+        syncing) repos_verb=sync ;;
+        *) repos_verb=arrive ;;
     esac
 }
 
@@ -432,11 +448,16 @@ repos_verb() {
 # and the counts taken from that log rather than from a state file, so a session still gets the client's
 # generic sentence about the repositories rather than nothing at all. The apps/, libs/ and platops/ wording is
 # the workspace's and arrives with the hook.
+#
+# The counts go through a file rather than a `<(…)` process substitution: this runs on every pass while the
+# repositories arrive, and a process substitution is the likeliest place of all to lose a SIGTERM. See the
+# trap above.
 fallback_count() {
-    read -r repos_done repos_total < <(awk '
+    awk '
         /^(Cloning into|Syncing) [0-9]+ / { total = $(/^Syncing/ ? 2 : 3) }
         /^(OK|ERR|SKIP|MISS) / || / skip \(/ { done++ }
-        END { print done + 0, total + 0 }' "$REPOS_LOG" 2>/dev/null)
+        END { print done + 0, total + 0 }' "$REPOS_LOG" >"$REPOS_LOG.count" 2>/dev/null
+    read -r repos_done repos_total <"$REPOS_LOG.count"
 }
 
 fallback_start() {
@@ -462,7 +483,8 @@ fallback_finished() {
         log "the workspace repos are ready"
     else
         repos_state=failed
-        log "the background $(repos_verb) reported failures; see $REPOS_LOG (the next boot runs it again)"
+        set_repos_verb
+        log "the background $repos_verb reported failures; see $REPOS_LOG (the next boot runs it again)"
     fi
     write_repos_state
 }
@@ -519,6 +541,7 @@ repos_finished() {
 }
 
 poll_repos() {
+    local rc=""
     [[ -n "$repos_pid" ]] || return 0
     if [[ ! -f "$REPOS_RC" ]] && kill -0 "$repos_pid" 2>/dev/null; then
         repos_progress
@@ -526,40 +549,52 @@ poll_repos() {
     fi
     wait "$repos_pid" 2>/dev/null
     repos_pid=""
-    repos_finished "$(cat "$REPOS_RC" 2>/dev/null)"
+    # Read rather than `$(cat …)`, for the reason the trap above gives. A step that was killed before it could
+    # write its status leaves no file at all, and repos_finished takes an empty status as a failure.
+    read -r rc 2>/dev/null <"$REPOS_RC" || true
+    repos_finished "$rc"
 }
 
-repos_detail() {
+# The sentence the hub shows under the agent, left in repos_detail. Assigned rather than printed for
+# report_running to read back with `$(…)`, for the reason the trap above gives.
+repos_detail=""
+set_repos_detail() {
     case "$repos_state" in
         cloning | syncing)
-            printf 'Claude is ready; %s repositories' "$repos_state"
-            [[ "$repos_total" -gt 0 ]] && printf ' (%s/%s)' "$repos_done" "$repos_total"
+            repos_detail="Claude is ready; $repos_state repositories"
+            [[ "$repos_total" -gt 0 ]] && repos_detail="$repos_detail ($repos_done/$repos_total)"
             ;;
-        done) printf 'Claude is ready; repositories ready' ;;
-        failed) printf 'Claude is ready; some repositories failed to %s (see %s)' "$(repos_verb)" "$REPOS_LOG" ;;
-        *) printf 'Claude is ready' ;;
+        done) repos_detail="Claude is ready; repositories ready" ;;
+        failed)
+            set_repos_verb
+            repos_detail="Claude is ready; some repositories failed to $repos_verb (see $REPOS_LOG)"
+            ;;
+        *) repos_detail="Claude is ready" ;;
     esac
     # A stale hai is otherwise only in the boot log, which the owner does not see. It rides along
     # on every detail rather than being reported on its own: report_running compares the whole
     # string against the last one sent, so a second phase line would be dropped as a duplicate as
     # soon as the repos stopped moving.
     if [[ -n "$hai_note" ]]; then
-        printf '; %s' "$hai_note"
+        repos_detail="$repos_detail; $hai_note"
     fi
 }
 
 # report_running [now]: phase running with the repos' progress, at most every REPORT_EVERY
 # seconds while they are still arriving, unless "now".
+#
+# SECONDS rather than `date +%s`: the rate limit needs an interval and nothing else, and this runs on every
+# pass of the loop that waits for SIGTERM. See the trap above.
 report_running() {
-    local detail at
-    detail=$(repos_detail)
-    at=$(date +%s)
+    local at
+    set_repos_detail
+    at=$SECONDS
     if [[ "${1:-}" != now ]]; then
-        [[ "$detail" == "$reported" ]] && return 0
+        [[ "$repos_detail" == "$reported" ]] && return 0
         [[ "$repos_state" == cloning || "$repos_state" == syncing ]] &&
             [[ $((at - reported_at)) -lt "$REPORT_EVERY" ]] && return 0
     fi
-    status running "$detail" && reported=$detail && reported_at=$at
+    status running "$repos_detail" && reported=$repos_detail && reported_at=$at
 }
 
 start_repos

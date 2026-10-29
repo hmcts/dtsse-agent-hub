@@ -77,14 +77,11 @@ const entry = z
   .object({
     key: z.string().min(1).max(MAX_ENTRY_KEY).regex(ENTRY_KEY_PATTERN, "must be letters, digits, ':', '_' and '-'"),
     role: z.enum(TRANSCRIPT_ROLES),
-    content: z.record(z.unknown()),
+    content: z.record(z.string(), z.unknown()),
     truncated: z.boolean().default(false),
     redacted: z.boolean().default(false),
     message_id: messageId,
-    occurred_at: z
-      .string()
-      .datetime({ offset: true })
-      .transform((value) => new Date(value))
+    occurred_at: z.iso.datetime({ offset: true }).transform((value) => new Date(value))
   })
   .transform((value, context) => {
     const { schema, shape } = contentFor(value.role, value.redacted);

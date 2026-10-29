@@ -1694,20 +1694,20 @@ describe("sweepVirtualAgents", () => {
     expect((await row(agent.id)).desired).toBe("running");
   });
 
-  it.each([
-    "awaiting_login",
-    "awaiting_credentials"
-  ] as const)("should stop an agent that has spent the night asking its owner for %s and getting nothing", async (phase) => {
-    const stalled = await waitingSince(ALICE, "stalled", phase);
-    expect(stalled).toMatchObject({ status: phase, desired: "running", statusDetail: `${phase} 0` });
-    // The Sunday evening start is past every weekday stop, so the evening rule is not what catches this one.
-    expect(dueEveningStop(stalled.startedAt, NOW, OPTIONS.eveningStop)).toBe(false);
+  it.each(["awaiting_login", "awaiting_credentials"] as const)(
+    "should stop an agent that has spent the night asking its owner for %s and getting nothing",
+    async (phase) => {
+      const stalled = await waitingSince(ALICE, "stalled", phase);
+      expect(stalled).toMatchObject({ status: phase, desired: "running", statusDetail: `${phase} 0` });
+      // The Sunday evening start is past every weekday stop, so the evening rule is not what catches this one.
+      expect(dueEveningStop(stalled.startedAt, NOW, OPTIONS.eveningStop)).toBe(false);
 
-    const result = await sweepVirtualAgents(prisma, OPTIONS);
+      const result = await sweepVirtualAgents(prisma, OPTIONS);
 
-    expect(result).toMatchObject({ awaitingOwner: [stalled.id], idle: [], evening: [] });
-    expect(await row(stalled.id)).toMatchObject({ desired: "stopped", stopReason: "awaiting_owner" });
-  });
+      expect(result).toMatchObject({ awaitingOwner: [stalled.id], idle: [], evening: [] });
+      expect(await row(stalled.id)).toMatchObject({ desired: "stopped", stopReason: "awaiting_owner" });
+    }
+  );
 
   it("should leave an agent its owner has just signed in to, where the pod's own prompts would not have saved it", async () => {
     const waiting = await waitingSince(ALICE, "signed-in", "awaiting_login");
@@ -1871,7 +1871,7 @@ describe("sweepVirtualAgents", () => {
     try {
       await expect.poll(async () => (await prisma.virtualAgent.findUniqueOrThrow({ where: { id: agent.id } })).claimedBy).toBeNull();
     } finally {
-      sweeper.stop();
+      await sweeper.stop();
     }
   });
 });

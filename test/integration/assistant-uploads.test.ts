@@ -1,9 +1,10 @@
 // Files attached to an HMCTS Assistant message, end to end through Postgres: the browser's parts, the message that
 // claims them, the frame that names them, the pod's fetch, and the sweep that is the backstop for all of it.
 //
-// The memory assertion in "the hub's memory" is the point of the transport's design and not a formality: every byte
-// of an upload crosses a heap capped at 768 MB on two replicas, so one part at a time has to be measured rather than
-// reasoned about.
+// The two assertions in "the hub's memory" are the point of the transport's design and not a formality: every byte of
+// an upload crosses a heap capped at 768 MB on two replicas, so one part at a time has to be measured rather than
+// reasoned about. Both measure the bytes the hub pulled from a client's body, which is the route's own behaviour,
+// rather than `process.memoryUsage()`, which is the whole worker's and moves with everything else sharing it.
 import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -22,10 +23,11 @@ import * as discardRoute from "../../src/app/api/ui/uploads/[uploadId]/route.ts"
 import * as uploadRoute from "../../src/app/api/ui/uploads/route.ts";
 import * as conversationsRoute from "../../src/app/api/virtual/[virtualAgentId]/conversations/route.ts";
 import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
-import { sweepUploads } from "../../src/assistant/upload-sweep.ts";
+import { startUploadSweep, sweepUploads } from "../../src/assistant/upload-sweep.ts";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_BYTES, MAX_UPLOAD_BYTES, PART_BYTES } from "../../src/assistant/uploads.ts";
 import { unsentChat } from "../../src/assistant/views.ts";
 import { realtime } from "../../src/realtime/process.ts";
+import type { PrismaClient } from "../../src/store/prisma.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { DEV_PERSONA_COOKIE } from "../../src/viewer/identity.ts";
 import { type ClaimResult, createVirtualAgent } from "../../src/virtual-agents/store.ts";
@@ -33,6 +35,7 @@ import { assistantSuite } from "./assistant-suite.ts";
 import { insertUser, type Person, prisma } from "./database.ts";
 import { jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
+import { until } from "./waits.ts";
 
 vi.mock("next/headers", async () => {
   const { jar } = await import("./web-session.ts");
@@ -1055,93 +1058,126 @@ describe("the upload sweep", () => {
     expect([one, two].filter((result) => result === undefined).length).toBeLessThanOrEqual(1);
     expect(await prisma.assistantUploadPart.count()).toBe(0);
   });
+
+  describe("startUploadSweep", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("should log what a tick took, and nothing for a tick that found nothing", async () => {
+      // Arrange: one upload past the window, which the default retention is the same 3 hours as every test above
+      // passes explicitly. The spy goes on after the fixtures, which announce an orchestrator lease of their own.
+      await startedAssistant();
+      await stale(await spokenIn(), 5, "stored");
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const transaction = vi.spyOn(prisma, "$transaction");
+
+      // Act
+      const sweeper = startUploadSweep(prisma, 10);
+      try {
+        await until(() => info.mock.calls.length > 0);
+        // Two more ticks after the one that took it, so the quiet is a tick that ran and found nothing rather than
+        // a tick that had yet to happen.
+        const calls = transaction.mock.calls.length;
+        await until(() => transaction.mock.calls.length >= calls + 2);
+      } finally {
+        await sweeper.stop();
+      }
+
+      // Assert
+      expect(info.mock.calls).toEqual([["upload sweep: 1 uploads past their window expired, 1 part rows deleted"]]);
+      expect(await prisma.assistantUploadPart.count()).toBe(0);
+    });
+
+    it("should warn when a tick fails, and skip ticks while one is still running", async () => {
+      // Arrange: a client whose every tick rejects, the second with something that is not an `Error`, since the
+      // warning reads the message off one.
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const failures: unknown[] = [new Error("database gone"), "not an error"];
+      let started = 0;
+      const failing = {
+        $transaction: () => {
+          const failure = failures[started++ % failures.length];
+          return new Promise((_unused, reject) => setTimeout(() => reject(failure), 50));
+        }
+      } as unknown as PrismaClient;
+
+      // Act: an interval an order of magnitude shorter than a tick takes, so a tick is always still running when
+      // the next one is due.
+      const sweeper = startUploadSweep(failing, 5);
+      try {
+        await until(() => warn.mock.calls.length >= 2);
+      } finally {
+        await sweeper.stop();
+      }
+
+      // Assert
+      expect(warn.mock.calls.slice(0, 2)).toEqual([["the upload sweep failed: database gone"], ["the upload sweep failed: not an error"]]);
+      expect(started).toBeLessThanOrEqual(warn.mock.calls.length + 1);
+    });
+  });
 });
 
 const MB = 1024 * 1024;
 
-/**
- * The retained memory, not the allocated: a forced collection first, so what is left is what is still reachable.
- * `vitest.integration.config.mts` gives the worker `--expose-gc` for this; without it the reading is churn and says
- * nothing about what is held.
- *
- * `arrayBuffers` is counted as well as `heapUsed`, and is the half that matters here: a `Uint8Array` of a part's
- * worth of bytes has its backing store outside the V8 object heap, so `heapUsed` alone cannot see a buffered body at
- * all and would report a reader holding every file as using nothing.
- */
-function retained(): number {
-  (global as { gc?: () => void }).gc?.();
-  const usage = process.memoryUsage();
-  return usage.heapUsed + usage.arrayBuffers;
-}
-
-/** Uploads `parts` parts of one file, one request at a time, from a buffer the caller owns. */
-async function sequentially(created: Created, parts: number, body: Uint8Array<ArrayBuffer>): Promise<void> {
-  for (let index = 0; index < parts; index += 1) {
-    const response = await putPart(created.uploadId, index, body);
-    if (!response.ok) {
-      throw new Error(`part ${index} was refused: ${response.status}`);
-    }
-  }
-}
-
+/** Clients streaming at once in the reading measurement below; also the per-message file cap. */
 const CONCURRENT_UPLOADS = 4;
 
-/**
- * The most the process retained at any moment while `CONCURRENT_UPLOADS` files of `parts` parts each were uploaded
- * together, one part in flight per file. Every body is the same shared buffer, so the test's own contribution is a
- * fixed 4 MiB whatever the file size is.
- */
-async function peakWhileUploading(conversationId: string, parts: number, body: Uint8Array<ArrayBuffer>): Promise<number> {
-  const size = PART_BYTES * parts;
-  const files = await Promise.all(
-    Array.from({ length: CONCURRENT_UPLOADS }, async (_unused, n) => await jsonOf<Created>(await startUpload(conversationId, { name: `f${n}.pdf`, size })))
-  );
-  let peak = retained();
-  const sampler = setInterval(() => {
-    peak = Math.max(peak, retained());
-  }, 10);
-  try {
-    await Promise.all(files.map((created) => sequentially(created, parts, body)));
-  } finally {
-    clearInterval(sampler);
-  }
-  for (const created of files) {
-    expect(await prisma.assistantUpload.findUniqueOrThrow({ where: { id: created.uploadId } })).toMatchObject({ state: "stored" });
-  }
-  return peak;
-}
-
 describe("the hub's memory", () => {
-  it("should cost no more for a large file than a small one when several uploads run at once", async () => {
-    // Arrange: the same four concurrent uploads at two file sizes, 4 MB and 24 MB. What is asserted is not an absolute
-    // ceiling — a part costs several copies between undici, the reader and the Postgres driver, and Node's allocator
-    // holds freed external memory for reuse, so the absolute figure is large and noisy either way. What distinguishes
-    // a reader that holds one part from one that holds the body it was given is whether the peak follows the *file*
-    // size: six times the file for the same number of requests in flight.
-    expect((global as { gc?: () => void }).gc, "the measurement needs --expose-gc; see vitest.integration.config.mts").toBeTypeOf("function");
+  it("should read no more than a part from each of several clients streaming a whole file at once", async () => {
+    // Arrange: `CONCURRENT_UPLOADS` clients that each offer a whole 24 MB file at part 0, with every request in
+    // flight together — the shape a buffering reader multiplies. What is counted is the bytes the hub pulled, not
+    // the heap it was seen holding: the reads are the route's own behaviour, where `heapUsed + arrayBuffers` is the
+    // whole worker's and moves with the Prisma pool, undici's buffers and the allocator's retained externals.
+    // Each body is generated chunk by chunk from one small buffer, so the test holds no copy of any file.
     await startedAssistant();
-    const body = filled(PART_BYTES, 7);
-    // A conversation of its own per measurement: four files at once is already the per-message cap, and none of these
-    // is ever sent, so they stay unattached and a second round in the same conversation would be refused.
-    const peak = async (parts: number) => {
-      const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
-      return await peakWhileUploading(conversation.id, parts, body);
+    const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const offered = PART_BYTES * 6;
+    const chunk = 64 * 1024;
+    let pulled = 0;
+    // Four at once is the per-message cap, and none of these is ever sent, so one conversation holds them all.
+    const created = await Promise.all(
+      Array.from(
+        { length: CONCURRENT_UPLOADS },
+        async (_unused, n) => await jsonOf<Created>(await startUpload(conversation.id, { name: `whole${n}.pdf`, size: offered }))
+      )
+    );
+
+    const streamWholeFile = async (upload: Created): Promise<number> => {
+      let sent = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent >= offered) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(new Uint8Array(chunk).fill(7));
+          sent += chunk;
+          pulled += chunk;
+        }
+      });
+      const request = new NextRequest(`http://localhost:3000/api/ui/uploads/${upload.uploadId}/parts/0`, {
+        method: "PUT",
+        headers: { cookie: `${DEV_PERSONA_COOKIE}=alice`, "content-type": "application/octet-stream" },
+        body,
+        duplex: "half"
+      } as NextInit);
+      const response = await partRoute.PUT(request, { params: Promise.resolve({ uploadId: upload.uploadId, index: "0" }) });
+      return response.status;
     };
 
-    // Act: each size measured twice and the lower reading kept. The noise in this figure is all upward — a collection
-    // the sampler happened to catch late — so the minimum is much the steadier of the two statistics.
-    const small = Math.min(await peak(1), await peak(1));
-    const large = Math.min(await peak(6), await peak(6));
+    // Act
+    const statuses = await Promise.all(created.map(streamWholeFile));
 
     // Assert
-    const measured = `${CONCURRENT_UPLOADS} concurrent uploads peaked at ${(small / MB).toFixed(0)} MB retained for ${PART_BYTES / MB} MB files and ${(large / MB).toFixed(0)} MB for ${(PART_BYTES * 6) / MB} MB files`;
-    // Printed, not only asserted: this is the measurement the transport was accepted on, so a run should say what it
-    // actually was rather than only that it passed.
+    expect(statuses).toEqual(created.map(() => 413));
+    const measured = `${CONCURRENT_UPLOADS} clients streaming ${offered / MB} MB files at one part got through ${(pulled / MB).toFixed(1)} MB between them`;
+    // Printed as well as asserted: this is one of the two measurements the transport was accepted on.
     console.info(measured);
-    // Measured: the two readings stay within about 20 MB of each other however the files are sized. A reader that
-    // kept each body would add CONCURRENT_UPLOADS × 20 MB — 80 MB, and 83 MB when that was deliberately tried — so
-    // the allowance of two parts per upload in flight sits well above the noise and well below the signal.
-    expect(large, measured).toBeLessThan(small + CONCURRENT_UPLOADS * PART_BYTES * 2);
+    // An unbounded read pulls every offered byte — CONCURRENT_UPLOADS × 24 MB — and this reader stops a chunk past
+    // each part's length, so the allowance of two parts per request in flight sits far below that and just above
+    // what a part-at-a-time reader can pull.
+    expect(pulled, measured).toBeLessThan(CONCURRENT_UPLOADS * PART_BYTES * 2);
   });
 
   it("should not take a whole file into memory when a client streams one at a single part", async () => {
@@ -1149,7 +1185,6 @@ describe("the hub's memory", () => {
     // refused, but a reader built on `request.arrayBuffer()` would have all 24 MB in memory before it could refuse.
     // The body is generated chunk by chunk from one small buffer, so the test holds no copy of it and the only thing
     // the measurement can see is what the route itself keeps.
-    expect((global as { gc?: () => void }).gc, "the measurement needs --expose-gc; see vitest.integration.config.mts").toBeTypeOf("function");
     await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
     const offered = PART_BYTES * 6;

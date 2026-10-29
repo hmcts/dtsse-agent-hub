@@ -16,7 +16,7 @@ export function SkeletonPage({ children }: { children: React.ReactNode }) {
 }
 
 export function SkeletonBar({ className }: { className: string }) {
-  return <div className={`animate-pulse rounded bg-hub-raised ${className}`} />;
+  return <div className={`animate-pulse rounded-sm bg-hub-raised ${className}`} />;
 }
 
 function SkeletonMessage() {

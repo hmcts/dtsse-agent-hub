@@ -103,7 +103,7 @@ describe("ClaudeMdSection", () => {
       fireEvent.submit(screen.getByRole("form", { name: "Save your CLAUDE.md" }));
     });
 
-    expect(((given.save as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as FormData).get("value")).toBe("# Mine\n");
+    expect(((given.save as ReturnType<typeof vi.fn>).mock.calls[0]![0] as FormData).get("value")).toBe("# Mine\n");
     expect(editor().value).toBe("# Mine\n");
     expect(screen.getByRole("status").textContent).toBe("Your CLAUDE.md is saved");
     expect(refresh).toHaveBeenCalled();
