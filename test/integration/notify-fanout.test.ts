@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { heartbeat, markOffline } from "../../src/agents/store.ts";
+import { linkLocalSession } from "../../src/assistant/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import type { HubEvent } from "../../src/realtime/events.ts";
 import { createEventHub, type EventHub } from "../../src/realtime/hub.ts";
@@ -51,10 +52,26 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+/**
+ * `insertAgent` writes the row directly, so its agent has no conversation — and a heartbeat gives a laptop session
+ * one, announcing it. These are tests about fan-out rather than about conversations, so each agent whose heartbeat
+ * they exercise is given one first, which is the state every registered session is in anyway.
+ */
+async function settled(agentId: string, ownerOid: string, name: string): Promise<string> {
+  await linkLocalSession(prisma, { ownerOid, agentId, name });
+  // The link announces, and the pods are already listening, so wait for that to arrive on both and drop it. These
+  // tests assert on the whole captured list, so an event from the fixture would read as one the test caused.
+  for (const running of pods) {
+    await until(() => running.events.some((event) => event.type === "assistant_conversation"));
+    running.events.length = 0;
+  }
+  return agentId;
+}
+
 describe("NOTIFY fan-out between pods", () => {
   it("should deliver a direct message, a post and status changes to every pod's hub", async () => {
     const alicesAgent = await insertAgent(ALICE, "alice");
-    const bobsAgent = await insertAgent(BOB, "bob");
+    const bobsAgent = await settled(await insertAgent(BOB, "bob"), BOB.oid, "bob");
 
     const direct = await createDirect(prisma, { author: { oid: ALICE.oid, agentId: alicesAgent }, targetAgentId: bobsAgent, inReplyTo: null, body: "hi" });
     const post = await createPost(prisma, { author: { oid: BOB.oid, agentId: bobsAgent }, topics: ["ccd"], title: null, body: "news", inReplyTo: null });
@@ -74,7 +91,7 @@ describe("NOTIFY fan-out between pods", () => {
   });
 
   it("should announce a heartbeat only when the status changed", async () => {
-    const agent = await insertAgent(ALICE, "alice");
+    const agent = await settled(await insertAgent(ALICE, "alice"), ALICE.oid, "alice");
 
     await heartbeat(prisma, agent, "idle", null);
     await heartbeat(prisma, agent, "busy", null);
@@ -86,7 +103,7 @@ describe("NOTIFY fan-out between pods", () => {
   });
 
   it("should not notify for a write that rolled back", async () => {
-    const agent = await insertAgent(ALICE, "alice");
+    const agent = await settled(await insertAgent(ALICE, "alice"), ALICE.oid, "alice");
 
     await expect(
       createPost(prisma, {
