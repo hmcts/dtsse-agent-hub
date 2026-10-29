@@ -17,6 +17,7 @@ import {
   canManageTemplate,
   canManageUploadsOnDisk,
   canManageVirtualAgent,
+  canOpenVirtualAgentPort,
   canOwnerReadCredential,
   canPersonMessageAgent,
   canReadMessage,
@@ -345,6 +346,15 @@ describe("canManageVirtualAgent", () => {
 
   it.each(EVERYONE_ELSE)("should refuse %s managing the owner's virtual agent", (_label, actorOid) => {
     expect(canManageVirtualAgent(actorOid, { id: "va-1", ownerOid: OWNER })).toBe(false);
+  });
+});
+
+describe("canOpenVirtualAgentPort", () => {
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "colleague"]
+  ])("should answer %s when the %s opens a web server on the owner's virtual agent", (expected, role) => {
+    expect(canOpenVirtualAgentPort(ROLES[role], { id: "va-1", ownerOid: OWNER })).toBe(expected);
   });
 });
 

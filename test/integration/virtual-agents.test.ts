@@ -1859,7 +1859,7 @@ describe("sweepVirtualAgents", () => {
     try {
       await expect.poll(async () => (await prisma.virtualAgent.findUniqueOrThrow({ where: { id: agent.id } })).claimedBy).toBeNull();
     } finally {
-      sweeper.stop();
+      await sweeper.stop();
     }
   });
 });

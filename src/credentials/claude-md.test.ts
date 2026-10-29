@@ -1,9 +1,23 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { checkClaudeMd, claudeMdLength, DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_BYTES, MAX_CLAUDE_MD_CHARACTERS } from "./claude-md.ts";
 
 describe("DEFAULT_CLAUDE_MD", () => {
   it("should tell Claude where it is running when nothing is stored", () => {
-    expect(DEFAULT_CLAUDE_MD).toBe("You are running in a pod in Preview and connected via the agent hub.");
+    expect(DEFAULT_CLAUDE_MD).toContain("running in a pod in Preview");
+    expect(DEFAULT_CLAUDE_MD).toContain("connected via the agent hub");
+  });
+
+  it("should say how to run CCD services when a pod has no Docker to run them in", () => {
+    expect(DEFAULT_CLAUDE_MD).toContain("no Docker");
+    expect(DEFAULT_CLAUDE_MD).toContain("RSE_LIB_DEPENDENCY_MODE=process");
+  });
+
+  it("should be the same words the entrypoint falls back to when the hub cannot be asked", () => {
+    // Two copies, because a pod that cannot reach the hub has only the one in its own image.
+    const entrypoint = readFileSync(new URL("../../packages/agent-hub/virtual-agent/entrypoint.sh", import.meta.url), "utf8");
+    const fallback = /^DEFAULT_CLAUDE_MD="([^"]*)"$/m.exec(entrypoint);
+    expect(fallback?.[1]).toBe(DEFAULT_CLAUDE_MD);
   });
 
   it("should pass its own check when it is used as the default", () => {

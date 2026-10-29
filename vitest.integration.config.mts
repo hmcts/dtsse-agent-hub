@@ -20,10 +20,6 @@ const shared = {
   // Before any test module, because `store/prisma.ts` resolves `DATABASE_URL` at module load.
   setupFiles: ["./test/integration/worker-database.ts"],
   pool: "forks" as const,
-  // `--expose-gc` so the upload suite can measure what the hub *retains* while parts are in flight rather than how
-  // much it allocated and threw away. Without it `heapUsed` is dominated by uncollected garbage and a reader that
-  // buffered a whole file would be indistinguishable from one that holds a single part.
-  execArgv: ["--expose-gc"],
   testTimeout: 30_000,
   env: {
     AGENT_AUTH_DISABLED: "true",

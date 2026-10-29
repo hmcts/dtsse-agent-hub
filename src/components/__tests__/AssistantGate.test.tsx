@@ -63,6 +63,7 @@ function assistant(overrides: Partial<AssistantSummary> = {}): AssistantSummary 
     id: ASSISTANT,
     name: "assistant",
     desired: "running",
+    modelRoute: "gateway",
     status: "awaiting_credentials",
     statusDetail: null,
     statusChangedAt: new Date().toISOString(),

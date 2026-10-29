@@ -16,7 +16,7 @@ import { CONVERSATION_PAGE_SIZE } from "../../src/transcripts/views.ts";
 import { connect, insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
-import { WAIT_MS } from "./waits.ts";
+import { until } from "./waits.ts";
 
 const ALICE = person("alice");
 const BOB = person("bob");
@@ -487,16 +487,6 @@ describe("sweepTranscripts", () => {
   });
 });
 
-async function until(check: () => boolean, timeoutMs = WAIT_MS): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!check()) {
-    if (Date.now() > deadline) {
-      throw new Error("timed out waiting for the sweeper");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
 describe("startTranscriptSweep", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -513,7 +503,7 @@ describe("startTranscriptSweep", () => {
       const calls = transaction.mock.calls.length;
       await until(() => transaction.mock.calls.length >= calls + 2);
     } finally {
-      sweeper.stop();
+      await sweeper.stop();
     }
 
     expect(info.mock.calls).toEqual([["transcript sweep: 1 entries past retention and 0 over the per-agent cap deleted"]]);
@@ -533,7 +523,7 @@ describe("startTranscriptSweep", () => {
     try {
       await until(() => warn.mock.calls.length >= 2);
     } finally {
-      sweeper.stop();
+      await sweeper.stop();
     }
 
     expect(warn.mock.calls.slice(0, 2)).toEqual([["the transcript sweep failed: database gone"], ["the transcript sweep failed: not an error"]]);

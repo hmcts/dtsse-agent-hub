@@ -1,6 +1,8 @@
 import { canManageVirtualAgent, canViewVirtualAgent } from "../access/rules.ts";
 import { isUuid } from "../agents/store.ts";
 import type { CredentialKind } from "../credentials/names.ts";
+import { viewerUrl } from "../port-viewer/paths.ts";
+import { viewerSettings } from "../port-viewer/settings.ts";
 import type { Database } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { lastActivity } from "./cleanup.ts";
@@ -25,8 +27,11 @@ export interface VirtualAgentCard {
   statusDetail: string | null;
   modelRoute: ModelRoute;
   size: VirtualAgentSize;
-  /** Each port the pod reports listening on beyond loopback, with the URL it is served at. */
-  exposedPorts: { port: number; url: string }[];
+  /**
+   * Each port the pod reports listening on beyond loopback, with the URL it is served at on the VPN and, when the
+   * viewer is on, the one it is served at off it.
+   */
+  exposedPorts: { port: number; url: string; viewerUrl?: string }[];
   /** The ports the pod reports listening on loopback only, which no URL can reach. */
   localOnlyPorts: number[];
   /** The workspace plugins its pod loads, in code-point order. */
@@ -64,7 +69,12 @@ async function newestEntries(db: Database, agentIds: readonly string[]): Promise
   return new Map(rows.flatMap((row) => (row._max.createdAt === null ? [] : [[row.agentId, row._max.createdAt] as const])));
 }
 
+function viewerLink(id: string, port: number, host: string | undefined): { viewerUrl?: string } {
+  return host === undefined ? {} : { viewerUrl: viewerUrl(host, id, port) };
+}
+
 function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCard {
+  const viewerHost = viewerSettings()?.host;
   return {
     id: row.id,
     name: row.name,
@@ -73,7 +83,11 @@ function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCa
     statusDetail: row.statusDetail,
     modelRoute: row.modelRoute,
     size: row.size,
-    exposedPorts: row.exposedPorts.map((port) => ({ port, url: publicUrl(row.statefulsetName, port, publicDomain()) })),
+    exposedPorts: row.exposedPorts.map((port) => ({
+      port,
+      url: publicUrl(row.statefulsetName, port, publicDomain()),
+      ...viewerLink(row.id, port, viewerHost)
+    })),
     localOnlyPorts: row.localOnlyPorts,
     plugins: row.plugins,
     stopReason: row.stopReason,

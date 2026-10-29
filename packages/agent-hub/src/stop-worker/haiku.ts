@@ -3,9 +3,10 @@
 // disableAllHooks so no hook can recurse into agent-hub or start other work. runHaiku starts it in summariserCwd(), a
 // private directory outside the workspace, so the workspace CLAUDE.md, auto-memory and project settings never load
 // (about 3k input tokens instead of 21k). Claude Code keeps only the last --settings, so one JSON carries
-// disableAllHooks, the credential helpers from the workspace's .claude/settings.json and settings.local.json, and
-// AGENT_HUB_CLAUDE_SETTINGS (a path relative to the workspace root, or inline JSON), later ones winning. Each helper
-// is a shell command, so it is prefixed with a cd to the workspace root and relative paths in it keep working.
+// disableAllHooks, the credential helpers from the workspace's .claude/settings.json and settings.local.json,
+// HAI_API_KEY_HELPER, and AGENT_HUB_CLAUDE_SETTINGS (a path relative to the workspace root, or inline JSON), later
+// ones winning. Each helper is a shell command, so it is prefixed with a cd to the workspace root and relative paths
+// in it keep working.
 // It never uses --bare: that ignores OAuth, so it would fail for everyone on their own Claude licence.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -47,6 +48,18 @@ function rootedHelpers(settings: Settings, root: string): Settings {
   return out;
 }
 
+// hai publishes the apiKeyHelper it gave the session as HAI_API_KEY_HELPER, and only on the AI Gateway route: that
+// route's credential is a token the helper mints, while the session's base URL and APIM header reach the summariser by
+// inheritance, so without the helper named here its one call is a 401. It wins over a helper in a settings file,
+// because it is the credential the session is actually running on rather than a file that may describe another, and
+// loses to AGENT_HUB_CLAUDE_SETTINGS, which is the operator's explicit say. Absent — an own-licence session, which has
+// no helper at all, or a pod on a hai that predates the variable — nothing is added and the summariser authenticates
+// as it did before.
+function publishedHelper(env: Env): Settings {
+  const helper = (env.HAI_API_KEY_HELPER || "").trim();
+  return helper ? { apiKeyHelper: helper } : {};
+}
+
 /** The one `--settings` JSON the summariser is given: the workspace's helpers, any extra, and hooks off. */
 export function summariserSettings(env: Env = process.env, root: string = projectDir()): string {
   const pick = (s: Settings): Settings => Object.fromEntries(HELPER_KEYS.filter((k) => k in s).map((k) => [k, s[k]]));
@@ -55,7 +68,7 @@ export function summariserSettings(env: Env = process.env, root: string = projec
   const given = (env.AGENT_HUB_CLAUDE_SETTINGS || "").trim();
   // An unreadable AGENT_HUB_CLAUDE_SETTINGS is dropped; it must not switch the hooks back on.
   const extra = !given ? {} : given.startsWith("{") ? settingsObject(given) : readSettingsFile(path.resolve(root, given));
-  const merged = { ...project, ...local, ...extra };
+  const merged = { ...project, ...local, ...publishedHelper(env), ...extra };
   return JSON.stringify({ ...merged, ...rootedHelpers(merged, root), disableAllHooks: true });
 }
 
