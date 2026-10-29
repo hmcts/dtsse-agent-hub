@@ -120,6 +120,7 @@ the `-staging` release.
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
 | `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain a reported port's URL is under, as `https://<statefulset_name>-<port>.<domain>`; the orchestrator reads it too |
+| `AGENT_HUB_VIEWER_HOST` | none | The viewer's own host, as `agent-hub-viewer.aat.platform.hmcts.net`, which serves each port to its owner off the VPN. It also needs `SESSION_SECRET` and `ENTRA_REDIRECT_URI`, whose origin is where it sends a person to sign in. With none, owners get the VPN URLs alone |
 | `VIRTUAL_AGENT_PLUGINS` | none | The workspace marketplace plugins an owner can tick, comma-separated `name` or `name=description`, as `pcs=PCS team workflows,dtsse=DTSSE docs`. A name is lowercase letters, digits and hyphens; any other makes the pages that read it fail. With none, the create form and the agent's page offer no plugins |
 | `AI_GATEWAY_APIM_KEY` | none | The HMCTS AI Gateway's APIM subscription key, from the `dtsse` vault, and the whole of what this hub holds about the gateway: `hai` resolves the host, the Entra scope, the `apiKeyHelper` and the model ids in the pod, and this key is the one value it cannot fetch there. Each claim for a running `gateway` agent carries it to the orchestrator, which puts it in that pod and no other. Without it a claim for such an agent is refused, so a deployment with nobody on the gateway needs none |
 
@@ -310,6 +311,16 @@ name its checkout does not have.
 chooses them. Each one bound beyond loopback is served at `https://<statefulset_name>-<port>.<VIRTUAL_AGENT_PUBLIC_DOMAIN>`
 to anyone on the HMCTS VPN, and the agent's page links it; one bound to loopback only is listed with how to open it. A
 change never restarts the pod: it bumps `generation` but not the `pod_generation` the pod template is stamped with.
+
+**The viewer.** With `AGENT_HUB_VIEWER_HOST` set, the agent's page links each port at
+`https://<AGENT_HUB_VIEWER_HOST>/<virtual agent id>/<port>/` too, which works off the VPN for its owner alone. The hub
+forwards each request to the port's VPN URL. A browser without the port's cookie is sent through the hub, which signs
+it in if need be and hands back a ticket lasting a minute, swapped for an 8-hour cookie scoped to that port's path.
+It is a host of its own so that nothing an agent serves shares the hub's origin and its `ah_session`; the hub never
+serves its own pages there. A server that links to its assets from `/` needs telling its base path, which it is sent
+as `X-Forwarded-Prefix`, and WebSockets are not forwarded. `docs/agent-api.md` (The viewer) has the detail. In AAT,
+Front Door (`azure-platform-terraform`, `environments/stg/stg.tfvars`) and both DNS zones carry the host, and the
+chart adds it to the Ingress as `additionalIngressHosts`.
 
 A pasted sign-in code is sealed under a key derived from `SESSION_SECRET`, so that must be set too. Locally, the
 orchestrator can be stood in for with `X-Dev-Orchestrator: <name>` under `AGENT_AUTH_DISABLED=true`:

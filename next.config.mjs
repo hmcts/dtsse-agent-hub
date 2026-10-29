@@ -14,16 +14,22 @@ const nextConfig = {
   // holds `/api/agent/*/stream` events and pings back from the client.
   compress: false,
   poweredByHeader: false,
+  // The proxy makes the hub's own trailing-slash redirect instead, because on the viewer's host a path belongs to
+  // the agent's web server, for which `/docs/` and `/docs` can be different pages.
+  skipTrailingSlashRedirect: true,
   // `next dev` prints every request's URL, query included; `next start` prints none. The proxy redirects these away,
-  // but only after the original URL has been printed. Matches the names `carriesSecret` in src/auth/guard.ts refuses.
-  logging: { incomingRequests: { ignore: [/[?&](value|token|code|password|secret)=/i] } },
+  // but only after the original URL has been printed. Matches the names `carriesSecret` in src/auth/guard.ts refuses,
+  // and the viewer's `ticket`.
+  logging: { incomingRequests: { ignore: [/[?&](value|token|code|password|secret|ticket)=/i] } },
   // The sidebar's agent list is pinned to the bottom left, where the dev indicator sits by default.
   devIndicators: { position: "bottom-right" },
   experimental: {
     // The proxy buffers every matched request body in memory up to this size. The largest body the service accepts
     // is one part of an Assistant upload, PART_BYTES in src/assistant/uploads.ts (4 MiB), and this sits above it so
     // the part arrives whole; every other route stays bounded by the agent API's own MAX_REQUEST_BYTES, and a body
-    // the proxy truncates is still long enough for `readJson` to refuse with a 413.
+    // the proxy truncates is still long enough for `readJson` to refuse with a 413. A viewer-forwarded body has no
+    // such reader, so PROXY_BODY_LIMIT_BYTES in src/port-viewer/forward.ts repeats this number to refuse it; keep
+    // the two the same.
     proxyClientMaxBodySize: "6mb",
     // The largest action is a post or direct message, bounded by the same worst case as MAX_REQUEST_BYTES.
     serverActions: { bodySizeLimit: "256kb" }

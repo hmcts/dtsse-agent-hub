@@ -341,6 +341,15 @@ export function canManageVirtualAgent(actorOid: string, virtualAgent: VirtualAge
 }
 
 /**
+ * Only its owner opens a virtual agent's web servers through the viewer, as only they see its ports. No grant
+ * extends to it: a server there runs as the owner, with their GitHub and Azure access, and may serve what it read
+ * with them.
+ */
+export function canOpenVirtualAgentPort(actorOid: string, virtualAgent: VirtualAgentRef): boolean {
+  return canManageVirtualAgent(actorOid, virtualAgent);
+}
+
+/**
  * A launch token acts as its owner, but only for the agents its own virtual agent's sessions registered: never for
  * the owner's other agents, which run on their laptop with whatever else they have open.
  */

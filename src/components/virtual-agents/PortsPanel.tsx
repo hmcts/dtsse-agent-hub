@@ -3,7 +3,8 @@ import type { VirtualAgentCard } from "@/virtual-agents/views";
 
 /**
  * The web servers the agent's pod reports listening on, each linked at its URL, and why any on loopback have none.
- * The page refreshes on the agent's `virtual_agent` event, so a server appears here soon after it starts.
+ * With the viewer on, each is linked there, which works off the VPN, and its VPN URL follows it. The page refreshes
+ * on the agent's `virtual_agent` event, so a server appears here soon after it starts.
  */
 export function PortsPanel({ agent }: { agent: Pick<VirtualAgentCard, "desired" | "exposedPorts" | "localOnlyPorts"> }) {
   if (agent.desired === "deleted") {
@@ -17,13 +18,27 @@ export function PortsPanel({ agent }: { agent: Pick<VirtualAgentCard, "desired" 
           <p className="text-hub-muted">No web servers running</p>
         ) : (
           <ul aria-label="Web server URLs" className="space-y-2">
-            {ports.map(({ port, url }) => (
-              <li key={port}>
-                <a href={url} target="_blank" rel="noreferrer noopener" className="break-all text-hub-link underline">
-                  {url}
-                </a>
-              </li>
-            ))}
+            {ports.map(({ port, url, viewerUrl }) =>
+              viewerUrl === undefined ? (
+                <li key={port}>
+                  <a href={url} target="_blank" rel="noreferrer noopener" className="break-all text-hub-link underline">
+                    {url}
+                  </a>
+                </li>
+              ) : (
+                <li key={port} className="space-y-0.5">
+                  <a href={viewerUrl} target="_blank" rel="noreferrer noopener" className="block break-all text-hub-link underline">
+                    {viewerUrl}
+                  </a>
+                  <span className="block text-xs text-hub-muted">
+                    on the VPN:{" "}
+                    <a href={url} target="_blank" rel="noreferrer noopener" className="break-all text-hub-link underline">
+                      {url}
+                    </a>
+                  </span>
+                </li>
+              )
+            )}
           </ul>
         )}
         {agent.localOnlyPorts.length === 0 ? null : (
