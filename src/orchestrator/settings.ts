@@ -25,6 +25,8 @@ export interface HostAlias {
 
 /** What each virtual agent's StatefulSet is built from. */
 export interface VirtualAgentSpec {
+  /** The orchestrator's own cluster, which is the one its pods run in; they are given it to pick their kube context. */
+  cluster: string;
   namespace: string;
   /** Digest-pinned, so a pod that restarts runs the image it was created with. */
   image: string;
@@ -192,6 +194,7 @@ export function orchestratorSettings(env: Environment, namespace: string | undef
     orphanSweepEvery: ORPHAN_SWEEP_EVERY,
     port,
     agent: {
+      cluster: cluster!,
       namespace: ns!,
       image: image!,
       serviceAccount,

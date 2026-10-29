@@ -28,6 +28,7 @@ const SETTINGS: OrchestratorSettings = {
   orphanSweepEvery: 30,
   port: 8080,
   agent: {
+    cluster: "cft-preview-00",
     namespace: "dtsse",
     image: `registry/agent@sha256:${"c".repeat(64)}`,
     serviceAccount: "default",

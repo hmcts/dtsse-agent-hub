@@ -465,7 +465,7 @@ successful.
 | Variable | Default | What it is |
 | --- | --- | --- |
 | `VIRTUAL_AGENT_IMAGE` | required | The virtual-agent image, pinned by digest (`<registry>/<repository>@sha256:<digest>`) |
-| `ORCHESTRATOR_CLUSTER` | required | The cluster's name, sent with each claim, as `cft-preview-00` |
+| `ORCHESTRATOR_CLUSTER` | required | The cluster's name, sent with each claim and passed on to the pods as `AGENT_HUB_CLUSTER`, as `cft-preview-00` |
 | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_FEDERATED_TOKEN_FILE` | set by workload identity | The orchestrator's identity; `AZURE_TENANT_ID` is passed on to the pods |
 | `AGENT_HUB_URL` | `https://agent-hub.aat.platform.hmcts.net` | The hub the orchestrator calls |
 | `AGENT_HUB_AUDIENCE` | `api://dtsse-agent-hub` | The hub's Application ID URI; the token is asked for `<it>/.default` |

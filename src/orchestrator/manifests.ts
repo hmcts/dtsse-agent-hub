@@ -178,6 +178,11 @@ function env(agent: ClaimedAgent, spec: VirtualAgentSpec, launchToken: string) {
     { name: "AGENT_HUB_MODEL_ROUTE", value: agent.model_route },
     { name: "AGENT_HUB_PLUGINS", value: plugins(agent).join(",") },
     { name: "AGENT_HUB_MAX_SESSIONS", value: String(CONVERSATION_SESSIONS[isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE]) },
+    // The cluster the pod runs in, which is its kube context's name less `-aks`. Preview runs one cluster at a time
+    // and which one changes without notice, so a fixed context would go stale, and the pod cannot work out where it
+    // is for itself: it mounts no ServiceAccount token, so it cannot ask the API server either. A switchover
+    // recreates the pod on the new cluster with the new name here, so its context follows it.
+    { name: "AGENT_HUB_CLUSTER", value: spec.cluster },
     ...gatewayEnv(agent),
     { name: "AZURE_TENANT_ID", value: spec.tenantId },
     { name: "DISABLE_AUTOUPDATER", value: "1" },
