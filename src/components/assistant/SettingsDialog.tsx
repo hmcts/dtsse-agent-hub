@@ -2,7 +2,16 @@
 
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { type Connection, type ConnectionsData, connections, connectionsWarning, offersConnect } from "@/assistant/connections";
+import {
+  type Connection,
+  type ConnectionsData,
+  connections,
+  connectionsWarning,
+  type ModelAccess,
+  modelAccess,
+  modelAccessAfter,
+  offersConnect
+} from "@/assistant/connections";
 import { memoryPressure, memoryWarning } from "@/assistant/memory-report";
 import type { AssistantPluginsData } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
@@ -35,6 +44,8 @@ export type AssistantPlugins = AssistantPluginsData & { save: FormAction };
 interface SettingsView {
   theme: Theme;
   list: Connection[];
+  /** How this person's agents reach Claude, where that is not one of `list`'s own rows. */
+  access: ModelAccess | null;
   connect: AssistantConnect | undefined;
   unavailable: string | null;
   warning: string | null;
@@ -175,7 +186,12 @@ function Connect({ row, connect, stored }: { row: Connection; connect: Assistant
   );
 }
 
-function Row({ row, connect }: { row: Connection; connect: AssistantConnect | undefined }) {
+/**
+ * One row of the Connections list: a sign-in of the person's, or the derived model-access row, which has no
+ * credential of its own and so neither an account to name nor anything to press.
+ */
+function Row({ row, connect }: { row: Connection | ModelAccess; connect?: AssistantConnect }) {
+  const credential = "kind" in row ? row : undefined;
   return (
     <li className="flex flex-wrap items-center gap-3 border-b border-asst-line px-3.5 py-3 last:border-b-0">
       <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-asst-active text-xs font-semibold">
@@ -183,10 +199,12 @@ function Row({ row, connect }: { row: Connection; connect: AssistantConnect | un
       </span>
       <div className="flex min-w-0 flex-1 flex-col leading-tight">
         <span className="truncate text-sm font-medium">{row.name}</span>
-        <span className="truncate text-xs text-asst-muted">{row.accountLabel ?? row.desc}</span>
+        <span className="truncate text-xs text-asst-muted">{credential?.accountLabel ?? row.desc}</span>
       </div>
       <span className={`shrink-0 text-xs font-medium ${STATE_CLASS[row.state]}`}>{row.detail}</span>
-      {connect !== undefined && offersConnect(row) ? <Connect row={row} connect={connect} stored={row.stored} /> : null}
+      {connect !== undefined && credential !== undefined && offersConnect(credential) ? (
+        <Connect row={credential} connect={connect} stored={credential.stored} />
+      ) : null}
     </li>
   );
 }
@@ -205,7 +223,7 @@ function Appearance({ theme }: { theme: Theme }) {
   );
 }
 
-function Connections({ list, connect, unavailable, warning }: Pick<SettingsView, "list" | "connect" | "unavailable" | "warning">) {
+function Connections({ list, access, connect, unavailable, warning }: Pick<SettingsView, "list" | "access" | "connect" | "unavailable" | "warning">) {
   return (
     <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-connections" className="text-sm font-semibold">
@@ -229,8 +247,11 @@ function Connections({ list, connect, unavailable, warning }: Pick<SettingsView,
       {unavailable === null ? null : <p className="text-[13px] text-asst-error">{unavailable}</p>}
       {list.length === 0 ? null : (
         <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
-          {list.map((row) => (
-            <Row key={row.kind} row={row} connect={connect} />
+          {list.map((row, index) => (
+            <Fragment key={row.kind}>
+              <Row row={row} connect={connect} />
+              {access !== null && modelAccessAfter(index) ? <Row row={access} /> : null}
+            </Fragment>
           ))}
         </ul>
       )}
@@ -318,7 +339,7 @@ const SECTIONS: readonly SettingsSection[] = [
     label: "Connections",
     group: "General",
     shown: (view) => view.list.length > 0 || view.unavailable !== null,
-    panel: (view) => <Connections list={view.list} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
+    panel: (view) => <Connections list={view.list} access={view.access} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
   },
   {
     id: "templates",
@@ -743,6 +764,9 @@ export function AssistantSettings({
   const [shownTheme, setShownTheme] = useState<Theme>(theme);
 
   const list = connections(data, checklistState, now);
+  // Only ever a status, so it is left out of the warning and of the badge: the sign-in it is read from is in `list`
+  // and raises both for itself, and the same thing said twice is read as two.
+  const access = data === undefined ? null : modelAccess(data.route, list);
   const warning = connectionsWarning(list);
   const memory = size === undefined ? null : memoryWarning(memoryPressure(size.view.use, size.view.openChats, size.view.size));
   // In the order the dialog's sections come — Connections under General, then Size under Agent — so the name reads as
@@ -804,6 +828,7 @@ export function AssistantSettings({
               view={{
                 theme: shownTheme,
                 list,
+                access,
                 connect,
                 unavailable: data?.unavailable ?? null,
                 warning,
