@@ -4,7 +4,7 @@ import { DEFAULT_SIZE, sizeChangeRefusal, sizeChangeRollsPod, sizeLabel, VIRTUAL
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 
 const SELECT = "mt-1 w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 text-sm text-hub-text";
-const BUTTON = "rounded border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
+const BUTTON = "rounded-sm border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
 
 export function SizeSelect({ value = DEFAULT_SIZE }: { value?: VirtualAgentSize }) {
   return (

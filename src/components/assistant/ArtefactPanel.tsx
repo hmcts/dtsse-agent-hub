@@ -385,7 +385,7 @@ export function ArtefactPanel({
       {narrow ? null : (
         <div
           {...resize.separator}
-          className="absolute -left-1 bottom-0 top-0 z-[2] w-2 cursor-col-resize hover:bg-asst-accent/25 focus:bg-asst-accent/40 focus:outline-none"
+          className="absolute -left-1 bottom-0 top-0 z-[2] w-2 cursor-col-resize hover:bg-asst-accent/25 focus:bg-asst-accent/40 focus:outline-hidden"
         />
       )}
       <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-asst-field pl-4 pr-3">
@@ -397,7 +397,7 @@ export function ArtefactPanel({
           onChange={(event) => edited({ title: event.target.value })}
           aria-label="Document title"
           maxLength={200}
-          className="min-w-0 flex-1 border-none bg-transparent py-1.5 text-[15px] font-medium text-asst-text outline-none"
+          className="min-w-0 flex-1 border-none bg-transparent py-1.5 text-[15px] font-medium text-asst-text outline-hidden"
         />
         <span role="status" className={`shrink-0 text-xs ${state === "failed" ? "text-asst-error" : state === "saved" ? "text-asst-ok" : "text-asst-faint"}`}>
           {saveLabel}
@@ -500,7 +500,7 @@ export function ArtefactPanel({
             onChange={(event) => edited({ markdown: event.target.value })}
             aria-label="Document, in markdown"
             spellCheck
-            className="block h-full min-h-full w-full resize-none border-none bg-transparent px-[22px] py-5 font-plex-mono text-[13.5px] leading-[1.7] text-asst-body outline-none"
+            className="block h-full min-h-full w-full resize-none border-none bg-transparent px-[22px] py-5 font-plex-mono text-[13.5px] leading-[1.7] text-asst-body outline-hidden"
           />
         </div>
       ) : (

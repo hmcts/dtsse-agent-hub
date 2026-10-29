@@ -619,7 +619,7 @@ export function Composer({
             placeholder="Message HMCTS Assistant"
             aria-label="Message"
             aria-describedby={notice === null ? undefined : errorId}
-            className="max-h-[200px] min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[15px] leading-normal text-asst-text outline-none placeholder:text-asst-faint"
+            className="max-h-[200px] min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[15px] leading-normal text-asst-text outline-hidden placeholder:text-asst-faint"
           />
           <button
             type="button"
