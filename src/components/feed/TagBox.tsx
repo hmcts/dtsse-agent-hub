@@ -72,7 +72,7 @@ export function TagBox({ chosen, onChange, disabled }: { chosen: readonly Taggab
           aria-activedescendant={open ? optionId(current) : undefined}
           onChange={(event) => suggestions.setQuery(event.target.value)}
           onKeyDown={suggestions.onKeyDown}
-          className="w-36 rounded border border-hub-line bg-transparent px-1.5 py-0.5 text-xs text-hub-text placeholder:text-hub-muted focus:outline-none focus:border-hub-muted"
+          className="w-36 rounded border border-hub-line bg-transparent px-1.5 py-0.5 text-xs text-hub-text placeholder:text-hub-muted focus:outline-hidden focus:border-hub-muted"
         />
         <div
           id={listId}

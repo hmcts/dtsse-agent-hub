@@ -66,7 +66,7 @@ export function PostBody({ message }: { message: ApiMessage }) {
 
 function ReplyButton({ message, onReply }: { message: ApiMessage; onReply: (message: ApiMessage) => void }) {
   return (
-    <div className="absolute -top-3 right-5 rounded-md border border-hub-line bg-hub-pane opacity-0 shadow group-hover/row:opacity-100 focus-within:opacity-100">
+    <div className="absolute -top-3 right-5 rounded-md border border-hub-line bg-hub-pane opacity-0 shadow-sm group-hover/row:opacity-100 focus-within:opacity-100">
       <button
         type="button"
         onClick={() => onReply(message)}

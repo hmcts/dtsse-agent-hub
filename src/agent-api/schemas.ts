@@ -33,9 +33,9 @@ const optionalText = (max: number) =>
  * The cast restores the input type `z.preprocess` erases — it types its input `unknown` — so a `transform` or
  * `default` built on the result is still checked against the values the schema accepts, as it is for `boundedArray`.
  */
-function listOrAbsent<S extends z.ZodTypeAny>(schema: S): z.ZodType<z.output<S> | undefined, z.ZodTypeDef, z.input<S> | undefined> {
+function listOrAbsent<S extends z.ZodType>(schema: S): z.ZodType<z.output<S> | undefined, z.input<S> | undefined> {
   const tolerant = z.preprocess((value) => (Array.isArray(value) ? value : undefined), schema.optional());
-  return tolerant as unknown as z.ZodType<z.output<S> | undefined, z.ZodTypeDef, z.input<S> | undefined>;
+  return tolerant as unknown as z.ZodType<z.output<S> | undefined, z.input<S> | undefined>;
 }
 
 /** A description over the limit is cut rather than refused, so one long description does not lose the whole list. */
@@ -110,7 +110,11 @@ export const postBody = z.object({
   in_reply_to: messageId.nullish(),
   // Shape, cap and refusals are `postTags`'s, as the topics' are `postTopics`': the web UI's action takes the same
   // field and has no schema, so one of the two paths would otherwise accept what the other refuses.
-  tag_agents: z.unknown()
+  // `.optional()` explicitly: `z.unknown()` was implicitly optional in Zod 3 and is not in Zod 4, where a missing
+  // key is refused as `expected nonoptional`. Without it every post that tags nobody answers 400. The shape, the cap
+  // and every refusal are `postTags`' rather than this schema's, so that the web action — which has no schema — and
+  // this one cannot disagree about what a tag list is.
+  tag_agents: z.unknown().optional()
 });
 
 export const directBody = z

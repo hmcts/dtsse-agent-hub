@@ -76,10 +76,10 @@ describe("boundedArray", () => {
   });
 
   /**
-   * The audit gate cannot catch a regression here: zod 1243066 is suppressed in `yarn-audit-known-issues` on the
-   * strength of this helper, so a new `z.array(element).max(n)` in a request body would bring back the 450× memory
-   * amplification of GHSA-mrhx-c7xc-m3w5 with every check still green. An element that cannot fail is the one safe
-   * alternative, which is why `topics` is allowed to stay as it is.
+   * One place for a request body's cap, its minimum and its element refinement, rather than each body spelling them
+   * out: `z.array(element).max(n)` is equivalent from zod 4.6.6, but the helper is what every body is written
+   * against, and a refinement chained onto a bare array is the easy way to be handed the unparsed input. An element
+   * that cannot fail needs none of this, which is why `topics` is allowed to stay as it is.
    */
   it("should leave no array schema in src validating elements outside this helper", () => {
     const offenders = sourceFiles(SRC)

@@ -505,7 +505,7 @@ describe("runAssistantSupervisor and the uploads on its volume", () => {
 
   /** A `statfs` that answers for any path, so the measurement does not depend on the test machine's own volume. */
   function volume(): { statfsSync: () => ReturnType<typeof fs.statfsSync> } {
-    return { statfsSync: () => ({ type: 0, bsize: 4096, blocks: 1024, bfree: 512, bavail: 512, files: 0, ffree: 0 }) };
+    return { statfsSync: () => ({ type: 0, bsize: 4096, frsize: 4096, blocks: 1024, bfree: 512, bavail: 512, files: 0, ffree: 0 }) };
   }
 
   function written(root: string, uploadId: string): string {
@@ -546,7 +546,7 @@ describe("runAssistantSupervisor and the uploads on its volume", () => {
       expect(fs.existsSync(going), "the file the person asked to delete").toBe(false);
       expect(fs.existsSync(staying), "a file they did not ask about").toBe(true);
       expect(reports()[0]).toMatchObject({ uploads_bytes: 16, volume_used_bytes: 512 * 4096, volume_total_bytes: 1024 * 4096, files_total: 1 });
-      expect((reports()[0]?.files as { upload_id: string }[]).map((file) => file.upload_id)).toEqual([KEEP]);
+      expect((reports()[0]!.files as { upload_id: string }[]).map((file) => file.upload_id)).toEqual([KEEP]);
       // The acknowledgement, which is the only thing that ends the hub's request. Absence from `files` says nothing:
       // that list is the largest 200, so a file outside it is unnamed while still sitting on the volume.
       expect(reports()[0]?.deleted).toEqual([UPLOAD]);

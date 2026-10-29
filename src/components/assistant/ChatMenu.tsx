@@ -223,7 +223,7 @@ export function ChatMenu({
                   value={draft}
                   maxLength={200}
                   onChange={(event) => setDraft(event.target.value)}
-                  className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-none focus:border-asst-accent-line"
+                  className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-hidden focus:border-asst-accent-line"
                 />
               </label>
               <button type="submit" className="self-end rounded-lg bg-asst-accent px-3 py-1.5 text-sm font-semibold text-asst-ink">

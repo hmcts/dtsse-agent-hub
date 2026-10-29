@@ -17,19 +17,16 @@ function backHome(): string | null {
 }
 
 describe("NotFoundPanel", () => {
-  it.each([
-    "/hub",
-    "/hub/topics",
-    "/hub/topics/extra/deep",
-    "/hub/agents/0f8a",
-    "/hub/nonsense"
-  ])("should offer the hub as the way back from %s, which renders without its sidebar", (pathname) => {
-    navigation.pathname = pathname;
+  it.each(["/hub", "/hub/topics", "/hub/topics/extra/deep", "/hub/agents/0f8a", "/hub/nonsense"])(
+    "should offer the hub as the way back from %s, which renders without its sidebar",
+    (pathname) => {
+      navigation.pathname = pathname;
 
-    render(<NotFoundPanel />);
+      render(<NotFoundPanel />);
 
-    expect(backHome()).toBe("/hub");
-  });
+      expect(backHome()).toBe("/hub");
+    }
+  );
 
   it.each(["/", "/nonsense", "/assistant", "/assistant/0f8a", "/hubbub", "/hub-other"])("should offer the front door from %s", (pathname) => {
     navigation.pathname = pathname;

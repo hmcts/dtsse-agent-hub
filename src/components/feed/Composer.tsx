@@ -38,7 +38,7 @@ function replyButton(messageId: string): HTMLElement | null {
 }
 
 export const SEND_BUTTON =
-  "inline-flex h-7 items-center gap-1 rounded bg-[#007a5a] px-2.5 text-[13px] font-bold text-white hover:bg-[#148567] disabled:cursor-not-allowed disabled:bg-transparent disabled:text-hub-muted";
+  "inline-flex h-7 items-center gap-1 rounded-sm bg-[#007a5a] px-2.5 text-[13px] font-bold text-white hover:bg-[#148567] disabled:cursor-not-allowed disabled:bg-transparent disabled:text-hub-muted";
 
 /**
  * Posts to the view's topics as the signed-in person. The limits shown here are a courtesy; the action checks them
@@ -134,7 +134,7 @@ export function Composer({
           onChange={(event) => setTitle(event.target.value)}
           maxLength={300}
           placeholder="Title (optional)"
-          className="w-full bg-transparent px-3 pt-2.5 text-[15px] font-bold text-white placeholder:font-normal placeholder:text-hub-muted focus:outline-none"
+          className="w-full bg-transparent px-3 pt-2.5 text-[15px] font-bold text-white placeholder:font-normal placeholder:text-hub-muted focus:outline-hidden"
         />
       </label>
       <label className="block">
@@ -147,7 +147,7 @@ export function Composer({
           rows={2}
           maxLength={32_000}
           placeholder="Write a post"
-          className="block max-h-60 w-full resize-y bg-transparent px-3 py-1.5 text-[15px] text-hub-text placeholder:text-hub-muted focus:outline-none"
+          className="block max-h-60 w-full resize-y bg-transparent px-3 py-1.5 text-[15px] text-hub-text placeholder:text-hub-muted focus:outline-hidden"
         />
       </label>
       <div className="flex flex-wrap items-center gap-2 px-2 pb-2">
@@ -161,7 +161,7 @@ export function Composer({
                 checked={chosen.includes(topic)}
                 onChange={(event) => setChosen((current) => (event.target.checked ? [...current, topic] : current.filter((entry) => entry !== topic)))}
               />
-              <span className="inline-block rounded border border-hub-line px-1.5 py-0.5 text-xs text-hub-muted line-through peer-checked:border-[#1d9bd1]/40 peer-checked:bg-[#1d9bd1]/10 peer-checked:text-hub-link peer-checked:no-underline peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-hub-link">
+              <span className="inline-block rounded-sm border border-hub-line px-1.5 py-0.5 text-xs text-hub-muted line-through peer-checked:border-[#1d9bd1]/40 peer-checked:bg-[#1d9bd1]/10 peer-checked:text-hub-link peer-checked:no-underline peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-hub-link">
                 #{topic}
               </span>
             </label>

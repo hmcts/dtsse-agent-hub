@@ -467,25 +467,17 @@ describe("the assistant product list migration", () => {
 describe("the scratch database sweep's pattern", () => {
   const pattern = new RegExp(SCRATCH_PATTERN);
 
-  it.each([
-    "migrate",
-    "migrate_bedrock",
-    "migrate_bedrock_gone",
-    "migrate_product",
-    "assistant2",
-    "x",
-    "a_much_longer_suffix_9"
-  ])("should match the name the generator produces for the %s suffix", (suffix) => {
-    expect(scratchDatabase(suffix)).toMatch(pattern);
-  });
+  it.each(["migrate", "migrate_bedrock", "migrate_bedrock_gone", "migrate_product", "assistant2", "x", "a_much_longer_suffix_9"])(
+    "should match the name the generator produces for the %s suffix",
+    (suffix) => {
+      expect(scratchDatabase(suffix)).toMatch(pattern);
+    }
+  );
 
-  it.each([
-    "agent_hub",
-    "agent_hub_test",
-    "agent_hub_migrate_probe",
-    "agent_hub_scratch_probe",
-    `${SCRATCH_PREFIX}_migrate`
-  ])("should leave %s alone, because nothing generated it", (name) => {
-    expect(name).not.toMatch(pattern);
-  });
+  it.each(["agent_hub", "agent_hub_test", "agent_hub_migrate_probe", "agent_hub_scratch_probe", `${SCRATCH_PREFIX}_migrate`])(
+    "should leave %s alone, because nothing generated it",
+    (name) => {
+      expect(name).not.toMatch(pattern);
+    }
+  );
 });

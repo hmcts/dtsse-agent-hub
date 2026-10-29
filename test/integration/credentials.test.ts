@@ -263,23 +263,20 @@ describe("reading credentials back", () => {
     expect((await read(ALICE, "bedrock")).status).toBe(404);
   });
 
-  it.each([
-    "github",
-    "azure",
-    "claude",
-    "jenkins",
-    "atlassian"
-  ])("should answer 405 and never the value when the owner asks for their stored %s", async (kind) => {
-    const values: Record<string, string> = { github: GITHUB, azure: AZURE, claude: CLAUDE, jenkins: JENKINS, atlassian: ATLASSIAN };
-    expect((await put(ALICE, kind, { value: values[kind] })).status).toBe(204);
+  it.each(["github", "azure", "claude", "jenkins", "atlassian"])(
+    "should answer 405 and never the value when the owner asks for their stored %s",
+    async (kind) => {
+      const values: Record<string, string> = { github: GITHUB, azure: AZURE, claude: CLAUDE, jenkins: JENKINS, atlassian: ATLASSIAN };
+      expect((await put(ALICE, kind, { value: values[kind] })).status).toBe(204);
 
-    const response = await read(ALICE, kind);
+      const response = await read(ALICE, kind);
 
-    expect(response.status).toBe(405);
-    const body = await response.text();
-    expect(body).toContain("write-only");
-    expect(body).not.toContain(values[kind]!);
-  });
+      expect(response.status).toBe(405);
+      const body = await response.text();
+      expect(body).toContain("write-only");
+      expect(body).not.toContain(values[kind]!);
+    }
+  );
 
   it("should answer 404 when the owner asks for an unknown kind", async () => {
     expect((await read(ALICE, "ssh")).status).toBe(404);
@@ -396,18 +393,19 @@ describe("saveCredential and removeCredential", () => {
     expect(await readCredential(prisma, localStore(), devIdentity("own-licence").oid, "claude")).toBe(CLAUDE);
   });
 
-  it.each([
-    ["own-licence", "own-licence", true]
-  ] as const)("should leave a Claude token as it was when the viewer is on %s and so is their agent", async (persona, route, stored) => {
-    const who = person(persona);
-    await insertUser(who);
-    await createVirtualAgent(prisma, { owner: who, modelRoute: route, name: "assistant" });
-    actAs(persona);
+  it.each([["own-licence", "own-licence", true]] as const)(
+    "should leave a Claude token as it was when the viewer is on %s and so is their agent",
+    async (persona, route, stored) => {
+      const who = person(persona);
+      await insertUser(who);
+      await createVirtualAgent(prisma, { owner: who, modelRoute: route, name: "assistant" });
+      actAs(persona);
 
-    await saveCredential(form({ kind: "claude", value: CLAUDE }));
+      await saveCredential(form({ kind: "claude", value: CLAUDE }));
 
-    expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(stored ? CLAUDE : undefined);
-  });
+      expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(stored ? CLAUDE : undefined);
+    }
+  );
 
   // The agent's route is fixed on its row when it is created, and its pod boots on that; the viewer's follows their
   // `AIGateway.User` app role. Someone granted that role afterwards is on the gateway while an agent of theirs is

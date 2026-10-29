@@ -207,7 +207,7 @@ export function ShareDialog({
               aria-activedescendant={open ? optionId(current) : undefined}
               onChange={(event) => suggestions.setQuery(event.target.value)}
               onKeyDown={suggestions.onKeyDown}
-              className="w-full rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-none focus:border-asst-accent-line"
+              className="w-full rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-hidden focus:border-asst-accent-line"
             />
             <div
               id={listId}
@@ -279,7 +279,7 @@ export function ShareDialog({
               id={`${ids}-link`}
               readOnly
               value={link}
-              className="min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-xs text-asst-muted outline-none"
+              className="min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-xs text-asst-muted outline-hidden"
             />
             <button type="button" onClick={() => void copy()} className="shrink-0 rounded-lg border border-asst-strong px-3 py-1.5 text-sm hover:bg-asst-field">
               {copied ? "Copied" : "Copy"}

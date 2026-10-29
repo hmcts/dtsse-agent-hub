@@ -4,7 +4,7 @@ import { Markup, type MarkupTheme } from "@/components/Markup";
 /** The hub's own tokens and type scale. Everything structural is in `Markup`, which both surfaces share. */
 const HUB: MarkupTheme = {
   container: "space-y-1 whitespace-pre-wrap break-words text-[15px] leading-[22px] text-hub-text",
-  code: "whitespace-pre-wrap rounded border border-hub-line bg-hub-raised px-1 font-mono text-[13px] text-hub-text",
+  code: "whitespace-pre-wrap rounded-sm border border-hub-line bg-hub-raised px-1 font-mono text-[13px] text-hub-text",
   strong: "font-bold text-white",
   link: "text-hub-link underline hover:no-underline",
   ordered: "list-decimal pl-6",

@@ -26,6 +26,7 @@ export default defineConfig({
       exclude: [
         "src/store/generated/**",
         "src/instrumentation.ts",
+        "src/instrumentation-node.ts",
         "src/app/**",
         "src/cli/**",
         // Everything below reads or writes Postgres, and is covered by `vitest.integration.config.mts` instead.
