@@ -7,6 +7,7 @@ import { notify } from "../realtime/notify.ts";
 import { likeLiteral } from "../store/like.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { upsertUser } from "../users/store.ts";
+import { type NameSource, nameSourceOf } from "./name-source.ts";
 import { normaliseSkills, type Skill, skillsChanged, storedSkills } from "./skills.ts";
 
 export interface Registration {
@@ -24,6 +25,11 @@ export interface Registration {
    * register would have the hub send a field this client does not read.
    */
   clientFeatures?: string[];
+  /**
+   * Where `name` came from. Replaced on every registration as `clientFeatures` is, and for the same reason: it
+   * describes the name this session is running under now. `derived` when a client did not say.
+   */
+  nameSource?: NameSource;
   /** The assistant conversation this session is for, sent by an assistant pod's conversation sessions only. */
   conversationId?: string | null;
 }
@@ -60,6 +66,7 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
   const virtualAgentId = owner.virtualAgentId ?? null;
   const skills = registration.skills === undefined ? null : JSON.stringify(registration.skills);
   const clientFeatures = registration.clientFeatures === undefined ? null : JSON.stringify(registration.clientFeatures);
+  const nameSource = nameSourceOf(registration.nameSource);
   const conversationId = registration.conversationId ?? null;
   // Nobody's pod, and naming no conversation: a session on somebody's laptop.
   const local = virtualAgentId === null && conversationId === null;
@@ -95,10 +102,11 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
             { id: string; skills: unknown }[]
           >`SELECT id::text AS id, skills FROM agent WHERE session_id = ${registration.sessionId} FOR UPDATE`;
     const [agent] = await tx.$queryRaw<{ id: string; name: string; conversation_id: string | null }[]>`
-      INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills, client_features, assistant_conversation_id)
+      INSERT INTO agent (owner_oid, session_id, name, name_source, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills, client_features, assistant_conversation_id)
       VALUES (
         ${owner.oid}, ${registration.sessionId},
         COALESCE((SELECT name FROM virtual_agent WHERE id = ${virtualAgentId}::uuid), ${registration.name}),
+        ${nameSource},
         ${registration.cwd}, ${registration.repo},
         ${registration.branch}, ${registration.host}, 'idle', now(), (SELECT COALESCE(max(id), 0) FROM message), ${virtualAgentId}::uuid,
         COALESCE(${skills}::jsonb, '[]'::jsonb), ${clientFeatures}::jsonb, ${conversationId}::uuid
@@ -106,8 +114,9 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
       ON CONFLICT (session_id) DO UPDATE
         SET name = EXCLUDED.name, cwd = EXCLUDED.cwd, repo = EXCLUDED.repo, branch = EXCLUDED.branch, host = EXCLUDED.host,
             status = 'idle', last_heartbeat_at = now(), ended_at = NULL, skills = COALESCE(${skills}::jsonb, agent.skills),
-            -- Not COALESCEd, unlike the skills: whatever this register reported is what is running, nothing included.
-            client_features = EXCLUDED.client_features
+            -- Neither of these is COALESCEd, unlike the skills: whatever this register reported is what is running,
+            -- nothing included. name_source goes with the name it describes, which this register also replaced.
+            client_features = EXCLUDED.client_features, name_source = EXCLUDED.name_source
         WHERE agent.owner_oid = EXCLUDED.owner_oid AND agent.virtual_agent_id IS NOT DISTINCT FROM EXCLUDED.virtual_agent_id
           -- The second arm is a caller that is nobody's pod and names no conversation, which is a session on a
           -- laptop re-registering: it sends no conversation id and the hub's own link is already on the row, so
@@ -193,13 +202,18 @@ async function lockAgent(
  * with its next heartbeat. A virtual agent's session takes the name its owner gave the virtual agent, which also corrects one registered
  * under another name. `skills`, sent only when the session's list changed, replaces the stored list, and is announced
  * when it differs from it, so an open agent page re-reads its composer's "/" autocomplete.
+ *
+ * `nameSource` is stored with the name and only when the name is, so a heartbeat that reports no name says nothing
+ * about where the stored one came from. That is what lets a `/rename` part-way through a session reach the hub
+ * within a heartbeat, which is the whole reason a chat on somebody's own computer can keep the name they chose.
  */
 export async function heartbeat(
   prisma: PrismaClient,
   agentId: string,
   status: Exclude<AgentStatus, "offline">,
   name: string | null,
-  skills?: Skill[]
+  skills?: Skill[],
+  nameSource?: NameSource
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const before = await lockAgent(tx, agentId);
@@ -213,7 +227,7 @@ export async function heartbeat(
         lastHeartbeatAt: new Date(),
         endedAt: null,
         ...(skills === undefined ? {} : { skills: skills.map(({ name, description }) => ({ name, description })) }),
-        ...(before.virtualName !== null ? { name: before.virtualName } : name === null ? {} : { name })
+        ...(before.virtualName !== null ? { name: before.virtualName } : name === null ? {} : { name, nameSource: nameSourceOf(nameSource) })
       }
     });
     if (before.status !== status) {
@@ -228,7 +242,9 @@ export async function heartbeat(
     // would otherwise never have had one, with nothing to create it later. Under the same row lock the heartbeat
     // already takes, so two heartbeats cannot both make one.
     if (before.local) {
-      await linkLocalSession(tx, { ownerOid: before.ownerOid, agentId, name: before.name });
+      // The name this heartbeat reported, not the one the row held before it: the two differ exactly when the
+      // client has just worked out a better one, and the chat made here would otherwise be named the worse of them.
+      await linkLocalSession(tx, { ownerOid: before.ownerOid, agentId, name: name ?? before.name });
     }
   });
 }

@@ -1,5 +1,6 @@
 import { HttpError } from "../agent-api/http.ts";
 import { clientSupports } from "../agents/client-features.ts";
+import { nameSourceOf } from "../agents/name-source.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
@@ -12,6 +13,7 @@ import { hasPod } from "./pods.ts";
 import { DEFAULT_PRODUCT, isProduct, productLabel, storedProduct } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
 import { SEARCH_LIMIT, SNIPPET_MAX_WORDS, SNIPPET_MIN_WORDS, searchTerms, visibleMatches } from "./search.ts";
+import { firstPromptTitle, localTitle, messageTitle, PROMPT_CANDIDATES, TITLE_MAX, type TitleSource } from "./titles.ts";
 import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
 
 /**
@@ -24,12 +26,6 @@ import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
  */
 
 export const ASSISTANT_NAME = "assistant";
-
-/** A new conversation's title is the start of its first message, until the person renames it. */
-export const TITLE_FROM_MESSAGE = 60;
-
-/** The longest title a conversation can carry, whoever wrote it: the person renaming it, or a local session's name. */
-export const TITLE_MAX = 200;
 
 const MAX_PRODUCT_HISTORY = 50;
 const MAX_STOP_HISTORY = 50;
@@ -92,18 +88,6 @@ const SELECT = {
   lastActiveAt: true,
   createdAt: true
 } as const;
-
-/**
- * A local session's title: the name its client reported, which the client derives from the transcript's own title.
- * Normalised exactly as a rename is, so the two cannot disagree about what a title may be.
- *
- * Kept even when the client had nothing better and sent the first characters of the session id. That reads as
- * nothing, but it is what the hub calls the same session everywhere else, and the alternative is a sidebar in which
- * every laptop says "New chat"; the person can rename it.
- */
-function localTitle(name: string): string | null {
-  return name.trim().replace(/\s+/g, " ").slice(0, TITLE_MAX) || null;
-}
 
 function storedHistory(value: unknown): ProductChange[] {
   if (!Array.isArray(value)) {
@@ -470,7 +454,7 @@ export async function createConversation(
   if (assistant === undefined) {
     throw new HttpError(409, "open the Assistant first, so it can be set up");
   }
-  const title = request.title?.trim().slice(0, TITLE_FROM_MESSAGE) || null;
+  const title = messageTitle(request.title ?? "");
   return await prisma.$transaction(async (tx) => {
     const created = await tx.assistantConversation.create({
       data: { ownerOid, virtualAgentId: assistant.id, product, title },
@@ -492,7 +476,16 @@ export async function createConversation(
  */
 export async function createLocalConversation(db: Database, session: { ownerOid: string; agentId: string; title: string | null }): Promise<ConversationRow> {
   const created = await db.assistantConversation.create({
-    data: { ownerOid: session.ownerOid, virtualAgentId: null, agentId: session.agentId, product: DEFAULT_PRODUCT, title: session.title },
+    data: {
+      ownerOid: session.ownerOid,
+      virtualAgentId: null,
+      agentId: session.agentId,
+      product: DEFAULT_PRODUCT,
+      title: session.title,
+      // Whatever the session's client reported, which is as weak as a title gets: `refreshLocalTitle` replaces
+      // it with the chat's first prompt as soon as the session uploads one.
+      titleSource: "agent" satisfies TitleSource
+    },
     select: SELECT
   });
   await announce(db, created);
@@ -592,11 +585,20 @@ export async function conversationAgent(prisma: PrismaClient, conversation: Conv
   });
 }
 
-/** Activity on the conversation: it moves up the list, and a first message names it. */
+/**
+ * Activity on the conversation: it moves up the list, and a first message names it.
+ *
+ * Only while it has no title at all, which is the precedent `refreshLocalTitle` follows for a chat on somebody's
+ * own computer. A local chat reaches here with the name its session reported already on it, so a message sent into
+ * one from the hub leaves that name standing and the chat's own first prompt is what replaces it.
+ */
 export async function touchConversation(prisma: PrismaClient, conversation: ConversationRow, firstMessage: string, now: Date = new Date()): Promise<void> {
-  const title = conversation.title ?? (firstMessage.trim().replace(/\s+/g, " ").slice(0, TITLE_FROM_MESSAGE) || null);
+  const title = conversation.title === null ? messageTitle(firstMessage) : null;
   await prisma.$transaction(async (tx) => {
-    await tx.assistantConversation.update({ where: { id: conversation.id }, data: { title, lastActiveAt: now, updatedAt: now } });
+    await tx.assistantConversation.update({
+      where: { id: conversation.id },
+      data: { ...(title === null ? {} : { title, titleSource: "message" satisfies TitleSource }), lastActiveAt: now, updatedAt: now }
+    });
     await announce(tx, conversation);
   });
 }
@@ -646,6 +648,89 @@ export async function linkLocalSession(db: Database, session: { ownerOid: string
     return undefined;
   }
   return created;
+}
+
+/**
+ * Writes a title the hub derived for a chat with no pod, and announces it when it landed.
+ *
+ * Every condition is repeated here rather than trusted from the caller's read, so two uploads for one session
+ * racing cannot both name it: the second blocks on the row, re-reads it and matches nothing. `replaceable` is which
+ * titles this derivation outranks, and `IS DISTINCT FROM` is what makes a derivation that agrees with the row cost
+ * one statement and no write — including the common case of the same `/rename` arriving on upload after upload.
+ */
+async function nameLocalChat(
+  db: Database,
+  conversation: { id: string; ownerOid: string },
+  title: string,
+  source: TitleSource,
+  replaceable: readonly TitleSource[],
+  now: Date
+): Promise<void> {
+  const named = await db.$executeRaw`
+    UPDATE assistant_conversation
+       SET title = ${title}, title_source = ${source}, updated_at = ${now}
+     WHERE id = ${conversation.id}::uuid
+       AND virtual_agent_id IS NULL
+       AND title_source = ANY(${replaceable}::text[])
+       AND title IS DISTINCT FROM ${title}
+  `;
+  if (named > 0) {
+    await announce(db, { id: conversation.id, virtualAgentId: null, ownerOid: conversation.ownerOid });
+  }
+}
+
+/**
+ * Keeps the title of a chat on somebody's own computer in step with the best name available for it. Called from the
+ * transcript upload inside its transaction — the moment the hub learns what the person typed — and does nothing at
+ * all for a chat with a pod, or for one whose owner has renamed it in the hub.
+ *
+ * Two derivations, strongest first:
+ *
+ * - **The session's name, when the person chose it** (`name_source = 'user'`, which is Claude Code's `/rename`).
+ *   That is the person saying what this session is, so it outranks the chat's own prompts and replaces a title
+ *   already taken from one. The chat keeps `title_source = 'agent'`, because the title still follows the session's
+ *   name and a second `/rename` should move it again.
+ * - **The chat's first prompt**, while the title is still the name the client reported. The hub can name a local
+ *   chat better than its client can: the client has only the session's own name to offer, which it derives from the
+ *   transcript's conversation title and which is the session registry's `hmcts-25` at the moment the session
+ *   registers and its chat is made. A chat's first prompt is what the chat is about, which is already how a chat on
+ *   a pod is named (`touchConversation`). `firstPromptTitle` decides which prompt — a redacted or relayed one names
+ *   nothing.
+ *
+ * The prompts are read by agent rather than by conversation because a local chat has exactly one: `linkLocalSession`
+ * links the session's own agent and `conversationAgent`, which is what ever makes a second, refuses a chat with no
+ * pod. That keeps the read on `transcript_entry_agent_id_occurred_at_id_idx`, and it is only reached while a prompt
+ * could still claim the title — after that this is one indexed read per upload and nothing else.
+ */
+export async function refreshLocalTitle(db: Database, agentId: string, now: Date = new Date()): Promise<void> {
+  const agent = await db.agent.findUnique({
+    where: { id: agentId },
+    select: { name: true, nameSource: true, assistantConversation: { select: { id: true, ownerOid: true, virtualAgentId: true, titleSource: true } } }
+  });
+  const conversation = agent?.assistantConversation ?? null;
+  if (agent === null || conversation === null || conversation.virtualAgentId !== null || conversation.titleSource === "user") {
+    return;
+  }
+  if (nameSourceOf(agent.nameSource) === "user") {
+    const chosen = localTitle(agent.name);
+    if (chosen !== null) {
+      await nameLocalChat(db, conversation, chosen, "agent", ["agent", "message"], now);
+    }
+    return;
+  }
+  if (conversation.titleSource !== "agent") {
+    return;
+  }
+  const prompts = await db.transcriptEntry.findMany({
+    where: { agentId, role: "user" },
+    select: { content: true, redacted: true, messageId: true },
+    orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+    take: PROMPT_CANDIDATES
+  });
+  const title = firstPromptTitle(prompts);
+  if (title !== null) {
+    await nameLocalChat(db, conversation, title, "message", ["agent"], now);
+  }
 }
 
 /**
@@ -703,7 +788,8 @@ export async function renameConversation(prisma: PrismaClient, ownerOid: string,
     throw new ConversationNotFound();
   }
   await prisma.$transaction(async (tx) => {
-    await tx.assistantConversation.update({ where: { id }, data: { title: trimmed, updatedAt: new Date() } });
+    // `user` is what makes this the last word on the title: nothing the hub derives replaces one a person chose.
+    await tx.assistantConversation.update({ where: { id }, data: { title: trimmed, titleSource: "user" satisfies TitleSource, updatedAt: new Date() } });
     await announce(tx, conversation);
   });
 }

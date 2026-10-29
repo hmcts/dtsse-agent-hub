@@ -154,11 +154,20 @@ describe("registerBody", () => {
     expect(parse(registerBody, { session_id: "s", name: "n", cwd: "  ", repo: null })).toEqual({
       session_id: "s",
       name: "n",
+      // Where the name came from is decided whether or not the client said: absent is a client from before the
+      // field, and what it reports is a name it worked out.
+      name_source: "derived",
       cwd: null,
       repo: null,
       branch: null,
       host: null
     });
+  });
+
+  it("should carry a /rename through, and read every other name source as derived", () => {
+    expect(parse(registerBody, { session_id: "s", name: "hdpi-9653-welsh", name_source: "user" }).name_source).toBe("user");
+    expect(parse(registerBody, { session_id: "s", name: "a-chat-it-named", name_source: "auto" }).name_source).toBe("derived");
+    expect(parse(registerBody, { session_id: "s", name: "hmcts-25", name_source: null }).name_source).toBe("derived");
   });
 
   it("should require a session id and a name", () => {
@@ -216,6 +225,16 @@ describe("heartbeatBody", () => {
 
   it("should read skills that are not a list as skills not sent, so a heartbeat leaves the stored list", () => {
     expect(parse(heartbeatBody, { status: "idle", skills: null }).skills).toBeUndefined();
+  });
+
+  it("should carry a /rename through, and read every other name source as derived", () => {
+    expect(parse(heartbeatBody, { status: "idle", name: "hdpi-9653-welsh", name_source: "user" }).name_source).toBe("user");
+    expect(parse(heartbeatBody, { status: "idle", name: "hmcts-25", name_source: "derived" }).name_source).toBe("derived");
+    // Claude Code's third source, a client that has never heard of the field, and a value from some later client:
+    // all automatic as far as the hub is concerned, and none of them refuses a heartbeat.
+    expect(parse(heartbeatBody, { status: "idle", name: "a-chat-it-named", name_source: "auto" }).name_source).toBe("derived");
+    expect(parse(heartbeatBody, { status: "idle", name: "hmcts-25" }).name_source).toBe("derived");
+    expect(parse(heartbeatBody, { status: "idle", name_source: 7 }).name_source).toBe("derived");
   });
 });
 

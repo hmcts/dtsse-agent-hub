@@ -266,12 +266,14 @@ export async function followWork(ctx: PassContext, { agent, touches, root }: Fol
     try {
       const repo = repoName(top.dir) || top.slug;
       const branch = branchOf(top.dir);
-      // `client_features` goes on this register too, not just the one in `agent.ts`: the service replaces the
-      // column with whatever a register reports, so leaving it off here would downgrade a capable session to
-      // "claims nothing" the first time the person's edits moved to another repo.
+      // `client_features` and `name_source` go on this register too, not just the one in `agent.ts`: the service
+      // replaces both columns with whatever a register reports, so leaving either off here would downgrade a capable
+      // session to "claims nothing", and a session the person had renamed to one whose name came from nowhere, the
+      // first time their edits moved to another repo.
       await api.register({
         session_id: sid,
         name: agent.name ?? "",
+        name_source: sessionInfo(sid).nameSource,
         cwd: agent.cwd,
         repo,
         branch,

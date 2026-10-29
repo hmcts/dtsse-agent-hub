@@ -390,6 +390,19 @@ describe("gatherMetadata", () => {
     expect(gatherMetadata("sess-meta-cwd").cwd).toBe(home.root);
   });
 
+  // Every register carries it, because the service replaces what it has stored with whatever a register reports.
+  it("should report where the session's name came from, so a /rename registers as the person's own", () => {
+    // Arrange
+    const entry = (sid: string, fields: Record<string, unknown>) =>
+      fs.writeFileSync(path.join(home.claude, "sessions", `${sid}.json`), JSON.stringify({ pid: DEAD_PID, sessionId: sid, cwd: home.root, ...fields }));
+    entry("sess-meta-renamed", { name: "hdpi-9653-welsh", nameSource: "user" });
+    entry("sess-meta-derived", { name: "hmcts-25", nameSource: "derived" });
+
+    // Act & Assert
+    expect(gatherMetadata("sess-meta-renamed")).toMatchObject({ name: "hdpi-9653-welsh", name_source: "user" });
+    expect(gatherMetadata("sess-meta-derived")).toMatchObject({ name: "hmcts-25", name_source: "derived" });
+  });
+
   it("should report no repository for a working directory that is not there any more", () => {
     // Act
     const meta = gatherMetadata("sess-meta", { cwd: path.join(home.root, "deleted-while-running"), root: home.root });

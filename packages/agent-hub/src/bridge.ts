@@ -481,7 +481,11 @@ export async function runBridge({
     const status = readStatus(sid);
     sentStatus = status;
     try {
-      await api.heartbeat(agentId, { status, name: sessionInfo(sid, env).name, ...(skills ? { skills } : {}) });
+      // The name and where it came from together, on every heartbeat: a /rename part-way through a session is how
+      // the person says what it is, and the service keeps the chat in the Assistant on that name rather than on the
+      // session's first prompt. Reading them apart would let a rename arrive as a name of unknown origin.
+      const session = sessionInfo(sid, env);
+      await api.heartbeat(agentId, { status, name: session.name, name_source: session.nameSource, ...(skills ? { skills } : {}) });
       if (skills) {
         const hash = skillsHash(skills);
         agent = { ...current, skills_hash: hash };
