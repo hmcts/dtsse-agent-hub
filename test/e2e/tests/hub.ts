@@ -1,4 +1,4 @@
-import { type APIRequestContext, type Browser, type BrowserContext, expect, type Page } from "@playwright/test";
+import { type APIRequestContext, type Browser, type BrowserContext, expect, type Locator, type Page } from "@playwright/test";
 
 /**
  * What the specs share. They run against a deployment with `AUTH_DISABLED=true`, where the viewer is a development
@@ -191,17 +191,26 @@ export function sampleTranscript(prefix: string): TranscriptEntry[] {
 }
 
 /**
+ * The sidebar row of a local session registered as `title`, found by its accessible name — the local marker's words
+ * joined to the title (`LocalMark`) — so every spec using it also fails on a chat the sidebar has stopped marking.
+ *
+ * The state of the session is part of those words and is matched loosely, because it is whatever the session was
+ * doing when the page rendered; that the row is marked, and marked as being on the person's own computer, is what
+ * this pins. `unique` titles are alphanumeric and so need no escaping here.
+ */
+export function localChatRow(page: Page, title: string): Locator {
+  return page.getByRole("navigation", { name: "Chats" }).getByRole("link", { name: new RegExp(`^On your computer, [a-z ]+: ${title}$`) });
+}
+
+/**
  * Opens the chat of a local session registered as `title` from the Assistant's sidebar, and returns its path.
  *
  * The sidebar is where a spec learns the conversation's id: the registration answers with the agent alone, and
  * nothing names the conversation the hub made for it. `page` is already showing a page of the Assistant, so the
  * caller keeps the response its own skip reads.
- *
- * The row is found by its accessible name, which is the local marker's words joined to the title (`LocalMark`), so
- * this also fails on a chat the sidebar has stopped marking.
  */
 export async function openLocalChat(page: Page, title: string): Promise<string> {
-  const row = page.getByRole("navigation", { name: "Chats" }).getByRole("link", { name: `On your computer: ${title}` });
+  const row = localChatRow(page, title);
   await expect(row).toBeVisible();
   await row.click();
   await page.waitForURL(/\/assistant\/[0-9a-f-]{36}$/);

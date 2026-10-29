@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 function link(id: string, title: string): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", local: false };
+  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", mark: null };
 }
 
 function ok() {

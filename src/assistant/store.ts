@@ -1,5 +1,6 @@
 import { HttpError } from "../agent-api/http.ts";
 import { clientSupports } from "../agents/client-features.ts";
+import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
@@ -225,24 +226,52 @@ export async function findConversation(db: Database, ownerOid: string, id: strin
 }
 
 /**
+ * A listed conversation with the status of its current agent, which is what a sidebar row needs and a conversation's
+ * own row does not carry: `agent_id` names the agent, and the status lives on that agent.
+ */
+export interface ConversationListRow extends ConversationRow {
+  /** The status of the conversation's current agent; `offline` when it has no agent yet, as its own page reads it. */
+  agentStatus: AgentStatus;
+}
+
+/**
  * The owner's conversations, most recently active first; only those on `virtualAgentId` when it is given.
  *
  * A conversation with no pod is listed outright. `virtualAgent: { desired: … }` is a relation filter on an optional
  * to-one, so a row with no related virtual agent does not satisfy it at all — reading the pod's state alone would
  * leave every local chat out of the sidebar rather than only the ones whose pod is going.
+ *
+ * The current agent's status comes back with each row, because the sidebar colours a local chat's mark by it: a
+ * second read per row would be one query per chat, and one read of the whole list is what keeps the mark and the
+ * chat's own page saying the same thing about the same session.
  */
-export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationRow[]> {
+export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationListRow[]> {
   const rows = await db.assistantConversation.findMany({
     where: {
       ownerOid,
       OR: [{ virtualAgentId: null }, { virtualAgent: { desired: { not: "deleted" } } }],
       ...(virtualAgentId === undefined ? {} : { virtualAgentId })
     },
-    select: SELECT,
+    select: { ...SELECT, agent: { select: { status: true } } },
     orderBy: [{ lastActiveAt: "desc" }, { id: "asc" }],
     take: limit
   });
-  return rows.map(toRow);
+  return rows.map(({ agent, ...row }) => ({ ...toRow(row), agentStatus: agent?.status ?? "offline" }));
+}
+
+/**
+ * Whether any of the owner's conversations is a session on their own computer.
+ *
+ * A fact about the whole list rather than about any one row, and so its own read: it is what decides whether a chat
+ * running on a pod is marked as one at all, since a cloud beside every row of a list that holds nothing else tells
+ * nobody anything. Asked here, by both the sidebar's list and its search, so the two cannot answer it differently
+ * for the same person — and asked of every one of their conversations rather than of the page the sidebar loaded,
+ * which is capped and so could miss the only local chat they have.
+ *
+ * No `virtual_agent` filter, unlike `listConversations`: these rows have no related virtual agent to be deleted.
+ */
+export async function hasLocalConversation(db: Database, ownerOid: string): Promise<boolean> {
+  return (await db.assistantConversation.findFirst({ where: { ownerOid, virtualAgentId: null }, select: { id: true } })) !== null;
 }
 
 /**
@@ -298,6 +327,8 @@ export interface ConversationMatchRow {
   title: string | null;
   product: string;
   lastActiveAt: Date;
+  /** The status of the chat's current agent, as `ConversationListRow` carries it, so a result is marked as a row is. */
+  agentStatus: AgentStatus;
   /** The words of a message around the match, when a message rather than the title is why the chat matched. */
   excerpt: string | null;
 }
@@ -330,7 +361,16 @@ export async function searchConversations(db: Database, ownerOid: string, query:
     return [];
   }
   const rows = await db.$queryRaw<
-    { id: string; ownerOid: string; virtualAgentId: string | null; title: string | null; product: string; lastActiveAt: Date; excerpt: string | null }[]
+    {
+      id: string;
+      ownerOid: string;
+      virtualAgentId: string | null;
+      title: string | null;
+      product: string;
+      lastActiveAt: Date;
+      agentStatus: AgentStatus | null;
+      excerpt: string | null;
+    }[]
   >`
     WITH query AS (
       -- quote_literal is what makes a typed term safe to put in a query. A single-quoted string in a tsquery is
@@ -347,10 +387,12 @@ export async function searchConversations(db: Database, ownerOid: string, query:
     owned AS (
       -- LEFT JOIN, with the null counted in: a conversation with no pod is one of the viewer's own chats and is
       -- searchable like any other. An inner join would drop every local chat from the sidebar's search, since there
-      -- is no virtual_agent row for it to match.
-      SELECT c.id, c.owner_oid, c.virtual_agent_id, c.title, c.product, c.last_active_at
+      -- is no virtual_agent row for it to match. The current agent is joined the same way and for the same reason:
+      -- a chat with no agent yet is still a chat, and its status reads as offline.
+      SELECT c.id, c.owner_oid, c.virtual_agent_id, c.title, c.product, c.last_active_at, cur.status::text AS agent_status
         FROM assistant_conversation c
         LEFT JOIN virtual_agent v ON v.id = c.virtual_agent_id
+        LEFT JOIN agent cur ON cur.id = c.agent_id
        WHERE c.owner_oid = ${ownerOid} AND (v.id IS NULL OR v.desired <> 'deleted')
     ),
     in_body AS (
@@ -369,7 +411,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
        WHERE to_tsvector('english', COALESCE(o.title, '')) @@ q.tsq OR b.body IS NOT NULL
     )
     SELECT o.id::text AS id, o.owner_oid AS "ownerOid", o.virtual_agent_id::text AS "virtualAgentId", o.title, o.product,
-           o.last_active_at AS "lastActiveAt", e.excerpt
+           o.last_active_at AS "lastActiveAt", o.agent_status AS "agentStatus", e.excerpt
       FROM owned o
       JOIN (SELECT id FROM hit GROUP BY id HAVING count(*) = (SELECT count(*) FROM query)) matched ON matched.id = o.id
       LEFT JOIN LATERAL (
@@ -385,7 +427,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
   // Nothing leaves the store carrying a product the list no longer offers, as `toRow` does for a whole conversation.
   return visibleMatches(
     ownerOid,
-    rows.map((row) => ({ ...row, product: storedProduct(row.product) }))
+    rows.map((row) => ({ ...row, product: storedProduct(row.product), agentStatus: row.agentStatus ?? "offline" }))
   );
 }
 

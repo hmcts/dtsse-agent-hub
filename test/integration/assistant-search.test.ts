@@ -11,7 +11,7 @@ import {
   searchConversations,
   touchConversation
 } from "../../src/assistant/store.ts";
-import { type ConversationMatch, conversationMatches } from "../../src/assistant/views.ts";
+import { type ConversationMark, type ConversationMatch, conversationGroups, conversationMatches } from "../../src/assistant/views.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { setDesired } from "../../src/virtual-agents/store.ts";
@@ -51,6 +51,12 @@ async function found(who: Person, query: string): Promise<string[]> {
 
 async function listed(who: Person): Promise<(string | null)[]> {
   return (await listConversations(prisma, who.oid)).map((chat) => chat.title);
+}
+
+/** What the sidebar's own grouped list marks each of their chats with, which a search result has to agree with. */
+async function marked(who: Person): Promise<Map<string, ConversationMark>> {
+  const groups = await conversationGroups(prisma, who.oid);
+  return new Map(groups.flatMap((group) => group.items).map((item) => [item.title, item.mark]));
 }
 
 /**
@@ -299,12 +305,55 @@ describe("a chat with no assistant behind it", () => {
 
     const matches = await conversationMatches(prisma, ALICE.oid, "possession");
 
-    expect(new Map(matches.map((match) => [match.title, match.local]))).toEqual(
+    expect(new Map(matches.map((match) => [match.title, match.mark]))).toEqual(
       new Map([
-        ["A possession claim with no assistant", true],
-        ["A possession claim on my assistant", false]
+        ["A possession claim with no assistant", { where: "computer", session: "disconnected" }],
+        ["A possession claim on my assistant", { where: "assistant" }]
       ])
     );
+  });
+
+  /**
+   * A result's mark is coloured by the state of its session, as a row in the list below it is, so the search's own
+   * query has to bring the current agent's status back with each match: without it every laptop found by searching
+   * would be marked the same whatever its session was doing.
+   */
+  it.each([
+    ["busy", "working"],
+    ["idle", "ready"],
+    ["offline", "disconnected"]
+  ] as const)("should mark a result that is a local chat as %s with the state of its session", async (status, session) => {
+    const local = await chat(ALICE, ["A possession claim with no assistant"]);
+    await withoutPod(local);
+    await prisma.agent.updateMany({ where: { assistantConversationId: local.id }, data: { status } });
+
+    const matches = await conversationMatches(prisma, ALICE.oid, "possession");
+
+    expect(matches.map((match) => match.mark)).toEqual([{ where: "computer", session }]);
+  });
+
+  /**
+   * Whether a pod chat is marked as one is a fact about the person's whole list, and the sidebar's list and its
+   * search are two requests apart: the page renders one and the browser asks the route for the other. Both read it
+   * through `hasLocalConversation`, which is what keeps them from answering differently for the same person.
+   */
+  it("should mark a pod chat the same in the sidebar's list and in the search for the same person", async () => {
+    const ON_POD = "A possession claim on my assistant";
+    const ON_LAPTOP = "A possession claim with no assistant";
+    await chat(ALICE, [ON_POD]);
+
+    // Nothing of theirs is local yet, so neither read marks the pod chat: there is nothing to tell it apart from.
+    expect(await marked(ALICE)).toEqual(new Map([[ON_POD, null]]));
+    expect(new Map((await asked("alice", "possession")).map((match) => [match.title, match.mark]))).toEqual(new Map([[ON_POD, null]]));
+
+    await withoutPod(await chat(ALICE, [ON_LAPTOP]));
+
+    const mixed = new Map([
+      [ON_LAPTOP, { where: "computer", session: "disconnected" }],
+      [ON_POD, { where: "assistant" }]
+    ]);
+    expect(await marked(ALICE)).toEqual(mixed);
+    expect(new Map((await asked("alice", "possession")).map((match) => [match.title, match.mark]))).toEqual(mixed);
   });
 
   it("should find nothing of another person's chat that has no assistant either", async () => {

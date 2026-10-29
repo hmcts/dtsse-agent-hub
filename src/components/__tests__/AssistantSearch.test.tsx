@@ -3,14 +3,19 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationMatch } from "@/assistant/views";
+import type { ConversationMark, ConversationMatch, LocalSession } from "@/assistant/views";
 import { ConversationSearch, SEARCH_AFTER_MS } from "@/components/assistant/ConversationSearch";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh: () => undefined }), usePathname: () => "/assistant" }));
 
 function match(id: string, title: string, snippet: string | null = null): ConversationMatch {
-  return { id, title, product: "pcs", productLabel: "Possession Claims (PCS)", lastActiveAt: "2026-10-24T09:00:00.000Z", local: false, snippet };
+  return { id, title, product: "pcs", productLabel: "Possession Claims (PCS)", lastActiveAt: "2026-10-24T09:00:00.000Z", mark: null, snippet };
+}
+
+/** A result that is a chat on the person's own computer, with the state of its session. */
+function onComputer(session: LocalSession): ConversationMark {
+  return { where: "computer", session };
 }
 
 const search = vi.fn<(query: string, signal: AbortSignal) => Promise<ConversationMatch[]>>();
@@ -91,13 +96,50 @@ describe("ConversationSearch", () => {
 
   // A result is the same chat as the row in the list below, so it carries the same marker: a local chat found by
   // searching must not be the one place it looks like any other.
-  it("should mark a chat on the person's own computer among the results", async () => {
-    search.mockResolvedValue([{ ...match("c1", "Fixing the sweep"), local: true }]);
+  it.each([
+    ["ready", "On your computer, ready"],
+    ["working", "On your computer, working"],
+    ["disconnected", "On your computer, not connected"]
+  ] as const)("should mark a chat on the person's own computer among the results when its session is %s", async (session: LocalSession, words: string) => {
+    search.mockResolvedValue([{ ...match("c1", "Fixing the sweep"), mark: onComputer(session) }]);
     render_();
 
     await type("sweep");
 
-    expect(screen.getByRole("option", { name: /On your computer/ }).textContent).toContain("On your computer: Fixing the sweep");
+    expect(screen.getByRole("option", { name: new RegExp(`^${words}`) }).textContent).toContain(`${words}: Fixing the sweep`);
+    expect(screen.getByTitle(words)).toBeTruthy();
+  });
+
+  it.each([
+    ["ready", "text-asst-ok"],
+    ["working", "text-asst-warn"],
+    ["disconnected", "text-asst-faint"]
+  ] as const)("should colour a result's mark when its session is %s", async (session: LocalSession, colour: string) => {
+    search.mockResolvedValue([{ ...match("c1", "Fixing the sweep"), mark: onComputer(session) }]);
+    render_();
+
+    await type("sweep");
+
+    expect(screen.getByTitle(/On your computer/).className).toContain(colour);
+  });
+
+  it("should mark a result that runs on the assistant once the person has a chat on their own computer", async () => {
+    search.mockResolvedValue([{ ...match("c1", "Possession claim help"), mark: { where: "assistant" } }]);
+    render_();
+
+    await type("possession");
+
+    expect(screen.getByRole("option", { name: /On your assistant/ }).textContent).toContain("On your assistant: Possession claim help");
+  });
+
+  it("should mark no result when every one of the person's chats runs on their assistant", async () => {
+    search.mockResolvedValue([match("c1", "Possession claim help")]);
+    render_();
+
+    await type("possession");
+
+    expect(screen.getByRole("option", { name: "Possession claim help" })).toBeTruthy();
+    expect(screen.queryByTitle(/On your/)).toBeNull();
   });
 
   it("should show where a chat matched when the match was in a message rather than its title", async () => {
