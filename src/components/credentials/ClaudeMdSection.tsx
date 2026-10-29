@@ -15,7 +15,7 @@ export interface ClaudeMdActions {
 
 export const CLAUDE_MD_ANCHOR = "claude-md";
 
-const BUTTON = "rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
+const BUTTON = "rounded-sm bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
 
 function count(value: number): string {
   return value.toLocaleString("en-GB");

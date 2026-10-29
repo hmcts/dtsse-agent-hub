@@ -57,8 +57,7 @@ change it first when the contract changes.
 - **Schema changes are a new directory under `prisma/migrations/`** with hand-written SQL, plus the matching change to
   `schema.prisma`. Never edit an applied migration: its checksum is in the ledger. Table names are singular; `"user"`
   is quoted everywhere because it is reserved.
-- **Dependencies are pinned exactly**, with no `^` or `~`, at the same versions as dtsse-github-metrics where both use
-  a package.
+- **Dependencies are pinned exactly**, with no `^` or `~`.
 - **Never a bare `.sort()`.** Pass a comparator; strings sort by code point.
 - **Comments say why**, state the current rule rather than its history, and are changed with the behaviour they
   describe.
@@ -79,6 +78,14 @@ change it first when the contract changes.
 
 `yarn lint` checks nothing inside a worktree under `.claude/worktrees/`, because `biome.json` excludes that path. Run
 `yarn biome check src test packages` there instead — `packages` as well, or the published client goes unchecked.
+
+`biome.json` is plain JSON and cannot carry comments, so three of its settings are explained here. The Markdown and
+YAML formatters are off: enabling them reflows every documentation page and requotes every workflow string, which is a
+change in its own right. `noComponentHookFactories` is off for test files, where a component defined inside a test is
+deliberate — remounting is often the thing under test — and where the rule also fires on screaming-case clock helpers
+that return a string and are no kind of component. `css.parser.tailwindDirectives` is on because the theme is written
+in CSS: without it Biome cannot parse `@theme`, `@source` or the `source()` on the Tailwind import, and fails
+`globals.css` outright.
 
 ## Charts
 

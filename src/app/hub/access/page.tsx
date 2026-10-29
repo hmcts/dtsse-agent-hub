@@ -60,7 +60,7 @@ export default async function AccessPage() {
                 <option value="write">write</option>
               </select>
             </label>
-            <button type="submit" className="rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]">
+            <button type="submit" className="rounded-sm bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]">
               Grant
             </button>
           </ActionForm>

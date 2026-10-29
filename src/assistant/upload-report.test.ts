@@ -51,17 +51,12 @@ describe("isDiskSize", () => {
     expect(isDiskSize(value)).toBe(true);
   });
 
-  it.each([
-    [-1],
-    [1.5],
-    [Number.NaN],
-    [Number.POSITIVE_INFINITY],
-    ["1"],
-    [null],
-    [undefined]
-  ] as const)("should refuse %s as a disk figure when it is not a whole count of bytes", (value) => {
-    expect(isDiskSize(value)).toBe(false);
-  });
+  it.each([[-1], [1.5], [Number.NaN], [Number.POSITIVE_INFINITY], ["1"], [null], [undefined]] as const)(
+    "should refuse %s as a disk figure when it is not a whole count of bytes",
+    (value) => {
+      expect(isDiskSize(value)).toBe(false);
+    }
+  );
 });
 
 describe("readReportedFiles", () => {

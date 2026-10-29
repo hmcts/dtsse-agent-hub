@@ -15,7 +15,7 @@ interface DrawerContextValue {
   hasSidebar: boolean;
   open: boolean;
   setOpen: (open: boolean) => void;
-  toggleRef: React.RefObject<HTMLButtonElement>;
+  toggleRef: React.RefObject<HTMLButtonElement | null>;
 }
 
 const DrawerContext = createContext<DrawerContextValue | null>(null);

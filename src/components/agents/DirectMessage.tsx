@@ -15,7 +15,7 @@ export function senderName(message: ThreadMessage): string {
 }
 
 function DeliveryBadge({ state }: { state: DeliveryView }) {
-  return <span className={`rounded border px-1 text-[11px] uppercase tracking-wide ${DELIVERY_STYLE[state]}`}>{state}</span>;
+  return <span className={`rounded-sm border px-1 text-[11px] uppercase tracking-wide ${DELIVERY_STYLE[state]}`}>{state}</span>;
 }
 
 /** One direct message in an agent's conversation, with which way it went and its delivery to the target. */

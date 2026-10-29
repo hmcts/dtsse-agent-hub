@@ -197,7 +197,7 @@ function Change({
           // A different size is a different question, so an answer already on the screen stops being the one asked.
           setAsking(false);
         }}
-        className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-2 text-[13px] text-asst-text outline-none focus:border-asst-accent-line"
+        className="rounded-lg border border-asst-strong bg-asst-field px-2.5 py-2 text-[13px] text-asst-text outline-hidden focus:border-asst-accent-line"
       >
         {/* Each size as it would be after the change, so these are the constants rather than what the pod in front
             of the person enforces now; the sentence above the section says that where the two differ. */}

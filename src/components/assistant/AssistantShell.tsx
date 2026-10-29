@@ -51,9 +51,9 @@ export function SidebarToggle() {
       className={`-ml-2 h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-asst-field ${sidebarOpen ? "flex md:hidden" : "flex"}`}
     >
       <span aria-hidden="true" className="flex flex-col gap-1">
-        <span className="block h-0.5 w-[18px] rounded bg-current" />
-        <span className="block h-0.5 w-[18px] rounded bg-current" />
-        <span className="block h-0.5 w-[18px] rounded bg-current" />
+        <span className="block h-0.5 w-[18px] rounded-sm bg-current" />
+        <span className="block h-0.5 w-[18px] rounded-sm bg-current" />
+        <span className="block h-0.5 w-[18px] rounded-sm bg-current" />
       </span>
     </button>
   );
@@ -348,7 +348,7 @@ export function AssistantShell({
           {narrow || !open ? null : (
             <div
               {...resize.separator}
-              className="absolute -right-1 bottom-0 top-0 z-[2] w-2 cursor-col-resize hover:bg-asst-accent/25 focus:bg-asst-accent/40 focus:outline-none"
+              className="absolute -right-1 bottom-0 top-0 z-[2] w-2 cursor-col-resize hover:bg-asst-accent/25 focus:bg-asst-accent/40 focus:outline-hidden"
             />
           )}
         </aside>

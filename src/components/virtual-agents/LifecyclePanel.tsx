@@ -12,8 +12,8 @@ export interface LifecycleActions {
   remove: FormAction;
 }
 
-const BUTTON = "rounded border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
-const DANGER = "rounded bg-red-700 px-3 py-1 text-sm font-medium text-white hover:bg-red-600";
+const BUTTON = "rounded-sm border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
+const DANGER = "rounded-sm bg-red-700 px-3 py-1 text-sm font-medium text-white hover:bg-red-600";
 
 function Act({ action, id, label, className = BUTTON }: { action: FormAction; id: string; label: string; className?: string }) {
   return (

@@ -5,9 +5,9 @@ provider "azurerm" {
 
 provider "azurerm" {
   features {}
-  alias                      = "postgres_network"
-  subscription_id            = var.aks_subscription_id
-  skip_provider_registration = true
+  alias                           = "postgres_network"
+  subscription_id                 = var.aks_subscription_id
+  resource_provider_registrations = "none"
 }
 
 data "azurerm_key_vault" "key_vault" {

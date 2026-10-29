@@ -1,4 +1,4 @@
-import type { ZodTypeAny, z } from "zod";
+import type { z } from "zod";
 import { messageIdOf } from "../messages/limits.ts";
 
 /** A refusal with the status and JSON body the contract gives it: `{"error": "<message>"}` plus any extras. */
@@ -80,7 +80,7 @@ export async function readJson(request: Request): Promise<unknown> {
 }
 
 /** Parses against a schema, turning the first issue into a 400 that names the field. */
-export function parse<S extends ZodTypeAny>(schema: S, value: unknown): z.output<S> {
+export function parse<S extends z.ZodType>(schema: S, value: unknown): z.output<S> {
   const result = schema.safeParse(value);
   if (result.success) {
     return result.data;

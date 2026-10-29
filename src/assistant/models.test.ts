@@ -31,16 +31,12 @@ describe("CATALOGUE", () => {
     expect(isKnownModel(id)).toBe(true);
   });
 
-  it.each([
-    ["claude-sonnet-5-5"],
-    ["eu.anthropic.claude-sonnet-5-5"],
-    ["sonnet --dangerously-skip-permissions"],
-    [""],
-    [42],
-    [null]
-  ])("should not know %j when it is not a catalogue id", (id) => {
-    expect(isKnownModel(id)).toBe(false);
-  });
+  it.each([["claude-sonnet-5-5"], ["eu.anthropic.claude-sonnet-5-5"], ["sonnet --dangerously-skip-permissions"], [""], [42], [null]])(
+    "should not know %j when it is not a catalogue id",
+    (id) => {
+      expect(isKnownModel(id)).toBe(false);
+    }
+  );
 });
 
 describe("modelLabel", () => {

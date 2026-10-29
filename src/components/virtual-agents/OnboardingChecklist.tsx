@@ -36,10 +36,10 @@ function pastedName(kind: CredentialKind): string {
 const INPUT = "mt-1 block w-full min-w-0 rounded-md border border-hub-line bg-hub-pane px-2 py-1 font-mono text-sm text-hub-text";
 const FIELD = "block min-w-0 flex-1 basis-48";
 const FORM = "flex min-w-0 flex-wrap items-end gap-3";
-const BUTTON = "shrink-0 rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
-const SECONDARY = "shrink-0 rounded border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
-const DANGER = "shrink-0 rounded bg-red-700 px-3 py-1 text-sm font-medium text-white hover:bg-red-600";
-const ICON_BUTTON = "ml-auto shrink-0 rounded p-1 text-hub-muted hover:bg-hub-raised hover:text-white";
+const BUTTON = "shrink-0 rounded-sm bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
+const SECONDARY = "shrink-0 rounded-sm border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
+const DANGER = "shrink-0 rounded-sm bg-red-700 px-3 py-1 text-sm font-medium text-white hover:bg-red-600";
+const ICON_BUTTON = "ml-auto shrink-0 rounded-sm p-1 text-hub-muted hover:bg-hub-raised hover:text-white";
 
 export type ChecklistState = "stored" | "login" | "waiting";
 
