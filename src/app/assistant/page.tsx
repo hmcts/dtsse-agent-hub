@@ -87,6 +87,7 @@ export default async function AssistantPage() {
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
     >
+      {/* No `local` here: this screen is about to start a chat on a pod, so it needs what a pod needs. */}
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>
         <EmptyChat starters={STARTERS} templates={offeredTemplates(mine)} viewerOid={viewer.oid} unsent={unsent} actions={CHAT_ACTIONS} />
       </AssistantGate>
