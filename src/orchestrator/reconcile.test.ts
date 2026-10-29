@@ -40,7 +40,7 @@ const SETTINGS: OrchestratorSettings = {
   }
 };
 
-const GATEWAY = { base_url: "https://ai-gateway.sandbox.platform.hmcts.net", audience: "api://gateway-client/.default", apim_key: "apim-key" };
+const GATEWAY = { apim_key: "apim-key" };
 
 function agent(overrides: Partial<ClaimedAgent> = {}): ClaimedAgent {
   const id = overrides.id ?? ID;
@@ -182,14 +182,12 @@ describe("podReason", () => {
     expect(podReason(null, now)).toBeNull();
   });
 
-  it.each([
-    "CrashLoopBackOff",
-    "ImagePullBackOff",
-    "ErrImagePull",
-    "CreateContainerConfigError"
-  ])("should report %s when the container waits on it", (reason) => {
-    expect(podReason(waiting(reason), now)).toBe(reason);
-  });
+  it.each(["CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError"])(
+    "should report %s when the container waits on it",
+    (reason) => {
+      expect(podReason(waiting(reason), now)).toBe(reason);
+    }
+  );
 
   it("should report OOMKilled when the container has terminated with it", () => {
     expect(podReason(pod("Running", { containerStatuses: [{ name: "agent", state: { terminated: { reason: "OOMKilled" } } }] }), now)).toBe("OOMKilled");
@@ -271,7 +269,7 @@ function existing(overrides: Partial<ClaimedAgent> = {}, token = "ahv_old"): Sta
 }
 
 function envOf(set: StatefulSet | undefined): Record<string, unknown> {
-  const containers = (set?.spec as { template: { spec: { containers: { env: { name: string; value: unknown }[] }[] } } }).template.spec.containers;
+  const containers = (set!.spec as { template: { spec: { containers: { env: { name: string; value: unknown }[] }[] } } }).template.spec.containers;
   return Object.fromEntries(containers[0]!.env.map((entry) => [entry.name, entry.value]));
 }
 

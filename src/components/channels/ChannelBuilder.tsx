@@ -104,7 +104,7 @@ export function ChannelBuilder({
         </label>
         <ul className="flex flex-wrap gap-2" aria-label="Chosen topics">
           {topics.map((topic) => (
-            <li key={topic} className="flex items-center gap-1 rounded bg-hub-raised px-2 py-0.5 font-mono text-xs text-hub-link">
+            <li key={topic} className="flex items-center gap-1 rounded-sm bg-hub-raised px-2 py-0.5 font-mono text-xs text-hub-link">
               #{topic}
               <button
                 type="button"
@@ -201,7 +201,7 @@ export function ChannelBuilder({
         <button
           type="submit"
           disabled={pending}
-          className="rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567] disabled:bg-hub-raised disabled:text-hub-text"
+          className="rounded-sm bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567] disabled:bg-hub-raised disabled:text-hub-text"
         >
           {pending ? "Saving" : "Save channel"}
         </button>

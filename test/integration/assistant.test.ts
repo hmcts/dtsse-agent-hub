@@ -255,17 +255,20 @@ describe("the person's assistant", () => {
     ["own-licence", "gateway", ["github", "azure"], true],
     ["own-licence", "own-licence", ["github", "claude"], true],
     ["gateway", "gateway", ["github", "azure"], false]
-  ] as const)("should ask for the assistant's own credentials and allow every one of them when the viewer is on %s and the row on %s", async (viewerRoute, rowRoute, needed, claudeTokenUsable) => {
-    await insertUser(ALICE);
-    await createVirtualAgent(prisma, { owner: ALICE, modelRoute: rowRoute, name: "assistant" });
+  ] as const)(
+    "should ask for the assistant's own credentials and allow every one of them when the viewer is on %s and the row on %s",
+    async (viewerRoute, rowRoute, needed, claudeTokenUsable) => {
+      await insertUser(ALICE);
+      await createVirtualAgent(prisma, { owner: ALICE, modelRoute: rowRoute, name: "assistant" });
 
-    const home = await openAssistant({ ...ALICE, tid: "dev", modelRoute: viewerRoute });
+      const home = await openAssistant({ ...ALICE, tid: "dev", modelRoute: viewerRoute });
 
-    expect(home.assistant.needed).toEqual(needed);
-    // The row's route and not the viewer's, because the Connections list words how this assistant reaches Claude.
-    expect(home.assistant.modelRoute).toBe(rowRoute);
-    expect(home.credentials).toMatchObject({ modelRoute: viewerRoute, claudeTokenUsable });
-  });
+      expect(home.assistant.needed).toEqual(needed);
+      // The row's route and not the viewer's, because the Connections list words how this assistant reaches Claude.
+      expect(home.assistant.modelRoute).toBe(rowRoute);
+      expect(home.credentials).toMatchObject({ modelRoute: viewerRoute, claudeTokenUsable });
+    }
+  );
 });
 
 describe("conversations", () => {

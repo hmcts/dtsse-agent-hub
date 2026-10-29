@@ -148,7 +148,7 @@ describe("CredentialSettingsView", () => {
       fireEvent.submit(screen.getByRole("form", { name: "Delete Azure sign-in" }));
     });
 
-    expect(((given.remove as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as FormData).get("kind")).toBe("azure");
+    expect(((given.remove as ReturnType<typeof vi.fn>).mock.calls[0]![0] as FormData).get("kind")).toBe("azure");
   });
 
   it("should say credentials are unavailable, and why, with no forms when the deployment cannot store them", () => {

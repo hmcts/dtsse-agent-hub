@@ -17,9 +17,8 @@ function urlFor(database: string): string {
 
 /**
  * Unique per process, so two concurrent runs never create and drop one another's scratch databases mid-suite. It is
- * not derived from `DATABASE_URL`, because the two ways this suite is normally run both leave that at a fixed name —
- * `vitest.integration.config.mts` falls back to `agent_hub_test`, and `Jenkinsfile_CNP` sets `agent_hub` — so a name
- * derived from it would collide for exactly the people who have not overridden it.
+ * not derived from `DATABASE_URL`, which is this worker's own database and so already unique to the run: these are
+ * databases beside it on the same server, named from scratch, and the uniqueness has to be their own.
  */
 const RUN = `${process.pid.toString(36)}_${randomBytes(4).toString("hex")}`;
 
@@ -467,25 +466,17 @@ describe("the assistant product list migration", () => {
 describe("the scratch database sweep's pattern", () => {
   const pattern = new RegExp(SCRATCH_PATTERN);
 
-  it.each([
-    "migrate",
-    "migrate_bedrock",
-    "migrate_bedrock_gone",
-    "migrate_product",
-    "assistant2",
-    "x",
-    "a_much_longer_suffix_9"
-  ])("should match the name the generator produces for the %s suffix", (suffix) => {
-    expect(scratchDatabase(suffix)).toMatch(pattern);
-  });
+  it.each(["migrate", "migrate_bedrock", "migrate_bedrock_gone", "migrate_product", "assistant2", "x", "a_much_longer_suffix_9"])(
+    "should match the name the generator produces for the %s suffix",
+    (suffix) => {
+      expect(scratchDatabase(suffix)).toMatch(pattern);
+    }
+  );
 
-  it.each([
-    "agent_hub",
-    "agent_hub_test",
-    "agent_hub_migrate_probe",
-    "agent_hub_scratch_probe",
-    `${SCRATCH_PREFIX}_migrate`
-  ])("should leave %s alone, because nothing generated it", (name) => {
-    expect(name).not.toMatch(pattern);
-  });
+  it.each(["agent_hub", "agent_hub_test", "agent_hub_migrate_probe", "agent_hub_scratch_probe", `${SCRATCH_PREFIX}_migrate`])(
+    "should leave %s alone, because nothing generated it",
+    (name) => {
+      expect(name).not.toMatch(pattern);
+    }
+  );
 });

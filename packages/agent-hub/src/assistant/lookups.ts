@@ -153,7 +153,7 @@ function apiBody(stdout: string): { status: number; body: Record<string, unknown
 /** The projects in Jira's `project/search` answer, as the hub accepts them. */
 export function parseJiraProjects(stdout: string): JiraProjectFound[] | null {
   const answer = apiBody(stdout);
-  if (!answer || answer.status !== 200 || !Array.isArray(answer.body.values)) {
+  if (answer?.status !== 200 || !Array.isArray(answer.body.values)) {
     return null;
   }
   const found: JiraProjectFound[] = [];
@@ -170,7 +170,7 @@ export function parseJiraProjects(stdout: string): JiraProjectFound[] | null {
 /** The pages in Confluence's `search` answer, as the hub accepts them: anything not quite a page is left out. */
 export function parseConfluencePages(stdout: string): ConfluencePageFound[] | null {
   const answer = apiBody(stdout);
-  if (!answer || answer.status !== 200 || !Array.isArray(answer.body.results)) {
+  if (answer?.status !== 200 || !Array.isArray(answer.body.results)) {
     return null;
   }
   const found: ConfluencePageFound[] = [];
@@ -181,8 +181,7 @@ export function parseConfluencePages(stdout: string): ConfluencePageFound[] | nu
     const spaceName = shortText(space?.name, MAX_NAME);
     const spaceId = typeof space?.id === "number" ? String(space.id) : space?.id;
     if (
-      !content ||
-      content.type !== "page" ||
+      content?.type !== "page" ||
       typeof content.id !== "string" ||
       !NUMERIC_ID_RE.test(content.id) ||
       title === null ||

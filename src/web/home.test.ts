@@ -55,16 +55,12 @@ describe("movedHubPath", () => {
     expect(movedHubPath("/hub/agents/0f8a")).toBeUndefined();
   });
 
-  it.each([
-    "/auth/login",
-    "/auth/callback",
-    "/api/ui/feed",
-    "/api/agent/agents",
-    "/health",
-    "/health/liveness"
-  ])("should leave %s alone, which is not a page the hub ever served", (path) => {
-    expect(movedHubPath(path)).toBeUndefined();
-  });
+  it.each(["/auth/login", "/auth/callback", "/api/ui/feed", "/api/agent/agents", "/health", "/health/liveness"])(
+    "should leave %s alone, which is not a page the hub ever served",
+    (path) => {
+      expect(movedHubPath(path)).toBeUndefined();
+    }
+  );
 
   it("should match a whole segment only, so a path that merely starts with one is untouched", () => {
     expect(movedHubPath("/topicsfoo")).toBeUndefined();

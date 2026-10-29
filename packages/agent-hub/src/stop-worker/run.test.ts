@@ -602,7 +602,7 @@ describe("followWork", () => {
     await followRun(api, [toolUse("Edit", { file_path: "/work/cft-workspace/scripts/lib/agent-hub/agent.mjs" })]);
 
     // Assert
-    expect((callsOf(api, "register")[0]?.[1] as Record<string, unknown>).repo).toBe("cft-workspace");
+    expect((callsOf(api, "register")[0]![1] as Record<string, unknown>).repo).toBe("cft-workspace");
     expect(callsOf(api, "subscribe")[0]?.[1]).toEqual(["cft-workspace"]);
   });
 

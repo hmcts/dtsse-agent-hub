@@ -59,10 +59,12 @@ export default async function SharedChatsPage() {
       <div className="mx-auto flex max-w-[760px] flex-col gap-7 px-5 pb-10 pt-7">
         <div className="flex flex-col gap-2">
           <h1 className="text-[22px] font-semibold tracking-tight">Shared chats</h1>
-          <p className="text-pretty text-[13px] text-asst-body">
-            A shared chat can be read by the people its owner named, and by nobody else. A reader sees the most recent part of the chat and its document as they
-            stood when the page was opened; they cannot reply, change anything, or open the files that were sent. A chat offered to fork can also be copied by
-            the people named into their own Assistant, to carry on there; the original stays its owner's.
+          <p className="text-pretty text-sm text-asst-text">
+            Only the people you share a chat with can open it. They see the latest messages and the document as they were when they opened the page. They can't
+            reply, edit anything, or open files sent in the chat.
+          </p>
+          <p className="text-pretty text-sm text-asst-text">
+            If you let them fork it, they can copy the chat into their own Assistant and carry on there. Your original stays yours.
           </p>
         </div>
         <Chats label="Chats you have shared" chats={given} manage empty="You have not shared any of your chats." />

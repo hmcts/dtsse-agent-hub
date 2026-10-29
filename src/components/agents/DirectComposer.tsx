@@ -32,7 +32,7 @@ export function offlineNote(agentName: string | undefined): string {
 
 /** The list sits in the flow above the box, which is what pushes the box down to make room for it. */
 const SKILL_MENU: SkillMenuTheme = {
-  list: "mx-2 mt-2 max-h-60 overflow-y-auto rounded border border-hub-line bg-hub-raised py-1 text-[13px]",
+  list: "mx-2 mt-2 max-h-60 overflow-y-auto rounded-sm border border-hub-line bg-hub-raised py-1 text-[13px]",
   option: "cursor-pointer px-3 py-1",
   active: "bg-hub-active text-white",
   idle: "text-hub-text hover:bg-hub-hover",
@@ -152,7 +152,7 @@ export function DirectComposer({
           rows={2}
           maxLength={32_000}
           placeholder={agentName ? `Message @${agentName}` : "Message this agent"}
-          className="block max-h-60 w-full resize-y bg-transparent px-3 pt-2.5 pb-1 text-[15px] text-hub-text placeholder:text-hub-muted focus:outline-none"
+          className="block max-h-60 w-full resize-y bg-transparent px-3 pt-2.5 pb-1 text-[15px] text-hub-text placeholder:text-hub-muted focus:outline-hidden"
         />
       </label>
       <div className="flex items-center gap-3 px-2 pb-2">

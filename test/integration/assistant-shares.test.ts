@@ -12,6 +12,7 @@ import { realtime } from "../../src/realtime/process.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { connectForChat, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
+import { WAIT_MS } from "./waits.ts";
 
 /**
  * Sharing an HMCTS Assistant conversation, read-only, with people the owner names.
@@ -163,11 +164,11 @@ describe("sharing a conversation", () => {
       heard.length = 0;
 
       await shareActions.shareChat({ conversationId: id, recipientOid: BOB.oid });
-      await vi.waitFor(() => expect(heard).toEqual([ALICE.oid]), { timeout: 5000 });
+      await vi.waitFor(() => expect(heard).toEqual([ALICE.oid]), { timeout: WAIT_MS });
 
       heard.length = 0;
       await shareActions.unshareChat({ conversationId: id, recipientOid: BOB.oid });
-      await vi.waitFor(() => expect(heard).toEqual([ALICE.oid]), { timeout: 5000 });
+      await vi.waitFor(() => expect(heard).toEqual([ALICE.oid]), { timeout: WAIT_MS });
     } finally {
       stop();
     }

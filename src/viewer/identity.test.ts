@@ -18,15 +18,12 @@ describe("devIdentity", () => {
     expect(devIdentity("owner-2")).toEqual({ oid: "dev-owner-2", tid: "dev", name: "Dev owner-2 (sign-in disabled)", email: "owner-2@dev.invalid" });
   });
 
-  it.each([
-    "",
-    "Owner",
-    "has space",
-    "x".repeat(33),
-    "00000000-0000-0000-0000-00000000000"
-  ])("should fall back to anonymous when the persona is %j", (persona) => {
-    expect(devIdentity(persona).oid).toBe("dev-anonymous");
-  });
+  it.each(["", "Owner", "has space", "x".repeat(33), "00000000-0000-0000-0000-00000000000"])(
+    "should fall back to anonymous when the persona is %j",
+    (persona) => {
+      expect(devIdentity(persona).oid).toBe("dev-anonymous");
+    }
+  );
 
   it("should never produce an oid shaped like an Entra object id", () => {
     expect(devIdentity("a").oid.startsWith("dev-")).toBe(true);

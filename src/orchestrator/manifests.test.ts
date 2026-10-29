@@ -30,7 +30,7 @@ const SPEC: VirtualAgentSpec = {
   publicDomain: "preview.platform.hmcts.net"
 };
 
-const GATEWAY = { base_url: "https://ai-gateway.sandbox.platform.hmcts.net", audience: "api://gateway-client/.default", apim_key: "apim-key" };
+const GATEWAY = { apim_key: "apim-key" };
 
 const LABELS = {
   "app.kubernetes.io/name": "virtual-agent",
@@ -154,12 +154,12 @@ describe("statefulSet", () => {
     expect(container!.env.map((entry) => entry.name)).not.toContain("HAI_ENV_READY");
   });
 
-  it("should give the pod the gateway's URL, scope and APIM key when the claim carried them for a gateway agent", () => {
+  // The key alone, because hai resolves the gateway's host, its Entra scope and the apiKeyHelper in the pod.
+  it("should give the pod the gateway's APIM key and nothing else about the gateway when the claim carried one", () => {
     const [container] = podSpec(statefulSet({ ...AGENT, model_route: "gateway", gateway: GATEWAY }, SPEC, TOKEN)).containers;
 
-    expect(container!.env).toContainEqual({ name: "AI_GATEWAY_BASE_URL", value: GATEWAY.base_url });
-    expect(container!.env).toContainEqual({ name: "AI_GATEWAY_AUDIENCE", value: GATEWAY.audience });
-    expect(container!.env).toContainEqual({ name: "AI_GATEWAY_APIM_KEY", value: GATEWAY.apim_key });
+    expect(container!.env).toContainEqual({ name: "HAI_GATEWAY_APIM_KEY", value: GATEWAY.apim_key });
+    expect(container!.env.map((entry) => entry.name).filter((name) => name.startsWith("AI_GATEWAY_"))).toEqual([]);
   });
 
   // The key is one service's rather than one agent's, so a pod that cannot use it must not carry it. The hub sends
@@ -167,12 +167,12 @@ describe("statefulSet", () => {
   it("should leave the gateway's APIM key out when the agent is on the own_licence route", () => {
     const [container] = podSpec(statefulSet({ ...AGENT, model_route: "own_licence", gateway: GATEWAY }, SPEC, TOKEN)).containers;
 
-    expect(container!.env.map((entry) => entry.name).filter((name) => name.startsWith("AI_GATEWAY_"))).toEqual([]);
+    expect(container!.env.map((entry) => entry.name).filter((name) => name.includes("GATEWAY"))).toEqual([]);
   });
 
-  // A pod started without them could only boot, say which setting it was not given, and sit there.
-  it("should refuse to build a gateway pod when the claim carried no gateway settings", () => {
-    expect(() => statefulSet({ ...AGENT, model_route: "gateway" }, SPEC, TOKEN)).toThrow(/AI_GATEWAY/);
+  // A pod started without it could only boot, say which setting it was not given, and sit there.
+  it("should refuse to build a gateway pod when the claim carried no APIM key", () => {
+    expect(() => statefulSet({ ...AGENT, model_route: "gateway" }, SPEC, TOKEN)).toThrow(/AI_GATEWAY_APIM_KEY/);
   });
 
   // The figures, not the constant, because a cap is a measured limit on what a pod of that size can hold: reading it

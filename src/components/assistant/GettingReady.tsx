@@ -44,7 +44,7 @@ import type { CredentialStatus } from "@/credentials/store";
 import type { LoginView } from "@/virtual-agents/logins";
 
 const INPUT =
-  "min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 font-plex-mono text-sm text-asst-text outline-none focus:border-asst-accent-line";
+  "min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 font-plex-mono text-sm text-asst-text outline-hidden focus:border-asst-accent-line";
 const PRIMARY = "shrink-0 rounded-[9px] bg-asst-accent px-3.5 py-1.5 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover";
 const FOOTER = "h-[42px] rounded-[10px] px-5 text-sm";
 const FOOTER_PRIMARY = `${FOOTER} bg-asst-accent font-semibold text-asst-ink disabled:opacity-40`;
@@ -518,9 +518,9 @@ function ReadyShell({ assistant, unavailable, theme = "system", subtitle, childr
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={readiness.percent}
-              className="h-1 w-full overflow-hidden rounded bg-asst-active"
+              className="h-1 w-full overflow-hidden rounded-sm bg-asst-active"
             >
-              <div className="h-full rounded bg-asst-accent transition-[width] duration-300" style={{ width: `${readiness.percent}%` }} />
+              <div className="h-full rounded-sm bg-asst-accent transition-[width] duration-300" style={{ width: `${readiness.percent}%` }} />
             </div>
             <p role="status" className="font-plex-mono text-xs text-asst-faint">
               {readiness.step}

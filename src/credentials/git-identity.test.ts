@@ -36,14 +36,12 @@ describe("checkGitIdentity", () => {
     expect(checkGitIdentity(json(given))).toEqual({ ok: false, error: "set a name or an email, or clear the git identity" });
   });
 
-  it.each([
-    "Olive <o@example.com>",
-    "Olive\nOwner",
-    "Olive\u0000",
-    "\ud800Olive"
-  ])("should refuse the name %j when it would corrupt the author line", (name) => {
-    expect(checkGitIdentity(json({ name }))).toEqual({ ok: false, error: "the git name cannot hold control characters or < >" });
-  });
+  it.each(["Olive <o@example.com>", "Olive\nOwner", "Olive\u0000", "\ud800Olive"])(
+    "should refuse the name %j when it would corrupt the author line",
+    (name) => {
+      expect(checkGitIdentity(json({ name }))).toEqual({ ok: false, error: "the git name cannot hold control characters or < >" });
+    }
+  );
 
   it("should accept a name of the most characters when they are counted as code points", () => {
     expect(checkGitIdentity(json({ name: "😀".repeat(MAX_GIT_NAME_CHARACTERS) })).ok).toBe(true);
@@ -66,27 +64,19 @@ describe("checkGitIdentity", () => {
     expect(checkGitIdentity(json({ email })).ok).toBe(true);
   });
 
-  it.each([
-    "olive",
-    "olive@",
-    "@example.com",
-    "olive@example",
-    "o live@example.com",
-    "o@@example.com",
-    "<o@example.com>",
-    "o@example..com",
-    "o@.com"
-  ])("should refuse the email %j when it is not a plausible address", (email) => {
-    expect(checkGitIdentity(json({ email }))).toEqual({ ok: false, error: "that is not an email address" });
-  });
+  it.each(["olive", "olive@", "@example.com", "olive@example", "o live@example.com", "o@@example.com", "<o@example.com>", "o@example..com", "o@.com"])(
+    "should refuse the email %j when it is not a plausible address",
+    (email) => {
+      expect(checkGitIdentity(json({ email }))).toEqual({ ok: false, error: "that is not an email address" });
+    }
+  );
 
-  it.each([
-    "4242+oliveo@users.noreply.github.com",
-    "olive.owner@justice.gov.uk",
-    "o@x.io"
-  ])("should accept the email %j when it is a plausible address", (email) => {
-    expect(checkGitIdentity(json({ email })).ok).toBe(true);
-  });
+  it.each(["4242+oliveo@users.noreply.github.com", "olive.owner@justice.gov.uk", "o@x.io"])(
+    "should accept the email %j when it is a plausible address",
+    (email) => {
+      expect(checkGitIdentity(json({ email })).ok).toBe(true);
+    }
+  );
 });
 
 describe("readGitIdentity", () => {
