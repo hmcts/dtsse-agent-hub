@@ -21,12 +21,8 @@ const CASE_TIMEOUT = 300_000;
 const CASES = [
   "first-boot",
   "gateway-route",
-  "gateway-route-unchecked",
-  "gateway-route-unreadable",
-  "gateway-route-refused",
-  "gateway-route-no-roles",
+  "gateway-route-older-template",
   "gateway-route-unconfigured",
-  "gateway-route-bad-audience",
   "unknown-route",
   "hai-install-blip-recovers",
   "hai-install-falls-back",

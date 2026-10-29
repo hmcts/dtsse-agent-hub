@@ -33,9 +33,10 @@ export interface ClaimedAgent {
   owner: { oid: string };
   launch_token?: string;
   /**
-   * What a running `gateway` agent's pod needs to reach the HMCTS AI Gateway, which the hub reads from its own
-   * environment and only ever sends for an agent on that route. Absent for every other agent, and for one on that
-   * route where the hub has no gateway configured — which the orchestrator refuses to build a pod from.
+   * The AI Gateway's APIM subscription key, which the hub reads from its own environment and only ever sends for a
+   * running agent on the `gateway` route; `hai` resolves the rest of that route in the pod. Absent for every other
+   * agent, and for one on that route claimed by a hub too old to send it — which the orchestrator refuses to build
+   * a pod from.
    */
   gateway?: GatewaySettings;
 }

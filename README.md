@@ -121,7 +121,7 @@ the `-staging` release.
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
 | `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain a reported port's URL is under, as `https://<statefulset_name>-<port>.<domain>`; the orchestrator reads it too |
 | `VIRTUAL_AGENT_PLUGINS` | none | The workspace marketplace plugins an owner can tick, comma-separated `name` or `name=description`, as `pcs=PCS team workflows,dtsse=DTSSE docs`. A name is lowercase letters, digits and hyphens; any other makes the pages that read it fail. With none, the create form and the agent's page offer no plugins |
-| `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_AUDIENCE`, `AI_GATEWAY_APIM_KEY` | none | The HMCTS AI Gateway a `gateway` pod reaches Claude through: its origin, the Entra scope `az` is asked for a token for, and the APIM subscription key, which comes from the `dtsse` vault. Each claim for a running `gateway` agent carries all three to the orchestrator, which puts them in that pod and no other. All three or none: a claim on a half-configured deployment is refused. With none there is no working `gateway` route, and such a pod cannot be built |
+| `AI_GATEWAY_APIM_KEY` | none | The HMCTS AI Gateway's APIM subscription key, from the `dtsse` vault, and the whole of what this hub holds about the gateway: `hai` resolves the host, the Entra scope, the `apiKeyHelper` and the model ids in the pod, and this key is the one value it cannot fetch there. Each claim for a running `gateway` agent carries it to the orchestrator, which puts it in that pod and no other. Without it a claim for such an agent is refused, so a deployment with nobody on the gateway needs none |
 
 ### HMCTS Assistant
 
@@ -167,41 +167,55 @@ These two and no third: there is no pasted model key anywhere in the hub, on any
 `AIGateway.User` app role for a check of the gateway's own Entra group is a change to that function alone.
 
 **The `gateway` route asks the person for no model credential at all.** The gateway authorises them, not a key of
-theirs: the pod writes an `apiKeyHelper` that runs `az account get-access-token --scope <AI_GATEWAY_AUDIENCE>` as the
-owner, and sends that token with the APIM subscription key the hub injects as `AI_GATEWAY_APIM_KEY`. Its Azure
-sign-in is therefore `needed` rather than optional, is what the connections banner asks for, and is the one credential
-other than GitHub that gates the Assistant's chat — a pod whose helper has no sign-in to mint from fails every turn.
-**The hub is what is configured with the gateway, not the orchestrator.** It reads `AI_GATEWAY_BASE_URL`,
-`AI_GATEWAY_AUDIENCE` and `AI_GATEWAY_APIM_KEY` — the two plain values from its chart's `environment`, the key from
-the `dtsse` vault — and hands all three to the orchestrator in each claim for a running agent on that route, the way
-a launch token travels into the same pod template. The orchestrator puts them in the pod, and refuses to build a
-`gateway` pod it was sent none for. All three or none: `gatewaySettings` refuses a claim on a half-configured
-deployment rather than handing out a pod that boots and then fails every turn. Nothing in `cnp-flux-config` has to
-change for the route to work; the one step outside this repository is that
-`apim-subscription-dtsse-ai-gateway-bedrock-swe` in `sps-ai-kv-sbox` has to be copied into the `dtsse` vault as
-`agent-hub-ai-gateway-apim-key` before the chart ships, since that vault has no public endpoint and the hub's pods
-cannot start without a secret the chart names.
+theirs: `hai` writes an `apiKeyHelper` that runs `az account get-access-token` for the gateway's scope as the owner,
+and sends that token with the APIM subscription key the hub injects. Its Azure sign-in is therefore `needed` rather
+than optional, is what the connections banner asks for, and is the one credential other than GitHub that gates the
+Assistant's chat — a pod whose helper has no sign-in to mint from fails every turn.
 
-Stage 1 builds the whole of the route's environment from the three and sets `HAI_ENV_READY=1`, because `hai`'s own
-`ai-gateway` route reads the APIM key from `sps-ai-kv-sbox`, which a pod cannot reach. The key is one service's
-rather than one person's, so the orchestrator redacts it by value from every log line and every apply error it
-reports for that agent: the API server's refusal of an apply can quote the spec it was given, and an apply error is
-stored as the agent's `status_detail` and shown to its owner.
+**`hai` owns this route; the hub passes one value.** The gateway's host, the Entra scope the token is minted for, the
+`apiKeyHelper`, the Bedrock switches and the model ids are all resolved by `hai` in the pod, from its own defaults —
+the staging gateway and the staging audience, which is what a CFT cluster can reach. The exception is the APIM
+subscription key: `hai` reads that from `sps-ai-kv-stg`, a vault with no public endpoint, which a pod can never reach
+however well it is authenticated, so `HAI_GATEWAY_APIM_KEY` is how it takes one instead. With the key handed in,
+`hai` makes no Key Vault call and no VPN probe and resolves everything else itself. Stage 1 therefore sets
+`HAI_ROUTE=ai-gateway` and that one variable, and no `HAI_ENV_READY`: a second copy of the host or the scope here
+could only drift from the ones `hai` uses, which is a pod that boots, reports healthy and fails every turn.
 
-**The sandbox gateway's APIM subscription is rate-limited to 30 requests a minute and 1000 a day**, counted across
+**The hub is what is configured with the gateway, not the orchestrator.** It reads `AI_GATEWAY_APIM_KEY` from the
+`dtsse` vault and hands it to the orchestrator in each claim for a running agent on that route, the way a launch
+token travels into the same pod template. The orchestrator puts it in the pod as `HAI_GATEWAY_APIM_KEY`, and refuses
+to build a `gateway` pod it was sent none for; `gatewaySettings` refuses the claim itself when the deployment has no
+key, rather than handing out a pod that boots and then fails every turn. Nothing in `cnp-flux-config` has to change
+for the route to work; the one step outside this repository is that `apim-subscription-dtsse-ai-gateway-bedrock-swe`
+in `sps-ai-kv-stg` has to be copied into the `dtsse` vault as `agent-hub-ai-gateway-apim-key` before the chart ships,
+since that vault has no public endpoint and the hub's pods cannot start without a secret the chart names.
+
+The key is one service's rather than one person's, so the orchestrator redacts it by value from every log line and
+every apply error it reports for that agent: the API server's refusal of an apply can quote the spec it was given,
+and an apply error is stored as the agent's `status_detail` and shown to its owner.
+
+**The gateway's APIM subscription is rate-limited to 30 requests a minute and 1000 a day**, counted across
 the key rather than per caller, and every `gateway` pod shares the one key — so the ceiling is the whole route's, not
 each person's. Worth sizing a rollout against before adding people to the Entra group.
 
-The gateway grants its access by assigning an app role to one Entra group, and a group's assignment only reaches a
-member's own token — so an owner outside **DTSSE AI Gateway Bedrock Developer** holds a token the gateway accepts as a
-token and refuses as an entitlement, with no credential missing for anything to ask about. Stage 1 therefore mints the
-token once before the first session, decodes its payload, and requires `AI.Gateway.Standard` in the `roles` claim,
-failing the agent with a detail naming that group when it is absent. The claim and not an HTTP probe, because the
-gateway cannot be asked: every request a probe could make without spending a model turn answers `404` whether the
-caller is entitled or not. A token `az` cannot mint yet, or one whose payload will not decode, leaves the access
-unchecked and the session starts — `apiKeyHelper` is re-run every five minutes, so a sign-in that lands after boot
-reaches a running session. None of them falls back to the owner's own Claude licence: that would put HMCTS work on a
-personal subscription nobody offered.
+**Known gap: nothing checks the owner's entitlement any more.** The gateway grants its access by assigning an app
+role to one Entra group, and a group's assignment only reaches a member's own token — so an owner outside **DTSSE AI
+Gateway Bedrock Developer** holds a token the gateway accepts as a token and refuses as an entitlement, with no
+credential missing for anything to ask about. Stage 1 used to mint the token before the first session and require
+`AI.Gateway.Standard` in its `roles` claim, failing the agent with a detail naming that group. That check needed the
+audience to mint the token with, which is now `hai`'s and not the hub's, and `hai` refuses nobody on an explicit
+`HAI_ROUTE`. So such an owner now gets a pod that boots, reports healthy, and fails at their first message with
+whatever `hai` or Claude Code says, instead of a boot failure naming the group to ask for. Putting it back wants
+either the group check through Graph that `hai` already has on its own unset path, or the hub checking the group when
+it decides the owner's route.
+
+**Known gap: the summariser has no gateway credential.** The stop-worker's summariser spawns `claude` itself rather
+than through `hai` (`packages/agent-hub/src/stop-worker/haiku.ts`), and takes its `apiKeyHelper` from the settings the
+pod hands it as `AGENT_HUB_CLAUDE_SETTINGS`. Stage 1 used to put the helper it wrote there; the helper is `hai`'s now,
+written in `hai`'s own state directory, and nothing tells the summariser where. So on the `gateway` route it inherits
+the route's Bedrock environment with no token to send and its one model call fails, which costs the stopping session
+its summary and nothing else. Fixing it wants `hai` to say where the helper is, rather than this repository guessing
+at a path inside it.
 
 An Azure sign-in (`azure`) is optional on `own_licence` and needed on `gateway`. It lets Claude run `az` as the owner — pipelines,
 environments, AKS, Key Vault and the workspace scripts that fetch secrets with `az` — and gives Jenkins the owner's
