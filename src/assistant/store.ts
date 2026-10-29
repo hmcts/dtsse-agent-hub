@@ -7,6 +7,7 @@ import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow 
 import { CONFLUENCE_SELECT, type ConfluenceExportFrame, pendingConfluenceExport } from "./confluence.ts";
 import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
 import { readAssistantModel } from "./model-store.ts";
+import { hasPod } from "./pods.ts";
 import { DEFAULT_PRODUCT, isProduct, productLabel, storedProduct } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
 import { SEARCH_LIMIT, SNIPPET_MAX_WORDS, SNIPPET_MIN_WORDS, searchTerms, visibleMatches } from "./search.ts";
@@ -38,7 +39,8 @@ export class ConversationNotFound extends HttpError {
 export interface ConversationRow {
   id: string;
   ownerOid: string;
-  virtualAgentId: string;
+  /** The virtual agent whose pod runs its sessions, or null for a conversation that is a local session. */
+  virtualAgentId: string | null;
   agentId: string | null;
   title: string | null;
   product: string;
@@ -106,7 +108,7 @@ function storedStops(value: unknown): StopMark[] {
 function toRow(row: {
   id: string;
   ownerOid: string;
-  virtualAgentId: string;
+  virtualAgentId: string | null;
   agentId: string | null;
   title: string | null;
   product: string;
@@ -130,6 +132,15 @@ function toRow(row: {
   };
 }
 
+/**
+ * Tells the owner's open tabs, and the pod's sessions stream, that the conversation changed; called inside the
+ * transaction that changed it.
+ *
+ * Sent for a conversation with no pod as well, carrying a null `virtual_agent_id`. The owner's tabs are the
+ * subscriber that matters here and `ui-stream` selects this frame on `owner_oid`, so having no pod means there is
+ * nobody to *instruct*, not nobody to tell: a local chat renamed or deleted has to redraw like any other. The
+ * sessions stream reaches no pod for it on its own, by comparing the id against a real one.
+ */
 export async function announce(db: Database, conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">): Promise<void> {
   await notify(db, {
     type: "assistant_conversation",
@@ -198,10 +209,20 @@ export async function findConversation(db: Database, ownerOid: string, id: strin
   return row === null || row.ownerOid !== ownerOid ? undefined : toRow(row);
 }
 
-/** The owner's conversations, most recently active first; only those on `virtualAgentId` when it is given. */
+/**
+ * The owner's conversations, most recently active first; only those on `virtualAgentId` when it is given.
+ *
+ * A conversation with no pod is listed outright. `virtualAgent: { desired: … }` is a relation filter on an optional
+ * to-one, so a row with no related virtual agent does not satisfy it at all — reading the pod's state alone would
+ * leave every local chat out of the sidebar rather than only the ones whose pod is going.
+ */
 export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationRow[]> {
   const rows = await db.assistantConversation.findMany({
-    where: { ownerOid, virtualAgent: { desired: { not: "deleted" } }, ...(virtualAgentId === undefined ? {} : { virtualAgentId }) },
+    where: {
+      ownerOid,
+      OR: [{ virtualAgentId: null }, { virtualAgent: { desired: { not: "deleted" } } }],
+      ...(virtualAgentId === undefined ? {} : { virtualAgentId })
+    },
     select: SELECT,
     orderBy: [{ lastActiveAt: "desc" }, { id: "asc" }],
     take: limit
@@ -305,10 +326,13 @@ export async function searchConversations(db: Database, ownerOid: string, query:
        WHERE tsq <> ''::tsquery
     ),
     owned AS (
+      -- LEFT JOIN, with the null counted in: a conversation with no pod is one of the viewer's own chats and is
+      -- searchable like any other. An inner join would drop every local chat from the sidebar's search, since there
+      -- is no virtual_agent row for it to match.
       SELECT c.id, c.owner_oid, c.title, c.product, c.last_active_at
         FROM assistant_conversation c
-        JOIN virtual_agent v ON v.id = c.virtual_agent_id
-       WHERE c.owner_oid = ${ownerOid} AND v.desired <> 'deleted'
+        LEFT JOIN virtual_agent v ON v.id = c.virtual_agent_id
+       WHERE c.owner_oid = ${ownerOid} AND (v.id IS NULL OR v.desired <> 'deleted')
     ),
     in_body AS (
       SELECT DISTINCT ON (o.id, q.n) o.id AS conversation_id, q.n, m.body
@@ -345,8 +369,17 @@ export async function searchConversations(db: Database, ownerOid: string, query:
   );
 }
 
-/** Creates the conversation's agent: offline, the assistant's, under a session id the pod will start a session as. */
+/**
+ * Creates the conversation's agent: offline, the assistant's, under a session id the pod will start a session as.
+ *
+ * Refused for a conversation with no pod: the agent's name and its `virtual_agent_id` are read off the `virtual_agent`
+ * row the insert selects from, so there is nothing to create the agent from. The same 409 the insert itself answers
+ * when the virtual agent has gone, stated here rather than left to a `v.id = NULL` matching no row.
+ */
 export async function createConversationAgent(db: Database, conversation: Pick<ConversationRow, "id" | "ownerOid" | "virtualAgentId">): Promise<string> {
+  if (!hasPod(conversation)) {
+    throw new HttpError(409, "the assistant has gone");
+  }
   const [agent] = await db.$queryRaw<{ id: string }[]>`
     INSERT INTO agent (owner_oid, session_id, name, status, last_heartbeat_at, read_cursor, virtual_agent_id, assistant_conversation_id)
     SELECT ${conversation.ownerOid}, gen_random_uuid()::text, v.name, 'offline', now(), (SELECT COALESCE(max(id), 0) FROM message),
@@ -400,7 +433,8 @@ export async function requestWake(prisma: PrismaClient, conversation: Conversati
     `;
     await announce(tx, conversation);
   });
-  const assistant = await findVirtualAgent(prisma, conversation.virtualAgentId);
+  // A conversation with no pod has nothing to start: the wake is recorded on the row either way.
+  const assistant = hasPod(conversation) ? await findVirtualAgent(prisma, conversation.virtualAgentId) : undefined;
   if (assistant?.desired === "stopped") {
     await setDesired(prisma, conversation.ownerOid, assistant.id, "running", now);
   }
@@ -422,9 +456,12 @@ export type StopOutcome = "stopped" | "nothing-running" | "unsupported-client";
  * Refused outright for a session whose client never claimed `stop`, which would ignore the frame in silence. That
  * claim is also what the UI gates its stop control on, so this is the second line of the same defence rather than
  * the one the person normally meets.
+ *
+ * `nothing-running` for a conversation with no pod, for the same reason as one with no agent: the stop is an
+ * `assistant_stop` to the conversation's pod, and there is no pod to send it to.
  */
 export async function stopAnswer(prisma: PrismaClient, conversation: ConversationRow, now: Date = new Date()): Promise<StopOutcome> {
-  if (conversation.agentId === null) {
+  if (!hasPod(conversation) || conversation.agentId === null) {
     return "nothing-running";
   }
   const agent = await prisma.agent.findUnique({ where: { id: conversation.agentId }, select: { status: true, clientFeatures: true } });

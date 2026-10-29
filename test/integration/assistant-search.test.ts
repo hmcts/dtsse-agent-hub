@@ -6,6 +6,7 @@ import {
   conversationAgent,
   createConversation,
   ensureAssistant,
+  listConversations,
   renameConversation,
   searchConversations,
   touchConversation
@@ -46,6 +47,21 @@ async function answered(conversation: ConversationRow, who: Person, body: string
 
 async function found(who: Person, query: string): Promise<string[]> {
   return (await conversationMatches(prisma, who.oid, query)).map((chat) => chat.title);
+}
+
+async function listed(who: Person): Promise<(string | null)[]> {
+  return (await listConversations(prisma, who.oid)).map((chat) => chat.title);
+}
+
+/**
+ * The chat with its pod taken off it, which is what a local Claude Code session's conversation is: no `virtual_agent`
+ * row behind it.
+ *
+ * Written straight to the row, because nothing creates one of these yet. The pod is taken off last, after the chat's
+ * messages and title are in place, since every write to a conversation announces it and an announcement names a pod.
+ */
+async function withoutPod(conversation: ConversationRow): Promise<void> {
+  await prisma.assistantConversation.update({ where: { id: conversation.id }, data: { virtualAgentId: null } });
 }
 
 /** The search as the sidebar asks for it: the signed-in person is the development persona in the cookie. */
@@ -214,7 +230,7 @@ describe("searching conversations", () => {
   it("should leave out a chat whose assistant is being deleted, as the sidebar's own list does", async () => {
     const conversation = await chat(ALICE, ["A possession claim came through"]);
 
-    await setDesired(prisma, ALICE.oid, conversation.virtualAgentId, "deleted");
+    await setDesired(prisma, ALICE.oid, conversation.virtualAgentId!, "deleted");
 
     expect(await found(ALICE, "possession")).toEqual([]);
   });
@@ -225,6 +241,61 @@ describe("searching conversations", () => {
     }
 
     expect(await searchConversations(prisma, ALICE.oid, "possession", 2)).toHaveLength(2);
+  });
+});
+
+/**
+ * A chat with no pod is the person's own local Claude Code session.
+ *
+ * Both reads consult the `virtual_agent` row to leave out a chat whose assistant is being deleted, and both used to
+ * drop every one of these on the way past: a relation filter on an optional to-one is false for a row with no related
+ * virtual agent, and the search's join was an inner one. So each of these is paired with the exclusion that reading
+ * is for — a deleted pod's chat still goes, and still goes for the owner's own list as well as their search.
+ */
+describe("a chat with no assistant behind it", () => {
+  it("should list a chat with no assistant among the person's own", async () => {
+    const local = await chat(ALICE, ["A possession claim came through"]);
+    await withoutPod(local);
+
+    expect(await listed(ALICE)).toEqual(["A possession claim came through"]);
+  });
+
+  it("should find a chat with no assistant by a word in its title", async () => {
+    const local = await chat(ALICE, ["Nothing in here about that"]);
+    await renameConversation(prisma, ALICE.oid, local.id, "Possession claim notes");
+    await withoutPod(local);
+
+    expect(await found(ALICE, "possession")).toEqual(["Possession claim notes"]);
+  });
+
+  it("should find a chat with no assistant by a word in a message in it", async () => {
+    const local = await chat(ALICE, ["Help me with a tenancy question", "The landlord served a possession claim last week"]);
+    await renameConversation(prisma, ALICE.oid, local.id, "Tenancy question");
+    await withoutPod(local);
+
+    const matches = await conversationMatches(prisma, ALICE.oid, "possession");
+
+    expect(matches.map((match) => match.title)).toEqual(["Tenancy question"]);
+    expect(matches[0]?.snippet).toBe("landlord served a possession claim last week");
+  });
+
+  it("should still leave out a chat whose assistant is being deleted, and keep the one with no assistant", async () => {
+    const local = await chat(ALICE, ["A possession claim with no assistant"]);
+    await withoutPod(local);
+    const going = await chat(ALICE, ["A possession claim on an assistant being deleted"]);
+
+    await setDesired(prisma, ALICE.oid, going.virtualAgentId!, "deleted");
+
+    expect(await listed(ALICE)).toEqual(["A possession claim with no assistant"]);
+    expect(await found(ALICE, "possession")).toEqual(["A possession claim with no assistant"]);
+  });
+
+  it("should find nothing of another person's chat that has no assistant either", async () => {
+    const local = await chat(BOB, ["Bob asked about a possession claim"]);
+    await withoutPod(local);
+
+    expect(await found(ALICE, "possession")).toEqual([]);
+    expect(await listed(ALICE)).toEqual([]);
   });
 });
 

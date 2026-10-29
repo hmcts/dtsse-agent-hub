@@ -623,6 +623,24 @@ describe("conversations", () => {
     expect(await prisma.message.count({ where: { kind: "direct" } })).toBe(0);
   });
 
+  /**
+   * A conversation with no pod is one that is a person's own local Claude Code session. Every write to a conversation
+   * announces it inside its own transaction, so a write path that could not announce one of these would roll back:
+   * the chat would be listed in the sidebar and refuse to be renamed or removed from it. Pinned here rather than left
+   * to the reads, because that failure shows up as a chat nobody can get rid of.
+   */
+  it("should rename and delete a conversation that has no assistant behind it", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    await prisma.assistantConversation.update({ where: { id }, data: { virtualAgentId: null } });
+
+    expect(await actions.renameConversation({ conversationId: id, title: "On my laptop" })).toEqual({ ok: true });
+    expect((await findConversation(prisma, ALICE.oid, id))!.title).toBe("On my laptop");
+    expect(await actions.deleteConversation({ conversationId: id })).toEqual({ ok: true });
+
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+
   it("should wake a conversation when its composer is focused and the session is offline", async () => {
     const { id: assistantId, token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
@@ -1037,7 +1055,7 @@ describe("jira export", () => {
 
   it("should start a stopped assistant when the person exports", async () => {
     const { id } = await written();
-    const assistantId = (await findConversation(prisma, ALICE.oid, id))!.virtualAgentId;
+    const assistantId = (await findConversation(prisma, ALICE.oid, id))!.virtualAgentId!;
     await prisma.agent.updateMany({ where: { assistantConversationId: id }, data: { status: "offline" } });
     await setDesired(prisma, ALICE.oid, assistantId, "stopped");
 

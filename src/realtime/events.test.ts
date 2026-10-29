@@ -42,7 +42,12 @@ describe("encodeEvent and decodeEvent", () => {
     ["a conversation without an owner", JSON.stringify({ type: "assistant_conversation", conversation_id: "c", virtual_agent_id: "va" })],
     ["a stop without a conversation", JSON.stringify({ type: "assistant_stop", virtual_agent_id: "va", owner_oid: "o" })],
     ["a stop without its assistant", JSON.stringify({ type: "assistant_stop", conversation_id: "c", owner_oid: "o" })],
-    ["a stop without an owner", JSON.stringify({ type: "assistant_stop", conversation_id: "c", virtual_agent_id: "va" })]
+    ["a stop without an owner", JSON.stringify({ type: "assistant_stop", conversation_id: "c", virtual_agent_id: "va" })],
+    // Only `assistant_conversation` takes a null assistant. The other three are instructions *to* a pod, so one
+    // naming no pod has nowhere to go and is a bug in whatever published it rather than a local chat.
+    ["a stop naming no assistant", JSON.stringify({ type: "assistant_stop", conversation_id: "c", virtual_agent_id: null, owner_oid: "o" })],
+    ["an uploads deletion naming no assistant", JSON.stringify({ type: "assistant_uploads", virtual_agent_id: null, owner_oid: "o" })],
+    ["a lookup naming no assistant", JSON.stringify({ type: "assistant_lookup", lookup_id: "l", virtual_agent_id: null, owner_oid: "o" })]
   ])("should ignore %s", (_label, payload) => {
     expect(decodeEvent(payload)).toBeUndefined();
   });

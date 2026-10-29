@@ -23,7 +23,11 @@ export const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Ex
   transcript: [{ type: "transcript", agent_id: "agent-a", owner_oid: "oid-a", last_id: "17" }],
   credential: [{ type: "credential", owner_oid: "oid-a", kind: "github" }],
   virtual_agent: [{ type: "virtual_agent", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
-  assistant_conversation: [{ type: "assistant_conversation", conversation_id: "c-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
+  assistant_conversation: [
+    { type: "assistant_conversation", conversation_id: "c-a", virtual_agent_id: "va-a", owner_oid: "oid-a" },
+    // A conversation that is a person's own local session: no pod, and the owner's tabs are the subscriber.
+    { type: "assistant_conversation", conversation_id: "c-b", virtual_agent_id: null, owner_oid: "oid-a" }
+  ],
   assistant_stop: [{ type: "assistant_stop", conversation_id: "c-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_uploads: [{ type: "assistant_uploads", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_lookup: [{ type: "assistant_lookup", lookup_id: "l-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],

@@ -34,9 +34,12 @@ export type HubEvent =
   | { type: "virtual_agent"; virtual_agent_id: string; owner_oid: string }
   /**
    * `owner_oid`'s assistant conversation changed: created, renamed, deleted, its product, its artefact, its session or
-   * a wake. `virtual_agent_id` is the assistant's, so its pod's sessions stream hears of wakes and deletions.
+   * a wake. `virtual_agent_id` is the assistant's, so its pod's sessions stream hears of wakes and deletions; null for
+   * a conversation that is a person's own local session, which has no pod. The owner's open tabs are the subscriber
+   * either way — `src/realtime/ui-stream.ts` selects this frame on `owner_oid` — so a null is a frame with a reader
+   * rather than one with nowhere to go, and the sessions stream drops it by comparing against a real id.
    */
-  | { type: "assistant_conversation"; conversation_id: string; virtual_agent_id: string; owner_oid: string }
+  | { type: "assistant_conversation"; conversation_id: string; virtual_agent_id: string | null; owner_oid: string }
   /**
    * The person stopped the answer their conversation was working on, so its pod should interrupt the session.
    *
@@ -132,7 +135,7 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
         ? { type: "virtual_agent", virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
         : undefined;
     case "assistant_conversation":
-      return isId(event.conversation_id) && isId(event.virtual_agent_id) && isId(event.owner_oid)
+      return isId(event.conversation_id) && isOptionalId(event.virtual_agent_id) && isId(event.owner_oid)
         ? { type: "assistant_conversation", conversation_id: event.conversation_id, virtual_agent_id: event.virtual_agent_id, owner_oid: event.owner_oid }
         : undefined;
     case "assistant_stop":

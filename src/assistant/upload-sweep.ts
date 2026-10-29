@@ -122,7 +122,10 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  * after the window it is rubbish either way.
  */
 async function dropAbandoned(tx: Database, retentionHours: number, batch: number): Promise<number> {
-  const abandoned = await tx.$queryRaw<{ id: string; virtual_agent_id: string; owner_oid: string }[]>`
+  // `virtual_agent_id` is null for a conversation that is a local session; the announcement below carries that
+  // through. Declared here because a raw query's row type is asserted rather than checked, so the compiler cannot
+  // find this site the way it finds the ones reading `ConversationRow`.
+  const abandoned = await tx.$queryRaw<{ id: string; virtual_agent_id: string | null; owner_oid: string }[]>`
     SELECT c.id::text AS id, c.virtual_agent_id::text AS virtual_agent_id, c.owner_oid
       FROM assistant_conversation c
      WHERE c.artefact_version = 0
