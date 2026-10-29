@@ -34,6 +34,21 @@ function candidateView(candidate: Candidate): Record<string, unknown> {
 }
 
 /**
+ * An ambiguous **tag**'s candidates: the name and whose it is, and nothing operational.
+ *
+ * Its own shape rather than `candidateView`'s, because the two resolve over different populations. A direct's
+ * candidates are only ever the caller's own agents, so telling them apart by repo and branch costs nothing. A tag
+ * resolves across every owner, so the same fields would answer what somebody else's session is working on — and
+ * repeatably, since the refusal writes nothing. `agentLookup` already draws this line for the composer's own
+ * search: a name and its owner, "no status, heartbeat or repo: those are the agent's page, which is its owner's
+ * alone". The owner's name is what makes two same-named agents tellable apart, and a post of that agent's already
+ * shows it to anyone signed in.
+ */
+function tagCandidateView(candidate: Candidate): Record<string, unknown> {
+  return { id: candidate.id, name: candidate.name, owner_name: candidate.ownerName };
+}
+
+/**
  * The agents a post's `tag_agents` names, as ids. Each reference resolves as `to_agent` does, but among every agent
  * rather than the ones the author may message: anyone may tag anyone's, and `tagRefusal` is where that is said.
  *
@@ -45,7 +60,7 @@ async function taggedAgents(prisma: PrismaClient, author: Author, tags: readonly
   for (const tag of tags) {
     const candidates = await resolveTargets(prisma, author.oid, tag, "tag");
     if (candidates.length > 1) {
-      throw new HttpError(409, `more than one agent is called "${tag}"; tag its id instead`, { candidates: candidates.map(candidateView) });
+      throw new HttpError(409, `more than one agent is called "${tag}"; tag its id instead`, { candidates: candidates.map(tagCandidateView) });
     }
     const target = candidates[0];
     // A pod conversation's agent is reported as missing rather than forbidden, so the refusal does not confirm it

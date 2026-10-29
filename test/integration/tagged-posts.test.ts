@@ -190,6 +190,9 @@ describe("a post the hub refuses to tag", () => {
     expect(refused.status).toBe(409);
     expect(refused.error).toMatch(/more than one agent is called "twin"/);
     expect((refused.candidates ?? []).map((candidate) => candidate.id).sort(byCodePoint)).toEqual([first, second].sort(byCodePoint));
+    // A name and whose it is, and nothing about what the session is doing. Carol's agent is somebody else's and the
+    // refusal writes nothing, so a wider shape here would be a free, repeatable probe for other owners' work.
+    expect(Object.keys((refused.candidates ?? [])[0] ?? {}).sort(byCodePoint)).toEqual(["id", "name", "owner_name"]);
     expect(await prisma.message.count()).toBe(0);
   });
 
