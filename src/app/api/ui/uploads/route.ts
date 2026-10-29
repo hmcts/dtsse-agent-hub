@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { errorResponse, json, readJson } from "@/agent-api/http";
+import { hasPod } from "@/assistant/pods";
 import { findConversation } from "@/assistant/store";
 import { createUpload } from "@/assistant/upload-store";
 import type { UploadRefusal } from "@/assistant/uploads";
@@ -34,6 +35,15 @@ export async function POST(request: NextRequest): Promise<Response> {
     const conversation = await findConversation(prisma, viewer.oid, conversationId);
     if (conversation === undefined) {
       return errorResponse(404, "that conversation no longer exists", { reason: "no_such_conversation" satisfies UploadRefusal });
+    }
+    // Refused here, where the person is still holding the file, rather than taken and quietly dropped. A conversation
+    // with no pod is a session on their own computer: the only carrier for a message's attachments is the `assistant`
+    // frame of a direct, which `/api/agent/{id}/stream` sends to a pod's session alone, so the bytes would sit in
+    // Postgres until the retention sweep and the session would be sent a message that never mentioned the file.
+    if (!hasPod(conversation)) {
+      return errorResponse(409, "a conversation that is a session on your own computer takes no files", {
+        reason: "local_session" satisfies UploadRefusal
+      });
     }
     const created = await createUpload(prisma, {
       conversationId: conversation.id,

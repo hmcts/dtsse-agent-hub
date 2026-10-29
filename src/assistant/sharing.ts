@@ -3,6 +3,7 @@ import type { Database } from "../store/prisma.ts";
 import { conversationItems } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
+import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import type { SharedConversationRow } from "./shares.ts";
 import { readArtefact } from "./store.ts";
@@ -32,7 +33,7 @@ import { UNTITLED } from "./views.ts";
  *
  * Nothing here is live. A share is a snapshot: a recipient sees whatever is there when they open the page, because
  * the hub tells only an owner's own tabs that their conversation changed, and the conversation's agent — which is
- * what a UI stream would have to be allowed to watch — is owner-only.
+ * what a UI stream would have to be allowed to watch — is its owner's.
  */
 
 export type SharedThreadItem =
@@ -49,6 +50,11 @@ export type SharedThreadItem =
  * assistant asked, which are controls rather than words — a recipient must not answer one, and an answered question
  * is quoted back in the owner's own answering message, which a share does show.
  *
+ * The tool calls go too. A share carries the words, and the one reader a tool row is for is the developer whose own
+ * session made the call: it names a path on their disk, a command they ran or a repository they were in, none of
+ * which is anything the chat was about. `sharedConversation` asks for the thread without them in any case, since
+ * only a local chat has them; this is the type refusing to carry one that reached here another way.
+ *
  * Every other kind of item passes through, which is deliberate: a kind the thread grows is part of what was said
  * until someone decides otherwise, and the type above is what makes that decision explicit rather than silent.
  */
@@ -59,7 +65,7 @@ export function sharedThreadItems(items: readonly ThreadItem[]): SharedThreadIte
       shared.push({ type: "user", key: item.key, at: item.at, text: item.text, attachmentCount: item.attachments.length });
     } else if (item.type === "assistant") {
       shared.push({ type: "assistant", key: item.key, at: item.at, text: item.text });
-    } else if (item.type !== "question") {
+    } else if (item.type !== "question" && item.type !== "tool") {
       shared.push(item);
     }
   }
@@ -108,10 +114,17 @@ export function stopMarks(value: unknown): StopMark[] {
 /**
  * The share page's read, for a viewer `canViewSharedConversation` has already allowed.
  *
- * The thread is read as the conversation's owner, because every message in it is between them and their assistant
- * and `canReadMessage` would otherwise keep all of it from the very person the owner shared it with. That the
- * recipient is allowed this much, and no more, is settled above this call rather than here; `sharedThreadItems` is
- * what holds "no more" to the words.
+ * **The thread is read as the conversation's owner, and that is the design rather than a shortcut.** A share is
+ * read-through access to one chat: every message in it is between the owner and their assistant, so `canReadMessage`
+ * answering for the recipient would keep all of it from the very person the owner shared it with. Whether that
+ * recipient is allowed this much at all is settled before this call, by the share rows and `conversationAccess`
+ * reading them — the one place anyone reads anything of somebody else's. What holds the recipient to *no more* than
+ * this is `sharedThreadItems` below, which cuts the thread back to the words.
+ *
+ * So the agent ref here is the owner's own, built from the conversation's two columns: it says who to read as and
+ * nothing more. It is not a claim about the agent that some rule elsewhere has to agree with, and nothing about a
+ * share reaches any rule that is about the agent — a recipient is refused that agent's page, its routes and its
+ * stream exactly as a stranger is.
  */
 export async function sharedConversation(
   db: Database,
@@ -136,7 +149,7 @@ export async function sharedConversation(
   }
   const agentId = row.agentId;
   const [page, artefact] = await Promise.all([
-    agentId === null ? undefined : agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true }, []),
+    agentId === null ? undefined : agentConversation(db, conversation.ownerOid, { id: agentId, ownerOid: conversation.ownerOid }),
     readArtefact(db, conversation.id)
   ]);
   const items = page === undefined ? [] : conversationItems(page.messages, page.entries);
@@ -145,7 +158,10 @@ export async function sharedConversation(
     title: row.title ?? UNTITLED,
     productLabel: productLabel(row.product),
     ownerName: row.owner.name,
-    thread: sharedThreadItems(threadItems(items, productMarks(row.productHistory), stopMarks(row.stopHistory))),
+    // `local` so a shared laptop chat reads as a conversation rather than as a monologue of answers: the person's
+    // prompts are transcript entries there, not hub messages. `sharedThreadItems` drops the tool rows it also lets
+    // through, so what a recipient gets is still the words alone.
+    thread: sharedThreadItems(threadItems(items, productMarks(row.productHistory), stopMarks(row.stopHistory), !hasPod(conversation))),
     forked: forkedView(row),
     // `olderBefore` is the entry the owner's own page would ask for the previous page before; here it only says that
     // there is one.

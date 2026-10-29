@@ -8,7 +8,6 @@ import { expect, test } from "@playwright/test";
 
 /** Each old hub address, and where it now lives. */
 const MOVED: [string, string][] = [
-  ["/access", "/hub/access"],
   ["/agents/00000000-0000-0000-0000-000000000000", "/hub/agents/00000000-0000-0000-0000-000000000000"],
   ["/c", "/hub/c"],
   ["/c?topics=e2e-routes&mode=all", "/hub/c?topics=e2e-routes&mode=all"],
@@ -57,6 +56,18 @@ test.describe("routes @regression", () => {
 
       expect(response.status()).toBe(308);
       expect(response.headers().location).toBe(to);
+    });
+  }
+
+  // The access page managed standing access to every agent its owner had; there is none. What anyone shares is one
+  // chat at a time, which is `/assistant/shared`, so both of its addresses go there — or to the hub where virtual
+  // agents are off and the Assistant's pages are not found at all.
+  for (const from of ["/access", "/hub/access"]) {
+    test(`should redirect the retired ${from} to the shared chats @regression`, async ({ request }) => {
+      const response = await request.get(from, { maxRedirects: 0 });
+
+      expect(response.status()).toBe(308);
+      expect(response.headers().location).toMatch(/^(\/assistant\/shared|\/hub)$/);
     });
   }
 

@@ -1,5 +1,4 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { setGrant } from "../../src/access/load.ts";
 import { forkRecipients } from "../../src/assistant/fork-store.ts";
 import { FORK_CONTEXT_FILE_NAME } from "../../src/assistant/forks.ts";
 import { ensureAssistant, findAssistant, writeArtefact } from "../../src/assistant/store.ts";
@@ -11,9 +10,8 @@ import { connectForChat, type Person, prisma, resetDatabase } from "./database.t
 
 /**
  * Forking an HMCTS Assistant conversation: Alice offers her chat to Bob, who takes his own copy into his own
- * Assistant and carries on there. Carol holds a write grant over every agent Alice has and a plain read share of the
- * chat, which makes her the right stranger to the fork: as close to the chat as anyone can be without being offered
- * it.
+ * Assistant and carries on there. Carol holds a plain read share of the chat, which makes her the right stranger to
+ * the fork: as close to it as anyone can be without being offered it.
  */
 
 vi.mock("next/headers", async () => {
@@ -92,7 +90,6 @@ beforeEach(async () => {
   await resetDatabase();
   // Connected, so the chat gate lets each of them start a chat or take a copy; the gate has its own case below.
   await Promise.all([ALICE, BOB, CAROL].map(connectForChat));
-  await setGrant(prisma, ALICE.oid, CAROL.oid, "write");
 });
 
 afterEach(() => {

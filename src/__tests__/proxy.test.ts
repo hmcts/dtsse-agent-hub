@@ -191,7 +191,6 @@ describe("proxy hub address redirect", () => {
   });
 
   it.each([
-    ["/access", "/hub/access"],
     ["/agents/0f8a", "/hub/agents/0f8a"],
     ["/c", "/hub/c"],
     ["/channels/new", "/hub/channels/new"],
@@ -220,6 +219,15 @@ describe("proxy hub address redirect", () => {
       expect((await proxy(askWith("GET", path))).status).toBe(200);
     }
   );
+
+  it.each(["/access", "/hub/access"])("should redirect the retired %s to the shared chats, ahead of the sign-in check", async (from) => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+
+    const response = await proxy(askWith("GET", from));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant/shared");
+  });
 
   it("should redirect before the sign-in check, so the login's redirect= carries the new address", async () => {
     vi.stubEnv("AUTH_DISABLED", "");
@@ -253,6 +261,23 @@ describe("proxy for the viewer's host", () => {
 
     expect(response.headers.get("x-middleware-rewrite")).toBe(`https://${VIEWER}/viewer-proxy`);
     expect(response.headers.get("x-middleware-request-x-agent-hub-viewer-url")).toBe("/3fa85f64-5717-4562-b3fc-2c963f66afa6/8080/docs/?token=pods-own");
+  });
+
+  it.each(["/health", "/health/liveness", "/health/readiness"])(
+    "should serve %s on the viewer's host, so the Application Gateway's probe finds the backend healthy",
+    async (path) => {
+      const response = await proxy(onHost(VIEWER, path));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+      expect(response.headers.get("location")).toBeNull();
+    }
+  );
+
+  it("should still send a path that only starts like a health route to the viewer", async () => {
+    const response = await proxy(onHost(VIEWER, "/healthz"));
+
+    expect(response.headers.get("x-middleware-rewrite")).toBe(`https://${VIEWER}/viewer-proxy`);
   });
 
   it("should neither sign a person in nor serve a hub page on the viewer's host", async () => {

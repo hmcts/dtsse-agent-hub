@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import { Conversation, transcriptUrl } from "@/components/agents/Conversation";
-import { mayMessage, offlineNote } from "@/components/agents/DirectComposer";
+import { offlineNote } from "@/components/agents/DirectComposer";
 import { ANNOUNCE_AFTER_MS } from "@/components/live/Announcer";
 import { HubStreamProvider } from "@/components/live/HubStream";
 import type { ThreadMessage } from "@/messages/direct-thread";
@@ -22,6 +22,7 @@ function message(id: string, overrides: Partial<ThreadMessage> = {}): ThreadMess
     title: null,
     body: `message ${id}`,
     topics: [],
+    tagged_agents: [],
     in_reply_to: null,
     target_agent_id: AGENT,
     created_at: "2026-09-29T09:00:00.000Z",
@@ -102,7 +103,6 @@ function view(props: Partial<Parameters<typeof Conversation>[0]> = {}) {
       ownerName="Alice"
       viewerOid="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
       status="idle"
-      access="read"
       initial={page()}
       send={vi.fn()}
       answerQuestion={vi.fn()}
@@ -122,16 +122,6 @@ async function submit(text: string): Promise<void> {
     fireEvent.submit(screen.getByRole("form", { name: "Message this agent" }));
   });
 }
-
-describe("mayMessage", () => {
-  it.each([
-    ["owner", true],
-    ["write", true],
-    ["read", false]
-  ] as const)("should decide %s may message: %s", (access, expected) => {
-    expect(mayMessage(access)).toBe(expected);
-  });
-});
 
 describe("offlineNote", () => {
   it("should say the message is queued and when it expires when the agent has a name", () => {
@@ -154,24 +144,18 @@ describe("transcriptUrl", () => {
 });
 
 describe("Conversation composer", () => {
-  it.each(["owner", "write"] as const)("should show the composer when the viewer has %s access", (access) => {
-    render(view({ access }));
-
-    expect(screen.getByRole("form", { name: "Message this agent" })).toBeTruthy();
-    expect(screen.queryByTestId("read-only-thread")).toBeNull();
-  });
-
-  it("should hide the composer and say why when the viewer has read access only", () => {
+  // An agent's page is its owner's, and an owner may always message their own session, so the composer is simply
+  // there: there is no read-only rendering of this page left to test.
+  it("should show the composer above the thread", () => {
     render(view({ initial: page({ messages: [message("1")] }) }));
 
-    expect(screen.queryByRole("form", { name: "Message this agent" })).toBeNull();
-    expect(screen.getByTestId("read-only-thread").textContent).toContain("read access");
+    expect(screen.getByRole("form", { name: "Message this agent" })).toBeTruthy();
     expect(screen.getByText("message 1")).toBeTruthy();
   });
 
   it("should add the sent message to the conversation and clear the box when sending succeeds", async () => {
     const send = vi.fn(async () => ({ ok: true as const, message: message("9", { body: "hello agent" }) }));
-    render(view({ access: "owner", send }));
+    render(view({ send }));
 
     await submit("hello agent");
 
@@ -181,18 +165,17 @@ describe("Conversation composer", () => {
   });
 
   it("should show the refusal when the server refuses the message", async () => {
-    render(view({ access: "write", send: vi.fn(async () => ({ ok: false as const, error: "you have read access to this agent, not write access" })) }));
+    render(view({ send: vi.fn(async () => ({ ok: false as const, error: "no such agent" })) }));
 
     await submit("hi");
 
-    expect(screen.getByRole("alert").textContent).toContain("not write access");
+    expect(screen.getByRole("alert").textContent).toContain("no such agent");
   });
 
   it("should say the message could not be sent when the call itself fails", async () => {
     answers(new Response(null, { status: 200 }));
     render(
       view({
-        access: "write",
         send: vi.fn(async () => {
           throw new Error("offline");
         })
@@ -208,7 +191,6 @@ describe("Conversation composer", () => {
     const fetch = answers(new Response(null, { status: 401 }));
     render(
       view({
-        access: "write",
         send: vi.fn(async () => {
           throw new Error("An unexpected response was received from the server.");
         })
@@ -225,7 +207,7 @@ describe("Conversation composer", () => {
 
   it("should not send when the message is only whitespace", async () => {
     const send = vi.fn();
-    render(view({ access: "owner", send }));
+    render(view({ send }));
 
     await submit("   ");
 
@@ -233,21 +215,21 @@ describe("Conversation composer", () => {
   });
 
   it("should describe the composer with the offline note when the agent is offline", () => {
-    render(view({ access: "owner", status: "offline" }));
+    render(view({ status: "offline" }));
 
     const note = screen.getByText(/@pcs is offline/);
     expect(screen.getByRole("textbox").getAttribute("aria-describedby")).toBe(note.id);
   });
 
   it("should show no offline note when the agent is live", () => {
-    render(view({ access: "owner", status: "busy" }));
+    render(view({ status: "busy" }));
 
     expect(screen.queryByText(/is offline/)).toBeNull();
     expect(screen.getByRole("textbox").getAttribute("aria-describedby")).toBeNull();
   });
 
   it("should show and hide the offline note as the agent's status changes on the stream", async () => {
-    live({ access: "owner" });
+    live({});
 
     await act(async () => {
       FakeSource.last?.emit("agent_status", { agent_id: "someone-else", status: "offline" });
@@ -323,7 +305,7 @@ describe("Conversation skills", () => {
   const SKILL = { name: "cft-explain", description: "Explain a CFT topic" };
 
   it("should re-read the page when the watched agent's skills change, and not for another agent's", async () => {
-    live({ access: "owner" });
+    live({});
 
     await act(async () => {
       FakeSource.last?.emit("agent_skills", { agent_id: "someone-else" });
@@ -337,11 +319,11 @@ describe("Conversation skills", () => {
   });
 
   it("should offer the new skills in the composer when the re-read page hands down a changed list", () => {
-    const { rerender } = render(view({ access: "owner" }));
+    const { rerender } = render(view({}));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "/", selectionStart: 1, selectionEnd: 1 } });
     expect(screen.queryByRole("listbox", { name: "Skills" })).toBeNull();
 
-    rerender(view({ access: "owner", skills: [SKILL] }));
+    rerender(view({ skills: [SKILL] }));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "/c", selectionStart: 2, selectionEnd: 2 } });
 
     expect(screen.getByRole("listbox", { name: "Skills" }).textContent).toContain("cft-explain");
@@ -369,7 +351,7 @@ describe("Conversation questions", () => {
   };
 
   it("should show a question the agent's session asked, merged into the time line", () => {
-    render(view({ access: "owner", initial: page({ entries: [entry("1")] }), questions: [ASKED] }));
+    render(view({ initial: page({ entries: [entry("1")] }), questions: [ASKED] }));
 
     const items = screen.getByRole("list", { name: "Conversation" }).children;
     expect(screen.getByRole("region", { name: "A question for you" })).toBeTruthy();
@@ -378,7 +360,7 @@ describe("Conversation questions", () => {
 
   it("should send the owner's choice through the action the page gave it", async () => {
     const answerQuestion = vi.fn(async () => ({ ok: true as const }));
-    render(view({ access: "owner", questions: [ASKED], answerQuestion }));
+    render(view({ questions: [ASKED], answerQuestion }));
 
     await act(async () => {
       fireEvent.click(screen.getByRole("radio", { name: /Red/ }));
@@ -387,24 +369,17 @@ describe("Conversation questions", () => {
     expect(answerQuestion).toHaveBeenCalledWith({ questionId: "q-1", answers: { answers: [{ labels: ["Red"], text: null }] } });
   });
 
-  // The same rule the composer is behind: a read-grant viewer may read the question and may not answer it, and
-  // offering them the controls would end in a refusal saying the question is no longer waiting for an answer.
-  it("should offer a read-only viewer no way to answer, while still showing them the question", () => {
-    render(view({ access: "read", questions: [ASKED] }));
+  // The reader of this page is the agent's owner, who may answer, so the controls are offered beside the card
+  // rather than drawn and then refused.
+  it("should offer the viewer the options, since they own the agent that asked", () => {
+    render(view({ questions: [ASKED] }));
 
     expect(screen.getByText("Do you prefer red or blue?")).toBeTruthy();
-    expect(screen.queryByRole("radio")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Something else" })).toBeNull();
-  });
-
-  it.each(["owner", "write"] as const)("should offer a %s viewer the options, since they may message the agent", (access) => {
-    render(view({ access, questions: [ASKED] }));
-
     expect(screen.getByRole("radio", { name: /Red/ })).toBeTruthy();
   });
 
   it("should re-read the page when the watched agent's questions change, and not for another agent's", async () => {
-    live({ access: "owner", questions: [ASKED] });
+    live({ questions: [ASKED] });
 
     await act(async () => {
       FakeSource.last?.emit("agent_question", { agent_id: "someone-else" });

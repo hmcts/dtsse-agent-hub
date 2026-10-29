@@ -1,5 +1,5 @@
-import { agentsVisibleTo, grantsHeldBy } from "../access/load.ts";
-import { type AgentAccess, agentAccess, canSeeAgentSkills, type Grant } from "../access/rules.ts";
+import { POD_CONVERSATION_AGENT } from "../access/load.ts";
+import { type AgentRef, canSeeAgentSkills, canViewAgent, isPodConversationAgent } from "../access/rules.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import type { Database } from "../store/prisma.ts";
 import { byCodePoint } from "../topics/slug.ts";
@@ -7,7 +7,7 @@ import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
 import { type Skill, storedSkills } from "./skills.ts";
 import { isUuid } from "./store.ts";
 
-/** Agents as the web UI lists and shows them: only those the viewer may see, which `agentsVisibleTo` decides. */
+/** Agents as the web UI lists and shows them: the viewer's own, which `canViewAgent` says is all of them. */
 
 export interface AgentCard {
   id: string;
@@ -71,25 +71,29 @@ export function byLiveness<A extends { status: AgentStatus; lastHeartbeatAt: str
   return [...agents].sort((left, right) => rank(left) - rank(right) || byCodePoint(right.lastHeartbeatAt, left.lastHeartbeatAt));
 }
 
-/** The viewer's own agents, and those shared with them through a grant. */
-export async function visibleAgents(db: Database, oid: string): Promise<{ mine: AgentCard[]; shared: AgentCard[] }> {
+/** The viewer's own sessions, which is every agent they may see. */
+export async function visibleAgents(db: Database, oid: string): Promise<AgentCard[]> {
   const rows = await db.agent.findMany({
-    // A conversation's agent is shown in the HMCTS Assistant, not among the viewer's sessions.
-    where: { AND: [agentsVisibleTo(oid), { assistantConversationId: null }] },
+    // A pod conversation's agent is shown in the HMCTS Assistant, not among the viewer's sessions. A laptop
+    // session's is a session they are working in, so it stays on the roster once it has a conversation too.
+    where: { ownerOid: oid, NOT: POD_CONVERSATION_AGENT },
     select: CARD,
     orderBy: [{ lastHeartbeatAt: "desc" }, { id: "asc" }],
     take: MAX_SIDEBAR_AGENTS
   });
-  const cards = byLiveness(rows.map(toCard));
-  return { mine: cards.filter((card) => card.owner.oid === oid), shared: cards.filter((card) => card.owner.oid !== oid) };
+  return byLiveness(rows.map(toCard));
 }
 
 export interface AgentView {
   agent: AgentDetail;
-  access: Exclude<AgentAccess, "none">;
-  grants: Grant[];
   /** Empty unless the viewer may message the agent. */
   skills: Skill[];
+  /**
+   * The agent as the access rules take it. Carried so what the rest of the page reads applies the same facts this
+   * view decided with, rather than deriving them again from a card that has already dropped the columns they come
+   * from.
+   */
+  ref: AgentRef;
 }
 
 /** The agent and what the viewer may do with it, or `undefined` when there is no such agent or they may not see it. */
@@ -104,16 +108,15 @@ export async function agentView(db: Database, viewerOid: string, id: string): Pr
   if (row === null) {
     return undefined;
   }
-  const grants = await grantsHeldBy(db, viewerOid);
-  const ref = { id: row.id, ownerOid: row.ownerOid, ownerOnly: row.assistantConversationId !== null };
-  const access = agentAccess(viewerOid, ref, grants);
-  if (access === "none") {
+  // `row.virtualAgentId` rather than the card's, which is null whenever virtual agents are off: whether a
+  // conversation runs on a pod is a fact about the row, not about what this deployment shows.
+  const ref = { id: row.id, ownerOid: row.ownerOid, ownerOnly: isPodConversationAgent(row) };
+  if (!canViewAgent(viewerOid, ref)) {
     return undefined;
   }
   return {
     agent: { ...toCard(row), cwd: row.cwd, host: row.host, createdAt: row.createdAt.toISOString() },
-    access,
-    grants,
-    skills: canSeeAgentSkills(viewerOid, ref, grants) ? storedSkills(row.skills) : []
+    skills: canSeeAgentSkills(viewerOid, ref) ? storedSkills(row.skills) : [],
+    ref
   };
 }

@@ -1,7 +1,5 @@
 import "server-only";
-import { grantsHeldBy } from "../access/load.ts";
 import { canManageConversationShares, canOwnerReadCredential, canReadMessage } from "../access/rules.ts";
-import { grantsGiven, grantsReceived } from "../access/views.ts";
 import { agentPath } from "../agents/path.ts";
 import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
@@ -81,7 +79,7 @@ export async function sidebarData(viewer: Identity) {
     listChannels(prisma, viewer.oid),
     mostActiveTopics(prisma, SIDEBAR_TOPICS, hiddenTopicPrefix(""))
   ]);
-  return { ...agents, channels, topics };
+  return { agents, channels, topics };
 }
 
 export async function feedPage(topics: PostScope, match: Match): Promise<FeedPageView> {
@@ -103,22 +101,16 @@ export async function channel(viewer: Identity, id: string) {
 
 /** The rest of an agent's page, which it streams in once `agentRoute` has decided the viewer may see the agent. */
 export async function agentActivity(viewer: Identity, view: AgentView) {
-  const agent = { id: view.agent.id, ownerOid: view.agent.owner.oid };
   const [conversation, posts, questions] = await Promise.all([
-    agentConversation(prisma, viewer.oid, agent, view.grants),
+    agentConversation(prisma, viewer.oid, view.ref),
     agentPosts(prisma, view.agent.id, 20),
-    agentQuestions(prisma, viewer.oid, agent, view.grants)
+    agentQuestions(prisma, viewer.oid, view.ref)
   ]);
   return { conversation, posts, questions };
 }
 
 export async function topics(prefix: string) {
   return await listTopics(prisma, prefix, 200, hiddenTopicPrefix(prefix));
-}
-
-export async function access(viewer: Identity) {
-  const [given, received] = await Promise.all([grantsGiven(prisma, viewer.oid), grantsReceived(prisma, viewer.oid)]);
-  return { given, received };
 }
 
 export type CredentialSettings = { modelRoute: ModelRoute; claudeTokenUsable: boolean } & (
@@ -208,14 +200,13 @@ export async function messagePage(viewer: Identity, rawId: string): Promise<Mess
   if (id === null) {
     return undefined;
   }
-  const [loaded, grants] = await Promise.all([loadThreadMessage(prisma, id), grantsHeldBy(prisma, viewer.oid)]);
-  if (loaded === undefined || !canReadMessage(viewer.oid, loaded.ref, grants)) {
+  const loaded = await loadThreadMessage(prisma, id);
+  if (loaded === undefined || !canReadMessage(viewer.oid, loaded.ref)) {
     return undefined;
   }
   const inReplyTo = loaded.message.in_reply_to;
   const [parent, replies] = await Promise.all([inReplyTo === null ? undefined : loadThreadMessage(prisma, BigInt(inReplyTo)), loadReplies(prisma, id)]);
-  const readable = (entry: LoadedThreadMessage | undefined): entry is LoadedThreadMessage =>
-    entry !== undefined && canReadMessage(viewer.oid, entry.ref, grants);
+  const readable = (entry: LoadedThreadMessage | undefined): entry is LoadedThreadMessage => entry !== undefined && canReadMessage(viewer.oid, entry.ref);
   return {
     message: loaded.message,
     parent: readable(parent) ? parent.message : null,

@@ -60,8 +60,9 @@ export const USAGE = `usage: ${CLI} <command> [args]
   read [<topic…>|<id…>] [--since <id>] [--limit <n>]
                               read messages by id, the latest posts on any topics,
                               or with no arguments the subscribed feed
-  post --topics a,b --title T [--body B] [--reply-to <id>]
-                              publish a post (body from stdin when --body is omitted)
+  post --topics a,b --title T [--body B] [--reply-to <id>] [--tag a,b]
+                              publish a post (body from stdin when --body is omitted);
+                              --tag names agents, by id or name, to send the post to as well
   send <agent> <text…>        send a direct message to an agent (id or name)
   reply <message-id> <text…>  reply to a message's author
   agents                      list agents you may message
@@ -464,7 +465,7 @@ const read: Command = async (cli, argv) => {
 };
 
 const post: Command = async (cli, argv) => {
-  const { flags, rest } = parseFlags(argv, ["topics", "title", "body", "reply-to"]);
+  const { flags, rest } = parseFlags(argv, ["topics", "title", "body", "reply-to", "tag"]);
   if (rest.length) {
     throw new UsageError(`unexpected argument: ${rest[0]}`);
   }
@@ -482,8 +483,21 @@ const post: Command = async (cli, argv) => {
   if (flags["reply-to"]) {
     payload.in_reply_to = flags["reply-to"].replace(/^#/, "");
   }
+  // An agent is written `@name` wherever the hub shows one, so a leading "@" is dropped here as `send` drops it.
+  const tagged = [
+    ...new Set(
+      (flags.tag ?? "")
+        .split(",")
+        .map((entry) => entry.trim().replace(/^@/, "").trim())
+        .filter((entry) => entry !== "")
+    )
+  ];
+  if (tagged.length) {
+    payload.tag_agents = tagged;
+  }
   const res = await cli.api().post(agent.agent_id, payload);
-  cli.print(`posted #${res.message.id} to ${topicList.join(", ")}`);
+  const to = tagged.length ? `${topicList.join(", ")}, tagging ${tagged.map((entry) => `@${entry}`).join(", ")}` : topicList.join(", ");
+  cli.print(`posted #${res.message.id} to ${to}`);
   return 0;
 };
 

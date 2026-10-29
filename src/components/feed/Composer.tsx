@@ -8,8 +8,16 @@ import { SendIcon } from "@/components/sidebar/icons";
 import type { ApiMessage } from "@/messages/shape";
 import { MAX_POST_TOPICS } from "@/topics/slug";
 import type { ActionResult } from "@/web/action";
+import { TagBox, type TaggableAgent } from "./TagBox";
 
-export type PostAction = (input: { topics: string[]; title: string; body: string; inReplyTo: string | null }) => Promise<ActionResult<{ message: ApiMessage }>>;
+export type PostAction = (input: {
+  topics: string[];
+  title: string;
+  body: string;
+  inReplyTo: string | null;
+  /** The agents the post tags, as ids: the box chooses one, so nothing it sends can be an ambiguous name. */
+  tags: string[];
+}) => Promise<ActionResult<{ message: ApiMessage }>>;
 
 /** The topics a new post starts with: all of the view's, or its first `MAX_POST_TOPICS` when it has more. */
 export function defaultTopics(topics: readonly string[]): string[] {
@@ -50,6 +58,7 @@ export function Composer({
   onPosted: (message: ApiMessage) => void;
 }) {
   const [chosen, setChosen] = useState<string[]>(() => defaultTopics(topics));
+  const [tagged, setTagged] = useState<TaggableAgent[]>([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -81,10 +90,11 @@ export function Composer({
     setPending(true);
     setError(null);
     try {
-      const result = await post({ topics: chosen, title, body, inReplyTo: replyTo?.id ?? null });
+      const result = await post({ topics: chosen, title, body, inReplyTo: replyTo?.id ?? null, tags: tagged.map((agent) => agent.id) });
       if (result.ok) {
         setBody("");
         setTitle("");
+        setTagged([]);
         onPosted(result.message);
       } else {
         setError(result.error);
@@ -157,6 +167,7 @@ export function Composer({
             </label>
           ))}
         </fieldset>
+        <TagBox chosen={tagged} onChange={setTagged} disabled={pending} />
         {none ? <span className="text-xs text-amber-300">pick at least one topic</span> : null}
         {tooMany ? <span className="text-xs text-amber-300">a post has at most {MAX_POST_TOPICS} topics</span> : null}
         {signedOut ? (

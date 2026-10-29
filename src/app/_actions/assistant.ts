@@ -10,6 +10,7 @@ import { requestJiraExport } from "@/assistant/jira-store";
 import { saveAssistantModel as saveModel } from "@/assistant/model-store";
 import { modelLabel } from "@/assistant/models";
 import { CHAT_BLOCKED } from "@/assistant/onboarding";
+import { hasPod } from "@/assistant/pods";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import { sendToConversation } from "@/assistant/send";
 import {
@@ -32,6 +33,7 @@ import type { ThreadMessage } from "@/messages/direct-thread";
 import { MAX_BODY } from "@/messages/limits";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";
+import type { Viewer } from "@/viewer/identity";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { type ActionResult, runAction, text } from "@/web/action";
 import { assistantChatGate } from "@/web/data";
@@ -52,6 +54,22 @@ const MISSING: { ok: false; error: string } = { ok: false, error: "that conversa
  * the getting-ready screen on, so a page loaded before it closed, or a request made without the page, gets no further.
  */
 const BLOCKED: { ok: false; error: string } = { ok: false, error: CHAT_BLOCKED };
+
+/**
+ * Whether the gate holds this conversation shut.
+ *
+ * Only where a pod is involved. `assistantChatGate` tests the credentials a *pod* needs — GitHub, and the credential
+ * its session reaches a model with — because without them there is no session for a message to be answered by. A
+ * conversation with no pod is a Claude Code session already running on the person's own computer, on their own
+ * credentials; the hub only has to carry the message to it, which needs nothing of theirs stored here. Asked of one
+ * of those, the gate would leave somebody who has never set up an Assistant able to read their laptop chats and
+ * unable to answer one, with a refusal naming accounts that have nothing to do with the session they are typing to.
+ *
+ * Read after the conversation, so the gate is only read where it can apply at all.
+ */
+async function gated(viewer: Viewer, conversation: ConversationRow): Promise<boolean> {
+  return hasPod(conversation) && (await assistantChatGate(viewer)) === "blocked";
+}
 
 /**
  * The message body, or the refusal. A message of files and no words is a message: handing the assistant a document is
@@ -164,7 +182,11 @@ export async function sendAssistantMessage(input: {
       return OFF;
     }
     const viewer = await requireViewer();
-    if ((await assistantChatGate(viewer)) === "blocked") {
+    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+    if (conversation === undefined) {
+      return MISSING;
+    }
+    if (await gated(viewer, conversation)) {
       return BLOCKED;
     }
     const uploadIds = uploadIdsOf(input.uploadIds);
@@ -172,27 +194,29 @@ export async function sendAssistantMessage(input: {
     if (typeof body !== "string") {
       return body;
     }
-    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
-    if (conversation === undefined) {
-      return MISSING;
-    }
     return { ok: true, message: await send(viewer.oid, conversation, body, uploadIds) };
   });
 }
 
-/** Asks for a session before the person has finished typing, so the first answer comes sooner. Says nothing back. */
+/**
+ * Asks for a session before the person has finished typing, so the first answer comes sooner. Says nothing back.
+ *
+ * Nothing to ask for on a conversation with no pod, where `requestWake` is a no-op: the session is on a laptop and
+ * comes back when it comes back. The composer does not call this for one, and this answers `ok` rather than a
+ * refusal if anything else does, because a warm has never been something the person asked for.
+ */
 export async function warmConversation(input: { conversationId: unknown }): Promise<ActionResult> {
   return await runAction("warm conversation", async () => {
     if (!virtualAgentsEnabled()) {
       return OFF;
     }
     const viewer = await requireViewer();
-    if ((await assistantChatGate(viewer)) === "blocked") {
-      return BLOCKED;
-    }
     const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
     if (conversation === undefined) {
       return MISSING;
+    }
+    if (await gated(viewer, conversation)) {
+      return BLOCKED;
     }
     const agentId = await conversationAgent(prisma, conversation);
     const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { status: true } });

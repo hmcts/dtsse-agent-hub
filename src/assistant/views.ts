@@ -18,6 +18,7 @@ import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
+import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { snippetOf } from "./search.ts";
 import { type Artefact, type ConversationRow, listConversations, readArtefact, type SessionState, searchConversations, unsentConversation } from "./store.ts";
@@ -53,6 +54,14 @@ export interface ConversationLink {
   product: string;
   productLabel: string;
   lastActiveAt: string;
+  /**
+   * Where the chat runs: `true` for a Claude Code session on the person's own computer, which has no pod behind it.
+   *
+   * On every link rather than only the sidebar's, because it is the one thing about a chat that no title can say and
+   * that changes what the chat can do — a local one takes no files, cannot be stopped from here and answers only
+   * while the laptop is connected. `hasPod` is what decides it, so the screens and the stores cannot disagree.
+   */
+  local: boolean;
 }
 
 export const UNTITLED = "New chat";
@@ -77,13 +86,14 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
   };
 }
 
-function toLink(row: Pick<ConversationRow, "id" | "title" | "product" | "lastActiveAt">): ConversationLink {
+function toLink(row: Pick<ConversationRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId">): ConversationLink {
   return {
     id: row.id,
     title: row.title ?? UNTITLED,
     product: row.product,
     productLabel: productLabel(row.product),
-    lastActiveAt: row.lastActiveAt.toISOString()
+    lastActiveAt: row.lastActiveAt.toISOString(),
+    local: !hasPod(row)
   };
 }
 
@@ -148,6 +158,12 @@ export interface ConversationView {
   productHistory: { product: string; at: string }[];
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
   stopHistory: { at: string }[];
+  /**
+   * Where the chat runs, as `ConversationLink.local`. The one thing the chat's own screen reads it for is which of
+   * its controls make sense: everything a pod does for a conversation — carrying a file to its session, interrupting
+   * a turn, starting one on demand — there is nobody to do for a session on somebody's laptop.
+   */
+  local: boolean;
   agentId: string;
   agentStatus: AgentStatus;
   /**
@@ -184,16 +200,19 @@ export interface ConversationView {
 
 /** One of the viewer's conversations with its first page; `agentId` is the conversation's current agent. */
 export async function conversationView(db: Database, conversation: ConversationRow, agentId: string): Promise<ConversationView> {
-  // The conversation's own agent, which is its owner's alone: both reads below apply their own rule to it, and no
-  // grant is passed because none extends to a conversation.
-  const agent = { id: agentId, ownerOid: conversation.ownerOid, ownerOnly: true };
+  // Read as the owner, deliberately: this page is only ever reached through `findConversation`, which is scoped to
+  // the viewer's own chats, so by here the viewer *is* the owner and both reads below would answer nothing for
+  // anyone else. The owner is passed rather than the caller's viewer so that stays true of this function on its own.
+  // The ref carries the agent's id and its owner and nothing else, because that is all either read asks of it: the
+  // literals are not a claim about the agent that some rule elsewhere has to keep agreeing with.
+  const agent = { id: agentId, ownerOid: conversation.ownerOid };
   const [current, artefact, jira, confluence, page, questions, fork] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true } }),
     readArtefact(db, conversation.id),
     readJiraExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),
-    agentConversation(db, conversation.ownerOid, agent, []),
-    agentQuestions(db, conversation.ownerOid, agent, []),
+    agentConversation(db, conversation.ownerOid, agent),
+    agentQuestions(db, conversation.ownerOid, agent),
     db.assistantConversation.findUnique({ where: { id: conversation.id }, select: FORKED_SELECT })
   ]);
   return {
@@ -203,6 +222,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     productLabel: productLabel(conversation.product),
     productHistory: conversation.productHistory,
     stopHistory: conversation.stopHistory,
+    local: !hasPod(conversation),
     agentId,
     agentStatus: current?.status ?? "offline",
     skills: storedSkills(current?.skills),

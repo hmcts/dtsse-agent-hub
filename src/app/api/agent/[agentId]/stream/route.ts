@@ -26,8 +26,14 @@ export const GET = ownedAgentRoute<{ agentId: string }>(async ({ agent, request 
   // A conversation's session is told the conversation's product and document version with every message, read as
   // each is sent, so a change of product reaches the next message whether it was queued before or after it. The
   // message id goes in too, because the frame also names that message's attachments.
+  //
+  // `ownerOnly` is the pod kind of conversation, which is the only one with an Assistant frame to send: the pod's
+  // session reads the product, the document and the exports from it. A session on a laptop is told none of that, and
+  // the frame is also the only carrier for a message's attachments — which is why `POST /api/ui/uploads` refuses a
+  // file for a conversation with no pod, rather than leaving one to be stranded here.
+  const podConversation = agent.ownerOnly;
   const withAssistant = async (direct: StreamedDirect): Promise<StreamedDirect> => {
-    if (!agent.ownerOnly) {
+    if (!podConversation) {
       return direct;
     }
     const assistant = await assistantFrame(prisma, agent.id, BigInt(direct.message.id));

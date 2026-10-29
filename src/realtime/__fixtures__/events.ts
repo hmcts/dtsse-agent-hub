@@ -15,15 +15,19 @@ export const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Ex
     { type: "direct", message_id: "14", target_agent_id: null, author_agent_id: "agent-a" },
     { type: "direct", message_id: "15", target_agent_id: "agent-b", author_agent_id: null }
   ],
+  tagged_post: [{ type: "tagged_post", message_id: "12", agent_id: "agent-b" }],
   agent_status: [{ type: "agent_status", agent_id: "agent-a", owner_oid: "oid-a", status: "offline" }],
   agent_skills: [{ type: "agent_skills", agent_id: "agent-a", owner_oid: "oid-a" }],
   agent_question: [{ type: "agent_question", agent_id: "agent-a", owner_oid: "oid-a" }],
   delivery: [{ type: "delivery", message_id: "16", agent_id: "agent-b", state: "delivered" }],
-  grant: [{ type: "grant", owner_oid: "oid-a", grantee_oid: "oid-b" }],
   transcript: [{ type: "transcript", agent_id: "agent-a", owner_oid: "oid-a", last_id: "17" }],
   credential: [{ type: "credential", owner_oid: "oid-a", kind: "github" }],
   virtual_agent: [{ type: "virtual_agent", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
-  assistant_conversation: [{ type: "assistant_conversation", conversation_id: "c-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
+  assistant_conversation: [
+    { type: "assistant_conversation", conversation_id: "c-a", virtual_agent_id: "va-a", owner_oid: "oid-a" },
+    // A conversation that is a person's own local session: no pod, and the owner's tabs are the subscriber.
+    { type: "assistant_conversation", conversation_id: "c-b", virtual_agent_id: null, owner_oid: "oid-a" }
+  ],
   assistant_stop: [{ type: "assistant_stop", conversation_id: "c-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_uploads: [{ type: "assistant_uploads", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_lookup: [{ type: "assistant_lookup", lookup_id: "l-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],

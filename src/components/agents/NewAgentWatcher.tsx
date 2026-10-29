@@ -5,8 +5,8 @@ import { useRef } from "react";
 import { useHubEvent } from "@/components/live/HubStream";
 
 /**
- * Re-renders the server components when an agent the viewer can see, but the sidebar does not list, changes status:
- * that is a newly registered agent, or one a new grant has made visible.
+ * Re-renders the server components when an agent of the viewer's that the sidebar does not list changes status: that
+ * is a session they have just registered, which the roster has to pick up without a reload.
  */
 export function NewAgentWatcher({ known }: { known: readonly string[] }) {
   const router = useRouter();

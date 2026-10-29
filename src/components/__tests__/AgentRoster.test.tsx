@@ -59,7 +59,7 @@ describe("AgentRoster", () => {
   it("should re-sort and recount agents when their statuses change on the stream", async () => {
     render(
       <HubStreamProvider>
-        <AgentRoster mine={[agent("1", "alpha", "idle"), agent("2", "beta", "offline")]} shared={[agent("3", "gamma", "busy")]} />
+        <AgentRoster agents={[agent("1", "alpha", "idle"), agent("2", "beta", "offline"), agent("3", "gamma", "busy")]} />
       </HubStreamProvider>
     );
     expect(hrefs()).toEqual(["/hub/agents/3", "/hub/agents/1", "/hub/agents/2"]);
@@ -78,7 +78,7 @@ describe("AgentRoster", () => {
   it("should link to the virtual agent and mark it virtual when a virtual agent's session registered the agent", () => {
     render(
       <HubStreamProvider>
-        <AgentRoster mine={[agent("1", "alpha", "idle", "va-1"), agent("2", "beta", "idle")]} shared={[]} />
+        <AgentRoster agents={[agent("1", "alpha", "idle", "va-1"), agent("2", "beta", "idle")]} />
       </HubStreamProvider>
     );
 
@@ -101,7 +101,7 @@ describe("AgentRoster last heard", () => {
   it("should say how long an agent has been silent when it is offline, and nothing when it is live", async () => {
     render(
       <HubStreamProvider>
-        <AgentRoster mine={[agent("1", "alpha", "idle"), agent("2", "beta", "offline")]} shared={[]} />
+        <AgentRoster agents={[agent("1", "alpha", "idle"), agent("2", "beta", "offline")]} />
       </HubStreamProvider>
     );
 

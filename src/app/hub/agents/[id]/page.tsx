@@ -42,7 +42,7 @@ const VIRTUAL_AGENT_ACTIONS: VirtualAgentActions = {
 };
 
 async function AgentConversation({ viewer, activity, view }: { viewer: Viewer; activity: Activity; view: AgentView }) {
-  const { agent, access, skills } = view;
+  const { agent, skills } = view;
   const { conversation, questions } = await activity;
   return (
     <Conversation
@@ -52,7 +52,6 @@ async function AgentConversation({ viewer, activity, view }: { viewer: Viewer; a
       virtualAgentId={agent.virtualAgentId}
       viewerOid={viewer.oid}
       status={agent.status}
-      access={access}
       initial={conversation}
       questions={questions}
       skills={skills}
@@ -78,12 +77,10 @@ async function LatestPosts({ activity }: { activity: Activity }) {
   );
 }
 
-function About({ viewer, view, activity }: { viewer: Viewer; view: AgentView; activity: Activity }) {
+function About({ view, activity }: { view: AgentView; activity: Activity }) {
   return (
     <AgentAbout
       agent={view.agent}
-      access={view.access}
-      ownedByViewer={view.agent.owner.oid === viewer.oid}
       latestPosts={
         <Suspense fallback={<SkeletonRows rows={3} />}>
           <LatestPosts activity={activity} />
@@ -110,7 +107,7 @@ function LocalAgent({ viewer, view }: { viewer: Viewer; view: AgentView }) {
           </span>
         </span>
       }
-      side={<About viewer={viewer} view={view} activity={activity} />}
+      side={<About view={view} activity={activity} />}
       sideLabel="About this agent"
       narrow="disclosure"
     >
@@ -151,7 +148,7 @@ function VirtualAgent({ viewer, page }: { viewer: Viewer; page: VirtualAgentPage
             actions={VIRTUAL_AGENT_ACTIONS}
             now={Date.now()}
             plugins={pluginOffer()}
-            session={linked === null || activity === null ? null : <About viewer={viewer} view={linked} activity={activity} />}
+            session={linked === null || activity === null ? null : <About view={linked} activity={activity} />}
           />
         }
         sideLabel="About this virtual agent"

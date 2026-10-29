@@ -12,6 +12,7 @@ import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings"
 import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
+import { LocalMark } from "@/components/assistant/LocalMark";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
@@ -276,11 +277,13 @@ export function AssistantShell({
                       <Link
                         href={`/assistant/${item.id}`}
                         aria-current={item.id === activeId ? "page" : undefined}
-                        className={`block truncate rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
+                        className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
                           item.id === activeId ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
                         }`}
                       >
-                        {item.title}
+                        {item.local ? <LocalMark /> : null}
+                        {/* The title is what gives way, so the marker beside it stays whole at any sidebar width. */}
+                        <span className="min-w-0 truncate">{item.title}</span>
                       </Link>
                       {actions === undefined ? null : (
                         // A sibling of the link, not a child: an anchor may not hold a button.

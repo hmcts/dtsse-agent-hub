@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { setGrant } from "../../src/access/load.ts";
 import { POST as direct } from "../../src/app/api/agent/[agentId]/direct/route.ts";
 import { GET as agentStream } from "../../src/app/api/agent/[agentId]/stream/route.ts";
 import { GET as uiStream } from "../../src/app/api/ui/stream/route.ts";
@@ -20,7 +19,6 @@ import { frames } from "./sse-reader.ts";
  */
 
 const ALICE = person("alice");
-const BOB = person("bob");
 
 const globalForRealtime = globalThis as unknown as { agentHubRealtime?: Realtime };
 
@@ -85,13 +83,13 @@ async function sendDirect(from: string, to: string, body: string): Promise<strin
 }
 
 let alicesAgent: string;
-let bobsAgent: string;
+/** A second agent of Alice's: a direct message is between one person's sessions. */
+let alicesOther: string;
 
 beforeEach(async () => {
   await resetDatabase();
   alicesAgent = await insertAgent(ALICE, "alice-pcs-api");
-  bobsAgent = await insertAgent(BOB, "bob-ccd");
-  await setGrant(prisma, BOB.oid, ALICE.oid, "write");
+  alicesOther = await insertAgent(ALICE, "alice-ccd");
 });
 
 afterEach(async () => {
@@ -110,8 +108,8 @@ afterAll(async () => {
 describe("a stream opened before LISTEN is active", () => {
   it("should deliver a direct message sent the moment the pod's first stream opens", async () => {
     expect(globalForRealtime.agentHubRealtime).toBeUndefined();
-    const reader = await openAgentStream(BOB, bobsAgent);
-    const sent = await sendDirect(alicesAgent, bobsAgent, "straight away");
+    const reader = await openAgentStream(ALICE, alicesOther);
+    const sent = await sendDirect(alicesAgent, alicesOther, "straight away");
 
     expect((await reader.directs(1)).map((event) => event.id)).toEqual([sent]);
     expect(realtime().listener.connected()).toBe(true);
@@ -119,14 +117,14 @@ describe("a stream opened before LISTEN is active", () => {
 
   it("should replay a direct message committed while nothing was listening, then stream live ones, each once", async () => {
     const { listen } = gatedRealtime();
-    const reader = await openAgentStream(BOB, bobsAgent);
+    const reader = await openAgentStream(ALICE, alicesOther);
     await reader.drain(300);
 
-    const missed = await sendDirect(alicesAgent, bobsAgent, "while nothing listened");
+    const missed = await sendDirect(alicesAgent, alicesOther, "while nothing listened");
     listen();
     expect((await reader.directs(1)).map((event) => event.id)).toEqual([missed]);
 
-    const live = await sendDirect(alicesAgent, bobsAgent, "once listening");
+    const live = await sendDirect(alicesAgent, alicesOther, "once listening");
     expect((await reader.directs(2)).map((event) => event.id)).toEqual([missed, live]);
     await reader.drain(300);
     expect(reader.received.filter((frame) => frame.event === "direct")).toHaveLength(2);

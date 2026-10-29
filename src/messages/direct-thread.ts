@@ -1,4 +1,4 @@
-import { canReadMessage, type Grant, type MessageRef } from "../access/rules.ts";
+import { canReadMessage, type MessageRef } from "../access/rules.ts";
 import { ATTACHMENT_SELECT, attachmentView, type MessageAttachment } from "../assistant/upload-store.ts";
 import type { Database } from "../store/prisma.ts";
 import { type ApiMessage, toApiMessage } from "./shape.ts";
@@ -27,6 +27,8 @@ export interface LoadedThreadMessage {
   ref: MessageRef;
 }
 
+// An agent's owner, because `canReadMessage` decides a thread by who owns it; nothing it applies reads any more of
+// the agent than that.
 const SELECT = {
   ...MESSAGE_SELECT,
   authorOid: true,
@@ -49,6 +51,8 @@ type Row = {
   authorAgent: { id: string; name: string; ownerOid: string } | null;
   author: { name: string; email: string | null };
   topics: { topic: { slug: string } }[];
+  // Always empty in a thread, which holds direct messages: only a post is tagged. Here because `toApiMessage` reads it.
+  tags: { agent: { id: string; name: string } }[];
   targetAgent: { id: string; ownerOid: string } | null;
   parent: { authorOid: string } | null;
   deliveries: { agentId: string; state: DeliveryView }[];
@@ -84,13 +88,7 @@ export interface ThreadWindow {
 }
 
 /** The latest direct messages in the agent's thread that the viewer may read, within `window`, oldest first. */
-export async function agentThread(
-  db: Database,
-  viewerOid: string,
-  agentId: string,
-  grants: readonly Grant[],
-  window: ThreadWindow = {}
-): Promise<ThreadMessage[]> {
+export async function agentThread(db: Database, viewerOid: string, agentId: string, window: ThreadWindow = {}): Promise<ThreadMessage[]> {
   const createdAt = { ...(window.since === undefined ? {} : { gte: window.since }), ...(window.until === undefined ? {} : { lt: window.until }) };
   const rows = await db.message.findMany({
     where: { kind: "direct", OR: [{ targetAgentId: agentId }, { authorAgentId: agentId }], ...(Object.keys(createdAt).length === 0 ? {} : { createdAt }) },
@@ -100,7 +98,7 @@ export async function agentThread(
   });
   return rows
     .map(toLoaded)
-    .filter((loaded) => canReadMessage(viewerOid, loaded.ref, grants))
+    .filter((loaded) => canReadMessage(viewerOid, loaded.ref))
     .map((loaded) => loaded.message)
     .reverse();
 }

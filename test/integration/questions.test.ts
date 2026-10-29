@@ -1,5 +1,4 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { grantsHeldBy, setGrant } from "../../src/access/load.ts";
 import * as questionRoute from "../../src/app/api/agent/[agentId]/question/route.ts";
 import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
@@ -299,7 +298,7 @@ describe("POST /api/agent/{agent_id}/question", () => {
 });
 
 describe("who may read a question", () => {
-  /** An ordinary agent of Alice's with a question on it, which a grant from her can reach. */
+  /** An ordinary session of Alice's with a question on it. */
   async function laptopQuestion(): Promise<string> {
     const agentId = await insertAgent(ALICE, "laptop");
     await call(questionRoute.POST, { as: ALICE, path: `/api/agent/${agentId}/question`, params: { agentId }, method: "POST", body: QUESTION });
@@ -311,36 +310,25 @@ describe("who may read a question", () => {
   it("should give the owner the questions their agent's sessions asked", async () => {
     const agentId = await laptopQuestion();
 
-    expect(await agentQuestions(prisma, ALICE.oid, ref(agentId), [])).toHaveLength(1);
+    expect(await agentQuestions(prisma, ALICE.oid, ref(agentId))).toHaveLength(1);
   });
 
-  // A question is the model's own words, as a transcript entry is, so it follows `canViewTranscript` — the rule
-  // that exists so who may read those can narrow without changing who may see the agent.
-  it.each(["read", "write"] as const)("should give a %s grantee the questions, since they may read the transcript", async (level) => {
-    const agentId = await laptopQuestion();
-    await insertUser(BOB);
-    await setGrant(prisma, ALICE.oid, BOB.oid, level);
-
-    expect(await agentQuestions(prisma, BOB.oid, ref(agentId), await grantsHeldBy(prisma, BOB.oid))).toHaveLength(1);
-  });
-
-  it("should give someone with no grant nothing", async () => {
+  // A question is the model's own words, as a transcript entry is, so it follows `canViewTranscript`: its owner
+  // and nobody else. Nothing a colleague can be given reaches one — they tag the agent in a post instead, which
+  // tells it something rather than letting them read what it was asked.
+  it("should give a colleague nothing for an ordinary session of Alice's", async () => {
     const agentId = await laptopQuestion();
     await insertUser(BOB);
 
-    expect(await agentQuestions(prisma, BOB.oid, ref(agentId), await grantsHeldBy(prisma, BOB.oid))).toEqual([]);
+    expect(await agentQuestions(prisma, BOB.oid, ref(agentId))).toEqual([]);
   });
 
-  // The conversation's agent is owner-only, so no grant reaches its questions however wide the grant.
-  it("should give a grantee nothing for an assistant conversation's agent", async () => {
+  it("should give a colleague nothing for an assistant conversation's agent either", async () => {
     const { agentId, token } = await conversationSession();
     await ask(token, agentId);
     await insertUser(BOB);
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
 
-    const seen = await agentQuestions(prisma, BOB.oid, { id: agentId, ownerOid: ALICE.oid, ownerOnly: true }, await grantsHeldBy(prisma, BOB.oid));
-
-    expect(seen).toEqual([]);
+    expect(await agentQuestions(prisma, BOB.oid, { id: agentId, ownerOid: ALICE.oid, ownerOnly: true })).toEqual([]);
   });
 
   /**
@@ -352,7 +340,7 @@ describe("who may read a question", () => {
     const agentId = await laptopQuestion();
     await prisma.agentQuestion.updateMany({ where: { agentId }, data: { answeredAt: new Date(), answer: ["not an answer set"] } });
 
-    const [seen] = await agentQuestions(prisma, ALICE.oid, ref(agentId), []);
+    const [seen] = await agentQuestions(prisma, ALICE.oid, ref(agentId));
 
     expect(seen?.answer).toEqual({ answers: [], at: expect.any(String) });
   });
@@ -361,7 +349,7 @@ describe("who may read a question", () => {
     const agentId = await laptopQuestion();
     await prisma.agentQuestion.updateMany({ where: { agentId }, data: { questions: [{ question: "half a question" }] } });
 
-    expect(await agentQuestions(prisma, ALICE.oid, ref(agentId), [])).toEqual([]);
+    expect(await agentQuestions(prisma, ALICE.oid, ref(agentId))).toEqual([]);
   });
 
   /** The transcript beside these is paginated and they are not, so every load would otherwise carry the lot. */
@@ -378,7 +366,7 @@ describe("who may read a question", () => {
       }))
     });
 
-    const seen = await agentQuestions(prisma, ALICE.oid, ref(agentId), []);
+    const seen = await agentQuestions(prisma, ALICE.oid, ref(agentId));
 
     expect(seen).toHaveLength(MAX_SHOWN_QUESTIONS);
     // Newest kept, and handed back oldest first, which is the order the thread merges them in.
@@ -395,8 +383,8 @@ describe("who may read a question", () => {
     const asked = new Date(Date.UTC(2026, 9, 21, 9, 0));
     await prisma.agentQuestion.updateMany({ where: { agentId }, data: { askedAt: asked } });
 
-    const [fresh] = await agentQuestions(prisma, ALICE.oid, ref(agentId), [], new Date(asked.getTime() + QUESTION_OFFER_WINDOW_MS - 1000));
-    const [stale] = await agentQuestions(prisma, ALICE.oid, ref(agentId), [], new Date(asked.getTime() + QUESTION_OFFER_WINDOW_MS));
+    const [fresh] = await agentQuestions(prisma, ALICE.oid, ref(agentId), new Date(asked.getTime() + QUESTION_OFFER_WINDOW_MS - 1000));
+    const [stale] = await agentQuestions(prisma, ALICE.oid, ref(agentId), new Date(asked.getTime() + QUESTION_OFFER_WINDOW_MS));
 
     expect(fresh?.offered).toBe(true);
     expect(stale?.offered).toBe(false);
@@ -407,7 +395,7 @@ describe("who may read a question", () => {
     const agentId = await laptopQuestion();
     await prisma.agentQuestion.updateMany({ where: { agentId }, data: { answeredAt: new Date(), answer: { answers: [{ labels: ["Red"], text: null }] } } });
 
-    expect((await agentQuestions(prisma, ALICE.oid, ref(agentId), []))[0]?.offered).toBe(false);
+    expect((await agentQuestions(prisma, ALICE.oid, ref(agentId)))[0]?.offered).toBe(false);
   });
 });
 

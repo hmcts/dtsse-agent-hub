@@ -114,7 +114,8 @@ export default async function ConversationPage({
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: jira }}
     >
-      <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>
+      {/* `local` so a chat on the person's own computer is not held behind credentials only a pod needs. */}
+      <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme} local={view.local}>
         {/* Keyed on the agent, which a /clear in the session replaces, so the thread starts again from its page. */}
         <ChatView key={view.agentId} view={view} templates={offeredTemplates(mine)} viewerOid={viewer.oid} actions={ACTIONS} jira={jira} defaults={defaults} />
       </AssistantGate>

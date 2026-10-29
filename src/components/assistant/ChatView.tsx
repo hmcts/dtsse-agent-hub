@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { clientSupports } from "@/agents/client-features";
+import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import { type ExportDefaults, NO_DEFAULTS } from "@/assistant/export-defaults";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
@@ -27,6 +28,7 @@ import { type AnswerQuestionAction, QuestionCard } from "@/components/questions/
 import type { ThreadMessage } from "@/messages/direct-thread";
 import type { AgentStatus } from "@/realtime/events";
 import type { ActionResult } from "@/web/action";
+import { duration } from "@/web/format";
 
 export interface ChatActions {
   send: (input: { conversationId: unknown; body: unknown; uploadIds: unknown }) => Promise<ActionResult<{ message: ThreadMessage }>>;
@@ -87,6 +89,17 @@ function StopButton({ onStop }: { onStop: () => Promise<void> }) {
   );
 }
 
+/**
+ * What happens to a message typed into a local chat whose session is not connected, in the person's own terms.
+ *
+ * The same promise the hub's own composer makes about an offline agent (`offlineNote`), and the same bound, read from
+ * the same constant. It is worded from the delivery's side rather than the session's because that is what the person
+ * is deciding about: whether to type now or wait until their laptop is back.
+ */
+export function localOfflineNote(): string {
+  return `This chat is a Claude Code session on your own computer, and it is not connected. Your message is kept and delivered when it reconnects, for up to ${duration(EXPIRE_AFTER_SECONDS)} offline.`;
+}
+
 function Item({ item, answerQuestion }: { item: ThreadItem; answerQuestion: AnswerQuestionAction }) {
   if (item.type === "question") {
     return (
@@ -110,6 +123,19 @@ function Item({ item, answerQuestion }: { item: ThreadItem; answerQuestion: Answ
         <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
         Product changed to {item.label}
         <span aria-hidden="true" className="h-px flex-1 bg-asst-line" />
+      </li>
+    );
+  }
+  // One quiet line per tool call, in a local chat only. Named for a screen reader, since "Bash" beside a path says
+  // nothing on its own, and the summary is left to truncate: it is a path or a command, and the start of one is the
+  // part that identifies it.
+  if (item.type === "tool") {
+    return (
+      <li className="flex min-w-0 items-baseline gap-2 text-xs text-asst-faint">
+        <span className="sr-only">Used</span>
+        <span className="shrink-0 font-plex-mono text-asst-muted">{item.name}</span>
+        {item.summary === "" ? null : <span className="min-w-0 truncate">{item.summary}</span>}
+        {item.failed ? <span className="shrink-0 text-asst-error">failed</span> : null}
       </li>
     );
   }
@@ -260,8 +286,15 @@ export function ChatView({
 
   // The picker can only show a product it offers, so it and the dialog it opens read the stored one through this.
   const product = storedProduct(view.product);
-  const thread = threadItems(live.items, view.productHistory, view.stopHistory);
-  const doing: Progress = progress(live.items, thread, status, view.sessionState);
+  /**
+   * Whether a pod is behind this chat, which is the one question every control that instructs one hangs on: the
+   * stop, the attach, the warm on focus and the document's two exports all reach the session through its pod, and
+   * there is none for a session on the person's own computer. One reading of `view.local`, so the controls cannot
+   * disagree about where the chat is.
+   */
+  const pod = !view.local;
+  const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
+  const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
   /**
    * Both halves of "there is something to stop, and stopping it will work".
    *
@@ -273,8 +306,12 @@ export function ChatView({
    * The claim itself is the other half. A pod takes the current client when it boots, so a conversation on an older
    * session has no stop until that session is next started; a button there would do nothing, which is worse than
    * the plain wait.
+   *
+   * Having a pod is the third. The laptop client claims `stop` and means it — it is the same client — but the
+   * interrupt is an `assistant_stop` to the conversation's pod, so `stopAnswer` answers `nothing-running` for a
+   * conversation that has none. Without this the button would be offered on every local chat and do nothing at all.
    */
-  const stoppable = doing.state === "working" && clientSupports(view.clientFeatures, "stop");
+  const stoppable = pod && doing.state === "working" && clientSupports(view.clientFeatures, "stop");
   const scroller = useStickToBottom<HTMLDivElement>(`${thread.length}:${doing.state}`);
   const artefact: ArtefactSnapshot = {
     title: view.artefact.title,
@@ -431,6 +468,13 @@ export function ChatView({
                 {error}
               </p>
             )}
+            {/*
+              The box stays live: a message to a session that is not connected queues as a delivery and is handed to
+              it on the stream it opens when it comes back, so there is something to be gained by typing. What it
+              cannot do is wait for ever — the sweep expires a delivery to an agent that has been offline that long,
+              which for a laptop session is the clock that runs rather than the delivery's own age.
+            */}
+            {view.local && status === "offline" ? <p className="pb-2 text-center text-[13px] text-asst-muted">{localOfflineNote()}</p> : null}
             <Composer
               templates={templates}
               viewerOid={viewerOid}
@@ -439,10 +483,13 @@ export function ChatView({
               draftId={view.id}
               onSend={send}
               conversationId={view.id}
+              // Only a pod can be handed a file: see the `local_session` refusal in `src/assistant/uploads.ts`. The
+              // control is taken away rather than left to offer something that is then refused.
+              attach={pod}
               skills={view.skills}
               dropZone={scroller.ref}
               onFocus={() => {
-                if (!warmed.current && status === "offline") {
+                if (pod && !warmed.current && status === "offline") {
                   warmed.current = true;
                   void actions.warm({ conversationId: view.id });
                 }
@@ -458,9 +505,18 @@ export function ChatView({
           productLabel={view.productLabel}
           save={actions.saveArtefact}
           onClose={() => setPanel(false)}
-          jira={{ exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira }}
+          /*
+           * The document itself stays on a local chat — it is a hub row the person and the session both edit, and
+           * `saveArtefact` works there — but neither export is offered, which is what `pod` takes away here. An
+           * export is carried out by the conversation's session, instructed through `assistantFrame`, and that frame
+           * reaches a pod's session alone: `requestJiraExport` would set the status pending, the footer would say
+           * "Creating ticket…" until the 15-minute timeout and then report a generic failure, and a retry the same.
+           * The panel keeps copy, download and print, which are the ways a document leaves a local chat.
+           * `requestJiraExport` and `requestConfluenceExport` refuse it as well, so this is the convenience half.
+           */
+          jira={pod ? { exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira } : undefined}
           confluence={
-            actions.exportToConfluence === undefined
+            !pod || actions.exportToConfluence === undefined
               ? undefined
               : { exported: view.confluence, access: jira, exportTo: actions.exportToConfluence, defaultPage: defaults.confluence }
           }

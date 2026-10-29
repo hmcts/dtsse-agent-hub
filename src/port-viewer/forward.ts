@@ -37,7 +37,13 @@ const REPLACED_ON_REQUEST = new Set([
  * `fetch` decodes what it receives, so the encoding and length no longer describe the body it hands on. HSTS from a
  * pod is not the viewer's to set; the hub's own configuration sets the viewer's.
  */
-const DROPPED_FROM_RESPONSE = new Set(["content-encoding", "content-length", "strict-transport-security", "set-cookie", "location"]);
+const DROPPED_FROM_RESPONSE = new Set(["content-encoding", "content-length", "strict-transport-security", "set-cookie", "location", "referrer-policy"]);
+
+/**
+ * In place of whatever the pod asks for, as helmet's `no-referrer` default: the viewer finds the port a root-relative
+ * request came from by its `Referer`, which `same-origin` still sends to the viewer and never to anywhere else.
+ */
+export const VIEWER_REFERRER_POLICY = "same-origin";
 
 /** A `Connection` header can name further hop-by-hop headers. */
 function connectionTokens(headers: Headers): Set<string> {
@@ -181,6 +187,7 @@ export function forwardedResponseHeaders(incoming: Headers, target: Pick<Forward
     }
     headers.append(name, value);
   }
+  headers.set("referrer-policy", VIEWER_REFERRER_POLICY);
   const location = incoming.get("location");
   if (location !== null) {
     headers.set("location", rewriteLocation(location, target));
@@ -229,6 +236,75 @@ export type Fetch = (input: string, init: RequestInit & { duplex?: "half" }) => 
 export class UpstreamUnreachable extends Error {}
 
 /** Sends `request` on to the pod and hands back its answer as the viewer's, without following its redirects. */
+/**
+ * The most of an HTML page the viewer reads to move its `<base href>`. A larger page is passed on as it came, since
+ * holding it would cost the viewer that much memory per request; an app shell with a `<base>` is a few kilobytes.
+ */
+export const BASE_REWRITE_LIMIT_BYTES = 2 * 1024 * 1024;
+
+const BASE_HREF = /(<base\b[^>]*?\bhref\s*=\s*)(["'])(\/(?![/\\])[^"']*)\2/i;
+
+/**
+ * A page's first `<base href>` from `/`, moved under the prefix. A single-page app such as Angular's routes from its
+ * base, so with `/` it reads the prefix as an unknown route and navigates out of it; under the prefix its address
+ * bar stays there, and so does the `Referer` its root-relative API calls carry. Anything else is left alone.
+ */
+export function rewriteBaseHref(html: string, prefix: string): string {
+  return html.replace(BASE_HREF, (_match, start: string, quote: string, href: string) => `${start}${quote}${prefix}${href}${quote}`);
+}
+
+/** HTML in UTF-8, or with no charset said, which is the only kind the viewer can rewrite and hand back unchanged otherwise. */
+export function isRewritableHtml(headers: Headers): boolean {
+  const type = (headers.get("content-type") ?? "").toLowerCase();
+  if (!type.startsWith("text/html")) {
+    return false;
+  }
+  const charset = /charset\s*=\s*"?([^";\s]+)/.exec(type)?.[1];
+  return charset === undefined || charset === "utf-8" || charset === "utf8";
+}
+
+/** The body with its `<base href>` moved, or, past `BASE_REWRITE_LIMIT_BYTES`, the same bytes streamed on as they came. */
+async function withBaseMoved(body: ReadableStream<Uint8Array>, prefix: string): Promise<BodyInit> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    chunks.push(value);
+    size += value.byteLength;
+    if (size > BASE_REWRITE_LIMIT_BYTES) {
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) {
+            controller.enqueue(chunk);
+          }
+        },
+        async pull(controller) {
+          const next = await reader.read();
+          if (next.done) {
+            controller.close();
+          } else {
+            controller.enqueue(next.value);
+          }
+        },
+        cancel(reason) {
+          return reader.cancel(reason);
+        }
+      });
+    }
+  }
+  const whole = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    whole.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return rewriteBaseHref(new TextDecoder().decode(whole), prefix);
+}
+
 export async function forward(request: Request, target: ForwardTarget, fetchImpl: Fetch): Promise<Response> {
   const url = `${target.upstreamOrigin}${target.rest}${target.search}`;
   let upstream: Response;
@@ -243,7 +319,8 @@ export async function forward(request: Request, target: ForwardTarget, fetchImpl
   } catch (error) {
     throw new UpstreamUnreachable(error instanceof Error ? error.message : String(error));
   }
-  return new Response(request.method === "HEAD" || NULL_BODY_STATUSES.has(upstream.status) ? null : upstream.body, {
+  const body = request.method === "HEAD" || NULL_BODY_STATUSES.has(upstream.status) ? null : upstream.body;
+  return new Response(body !== null && isRewritableHtml(upstream.headers) ? await withBaseMoved(body, target.prefix) : body, {
     status: upstream.status,
     statusText: upstream.statusText,
     headers: forwardedResponseHeaders(upstream.headers, target)

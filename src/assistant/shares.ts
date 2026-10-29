@@ -9,10 +9,9 @@ import {
 } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/store.ts";
-import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { productLabel } from "./products.ts";
-import { ConversationNotFound } from "./store.ts";
+import { announce, ConversationNotFound } from "./store.ts";
 
 /**
  * Who, besides its owner, may read an HMCTS Assistant conversation.
@@ -38,7 +37,8 @@ export async function forksOf(db: Database, conversationId: string): Promise<Con
 
 /** The conversation as the share rules read it, whoever is asking. `findConversation` is the owner's read. */
 export interface SharedConversationRow extends SharedConversationRef {
-  virtualAgentId: string;
+  /** The virtual agent whose pod runs its sessions, or null for a conversation that is a local session. */
+  virtualAgentId: string | null;
 }
 
 /** The conversation, if it exists, without regard to who is asking: `conversationAccess` decides that next. */
@@ -104,14 +104,12 @@ export async function shareRecipients(db: Database, conversationId: string): Pro
  *
  * Nothing is sent to the recipient, because a share has nothing live in it: their page is a snapshot of the thread
  * and reads again when they open it. That is also what makes a revoked share stop working at the next read.
+ *
+ * `announce` and not a second `assistant_conversation` of its own, so a conversation with no pod — which has no such
+ * event to send, and which nothing creates yet — is refused in the one place that decides it.
  */
 async function announceShares(db: Database, conversation: SharedConversationRow): Promise<void> {
-  await notify(db, {
-    type: "assistant_conversation",
-    conversation_id: conversation.id,
-    virtual_agent_id: conversation.virtualAgentId,
-    owner_oid: conversation.ownerOid
-  });
+  await announce(db, conversation);
 }
 
 /** The owner's conversation, or the 404 anyone else's is reported as. */

@@ -1,6 +1,5 @@
 import type { NextRequest } from "next/server";
-import { grantsHeldBy } from "@/access/load";
-import { canViewAgent, canViewTranscript } from "@/access/rules";
+import { canViewTranscript } from "@/access/rules";
 import { errorResponse, HttpError, json } from "@/agent-api/http";
 import { findAgent, isUuid } from "@/agents/store";
 import { messageIdOf } from "@/messages/limits";
@@ -34,7 +33,9 @@ function cursorOf(query: URLSearchParams): ConversationCursor {
 
 /**
  * A page of an agent's conversation: `?before=<entry id>` for earlier entries, `?after=<entry id>` for those stored
- * since. An agent the viewer cannot see is refused as missing.
+ * since. One refusal, the missing one: a transcript is its owner's, by `canViewTranscript`, and an agent that is not
+ * the viewer's is reported as not existing rather than as forbidden — the same answer an id that is not a UUID gets,
+ * so nothing here confirms an id.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
   const viewer = await uiViewer(request);
@@ -43,12 +44,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
   const { id } = await params;
   const agent = isUuid(id) ? await findAgent(prisma, id) : undefined;
-  const grants = await grantsHeldBy(prisma, viewer.oid);
-  if (agent === undefined || !canViewAgent(viewer.oid, agent, grants)) {
+  if (agent === undefined || !canViewTranscript(viewer.oid, agent)) {
     return errorResponse(404, "no such agent");
-  }
-  if (!canViewTranscript(viewer.oid, agent, grants)) {
-    return errorResponse(403, "you may not read this agent's transcript");
   }
   let cursor: ConversationCursor;
   try {
@@ -56,5 +53,5 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   } catch (error) {
     return errorResponse(400, error instanceof HttpError ? error.message : "bad request");
   }
-  return json(await agentConversation(prisma, viewer.oid, { id: agent.id, ownerOid: agent.ownerOid, ownerOnly: agent.ownerOnly }, grants, cursor));
+  return json(await agentConversation(prisma, viewer.oid, { id: agent.id, ownerOid: agent.ownerOid }, cursor));
 }

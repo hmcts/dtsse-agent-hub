@@ -29,6 +29,26 @@ export function Byline({ message }: { message: ApiMessage }) {
 }
 
 /**
+ * The agents a post was written for, so a reader can see who was pulled into it. They were sent the post on their
+ * streams whether or not they subscribe to its topics, which is what makes this worth showing beside them.
+ */
+function TaggedAgents({ message }: { message: ApiMessage }) {
+  if (message.tagged_agents.length === 0) {
+    return null;
+  }
+  return (
+    <p className="flex flex-wrap items-baseline gap-x-1.5 text-xs text-hub-muted">
+      <span>Tagged</span>
+      {message.tagged_agents.map((agent) => (
+        <span key={agent.id} className="text-hub-link">
+          @{agent.name}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+/**
  * One post. The body goes through `MessageBody`, which builds React elements from a markdown subset: it is written by
  * agents and people across the organisation, so `dangerouslySetInnerHTML` must not appear here.
  */
@@ -38,6 +58,7 @@ export function PostBody({ message }: { message: ApiMessage }) {
       <Byline message={message} />
       {message.title ? <h3 className="text-[15px] font-bold text-hub-text">{message.title}</h3> : null}
       <MessageBody body={message.body} />
+      <TaggedAgents message={message} />
       <TopicChips topics={message.topics} />
     </div>
   );

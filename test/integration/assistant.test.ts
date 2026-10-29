@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
-import { setGrant } from "../../src/access/load.ts";
+import { registerAgent } from "../../src/agents/store.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
 import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
@@ -24,7 +24,8 @@ import { assistantFrame, createConversation, ensureAssistant, findConversation, 
 import { credentialBackend } from "../../src/credentials/backend.ts";
 import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
-import { expireDeliveries } from "../../src/messages/store.ts";
+import { createDirect, expireDeliveries } from "../../src/messages/store.ts";
+import { subscribe, subscriptions } from "../../src/topics/store.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
@@ -119,6 +120,15 @@ async function sessionOf(conversationId: string): Promise<{ agentId: string; ses
     select: { agent: { select: { id: true, sessionId: true } } }
   });
   return { agentId: conversation.agent!.id, sessionId: conversation.agent!.sessionId };
+}
+
+/**
+ * Alice's Claude Code session on her own laptop, and the conversation the hub gives it: an ordinary registration
+ * that is nobody's pod and names no conversation, which is the whole of what makes a chat local.
+ */
+async function laptopChat(sessionId = "alices-laptop"): Promise<string> {
+  await registerAgent(prisma, { ...ALICE, tid: "dev" }, { sessionId, name: sessionId, cwd: null, repo: null, branch: null, host: null });
+  return (await prisma.assistantConversation.findFirstOrThrow({ where: { virtualAgentId: null }, orderBy: { createdAt: "desc" } })).id;
 }
 
 assistantSuite([ALICE, BOB]);
@@ -368,10 +378,32 @@ describe("conversations", () => {
     expect(await prisma.delivery.count({ where: { agentId, state: "expired" } })).toBe(1);
   });
 
-  it("should keep a conversation's agent from the person's grantees and the messageable list", async () => {
+  /**
+   * The exemption above belongs to a pod, whose session a queued message is what wakes. Nothing wakes a session on
+   * somebody's laptop, so a message to one that was last seen days ago is not waiting to start anything and expires
+   * on the agent's own offline clock, as it would for a session in no conversation at all. Left on the delivery's
+   * clock, every laptop chat would hold a colleague's thread at "queued" for a further day.
+   */
+  it("should expire a new message to a conversation with no pod on the agent's offline clock", async () => {
+    const laptop = await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+    await prisma.agent.update({ where: { id: laptop.id }, data: { status: "offline", lastHeartbeatAt: new Date(Date.now() - 3 * 86_400_000) } });
+    await directAsPerson(prisma, ALICE.oid, laptop.id, "still there?");
+
+    await prisma.$transaction(async (tx) => {
+      await expireDeliveries(tx, 86_400, 100);
+    });
+
+    expect((await prisma.assistantConversation.findFirstOrThrow()).virtualAgentId).toBeNull();
+    expect(await prisma.delivery.count({ where: { agentId: laptop.id, state: "expired" } })).toBe(1);
+  });
+
+  it("should keep a conversation's agent from everyone else and off the messageable list", async () => {
     await startedAssistant();
     await insertUser(BOB);
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
     const id = ((await actions.startConversation({ product: "general", body: "private" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
@@ -405,7 +437,6 @@ describe("conversations", () => {
   it("should send a session's tool calls to the owner and to nobody else, so only they see what it is doing", async () => {
     const { token } = await startedAssistant();
     await insertUser(BOB);
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
     const id = ((await actions.startConversation({ product: "general", body: "look into this" })) as { id: string }).id;
     const { agentId, sessionId } = await sessionOf(id);
     await register(token, sessionId, id);
@@ -628,6 +659,83 @@ describe("conversations", () => {
     expect(await prisma.message.count({ where: { kind: "direct" } })).toBe(0);
   });
 
+  /**
+   * A conversation with no pod is a session on the person's own computer, and removing the chat has to leave that
+   * session exactly as it was. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the agent's own
+   * dependants cascade from there, so deleting the row without clearing the column first would take the live
+   * session's agent, the transcript it uploaded, its subscriptions and every direct message to or from it — board
+   * messages with colleagues included — after which the session 404s, re-registers as a new agent and the chat
+   * comes back.
+   *
+   * The rename is here too: every write to a conversation announces it inside its own transaction, so a write path
+   * that could not announce one with no pod would roll back and leave a chat nobody can rename or get rid of.
+   */
+  it("should detach a conversation with no pod and leave the session on the laptop standing", async () => {
+    const laptop = await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+    const id = (await prisma.assistantConversation.findFirstOrThrow()).id;
+    await subscribe(prisma, laptop.id, ["pcs"]);
+    await prisma.transcriptEntry.create({
+      data: {
+        agentId: laptop.id,
+        sessionId: "alices-laptop",
+        entryKey: "e1",
+        role: "assistant",
+        content: { text: "read off my own disk" },
+        occurredAt: new Date()
+      }
+    });
+    // Seeded rather than sent: nobody can direct another owner's session any more, so a cross-owner direct is a row
+    // written before that changed. It is here because the old delete took every message of the agent with it,
+    // including ones that had nothing to do with the chat being removed.
+    const board = await createDirect(prisma, {
+      author: { oid: BOB.oid, agentId: null },
+      targetAgentId: laptop.id,
+      inReplyTo: null,
+      body: "nothing to do with that chat"
+    });
+
+    expect(await actions.renameConversation({ conversationId: id, title: "On my laptop" })).toEqual({ ok: true });
+    expect((await findConversation(prisma, ALICE.oid, id))!.title).toBe("On my laptop");
+    expect(await actions.deleteConversation({ conversationId: id })).toEqual({ ok: true });
+
+    expect(await prisma.assistantConversation.count()).toBe(0);
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: laptop.id } })).toMatchObject({ sessionId: "alices-laptop", assistantConversationId: null });
+    expect(await prisma.transcriptEntry.count({ where: { agentId: laptop.id } })).toBe(1);
+    expect(await subscriptions(prisma, laptop.id)).toEqual(["pcs"]);
+    expect(await prisma.message.count({ where: { id: BigInt(board.id) } })).toBe(1);
+    expect(await prisma.delivery.count({ where: { agentId: laptop.id } })).toBe(1);
+  });
+
+  /**
+   * Where a chat runs is on every view of it, from `hasPod` and nowhere else, because the screens change on it: the
+   * sidebar marks it, and its own page shows the tool calls, hides the attach and offers no stop.
+   */
+  it("should say on every view of a chat whether it is a session on the person's own computer", async () => {
+    const { token } = await startedAssistant();
+    const onPod = ((await actions.startConversation({ product: "general", body: "on my assistant" })) as { id: string }).id;
+    await register(token, (await sessionOf(onPod)).sessionId, onPod);
+    await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+    const onLaptop = (await prisma.assistantConversation.findFirstOrThrow({ where: { virtualAgentId: null } })).id;
+
+    expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
+    expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
+    const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
+    expect(new Map(listed.map((item) => [item.id, item.local]))).toEqual(
+      new Map([
+        [onLaptop, true],
+        [onPod, false]
+      ])
+    );
+  });
+
   it("should wake a conversation when its composer is focused and the session is offline", async () => {
     const { id: assistantId, token } = await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
@@ -684,6 +792,54 @@ describe("the chat gate", () => {
 
     expect((await openAssistant(VIEWER)).chat).toBe("open");
     expect(await actions.startConversation({ product: "general", body: "hello" })).toMatchObject({ ok: true });
+  });
+
+  /**
+   * The gate tests the credentials a *pod* needs, so it has nothing to say about a chat that is a session on the
+   * person's own computer: that session is already running, on their own Claude Code and their own sign-ins, and all
+   * the hub has to do is carry the message to it. Gated, somebody who had never set up an Assistant could read their
+   * laptop chats and not answer one, refused in the name of accounts the session never touches.
+   */
+  it("should let the person send to a chat on their own computer with nothing connected at all", async () => {
+    await insertUser(ALICE);
+    const laptop = await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+    const id = (await prisma.assistantConversation.findFirstOrThrow()).id;
+    await storedOnly();
+
+    expect(await actions.sendAssistantMessage({ conversationId: id, body: "carry on where you left off" })).toMatchObject({ ok: true });
+
+    expect(await prisma.delivery.count({ where: { agentId: laptop.id, state: "queued" } })).toBe(1);
+  });
+
+  /**
+   * Nothing to wake, and nothing that would ever clear the column if it were written: `pendingWakes` selects on the
+   * virtual agent, `linkLocalSession` deliberately leaves the wake alone, and `reportSessions` only sees a pod's own
+   * conversations. A wake here would be a row claiming for ever that a session had been asked for.
+   */
+  it("should ask for no wake on a chat with no pod, whether a message is sent to it or its box is focused", async () => {
+    await insertUser(ALICE);
+    await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+    const id = (await prisma.assistantConversation.findFirstOrThrow()).id;
+    const yesterday = new Date(Date.now() - 86_400_000);
+    await prisma.assistantConversation.update({ where: { id }, data: { lastActiveAt: yesterday } });
+    await prisma.agent.updateMany({ where: { sessionId: "alices-laptop" }, data: { status: "offline" } });
+    await storedOnly();
+
+    expect(await actions.sendAssistantMessage({ conversationId: id, body: "when you are back" })).toMatchObject({ ok: true });
+    expect(await actions.warmConversation({ conversationId: id })).toEqual({ ok: true });
+
+    const conversation = (await findConversation(prisma, ALICE.oid, id))!;
+    expect(conversation.wakeRequestedAt).toBeNull();
+    // The chat still moves up the sidebar when something is sent to it: `touchConversation` does that, not the wake.
+    expect(conversation.lastActiveAt.getTime()).toBeGreaterThan(yesterday.getTime());
   });
 
   it("should not hold the person when the hub cannot read the credentials", async () => {
@@ -834,10 +990,8 @@ describe("the sessions stream and report", () => {
     await register(token, sessionId, id, { clientFeatures: ["stop"] });
     await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
     await insertUser(BOB);
-    // A write grant is the most anyone else can hold, and it lets them message any other agent of Alice's. The
-    // refusal comes from the owner-scoped read rather than from `canStopAssistantAnswer`, which the action names
+    // The refusal comes from the owner-scoped read rather than from `canStopAssistantAnswer`, which the action names
     // after it and `rules.test.ts` covers; this is the end of it that the person would meet.
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
     actAs("bob");
 
     expect(await actions.stopAssistantAnswer({ conversationId: id })).toMatchObject({ ok: false });
@@ -1040,9 +1194,30 @@ describe("jira export", () => {
     expect(await actions.exportArtefactToJira({ conversationId: id, project: "ccd" })).toEqual({ ok: false, error: "pick a Jira project to export to" });
   });
 
+  /**
+   * A local chat's document is real — `saveArtefact` works there, because the document is a hub row — so the export's
+   * own `artefact_version > 0` is satisfied and the only thing standing between the person and a 15-minute wait is
+   * this refusal. There is no carrier: `assistantFrame` is the only way the steps reach a session, and the stream
+   * route suppresses it for a conversation with no pod. The UI offers no export either; this is the server's half.
+   */
+  it("should refuse an export from a chat that is a session on the person's own computer, and claim nothing", async () => {
+    const id = await laptopChat();
+    await actions.saveArtefact({ conversationId: id, title: "Notes", markdown: "# What I found", baseVersion: 0 });
+
+    expect(await actions.exportArtefactToJira({ conversationId: id, project: "VIBE" })).toEqual({
+      ok: false,
+      error: "this chat is a session on your own computer, which cannot export to Jira; download the document and attach it yourself"
+    });
+
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { jiraStatus: true, jiraExportId: true } })).toEqual({
+      jiraStatus: null,
+      jiraExportId: null
+    });
+  });
+
   it("should start a stopped assistant when the person exports", async () => {
     const { id } = await written();
-    const assistantId = (await findConversation(prisma, ALICE.oid, id))!.virtualAgentId;
+    const assistantId = (await findConversation(prisma, ALICE.oid, id))!.virtualAgentId!;
     await prisma.agent.updateMany({ where: { assistantConversationId: id }, data: { status: "offline" } });
     await setDesired(prisma, ALICE.oid, assistantId, "stopped");
 
@@ -1146,6 +1321,23 @@ describe("confluence export", () => {
 
     await report(token, agentId, { export_id: first, page_id: "1" });
     expect((await assistantConversation(VIEWER, id))?.confluence.status).toBe("pending");
+  });
+
+  // The same refusal and for the same reason as the Jira export's: the steps go out in `assistantFrame`, which no
+  // conversation without a pod gets, so a claimed export could only ever time out.
+  it("should refuse a publish from a chat that is a session on the person's own computer, and claim nothing", async () => {
+    const id = await laptopChat();
+    await actions.saveArtefact({ conversationId: id, title: "Notes", markdown: "# What I found", baseVersion: 0 });
+
+    expect(await actions.exportArtefactToConfluence({ conversationId: id, parent: PARENT })).toEqual({
+      ok: false,
+      error: "this chat is a session on your own computer, which cannot publish to Confluence; download the document and publish it yourself"
+    });
+
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { confluenceStatus: true, confluenceExportId: true } })).toEqual({
+      confluenceStatus: null,
+      confluenceExportId: null
+    });
   });
 
   it("should refuse a parent page that is not one, and a report that breaks the contract or is not a conversation's", async () => {

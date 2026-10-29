@@ -23,15 +23,6 @@ export function HomeIcon() {
   );
 }
 
-export function KeyIcon() {
-  return (
-    <Icon>
-      <circle cx="7" cy="12" r="3.5" />
-      <path d="m9.5 9.5 6-6M13 6l2 2M11.5 7.5l1.5 1.5" />
-    </Icon>
-  );
-}
-
 export function LockIcon() {
   return (
     <Icon>
@@ -144,6 +135,15 @@ export function DownloadIcon() {
   return (
     <Icon>
       <path d="M10 3.5v9M6 8.5l4 4 4-4M4 16.5h12" />
+    </Icon>
+  );
+}
+
+export function LaptopIcon() {
+  return (
+    <Icon>
+      <rect x="4.5" y="4" width="11" height="8" rx="1" />
+      <path d="M2.5 15.5h15" />
     </Icon>
   );
 }

@@ -69,4 +69,3 @@ Delete this file once everything below is done or has moved to Jira.
 - [ ] **Product chip.** The header's chip draws its own label and arrow over a native `<select>`, because a native one takes the width of its widest option. What is still the browser's is the open list; a custom listbox would style that too, and is the only part of this left.
 - [ ] **`/clear` in a session.** A `/clear` moves the conversation to the new session id, but the supervisor still tracks idleness by the id it started. A person can't send `/clear` from the Assistant, so this only matters if that changes.
 - [ ] **Templates and starters** are static (`src/assistant/starters.ts`). Should teams have their own?
-- [ ] **Agent status leak.** `agent_status` events for a conversation's agent reach the owner's grantees' streams (id and status only, nothing else). Filter them out if that matters.

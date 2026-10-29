@@ -28,17 +28,62 @@ export function devUser(persona: string): string {
 /**
  * Registers an agent owned by `persona` through the agent API, or returns `undefined` where the deployment checks
  * real Entra tokens (agent authentication stays on in preview and AAT), so a spec needing one can skip.
+ *
+ * The registration names no virtual agent and no conversation, which is what the hub reads as a session on somebody's
+ * own computer: it is given an assistant conversation of its own, titled `name`. See Conversations in
+ * `docs/agent-api.md`.
+ *
+ * `clientFeatures` is what the client running the session claims it understands, for a spec about a control the UI
+ * only offers to a session that claimed the field behind it. Left out, the agent claims nothing, as a client from
+ * before client features existed reports nothing.
  */
-export async function registerAgent(request: APIRequestContext, persona: string, name: string): Promise<string | undefined> {
+export async function registerAgent(request: APIRequestContext, persona: string, name: string, clientFeatures?: string[]): Promise<string | undefined> {
   const response = await request.post("/api/agent/register", {
     headers: { "x-dev-user": devUser(persona) },
-    data: { session_id: unique(`e2e-${name}`), name, repo: "dtsse-agent-hub", branch: "e2e" }
+    data: {
+      session_id: unique(`e2e-${name}`),
+      name,
+      repo: "dtsse-agent-hub",
+      branch: "e2e",
+      ...(clientFeatures === undefined ? {} : { client_features: clientFeatures })
+    }
   });
   if (response.status() === 401) {
     return undefined;
   }
   expect(response.status()).toBe(200);
   return ((await response.json()) as { agent_id: string }).agent_id;
+}
+
+/**
+ * Puts an agent `registerAgent` made into a status, as its own client would: `busy` and `idle` are a heartbeat, and
+ * `offline` is the call the client makes as the session ends. One helper for the three, because a spec asks the same
+ * question of all of them — what the UI shows while the session is in that state.
+ */
+export async function setAgentStatus(request: APIRequestContext, persona: string, agentId: string, status: "busy" | "idle" | "offline"): Promise<void> {
+  const headers = { "x-dev-user": devUser(persona) };
+  const response =
+    status === "offline"
+      ? await request.post(`/api/agent/${agentId}/offline`, { headers })
+      : await request.post(`/api/agent/${agentId}/heartbeat`, { headers, data: { status } });
+  expect(response.status()).toBe(204);
+}
+
+/**
+ * One connection of an agent's own stream, whole: the `: connected` comment, every delivery still queued for that
+ * agent, and the `reconnect` event the server ends on.
+ *
+ * It answers only once the server has ended the stream, which it does at `STREAM_MAX_SECONDS` — 25 seconds by
+ * default. A Playwright API request reads a response to its end rather than as it arrives, so there is no way to
+ * close it from here on the first frame; a spec calling this raises its own timeout to suit.
+ */
+export async function readAgentStream(request: APIRequestContext, persona: string, agentId: string): Promise<string> {
+  const response = await request.get(`/api/agent/${agentId}/stream`, {
+    headers: { "x-dev-user": devUser(persona), accept: "text/event-stream" },
+    timeout: 90_000
+  });
+  expect(response.status()).toBe(200);
+  return await response.text();
 }
 
 /**
@@ -53,6 +98,43 @@ export async function connectForChat(request: APIRequestContext, persona: string
     const response = await request.put(`/api/agent/credentials/${kind}`, { headers: { "x-dev-user": devUser(persona) }, data: { value } });
     expect([204, 401, 403, 503]).toContain(response.status());
   }
+}
+
+/**
+ * A unique persona on the own-licence model route, which is the route whose chat gate `connectForChat` can satisfy.
+ *
+ * A development persona is on the AI Gateway route unless it is named `own-licence` or `own-licence-…`
+ * (`devModelRoute` in `src/viewer/identity.ts`), and that route's gate is on the person's Azure sign-in — a device
+ * code their pod relays, which no spec can stand in for. So a spec that needs the Assistant to render a chat rather
+ * than the screen asking for accounts names its person through this.
+ */
+export function chatPersona(what: string): string {
+  return unique(`own-licence-${what}`);
+}
+
+/**
+ * Sends the Assistant's getting-ready surface away, so what is behind it can be used.
+ *
+ * Someone whose assistant is not running waits on a full-screen `aria-modal` surface over their chats, and nothing a
+ * spec can do starts one — no pod runs here. Escape is what sends it away, and the screen remembers the choice in a
+ * cookie, so one press clears it for the rest of that context's visit, navigations included.
+ *
+ * Only a surface that can be sent away: the screen holding someone at GitHub and their model credential refuses
+ * Escape, which is why this asserts that nothing modal is left rather than pressing and carrying on. The way past
+ * that one is `chatPersona` with `connectForChat`.
+ *
+ * The press is retried because the surface is in the first HTML and its key handler is not: a press before the
+ * browser has taken the page over reaches nothing.
+ */
+export async function dismissGettingReady(page: Page): Promise<void> {
+  const surface = page.getByRole("dialog");
+  await expect(async () => {
+    if ((await surface.count()) === 0) {
+      return;
+    }
+    await page.keyboard.press("Escape");
+    await expect(surface).toHaveCount(0, { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
 }
 
 export interface TranscriptEntry {
@@ -106,6 +188,24 @@ export function sampleTranscript(prefix: string): TranscriptEntry[] {
     { key: `${prefix}:4`, role: "tool_use", redacted: true, content: { id: "t2", name: "Read", redacted: "AKIA[0-9A-Z]{16}" }, occurred_at: at(3) },
     { key: `${prefix}:5`, role: "assistant", content: { text: "One test **failed**; fixing it now." }, truncated: true, occurred_at: at(4) }
   ];
+}
+
+/**
+ * Opens the chat of a local session registered as `title` from the Assistant's sidebar, and returns its path.
+ *
+ * The sidebar is where a spec learns the conversation's id: the registration answers with the agent alone, and
+ * nothing names the conversation the hub made for it. `page` is already showing a page of the Assistant, so the
+ * caller keeps the response its own skip reads.
+ *
+ * The row is found by its accessible name, which is the local marker's words joined to the title (`LocalMark`), so
+ * this also fails on a chat the sidebar has stopped marking.
+ */
+export async function openLocalChat(page: Page, title: string): Promise<string> {
+  const row = page.getByRole("navigation", { name: "Chats" }).getByRole("link", { name: `On your computer: ${title}` });
+  await expect(row).toBeVisible();
+  await row.click();
+  await page.waitForURL(/\/assistant\/[0-9a-f-]{36}$/);
+  return new URL(page.url()).pathname;
 }
 
 /** Builds a channel through the builder and returns its URL. */

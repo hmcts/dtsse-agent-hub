@@ -1,4 +1,4 @@
-import { grantsHeldBy, loadMessageRef, virtualAgentSessions } from "@/access/load";
+import { loadMessageRef, virtualAgentSessions } from "@/access/load";
 import { canLaunchTokenReadMessage, canReadMessage } from "@/access/rules";
 import { HttpError, json, parseMessageId } from "@/agent-api/http";
 import { agentRoute } from "@/agent-api/route";
@@ -21,7 +21,7 @@ export const GET = agentRoute<{ id: string }>(async ({ caller, params }) => {
   if (caller.virtualAgentId !== undefined && !canLaunchTokenReadMessage(await virtualAgentSessions(prisma, caller.virtualAgentId), ref)) {
     throw new HttpError(404, "no such message");
   }
-  if (!canReadMessage(caller.oid, ref, await grantsHeldBy(prisma, caller.oid))) {
+  if (!canReadMessage(caller.oid, ref)) {
     throw new HttpError(403, "you may not read that message");
   }
   return json({ message: await loadMessage(prisma, id) });

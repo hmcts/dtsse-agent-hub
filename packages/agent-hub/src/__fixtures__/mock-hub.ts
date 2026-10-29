@@ -4,7 +4,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import http from "node:http";
-import { MAX_POST_TOPICS } from "../limits.ts";
+import { MAX_POST_TAGS, MAX_POST_TOPICS } from "../limits.ts";
 
 const TOPIC_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const TRANSCRIPT_KEY_RE = /^[A-Za-z0-9:_-]{1,200}$/;
@@ -57,6 +57,8 @@ export type StoredMessage = {
   in_reply_to?: string | null;
   from_owner?: boolean;
   assistant?: Record<string, unknown>;
+  /** The agents a post tagged, as ids. Each one gets a delivery, like a direct message's target. */
+  tagged?: string[];
 };
 
 export type VirtualRecord = {
@@ -277,6 +279,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       title: msg.title ?? null,
       body: msg.body,
       topics: msg.topics,
+      tagged_agents: (msg.tagged ?? []).map((id) => ({ id, name: agents.get(id)?.name ?? "" })),
       in_reply_to: msg.in_reply_to ?? null,
       target_agent_id: msg.target_agent_id ?? null,
       created_at: msg.created_at,
@@ -298,6 +301,11 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     if (msg.kind === "direct" && msg.target_agent_id) {
       deliveries.set(`${msg.id}:${msg.target_agent_id}`, { message_id: msg.id, agent_id: msg.target_agent_id, state: "queued" });
       sendEvent(msg.target_agent_id, msg);
+    }
+    // A tagged post queues the same delivery and leaves as the same `direct` frame, as the hub's does.
+    for (const agentId of msg.tagged ?? []) {
+      deliveries.set(`${msg.id}:${agentId}`, { message_id: msg.id, agent_id: agentId, state: "queued" });
+      sendEvent(agentId, msg);
     }
     return msg;
   }
@@ -327,6 +335,44 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       return null;
     }
     return [...new Set(out)];
+  }
+
+  /**
+   * The agents a post's `tag_agents` names, as ids, or the refusal the hub gives: `404` for a reference that matches
+   * nothing, `409` for a name two agents share, `400` for an agent tagging itself or for more than the cap.
+   */
+  function checkTags(list: unknown, authorAgentId: string | null): { ids: string[] } | { status: number; body: Record<string, unknown> } {
+    if (list === undefined || list === null) {
+      return { ids: [] };
+    }
+    if (!Array.isArray(list)) {
+      return { status: 400, body: { error: "tag_agents must be an array of agent ids or names" } };
+    }
+    const refs = [...new Set(list.map((entry) => String(entry).trim().replace(/^@/, "")))].filter((entry) => entry !== "");
+    if (refs.length > MAX_POST_TAGS) {
+      return { status: 400, body: { error: `a post tags at most ${MAX_POST_TAGS} agents, and this one tags ${refs.length}` } };
+    }
+    const ids: string[] = [];
+    for (const ref of refs) {
+      const matches = [...agents.values()].filter((a) => a.id === ref || a.name === ref);
+      if (!matches.length) {
+        return { status: 404, body: { error: `no agent is called "${ref}"` } };
+      }
+      if (matches.length > 1) {
+        return {
+          status: 409,
+          body: { error: "ambiguous", candidates: matches.map((a) => ({ id: a.id, name: a.name, owner_name: users.get(a.owner_oid)?.name })) }
+        };
+      }
+      const target = matches[0] as StoredAgent;
+      if (target.id === authorAgentId) {
+        return { status: 400, body: { error: "an agent cannot tag itself in its own post" } };
+      }
+      if (!ids.includes(target.id)) {
+        ids.push(target.id);
+      }
+    }
+    return { ids };
   }
 
   const PHASES = new Set(["provisioning", "awaiting_credentials", "awaiting_login", "cloning", "running", "failed"]);
@@ -739,6 +785,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       if (!topics) {
         return send(res, 400, { error: `topics must be 1-${MAX_POST_TOPICS} valid slugs` });
       }
+      const tags = checkTags(body.tag_agents, agent.id);
+      if (!("ids" in tags)) {
+        return send(res, tags.status, tags.body);
+      }
       const msg = addMessage({
         kind: "post",
         author_agent_id: agent.id,
@@ -746,7 +796,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         topics,
         title: body.title,
         body: body.body,
-        in_reply_to: body.in_reply_to
+        in_reply_to: body.in_reply_to,
+        tagged: tags.ids
       });
       return send(res, 201, { message: view(msg) });
     }
@@ -1061,12 +1112,15 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       title,
       bodyText,
       fromAgent = null,
+      tagged = [],
       user = { oid: "u-bob", name: "Bob Jones", email: "bob@example.com" }
     }: {
       topics: string[];
       title?: string;
       bodyText?: string;
       fromAgent?: string | null;
+      /** Agent ids the post tags, each of which is queued a delivery and sent the post on its stream. */
+      tagged?: string[];
       user?: Person;
     }) {
       users.set(user.oid, user);
@@ -1076,7 +1130,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         agents.set(author.id, author);
         subscriptions.set(author.id, new Set());
       }
-      return view(addMessage({ kind: "post", author_oid: user.oid, author_agent_id: author?.id ?? null, topics, title, body: bodyText }));
+      return view(addMessage({ kind: "post", author_oid: user.oid, author_agent_id: author?.id ?? null, topics, title, body: bodyText, tagged }));
     }
   };
 }

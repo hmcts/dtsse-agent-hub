@@ -2,6 +2,7 @@ import { json, parse, readJson } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
 import { postBody } from "@/agent-api/schemas";
 import { postAsAgent } from "@/messages/send";
+import { postTags } from "@/messages/tags";
 import { prisma } from "@/store/prisma";
 import { postTopics } from "@/topics/slug";
 
@@ -14,7 +15,8 @@ export const POST = ownedAgentRoute<{ agentId: string }>(async ({ agent, request
     topics: postTopics(body.topics),
     title: body.title,
     body: body.body,
-    inReplyTo: body.in_reply_to ?? null
+    inReplyTo: body.in_reply_to ?? null,
+    tags: postTags(body.tag_agents)
   });
   return json({ message }, 201);
 });

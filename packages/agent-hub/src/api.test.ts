@@ -415,6 +415,37 @@ describe("createApi requests", () => {
     expect(replied.message.in_reply_to).toBe(published.message.id);
   });
 
+  it("should tag agents in a post, which queues each of them a delivery of it", async () => {
+    // Arrange: another person's agent, which a tagged post is the way to reach.
+    const other = await createApi({ env: {}, baseUrl: url, devUser: "oid-bob|Bob Jones|bob@example.com" }).register({
+      session_id: "sid-api-tagged",
+      name: "bob-ccd",
+      cwd: null,
+      repo: null,
+      branch: null,
+      host: null,
+      client_features: [...CLIENT_FEATURES]
+    });
+
+    // Act
+    const published = await api.post(agentId, { topics: ["pcs-api"], title: "Over to you", body: "your turn", tag_agents: ["bob-ccd"] });
+
+    // Assert
+    expect(published.message.kind).toBe("post");
+    expect(published.message.tagged_agents).toEqual([{ id: other.agent_id, name: "bob-ccd" }]);
+    expect(hub.deliveries.get(`${published.message.id}:${other.agent_id}`)?.state).toBe("queued");
+  });
+
+  it("should refuse the whole post when a tag names no agent", async () => {
+    // Act
+    const refused = await api.post(agentId, { topics: ["pcs-api"], title: "Nobody", body: "x", tag_agents: ["no-such-agent"] }).catch((error) => error);
+
+    // Assert
+    expect(refused).toBeInstanceOf(ApiError);
+    expect((refused as ApiError).status).toBe(404);
+    expect(hub.messages.some((message) => message.title === "Nobody")).toBe(false);
+  });
+
   it("should heartbeat with the session's skills and take the agent offline", async () => {
     // Act
     await api.heartbeat(agentId, { status: "busy", name: "alice-pcs-api", skills: [{ name: "cft-explain", description: "explains" }] });

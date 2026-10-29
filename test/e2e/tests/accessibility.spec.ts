@@ -1,6 +1,18 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { askQuestion, buildChannel, connectForChat, PERSONA_COOKIE, registerAgent, sampleTranscript, unique, uploadTranscript } from "./hub";
+import {
+  askQuestion,
+  buildChannel,
+  chatPersona,
+  connectForChat,
+  dismissGettingReady,
+  openLocalChat,
+  PERSONA_COOKIE,
+  registerAgent,
+  sampleTranscript,
+  unique,
+  uploadTranscript
+} from "./hub";
 
 const PERSONA = unique("a11y");
 
@@ -29,15 +41,7 @@ test.describe("accessibility @nightly", () => {
   });
 
   // With virtual agents on, /hub/settings/credentials redirects to /hub/virtual#credentials, so this audits that section.
-  for (const path of [
-    "/hub",
-    "/hub/topics",
-    "/hub/channels/new",
-    "/hub/access",
-    "/hub/settings/credentials",
-    "/hub/c?topics=e2e-a11y",
-    "/hub/topics/e2e-a11y"
-  ]) {
+  for (const path of ["/hub", "/hub/topics", "/hub/channels/new", "/hub/settings/credentials", "/hub/c?topics=e2e-a11y", "/hub/topics/e2e-a11y"]) {
     test(`should raise no WCAG A or AA violations on ${path} @nightly @a11y`, async ({ page }) => {
       await audit(page, path);
     });
@@ -176,5 +180,35 @@ test.describe("accessibility @nightly", () => {
     await expect(page.getByRole("heading", { name: "Welsh translations" })).toBeVisible();
     await expect(page.getByLabel("English or Welsh")).toBeVisible();
     await expectNoViolations(page);
+  });
+
+  /**
+   * A chat that is a Claude Code session on the person's own computer, which is the one conversation a deployment can
+   * show without a pod: the session is already running elsewhere, so registering one is all this needs.
+   *
+   * Not a path in the list above, where every route is a fixed address: a conversation's is its id, and the id of
+   * this one is published nowhere but the sidebar that links to it. It is also the only chat in the Assistant with
+   * markup of its own — the sidebar's local marker, and in the thread a row per tool call, named for a screen reader
+   * and with a redacted call and a failed one among `sampleTranscript`'s.
+   *
+   * It skips on the same 404 as the test above, and for the same reason. Unlike every other test here it needs a
+   * person of its own: the thread is behind the screen asking for accounts, and only a persona on the own-licence
+   * route is past that, so `chatPersona` names one and its cookie replaces the file's for this page alone. Then the
+   * getting-ready surface is sent away, because the audit is of the chat rather than of the wait in front of it.
+   */
+  test("should raise no WCAG A or AA violations on a chat on the person's own computer @nightly @a11y", async ({ page, baseURL, request }) => {
+    const persona = chatPersona("a11y");
+    const name = unique("laptop");
+    const agent = await registerAgent(request, persona, name);
+    test.skip(agent === undefined, "this deployment checks real agent tokens, so the suite cannot register an agent");
+    await uploadTranscript(request, persona, agent!, sampleTranscript(unique("a11y")));
+    await connectForChat(request, persona);
+    await page.context().addCookies([{ name: PERSONA_COOKIE, value: persona, url: baseURL! }]);
+
+    const response = await page.goto("/assistant");
+    test.skip(response?.status() === 404, "the Assistant is off on this deployment");
+    await dismissGettingReady(page);
+
+    await audit(page, await openLocalChat(page, name));
   });
 });

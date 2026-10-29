@@ -1,6 +1,7 @@
 import { HttpError } from "../agent-api/http.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { isJiraProject, JIRA_EXPORT_TIMEOUT_MS, JIRA_SELECT, type JiraExportView, jiraExportView } from "./jira.ts";
+import { hasPod } from "./pods.ts";
 import { MAX_JIRA_ERROR } from "./schemas.ts";
 import { announce, type ConversationRow } from "./store.ts";
 
@@ -18,6 +19,13 @@ export async function readJiraExport(db: Database, conversationId: string, now: 
  * Starts an export of the conversation's document to `project`'s backlog, for its session to carry out. Refused when
  * the conversation already has a ticket, or an export still pending, so a second click or tab cannot ask for a second
  * issue: the check and the write are one statement. The caller then asks the session, which wakes it.
+ *
+ * Refused outright for a conversation with no pod, before anything is written, as `requestWake` refuses a wake. The
+ * steps go to the session in `assistantFrame`, which `/api/agent/{id}/stream` sends to a pod's session alone, and no
+ * pod's sessions stream matches a null `virtual_agent_id` in any case — so claiming the export would set
+ * `jira_status = 'pending'` with nothing able to carry it out or report on it, and the footer would say "Creating
+ * ticket…" for the whole of `JIRA_EXPORT_TIMEOUT_MS` before failing, on every retry. The UI offers no export here
+ * either; this is the half that does not live only on the screen.
  */
 export async function requestJiraExport(
   prisma: PrismaClient,
@@ -25,6 +33,9 @@ export async function requestJiraExport(
   project: unknown,
   now: Date = new Date()
 ): Promise<void> {
+  if (!hasPod(conversation)) {
+    throw new HttpError(409, "this chat is a session on your own computer, which cannot export to Jira; download the document and attach it yourself");
+  }
   if (!isJiraProject(project)) {
     throw new HttpError(400, "pick a Jira project to export to");
   }

@@ -1,13 +1,12 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { revokeGrant, setGrant } from "../../src/access/load.ts";
 import { heartbeat, markOffline } from "../../src/agents/store.ts";
+import { linkLocalSession } from "../../src/assistant/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import type { HubEvent } from "../../src/realtime/events.ts";
 import { createEventHub, type EventHub } from "../../src/realtime/hub.ts";
 import { type Listener, startListener } from "../../src/realtime/listener.ts";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
-import type { PrismaClient } from "../../src/store/prisma.ts";
-import { connect, insertAgent, insertUser, person, prisma, resetDatabase } from "./database.ts";
+import { connect, insertAgent, person, prisma, resetDatabase } from "./database.ts";
 import { WAIT_MS } from "./waits.ts";
 
 const ALICE = person("alice");
@@ -53,10 +52,26 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+/**
+ * `insertAgent` writes the row directly, so its agent has no conversation — and a heartbeat gives a laptop session
+ * one, announcing it. These are tests about fan-out rather than about conversations, so each agent whose heartbeat
+ * they exercise is given one first, which is the state every registered session is in anyway.
+ */
+async function settled(agentId: string, ownerOid: string, name: string): Promise<string> {
+  await linkLocalSession(prisma, { ownerOid, agentId, name });
+  // The link announces, and the pods are already listening, so wait for that to arrive on both and drop it. These
+  // tests assert on the whole captured list, so an event from the fixture would read as one the test caused.
+  for (const running of pods) {
+    await until(() => running.events.some((event) => event.type === "assistant_conversation"));
+    running.events.length = 0;
+  }
+  return agentId;
+}
+
 describe("NOTIFY fan-out between pods", () => {
   it("should deliver a direct message, a post and status changes to every pod's hub", async () => {
     const alicesAgent = await insertAgent(ALICE, "alice");
-    const bobsAgent = await insertAgent(BOB, "bob");
+    const bobsAgent = await settled(await insertAgent(BOB, "bob"), BOB.oid, "bob");
 
     const direct = await createDirect(prisma, { author: { oid: ALICE.oid, agentId: alicesAgent }, targetAgentId: bobsAgent, inReplyTo: null, body: "hi" });
     const post = await createPost(prisma, { author: { oid: BOB.oid, agentId: bobsAgent }, topics: ["ccd"], title: null, body: "news", inReplyTo: null });
@@ -76,7 +91,7 @@ describe("NOTIFY fan-out between pods", () => {
   });
 
   it("should announce a heartbeat only when the status changed", async () => {
-    const agent = await insertAgent(ALICE, "alice");
+    const agent = await settled(await insertAgent(ALICE, "alice"), ALICE.oid, "alice");
 
     await heartbeat(prisma, agent, "idle", null);
     await heartbeat(prisma, agent, "busy", null);
@@ -88,7 +103,7 @@ describe("NOTIFY fan-out between pods", () => {
   });
 
   it("should not notify for a write that rolled back", async () => {
-    const agent = await insertAgent(ALICE, "alice");
+    const agent = await settled(await insertAgent(ALICE, "alice"), ALICE.oid, "alice");
 
     await expect(
       createPost(prisma, {
@@ -103,53 +118,6 @@ describe("NOTIFY fan-out between pods", () => {
 
     await until(() => pods[0]!.events.length >= 1);
     expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy" }]);
-  });
-
-  it("should announce a grant to every pod when it is set, changed or revoked", async () => {
-    await insertUser(ALICE);
-    await insertUser(BOB);
-
-    await setGrant(prisma, ALICE.oid, BOB.oid, "read");
-    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
-    await revokeGrant(prisma, ALICE.oid, BOB.oid);
-
-    const grant: HubEvent = { type: "grant", owner_oid: ALICE.oid, grantee_oid: BOB.oid };
-    for (const running of pods) {
-      await until(() => running.events.length >= 3);
-      expect(running.events).toEqual([grant, grant, grant]);
-    }
-  });
-
-  it("should not announce a revocation when there was no grant to revoke", async () => {
-    const agent = await insertAgent(ALICE, "alice");
-
-    await revokeGrant(prisma, ALICE.oid, BOB.oid);
-    await heartbeat(prisma, agent, "busy", null);
-
-    await until(() => pods[0]!.events.length >= 1);
-    expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy" }]);
-  });
-
-  it("should not announce a grant write that rolled back", async () => {
-    const agent = await insertAgent(ALICE, "alice");
-    await insertUser(BOB);
-    const failsAtCommit = new Proxy(prisma, {
-      get: (target, property, receiver) =>
-        property === "$transaction"
-          ? (write: (tx: unknown) => Promise<unknown>) =>
-              target.$transaction(async (tx) => {
-                await write(tx);
-                throw new Error("rolled back");
-              })
-          : Reflect.get(target, property, receiver)
-    }) as PrismaClient;
-
-    await expect(setGrant(failsAtCommit, ALICE.oid, BOB.oid, "read")).rejects.toThrow("rolled back");
-    await heartbeat(prisma, agent, "busy", null);
-
-    await until(() => pods[0]!.events.length >= 1);
-    expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy" }]);
-    expect(await prisma.agentGrant.count()).toBe(0);
   });
 
   it("should reconnect after its connection is killed and ask every stream to resync", async () => {

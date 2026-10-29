@@ -7,7 +7,8 @@ import { type ConversationRow, conversationAgent, requestWake, touchConversation
 /**
  * A message from the person into one of their own conversations, through the same `directAsPerson` as the hub's
  * composer: an ordinary direct message to the conversation's agent, so it queues as a delivery while no session runs
- * and the pod's wake is what starts one.
+ * and the pod's wake is what starts one. A conversation with no pod has nothing to wake and `requestWake` does
+ * nothing for one; the delivery waits on the stream the laptop's session opens when it comes back.
  *
  * Its own module rather than a function in `src/app/_actions/assistant.ts`, because everything exported from a
  * `"use server"` file is reachable as a server action, and more than one action sends into a conversation — the

@@ -100,7 +100,9 @@ export interface ComposerFiller {
  * one, because a file the hub has is already uploaded.
  *
  * A file needs a conversation to belong to, so the attach controls appear only with one in prospect: either
- * `conversationId`, or `openConversation` for the new-chat screen, where attaching is what creates one.
+ * `conversationId`, or `openConversation` for the new-chat screen, where attaching is what creates one. A page whose
+ * conversation cannot take a file at all says so with `attach`, and then none of the three ways in — the menu item,
+ * the paste and the drop — is offered.
  *
  * Typing "/" offers the conversation's session its skills, the same list and the same keys as the hub's own box, and
  * nothing at all when the session has reported none — which is every new chat, since a skill list comes from a
@@ -115,6 +117,7 @@ export function Composer({
   draftId,
   conversationId,
   openConversation,
+  attach: offerFiles = true,
   attached,
   skills = [],
   dropZone,
@@ -132,6 +135,8 @@ export function Composer({
   conversationId?: string;
   /** Answers the conversation to attach to, creating it if it does not exist yet. Called once per attached file. */
   openConversation?: () => Promise<string>;
+  /** Whether this conversation takes files at all; false hides every way of attaching one. */
+  attach?: boolean;
   /** Files the hub is already holding for the next message, shown as chips again on a remount of the screen. */
   attached?: readonly MessageAttachment[];
   /** The conversation's session's skills, offered when the message starts with "/". */
@@ -221,7 +226,7 @@ export function Composer({
     }
   }, [skillMenu.open]);
 
-  const attachable = (conversationId !== undefined || openConversation !== undefined) && !disabled;
+  const attachable = offerFiles && (conversationId !== undefined || openConversation !== undefined) && !disabled;
 
   function update(change: (current: Attachment[]) => Attachment[]): void {
     held.current = change(held.current);

@@ -30,12 +30,11 @@ function detail(term: string): string {
 }
 
 describe("AgentAbout", () => {
-  it("should name the owner, the viewer's access and where the agent runs when shown to a grantee", () => {
-    render(<AgentAbout agent={AGENT} access="read" ownedByViewer={false} latestPosts={<p>the posts</p>} />);
+  it("should name the viewer as the owner and say where the agent runs", () => {
+    render(<AgentAbout agent={AGENT} latestPosts={<p>the posts</p>} />);
 
-    expect(screen.getByText(/Owned by Bob/)).toBeTruthy();
+    expect(screen.getByText(/Owned by you/)).toBeTruthy();
     expect(screen.getByText("dev")).toBeTruthy();
-    expect(screen.getByText("You have read access")).toBeTruthy();
     expect(detail("Repository")).toBe("hmcts/pcs-api");
     expect(detail("Branch")).toBe("unknown");
     expect(detail("Working directory")).toBe("/work/pcs-api");
@@ -44,11 +43,9 @@ describe("AgentAbout", () => {
     expect(screen.getByText("the posts")).toBeTruthy();
   });
 
-  it("should say the viewer owns it when they do", () => {
-    render(<AgentAbout agent={{ ...AGENT, repo: null, branch: "main", cwd: null, host: "laptop" }} access="owner" ownedByViewer latestPosts={null} />);
+  it("should say unknown for each detail the session did not report", () => {
+    render(<AgentAbout agent={{ ...AGENT, repo: null, branch: "main", cwd: null, host: "laptop" }} latestPosts={null} />);
 
-    expect(screen.getByText(/Owned by you/)).toBeTruthy();
-    expect(screen.getByText("You own this agent")).toBeTruthy();
     expect(detail("Repository")).toBe("unknown");
     expect(detail("Branch")).toBe("main");
     expect(detail("Working directory")).toBe("unknown");

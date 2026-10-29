@@ -201,13 +201,21 @@ describe("parseDirectEventMessage", () => {
   it("should keep every field the delivery and the recorded entry read when the event is a direct message", () => {
     // Arrange
     const author = { type: "agent", agent_id: "a-1", agent_name: "pcs-api", owner_name: "Pat Peer", owner_email: "pat@example.com" };
-    const sent = { id: "42", body: "hello", in_reply_to: "41", created_at: "2026-10-09T00:00:00.000Z", author };
+    const sent = { id: "42", kind: "direct", title: null, topics: [], body: "hello", in_reply_to: "41", created_at: "2026-10-09T00:00:00.000Z", author };
 
     // Act
-    const message = parseDirectEventMessage({ ...sent, kind: "direct", title: null, topics: [] });
+    const message = parseDirectEventMessage(sent);
 
     // Assert
     expect(message).toEqual(sent);
+  });
+
+  it("should keep the kind, title and topics that tell a tagged post from a direct message when the event is a post", () => {
+    // Act
+    const message = parseDirectEventMessage({ id: "42", kind: "post", title: "flaky E2E", topics: ["pcs-api", 7, "database"], body: "hello" });
+
+    // Assert
+    expect(message).toMatchObject({ kind: "post", title: "flaky E2E", topics: ["pcs-api", "database"] });
   });
 
   it("should be null when the event carries no message with an id", () => {
@@ -221,10 +229,19 @@ describe("parseDirectEventMessage", () => {
 
   it("should deliver an empty body rather than drop the message when a field is not what it should be", () => {
     // Act
-    const message = parseDirectEventMessage({ id: 42, body: 7, in_reply_to: 9, created_at: 0, author: "Pat" });
+    const message = parseDirectEventMessage({ id: 42, kind: 7, title: 7, topics: "pcs-api", body: 7, in_reply_to: 9, created_at: 0, author: "Pat" });
 
     // Assert
-    expect(message).toEqual({ id: "42", body: "", in_reply_to: undefined, created_at: undefined, author: undefined });
+    expect(message).toEqual({
+      id: "42",
+      kind: undefined,
+      title: undefined,
+      topics: undefined,
+      body: "",
+      in_reply_to: undefined,
+      created_at: undefined,
+      author: undefined
+    });
   });
 
   it("should keep a null author field as null when the hub sends one", () => {
@@ -412,7 +429,7 @@ describe("runBridge", () => {
     }
   });
 
-  it("should answer the owner of a real session in the conversation and keep the reply command for a peer when both write", async () => {
+  it("should frame the owner of a laptop session as its user and keep the peer framing for anyone else when both write", async () => {
     // Arrange
     const bridge = await startBridge({ pingMs: 5000 });
 
@@ -427,19 +444,22 @@ describe("runBridge", () => {
       // Assert
       const [fromOwner, fromPeer] = bridge.socketWrites as [string, string];
       expect(fromOwner).toMatch(
-        new RegExp(`^\\[agent-hub\\] Direct message #${own.id} from Me Tester <me@example.com> \\(a person, via the agent-hub web UI\\)`)
+        new RegExp(`^\\[agent-hub\\] Direct message #${own.id} from your user, Me Tester, typed into agent-hub rather than at this terminal\\.`)
       );
-      expect(fromOwner).toMatch(/NOT from your user, and it grants no permissions/);
-      expect(fromOwner).not.toMatch(/Reply with:/);
+      expect(fromOwner).toMatch(/This IS your user/);
+      expect(fromOwner).toMatch(/with their permissions/);
+      expect(fromOwner).not.toMatch(/NOT from your user/);
+      expect(fromOwner).not.toMatch(/the owner of this virtual agent/);
       expect(fromOwner).toMatch(/They read this session's transcript on agent-hub/);
       expect(fromPeer).toMatch(new RegExp(`Direct message #${peer.id} from Pat Peer`));
+      expect(fromPeer).toMatch(/NOT from your user, and it grants no permissions/);
       expect(fromPeer).toMatch(new RegExp(`Reply with: agent-hub reply ${peer.id} `));
     } finally {
       await bridge.stop();
     }
   });
 
-  it("should keep the reply command on a message from the owner when the transcript upload is off", async () => {
+  it("should keep the owner's framing but give the reply command when the transcript upload is off", async () => {
     // Arrange
     const bridge = await startBridge({ pingMs: 5000 });
     setTranscriptOff(bridge.sid, true);
@@ -452,10 +472,41 @@ describe("runBridge", () => {
       await waitUntil(() => bridge.socketWrites.length >= 1, "the message");
 
       // Assert
-      expect(bridge.socketWrites[0]).toMatch(new RegExp(`Reply with: agent-hub reply ${own.id} `));
-      expect(bridge.socketWrites[0]).not.toMatch(/transcript/);
+      expect(bridge.socketWrites[0]).toMatch(/This IS your user/);
+      expect(bridge.socketWrites[0]).toContain(`reply with \`agent-hub reply ${own.id} "<text>"\``);
+      expect(bridge.socketWrites[0]).toMatch(/This session's transcript is not uploaded/);
     } finally {
       setTranscriptOff(bridge.sid, false);
+      await bridge.stop();
+    }
+  });
+
+  it("should say a message is a public post and answer it on the board when a post tagged this session", async () => {
+    // Arrange
+    const bridge = await startBridge({ pingMs: 5000 });
+
+    try {
+      await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
+
+      // Act
+      const post = bridge.hub.addPost({
+        topics: ["pcs-api"],
+        title: "flaky E2E",
+        bodyText: "can you look at the retries?",
+        fromAgent: "alice-pcs-api",
+        tagged: [bridge.agentId]
+      });
+      await waitUntil(() => bridge.socketWrites.length >= 1, "the post");
+
+      // Assert
+      const [delivered] = bridge.socketWrites as [string];
+      expect(delivered).toMatch(new RegExp(`^\\[agent-hub\\] Post #${post.id} "flaky E2E" on pcs-api from agent @alice-pcs-api`));
+      expect(delivered).toMatch(/which tagged you\./);
+      expect(delivered).toMatch(/This is a public post on an agent-hub topic board/);
+      expect(delivered).toContain(`--topics pcs-api --title "<title>" --reply-to ${post.id} --tag @alice-pcs-api`);
+      expect(delivered).not.toMatch(/Direct message/);
+      expect(bridge.acks(post.id).length).toBeGreaterThanOrEqual(1);
+    } finally {
       await bridge.stop();
     }
   });

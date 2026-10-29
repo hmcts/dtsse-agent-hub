@@ -76,3 +76,52 @@ export function ticketPath(virtualAgentId: string, port: number, path: string): 
 export function landingPath(value: string | null | undefined): string {
   return safeReturnTo(value);
 }
+
+/**
+ * The port whose page asked for `pathAndQuery` from outside every prefix, read from the request's `Referer`, and
+ * where under that port's prefix the request belongs. A server that thinks it is at `/` writes links, assets and
+ * form actions from `/`, which the browser sends to the viewer's root. Only a page on the viewer's own host, under a
+ * port's prefix, counts, and only a path from `/` that is not the viewer's own `AUTH_PATH`.
+ */
+export function refererTarget(referer: string | null, viewerHost: string, pathAndQuery: string): string | undefined {
+  if (referer === null || !URL.canParse(referer)) {
+    return undefined;
+  }
+  const from = new URL(referer);
+  if (from.protocol !== "https:" || from.host !== viewerHost) {
+    return undefined;
+  }
+  return underPage(parseViewerPath(from.pathname), pathAndQuery);
+}
+
+/**
+ * The cookie naming the port whose page the browser was last sent, on the viewer's whole host: a single-page app
+ * that changes its own URL with `history.pushState` leaves its prefix, so its later requests carry a `Referer` from
+ * `/` that names no port. Only where to send a request, never whether it may be served: that is still the port's own
+ * cookie's to say. Named under `VIEWER_COOKIE_PREFIX`, so it is never forwarded to a pod and no pod can set it.
+ */
+export const LAST_PORT_COOKIE = `${VIEWER_COOKIE_PREFIX}last`;
+
+export function lastPortCookie(virtualAgentId: string, port: number, maxAge: number): string {
+  return `${LAST_PORT_COOKIE}=${virtualAgentId}/${port}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+/** Where `pathAndQuery` belongs under the port `LAST_PORT_COOKIE` names, by the same rules as `refererTarget`. */
+export function lastPortTarget(value: string | undefined, pathAndQuery: string): string | undefined {
+  return value === undefined ? undefined : underPage(parseViewerPath(`/${value}/`), pathAndQuery);
+}
+
+/** `pathAndQuery` under the prefix of `page`, when it is a port's and the path is from `/` and not the viewer's own. */
+function underPage(page: ViewerPath, pathAndQuery: string): string | undefined {
+  if (page.kind !== "port" && page.kind !== "bare-port") {
+    return undefined;
+  }
+  if (!pathAndQuery.startsWith("/") || pathAndQuery.startsWith("//")) {
+    return undefined;
+  }
+  const queryAt = pathAndQuery.indexOf("?");
+  if ((queryAt === -1 ? pathAndQuery : pathAndQuery.slice(0, queryAt)) === AUTH_PATH) {
+    return undefined;
+  }
+  return `${viewerPrefix(page.virtualAgentId, page.port)}${pathAndQuery}`;
+}

@@ -220,9 +220,9 @@ describe("QuestionCard", () => {
   });
 
   /**
-   * A viewer with a read grant is offered nothing: the action would refuse them, and its refusal says the question
-   * is no longer waiting for an answer, which is not true. The question and its options are still shown, because
-   * they are transcript-grade content a reader may see.
+   * The card renders without an action, which is how it says "waiting" rather than offering a choice. Both of its
+   * call sites pass one today, since both pages belong to the person who may answer; this is the component's own
+   * contract, and what a surface that may show a question without offering the answer would get.
    */
   it("should offer no controls, and say what is being waited on, when there is no action to answer with", () => {
     // Act

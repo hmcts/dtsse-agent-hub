@@ -4,14 +4,13 @@ import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
 import { NavLink } from "@/components/NavLink";
 import { AgentRoster } from "@/components/sidebar/AgentRoster";
 import { SidebarClose, SidebarDrawer } from "@/components/sidebar/Drawer";
-import { CaretIcon, ChatIcon, HashIcon, HomeIcon, KeyIcon, LockIcon, PlusIcon, ServerIcon, StackIcon } from "@/components/sidebar/icons";
+import { CaretIcon, ChatIcon, HashIcon, HomeIcon, LockIcon, PlusIcon, ServerIcon, StackIcon } from "@/components/sidebar/icons";
 import { TopicSearchShortcut } from "@/components/sidebar/TopicSearchShortcut";
 import type { TopicSummary } from "@/topics/store";
 import type { Identity } from "@/users/identity";
 
 export interface SidebarData {
-  mine: AgentCard[];
-  shared: AgentCard[];
+  agents: AgentCard[];
   channels: { mine: ChannelSummary[]; shared: ChannelSummary[] };
   topics: TopicSummary[];
 }
@@ -51,7 +50,7 @@ export function Sidebar({
   return (
     <SidebarDrawer>
       <aside aria-label="Sidebar" className="flex w-64 max-w-[85vw] shrink-0 flex-col border-r border-hub-line bg-hub-rail">
-        <NewAgentWatcher known={[...data.mine, ...data.shared].map((agent) => agent.id)} />
+        <NewAgentWatcher known={data.agents.map((agent) => agent.id)} />
         <TopicSearchShortcut />
         <div className="flex min-h-[49px] items-center gap-2 border-b border-hub-line px-4">
           <div className="min-w-0">
@@ -73,10 +72,6 @@ export function Sidebar({
             <NavLink href="/hub">
               <HomeIcon />
               Home
-            </NavLink>
-            <NavLink href="/hub/access">
-              <KeyIcon />
-              Access
             </NavLink>
             {/* With virtual agents on, credentials are a section of their page. */}
             {virtualAgents ? (
@@ -158,7 +153,7 @@ export function Sidebar({
           </Group>
         </nav>
 
-        <AgentRoster mine={data.mine} shared={data.shared} />
+        <AgentRoster agents={data.agents} />
       </aside>
     </SidebarDrawer>
   );

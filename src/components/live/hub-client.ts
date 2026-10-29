@@ -13,17 +13,19 @@ import { sessionEnded } from "./session.ts";
 
 /**
  * Every frame name `selectFrame` can send, derived from the hub's own union so a new member of it reaches here.
- * `grant` and `credential` are not frames: they arrive as `resync`, because what changed is what the viewer may see
- * rather than anything the page can be handed. `assistant_stop` is not one either, and for a different reason: it is
+ * `credential` is not a frame: it arrives as `resync`, because what changed is what the viewer may see rather than
+ * anything the page can be handed. `assistant_stop` is not one either, and for a different reason: it is
  * an instruction to a conversation's pod, and the thread redraws from the `assistant_conversation` beside it.
  * `assistant_uploads` is the same: an instruction to the pod, with the page revalidated by the action that caused it.
  * `assistant_lookup` and its answer are as well: the request that asked for one waits on its own response. So are
  * `assistant_welsh` and its answer, which the Welsh page reads back itself.
+ * `tagged_post` is not a frame because it says nothing a browser does not already get: it is how one agent's stream
+ * picks a post of its own out, and the post arrives here as the `post` beside it, tags included.
  */
 export type HubEventType = Exclude<
   HubEvent["type"],
-  | "grant"
   | "credential"
+  | "tagged_post"
   | "assistant_stop"
   | "assistant_uploads"
   | "assistant_lookup"

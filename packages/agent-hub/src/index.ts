@@ -206,7 +206,8 @@ export type {
   EnvelopeAuthor,
   EnvelopeMessage,
   EnvelopeOptions,
-  JiraExportFrame
+  JiraExportFrame,
+  OwnerLaptopOptions
 } from "./envelope.ts";
 export {
   assistantEnvelope,
@@ -220,8 +221,9 @@ export {
   JIRA_EXPORT_BASH_TIMEOUT_MS,
   jiraExportLines,
   leadingSkill,
-  ownerDirectEnvelope,
-  ownerEnvelope
+  ownerEnvelope,
+  ownerLaptopEnvelope,
+  taggedPostEnvelope
 } from "./envelope.ts";
 export type { ClientFeature } from "./features.ts";
 export { CLIENT_FEATURES } from "./features.ts";

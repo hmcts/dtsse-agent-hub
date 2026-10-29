@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { AccessDenied } from "../access/load.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { InvalidTopics } from "../topics/slug.ts";
 import { NotSignedIn } from "../viewer/identity.ts";
@@ -8,8 +7,7 @@ import { refusalMessage, runAction, text } from "./action.ts";
 describe("refusalMessage", () => {
   it.each([
     ["an HTTP refusal", new HttpError(403, "not yours")],
-    ["an invalid topic", new InvalidTopics("bad topic")],
-    ["a refused grant", new AccessDenied("not known")]
+    ["an invalid topic", new InvalidTopics("bad topic")]
   ])("should pass on the message of %s", (_label, error) => {
     expect(refusalMessage(error)).toBe(error.message);
   });
