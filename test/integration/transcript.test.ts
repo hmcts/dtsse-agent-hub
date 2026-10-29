@@ -16,6 +16,7 @@ import { CONVERSATION_PAGE_SIZE } from "../../src/transcripts/views.ts";
 import { connect, insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
+import { WAIT_MS } from "./waits.ts";
 
 const ALICE = person("alice");
 const BOB = person("bob");
@@ -388,6 +389,11 @@ describe("transcript events on the UI stream", () => {
   });
 });
 
+/** Backdates when the hub stored an entry, which is what retention measures against. */
+async function storedAt(entryKey: string, at: number): Promise<void> {
+  await prisma.transcriptEntry.updateMany({ where: { entryKey }, data: { createdAt: new Date(at) } });
+}
+
 describe("sweepTranscripts", () => {
   it("should delete entries past retention and the oldest beyond an agent's cap, and keep the rest", async () => {
     const now = Date.now();
@@ -400,12 +406,50 @@ describe("sweepTranscripts", () => {
     ]);
     const response = await send(CAROL, carolsAgent, { session_id: "s", entries: [entry("c1", { occurred_at: iso(now - 1000) })] });
     expect(response.status).toBe(200);
+    // Retention goes by when the hub stored an entry, so the one that is past it has to have been stored back then.
+    await storedAt("old", now - 31 * DAY_MS);
 
     expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 1, trimmed: 1 });
 
     const kept = await prisma.transcriptEntry.findMany({ orderBy: { id: "asc" } });
     expect(kept.map((row) => row.entryKey)).toEqual(["a2", "a3", "c1"]);
     expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 0, trimmed: 0 });
+  });
+
+  it("should delete an entry stamped in the future once the hub has held it for the retention period", async () => {
+    const now = Date.now();
+    await accepted(alicesAgent, [entry("ahead", { occurred_at: new Date(now + 60 * DAY_MS).toISOString() })]);
+    // Nothing bounds occurred_at above, and the cap is not applied to an agent nothing is arriving for, so retention
+    // measured against this entry's own timestamp would never have reached it and nothing else would have.
+    await storedAt("ahead", now - 31 * DAY_MS);
+
+    expect(await sweepTranscripts(prisma)).toEqual({ expired: 1, trimmed: 0 });
+    expect(await prisma.transcriptEntry.count()).toBe(0);
+  });
+
+  it("should apply the cap only to an agent written to lately, and again as soon as it is", async () => {
+    const now = Date.now();
+    const iso = (ms: number) => new Date(ms).toISOString();
+    await accepted(alicesAgent, [
+      entry("q1", { occurred_at: iso(now - 3000) }),
+      entry("q2", { occurred_at: iso(now - 2000) }),
+      entry("q3", { occurred_at: iso(now - 1000) })
+    ]);
+    // Nothing stored for it since the day before yesterday, so nothing is still arriving and the cap is not applied.
+    // What decides is when the hub stored an entry, never a timestamp the entry carries or a heartbeat beside it:
+    // these three say they occurred seconds ago, and the agent's last heartbeat is now.
+    for (const key of ["q1", "q2", "q3"]) {
+      await storedAt(key, now - 2 * DAY_MS);
+    }
+
+    expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 0, trimmed: 0 });
+    expect(await prisma.transcriptEntry.count()).toBe(3);
+
+    await accepted(alicesAgent, [entry("q4", { occurred_at: iso(now) })]);
+
+    expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 0, trimmed: 2 });
+    const kept = await prisma.transcriptEntry.findMany({ orderBy: { id: "asc" } });
+    expect(kept.map((row) => row.entryKey)).toEqual(["q3", "q4"]);
   });
 
   it("should stand down while another pod holds the transcript sweep lock", async () => {
@@ -432,7 +476,7 @@ describe("sweepTranscripts", () => {
   });
 });
 
-async function until(check: () => boolean, timeoutMs = 5000): Promise<void> {
+async function until(check: () => boolean, timeoutMs = WAIT_MS): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!check()) {
     if (Date.now() > deadline) {
@@ -450,6 +494,7 @@ describe("startTranscriptSweep", () => {
   it("should log what a tick deleted, and nothing for a tick that deleted nothing", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     await accepted(alicesAgent, [entry("old", { occurred_at: new Date(Date.now() - 31 * DAY_MS).toISOString() })]);
+    await storedAt("old", Date.now() - 31 * DAY_MS);
     const transaction = vi.spyOn(prisma, "$transaction");
     const sweeper = startTranscriptSweep(prisma, 10);
     try {

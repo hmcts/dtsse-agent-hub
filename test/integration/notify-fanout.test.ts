@@ -8,6 +8,7 @@ import { type Listener, startListener } from "../../src/realtime/listener.ts";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
 import type { PrismaClient } from "../../src/store/prisma.ts";
 import { connect, insertAgent, insertUser, person, prisma, resetDatabase } from "./database.ts";
+import { WAIT_MS } from "./waits.ts";
 
 const ALICE = person("alice");
 const BOB = person("bob");
@@ -27,7 +28,7 @@ async function pod(): Promise<Pod> {
   return { hub, listener, events };
 }
 
-async function until(check: () => boolean, timeoutMs = 5000): Promise<void> {
+async function until(check: () => boolean, timeoutMs = WAIT_MS): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!check()) {
     if (Date.now() > deadline) {
@@ -154,8 +155,12 @@ describe("NOTIFY fan-out between pods", () => {
   it("should reconnect after its connection is killed and ask every stream to resync", async () => {
     const admin = await connect();
     try {
+      // `pg_stat_activity` is the whole server, and every connection here is the same superuser, so without
+      // `current_database()` this kills the listener of every other worker running its own tests, of a local
+      // `yarn dev`, and of any other run sharing the server. Each victim reconnects and publishes a `resync`,
+      // dropping the NOTIFYs committed in between — which reads as an unrelated failure somewhere else.
       await admin.query(
-        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'dtsse-agent-hub-listener' AND pid <> pg_backend_pid()`
+        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'dtsse-agent-hub-listener' AND datname = current_database() AND pid <> pg_backend_pid()`
       );
 
       for (const running of pods) {

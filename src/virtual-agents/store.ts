@@ -726,11 +726,11 @@ async function takeOver(db: Database, cluster: string, now: Date): Promise<void>
  * A launch token is minted, replacing any before it, when the agent is meant to be running and either has none or is
  * starting a new pod. Its plain value goes in this response and nowhere else.
  *
- * A running `gateway` agent also carries what its pod needs to reach the AI Gateway, read from this hub's own
- * environment: `gatewaySettings` refuses a deployment that sets some of the three and not others, which fails the
- * claim — and the whole transaction with it, so nothing is left claimed — rather than handing out a pod template
- * that boots and then fails every turn. Only an agent on that route asks, so a deployment with nobody on the
- * gateway is never refused for a gateway it has no use for.
+ * A running `gateway` agent also carries the AI Gateway's APIM subscription key, read from this hub's own
+ * environment: `gatewaySettings` refuses a deployment that has none, which fails the claim — and the whole
+ * transaction with it, so nothing is left claimed — rather than handing out a pod template that boots and then
+ * fails every turn. Only an agent on that route asks, so a deployment with nobody on the gateway is never refused
+ * for a gateway it has no use for.
  */
 export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, options: ClaimOptions = {}): Promise<ClaimResult> {
   const { limit = CLAIM_LIMIT, now = new Date(), leaseSeconds = orchestratorLeaseSeconds() } = options;
@@ -780,7 +780,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         });
         launchToken = minted.token;
       }
-      const gateway = row.model_route === "gateway" && row.desired === "running" ? (gatewaySettings() ?? undefined) : undefined;
+      const gateway = row.model_route === "gateway" && row.desired === "running" ? gatewaySettings() : undefined;
       claimed.push({
         id: row.id,
         generation: row.generation,

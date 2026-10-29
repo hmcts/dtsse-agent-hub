@@ -123,64 +123,30 @@ describe("publicDomain", () => {
 });
 
 describe("gatewaySettings", () => {
-  const GATEWAY = {
-    AI_GATEWAY_BASE_URL: "https://ai-gateway.sandbox.platform.hmcts.net",
-    AI_GATEWAY_AUDIENCE: "api://b3bfa0f5-faa5-4d10-bba0-e284144aea89/.default",
-    AI_GATEWAY_APIM_KEY: "apim-key"
-  };
-
-  it("should read the gateway when all three settings are given", () => {
-    expect(gatewaySettings(GATEWAY)).toEqual({
-      base_url: GATEWAY.AI_GATEWAY_BASE_URL,
-      audience: GATEWAY.AI_GATEWAY_AUDIENCE,
-      apim_key: "apim-key"
-    });
+  it("should read the APIM subscription key when the deployment is given one", () => {
+    expect(gatewaySettings({ AI_GATEWAY_APIM_KEY: " apim-key " })).toEqual({ apim_key: "apim-key" });
   });
 
-  it("should drop a trailing slash from the base URL when one is given, since the pod appends a path to it", () => {
-    expect(gatewaySettings({ ...GATEWAY, AI_GATEWAY_BASE_URL: "https://ai-gateway.sandbox.platform.hmcts.net//" })?.base_url).toBe(
-      "https://ai-gateway.sandbox.platform.hmcts.net"
-    );
+  // The pod needs nothing else of the hub: hai resolves the gateway's host, its Entra scope and the apiKeyHelper
+  // itself, so a copy of any of them here could only drift from the ones hai uses.
+  it("should read nothing but the key when a deployment still sets the gateway's host and scope", () => {
+    expect(
+      gatewaySettings({
+        AI_GATEWAY_APIM_KEY: "apim-key",
+        AI_GATEWAY_BASE_URL: "https://ai-gateway.staging.platform.hmcts.net",
+        AI_GATEWAY_AUDIENCE: "api://97f4f377-1eda-417b-8367-17c2c64cecd8/.default"
+      })
+    ).toEqual({ apim_key: "apim-key" });
   });
 
-  it("should have no gateway when none of the three is set, since a deployment without one is not misconfigured", () => {
-    expect(gatewaySettings({})).toBeNull();
-    expect(gatewaySettings({ AI_GATEWAY_BASE_URL: " ", AI_GATEWAY_AUDIENCE: "", AI_GATEWAY_APIM_KEY: " " })).toBeNull();
+  // Asked only for an agent on the gateway route that is meant to be running, so this is that pod being refused and
+  // not a deployment with nobody on the gateway.
+  it.each(["", " "])("should refuse to run a gateway agent naming the setting when the key is %p", (apimKey) => {
+    expect(() => gatewaySettings({ AI_GATEWAY_APIM_KEY: apimKey })).toThrow(VirtualAgentConfigurationError);
+    expect(() => gatewaySettings({ AI_GATEWAY_APIM_KEY: apimKey })).toThrow("AI_GATEWAY_APIM_KEY");
   });
 
-  // Half-configured is a pod that boots and then fails every turn, so the claim is refused rather than served.
-  it.each([
-    "AI_GATEWAY_BASE_URL",
-    "AI_GATEWAY_AUDIENCE",
-    "AI_GATEWAY_APIM_KEY"
-  ] as const)("should refuse the deployment naming the one missing setting when %s is left out", (missing) => {
-    const { [missing]: _left, ...rest } = GATEWAY;
-
-    expect(() => gatewaySettings(rest)).toThrow(VirtualAgentConfigurationError);
-    expect(() => gatewaySettings(rest)).toThrow(missing);
-  });
-
-  // A wrong audience is a bare `401 invalid_token` at the gateway, which says nothing about what was wrong — and one
-  // with a quote, a backtick or a `$(…)` in it is interpolated into a double-quoted shell string in the pod's token
-  // helper, where a shell would act on it rather than ask for a scope by that name.
-  it.each([
-    "b3bfa0f5",
-    "api://b3bfa0f5",
-    "https://gateway/.default",
-    'api://gw"/.default',
-    "api://gw`id`/.default",
-    "api://gw$(id)/.default",
-    "api://gw'/.default",
-    "api://gw;id/.default"
-  ])("should refuse %s as the gateway's scope", (audience) => {
-    expect(() => gatewaySettings({ ...GATEWAY, AI_GATEWAY_AUDIENCE: audience })).toThrow("AI_GATEWAY_AUDIENCE");
-  });
-
-  it("should refuse a base URL that is not http or https", () => {
-    expect(() => gatewaySettings({ ...GATEWAY, AI_GATEWAY_BASE_URL: "ai-gateway.sandbox.platform.hmcts.net" })).toThrow("AI_GATEWAY_BASE_URL");
-  });
-
-  it("should never put the APIM key in the refusal, because it is logged and answered with", () => {
-    expect(() => gatewaySettings({ AI_GATEWAY_APIM_KEY: "apim-key" })).toThrow(expect.not.stringContaining("apim-key"));
+  it("should refuse to run a gateway agent when the deployment has no gateway configured at all", () => {
+    expect(() => gatewaySettings({})).toThrow("AI_GATEWAY_APIM_KEY");
   });
 });
