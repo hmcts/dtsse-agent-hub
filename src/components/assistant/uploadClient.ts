@@ -122,6 +122,7 @@ export function pastedName(name: string, mediaType: string, at: Date): string {
 const REFUSALS: Readonly<Record<UploadRefusal, string>> = {
   unavailable: "Attaching files is not switched on here yet.",
   no_such_conversation: "This chat no longer exists, so the file could not be attached.",
+  local_session: "This chat is a Claude Code session on your own computer, which can open the file itself. Tell it where the file is instead.",
   no_such_upload: "This file is no longer being uploaded. Remove it and attach it again.",
   no_longer_held: "This file is not kept here for long, and this one has gone. Attach it again to send it once more.",
   file_too_big: `This file is too big. Each file must be ${describeBytes(MAX_UPLOAD_BYTES)} or less.`,

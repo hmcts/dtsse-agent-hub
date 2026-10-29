@@ -27,6 +27,9 @@ export const ASSISTANT_NAME = "assistant";
 /** A new conversation's title is the start of its first message, until the person renames it. */
 export const TITLE_FROM_MESSAGE = 60;
 
+/** The longest title a conversation can carry, whoever wrote it: the person renaming it, or a local session's name. */
+export const TITLE_MAX = 200;
+
 const MAX_PRODUCT_HISTORY = 50;
 const MAX_STOP_HISTORY = 50;
 
@@ -88,6 +91,18 @@ const SELECT = {
   lastActiveAt: true,
   createdAt: true
 } as const;
+
+/**
+ * A local session's title: the name its client reported, which the client derives from the transcript's own title.
+ * Normalised exactly as a rename is, so the two cannot disagree about what a title may be.
+ *
+ * Kept even when the client had nothing better and sent the first characters of the session id. That reads as
+ * nothing, but it is what the hub calls the same session everywhere else, and the alternative is a sidebar in which
+ * every laptop says "New chat"; the person can rename it.
+ */
+function localTitle(name: string): string | null {
+  return name.trim().replace(/\s+/g, " ").slice(0, TITLE_MAX) || null;
+}
 
 function storedHistory(value: unknown): ProductChange[] {
   if (!Array.isArray(value)) {
@@ -421,6 +436,23 @@ export async function createConversation(
 }
 
 /**
+ * Creates the conversation of a local session: no pod, the session's own agent as its current one, and the default
+ * product.
+ *
+ * A sibling of `createConversation` rather than a branch of it, because the two share none of their steps. That one
+ * needs the person's assistant and creates an agent for the pod to start a session as; here the agent is the session
+ * that is already running on somebody's laptop, so there is no pod to find and nothing to create.
+ */
+export async function createLocalConversation(db: Database, session: { ownerOid: string; agentId: string; title: string | null }): Promise<ConversationRow> {
+  const created = await db.assistantConversation.create({
+    data: { ownerOid: session.ownerOid, virtualAgentId: null, agentId: session.agentId, product: DEFAULT_PRODUCT, title: session.title },
+    select: SELECT
+  });
+  await announce(db, created);
+  return toRow(created);
+}
+
+/**
  * Marks the conversation as needing a session, and starts its assistant if it is stopped. A wake already pending
  * keeps its time, so the sessions stream replays wakes in the order they were asked for.
  */
@@ -532,6 +564,35 @@ export async function linkSession(
 }
 
 /**
+ * A laptop session's conversation, created and linked to the session's own agent; called inside the registration's
+ * transaction. Answers the conversation, or `undefined` when the agent was already in one.
+ *
+ * Named after `linkSession` and deliberately not it: that one sets `sessionState` to `live` and clears the wake,
+ * which is a pod's supervisor reporting that it has started the session the hub asked for. A laptop has no
+ * supervisor and the hub asked for nothing, so neither field means anything here and both stay null.
+ *
+ * The link is a conditional update rather than a column of the registration's upsert, whose `SET` list leaves
+ * `assistant_conversation_id` alone — that is what lets this link survive a re-registration, which sends no
+ * conversation of any kind. Zero rows means another transaction linked the agent first, so this conversation goes and
+ * theirs stands; the registration itself is unaffected either way. The announcement already made for the one removed
+ * redraws a sidebar that then lists nothing new, which is cheaper than holding the announcement back for a case the
+ * caller's lock already rules out.
+ */
+export async function linkLocalSession(db: Database, session: { ownerOid: string; agentId: string; name: string }): Promise<ConversationRow | undefined> {
+  const created = await createLocalConversation(db, { ownerOid: session.ownerOid, agentId: session.agentId, title: localTitle(session.name) });
+  const linked = await db.$executeRaw`
+    UPDATE agent
+       SET assistant_conversation_id = ${created.id}::uuid
+     WHERE id = ${session.agentId}::uuid AND assistant_conversation_id IS NULL
+  `;
+  if (linked === 0) {
+    await db.assistantConversation.delete({ where: { id: created.id } });
+    return undefined;
+  }
+  return created;
+}
+
+/**
  * What the pod's supervisor runs, replacing its last report: every conversation of the assistant it leaves out has
  * no session. Only conversations whose state changed are announced. Not activity for the idle stop, which a pod
  * reporting every minute would otherwise never reach.
@@ -578,8 +639,8 @@ export async function reportSessions(prisma: PrismaClient, virtualAgentId: strin
 
 export async function renameConversation(prisma: PrismaClient, ownerOid: string, id: string, title: string): Promise<void> {
   const trimmed = title.trim().replace(/\s+/g, " ");
-  if (trimmed === "" || trimmed.length > 200) {
-    throw new HttpError(400, "a title is 1 to 200 characters");
+  if (trimmed === "" || trimmed.length > TITLE_MAX) {
+    throw new HttpError(400, `a title is 1 to ${TITLE_MAX} characters`);
   }
   const conversation = await findConversation(prisma, ownerOid, id);
   if (conversation === undefined) {
@@ -619,22 +680,39 @@ export async function setProduct(prisma: PrismaClient, ownerOid: string, id: str
 }
 
 /**
- * Deletes the conversation with everything it holds: its agents (and with them their transcripts, deliveries and
- * subscriptions) and every direct message to or from them, since the chat was the person's alone. The announcement
- * tells the pod to stop the conversation's session.
+ * Removes the conversation from the person's Assistant. How much goes with it depends on whether it has a pod,
+ * because that decides what its agent is.
+ *
+ * A pod conversation's agent exists only to be this chat's session: the hub created it with the conversation, it is
+ * its owner's alone, and nobody else can see or message it. So it goes too — and with it, by cascade, its transcript,
+ * its deliveries and its subscriptions — along with every direct message to or from it, since those are the words of
+ * the chat. The announcement tells the pod to stop the session.
+ *
+ * A conversation with no pod is detached instead: `agent.assistant_conversation_id` is cleared and the row then
+ * deleted, and no message is touched. Its agent is a session running on the person's own laptop and one of their
+ * ordinary sessions — on the hub roster, messageable by a colleague holding a write grant, holding the transcript it
+ * uploaded, its topic subscriptions, its questions and a direct thread that includes board messages with colleagues
+ * that have nothing to do with this chat. Deleting the conversation row without clearing the column first would
+ * cascade through all of that, and the session would then 404, re-register as a brand-new agent and bring the chat
+ * back. Removing a chat is about the chat; the session on the laptop is left exactly as it was.
  */
 export async function deleteConversation(prisma: PrismaClient, ownerOid: string, id: string): Promise<void> {
   const conversation = await findConversation(prisma, ownerOid, id);
   if (conversation === undefined) {
     throw new ConversationNotFound();
   }
+  const pod = hasPod(conversation);
   await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`
-      DELETE FROM message
-       WHERE kind = 'direct'
-         AND (target_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = ${id}::uuid)
-              OR author_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = ${id}::uuid))
-    `;
+    if (pod) {
+      await tx.$executeRaw`
+        DELETE FROM message
+         WHERE kind = 'direct'
+           AND (target_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = ${id}::uuid)
+                OR author_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = ${id}::uuid))
+      `;
+    } else {
+      await tx.$executeRaw`UPDATE agent SET assistant_conversation_id = NULL WHERE assistant_conversation_id = ${id}::uuid`;
+    }
     await tx.assistantConversation.delete({ where: { id } });
     await announce(tx, conversation);
   });

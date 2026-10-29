@@ -1,9 +1,11 @@
 import { generateKeyPair, SignJWT } from "jose";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerAgent, SessionOwnedElsewhere } from "../../src/agents/store.ts";
 import { POST as heartbeat } from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
 import { POST as offline } from "../../src/app/api/agent/[agentId]/offline/route.ts";
 import { POST as register } from "../../src/app/api/agent/register/route.ts";
-import { devUser, person, prisma, resetDatabase } from "./database.ts";
+import { createConversation, ensureAssistant, linkLocalSession, listConversations } from "../../src/assistant/store.ts";
+import { devUser, insertAgent, insertUser, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 
 const ALICE = person("alice");
@@ -196,6 +198,126 @@ describe("POST /api/agent/register", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
+  });
+});
+
+/**
+ * A session on the person's own laptop becomes a conversation in their Assistant: no pod behind it, and the
+ * registering agent is the session of it.
+ */
+describe("a laptop session's conversation", () => {
+  const CALLER = { oid: ALICE.oid, tid: "dev", name: ALICE.name, email: ALICE.email };
+
+  async function registered(body: object = REGISTRATION): Promise<{ agent_id: string; name: string }> {
+    const response = await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body });
+    expect(response.status).toBe(200);
+    return await jsonOf(response);
+  }
+
+  function session(sessionId: string, name = "a-session") {
+    return { sessionId, name, cwd: null, repo: null, branch: null, host: null };
+  }
+
+  it("should create a conversation with no pod for the session, named after it, and link the agent to it", async () => {
+    const { agent_id } = await registered();
+
+    const conversation = await prisma.assistantConversation.findFirstOrThrow();
+    expect(conversation).toMatchObject({
+      ownerOid: ALICE.oid,
+      virtualAgentId: null,
+      agentId: agent_id,
+      title: "alice-pcs-api",
+      product: "general",
+      // A laptop has no supervisor, so neither of the fields a pod's supervisor reports means anything here.
+      sessionState: null,
+      wakeRequestedAt: null
+    });
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).assistantConversationId).toBe(conversation.id);
+    expect((await listConversations(prisma, ALICE.oid)).map((chat) => [chat.id, chat.title])).toEqual([[conversation.id, "alice-pcs-api"]]);
+  });
+
+  /**
+   * The registration the relaxed conflict arm exists for. The bridge clears its stored agent id on a 404 from the
+   * stream and registers the same session id again, sending no conversation of any kind; refusing that because the
+   * hub's own link is on the row would take the session off the hub for good.
+   */
+  it("should keep the one conversation when the session registers again, and not refuse the registration", async () => {
+    const first = await registered();
+    const conversation = (await prisma.assistantConversation.findFirstOrThrow()).id;
+
+    const second = await registered({ ...REGISTRATION, branch: "HDPI-1" });
+
+    expect(second.agent_id).toBe(first.agent_id);
+    expect(await prisma.assistantConversation.count()).toBe(1);
+    expect((await prisma.assistantConversation.findFirstOrThrow()).id).toBe(conversation);
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: first.agent_id } })).toMatchObject({
+      assistantConversationId: conversation,
+      branch: "HDPI-1"
+    });
+  });
+
+  /**
+   * Two registrations for one session id nobody has registered yet: a hand-run `agent-hub enable` and the auto-enable
+   * worker. Without the advisory lock each inserts the agent — one of them through the conflict arm — and each then
+   * finds no conversation on it and makes one.
+   */
+  it("should create exactly one conversation when two registrations race for one new session id", async () => {
+    const [first, second] = await Promise.all([registered(), registered()]);
+
+    expect(second.agent_id).toBe(first.agent_id);
+    expect(await prisma.assistantConversation.count()).toBe(1);
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: first.agent_id } })).assistantConversationId).toBe(
+      (await prisma.assistantConversation.findFirstOrThrow()).id
+    );
+  });
+
+  /**
+   * The conditional link on its own. No registration reaches this, because the advisory lock serialises the two that
+   * could; the write is still conditional, since it is the thing that decides which of two conversations an agent
+   * keeps rather than leaving it to whoever wrote last.
+   */
+  it("should keep the conversation the agent is already in and remove the one it just made", async () => {
+    const { agent_id } = await registered();
+    const theirs = (await prisma.assistantConversation.findFirstOrThrow()).id;
+
+    expect(await linkLocalSession(prisma, { ownerOid: ALICE.oid, agentId: agent_id, name: "a second go" })).toBeUndefined();
+
+    expect((await prisma.assistantConversation.findMany({ select: { id: true } })).map((row) => row.id)).toEqual([theirs]);
+    expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).assistantConversationId).toBe(theirs);
+  });
+
+  it("should leave the chat untitled when the session's name is nothing but spaces, so the sidebar says New chat", async () => {
+    const agentId = await insertAgent(ALICE, "spaces");
+
+    expect(await linkLocalSession(prisma, { ownerOid: ALICE.oid, agentId, name: "   " })).toMatchObject({ title: null });
+  });
+
+  it("should refuse a launch token the session id of a laptop's chat, which is what the guard is for", async () => {
+    const { agent_id } = await registered();
+    const assistant = await ensureAssistant(prisma, { oid: ALICE.oid, modelRoute: "gateway" });
+
+    await expect(registerAgent(prisma, { ...CALLER, virtualAgentId: assistant.id }, session(REGISTRATION.session_id))).rejects.toThrow(SessionOwnedElsewhere);
+
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).toMatchObject({ virtualAgentId: null, name: "alice-pcs-api" });
+    expect(await prisma.assistantConversation.count()).toBe(1);
+  });
+
+  it("should refuse a laptop registration the session id of a pod conversation's agent", async () => {
+    await insertUser(ALICE);
+    await ensureAssistant(prisma, { oid: ALICE.oid, modelRoute: "gateway" });
+    const chat = await createConversation(prisma, ALICE.oid, { product: "general" });
+    const pods = await prisma.agent.findUniqueOrThrow({ where: { id: chat.agentId! }, select: { sessionId: true } });
+
+    const response = await call(register, {
+      as: ALICE,
+      path: "/api/agent/register",
+      method: "POST",
+      body: { ...REGISTRATION, session_id: pods.sessionId }
+    });
+
+    expect(response.status).toBe(409);
+    expect(await prisma.assistantConversation.count()).toBe(1);
+    expect((await prisma.assistantConversation.findFirstOrThrow()).virtualAgentId).not.toBeNull();
   });
 });
 

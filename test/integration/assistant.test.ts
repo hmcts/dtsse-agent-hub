@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { setGrant } from "../../src/access/load.ts";
+import { registerAgent } from "../../src/agents/store.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
 import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
@@ -25,6 +26,7 @@ import { credentialBackend } from "../../src/credentials/backend.ts";
 import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { expireDeliveries } from "../../src/messages/store.ts";
+import { subscribe, subscriptions } from "../../src/topics/store.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
@@ -363,6 +365,29 @@ describe("conversations", () => {
     expect(await prisma.delivery.count({ where: { agentId, state: "expired" } })).toBe(1);
   });
 
+  /**
+   * The exemption above belongs to a pod, whose session a queued message is what wakes. Nothing wakes a session on
+   * somebody's laptop, so a message to one that was last seen days ago is not waiting to start anything and expires
+   * on the agent's own offline clock, as it would for a session in no conversation at all. Left on the delivery's
+   * clock, every laptop chat would hold a colleague's thread at "queued" for a further day.
+   */
+  it("should expire a new message to a conversation with no pod on the agent's offline clock", async () => {
+    const laptop = await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+    await prisma.agent.update({ where: { id: laptop.id }, data: { status: "offline", lastHeartbeatAt: new Date(Date.now() - 3 * 86_400_000) } });
+    await directAsPerson(prisma, ALICE.oid, laptop.id, "still there?");
+
+    await prisma.$transaction(async (tx) => {
+      await expireDeliveries(tx, 86_400, 100);
+    });
+
+    expect((await prisma.assistantConversation.findFirstOrThrow()).virtualAgentId).toBeNull();
+    expect(await prisma.delivery.count({ where: { agentId: laptop.id, state: "expired" } })).toBe(1);
+  });
+
   it("should keep a conversation's agent from the person's grantees and the messageable list", async () => {
     await startedAssistant();
     await insertUser(BOB);
@@ -624,21 +649,47 @@ describe("conversations", () => {
   });
 
   /**
-   * A conversation with no pod is one that is a person's own local Claude Code session. Every write to a conversation
-   * announces it inside its own transaction, so a write path that could not announce one of these would roll back:
-   * the chat would be listed in the sidebar and refuse to be renamed or removed from it. Pinned here rather than left
-   * to the reads, because that failure shows up as a chat nobody can get rid of.
+   * A conversation with no pod is a session on the person's own computer, and removing the chat has to leave that
+   * session exactly as it was. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the agent's own
+   * dependants cascade from there, so deleting the row without clearing the column first would take the live
+   * session's agent, the transcript it uploaded, its subscriptions and every direct message to or from it — board
+   * messages with colleagues included — after which the session 404s, re-registers as a new agent and the chat
+   * comes back.
+   *
+   * The rename is here too: every write to a conversation announces it inside its own transaction, so a write path
+   * that could not announce one with no pod would roll back and leave a chat nobody can rename or get rid of.
    */
-  it("should rename and delete a conversation that has no assistant behind it", async () => {
-    await startedAssistant();
-    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
-    await prisma.assistantConversation.update({ where: { id }, data: { virtualAgentId: null } });
+  it("should detach a conversation with no pod and leave the session on the laptop standing", async () => {
+    await setGrant(prisma, ALICE.oid, BOB.oid, "write");
+    const laptop = await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+    const id = (await prisma.assistantConversation.findFirstOrThrow()).id;
+    await subscribe(prisma, laptop.id, ["pcs"]);
+    await prisma.transcriptEntry.create({
+      data: {
+        agentId: laptop.id,
+        sessionId: "alices-laptop",
+        entryKey: "e1",
+        role: "assistant",
+        content: { text: "read off my own disk" },
+        occurredAt: new Date()
+      }
+    });
+    const board = await directAsPerson(prisma, BOB.oid, laptop.id, "nothing to do with that chat");
 
     expect(await actions.renameConversation({ conversationId: id, title: "On my laptop" })).toEqual({ ok: true });
     expect((await findConversation(prisma, ALICE.oid, id))!.title).toBe("On my laptop");
     expect(await actions.deleteConversation({ conversationId: id })).toEqual({ ok: true });
 
     expect(await prisma.assistantConversation.count()).toBe(0);
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: laptop.id } })).toMatchObject({ sessionId: "alices-laptop", assistantConversationId: null });
+    expect(await prisma.transcriptEntry.count({ where: { agentId: laptop.id } })).toBe(1);
+    expect(await subscriptions(prisma, laptop.id)).toEqual(["pcs"]);
+    expect(await prisma.message.count({ where: { id: BigInt(board.id) } })).toBe(1);
+    expect(await prisma.delivery.count({ where: { agentId: laptop.id } })).toBe(1);
   });
 
   it("should wake a conversation when its composer is focused and the session is offline", async () => {

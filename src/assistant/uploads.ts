@@ -121,6 +121,12 @@ export type UploadRefusal =
   /** The deployment runs without virtual agents, so there is no Assistant to attach to. */
   | "unavailable"
   | "no_such_conversation"
+  /**
+   * The conversation is a session on the person's own computer, which has no pod. There is nothing to deliver a file
+   * to: that session reads files off the developer's own disk, and the hub's only carrier for an attachment is the
+   * `assistant` frame of a direct, which goes to a pod's session alone.
+   */
+  | "local_session"
   /** No such upload, or someone else's: the two are deliberately indistinguishable. */
   | "no_such_upload"
   /** The person's own file, but past the window Postgres holds its bytes for, so there is nothing to download. */

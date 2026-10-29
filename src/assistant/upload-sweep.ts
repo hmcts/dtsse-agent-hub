@@ -106,6 +106,10 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  *
  * The conditions are what make this safe to run unattended, and each is load-bearing:
  *
+ * - **It has a pod.** A conversation with none is a session on somebody's laptop, which the hub created for the
+ *   session rather than for a file: nothing was abandoned, and deleting it would take the live session's `agent` row
+ *   with it and so its transcript, its deliveries and its place on the roster. The new-chat screen this sweep is for
+ *   only ever makes a conversation on a pod.
  * - **No message to or from any of its agents.** One message and the conversation is the person's; this never
  *   touches a chat that was spoken in, whatever became of its files.
  * - **No document.** The session may have written one before the person said anything.
@@ -122,13 +126,14 @@ export async function sweepUploads(prisma: PrismaClient, options: UploadSweepOpt
  * after the window it is rubbish either way.
  */
 async function dropAbandoned(tx: Database, retentionHours: number, batch: number): Promise<number> {
-  // `virtual_agent_id` is null for a conversation that is a local session; the announcement below carries that
-  // through. Declared here because a raw query's row type is asserted rather than checked, so the compiler cannot
-  // find this site the way it finds the ones reading `ConversationRow`.
+  // `virtual_agent_id` is null for a conversation that is a local session, which this leaves alone; the column is
+  // still read because the announcement carries it. Declared here because a raw query's row type is asserted rather
+  // than checked, so the compiler cannot find this site the way it finds the ones reading `ConversationRow`.
   const abandoned = await tx.$queryRaw<{ id: string; virtual_agent_id: string | null; owner_oid: string }[]>`
     SELECT c.id::text AS id, c.virtual_agent_id::text AS virtual_agent_id, c.owner_oid
       FROM assistant_conversation c
-     WHERE c.artefact_version = 0
+     WHERE c.virtual_agent_id IS NOT NULL
+       AND c.artefact_version = 0
        AND c.forked_at IS NULL
        AND c.created_at < now() - make_interval(hours => ${retentionHours}::int)
        AND NOT EXISTS (

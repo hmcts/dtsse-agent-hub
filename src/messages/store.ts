@@ -174,9 +174,13 @@ export async function ackDelivery(prisma: PrismaClient, agentId: string, message
  * a transaction, so the NOTIFYs go out only if the expiry commits.
  *
  * An offline agent's heartbeat revives it, so the cut-off is measured from the later of its last heartbeat and its
- * end. An assistant conversation's agent is offline whenever its session is idle, and a message to it is what wakes
- * one, so its deliveries expire only once they have themselves been queued that long. `SKIP LOCKED` leaves a delivery
- * being acked to the ack. Returns how many expired.
+ * end. A *pod* conversation's agent is offline whenever its session is idle, and a message to it is what wakes one,
+ * so its deliveries expire only once they have themselves been queued that long. That exemption is the pod's alone:
+ * a conversation with no pod is a session on somebody's laptop, which nothing here can wake, so its deliveries run on
+ * the offline clock like any other session's — otherwise a message to a laptop that was last seen last week would
+ * read as "queued" in the sender's thread for a further day. An agent in a conversation with no virtual agent is that
+ * laptop session, as `conversationFlags` in `src/access/rules.ts` reads the same two columns to decide.
+ * `SKIP LOCKED` leaves a delivery being acked to the ack. Returns how many expired.
  */
 export async function expireDeliveries(db: Database, offlineForSeconds: number, limit: number): Promise<number> {
   const expired = await db.$queryRaw<{ message_id: string; agent_id: string }[]>`
@@ -187,7 +191,8 @@ export async function expireDeliveries(db: Database, offlineForSeconds: number, 
        WHERE d.state = 'queued'
          AND a.status = 'offline'
          AND GREATEST(a.last_heartbeat_at, a.ended_at) < now() - make_interval(secs => ${offlineForSeconds}::double precision)
-         AND (a.assistant_conversation_id IS NULL OR d.created_at < now() - make_interval(secs => ${offlineForSeconds}::double precision))
+         AND (a.assistant_conversation_id IS NULL OR a.virtual_agent_id IS NULL
+              OR d.created_at < now() - make_interval(secs => ${offlineForSeconds}::double precision))
        ORDER BY d.message_id
        LIMIT ${limit}::int
          FOR UPDATE OF d SKIP LOCKED

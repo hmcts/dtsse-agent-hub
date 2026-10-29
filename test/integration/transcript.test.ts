@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { findAgent, listMessageableAgents } from "../../src/agents/store.ts";
+import { findAgent, listMessageableAgents, registerAgent } from "../../src/agents/store.ts";
 import { visibleAgents } from "../../src/agents/views.ts";
 import { POST as upload } from "../../src/app/api/agent/[agentId]/transcript/route.ts";
 import { GET as conversation } from "../../src/app/api/ui/agents/[id]/transcript/route.ts";
@@ -272,6 +272,8 @@ describe("GET /api/ui/agents/{id}/transcript", () => {
  * sessions: a colleague holding a write grant still sees it on the roster, picks it out of a list and messages it.
  * Only the words of the chat are the owner's alone. A pod conversation's agent, the HMCTS Assistant, is in none of
  * those places for anyone but its owner, and is here as the contrast.
+ *
+ * The local one is a real registration, so these read the rows the hub itself writes.
  */
 describe("an agent in a conversation", () => {
   let local: string;
@@ -279,9 +281,13 @@ describe("an agent in a conversation", () => {
 
   beforeEach(async () => {
     await prisma.agentGrant.update({ where: { ownerOid_granteeOid: { ownerOid: ALICE.oid, granteeOid: BOB.oid } }, data: { level: "write" } });
-    local = await insertAgent(ALICE, "alices-local-chat");
-    const laptop = await prisma.assistantConversation.create({ data: { ownerOid: ALICE.oid, agentId: local }, select: { id: true } });
-    await prisma.agent.update({ where: { id: local }, data: { assistantConversationId: laptop.id } });
+    local = (
+      await registerAgent(
+        prisma,
+        { oid: ALICE.oid, tid: "dev", name: ALICE.name, email: ALICE.email },
+        { sessionId: "alices-laptop", name: "alices-local-chat", cwd: null, repo: null, branch: null, host: null }
+      )
+    ).id;
     pod = await insertAgent(ALICE, "alices-assistant");
     const assistant = await prisma.virtualAgent.create({ data: { ownerOid: ALICE.oid, name: "assistant", modelRoute: "gateway" }, select: { id: true } });
     const chat = await prisma.assistantConversation.create({ data: { ownerOid: ALICE.oid, virtualAgentId: assistant.id, agentId: pod }, select: { id: true } });

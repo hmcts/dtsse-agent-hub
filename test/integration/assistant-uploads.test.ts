@@ -21,7 +21,7 @@ import * as partRoute from "../../src/app/api/ui/uploads/[uploadId]/parts/[index
 import * as discardRoute from "../../src/app/api/ui/uploads/[uploadId]/route.ts";
 import * as uploadRoute from "../../src/app/api/ui/uploads/route.ts";
 import * as conversationsRoute from "../../src/app/api/virtual/[virtualAgentId]/conversations/route.ts";
-import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
+import { createConversation, ensureAssistant, linkLocalSession } from "../../src/assistant/store.ts";
 import { sweepUploads } from "../../src/assistant/upload-sweep.ts";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_BYTES, MAX_UPLOAD_BYTES, PART_BYTES } from "../../src/assistant/uploads.ts";
 import { unsentChat } from "../../src/assistant/views.ts";
@@ -1684,6 +1684,27 @@ describe("the sweep of conversations attaching left behind", () => {
     expect(await prisma.assistantConversation.count({ where: { id: conversation.id } })).toBe(0);
   });
 
+  /**
+   * A conversation with no pod is a session on somebody's laptop, which the hub made for the session rather than for
+   * a file. Nothing was abandoned, and the chat is empty until the person types into it — so without this it would be
+   * swept within the window, taking the live session's `agent` row, its transcript and its place on the roster with
+   * it.
+   */
+  it("should leave a conversation with no pod, which is a session on somebody's laptop", async () => {
+    // Arrange
+    const agent = await prisma.agent.create({ data: { ownerOid: ALICE.oid, sessionId: "alices-laptop", name: "alices-laptop" }, select: { id: true } });
+    const local = (await linkLocalSession(prisma, { ownerOid: ALICE.oid, agentId: agent.id, name: "alices-laptop" }))!;
+    await prisma.assistantConversation.update({ where: { id: local.id }, data: { createdAt: new Date(Date.now() - 48 * 3_600_000) } });
+
+    // Act
+    const result = await sweepUploads(prisma);
+
+    // Assert
+    expect(result).toMatchObject({ conversations: 0 });
+    expect(await prisma.assistantConversation.count({ where: { id: local.id } })).toBe(1);
+    expect(await prisma.agent.count({ where: { id: agent.id } })).toBe(1);
+  });
+
   it("should leave one whose session wrote a document before the person said anything", async () => {
     // Arrange
     await startedAssistant();
@@ -1791,6 +1812,30 @@ describe("the refusals the composer words for the person", () => {
     expect(await jsonOf<{ reason: string }>(partTooBig)).toMatchObject({ reason: "part_too_big" });
     expect(await jsonOf<{ reason: string }>(partWrong)).toMatchObject({ reason: "part_wrong_length" });
     expect(await jsonOf<{ reason: string }>(noConversation)).toMatchObject({ reason: "no_such_conversation" });
+  });
+
+  /**
+   * The composer is the same one for both kinds of chat, so a person can attach a file to a session running on their
+   * own computer. There is nothing to deliver it to: attachments ride the `assistant` frame of a direct, which only a
+   * pod conversation's agent is sent, and that session reads files off its own disk anyway. Refused while the person
+   * is still holding the file, rather than taken and left in Postgres for the sweep with nothing said.
+   */
+  it("should refuse a file for a conversation with no pod and still take one for a conversation with a pod", async () => {
+    // Arrange
+    await startedAssistant();
+    const pods = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+    const agent = await prisma.agent.create({ data: { ownerOid: ALICE.oid, sessionId: "alices-laptop", name: "alices-laptop" }, select: { id: true } });
+    const laptop = (await linkLocalSession(prisma, { ownerOid: ALICE.oid, agentId: agent.id, name: "alices-laptop" }))!;
+
+    // Act
+    const refused = await startUpload(laptop.id, { name: "notes.pdf", size: 4 });
+    const taken = await startUpload(pods.id, { name: "notes.pdf", size: 4 });
+
+    // Assert
+    expect(refused.status).toBe(409);
+    expect(await jsonOf(refused)).toEqual({ reason: "local_session", error: "a conversation that is a session on your own computer takes no files" });
+    expect(taken.status).toBe(201);
+    expect(await prisma.assistantUpload.count({ where: { conversationId: laptop.id } })).toBe(0);
   });
 
   it("should say the feature is unavailable rather than nothing without virtual agents", async () => {

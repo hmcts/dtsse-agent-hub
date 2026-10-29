@@ -1,7 +1,7 @@
 import { agentsMessageableBy } from "../access/load.ts";
 import { conversationFlags } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
-import { linkSession } from "../assistant/store.ts";
+import { linkLocalSession, linkSession } from "../assistant/store.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
@@ -51,13 +51,26 @@ export class SessionOwnedElsewhere extends Error {}
  *
  * A re-registration whose skills differ from the stored ones announces them, so an open agent page re-reads its
  * composer's "/" autocomplete. A new agent's are not announced: no page can be showing it yet.
+ *
+ * A session on a person's own laptop — no virtual agent and no conversation named — gets a conversation of its own
+ * with no pod behind it, so it appears in their Assistant.
  */
 export async function registerAgent(prisma: PrismaClient, owner: Caller, registration: Registration): Promise<{ id: string; name: string }> {
   const virtualAgentId = owner.virtualAgentId ?? null;
   const skills = registration.skills === undefined ? null : JSON.stringify(registration.skills);
   const clientFeatures = registration.clientFeatures === undefined ? null : JSON.stringify(registration.clientFeatures);
   const conversationId = registration.conversationId ?? null;
+  // Nobody's pod, and naming no conversation: a session on somebody's laptop.
+  const local = virtualAgentId === null && conversationId === null;
   return await prisma.$transaction(async (tx) => {
+    if (local) {
+      // Taken before anything else this transaction writes, and on the session id rather than a row, because the row
+      // may not exist yet: two registrations racing for one new session id would otherwise both insert the agent — one
+      // of them through the conflict arm — and both go on to create it a conversation. Blocking rather than `try`,
+      // since the loser's job is to find the conversation the winner made, not to skip its own registration. The key
+      // is `hashtext`, so a 32-bit integer, and cannot collide with the sweeps' hand-picked 64-bit keys.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${registration.sessionId}::text))`;
+    }
     if (virtualAgentId === null) {
       await upsertUser(tx, owner);
     }
@@ -80,7 +93,7 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
         : await tx.$queryRaw<
             { id: string; skills: unknown }[]
           >`SELECT id::text AS id, skills FROM agent WHERE session_id = ${registration.sessionId} FOR UPDATE`;
-    const [agent] = await tx.$queryRaw<{ id: string; name: string }[]>`
+    const [agent] = await tx.$queryRaw<{ id: string; name: string; conversation_id: string | null }[]>`
       INSERT INTO agent (owner_oid, session_id, name, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills, client_features, assistant_conversation_id)
       VALUES (
         ${owner.oid}, ${registration.sessionId},
@@ -95,8 +108,16 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
             -- Not COALESCEd, unlike the skills: whatever this register reported is what is running, nothing included.
             client_features = EXCLUDED.client_features
         WHERE agent.owner_oid = EXCLUDED.owner_oid AND agent.virtual_agent_id IS NOT DISTINCT FROM EXCLUDED.virtual_agent_id
-          AND agent.assistant_conversation_id IS NOT DISTINCT FROM EXCLUDED.assistant_conversation_id
-      RETURNING id::text AS id, name
+          -- The second arm is a caller that is nobody's pod and names no conversation, which is a session on a
+          -- laptop re-registering: it sends no conversation id and the hub's own link is already on the row, so
+          -- demanding the two match would answer 409 and strip the bridge of its one recovery from a lost agent.
+          -- Letting it through costs the guard nothing. Its purpose is that a launch token never adopts another
+          -- chat's agent, and a pod's registration always carries the virtual agent its token names, so a pod never
+          -- reaches this arm; nor can a laptop reach a pod's agent through it, which the virtual agent above
+          -- already refuses. assistant_conversation_id is not in the SET list, so neither caller moves it.
+          AND (agent.assistant_conversation_id IS NOT DISTINCT FROM EXCLUDED.assistant_conversation_id
+               OR (EXCLUDED.virtual_agent_id IS NULL AND EXCLUDED.assistant_conversation_id IS NULL))
+      RETURNING id::text AS id, name, assistant_conversation_id::text AS conversation_id
     `;
     if (agent === undefined) {
       throw new SessionOwnedElsewhere("that session id is registered to someone else");
@@ -110,8 +131,12 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
     } else if (virtualAgentId !== null) {
       await tx.virtualAgent.update({ where: { id: virtualAgentId }, data: { agentId: agent.id, lastActiveAt: new Date(), updatedAt: new Date() } });
       await notify(tx, { type: "virtual_agent", virtual_agent_id: virtualAgentId, owner_oid: owner.oid });
+    } else if (local && agent.conversation_id === null) {
+      // The column as the upsert left it, read under the advisory lock, so a re-registration finds the conversation
+      // the first one made rather than making a second.
+      await linkLocalSession(tx, { ownerOid: owner.oid, agentId: agent.id, name: agent.name });
     }
-    return agent;
+    return { id: agent.id, name: agent.name };
   });
 }
 
