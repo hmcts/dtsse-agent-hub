@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Environment } from "../../src/store/database-url.ts";
+import { type Environment, mountedDatabaseParts, resolveDatabaseUrl } from "../../src/store/database-url.ts";
 
 /**
  * The database each worker of an integration run writes to. Every file truncates every table, so two files sharing
@@ -29,7 +29,10 @@ function checkout(): string {
 export const DEFAULT_DATABASE_URL = "postgresql://hmcts@localhost:5432/agent_hub_test";
 
 export function stemUrl(env: Environment): string {
-  return env.DATABASE_URL ?? DEFAULT_DATABASE_URL;
+  // Through `resolveDatabaseUrl` where the `POSTGRES_*` parts are mounted, because that is what `store/prisma.ts`,
+  // `migrate()` and `database.ts`'s own connection resolve — reading `DATABASE_URL` alone here would have the
+  // workers create and migrate databases on one server while every test truncated and wrote to another.
+  return mountedDatabaseParts(env) === undefined ? (env.DATABASE_URL ?? DEFAULT_DATABASE_URL) : resolveDatabaseUrl(env);
 }
 
 export function workerDatabase(env: Environment): { url: string; name: string } {

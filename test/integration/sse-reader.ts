@@ -1,4 +1,5 @@
 import type { ApiMessage } from "../../src/messages/shape.ts";
+import { WAIT_MS } from "./waits.ts";
 
 export interface Frame {
   id?: string;
@@ -7,14 +8,6 @@ export interface Frame {
   comment?: string;
   retry?: string;
 }
-
-/**
- * How long a wait for an expected frame gives up after. It is a deadline, not a delay: a reader returns as soon as
- * the frames arrive, so this only sets how patient a *failing* wait is. Generous, because the suite's files run in
- * parallel and a loaded machine can be slow to deliver a NOTIFY without anything being wrong. A test asserting that
- * a frame never arrives passes its own short timeout instead.
- */
-const WAIT_MS = 15_000;
 
 /** Reads SSE frames from a response body as they arrive. */
 export function frames(response: Response) {

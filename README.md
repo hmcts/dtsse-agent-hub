@@ -571,6 +571,16 @@ worker names are built from, as the pipeline's does; do not point it at anything
 `INTEGRATION_WORKERS` sets how many workers run (default 6). The ceiling is the server's `max_connections`, which is
 the stock 100 against a Prisma pool of 10 per worker — not the cores available.
 
+Because the worker databases are kept, editing the SQL of a migration that has already been applied to them fails
+every later run with `has changed since it was applied` — the ledger holds its old checksum. That is the migrator
+working as intended; drop them and let the next run rebuild:
+
+```bash
+docker compose exec postgres psql -U hmcts -d postgres -tAc \
+  "select 'drop database \"' || datname || '\";' from pg_database where datname like 'agent_hub_test%'" \
+  | docker compose exec -T postgres psql -U hmcts -d postgres
+```
+
 `migrate.test.ts` sits in a `migrations` project of its own, with one worker and a longer timeout. It creates and
 drops whole databases, and each of those forces a checkpoint that flushes every dirty page the server is holding —
 so it is charged for whatever else has been written to that server. On a quiet one it takes 3s; sharing one with the

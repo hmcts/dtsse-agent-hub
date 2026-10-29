@@ -47,7 +47,9 @@ export default defineConfig({
           exclude: ["**/node_modules/**", MIGRATE],
           // Each worker holds a Prisma pool of 10 and a listener connection, against a server whose
           // `max_connections` is the stock 100, so this is bounded by the database rather than by the cores.
-          maxWorkers: Number(process.env.INTEGRATION_WORKERS ?? 6)
+          // Passed through as given, for Vitest to parse: a `Number()` here turns a typo into `NaN`, which Vitest
+          // reads as unset and replaces with one worker per core — the opposite of the bound just described.
+          maxWorkers: process.env.INTEGRATION_WORKERS ?? 6
         }
       },
       {
