@@ -23,8 +23,10 @@ function Heading({ level, document, children }: { level: number; document: boole
 
 function assistantTheme(document: boolean): MarkupTheme {
   return {
-    container: `flex flex-col gap-3 whitespace-pre-wrap break-words leading-relaxed${document ? " text-[15px]" : ""}`,
-    code: "whitespace-pre-wrap rounded bg-asst-active px-1.5 py-px font-plex-mono text-[0.9em]",
+    // The space before the interpolation is load-bearing: Tailwind's scanner does not see a class written up against
+    // a `${`, and silently generates no rule for it.
+    container: `flex flex-col gap-3 whitespace-pre-wrap break-words leading-relaxed ${document ? "text-[15px]" : ""}`,
+    code: "whitespace-pre-wrap rounded-sm bg-asst-active px-1.5 py-px font-plex-mono text-[0.9em]",
     strong: "font-semibold text-asst-text",
     link: "text-asst-accent underline hover:text-asst-accent-hover",
     ordered: "flex list-decimal flex-col gap-1 pl-6",

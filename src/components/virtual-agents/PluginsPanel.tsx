@@ -4,7 +4,7 @@ import type { PluginOffer } from "@/virtual-agents/plugins";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 import { PluginConfigurationFault, PluginsField } from "./PluginsField";
 
-const BUTTON = "rounded border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
+const BUTTON = "rounded-sm border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
 
 /**
  * The plugins can change at any time. A change replaces a running pod, so the form says so while one may be running;

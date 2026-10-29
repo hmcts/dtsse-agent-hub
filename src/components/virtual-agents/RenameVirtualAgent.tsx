@@ -4,7 +4,7 @@ import { MAX_NAME_LENGTH } from "@/virtual-agents/limits";
 import type { VirtualAgentCard } from "@/virtual-agents/views";
 
 const INPUT = "mt-1 w-full rounded-md border border-hub-line bg-hub-pane px-2 py-1 font-mono text-sm text-hub-text";
-const BUTTON = "rounded border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
+const BUTTON = "rounded-sm border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
 
 /** Its session is renamed with it, so other people address it by the new name; one being deleted keeps its name. */
 export function RenameVirtualAgent({ agent, rename }: { agent: Pick<VirtualAgentCard, "id" | "name" | "desired">; rename: FormAction }) {
