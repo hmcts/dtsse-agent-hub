@@ -12,6 +12,18 @@ import { movedHubPath } from "@/web/home";
  * `authSettings()` is deliberately not called here: it throws on incomplete configuration, and throwing from the
  * proxy would take `/health` down too. The login route calls it, where the error is visible without costing probes.
  */
+/**
+ * A pathname that cannot name anywhere but this origin.
+ *
+ * `new URL("//elsewhere.example", origin)` is a scheme-relative URL, so the base is discarded and the result is
+ * another site altogether: without this, a request for `//elsewhere.example/` is answered with a 308 sending the
+ * person there, from above the sign-in check and so without a session. Browsers normalise a leading backslash to a
+ * slash before sending, so `/\elsewhere.example/` arrives the same way and collapses here too.
+ */
+function ownPath(pathname: string): string {
+  return `/${pathname.replace(/^[/\\]+/, "")}`;
+}
+
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl;
   // Ahead of everything else: the viewer's host serves agents' pages, whose paths and queries are theirs, and never
@@ -25,12 +37,12 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   }
   // Ahead of the sign-in check, which would otherwise copy the query into the login's `redirect=`.
   if (carriesSecret(request.method, request.nextUrl.pathname, request.nextUrl.searchParams)) {
-    return NextResponse.redirect(new URL(request.nextUrl.pathname, request.nextUrl.origin), 303);
+    return NextResponse.redirect(new URL(ownPath(request.nextUrl.pathname), request.nextUrl.origin), 303);
   }
   // The redirect Next makes itself without `skipTrailingSlashRedirect`, which the viewer needs off: a pod's `/docs/` is
   // not its `/docs`. Below `carriesSecret`, so a pasted secret is already stripped by the time this copies the query.
   if (pathname.length > 1 && pathname.endsWith("/")) {
-    return NextResponse.redirect(new URL(`${pathname.replace(/\/+$/, "") || "/"}${search}`, request.nextUrl.origin), 308);
+    return NextResponse.redirect(new URL(`${ownPath(pathname).replace(/\/+$/, "") || "/"}${search}`, request.nextUrl.origin), 308);
   }
   // The hub's bare addresses are sent to `/hub` from here, and never from `redirects()` in next.config.mjs, which
   // Next checks ahead of the proxy: a 308 from there repeats the query into its own `Location`, and Traefik's access

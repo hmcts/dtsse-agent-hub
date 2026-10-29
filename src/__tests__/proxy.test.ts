@@ -318,3 +318,52 @@ describe("proxy for the viewer's host", () => {
     expect((await proxy(onHost("agent-hub.example", "/hub"))).status).toBe(307);
   });
 });
+
+/**
+ * A path beginning with two slashes is a scheme-relative URL, so a `Location` built from one names another site and
+ * the base origin is thrown away. Both of the redirects below sit above the sign-in check, so neither needs a
+ * session: an unauthenticated request was enough to be sent anywhere.
+ *
+ * The request URL is written out in full rather than through `askWith`, because `new URL("//elsewhere.example/",
+ * base)` resolves against nothing and would make the test's own host `elsewhere.example` before the proxy saw it.
+ */
+describe("proxy redirects staying on their own origin", () => {
+  beforeEach(() => {
+    vi.stubEnv("AUTH_DISABLED", "true");
+    vi.stubEnv("SESSION_SECRET", SECRET);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function asked(url: string, method = "GET"): NextRequest {
+    return new NextRequest(new URL(url), { method });
+  }
+
+  it.each([
+    ["//elsewhere.example/", "https://agent-hub.example/elsewhere.example"],
+    ["///elsewhere.example/", "https://agent-hub.example/elsewhere.example"],
+    ["//elsewhere.example/docs/", "https://agent-hub.example/elsewhere.example/docs"]
+  ])("should keep the trailing-slash redirect for %s on this origin", async (path, location) => {
+    const response = await proxy(asked(`https://agent-hub.example${path}`));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(location);
+  });
+
+  it("should keep the secret-stripping redirect on this origin", async () => {
+    const response = await proxy(asked("https://agent-hub.example//elsewhere.example?token=11a2b3c4d5e6f708192a3b4c5d"));
+
+    expect(response.status).toBe(303);
+    expect(new URL(response.headers.get("location") ?? "").origin).toBe("https://agent-hub.example");
+  });
+
+  it.each([
+    "//elsewhere.example/",
+    "//elsewhere.example?token=11a2b3c4d5e6f708192a3b4c5d"
+  ])("should never name another origin in the Location for %s", async (path) => {
+    const response = await proxy(asked(`https://agent-hub.example${path}`));
+
+    expect(new URL(response.headers.get("location") ?? "").host).toBe("agent-hub.example");
+  });
+});
