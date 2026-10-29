@@ -322,6 +322,29 @@ describe("sweepTranscripts", () => {
     expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 0, trimmed: 0 });
   });
 
+  it("should apply the cap only to an agent heard from lately, and again as soon as one is", async () => {
+    const now = Date.now();
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const heardFrom = async (at: number) => await prisma.agent.update({ where: { id: alicesAgent }, data: { lastHeartbeatAt: new Date(at) } });
+    await accepted(alicesAgent, [
+      entry("q1", { occurred_at: iso(now - 3000) }),
+      entry("q2", { occurred_at: iso(now - 2000) }),
+      entry("q3", { occurred_at: iso(now - 1000) })
+    ]);
+
+    // Silent since the day before yesterday, so nothing is still arriving for it and the cap is not applied. The
+    // entries are recent: it is the agent's own last heartbeat that decides, never a timestamp its client sent.
+    await heardFrom(now - 2 * DAY_MS);
+    expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 0, trimmed: 0 });
+    expect(await prisma.transcriptEntry.count()).toBe(3);
+
+    await heardFrom(now);
+
+    expect(await sweepTranscripts(prisma, { maxPerAgent: 2 })).toEqual({ expired: 0, trimmed: 1 });
+    const kept = await prisma.transcriptEntry.findMany({ orderBy: { id: "asc" } });
+    expect(kept.map((row) => row.entryKey)).toEqual(["q2", "q3"]);
+  });
+
   it("should stand down while another pod holds the transcript sweep lock", async () => {
     const other = await connect();
     try {
