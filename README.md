@@ -209,13 +209,15 @@ whatever `hai` or Claude Code says, instead of a boot failure naming the group t
 either the group check through Graph that `hai` already has on its own unset path, or the hub checking the group when
 it decides the owner's route.
 
-**Known gap: the summariser has no gateway credential.** The stop-worker's summariser spawns `claude` itself rather
-than through `hai` (`packages/agent-hub/src/stop-worker/haiku.ts`), and takes its `apiKeyHelper` from the settings the
-pod hands it as `AGENT_HUB_CLAUDE_SETTINGS`. Stage 1 used to put the helper it wrote there; the helper is `hai`'s now,
-written in `hai`'s own state directory, and nothing tells the summariser where. So on the `gateway` route it inherits
-the route's Bedrock environment with no token to send and its one model call fails, which costs the stopping session
-its summary and nothing else. Fixing it wants `hai` to say where the helper is, rather than this repository guessing
-at a path inside it.
+**The summariser's gateway credential comes from `hai`, as one variable.** The stop-worker's summariser spawns
+`claude` itself rather than through `hai` (`packages/agent-hub/src/stop-worker/haiku.ts`), and `claude --settings`
+keeps only the last one it is given, so it has to name the `apiKeyHelper` in its own settings. The helper is `hai`'s,
+written in `hai`'s own state directory, so `hai` publishes its path into the session as `HAI_API_KEY_HELPER` on that
+route and the summariser reads it from there. Nothing here reconstructs the path: a second copy of `hai`'s state-
+directory layout is the same drift that naming the gateway host here would be. The variable is set on the
+`ai-gateway` route alone and `hai` clears an inherited one on every other, so the `own_licence` route — which has no
+helper at all — is unaffected, and a pod running a `hai` from before the variable existed sees none and behaves as it
+did: the summary of a stopping session is lost, and nothing else.
 
 An Azure sign-in (`azure`) is optional on `own_licence` and needed on `gateway`. It lets Claude run `az` as the owner — pipelines,
 environments, AKS, Key Vault and the workspace scripts that fetch secrets with `az` — and gives Jenkins the owner's
