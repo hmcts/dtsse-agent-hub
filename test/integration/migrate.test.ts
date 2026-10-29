@@ -132,6 +132,8 @@ describe("migrate", () => {
       "assistant_template",
       "assistant_upload",
       "assistant_upload_part",
+      "assistant_welsh_file",
+      "assistant_welsh_job",
       "channel",
       "credential",
       "delivery",

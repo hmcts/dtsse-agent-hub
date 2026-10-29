@@ -3,6 +3,7 @@ import { type OnOpen, sseEvent } from "../realtime/sse.ts";
 import type { LookupFrame } from "./lookup-store.ts";
 import type { Wake } from "./store.ts";
 import type { UploadDeletion } from "./upload-disk.ts";
+import type { WelshFrame } from "./welsh-store.ts";
 
 export interface SessionStreamSources {
   hub: EventHub;
@@ -16,6 +17,8 @@ export interface SessionStreamSources {
   deletions: () => Promise<UploadDeletion[]>;
   /** The lookup to send the pod, `undefined` once it is answered or when it is not this assistant's. */
   lookup: (lookupId: string) => Promise<LookupFrame | undefined>;
+  /** The Welsh job to send the pod, `undefined` once it is answered or when it is not this assistant's. */
+  welsh: (jobId: string) => Promise<WelshFrame | undefined>;
 }
 
 export function wakeFrame(wake: Wake): string {
@@ -32,6 +35,10 @@ export function interruptFrame(conversationId: string): string {
 
 export function lookupFrame(lookup: LookupFrame): string {
   return sseEvent({ event: "lookup", data: JSON.stringify(lookup) });
+}
+
+export function welshFrame(job: WelshFrame): string {
+  return sseEvent({ event: "welsh", data: JSON.stringify(job) });
 }
 
 export function deleteUploadsFrame(deletion: UploadDeletion): string {
@@ -55,7 +62,8 @@ export function deleteUploadsFrame(deletion: UploadDeletion): string {
  * A lookup is read and sent as soon as it is asked for, beside the queue rather than behind it, because somebody is
  * typing and waiting for it; and like an interrupt it is never replayed, since the search it was for has been replaced
  * by the time another stream opens. A read that fails loses that one lookup, which the browser reports as a timeout,
- * rather than ending the stream.
+ * rather than ending the stream. A Welsh job is sent the same way: once, as it is started, and never replayed — a job
+ * lost to a reconnect times out, and the person starts it again, which is safer than running a pull request twice.
  *
  * An interrupt is the exception to all of that: it is neither replayed on connect nor resent on a `resync`, because
  * it names no state to reach but a turn to end, and the turn a missed one would have ended is over by the time
@@ -126,6 +134,15 @@ export function sessionStream(virtualAgentId: string, sources: SessionStreamSour
           (lookup) => {
             if (open && lookup !== undefined) {
               send(lookupFrame(lookup));
+            }
+          },
+          () => undefined
+        );
+      } else if (event.type === "assistant_welsh" && event.virtual_agent_id === virtualAgentId) {
+        sources.welsh(event.job_id).then(
+          (job) => {
+            if (open && job !== undefined) {
+              send(welshFrame(job));
             }
           },
           () => undefined

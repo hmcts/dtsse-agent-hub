@@ -510,6 +510,15 @@ export function canLookUpAtlassian(viewerOid: string, virtualAgent: { ownerOid: 
 }
 
 /**
+ * Whether `viewerOid` may run a Welsh translation job through a virtual agent, or download one of its Welsh files: its
+ * owner, and nobody else. A job runs with the owner's own GitHub and Atlassian sign-ins, opening pull requests and
+ * editing Jira stories as them, and its spreadsheets are theirs. No grant reaches it, not even a `write` one.
+ */
+export function canUseWelsh(viewerOid: string, virtualAgent: { ownerOid: string }): boolean {
+  return viewerOid === virtualAgent.ownerOid;
+}
+
+/**
  * Only its owner reads or changes where their documents go by default. Nothing about it is a secret, but it is theirs
  * alone, as their templates are, and no grant reaches it.
  */

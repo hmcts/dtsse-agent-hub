@@ -60,7 +60,8 @@ export const ENV_KEYS = [
   "TWG_CONFIG_DIR",
   "VIRTUAL_AGENT_IGNORE_PORTS",
   "VIRTUAL_AGENT_PUBLIC_DOMAIN",
-  "VIRTUAL_AGENT_STATE"
+  "VIRTUAL_AGENT_STATE",
+  "VIRTUAL_AGENT_WORKSPACE"
 ] as const;
 
 export type EnvKey = (typeof ENV_KEYS)[number];

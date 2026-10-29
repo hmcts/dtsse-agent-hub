@@ -172,6 +172,7 @@ model User {
   conversationsTheyShared     AssistantConversationShare[] @relation("shareOwner")
   conversationsForkedToThem   AssistantConversationFork[]  @relation("forkRecipient")
   conversationsTheyForked     AssistantConversationFork[]  @relation("forkOwner")
+  assistantWelshFiles         AssistantWelshFile[]
 
   @@map("user")
 }
@@ -450,6 +451,8 @@ model VirtualAgent {
   logins   VirtualAgentLogin[]
   conversations AssistantConversation[]
   lookups       AssistantLookup[]
+  welshJobs     AssistantWelshJob[]
+  welshFiles    AssistantWelshFile[]
 
   @@unique([ownerOid, name], map: "virtual_agent_owner_oid_name_key")
   @@index([ownerOid])
@@ -729,4 +732,47 @@ model AssistantModelChoice {
   owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
 
   @@map("assistant_model_choice")
+}
+
+model AssistantWelshJob {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  virtualAgentId String    @map("virtual_agent_id") @db.Uuid
+  /// One of WELSH_KINDS in src/assistant/welsh.ts.
+  kind           String
+  /// The cft-workspace apps/<product> the job is for.
+  product        String
+  args           Json
+  /// pending, done or failed.
+  status         String    @default("pending")
+  result         Json?
+  /// signed_out or failed, when status is failed.
+  error          String?
+  detail         String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  answeredAt     DateTime? @map("answered_at") @db.Timestamptz(6)
+
+  virtualAgent VirtualAgent         @relation(fields: [virtualAgentId], references: [id], onDelete: Cascade)
+  files        AssistantWelshFile[]
+
+  @@index([virtualAgentId, createdAt], map: "assistant_welsh_job_agent_idx")
+  @@map("assistant_welsh_job")
+}
+
+model AssistantWelshFile {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  virtualAgentId String   @map("virtual_agent_id") @db.Uuid
+  ownerOid       String   @map("owner_oid")
+  /// Set for a file a job made; null for one the person uploaded.
+  jobId          String?  @map("job_id") @db.Uuid
+  name           String
+  bytes          Bytes
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  virtualAgent VirtualAgent       @relation(fields: [virtualAgentId], references: [id], onDelete: Cascade)
+  owner        User               @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)
+  job          AssistantWelshJob? @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([virtualAgentId, createdAt], map: "assistant_welsh_file_agent_idx")
+  @@index([jobId], map: "assistant_welsh_file_job_idx")
+  @@map("assistant_welsh_file")
 }

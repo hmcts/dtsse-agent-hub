@@ -186,6 +186,9 @@ export type ConfluencePageFound = {
   ancestors: string[];
 };
 
+/** The answer to one Welsh translation job: what scripts/welsh printed, or why it did not run. */
+export type WelshAnswer = { result: Record<string, unknown> } | { error: "signed_out" | "failed"; detail?: string };
+
 /** The answer to one lookup: what twg found, or why it found nothing. */
 export type LookupAnswer = { results: JiraProjectFound[] | ConfluencePageFound[] } | { error: "signed_out" | "failed" | "superseded"; detail?: string };
 
@@ -441,6 +444,12 @@ export type Api = {
   putConfluenceExport: (agentId: string, body: ConfluenceExportReport) => Promise<null>;
   /** The supervisor's answer to one of its owner's Jira or Confluence lookups. */
   putLookup: (virtualId: string, lookupId: string, body: LookupAnswer) => Promise<null>;
+  /** The supervisor's answer to one of its owner's Welsh translation jobs. */
+  putWelsh: (virtualId: string, jobId: string, body: WelshAnswer) => Promise<null>;
+  /** A spreadsheet a Welsh job made, for its owner to download; sent before the job's answer. At most 5 MiB. */
+  putWelshFile: (virtualId: string, jobId: string, name: string, bytes: Uint8Array) => Promise<{ file_id: string }>;
+  /** A spreadsheet the owner uploaded for a Welsh job to read. At most 5 MiB, so read whole. */
+  welshFile: (virtualId: string, fileId: string) => Promise<Uint8Array>;
   /** One part of a file attached to a message in this agent's conversation. One part, never the whole file. */
   attachmentPart: (agentId: string, uploadId: string, index: number) => Promise<Uint8Array>;
   /** The whole file is on this pod's disk, which is what makes the hub delete its part rows. */
@@ -528,6 +537,20 @@ export function createApi({
     }
     return new Uint8Array(await res.arrayBuffer());
   }
+  /** A Welsh spreadsheet up to the hub: raw bytes, its name in a header, on the part timeout since it can be 5 MiB. */
+  async function putBytes<T>(path: string, name: string, bytes: Uint8Array, timeoutMs = PART_TIMEOUT_MS): Promise<T> {
+    const res = await fetchImpl(`${base}${path}`, {
+      method: "PUT",
+      headers: await headers({ "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(name) }),
+      body: bytes,
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    const json: unknown = readBody(await res.text());
+    if (!res.ok) {
+      throw new ApiError(res.status, json as ApiErrorBody | null, "PUT", path);
+    }
+    return json as T;
+  }
   // Both streams are framed alike, so the agent stream and a pod's sessions stream open the same way.
   async function openStream(path: string, { signal, lastEventId }: StreamOptions = {}): Promise<Response> {
     const h = await headers({ Accept: "text/event-stream" });
@@ -610,6 +633,9 @@ export function createApi({
     putJiraExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/jira`, body),
     putConfluenceExport: (agentId, body) => request<null>("PUT", `${a(agentId)}/confluence`, body),
     putLookup: (virtualId, lookupId, body) => request<null>("PUT", v(virtualId, `lookups/${encodeURIComponent(lookupId)}`), body),
+    putWelsh: (virtualId, jobId, body) => request<null>("PUT", v(virtualId, `welsh/${encodeURIComponent(jobId)}`), body),
+    putWelshFile: (virtualId, jobId, name, bytes) => putBytes<{ file_id: string }>(v(virtualId, `welsh/${encodeURIComponent(jobId)}/files`), name, bytes),
+    welshFile: (virtualId, fileId) => requestBytes(v(virtualId, `welsh/files/${encodeURIComponent(fileId)}`)),
     attachmentPart: (agentId, uploadId, index) => requestBytes(`${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/parts/${index}`),
     attachmentFetched: (agentId, uploadId) => request<null>("POST", `${a(agentId)}/attachments/${encodeURIComponent(uploadId)}/fetched`),
     stream: (id, opts) => openStream(`${a(id)}/stream`, opts)

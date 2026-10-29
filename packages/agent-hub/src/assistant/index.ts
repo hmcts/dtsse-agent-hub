@@ -71,3 +71,5 @@ export {
 } from "./supervisor.ts";
 export type { CreateTmuxOptions, ProgramCheck, StartSessionOptions, Tmux, TmuxExec, TmuxResult } from "./tmux.ts";
 export { canRunProgram, claudeCommand, commandProgram, createTmux, PROMPT_FILE, tmuxName } from "./tmux.ts";
+export type { WelshDeps, WelshFrame, WelshKind, WelshRunner } from "./welsh.ts";
+export { createWelshRunner, parseWelshFrame, runWelsh, welshArgs } from "./welsh.ts";

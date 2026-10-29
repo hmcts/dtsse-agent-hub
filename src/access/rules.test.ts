@@ -30,6 +30,7 @@ import {
   canStopAssistantAnswer,
   canSuggestPerson,
   canUseCredentialRoutes,
+  canUseWelsh,
   canViewAgent,
   canViewConversation,
   canViewSharedConversation,
@@ -884,6 +885,18 @@ describe("the people lookup rules", () => {
     it("should not offer the viewer themselves", () => {
       expect(canSuggestPerson(OWNER, { oid: OWNER })).toBe(false);
     });
+  });
+});
+
+describe("the Welsh rule", () => {
+  // A job opens pull requests and edits Jira stories with the owner's own sign-ins, so no grant may reach it.
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s runs a Welsh job through the owner's assistant", (expected, role) => {
+    expect(canUseWelsh(ROLES[role], { ownerOid: OWNER })).toBe(expected);
   });
 });
 

@@ -203,6 +203,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   const questions: Record<string, unknown>[] = [];
   // Every answer a supervisor gave to a lookup, in the order they came.
   const lookupAnswers: { virtual_id: string; lookup_id: string; body: Record<string, unknown> }[] = [];
+  const welshAnswers: { virtual_id: string; job_id: string; body: Record<string, unknown> }[] = [];
   // upload id → the parts the pod may still fetch, and whether it has reported having the whole file
   const attachments = new Map<string, { parts: Uint8Array[]; fetched: boolean }>();
   // virtual agent id → { owner, status: [], credentials: Map, prompts: [], codes: Map, completes: [], ports: [], wakes: [], sessionReports: [] }
@@ -359,6 +360,14 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return send(res, 400, { error: "bad lookup answer" });
       }
       lookupAnswers.push({ virtual_id: id, lookup_id: kind, body });
+      return send(res, 204);
+    }
+    if (req.method === "PUT" && area === "welsh" && kind && !sub) {
+      const answered = typeof body.result === "object" ? body.result !== null : ["signed_out", "failed"].includes(body.error);
+      if (!answered) {
+        return send(res, 400, { error: "bad welsh answer" });
+      }
+      welshAnswers.push({ virtual_id: id, job_id: kind, body });
       return send(res, 204);
     }
     if (req.method === "PUT" && area === "uploads" && !kind) {
@@ -933,6 +942,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     confluenceReports,
     questions,
     lookupAnswers,
+    welshAnswers,
     attachments,
     sessionStreams,
     // A wake for one of a virtual agent's conversations: kept, and sent on every sessions stream, until a session
@@ -954,6 +964,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     // The owner searching their Jira or Confluence. Sent once and never replayed, as the hub does.
     sendLookup(virtualId: string, data: Record<string, unknown>) {
       sessionStreams.get(virtualId)?.write(`event: lookup\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+    // The owner starting a Welsh translation job. Sent once and never replayed, as the hub does.
+    sendWelsh(virtualId: string, data: Record<string, unknown>) {
+      sessionStreams.get(virtualId)?.write(`event: welsh\ndata: ${JSON.stringify(data)}\n\n`);
     },
     sendClose(virtualId: string, data: { conversation_id: string }) {
       const v = virtuals.get(virtualId) as VirtualRecord;

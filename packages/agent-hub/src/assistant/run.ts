@@ -8,9 +8,10 @@ import { atlassianLogin } from "../virtual/atlassian.ts";
 import { run } from "../virtual/sign-in.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
-import { createLookupRunner, type LookupDeps } from "./lookups.ts";
+import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";
 import { type MemoryFs, reportMemory } from "./memory.ts";
 import { type AssistantSupervisor, type CreateAssistantSupervisorOptions, createAssistantSupervisor, idleMinutes } from "./supervisor.ts";
+import { createWelshRunner } from "./welsh.ts";
 
 const TICK_MS = 2000;
 const STREAM_IDLE_MS = 45000;
@@ -23,7 +24,7 @@ const STREAM_IDLE_MS = 45000;
 const RECONCILE_MS = 10 * 60 * 1000;
 
 export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOptions, "api" | "id"> & {
-  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations" | "putUploads" | "putLookup" | "putMemory">;
+  api: Pick<Api, "putSessions" | "sessionsStream" | "conversations" | "putUploads" | "putLookup" | "putMemory" | "putWelsh" | "putWelshFile" | "welshFile">;
   id: string;
   /** The filesystem the uploads report and the deletions use; a test passes its own. */
   uploadsFs?: DiskFs;
@@ -31,6 +32,8 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
   cgroupRoot?: string;
   memoryFs?: MemoryFs;
   /** How lookups run twg and sign it in; a test passes its own rather than a twg on PATH. */
+  /** How Welsh jobs run cft-workspace's scripts/welsh, and where that checkout is; a test passes its own. */
+  welsh?: { run?: Run; workspace?: string };
   lookups?: Partial<LookupDeps>;
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
   signal?: AbortSignal;
@@ -54,6 +57,7 @@ export async function runAssistantSupervisor({
   reconcileMs = Number(env.AGENT_HUB_UPLOAD_RECONCILE_MS) || RECONCILE_MS,
   uploadsFs,
   lookups: lookupDeps = {},
+  welsh: welshDeps = {},
   cgroupRoot,
   memoryFs,
   ...options
@@ -68,6 +72,16 @@ export async function runAssistantSupervisor({
     run: lookupDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
     login: lookupDeps.login ?? (async () => (await atlassianLogin({ env })) !== "not-signed-in"),
     ...(lookupDeps.env === undefined ? {} : { env: lookupDeps.env })
+  });
+  // Welsh jobs run beside the supervisor too: a quick one has somebody waiting on the page, and a long one runs for
+  // minutes that no wake should wait behind.
+  const welsh = createWelshRunner({
+    api,
+    id,
+    env,
+    say,
+    run: welshDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
+    workspace: welshDeps.workspace ?? env.VIRTUAL_AGENT_WORKSPACE ?? "/workspace/cft-workspace"
   });
   const uploads = {
     api,
@@ -157,6 +171,13 @@ export async function runAssistantSupervisor({
             lookups.lookup(JSON.parse(event.data));
           } catch {
             say("unparseable lookup event");
+          }
+        } else if (event.event === "welsh") {
+          // Not through `handle` either: a job can run for minutes, and the wakes behind it must not wait.
+          try {
+            welsh.welsh(JSON.parse(event.data));
+          } catch {
+            say("unparseable welsh event");
           }
         } else if (event.event === "delete_uploads") {
           handle(removeUploads, event);
