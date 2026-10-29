@@ -2,7 +2,10 @@
 # on a fixed name. They do still share the 5432 binding, which is correct — they would be the same `DATABASE_URL`.
 services:
   postgres:
-    image: postgres:18-alpine
+    # Held at 16 to match the integration-test container in `Jenkinsfile_CNP` and the AAT server in
+    # `infrastructure/postgres.tf`: the migrations here are hand-written SQL, so a local server ahead of those would
+    # accept syntax the gate and the deployed database reject.
+    image: postgres:16-alpine
     # Durability off, because nothing on this server is worth recovering: it holds `yarn dev`'s database and the
     # integration suite's, both of which are rebuilt by a migrate. It is the largest single thing the suite's speed
     # turns on — every test that touches the database commits about seven times, and each `DROP DATABASE` forces a
@@ -23,10 +26,8 @@ services:
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       - "5432:5432"
-    # The mount is the parent, not `data/`: from 18 the image keeps the cluster in a major-version directory
-    # (`/var/lib/postgresql/18/docker`) and refuses to start if it finds a mount at the old `data/` path.
     volumes:
-      - postgres-data:/var/lib/postgresql
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hmcts -d agent_hub"]
       interval: 5s
