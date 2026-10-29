@@ -1,7 +1,7 @@
 import { canOpenVirtualAgentPort } from "../access/rules.ts";
 import { publicUrl } from "../virtual-agents/ports.ts";
 import { declaresTooLongBody, type Fetch, forward, PROXY_BODY_LIMIT_BYTES, UpstreamUnreachable } from "./forward.ts";
-import { AUTH_PATH, landingPath, parseViewerPath, TICKET_PARAMETER, ticketPath, viewerCookieName, viewerPrefix } from "./paths.ts";
+import { AUTH_PATH, landingPath, parseViewerPath, refererTarget, TICKET_PARAMETER, ticketPath, viewerCookieName, viewerPrefix } from "./paths.ts";
 import type { ViewerSettings } from "./settings.ts";
 import { openTicket, openViewerCookie, sealTicket, sealViewerCookie, VIEWER_COOKIE_MAX_AGE } from "./tickets.ts";
 
@@ -82,8 +82,15 @@ export async function serveViewer(request: Request, pathAndQuery: string, deps: 
   const target = parseViewerPath(pathAndQuery);
 
   switch (target.kind) {
-    case "none":
+    case "none": {
+      // A root-relative URL from a port's page: sent back under that page's prefix, where the port's own cookie and
+      // checks apply as to any other request. 307 keeps the method and body, so a form posted to `/submit` arrives.
+      const location = refererTarget(request.headers.get("referer"), settings.host, pathAndQuery);
+      if (location !== undefined) {
+        return new Response(null, { status: 307, headers: { ...NO_STORE, location } });
+      }
       return text(404, "Not found");
+    }
 
     case "bare-port":
       return new Response(null, { status: 308, headers: { location: `${viewerPrefix(target.virtualAgentId, target.port)}/${target.search}` } });

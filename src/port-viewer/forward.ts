@@ -37,7 +37,13 @@ const REPLACED_ON_REQUEST = new Set([
  * `fetch` decodes what it receives, so the encoding and length no longer describe the body it hands on. HSTS from a
  * pod is not the viewer's to set; the hub's own configuration sets the viewer's.
  */
-const DROPPED_FROM_RESPONSE = new Set(["content-encoding", "content-length", "strict-transport-security", "set-cookie", "location"]);
+const DROPPED_FROM_RESPONSE = new Set(["content-encoding", "content-length", "strict-transport-security", "set-cookie", "location", "referrer-policy"]);
+
+/**
+ * In place of whatever the pod asks for, as helmet's `no-referrer` default: the viewer finds the port a root-relative
+ * request came from by its `Referer`, which `same-origin` still sends to the viewer and never to anywhere else.
+ */
+export const VIEWER_REFERRER_POLICY = "same-origin";
 
 /** A `Connection` header can name further hop-by-hop headers. */
 function connectionTokens(headers: Headers): Set<string> {
@@ -181,6 +187,7 @@ export function forwardedResponseHeaders(incoming: Headers, target: Pick<Forward
     }
     headers.append(name, value);
   }
+  headers.set("referrer-policy", VIEWER_REFERRER_POLICY);
   const location = incoming.get("location");
   if (location !== null) {
     headers.set("location", rewriteLocation(location, target));

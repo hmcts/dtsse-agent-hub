@@ -154,6 +154,7 @@ describe("forwardedResponseHeaders", () => {
       "content-length": "10",
       "strict-transport-security": "max-age=1",
       "transfer-encoding": "chunked",
+      "referrer-policy": "no-referrer",
       location: "/next"
     });
     incoming.append("set-cookie", "a=1; Path=/");
@@ -164,6 +165,7 @@ describe("forwardedResponseHeaders", () => {
     expect(headers.get("content-type")).toBe("text/html");
     expect(headers.get("location")).toBe(`${PREFIX}/next`);
     expect(headers.getSetCookie()).toEqual([`a=1; Path=${PREFIX}/`]);
+    expect(headers.get("referrer-policy")).toBe("same-origin");
     for (const name of ["content-encoding", "content-length", "strict-transport-security", "transfer-encoding"]) {
       expect(headers.has(name)).toBe(false);
     }

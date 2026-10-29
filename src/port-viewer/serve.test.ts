@@ -83,6 +83,26 @@ describe("serveViewer", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("should send a root-relative request from a port's page back under that page's prefix, keeping its method", async () => {
+    const request = new Request("https://agent-hub-viewer.example/submit?x=1", {
+      method: "POST",
+      body: "a=1",
+      headers: { referer: `https://agent-hub-viewer.example${PREFIX}/form` }
+    });
+
+    const response = await serveViewer(request, "/submit?x=1", deps());
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`${PREFIX}/submit?x=1`);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("should answer 404 outside every prefix when the Referer names no port's page", async () => {
+    const request = new Request("https://agent-hub-viewer.example/style.css", { headers: { referer: "https://elsewhere.example/" } });
+
+    expect((await serveViewer(request, "/style.css", deps())).status).toBe(404);
+  });
+
   it("should add the slash a bare prefix lacks, so its cookie is sent", async () => {
     const response = await serveViewer(new Request("https://agent-hub-viewer.example/x"), `${PREFIX}?a=1`, deps());
 

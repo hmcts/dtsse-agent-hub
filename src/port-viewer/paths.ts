@@ -76,3 +76,28 @@ export function ticketPath(virtualAgentId: string, port: number, path: string): 
 export function landingPath(value: string | null | undefined): string {
   return safeReturnTo(value);
 }
+
+/**
+ * The port whose page asked for `pathAndQuery` from outside every prefix, read from the request's `Referer`, and
+ * where under that port's prefix the request belongs. A server that thinks it is at `/` writes links, assets and
+ * form actions from `/`, which the browser sends to the viewer's root. Only a page on the viewer's own host, under a
+ * port's prefix, counts, and only a path from `/` that is not the viewer's own `AUTH_PATH`.
+ */
+export function refererTarget(referer: string | null, viewerHost: string, pathAndQuery: string): string | undefined {
+  if (referer === null || !URL.canParse(referer) || !pathAndQuery.startsWith("/") || pathAndQuery.startsWith("//")) {
+    return undefined;
+  }
+  const from = new URL(referer);
+  if (from.protocol !== "https:" || from.host !== viewerHost) {
+    return undefined;
+  }
+  const page = parseViewerPath(from.pathname);
+  if (page.kind !== "port" && page.kind !== "bare-port") {
+    return undefined;
+  }
+  const queryAt = pathAndQuery.indexOf("?");
+  if ((queryAt === -1 ? pathAndQuery : pathAndQuery.slice(0, queryAt)) === AUTH_PATH) {
+    return undefined;
+  }
+  return `${viewerPrefix(page.virtualAgentId, page.port)}${pathAndQuery}`;
+}
