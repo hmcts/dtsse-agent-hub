@@ -10,3 +10,17 @@
  * conclude nothing arrived would make the suite slower for no added confidence.
  */
 export const WAIT_MS = 15_000;
+
+/**
+ * Waits until `check` holds, which is how a test watches something a timer drives — a sweeper's ticks, a log it
+ * writes — without a sleep long enough to be safe on a loaded agent and slow on every passing run.
+ */
+export async function until(check: () => boolean, timeoutMs = WAIT_MS): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) {
+      throw new Error("timed out waiting for the sweeper");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
