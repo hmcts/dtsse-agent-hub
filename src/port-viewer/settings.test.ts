@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { requestHost, viewerHost, viewerSettings } from "./settings.ts";
+import { requestHost, viewerHost, viewerRouteHost, viewerSettings } from "./settings.ts";
 
 const COMPLETE = {
   AGENT_HUB_VIEWER_HOST: "agent-hub-viewer.aat.platform.hmcts.net",
@@ -18,6 +18,24 @@ describe("viewerHost", () => {
     [" Agent-Hub-Viewer.Example ", "agent-hub-viewer.example"]
   ])("should read AGENT_HUB_VIEWER_HOST=%j as %j", (value, host) => {
     expect(viewerHost({ AGENT_HUB_VIEWER_HOST: value })).toBe(host);
+  });
+});
+
+describe("viewerRouteHost", () => {
+  it("should route the viewer's own host to the viewer", () => {
+    expect(viewerRouteHost(COMPLETE)).toBe("agent-hub-viewer.aat.platform.hmcts.net");
+  });
+
+  it("should leave the hub's host to the hub when the viewer is named as it, rather than 404 the hub and its probes", () => {
+    expect(viewerRouteHost({ ...COMPLETE, AGENT_HUB_VIEWER_HOST: "agent-hub.aat.platform.hmcts.net" })).toBeUndefined();
+  });
+
+  it("should still route the viewer's host when the hub's own origin is unknown, so agents' paths never reach hub routes", () => {
+    expect(viewerRouteHost({ ...COMPLETE, ENTRA_REDIRECT_URI: undefined })).toBe("agent-hub-viewer.aat.platform.hmcts.net");
+  });
+
+  it("should route nothing when no viewer host is set", () => {
+    expect(viewerRouteHost({ ...COMPLETE, AGENT_HUB_VIEWER_HOST: undefined })).toBeUndefined();
   });
 });
 

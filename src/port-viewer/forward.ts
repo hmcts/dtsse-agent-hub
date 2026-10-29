@@ -92,13 +92,21 @@ export function forwardedRequestHeaders(incoming: Headers, target: ForwardTarget
 }
 
 /**
+ * A path the pod built from the `X-Forwarded-Prefix` it was sent, which putting under the prefix again would leave
+ * pointing at a port named `<virtual agent id>`.
+ */
+function alreadyPrefixed(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+/**
  * A redirect the pod sends, moved under the port's prefix when it points back at the pod: an absolute URL on the
- * upstream origin, or a path from `/`. A relative path already resolves under the prefix, and a redirect to anywhere
- * else is left alone.
+ * upstream origin, or a path from `/`. A relative path already resolves under the prefix, a path a prefix-aware pod
+ * has put under it already is left as it is, and a redirect to anywhere else is left alone.
  */
 export function rewriteLocation(location: string, target: Pick<ForwardTarget, "upstreamOrigin" | "prefix">): string {
   if (location.startsWith("/") && !location.startsWith("//")) {
-    return `${target.prefix}${location}`;
+    return alreadyPrefixed(location, target.prefix) ? location : `${target.prefix}${location}`;
   }
   if (!URL.canParse(location)) {
     return location;
@@ -109,20 +117,35 @@ export function rewriteLocation(location: string, target: Pick<ForwardTarget, "u
   if (url.hostname !== new URL(target.upstreamOrigin).hostname) {
     return location;
   }
-  return `${target.prefix}${url.pathname}${url.search}${url.hash}`;
+  const prefix = alreadyPrefixed(url.pathname, target.prefix) ? "" : target.prefix;
+  return `${prefix}${url.pathname}${url.search}${url.hash}`;
+}
+
+/**
+ * A `__Host-` cookie, which a browser accepts only with `Path=/` and no `Domain`. Matched without case, as the
+ * prefix is in RFC 6265bis and in the browsers.
+ */
+function hostPrefixedCookie(pair: string): boolean {
+  return pair.toLowerCase().startsWith("__host-");
 }
 
 /**
  * A cookie the pod sets, kept on the viewer's host and under the port's prefix: `Domain` would reach past the viewer,
  * and a `Path` from `/` would be sent to every other agent's prefix too. Without `Path` the browser already scopes it
  * to the request's directory, which is under the prefix. A cookie named like the viewer's own is refused.
+ *
+ * A `__Host-` cookie is the exception, and keeps `Path=/`: under the prefix the browser would refuse it outright, so
+ * an app that names its session or CSRF cookie that way could never sign anyone in. The cost is that it reaches every
+ * other agent's prefix on the viewer's host, which `Path` only ever discouraged rather than enforced.
  */
 export function rewriteSetCookie(value: string, prefix: string): string | undefined {
   const [pair, ...attributes] = value.split(";");
   if (pair === undefined || pair.trim().startsWith(VIEWER_COOKIE_PREFIX)) {
     return undefined;
   }
+  const hostPrefixed = hostPrefixedCookie(pair.trim());
   const kept: string[] = [pair.trim()];
+  let path = false;
   for (const attribute of attributes) {
     const trimmed = attribute.trim();
     const name = trimmed.split("=", 1)[0]!.trim().toLowerCase();
@@ -130,11 +153,21 @@ export function rewriteSetCookie(value: string, prefix: string): string | undefi
       continue;
     }
     if (name === "path") {
-      const path = trimmed.slice(trimmed.indexOf("=") + 1).trim();
-      kept.push(`Path=${prefix}${path.startsWith("/") ? path : "/"}`);
+      path = true;
+      const asked = trimmed.slice(trimmed.indexOf("=") + 1).trim();
+      if (hostPrefixed) {
+        kept.push("Path=/");
+      } else if (alreadyPrefixed(asked, prefix)) {
+        kept.push(`Path=${asked}`);
+      } else {
+        kept.push(`Path=${prefix}${asked.startsWith("/") ? asked : "/"}`);
+      }
       continue;
     }
     kept.push(trimmed);
+  }
+  if (hostPrefixed && !path) {
+    kept.push("Path=/");
   }
   return kept.join("; ");
 }

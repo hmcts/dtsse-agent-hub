@@ -302,4 +302,19 @@ describe("proxy for the viewer's host", () => {
     expect(response.headers.get("location")).toBe("https://agent-hub.example/agents/va-1?tab=x");
     expect((await proxy(onHost("agent-hub.example", "https://agent-hub.example//"))).headers.get("location")).toBe("https://agent-hub.example/");
   });
+
+  it("should strip a secret before dropping the trailing slash, so the 308 never carries it in Location", async () => {
+    const response = await proxy(onHost("agent-hub.example", "/hub/agents/va-1/?token=a-pasted-token"));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/hub/agents/va-1/");
+  });
+
+  // A typo naming the hub itself as the viewer switches the viewer off; it must not take the hub down with it.
+  it("should serve the hub as usual when the viewer is named as the hub's own host", async () => {
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", "agent-hub.example");
+
+    expect((await proxy(onHost("agent-hub.example", "/health"))).status).toBe(200);
+    expect((await proxy(onHost("agent-hub.example", "/hub"))).status).toBe(307);
+  });
 });

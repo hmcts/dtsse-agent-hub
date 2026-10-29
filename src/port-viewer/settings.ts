@@ -38,14 +38,29 @@ function hubOrigin(env: Environment): string | undefined {
 }
 
 /**
- * The viewer's settings, or `undefined` when it is off: no viewer host, or nothing to seal a ticket with or send a
- * person back to. A viewer host that is the hub's own would put agents' pages on the hub's origin, so that is off too.
+ * The host whose requests are the viewer's rather than the hub's, which is `AGENT_HUB_VIEWER_HOST` unless that is the
+ * hub's own: agents' pages do not belong on the hub's origin, and routing the hub's host to the viewer would answer
+ * 404 to the whole hub, probes included. `undefined` leaves the host to the hub, which a misconfigured name should
+ * cost nothing more than the viewer.
  */
-export function viewerSettings(env: Environment = process.env): ViewerSettings | undefined {
+export function viewerRouteHost(env: Environment = process.env): string | undefined {
   const host = viewerHost(env);
   const origin = hubOrigin(env);
+  if (host === undefined || (origin !== undefined && new URL(origin).hostname === host)) {
+    return undefined;
+  }
+  return host;
+}
+
+/**
+ * The viewer's settings, or `undefined` when it is off: no viewer host of its own, or nothing to seal a ticket with
+ * or send a person back to.
+ */
+export function viewerSettings(env: Environment = process.env): ViewerSettings | undefined {
+  const host = viewerRouteHost(env);
+  const origin = hubOrigin(env);
   const secret = sessionSecret(env);
-  if (host === undefined || origin === undefined || secret === undefined || new URL(origin).hostname === host) {
+  if (host === undefined || origin === undefined || secret === undefined) {
     return undefined;
   }
   return { host, hubOrigin: origin, secret };

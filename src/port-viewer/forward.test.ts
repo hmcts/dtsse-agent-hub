@@ -71,6 +71,17 @@ describe("rewriteLocation", () => {
   ])("should send a redirect to %j on to %j", (location, rewritten) => {
     expect(rewriteLocation(location, TARGET)).toBe(rewritten);
   });
+
+  // A pod that reads the `X-Forwarded-Prefix` forwarding sends it — Spring Boot's `ForwardedHeaderFilter`, uvicorn's
+  // `root_path` — builds its own links under the prefix already.
+  it.each([
+    [`${PREFIX}/login`, `${PREFIX}/login`],
+    [PREFIX, PREFIX],
+    [`https://va-abc-8080.preview.platform.hmcts.net${PREFIX}/login?next=%2F`, `${PREFIX}/login?next=%2F`],
+    [`${PREFIX}foo/login`, `${PREFIX}${PREFIX}foo/login`]
+  ])("should leave a redirect to %j that a prefix-aware pod has already put under the prefix", (location, rewritten) => {
+    expect(rewriteLocation(location, TARGET)).toBe(rewritten);
+  });
 });
 
 describe("rewriteSetCookie", () => {
@@ -87,6 +98,24 @@ describe("rewriteSetCookie", () => {
 
   it("should refuse a cookie named like the viewer's own", () => {
     expect(rewriteSetCookie(`ahv-${ID}-8080=forged; Path=/`, PREFIX)).toBeUndefined();
+  });
+
+  it("should leave a Path the pod has already put under the prefix, so the cookie is still sent back", () => {
+    expect(rewriteSetCookie(`sid=1; Path=${PREFIX}/app`, PREFIX)).toBe(`sid=1; Path=${PREFIX}/app`);
+    expect(rewriteSetCookie(`sid=1; Path=${PREFIX}`, PREFIX)).toBe(`sid=1; Path=${PREFIX}`);
+  });
+
+  // A browser refuses a `__Host-` cookie on any Path but `/`, and Auth.js names its CSRF cookie `__Host-` in
+  // production: under the prefix the cookie would vanish and the sign-in fail with nothing said about a cookie.
+  it("should keep Path=/ on a __Host- cookie, whatever Path the pod asked for", () => {
+    expect(rewriteSetCookie("__Host-authjs.csrf-token=abc; Path=/app; Secure; HttpOnly", PREFIX)).toBe(
+      "__Host-authjs.csrf-token=abc; Path=/; Secure; HttpOnly"
+    );
+    expect(rewriteSetCookie("__host-sid=1; Domain=preview.platform.hmcts.net; Path=/; Secure", PREFIX)).toBe("__host-sid=1; Path=/; Secure");
+  });
+
+  it("should give a __Host- cookie the Path=/ it needs when the pod sent none", () => {
+    expect(rewriteSetCookie("__Host-sid=1; Secure", PREFIX)).toBe("__Host-sid=1; Secure; Path=/");
   });
 });
 
