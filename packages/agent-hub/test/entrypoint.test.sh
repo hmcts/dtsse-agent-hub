@@ -585,7 +585,11 @@ case_sigterm_mid_clone() {
     grep -q "clone step" "$T/out" && ok "should log that it stopped the clone step when it gets SIGTERM" || no "did not log the clone stop"
 }
 
-DEFAULT_CLAUDE_MD="You are running in a pod in Preview and connected via the agent hub."
+# Read from the script under test rather than written out again here: a third copy of the words
+# would pass while saying something the pod never gets. That the entrypoint's copy matches the
+# hub's is checked by src/credentials/claude-md.test.ts.
+DEFAULT_CLAUDE_MD=$(sed -n 's/^DEFAULT_CLAUDE_MD="\(.*\)"$/\1/p' "$ENTRYPOINT")
+[ -n "$DEFAULT_CLAUDE_MD" ] || { echo "could not read DEFAULT_CLAUDE_MD from $ENTRYPOINT" >&2; exit 1; }
 same() { [ -f "$2" ] && [ "$(od -c <"$1")" = "$(od -c <"$2")" ]; }
 
 case_claude_md_stored() {

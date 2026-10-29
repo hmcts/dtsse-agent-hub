@@ -703,7 +703,8 @@ jenkins_env() {
 
 CLAUDE_MD="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
 # The same text agent-hub gives a pod whose owner has stored none, for a hub without the kind.
-DEFAULT_CLAUDE_MD="You are running in a pod in Preview and connected via the agent hub."
+# Kept word for word with DEFAULT_CLAUDE_MD in src/credentials/claude-md.ts.
+DEFAULT_CLAUDE_MD="You are running in a pod in Preview and connected via the agent hub. The pod has no Docker: no socket, no root, nothing to escalate to, so anything that reaches for a container fails. Cftlib can run its dependencies as host processes instead, so set RSE_LIB_DEPENDENCY_MODE=process to boot CCD services here. A repo whose cftlib is older than that mode ignores the variable and still reaches for Docker, so bump the plugin version first."
 claude_md_state=""
 
 # Writes the owner's CLAUDE.md, as agent-hub keeps it, to Claude's user memory file. The text goes
