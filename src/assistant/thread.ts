@@ -263,6 +263,13 @@ export function runningHelpers(items: readonly ConversationItem[], since: string
 }
 
 /**
+ * The two wordings for a pod's session that is not there yet, read from here by both the line under the thread and
+ * the one above the composer, so the same wait is never worded two ways on the one screen.
+ */
+const STARTING = "Starting your assistant…";
+const QUEUED = "Waiting for a free assistant…";
+
+/**
  * What to say about an offline agent the person's last message is waiting on.
  *
  * Three different things, and only one of them is ever true of a given chat. A pod's session is either being started
@@ -275,7 +282,7 @@ function wakingLabel(session: SessionState, local: boolean): string {
   if (local) {
     return "Waiting for your session to reconnect…";
   }
-  return session === "queued" ? "Waiting for a free assistant…" : "Starting your assistant…";
+  return session === "queued" ? QUEUED : STARTING;
 }
 
 /**
@@ -330,6 +337,14 @@ export function progress(
   return { state: "idle" };
 }
 
+/**
+ * A wait as it is read out rather than shown. The trailing ellipsis is punctuation for the eye — it says the line is
+ * standing there — and a screen reader either says nothing for it or says "ellipsis", so it goes.
+ */
+function spoken(label: string): string {
+  return label.replace(/…$/, "");
+}
+
 function helperCount(helpers: number): string {
   return helpers === 1 ? "1 helper" : `${helpers} helpers`;
 }
@@ -355,7 +370,75 @@ export function progressAnnouncement(doing: Progress): string {
     return "";
   }
   if (doing.state === "waking") {
-    return doing.label.replace(/…$/, "");
+    return spoken(doing.label);
   }
   return doing.helpers === 0 ? "Working on your answer" : `Working on your answer, with ${helperCount(doing.helpers)} running`;
+}
+
+/**
+ * Light words for the wait while a pod starts a session, shown in turn.
+ *
+ * Every one of them still says the assistant is starting, because the line is the only thing on the screen saying so:
+ * somebody who reads one of these and nothing else has to come away with the truth. The first is what a person sees
+ * for the first few seconds of most waits, and is the plainest.
+ */
+export const WARMING_QUIPS: readonly [string, ...string[]] = [
+  "Warming up your assistant…",
+  "Luring an assistant with tea and biscuits…",
+  "Putting the kettle on while your assistant starts…",
+  "Waking your assistant, which is not a morning person…",
+  "Starting your assistant — it is just finding its glasses…"
+];
+
+/**
+ * What a chat with no session behind it says. Not a wait at all: nothing has been asked to start one, so the line
+ * says what will ask, which is the person sending something.
+ */
+const UNSTARTED = "Your assistant starts when you send a message.";
+
+/** One wording each, so the words a person reads come from here rather than from a list built on every render. */
+const QUEUED_WORDS: readonly [string, ...string[]] = [QUEUED];
+const UNSTARTED_WORDS: readonly [string, ...string[]] = [UNSTARTED];
+
+export interface SessionNotice {
+  /** Which wait this is. `starting` is the one whose words rotate; the other two have one wording each. */
+  state: "starting" | "queued" | "unstarted";
+  /** The words to show, in the order they are shown. Never empty, so the view always has a line to draw. */
+  words: readonly [string, ...string[]];
+  /** What a screen reader is told: the state itself, once, and never the quip standing in for it on the screen. */
+  announcement: string;
+}
+
+/**
+ * Whether to say anything above the composer about the session behind this chat, and what.
+ *
+ * The gap this fills: a pod runs a bounded number of sessions and `/exit`s one after twenty idle minutes, so an old
+ * conversation on a running pod has no session behind it, and until this nothing said so. The wake fires on the
+ * composer being focused, which asked for a session silently; the person learnt that one was starting only when they
+ * sent. So four states, worded for what each is:
+ *
+ * - `live` — nothing. There is a session and it will answer.
+ * - `starting` — the quips, which is the one wait that is only ever a few seconds and nobody's fault.
+ * - `queued` — the pod is at its cap and another chat has to give up its session first. Said plainly: this is a real
+ *   wait with a cause, and a joke over it would hide both.
+ * - `null` — no session and nothing starting one, which is what `reportSessions` writes for every conversation its
+ *   pod's supervisor leaves out of a report. Says what will start one.
+ *
+ * Nothing at all in three cases. A chat on somebody's laptop has no pod, no supervisor and so no `sessionState` worth
+ * reading, and `localOfflineNote` already says the one thing there is to say there — checked first, so the two can
+ * never both be on the screen. An agent that is not `offline` has a session whatever a report yet to land says, and
+ * is also the agent the composer's wake leaves alone. And anything `progress` is already saying is left to it: the
+ * line under the thread and this one would otherwise both word the same wait, directly above and below each other.
+ */
+export function sessionNotice(session: SessionState, agentStatus: AgentStatus, doing: Progress, local = false): SessionNotice | null {
+  if (local || agentStatus !== "offline" || doing.state !== "idle" || session === "live") {
+    return null;
+  }
+  if (session === "starting") {
+    return { state: "starting", words: WARMING_QUIPS, announcement: spoken(STARTING) };
+  }
+  if (session === "queued") {
+    return { state: "queued", words: QUEUED_WORDS, announcement: spoken(QUEUED) };
+  }
+  return { state: "unstarted", words: UNSTARTED_WORDS, announcement: UNSTARTED };
 }
