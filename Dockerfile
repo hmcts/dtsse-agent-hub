@@ -1,4 +1,4 @@
-FROM hmctsprod.azurecr.io/base/node:22-alpine AS base
+FROM hmctsprod.azurecr.io/base/node:24-alpine AS base
 
 USER root
 RUN corepack enable

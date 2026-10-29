@@ -149,16 +149,15 @@ describe("gatewaySettings", () => {
   });
 
   // Half-configured is a pod that boots and then fails every turn, so the claim is refused rather than served.
-  it.each([
-    "AI_GATEWAY_BASE_URL",
-    "AI_GATEWAY_AUDIENCE",
-    "AI_GATEWAY_APIM_KEY"
-  ] as const)("should refuse the deployment naming the one missing setting when %s is left out", (missing) => {
-    const { [missing]: _left, ...rest } = GATEWAY;
+  it.each(["AI_GATEWAY_BASE_URL", "AI_GATEWAY_AUDIENCE", "AI_GATEWAY_APIM_KEY"] as const)(
+    "should refuse the deployment naming the one missing setting when %s is left out",
+    (missing) => {
+      const { [missing]: _left, ...rest } = GATEWAY;
 
-    expect(() => gatewaySettings(rest)).toThrow(VirtualAgentConfigurationError);
-    expect(() => gatewaySettings(rest)).toThrow(missing);
-  });
+      expect(() => gatewaySettings(rest)).toThrow(VirtualAgentConfigurationError);
+      expect(() => gatewaySettings(rest)).toThrow(missing);
+    }
+  );
 
   // A wrong audience is a bare `401 invalid_token` at the gateway, which says nothing about what was wrong — and one
   // with a quote, a backtick or a `$(…)` in it is interpolated into a double-quoted shell string in the pod's token

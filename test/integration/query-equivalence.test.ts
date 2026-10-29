@@ -187,20 +187,21 @@ describe("channelFeed", () => {
     expect(await channelIds([...topics], match, before, limit)).toEqual(await everyPostGrouped([...topics], match, before, limit));
   });
 
-  it.each(
-    TOPIC_SETS.flatMap((topics) => MATCHES.map((match) => [topics, match] as const))
-  )("should page through every post exactly once when %j matching %s is read with before cursors", async (topics, match) => {
-    const seen: string[] = [];
-    let before: bigint | undefined;
-    for (;;) {
-      const page = await channelIds([...topics], match, before, 9);
-      if (page.length === 0) {
-        break;
+  it.each(TOPIC_SETS.flatMap((topics) => MATCHES.map((match) => [topics, match] as const)))(
+    "should page through every post exactly once when %j matching %s is read with before cursors",
+    async (topics, match) => {
+      const seen: string[] = [];
+      let before: bigint | undefined;
+      for (;;) {
+        const page = await channelIds([...topics], match, before, 9);
+        if (page.length === 0) {
+          break;
+        }
+        seen.unshift(...page);
+        before = BigInt(page[0]!);
       }
-      seen.unshift(...page);
-      before = BigInt(page[0]!);
-    }
 
-    expect(seen).toEqual(await everyPostGrouped([...topics], match, undefined, 10_000));
-  });
+      expect(seen).toEqual(await everyPostGrouped([...topics], match, undefined, 10_000));
+    }
+  );
 });

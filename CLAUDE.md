@@ -80,6 +80,12 @@ change it first when the contract changes.
 `yarn lint` checks nothing inside a worktree under `.claude/worktrees/`, because `biome.json` excludes that path. Run
 `yarn biome check src test packages` there instead — `packages` as well, or the published client goes unchecked.
 
+`biome.json` is plain JSON and cannot carry comments, so two of its settings are explained here. The Markdown and YAML
+formatters are off: enabling them reflows every documentation page and requotes every workflow string, which is a
+change in its own right. `noComponentHookFactories` is off for test files, where a component defined inside a test is
+deliberate — remounting is often the thing under test — and where the rule also fires on screaming-case clock helpers
+that return a string and are no kind of component.
+
 ## Charts
 
 Any change to `charts/dtsse-agent-hub/values.yaml` needs `Chart.yaml`'s `version` bumped in the same commit, or Flux

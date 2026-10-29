@@ -2074,7 +2074,7 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/comms are enabled for this session as @itest-session/);
     const lines = await waitForInbox(before + 1);
-    expect((lines[1]?.message as { content: string }).content).toMatch(new RegExp(`#${queued.id} `));
+    expect((lines[1]!.message as { content: string }).content).toMatch(new RegExp(`#${queued.id} `));
     await hub.waitFor((c) => c.path.endsWith(`/deliveries/${queued.id}/ack`));
 
     const pid = bridgePid();
