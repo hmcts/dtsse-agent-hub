@@ -355,7 +355,8 @@ model TranscriptEntry {
 
   @@unique([agentId, entryKey])
   @@index([agentId, occurredAt, id])
-  @@index([occurredAt])
+  @@index([agentId, id])
+  @@index([createdAt])
   @@map("transcript_entry")
 }
 
