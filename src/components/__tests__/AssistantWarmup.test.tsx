@@ -62,6 +62,7 @@ function assistant(status: VirtualAgentStatus = "stopped", overrides: Partial<As
     statusChangedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
     readiness: readiness(status),
+    modelRoute: "own-licence",
     needed: ["github", "azure", "claude"],
     optional: ["jenkins", "atlassian"],
     logins: [],

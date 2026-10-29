@@ -1,5 +1,6 @@
 import type { CredentialKind } from "../credentials/names.ts";
 import type { CredentialStatus } from "../credentials/store.ts";
+import type { ModelRoute } from "../viewer/identity.ts";
 import type { LoginView } from "../virtual-agents/logins.ts";
 import type { ConnectionsAsk } from "./onboarding.ts";
 
@@ -10,6 +11,8 @@ import type { ConnectionsAsk } from "./onboarding.ts";
 
 /** What settings needs to list the person's sign-ins, or why it cannot. */
 export interface ConnectionsData {
+  /** How this assistant's agents reach Claude, which both the model-access row and Azure's wording follow. */
+  route: ModelRoute;
   /** The sign-ins the person's assistant asks for, needed ones first. */
   kinds: CredentialKind[];
   statuses: CredentialStatus[];
@@ -23,10 +26,11 @@ export interface ConnectionsData {
  * the list empty and say why, so settings never reads as "nothing connected" when it simply does not know.
  */
 export function connectionsData(
-  assistant: { needed: CredentialKind[]; optional: CredentialKind[]; logins: LoginView[] },
+  assistant: { modelRoute: ModelRoute; needed: CredentialKind[]; optional: CredentialKind[]; logins: LoginView[] },
   credentials: { available: true; statuses: CredentialStatus[] } | { available: false; reason: string }
 ): ConnectionsData {
   return {
+    route: assistant.modelRoute,
     kinds: [...assistant.needed, ...assistant.optional],
     statuses: credentials.available ? credentials.statuses : [],
     logins: assistant.logins,
@@ -77,6 +81,26 @@ export type ConnectionKind = { [K in CredentialKind]: (typeof CONNECTORS)[K] ext
  */
 export function isConnection(kind: CredentialKind): kind is ConnectionKind {
   return Object.hasOwn(CONNECTORS, kind) && CONNECTORS[kind] !== null;
+}
+
+/**
+ * What the Azure sign-in is for, which is not the same thing on both routes: on `gateway` it is what the person's
+ * agents reach Claude on, so `neededCredentials` names it and the connections banner asks for it, and calling it
+ * optional there would contradict the ask. A table over the whole union, so a route added without an answer does not
+ * build, and the `own-licence` wording is `CONNECTORS`'s own rather than a second copy of it.
+ */
+const AZURE_DESC: Readonly<Record<ModelRoute, string>> = {
+  gateway: "Your HMCTS account, which your agents reach Claude on, as well as your pipelines and environments",
+  "own-licence": CONNECTORS.azure.desc
+};
+
+/**
+ * One connection in the Assistant's words, for a person on this route. The seam every surface reads `CONNECTORS`
+ * through, because the table is flat and one of its entries is not: a surface reading the entry directly would word
+ * Azure as optional beside an ask that needs it.
+ */
+export function connectorFor(kind: ConnectionKind, route: ModelRoute): Connector {
+  return kind === "azure" ? { ...CONNECTORS.azure, desc: AZURE_DESC[route] } : CONNECTORS[kind];
 }
 
 /**
@@ -247,8 +271,78 @@ export function connections(
     const status = data.statuses.find((candidate) => candidate.kind === kind);
     const login = data.logins.find((candidate) => candidate.kind === kind);
     const state = connectionState(checklist(status?.stored === true, login, now), login, status, now);
-    return { kind, ...CONNECTORS[kind], state, detail: CONNECTION_DETAILS[state], accountLabel: status?.accountLabel ?? null, stored: status?.stored === true };
+    return {
+      kind,
+      ...connectorFor(kind, data.route),
+      state,
+      detail: CONNECTION_DETAILS[state],
+      accountLabel: status?.accountLabel ?? null,
+      stored: status?.stored === true
+    };
   });
+}
+
+/**
+ * How the person's agents reach Claude, as a row of the Connections list. Named as the sign-in it stands in for is,
+ * so the section reads the same on both routes, and worded by the route, because the two reach it differently.
+ */
+export interface ModelAccess {
+  name: string;
+  /** The letters the list shows in place of a logo. */
+  initial: string;
+  desc: string;
+  state: ConnectionState;
+  detail: string;
+}
+
+/**
+ * The model-access row each route needs derived, and the sign-in its state is read from, or `null` for a route whose
+ * model credential is a row of the list already. A table over the whole union, so a route added without an answer
+ * does not build rather than quietly saying nothing about Claude.
+ *
+ * The name and the letters are the Claude connector's, so the row reads the same whichever route the person is on and
+ * there is one copy of both.
+ */
+const MODEL_ACCESS: Readonly<Record<ModelRoute, { behind: ConnectionKind; row: Omit<ModelAccess, "state" | "detail"> } | null>> = {
+  gateway: {
+    behind: "azure",
+    row: { name: CONNECTORS.claude.name, initial: CONNECTORS.claude.initial, desc: "Through the HMCTS AI Gateway, on your Azure sign-in" }
+  },
+  "own-licence": null
+};
+
+/**
+ * The row saying how this person's agents reach Claude, where no credential of theirs is what gets them there, or
+ * `null` where one is and `connections` has the row already.
+ *
+ * On `gateway` there is no model credential at all — the pod mints a gateway token from the owner's Azure sign-in —
+ * so without this the Connections section says nothing about Claude or the gateway, which is the first thing people
+ * look for in it.
+ *
+ * Its state is read from the row of the credential behind it rather than from the statuses again, so the two cannot
+ * disagree and there is no second clock between them. No such row — which is what the hub failing to read somebody's
+ * credentials leaves — means no claim here either, for the same reason `connections` lists nothing then.
+ *
+ * It is not a `Connection` and has no kind, so `offersConnect`, `connectionsWarning` and `signInPrompt` cannot be
+ * asked about it. That is the point: the credential's own row carries the action and raises the prompt, and a second
+ * prompt for one sign-in, on a row with nothing to press, is the fault `offeredConnections` exists to prevent.
+ */
+export function modelAccess(route: ModelRoute, list: readonly Connection[]): ModelAccess | null {
+  const derived = MODEL_ACCESS[route];
+  if (derived === null) {
+    return null;
+  }
+  const behind = list.find((row) => row.kind === derived.behind);
+  return behind === undefined ? null : { ...derived.row, state: behind.state, detail: behind.detail };
+}
+
+/**
+ * Whether the derived model-access row goes after the row at this place in the list: after the first, which is GitHub
+ * on both routes, since that is where the `own-licence` route's Claude token has always been. Asked here rather than
+ * by each surface, so Claude cannot come second on one screen and first on another.
+ */
+export function modelAccessAfter(index: number): boolean {
+  return index === 0;
 }
 
 /**
@@ -335,6 +429,7 @@ export function canSignInAgain(kind: CredentialKind, uses: readonly CredentialKi
  */
 export function offeredConnections(
   assistant: {
+    modelRoute: ModelRoute;
     needed: readonly CredentialKind[];
     optional: readonly CredentialKind[];
     logins: readonly LoginView[];
@@ -350,7 +445,7 @@ export function offeredConnections(
   const rows: OfferedConnection[] = [];
   for (const kind of [...assistant.needed, ...asked, ...unasked]) {
     if (isConnection(kind) && !rows.some((row) => row.kind === kind)) {
-      rows.push({ kind, connector: CONNECTORS[kind] });
+      rows.push({ kind, connector: connectorFor(kind, assistant.modelRoute) });
     }
   }
   return rows;

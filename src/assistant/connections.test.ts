@@ -6,6 +6,7 @@ import { type ModelRoute, modelRouteFor } from "../viewer/identity.ts";
 import { isSignInKind, type LoginState, type LoginView } from "../virtual-agents/logins.ts";
 import { neededCredentials, OPTIONAL_CREDENTIALS, optionalCredentials } from "../virtual-agents/views.ts";
 import {
+  CONNECTION_DETAILS,
   CONNECTION_STATES,
   CONNECTORS,
   type Connection,
@@ -17,10 +18,13 @@ import {
   connectionsData,
   connectionsPrompt,
   connectionsWarning,
+  connectorFor,
   hasLapsed,
   inWords,
   isConnection,
   lapsedSinceStored,
+  modelAccess,
+  modelAccessAfter,
   needsPerson,
   OFFERED_OPTIONAL,
   ON_REQUEST,
@@ -70,8 +74,9 @@ function lapsed(kind: CredentialKind, state: "expired" | "failed" = "expired"): 
   return login(kind, state, new Date(NOW - 600_000).toISOString(), AFTER_STORED);
 }
 
-function list(kinds: CredentialKind[], statuses: CredentialStatus[], logins: LoginView[] = []): Connection[] {
-  return connections({ kinds, statuses, logins, unavailable: null }, checklistState, NOW);
+/** The rows for one route's list, where only the wording of the Azure row depends on which route that is. */
+function list(kinds: CredentialKind[], statuses: CredentialStatus[], logins: LoginView[] = [], route: ModelRoute = "own-licence"): Connection[] {
+  return connections({ route, kinds, statuses, logins, unavailable: null }, checklistState, NOW);
 }
 
 /**
@@ -402,13 +407,125 @@ describe("connections", () => {
   });
 
   it("should give no rows when the hub cannot read the person's credentials", () => {
-    const rows = connections({ kinds: ["github", "azure"], statuses: [], logins: [], unavailable: "no Key Vault here" }, checklistState, NOW);
+    const rows = connections(
+      { route: "own-licence", kinds: ["github", "azure"], statuses: [], logins: [], unavailable: "no Key Vault here" },
+      checklistState,
+      NOW
+    );
 
     expect(rows).toEqual([]);
   });
 
   it("should give no rows when there is nothing loaded to build them from", () => {
     expect(connections(undefined, checklistState, NOW)).toEqual([]);
+  });
+
+  it("should word the Azure row for the route the person is on when it builds the rows", () => {
+    const [row] = list(["azure"], [], [], "gateway");
+
+    expect(row?.desc).toBe(connectorFor("azure", "gateway").desc);
+  });
+});
+
+/**
+ * The one entry of `CONNECTORS` that is not the same thing on both routes. Everything else is the table's own answer,
+ * identically, which is what keeps one copy of the wording.
+ */
+describe("connectorFor", () => {
+  it("should say the Azure sign-in is what their agents reach Claude on when the person is on the gateway route", () => {
+    expect(connectorFor("azure", "gateway").desc).toBe("Your HMCTS account, which your agents reach Claude on, as well as your pipelines and environments");
+  });
+
+  it("should call the Azure sign-in optional when the person's agents run on their own Claude licence", () => {
+    expect(connectorFor("azure", "own-licence").desc).toBe(CONNECTORS.azure.desc);
+  });
+
+  // The wording and `neededCredentials` are the same claim made twice, and calling a credential the pod cannot boot
+  // without optional is the half of that pair this change was about.
+  it.each(ROUTES)("should call the Azure sign-in optional on the %s route only where that route does not need it", (route) => {
+    expect(connectorFor("azure", route).desc.includes("(optional)")).toBe(!neededCredentials(route).includes("azure"));
+  });
+
+  it.each(ROUTES)("should give every other connection the table's own wording on the %s route", (route) => {
+    for (const kind of CREDENTIAL_KINDS.filter(isConnection).filter((kind) => kind !== "azure")) {
+      expect(connectorFor(kind, route)).toBe(CONNECTORS[kind]);
+    }
+  });
+});
+
+/**
+ * How someone's agents reach Claude, which on the gateway route no credential of theirs is: the pod mints a gateway
+ * token from their Azure sign-in, so nothing in the list would mention Claude or the gateway without this row.
+ */
+describe("modelAccess", () => {
+  /** The rows of somebody on the gateway route: GitHub, and the Azure sign-in the model-access row is read from. */
+  function gatewayRows(statuses: CredentialStatus[], logins: LoginView[] = []): Connection[] {
+    return list(neededCredentials("gateway"), statuses, logins, "gateway");
+  }
+
+  it("should name Claude and the gateway, and where its access comes from, on the gateway route", () => {
+    expect(modelAccess("gateway", gatewayRows([status("azure", true)]))).toEqual({
+      name: "Claude",
+      initial: "C",
+      desc: "Through the HMCTS AI Gateway, on your Azure sign-in",
+      state: "connected",
+      detail: "Connected"
+    });
+  });
+
+  // The Claude token is the credential there, so `connections` has the row, with its sign-in and its box.
+  it("should derive no row when the person's agents run on their own Claude licence", () => {
+    expect(modelAccess("own-licence", list(neededCredentials("own-licence"), [status("claude", true)]))).toBeNull();
+  });
+
+  it("should say Claude is waiting for the person when the Azure sign-in behind it is", () => {
+    const rows = gatewayRows([status("github", true)], [login("azure", "pending")]);
+
+    expect(modelAccess("gateway", rows)).toMatchObject({ state: "signing-in", detail: "Waiting for you" });
+  });
+
+  it.each(["expired", "failed"] as const)("should say Claude's access has lapsed when the Azure sign-in behind it %s", (state) => {
+    const rows = gatewayRows([status("azure", true)], [lapsed("azure", state)]);
+
+    expect(modelAccess("gateway", rows)).toMatchObject({ state, detail: CONNECTION_DETAILS[state] });
+  });
+
+  it("should say Claude is not connected when nobody has signed in to Azure", () => {
+    expect(modelAccess("gateway", gatewayRows([status("github", true)]))).toMatchObject({ state: "waiting", detail: "Not connected" });
+  });
+
+  // The same reason `connections` lists nothing then: a row claiming anything about a sign-in the hub has not read is
+  // a wrong answer somebody would act on.
+  it("should make no claim when the hub cannot read the person's credentials", () => {
+    const rows = connections(
+      { route: "gateway", kinds: neededCredentials("gateway"), statuses: [], logins: [], unavailable: "no Key Vault here" },
+      checklistState,
+      NOW
+    );
+
+    expect(modelAccess("gateway", rows)).toBeNull();
+  });
+
+  // Two prompts for one sign-in is worse than none, and the row has nothing on it to press, so the asks are the Azure
+  // row's alone. It is no `Connection` and has no kind, which is what keeps it out of both of them.
+  it("should leave the asks to the Azure sign-in it is read from when that is waiting on the person", () => {
+    const rows = gatewayRows([status("github", true)], [login("azure", "pending")]);
+
+    expect(modelAccess("gateway", rows)).toMatchObject({ name: "Claude", detail: "Waiting for you" });
+    expect(signInPrompt(rows)?.message).toBe("Your assistant is waiting for you to sign in to Azure.");
+    expect(connectionsWarning(rows)).toBe("Azure needs your attention");
+  });
+
+  /**
+   * Second on both routes, which on `own-licence` is where the Claude token's own row already is: its route needs
+   * GitHub and then Claude, and `connectionsData` keeps that order. One place both surfaces ask, so Claude cannot
+   * read as the headline on one screen and as a footnote on the other.
+   */
+  it("should go after the first sign-in, which is the GitHub row both routes begin with", () => {
+    expect(ROUTES.map((route) => neededCredentials(route)[0])).toEqual(["github", "github"]);
+    expect(neededCredentials("own-licence")[1]).toBe("claude");
+    expect(modelAccessAfter(0)).toBe(true);
+    expect([1, 2, 3].map((index) => modelAccessAfter(index))).toEqual([false, false, false]);
   });
 });
 
@@ -530,7 +647,11 @@ describe("connectionsWarning", () => {
   });
 
   it("should raise no warning nobody can act on when the hub cannot read the person's credentials", () => {
-    const rows = connections({ kinds: [...PROMPTED_WHEN_MISSING], statuses: [], logins: [], unavailable: "no Key Vault here" }, checklistState, NOW);
+    const rows = connections(
+      { route: "own-licence", kinds: [...PROMPTED_WHEN_MISSING], statuses: [], logins: [], unavailable: "no Key Vault here" },
+      checklistState,
+      NOW
+    );
 
     expect(connectionsWarning(rows)).toBeNull();
   });
@@ -578,7 +699,7 @@ describe("signInPrompt", () => {
 
   it("should have nothing to say when the hub cannot read the credentials, since it knows of no sign-in at all", () => {
     const rows = connections(
-      { kinds: ["github", "atlassian"], statuses: [], logins: [lapsed("atlassian")], unavailable: "no Key Vault here" },
+      { route: "own-licence", kinds: ["github", "atlassian"], statuses: [], logins: [lapsed("atlassian")], unavailable: "no Key Vault here" },
       checklistState,
       NOW
     );
@@ -588,7 +709,12 @@ describe("signInPrompt", () => {
 });
 
 describe("connectionsData", () => {
-  const assistant = { needed: ["github", "azure", "claude"] as CredentialKind[], optional: ["jenkins", "atlassian"] as CredentialKind[], logins: [] };
+  const assistant = {
+    modelRoute: "own-licence" as ModelRoute,
+    needed: ["github", "azure", "claude"] as CredentialKind[],
+    optional: ["jenkins", "atlassian"] as CredentialKind[],
+    logins: []
+  };
 
   it("should ask for the needed sign-ins before the optional ones when the credentials are readable", () => {
     const data = connectionsData(assistant, { available: true, statuses: [status("github", true)] });
@@ -620,13 +746,15 @@ describe("connectionsData", () => {
  * see reads as connected.
  */
 describe("offeredConnections", () => {
-  function offer(needed: CredentialKind[], logins: LoginView[] = []) {
-    return offeredConnections({ needed, optional: OPTIONAL_CREDENTIALS, logins }, NOW).map((row) => row.kind);
+  function offer(needed: CredentialKind[], logins: LoginView[] = [], route: ModelRoute = "own-licence") {
+    return offeredConnections({ modelRoute: route, needed, optional: OPTIONAL_CREDENTIALS, logins }, NOW).map((row) => row.kind);
   }
 
   /** What one route's assistant is offered, with each of its own lists rather than every optional kind there is. */
   function offerFor(route: ModelRoute, logins: LoginView[] = []) {
-    return offeredConnections({ needed: neededCredentials(route), optional: optionalCredentials(route), logins }, NOW).map((row) => row.kind);
+    return offeredConnections({ modelRoute: route, needed: neededCredentials(route), optional: optionalCredentials(route), logins }, NOW).map(
+      (row) => row.kind
+    );
   }
 
   it.each(ROUTES)("should offer a row for every credential the %s route needs", (route) => {
@@ -718,7 +846,7 @@ describe("offeredConnections", () => {
 
   it("should word every row it offers", () => {
     for (const row of offeredConnections(
-      { needed: ["github", "azure", "claude"], optional: OPTIONAL_CREDENTIALS, logins: [login("jenkins", "pending")] },
+      { modelRoute: "own-licence", needed: ["github", "azure", "claude"], optional: OPTIONAL_CREDENTIALS, logins: [login("jenkins", "pending")] },
       NOW
     )) {
       expect(row.connector.name).not.toBe("");
@@ -733,7 +861,9 @@ describe("offeredConnections", () => {
 
 describe("sign-ins made on request", () => {
   function offer(logins: LoginView[] = []) {
-    return offeredConnections({ needed: neededCredentials("own-licence"), optional: OPTIONAL_CREDENTIALS, logins }, NOW).map((row) => row.kind);
+    return offeredConnections({ modelRoute: "own-licence", needed: neededCredentials("own-licence"), optional: OPTIONAL_CREDENTIALS, logins }, NOW).map(
+      (row) => row.kind
+    );
   }
 
   it("should sign in to Azure, and nothing else, only when the person asks", () => {

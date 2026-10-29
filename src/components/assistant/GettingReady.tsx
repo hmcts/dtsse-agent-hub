@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   CONNECTION_DETAILS,
+  type Connection,
   type ConnectionsPrompt,
   type Connector,
   codeCollectable,
@@ -10,6 +11,10 @@ import {
   connections,
   connectionsPrompt,
   hasLapsed,
+  type ModelAccess,
+  modelAccess,
+  modelAccessAfter,
+  needsPerson,
   offeredConnections,
   signInPrompt
 } from "@/assistant/connections";
@@ -405,6 +410,36 @@ function ConnectionRow({
 }
 
 /**
+ * How the person's agents reach Claude, where no credential of theirs is what gets them there. A status and nothing
+ * else: it is read from the sign-in listed below it, which is the row that carries the action, and a second control
+ * for the same sign-in would be two things to press for one job.
+ *
+ * Coloured as that sign-in's own state is: the same fact, so the same colour, and a row with nothing to do about it
+ * stays quiet about a sign-in nobody has started.
+ *
+ * Always separated from the row above, since `modelAccessAfter` never puts it at the head of the list, where the
+ * `first` rows get their separator left off.
+ */
+function ModelAccessRow({ row }: { row: ModelAccess }) {
+  const tone =
+    row.state === "connected" ? "text-asst-ok" : hasLapsed(row.state) ? "text-asst-warn" : needsPerson(row.state) ? "text-asst-accent-soft" : "text-asst-muted";
+  return (
+    <li className="flex flex-col gap-2.5 border-t border-asst-line bg-asst-bg px-4 py-3.5">
+      <div className="flex items-center gap-3.5">
+        <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-asst-active text-sm font-semibold">
+          {row.initial}
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col leading-tight">
+          <span className="text-[15px] font-medium">{row.name}</span>
+          <span className="text-[13px] text-asst-muted">{row.desc}</span>
+        </div>
+        <span className={`shrink-0 text-[13px] ${tone}`}>{row.state === "connected" ? "✓ Connected" : row.detail}</span>
+      </div>
+    </li>
+  );
+}
+
+/**
  * What the screen says it is for. The `unknown` line neither claims the person has connected anything nor asks them
  * to: the hub has not read their credentials, and someone who has signed in everywhere must not be told otherwise.
  */
@@ -434,6 +469,24 @@ interface ScreenProps {
   unavailable: string | null;
   /** The appearance the person chose; the screen offers the switch, since it covers the sidebar's. */
   theme?: Theme;
+}
+
+/**
+ * The rows behind both reads of them here: the screen's model-access row, and the sign-in the gate's banner names.
+ * One function over the kinds `offeredConnections` gives, so the two cannot be built from different lists.
+ */
+function connectionRows(view: { assistant: AssistantSummary; statuses: CredentialStatus[]; unavailable: string | null }, now: number): Connection[] {
+  return connections(
+    {
+      route: view.assistant.modelRoute,
+      kinds: offeredConnections(view.assistant, now).map((row) => row.kind),
+      statuses: view.statuses,
+      logins: view.assistant.logins,
+      unavailable: view.unavailable
+    },
+    checklistState,
+    now
+  );
 }
 
 /** The shell both getting-ready screens share: the mark, the heading, how far the assistant has got, and why not. */
@@ -527,6 +580,7 @@ export function GettingReady({
 }) {
   const ask = connectionsAsk(assistant.onboarded, unavailable);
   const offered = offeredConnections(assistant, now);
+  const access = modelAccess(assistant.modelRoute, connectionRows({ assistant, statuses, unavailable }, now));
   const starting = !assistant.readiness.failed && assistant.status !== "running";
   return (
     <ReadyShell assistant={assistant} unavailable={unavailable} theme={theme} subtitle={subtitleFor(ask, returning)}>
@@ -538,21 +592,23 @@ export function GettingReady({
       ) : (
         <ul aria-label="Connections" className="flex flex-col overflow-hidden rounded-[14px] border border-asst-line">
           {offered.map(({ kind, connector }, index) => (
-            <ConnectionRow
-              key={kind}
-              kind={kind}
-              connector={connector}
-              status={statuses.find((status) => status.kind === kind)}
-              login={assistant.logins.find((login) => login.kind === kind)}
-              assistantId={assistant.id}
-              starting={starting}
-              running={assistant.desired === "running"}
-              paste={paste}
-              save={save}
-              reconnect={reconnect}
-              now={now}
-              first={index === 0}
-            />
+            <Fragment key={kind}>
+              <ConnectionRow
+                kind={kind}
+                connector={connector}
+                status={statuses.find((status) => status.kind === kind)}
+                login={assistant.logins.find((login) => login.kind === kind)}
+                assistantId={assistant.id}
+                starting={starting}
+                running={assistant.desired === "running"}
+                paste={paste}
+                save={save}
+                reconnect={reconnect}
+                now={now}
+                first={index === 0}
+              />
+              {access !== null && modelAccessAfter(index) ? <ModelAccessRow row={access} /> : null}
+            </Fragment>
           ))}
         </ul>
       )}
@@ -809,17 +865,7 @@ export function OnboardingGate({ dismissed = false, ...props }: Omit<Parameters<
   // The same kinds the screen lists, from the same function, so the banner can never name a sign-in the screen has no
   // row for nor stay quiet about one it does. Empty while the credentials cannot be read, which is the one case
   // nothing here is allowed to make a claim about.
-  const rows = connections(
-    {
-      kinds: offeredConnections(assistant, now).map((row) => row.kind),
-      statuses: props.statuses,
-      logins: assistant.logins,
-      unavailable: props.unavailable
-    },
-    checklistState,
-    now
-  );
-  const relayed = signInPrompt(rows);
+  const relayed = signInPrompt(connectionRows(props, now));
   // What the live region holds, put there after the browser takes over rather than rendered into the HTML. A live
   // region is not announced for what it already contains, so an ask that was there when the page loaded would reach
   // a screen-reader user only if they happened on the banner; going from empty to the sentence is a change, and is

@@ -262,6 +262,8 @@ describe("the person's assistant", () => {
     const home = await openAssistant({ ...ALICE, tid: "dev", modelRoute: viewerRoute });
 
     expect(home.assistant.needed).toEqual(needed);
+    // The row's route and not the viewer's, because the Connections list words how this assistant reaches Claude.
+    expect(home.assistant.modelRoute).toBe(rowRoute);
     expect(home.credentials).toMatchObject({ modelRoute: viewerRoute, claudeTokenUsable });
   });
 });

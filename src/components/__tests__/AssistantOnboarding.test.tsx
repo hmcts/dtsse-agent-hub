@@ -41,6 +41,7 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
     statusChangedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
     readiness: readiness(status),
+    modelRoute: "own-licence",
     needed: neededCredentials("own-licence"),
     optional: OPTIONAL_CREDENTIALS,
     logins: [],
@@ -255,17 +256,49 @@ describe("GettingReady connectors", () => {
     expect(within(connector("GitHub")).getByText(/The sign-in will appear here/)).toBeTruthy();
   });
 
-  // The gateway authorises the person, so this route asks for no model credential of theirs and the screen has no
-  // row for one. It is gone because the route asks for nothing, not because this screen knows a kind by name.
-  it("should offer no model-key row at all when the assistant is on the gateway route", () => {
-    const summary = assistant("awaiting_credentials", { needed: neededCredentials("gateway"), optional: optionalCredentials("gateway") });
+  // The gateway authorises the person, so this route asks for no model credential of theirs: the row says how its
+  // access is come by and has nothing on it to paste or press, the Azure row below being where they act.
+  it("should say how the agents reach Claude, and ask for no model key, when the assistant is on the gateway route", () => {
+    const summary = assistant("awaiting_credentials", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway")
+    });
     render(ready({ assistant: summary, statuses: statuses("github") }));
 
-    expect(screen.queryByText("AI model access")).toBeNull();
-    expect(screen.queryByText("Claude")).toBeNull();
+    const claude = connector("Claude");
+    expect(within(claude).getByText("Through the HMCTS AI Gateway, on your Azure sign-in")).toBeTruthy();
+    expect(within(claude).queryByRole("button")).toBeNull();
+    expect(within(claude).queryByRole("form")).toBeNull();
     // What it does ask for: the Azure sign-in the gateway authorises, which is this route's model credential.
     expect(connectionsPrompt("connect", summary.needed, new Set<CredentialKind>(["github"]))?.message).toContain("Azure");
     expect(connector("Azure")).toBeTruthy();
+  });
+
+  // Second, below GitHub, which is where the own-licence route's Claude token is: the same place on both routes.
+  it("should list how the agents reach Claude below GitHub on the gateway route", () => {
+    const summary = assistant("awaiting_credentials", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway")
+    });
+    render(ready({ assistant: summary, statuses: statuses("github") }));
+
+    const rows = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("listitem");
+    expect(within(rows[0] as HTMLElement).getByText("GitHub")).toBeTruthy();
+    expect(within(rows[1] as HTMLElement).getByText("Claude")).toBeTruthy();
+  });
+
+  it("should say Claude is connected once the Azure sign-in behind it is, on the gateway route", () => {
+    const summary = assistant("running", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway"),
+      onboarded: true
+    });
+    render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
+
+    expect(within(connector("Claude")).getByText("✓ Connected")).toBeTruthy();
   });
 
   it("should offer a form for the Claude token once the person clicks Connect, even while the assistant starts", () => {
@@ -953,8 +986,8 @@ describe("OnboardingGate", () => {
  * made from the same number and there is nothing for hydration to disagree about.
  */
 describe("OnboardingGate holding the person at GitHub and Claude", () => {
-  const OWN_LICENCE: Partial<AssistantSummary> = { needed: ["github", "azure", "claude"], toChat: ["github", "claude"] };
-  const GATEWAY: Partial<AssistantSummary> = { needed: ["github", "azure"], toChat: ["github", "azure"] };
+  const OWN_LICENCE: Partial<AssistantSummary> = { modelRoute: "own-licence", needed: ["github", "azure", "claude"], toChat: ["github", "claude"] };
+  const GATEWAY: Partial<AssistantSummary> = { modelRoute: "gateway", needed: ["github", "azure"], toChat: ["github", "azure"] };
 
   function held(summary: AssistantSummary, stored: CredentialStatus[] = [], options: { dismissed?: boolean; unavailable?: string | null } = {}) {
     return (
