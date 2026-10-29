@@ -168,14 +168,24 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
 async function lockAgent(
   db: Database,
   agentId: string
-): Promise<{ status: AgentStatus; ownerOid: string; virtualName: string | null; skills: Skill[] } | undefined> {
-  const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string; virtual_name: string | null; skills: unknown }[]>`
-    SELECT a.status::text AS status, a.owner_oid, v.name AS virtual_name, a.skills
+): Promise<{ status: AgentStatus; ownerOid: string; virtualName: string | null; skills: Skill[]; name: string; local: boolean } | undefined> {
+  const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string; virtual_name: string | null; skills: unknown; name: string; local: boolean }[]>`
+    SELECT a.status::text AS status, a.owner_oid, v.name AS virtual_name, a.skills, a.name,
+           (a.virtual_agent_id IS NULL AND a.assistant_conversation_id IS NULL) AS local
       FROM agent a LEFT JOIN virtual_agent v ON v.id = a.virtual_agent_id
      WHERE a.id = ${agentId}::uuid
        FOR UPDATE OF a
   `;
-  return row === undefined ? undefined : { status: row.status, ownerOid: row.owner_oid, virtualName: row.virtual_name, skills: storedSkills(row.skills) };
+  return row === undefined
+    ? undefined
+    : {
+        status: row.status,
+        ownerOid: row.owner_oid,
+        virtualName: row.virtual_name,
+        skills: storedSkills(row.skills),
+        name: row.name,
+        local: row.local
+      };
 }
 
 /**
@@ -211,6 +221,14 @@ export async function heartbeat(
     }
     if (skills !== undefined && skillsChanged(before.skills, normaliseSkills(skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agentId, owner_oid: before.ownerOid });
+    }
+    // A laptop session with no conversation gets one here as well as at registration, because registration is not
+    // where most of them arrive. The client registers only while it holds no agent id and heartbeats ever after, so
+    // every session already running when conversations were introduced — and every agent row written before then —
+    // would otherwise never have had one, with nothing to create it later. Under the same row lock the heartbeat
+    // already takes, so two heartbeats cannot both make one.
+    if (before.local) {
+      await linkLocalSession(tx, { ownerOid: before.ownerOid, agentId, name: before.name });
     }
   });
 }

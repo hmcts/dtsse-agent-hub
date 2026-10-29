@@ -398,6 +398,63 @@ describe("heartbeat and offline", () => {
     expect(await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).toMatchObject({ status: "busy", name: "new", endedAt: null });
   });
 
+  /**
+   * Registration is not where most laptop sessions get their conversation. The client registers only while it holds
+   * no agent id and heartbeats ever after, so a session that was already running — and every agent row written before
+   * conversations existed — arrives here instead, with nothing else that would ever create one.
+   */
+  it("should give a laptop session its conversation on a heartbeat when registration did not", async () => {
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: REGISTRATION }));
+    // The state every agent row was in before this existed, and the state a session running across the deploy is in.
+    // Detached before the conversation goes, because the column cascades — deleting it first takes the agent too,
+    // which is the bug the feature's own delete path exists to avoid.
+    await prisma.agent.update({ where: { id: agent_id }, data: { assistantConversationId: null } });
+    await prisma.assistantConversation.deleteMany({});
+
+    const response = await call(heartbeat, {
+      as: ALICE,
+      path: `/api/agent/${agent_id}/heartbeat`,
+      method: "POST",
+      params: { agentId: agent_id },
+      body: { status: "idle", name: "alice-pcs-api" }
+    });
+
+    expect(response.status).toBe(204);
+    const conversation = await prisma.assistantConversation.findFirstOrThrow();
+    expect(conversation).toMatchObject({ ownerOid: ALICE.oid, virtualAgentId: null, agentId: agent_id, title: "alice-pcs-api" });
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).toMatchObject({ assistantConversationId: conversation.id });
+  });
+
+  it("should make only one conversation when a laptop session heartbeats again", async () => {
+    const { agent_id } = await jsonOf(await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: REGISTRATION }));
+    const params = { agentId: agent_id };
+    const beat = () => call(heartbeat, { as: ALICE, path: `/api/agent/${agent_id}/heartbeat`, method: "POST", params, body: { status: "idle", name: "a" } });
+
+    await beat();
+    await beat();
+
+    expect(await prisma.assistantConversation.count()).toBe(1);
+  });
+
+  it("should give a pod's session no conversation of its own on a heartbeat", async () => {
+    await insertUser(ALICE);
+    const assistant = await ensureAssistant(prisma, { oid: ALICE.oid, modelRoute: "gateway" });
+    const caller = { oid: ALICE.oid, tid: "dev", name: ALICE.name, email: ALICE.email, virtualAgentId: assistant.id };
+    const { id } = await registerAgent(prisma, caller, { sessionId: "va-session-hb", name: "va", cwd: null, repo: null, branch: null, host: null });
+    const before = await prisma.assistantConversation.count();
+
+    const response = await call(heartbeat, {
+      as: ALICE,
+      path: `/api/agent/${id}/heartbeat`,
+      method: "POST",
+      params: { agentId: id },
+      body: { status: "idle", name: "pcs-api" }
+    });
+
+    expect(response.status).toBe(204);
+    expect(await prisma.assistantConversation.count()).toBe(before);
+  });
+
   it("should replace the stored skills when a heartbeat sends them, and leave them when it does not", async () => {
     const { agent_id } = await jsonOf(
       await call(register, { as: ALICE, path: "/api/agent/register", method: "POST", body: { ...REGISTRATION, skills: [{ name: "old", description: "" }] } })
