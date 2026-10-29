@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MAX_CLIENT_FEATURES, normaliseClientFeatures } from "../agents/client-features.ts";
+import { nameSourceOf } from "../agents/name-source.ts";
 import { MAX_SKILL_DESCRIPTION, MAX_SKILL_NAME, MAX_SKILLS, normaliseSkills, SKILL_NAME } from "../agents/skills.ts";
 import { MAX_BODY, MAX_TITLE, messageIdOf } from "../messages/limits.ts";
 import { boundedArray } from "./bounded-array.ts";
@@ -62,6 +63,14 @@ const clientFeatures = listOrAbsent(
   boundedArray(z.unknown(), MAX_CLIENT_FEATURES, { message: `at most ${MAX_CLIENT_FEATURES} client features` }).transform(normaliseClientFeatures)
 );
 
+/**
+ * Where the name came from. Read through `nameSourceOf`, so anything that is not `user` — the field left out, a
+ * `null`, Claude Code's own `auto`, a value from some later client — reads as `derived` and nothing here can refuse
+ * a registration over it. Same reasoning as `listOrAbsent` above: a session one field short beats a session locked
+ * out, and this field only ever decides what a chat on somebody's own computer is called.
+ */
+const nameSource = z.preprocess(nameSourceOf, z.enum(["user", "derived"]));
+
 export const registerBody = z.object({
   session_id: z.string().trim().min(1).max(MAX_NAME),
   name: z.string().trim().min(1).max(MAX_NAME),
@@ -69,6 +78,7 @@ export const registerBody = z.object({
   repo: optionalText(MAX_NAME),
   branch: optionalText(MAX_NAME),
   host: optionalText(MAX_NAME),
+  name_source: nameSource,
   skills,
   client_features: clientFeatures,
   conversation_id: z.string().trim().min(1).max(MAX_NAME).nullish()
@@ -77,6 +87,7 @@ export const registerBody = z.object({
 export const heartbeatBody = z.object({
   status: z.enum(["busy", "idle"]),
   name: z.string().trim().min(1).max(MAX_NAME).nullish(),
+  name_source: nameSource,
   skills
 });
 

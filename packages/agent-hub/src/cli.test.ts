@@ -1335,7 +1335,7 @@ describe("artefact, in an assistant conversation", () => {
   // A session with comms enabled, registered for a conversation unless `conversation` is false.
   async function session({ conversation = true }: { conversation?: boolean } = {}): Promise<{ sid: string; agentId: string }> {
     const sid = `artefact-sess-${++nextSession}`;
-    const body: RegisterBody = { session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] };
+    const body: RegisterBody = { session_id: sid, name: sid, name_source: "derived", client_features: [...CLIENT_FEATURES] };
     if (conversation) {
       body.conversation_id = `0f8a6a1e-0000-4000-8000-${String(nextSession).padStart(12, "0")}`;
     }

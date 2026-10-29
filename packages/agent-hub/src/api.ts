@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import type { Env } from "./env.ts";
 import type { PortsReport } from "./ports.ts";
 import type { QuestionBody } from "./questions.ts";
+import type { NameSource } from "./session.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
 export const DEFAULT_URL = "https://agent-hub.aat.platform.hmcts.net";
@@ -89,6 +90,13 @@ export type Skill = {
 export type RegisterBody = {
   session_id: string;
   name: string;
+  /**
+   * Where `name` came from: `user` for a /rename, `derived` for a name this client worked out. Optional on the wire,
+   * where leaving it out reads as `derived`, but required here for the same reason as `client_features`: the service
+   * replaces what it has stored with whatever a register reports, so a call site that omitted it would tell the hub
+   * the person had not named this session when they had.
+   */
+  name_source: NameSource;
   cwd?: string | null;
   repo?: string | null;
   branch?: string | null;
@@ -108,6 +116,8 @@ export type RegisterBody = {
 export type HeartbeatBody = {
   status: "busy" | "idle";
   name?: string | null;
+  /** Where `name` came from; read as `derived` when left out, and ignored by a heartbeat that sends no `name`. */
+  name_source?: NameSource;
   skills?: Skill[];
 };
 

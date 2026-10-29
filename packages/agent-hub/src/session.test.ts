@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import {
   acquirePidFile,
@@ -86,6 +86,25 @@ function transcript(file: string, entries: unknown[]) {
 
 function tmpFile(name: string) {
   return path.join(home.root, name);
+}
+
+/** The two windows `conversationTitles` reads, mirrored from `session.ts`, which keeps them private. */
+const HEAD_BYTES = 1024 * 1024;
+const TAIL_BYTES = 256 * 1024;
+
+function line(entry: unknown) {
+  return `${JSON.stringify(entry)}\n`;
+}
+
+/** Whole transcript lines, as many as fit in `bytes`, so every part of a padded file still parses line by line. */
+function filler(bytes: number) {
+  const one = line({ type: "user", message: { content: "x".repeat(200) } });
+  return one.repeat(Math.ceil(bytes / one.length));
+}
+
+function write(file: string, parts: string[]) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, parts.join(""));
 }
 
 describe("claudeHome", () => {
@@ -464,15 +483,54 @@ describe("conversationTitles", () => {
     expect(conversationTitles(file)).toEqual({ ai: "parsed" });
   });
 
-  it("should read only the tail, so a title from the start of a long transcript is not used", () => {
-    const file = tmpFile("titles-long.jsonl");
-    const padding = `${JSON.stringify({ type: "user", message: { content: "x".repeat(200) } })}\n`.repeat(1600);
-    fs.writeFileSync(
-      file,
-      `${JSON.stringify({ type: "ai-title", aiTitle: "buried" })}\n${padding}${JSON.stringify({ type: "custom-title", customTitle: "Near The End" })}\n`
-    );
-    expect(fs.statSync(file).size).toBeGreaterThan(256 * 1024);
-    expect(conversationTitles(file)).toEqual({ custom: "Near The End" });
+  it("should find the ai-title when the transcript has outgrown the window at its end", () => {
+    const file = tmpFile("titles-outgrown.jsonl");
+    write(file, [line({ type: "ai-title", aiTitle: "fix the local chat titles" }), filler(1536 * 1024)]);
+    expect(fs.statSync(file).size).toBeGreaterThan(HEAD_BYTES + TAIL_BYTES);
+
+    expect(conversationTitles(file)).toEqual({ ai: "fix the local chat titles" });
+  });
+
+  it("should prefer a custom-title written at the end to the ai-title written at the start", () => {
+    const file = tmpFile("titles-renamed-late.jsonl");
+    write(file, [line({ type: "ai-title", aiTitle: "ai one" }), filler(1536 * 1024), line({ type: "custom-title", customTitle: "Near The End" })]);
+
+    expect(conversationTitles(file)).toEqual({ ai: "ai one", custom: "Near The End" });
+  });
+
+  it("should be empty when the transcript carries neither kind of title", () => {
+    const file = tmpFile("titles-none.jsonl");
+    write(file, [filler(1536 * 1024)]);
+
+    expect(conversationTitles(file)).toEqual({});
+  });
+
+  // Both ends and nothing in between: a real transcript reaches hundreds of megabytes, and this is a hook path.
+  it("should read neither the whole file nor its middle when the transcript is larger than both windows", () => {
+    const file = tmpFile("titles-middle.jsonl");
+    write(file, [
+      line({ type: "ai-title", aiTitle: "from the head" }),
+      filler(1200 * 1024),
+      line({ type: "custom-title", customTitle: "In The Middle" }),
+      filler(800 * 1024)
+    ]);
+    const size = fs.statSync(file).size;
+    const readSync = vi.spyOn(fs, "readSync");
+    // Read before the restore, which clears the call history as well as putting the real function back. Each call is
+    // the positional overload, the only one this module uses: (fd, buffer, offset, length, position).
+    let reads: [number, Buffer, number, number, number][] = [];
+
+    try {
+      expect(conversationTitles(file)).toEqual({ ai: "from the head" });
+      reads = readSync.mock.calls as unknown as typeof reads;
+    } finally {
+      readSync.mockRestore();
+    }
+
+    expect(size).toBeGreaterThan(HEAD_BYTES + TAIL_BYTES);
+    // Asserted, so that a reduce over no calls at all cannot pass this on an empty total.
+    expect(reads).toHaveLength(2);
+    expect(reads.reduce((total, [, , , length]) => total + length, 0)).toBeLessThanOrEqual(HEAD_BYTES + TAIL_BYTES);
   });
 });
 
@@ -520,6 +578,15 @@ describe("agentName", () => {
     expect(agentName("0123456789-unregistered")).toBe("01234567");
   });
 
+  // The complaint this came from: a session worked in all day showed in the hub as `hmcts-25`, because its
+  // transcript had outgrown the window the title was looked for in and the registry handle was all that was left.
+  it("should use the ai title rather than the registry handle when the transcript has outgrown the tail window", () => {
+    registry("outgrown", { name: "hmcts-25", nameSource: "derived", cwd });
+    write(file("outgrown"), [line({ type: "ai-title", aiTitle: "Local chat titles" }), filler(1536 * 1024)]);
+
+    expect(agentName("outgrown")).toBe("local-chat-titles");
+  });
+
   it("should fall back to the first eight characters of the id when the registry says nothing usable", () => {
     registry("nameless-session-id", { cwd: "/w/nameless" });
     expect(agentName("nameless-session-id")).toBe("nameless");
@@ -532,6 +599,7 @@ describe("sessionInfo", () => {
     expect(sessionInfo("sess-info", { AGENT_HUB_CLAUDE_PID: "4321" })).toEqual({
       pid: 4321,
       name: "hmcts-i1",
+      nameSource: "derived",
       cwd: "/w/i",
       socketPath: "/sock/registry"
     });
@@ -548,12 +616,24 @@ describe("sessionInfo", () => {
   });
 
   it("should report nulls when the session is not in the registry", () => {
-    expect(sessionInfo("sess-info-absent", {})).toEqual({ pid: null, name: "sess-inf", cwd: null, socketPath: null });
+    expect(sessionInfo("sess-info-absent", {})).toEqual({ pid: null, name: "sess-inf", nameSource: "derived", cwd: null, socketPath: null });
   });
 
   it("should ignore an environment process id that is not a number", () => {
     registry("sess-info-4", { pid: 99, cwd: "/w/i4" });
     expect(sessionInfo("sess-info-4", { AGENT_HUB_CLAUDE_PID: "not-a-pid" }).pid).toBe(99);
+  });
+
+  // The service keeps a name the person chose and replaces one this client invented, so it has to be told which
+  // this is. Claude Code's own `auto` is automatic too, and is reported as derived.
+  it("should report a /rename as a name the person chose, and every other name as derived", () => {
+    registry("sess-renamed", { pid: 1, name: "hdpi-9653-welsh", nameSource: "user", cwd: "/w/r" });
+    registry("sess-auto", { pid: 1, name: "a-chat-it-named", nameSource: "auto", cwd: "/w/a" });
+    registry("sess-derived", { pid: 1, name: "hmcts-25", nameSource: "derived", cwd: "/w/d" });
+
+    expect(sessionInfo("sess-renamed", {})).toMatchObject({ name: "hdpi-9653-welsh", nameSource: "user" });
+    expect(sessionInfo("sess-auto", {}).nameSource).toBe("derived");
+    expect(sessionInfo("sess-derived", {}).nameSource).toBe("derived");
   });
 });
 

@@ -460,13 +460,113 @@ describe("the assistant product list migration", () => {
 });
 
 /**
+ * The recovery half of the title-source migration, which is the part of this change people see: the chats their own
+ * Claude Code sessions put in the Assistant were named `hmcts-25` after the session registry's handle, and the
+ * sessions that were named worst of all have ended, so no better name is ever coming from their clients. Their
+ * prompts are still here, and this is what reads them.
+ *
+ * The other half of what is under test is what it leaves alone. `name_source` cannot help a historical row — the
+ * column it adds says `derived` for every session ever registered, renamed or not — so the only evidence is the
+ * shape of the title, and a title it does not recognise as one of the client's own fallbacks keeps whatever it has.
+ * Leaving a chat badly named can be put right later; overwriting a name somebody chose cannot.
+ */
+describe("the conversation title source migration", () => {
+  const MIGRATION = "20261115090000_conversation_title_source";
+  const { database: TITLES, earlier } = migrationFixture("migrate_titles", MIGRATION);
+
+  it("should name a local chat carrying one of the client's handles after its first prompt, and leave every other title alone, when it is applied", async () => {
+    await migrate(earlier());
+    await query(TITLES, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(TITLES, `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'assistant', 'own_licence')`);
+    // One session per chat. `stale` is the complaint itself: its client worked out a real name hours later and a
+    // heartbeat stored it on the agent, while the chat kept the handle it was made with.
+    await query(
+      TITLES,
+      `INSERT INTO "agent" (owner_oid, session_id, name) VALUES
+        ('dev-alice', 'stale', 'fix-local-chat-titles'),
+        ('dev-alice', 'session-id', 'hmcts-3e'),
+        ('dev-alice', 'generated', 'local-chat-titles'),
+        ('dev-alice', 'renamed', 'hdpi-9653-welsh'),
+        ('dev-alice', 'silent', 'hmcts-99'),
+        ('dev-alice', 'blank', 'hmcts-ab'),
+        ('dev-alice', 'pod', 'assistant')`
+    );
+    await query(
+      TITLES,
+      `INSERT INTO "assistant_conversation" (owner_oid, agent_id, title)
+        SELECT 'dev-alice', a.id, t.title
+          FROM "agent" a
+          JOIN (VALUES ('stale', 'hmcts-25'), ('session-id', 'a1b2c3d4'), ('generated', 'local-chat-titles'),
+                       ('renamed', 'hdpi-9653-welsh'), ('silent', 'hmcts-99'), ('blank', NULL::text)) AS t (session_id, title)
+            ON t.session_id = a.session_id`
+    );
+    await query(
+      TITLES,
+      `INSERT INTO "assistant_conversation" (owner_oid, virtual_agent_id, agent_id, title)
+        SELECT 'dev-alice', v.id, a.id, 'what the person asked for' FROM "virtual_agent" v, "agent" a WHERE a.session_id = 'pod'`
+    );
+    await query(TITLES, `UPDATE "agent" a SET assistant_conversation_id = c.id FROM "assistant_conversation" c WHERE c.agent_id = a.id`);
+    await query(
+      TITLES,
+      `INSERT INTO "transcript_entry" (agent_id, session_id, entry_key, role, content, redacted, occurred_at)
+        SELECT a.id, a.session_id, t.entry_key, 'user'::transcript_role, t.content::jsonb, t.redacted, t.at::timestamptz
+          FROM "agent" a
+          JOIN (VALUES
+                 ('stale', '1', '{"redacted": "azure-client-secret"}', true, '2026-11-14T09:00:00Z'),
+                 ('stale', '2', '{"text": "  why can''t this user   see tasks? "}', false, '2026-11-14T09:01:00Z'),
+                 ('stale', '3', '{"text": "and later, something else"}', false, '2026-11-14T09:02:00Z'),
+                 ('session-id', '1', '{"text": "the prompt that names it"}', false, '2026-11-14T09:00:00Z'),
+                 ('generated', '1', '{"text": "a prompt this chat is not named after"}', false, '2026-11-14T09:00:00Z'),
+                 ('renamed', '1', '{"text": "look at the failing run on PR 2114"}', false, '2026-11-14T09:00:00Z'),
+                 ('blank', '1', '{"text": "   "}', false, '2026-11-14T09:00:00Z'),
+                 ('blank', '2', '{"text": "the first prompt with words in it"}', false, '2026-11-14T09:01:00Z'),
+                 ('pod', '1', '{"text": "the session reading the message back"}', false, '2026-11-14T09:00:00Z'))
+               AS t (session_id, entry_key, content, redacted, at)
+            ON t.session_id = a.session_id`
+    );
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const chats = await query<{ session_id: string; title: string | null; title_source: string }>(
+      TITLES,
+      `SELECT a.session_id, c.title, c.title_source FROM "assistant_conversation" c JOIN "agent" a ON a.id = c.agent_id ORDER BY a.session_id`
+    );
+    expect(chats).toEqual([
+      // Its client reported no name at all, and its opening prompt is whitespace: the next one names it.
+      { session_id: "blank", title: "the first prompt with words in it", title_source: "message" },
+      // A name Claude Code generated for the conversation reads exactly like a /rename, so it is left alone — and
+      // what it is left with is a readable name rather than a handle, which is why that costs the person little.
+      { session_id: "generated", title: "local-chat-titles", title_source: "message" },
+      // Named after its first message when it was sent, and a chat with a pod is no business of this migration's.
+      { session_id: "pod", title: "what the person asked for", title_source: "message" },
+      // The name the person chose with /rename, which is the one thing this must not take away.
+      { session_id: "renamed", title: "hdpi-9653-welsh", title_source: "message" },
+      // The start of the session id, `agentName`'s last resort, which no person types as a title.
+      { session_id: "session-id", title: "the prompt that names it", title_source: "message" },
+      { session_id: "silent", title: "hmcts-99", title_source: "agent" },
+      // The redacted prompt is passed over, the next one names the chat, and its whitespace is collapsed as a title's is.
+      { session_id: "stale", title: "why can't this user see tasks?", title_source: "message" }
+    ]);
+    // Every session the hub already knew about is read as carrying a name its client worked out, because that is
+    // all the column can say about a row written before it existed.
+    expect(await query(TITLES, `SELECT DISTINCT name_source FROM "agent"`)).toEqual([{ name_source: "derived" }]);
+    // A conversation made from here on says where its title came from, and both columns take nothing else: any
+    // other value is a write site that forgot to decide, which would read as a title or a name nothing may replace.
+    await query(TITLES, `INSERT INTO "assistant_conversation" (owner_oid, title) VALUES ('dev-alice', 'made at head')`);
+    expect(await query(TITLES, `SELECT title_source FROM "assistant_conversation" WHERE title = 'made at head'`)).toEqual([{ title_source: "message" }]);
+    await expect(query(TITLES, `UPDATE "assistant_conversation" SET title_source = 'guessed' WHERE title = 'made at head'`)).rejects.toThrow(/title_source/);
+    await expect(query(TITLES, `UPDATE "agent" SET name_source = 'auto' WHERE session_id = 'stale'`)).rejects.toThrow(/name_source/);
+  });
+});
+
+/**
  * The sweep's pattern and the name generator have to agree, and nothing else in the suite would notice if they
  * stopped: an unswept name leaks silently, and `dropAbandonedScratchDatabases` swallows its own errors by design.
  */
 describe("the scratch database sweep's pattern", () => {
   const pattern = new RegExp(SCRATCH_PATTERN);
 
-  it.each(["migrate", "migrate_bedrock", "migrate_bedrock_gone", "migrate_product", "assistant2", "x", "a_much_longer_suffix_9"])(
+  it.each(["migrate", "migrate_bedrock", "migrate_bedrock_gone", "migrate_product", "migrate_titles", "assistant2", "x", "a_much_longer_suffix_9"])(
     "should match the name the generator produces for the %s suffix",
     (suffix) => {
       expect(scratchDatabase(suffix)).toMatch(pattern);

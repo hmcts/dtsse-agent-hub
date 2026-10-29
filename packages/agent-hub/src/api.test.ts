@@ -38,6 +38,7 @@ beforeAll(async () => {
     await api.register({
       session_id: "sid-api-test",
       name: "alice-pcs-api",
+      name_source: "derived",
       cwd: "/work",
       repo: "pcs-api",
       branch: "main",
@@ -420,6 +421,7 @@ describe("createApi requests", () => {
     const other = await createApi({ env: {}, baseUrl: url, devUser: "oid-bob|Bob Jones|bob@example.com" }).register({
       session_id: "sid-api-tagged",
       name: "bob-ccd",
+      name_source: "derived",
       cwd: null,
       repo: null,
       branch: null,
@@ -709,6 +711,7 @@ describe("createApi conversations", () => {
       await pod.register({
         session_id: "sid-api-conv",
         name: "conv",
+        name_source: "derived",
         conversation_id: "0f8a6a1e-0000-4000-8000-00000000000b",
         client_features: [...CLIENT_FEATURES]
       })

@@ -113,7 +113,7 @@ async function startBridge(hubOptions: MockHubOptions, { env: extraEnv, ...bridg
   const url = await hub.listen();
   const api = createApi({ baseUrl: url, devUser: DEV_USER });
   const sid = `bridge-test-${++nextSession}`;
-  const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
+  const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, name_source: "derived", client_features: [...CLIENT_FEATURES] });
   ensureStateDir(sid);
   fs.writeFileSync(statePath(sid, "enabled"), "");
   writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid, ...savedAgent });
@@ -578,7 +578,7 @@ describe("runBridge", () => {
     const url = await hub.listen();
     const api = createApi({ baseUrl: url, devUser: DEV_USER });
     const sid = `bridge-test-${++nextSession}`;
-    const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
+    const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, name_source: "derived", client_features: [...CLIENT_FEATURES] });
     ensureStateDir(sid);
     fs.writeFileSync(statePath(sid, "enabled"), "");
     writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid });
@@ -672,6 +672,34 @@ describe("runBridge", () => {
     }
   });
 
+  // The hub keeps a chat on somebody's own computer on the name they chose and replaces the handle this client
+  // invented, so it has to hear both the name and where it came from — and a /rename happens part-way through a
+  // session, which makes the heartbeat the only place it can arrive.
+  it("should send the name and where it came from on every heartbeat, so a /rename reaches the hub", async () => {
+    // Arrange
+    const bridge = await startBridge({}, { heartbeatMs: 50 });
+    const beats = () => bridge.hub.calls.filter((c) => c.path === `/api/agent/${bridge.agentId}/heartbeat`);
+
+    try {
+      await waitUntil(() => beats().length >= 1, "a heartbeat before the rename");
+      expect(beats()[0]?.body.name_source).toBe("derived");
+
+      // Act: the person runs /rename, which Claude Code records in the session registry.
+      writeJson(path.join(home.claude, "sessions", `${bridge.sid}.json`), {
+        pid: process.pid,
+        sessionId: bridge.sid,
+        name: "hdpi-9653-welsh",
+        nameSource: "user"
+      });
+
+      // Assert
+      await waitUntil(() => beats().some((c) => c.body.name_source === "user"), "a heartbeat carrying the rename");
+      expect(beats().find((c) => c.body.name_source === "user")?.body.name).toBe("hdpi-9653-welsh");
+    } finally {
+      await bridge.stop();
+    }
+  });
+
   it("should send the skills on the first heartbeat when a saved agent's skills_hash differs from them", async () => {
     // Arrange
     const skills: SkillListing[] = [{ name: "pcs:start-env", description: "Start" }];
@@ -750,7 +778,7 @@ describe("runBridge", () => {
       const url = await hub.listen();
       const api = createApi({ baseUrl: url, devUser: DEV_USER });
       const sid = `bridge-test-${++nextSession}`;
-      const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, client_features: [...CLIENT_FEATURES] });
+      const { agent_id: agentId } = await api.register({ session_id: sid, name: sid, name_source: "derived", client_features: [...CLIENT_FEATURES] });
       ensureStateDir(sid);
       fs.writeFileSync(statePath(sid, "enabled"), "");
       writeJson(statePath(sid, "agent.json"), { agent_id: agentId, session_id: sid, name: sid });
