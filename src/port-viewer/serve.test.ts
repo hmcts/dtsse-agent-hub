@@ -97,6 +97,36 @@ describe("serveViewer", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("should send a request from a page that has left its prefix to the port last served, when its Referer names none", async () => {
+    const request = new Request("https://agent-hub-viewer.example/aggregated/x?access=read", {
+      headers: { referer: "https://agent-hub-viewer.example/cases", cookie: `ahv-last=${ID}/8080` }
+    });
+
+    const response = await serveViewer(request, "/aggregated/x?access=read", deps());
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`${PREFIX}/aggregated/x?access=read`);
+  });
+
+  it("should prefer the Referer's port to the one last served", async () => {
+    const request = new Request("https://agent-hub-viewer.example/x", {
+      headers: { referer: `https://agent-hub-viewer.example/${ID}/3000/`, cookie: `ahv-last=${ID}/8080` }
+    });
+
+    expect((await serveViewer(request, "/x", deps())).headers.get("location")).toBe(`/${ID}/3000/x`);
+  });
+
+  it("should remember the port of an HTML page it forwards, and of nothing else", async () => {
+    const html = deps({ fetch: vi.fn<Fetch>(async () => new Response("<p>hi</p>", { headers: { "content-type": "text/html" } })) });
+    const json = deps({ fetch: vi.fn<Fetch>(async () => new Response("{}", { headers: { "content-type": "application/json" } })) });
+
+    const page = await serveViewer(await withCookie(`${PREFIX}/`), `${PREFIX}/`, html);
+    const api = await serveViewer(await withCookie(`${PREFIX}/api`), `${PREFIX}/api`, json);
+
+    expect(page.headers.getSetCookie()).toContain(`ahv-last=${ID}/8080; Path=/; Max-Age=28800; HttpOnly; Secure; SameSite=Lax`);
+    expect(api.headers.getSetCookie()).toEqual([]);
+  });
+
   it("should answer 404 outside every prefix when the Referer names no port's page", async () => {
     const request = new Request("https://agent-hub-viewer.example/style.css", { headers: { referer: "https://elsewhere.example/" } });
 

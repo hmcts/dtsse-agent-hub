@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { landingPath, parseViewerPath, portOf, refererTarget, ticketPath, viewerCookieName, viewerPrefix, viewerUrl } from "./paths.ts";
+import {
+  LAST_PORT_COOKIE,
+  landingPath,
+  lastPortCookie,
+  lastPortTarget,
+  parseViewerPath,
+  portOf,
+  refererTarget,
+  ticketPath,
+  viewerCookieName,
+  viewerPrefix,
+  viewerUrl
+} from "./paths.ts";
 
 const ID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 
@@ -84,5 +96,28 @@ describe("refererTarget", () => {
     ["a scheme-relative path", PAGE, "//evil.example/"]
   ])("should leave nothing to redirect for %s", (_case, referer, path) => {
     expect(refererTarget(referer, HOST, path)).toBeUndefined();
+  });
+});
+
+describe("the last port's cookie", () => {
+  it("should name the port across the viewer's whole host, for as long as asked", () => {
+    expect(lastPortCookie(ID, 8080, 60)).toBe(`${LAST_PORT_COOKIE}=${ID}/8080; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax`);
+  });
+
+  it("should send a root-relative path under the port it names", () => {
+    expect(lastPortTarget(`${ID}/8080`, "/aggregated/caseworkers/:uid/jurisdictions?access=read")).toBe(
+      `/${ID}/8080/aggregated/caseworkers/:uid/jurisdictions?access=read`
+    );
+  });
+
+  it.each<[string, string | undefined, string]>([
+    ["no cookie", undefined, "/cases"],
+    ["a value that names no port", "nonsense", "/cases"],
+    ["an id that is not a uuid", "abc/8080", "/cases"],
+    ["a port below 1024", `${ID}/80`, "/cases"],
+    ["the viewer's own ticket exchange", `${ID}/8080`, "/_auth?ticket=x"],
+    ["a scheme-relative path", `${ID}/8080`, "//evil.example/"]
+  ])("should leave nothing to redirect for %s", (_case, value, path) => {
+    expect(lastPortTarget(value, path)).toBeUndefined();
   });
 });
