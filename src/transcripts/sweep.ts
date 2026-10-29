@@ -114,18 +114,19 @@ export async function sweepTranscripts(prisma: PrismaClient, options: Transcript
 }
 
 export interface TranscriptSweeper {
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 /** Runs `sweepTranscripts` on an interval, with the timer unreferenced as the offline sweep's is. */
 export function startTranscriptSweep(prisma: PrismaClient, intervalMs: number = TRANSCRIPT_SWEEP_INTERVAL_MS): TranscriptSweeper {
   let running = false;
+  let tick: Promise<void> = Promise.resolve();
   const timer = setInterval(() => {
     if (running) {
       return;
     }
     running = true;
-    sweepTranscripts(prisma)
+    tick = sweepTranscripts(prisma)
       .then((result) => {
         if (result !== undefined && (result.expired > 0 || result.trimmed > 0)) {
           console.info(`transcript sweep: ${result.expired} entries past retention and ${result.trimmed} over the per-agent cap deleted`);
@@ -139,5 +140,12 @@ export function startTranscriptSweep(prisma: PrismaClient, intervalMs: number = 
       });
   }, intervalMs);
   timer.unref();
-  return { stop: () => clearInterval(timer) };
+  // Waits for the tick in flight as the offline sweep's `stop` does, and for the same reason: its transaction is
+  // still holding locks the caller's next statement may want.
+  return {
+    stop: async () => {
+      clearInterval(timer);
+      await tick;
+    }
+  };
 }

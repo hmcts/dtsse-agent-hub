@@ -499,8 +499,12 @@ yarn install
 AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev    # http://localhost:3000
 ```
 
-`yarn dev` starts Postgres 18 in Docker on 5432 (`yarn deps:up`), regenerates the Prisma client and applies any
+`yarn dev` starts Postgres 16 in Docker on 5432 (`yarn deps:up`), regenerates the Prisma client and applies any
 pending migrations before it starts Next, so pulling a new migration needs no extra step.
+
+If `yarn deps:up` fails with `initdb: error: directory "/var/lib/postgresql/data" exists but is not empty`, the
+checkout's volume holds a cluster written by a different major version. `docker compose down -v` discards it, and the
+next `yarn dev` migrates a fresh one.
 
 With `AGENT_AUTH_DISABLED=true` the agent API takes the caller from an `X-Dev-User: <oid>|<name>|<email>` header
 instead of a bearer token. It works under `next dev` only: a production build, `yarn start` included, refuses it
