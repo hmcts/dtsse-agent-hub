@@ -7,7 +7,7 @@ export function DevBadge({ tid }: { tid: string }) {
   }
   return (
     <span
-      className="ml-1 rounded border border-amber-700 px-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300"
+      className="ml-1 rounded-sm border border-amber-700 px-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300"
       title="A development identity: sign-in was disabled"
     >
       dev

@@ -108,7 +108,7 @@ describe("a form carrying a credential", () => {
       <OnboardingChecklist
         virtualAgentId="va-1"
         desired="running"
-        needed={["github", "claude", "bedrock"]}
+        needed={["github", "claude"]}
         optional={["jenkins"]}
         statuses={[]}
         logins={[pasteLogin("claude")]}
@@ -122,7 +122,6 @@ describe("a form carrying a credential", () => {
 
     expect([...container.querySelectorAll("form")].filter(carriesSecret).map((form) => form.getAttribute("aria-label"))).toEqual([
       "Paste the Claude code",
-      "Save your Claude Code key",
       "Save your Jenkins API token"
     ]);
     expectEveryFormPosts(container);
@@ -137,9 +136,9 @@ describe("a form carrying a credential", () => {
       <OnboardingChecklist
         virtualAgentId="va-1"
         desired="running"
-        needed={["github", "bedrock"]}
+        needed={["github", "claude"]}
         optional={["jenkins"]}
-        statuses={[stored("github"), stored("bedrock"), stored("jenkins")]}
+        statuses={[stored("github"), stored("claude"), stored("jenkins")]}
         logins={[]}
         paste={ok()}
         save={ok()}
@@ -148,7 +147,7 @@ describe("a form carrying a credential", () => {
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "Replace your Jenkins API token" }));
-    fireEvent.click(screen.getByRole("button", { name: "Replace your Claude Code key" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replace your Claude token" }));
     fireEvent.click(screen.getByRole("button", { name: "Reconnect GitHub" }));
 
     expect(screen.getByRole("form", { name: "Save your Jenkins API token" })).toBeTruthy();
@@ -158,7 +157,7 @@ describe("a form carrying a credential", () => {
   });
 
   it("should post every form on the credentials page whatever is stored", () => {
-    const kinds: CredentialStatus["kind"][] = ["github", "azure", "claude", "bedrock", "jenkins", "atlassian"];
+    const kinds: CredentialStatus["kind"][] = ["github", "azure", "claude", "jenkins", "atlassian"];
     for (const statuses of [kinds.map(missing), kinds.map(stored)]) {
       const { container, unmount } = render(
         <CredentialSettingsView

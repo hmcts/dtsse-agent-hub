@@ -83,7 +83,7 @@ describe("requireCredentialKind", () => {
 describe("OWNER_READABLE", () => {
   it("should be the three kinds agent-hub gives back to their owner, not only to their virtual agents", () => {
     // Act & Assert
-    expect([...OWNER_READABLE]).toEqual(["bedrock", "claude_md", "git_identity"]);
+    expect([...OWNER_READABLE]).toEqual(["claude_md", "git_identity"]);
   });
 });
 

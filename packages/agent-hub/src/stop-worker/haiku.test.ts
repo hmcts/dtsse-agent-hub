@@ -37,7 +37,7 @@ const settingsOf = (env: Record<string, string>, root: string): Record<string, u
 describe("haikuCommand", () => {
   it("should run on the session's own auth without --bare, hooks, tools or MCP whatever the model route", () => {
     // Act & Assert
-    for (const route of [undefined, "own_licence", "bedrock"]) {
+    for (const route of [undefined, "own_licence", "gateway"]) {
       const env: Record<string, string> = route ? { AGENT_HUB_MODEL_ROUTE: route } : {};
       const { bin, args } = haikuCommand(env, home.root);
       expect(bin).toBe("claude");
@@ -76,6 +76,42 @@ describe("haikuCommand", () => {
     // Act & Assert: only the helpers come from project settings.
     expect(settingsOf({}, root)).toEqual({ apiKeyHelper: `${cd}.claude/project.sh`, awsAuthRefresh: `${cd}scripts/aws-refresh`, disableAllHooks: true });
     expect(settingsOf({ AGENT_HUB_CLAUDE_SETTINGS: '{"apiKeyHelper":".claude/token.sh"}' }, root).apiKeyHelper).toBe(`${cd}.claude/token.sh`);
+  });
+
+  it("should name the apiKeyHelper hai published when the session is on the gateway route", () => {
+    // Arrange: the route's base url and APIM header reach the summariser by inheritance, so the
+    // helper is the only part of the credential it has to name for itself.
+    const helper = "/home/hmcts/.local/state/hai/gateway-token.sh";
+
+    // Act & Assert: rooted like every other helper, which an absolute path is unaffected by.
+    expect(settingsOf({ HAI_API_KEY_HELPER: helper }, home.root)).toEqual({
+      apiKeyHelper: `cd '${home.root}' && ${helper}`,
+      disableAllHooks: true
+    });
+  });
+
+  it("should authenticate as it did before when hai published no helper", () => {
+    // Act & Assert: an own-licence session has no helper at all, and so does a pod running a hai
+    // that predates the variable.
+    expect(settingsOf({}, home.root)).toEqual({ disableAllHooks: true });
+    expect(settingsOf({ HAI_API_KEY_HELPER: "" }, home.root)).toEqual({ disableAllHooks: true });
+    expect(settingsOf({ HAI_API_KEY_HELPER: "   " }, home.root)).toEqual({ disableAllHooks: true });
+  });
+
+  it("should let hai's published helper win over a settings file and lose to AGENT_HUB_CLAUDE_SETTINGS", () => {
+    // Arrange
+    const root = fs.mkdtempSync(path.join(home.root, "ws-precedence-"));
+    fs.mkdirSync(path.join(root, ".claude"));
+    fs.writeFileSync(path.join(root, ".claude", "settings.json"), JSON.stringify({ apiKeyHelper: ".claude/project.sh" }));
+    const cd = `cd '${root}' && `;
+    const published = "/home/hmcts/.local/state/hai/gateway-token.sh";
+
+    // Act & Assert: hai names the credential the session is running on, rather than a file that
+    // may describe another; an operator naming one explicitly is still the last word.
+    expect(settingsOf({ HAI_API_KEY_HELPER: published }, root).apiKeyHelper).toBe(`${cd}${published}`);
+    expect(settingsOf({ HAI_API_KEY_HELPER: published, AGENT_HUB_CLAUDE_SETTINGS: '{"apiKeyHelper":".claude/token.sh"}' }, root).apiKeyHelper).toBe(
+      `${cd}.claude/token.sh`
+    );
   });
 });
 
@@ -158,10 +194,10 @@ describe("runHaiku", () => {
     expect(fs.statSync(cwd).mode & 0o077, "private to the user").toBe(0);
   });
 
-  it("should inherit the session's Bedrock environment when it is on the Bedrock route", async () => {
+  it("should inherit the session's Bedrock-protocol environment when it is on the gateway route", async () => {
     // Arrange
-    const bedrock: Record<string, string> = { AGENT_HUB_MODEL_ROUTE: "bedrock" };
-    expect(haikuCommand(bedrock, home.root).args).not.toContain("--bare");
+    const gateway: Record<string, string> = { AGENT_HUB_MODEL_ROUTE: "gateway" };
+    expect(haikuCommand(gateway, home.root).args).not.toContain("--bare");
     const bin = path.join(home.root, "fake-haiku");
     fs.writeFileSync(
       bin,
@@ -172,10 +208,10 @@ describe("runHaiku", () => {
     );
     const env = {
       ...process.env,
-      ...bedrock,
+      ...gateway,
       AGENT_HUB_CLAUDE_BIN: bin,
       CLAUDE_CODE_USE_BEDROCK: "1",
-      AWS_BEARER_TOKEN_BEDROCK: "bedrock-key",
+      AWS_BEARER_TOKEN_BEDROCK: "gateway-minted-token",
       AWS_REGION: "eu-west-2",
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
     };
@@ -184,7 +220,7 @@ describe("runHaiku", () => {
     const out = await runHaiku("prompt", { env, root: home.root });
 
     // Assert
-    expect(JSON.parse(out).result).toBe("1|bedrock-key|eu-west-2|eu.anthropic.claude-haiku-4-5-20251001-v1:0");
+    expect(JSON.parse(out).result).toBe("1|gateway-minted-token|eu-west-2|eu.anthropic.claude-haiku-4-5-20251001-v1:0");
   });
 
   it("should drop the session's messaging socket and id so the child cannot act as the session", async () => {

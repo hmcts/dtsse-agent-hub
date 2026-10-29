@@ -19,6 +19,7 @@ import {
   canManageTemplate,
   canManageUploadsOnDisk,
   canManageVirtualAgent,
+  canOpenVirtualAgentPort,
   canOwnerReadCredential,
   canPersonMessageAgent,
   canReadMessage,
@@ -347,6 +348,17 @@ describe("canManageVirtualAgent", () => {
   });
 });
 
+describe("canOpenVirtualAgentPort", () => {
+  it.each<[boolean, Role]>([
+    [true, "owner"],
+    [false, "read grantee"],
+    [false, "write grantee"],
+    [false, "stranger"]
+  ])("should answer %s when the %s opens a web server on the owner's virtual agent", (expected, role) => {
+    expect(canOpenVirtualAgentPort(ROLES[role], { id: "va-1", ownerOid: OWNER })).toBe(expected);
+  });
+});
+
 describe("canViewVirtualAgent", () => {
   it.each<[boolean, Role]>([
     [true, "owner"],
@@ -397,10 +409,6 @@ describe("canUseCredentialRoutes", () => {
 });
 
 describe("canOwnerReadCredential", () => {
-  it("should let the owner read their key back when it is an Amazon Bedrock API key", () => {
-    expect(canOwnerReadCredential("bedrock")).toBe(true);
-  });
-
   it("should let the owner read their CLAUDE.md back when the page shows it for editing", () => {
     expect(canOwnerReadCredential("claude_md")).toBe(true);
   });
@@ -409,32 +417,21 @@ describe("canOwnerReadCredential", () => {
     expect(canOwnerReadCredential("git_identity")).toBe(true);
   });
 
-  it.each([
-    "github",
-    "azure",
-    "claude",
-    "jenkins",
-    "atlassian",
-    "Bedrock",
-    "claude-md",
-    "git-identity",
-    ""
-  ])("should keep %j write-only when it is any other kind", (kind) => {
-    expect(canOwnerReadCredential(kind)).toBe(false);
-  });
+  it.each(["github", "azure", "claude", "jenkins", "atlassian", "bedrock", "Bedrock", "claude-md", "git-identity", ""])(
+    "should keep %j write-only when it is any other kind",
+    (kind) => {
+      expect(canOwnerReadCredential(kind)).toBe(false);
+    }
+  );
 });
 
 describe("canVirtualAgentStoreCredential", () => {
-  it.each([
-    "github",
-    "azure",
-    "claude",
-    "bedrock",
-    "jenkins",
-    "atlassian"
-  ])("should let a pod store its owner's %s when it is a credential the pod signs in for", (kind) => {
-    expect(canVirtualAgentStoreCredential(kind)).toBe(true);
-  });
+  it.each(["github", "azure", "claude", "jenkins", "atlassian"])(
+    "should let a pod store its owner's %s when it is a credential the pod signs in for",
+    (kind) => {
+      expect(canVirtualAgentStoreCredential(kind)).toBe(true);
+    }
+  );
 
   it("should refuse a pod when it would change its owner's CLAUDE.md", () => {
     expect(canVirtualAgentStoreCredential("claude_md")).toBe(false);

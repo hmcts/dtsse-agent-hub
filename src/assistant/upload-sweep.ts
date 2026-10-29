@@ -150,7 +150,7 @@ async function dropAbandoned(tx: Database, retentionHours: number, batch: number
 }
 
 export interface UploadSweeper {
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 /**
@@ -159,12 +159,13 @@ export interface UploadSweeper {
  */
 export function startUploadSweep(prisma: PrismaClient, intervalMs: number = UPLOAD_SWEEP_INTERVAL_MS): UploadSweeper {
   let running = false;
+  let tick: Promise<void> = Promise.resolve();
   const timer = setInterval(() => {
     if (running) {
       return;
     }
     running = true;
-    sweepUploads(prisma)
+    tick = sweepUploads(prisma)
       .then((result) => {
         if (result !== undefined && result.expired > 0) {
           console.info(`upload sweep: ${result.expired} uploads past their window expired, ${result.parts} part rows deleted`);
@@ -181,5 +182,12 @@ export function startUploadSweep(prisma: PrismaClient, intervalMs: number = UPLO
       });
   }, intervalMs);
   timer.unref();
-  return { stop: () => clearInterval(timer) };
+  // Waits for the tick in flight as the offline sweep's `stop` does, and for the same reason: its transaction is
+  // still holding locks the caller's next statement may want.
+  return {
+    stop: async () => {
+      clearInterval(timer);
+      await tick;
+    }
+  };
 }

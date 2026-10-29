@@ -18,15 +18,12 @@ describe("devIdentity", () => {
     expect(devIdentity("owner-2")).toEqual({ oid: "dev-owner-2", tid: "dev", name: "Dev owner-2 (sign-in disabled)", email: "owner-2@dev.invalid" });
   });
 
-  it.each([
-    "",
-    "Owner",
-    "has space",
-    "x".repeat(33),
-    "00000000-0000-0000-0000-00000000000"
-  ])("should fall back to anonymous when the persona is %j", (persona) => {
-    expect(devIdentity(persona).oid).toBe("dev-anonymous");
-  });
+  it.each(["", "Owner", "has space", "x".repeat(33), "00000000-0000-0000-0000-00000000000"])(
+    "should fall back to anonymous when the persona is %j",
+    (persona) => {
+      expect(devIdentity(persona).oid).toBe("dev-anonymous");
+    }
+  );
 
   it("should never produce an oid shaped like an Entra object id", () => {
     expect(devIdentity("a").oid.startsWith("dev-")).toBe(true);
@@ -42,14 +39,15 @@ describe("isDevIdentity", () => {
 
 describe("viewerFrom", () => {
   it("should be the anonymous dev identity when sign-in is disabled and there is no persona", async () => {
-    expect(await viewerFrom(jar({}), { AUTH_DISABLED: "true" })).toEqual({ ...devIdentity(), modelRoute: "bedrock" });
+    expect(await viewerFrom(jar({}), { AUTH_DISABLED: "true" })).toEqual({ ...devIdentity(), modelRoute: "gateway" });
   });
 
   it.each([
-    ["second", "bedrock"],
+    ["second", "gateway"],
     ["own-licence", "own-licence"],
     ["own-licence-2", "own-licence"],
-    ["own-licenced", "bedrock"]
+    ["own-licenced", "gateway"],
+    ["bedrock", "gateway"]
   ])("should put the persona %s on the %s route when sign-in is disabled", async (persona, route) => {
     expect((await viewerFrom(jar({ [DEV_PERSONA_COOKIE]: persona }), { AUTH_DISABLED: "true" }))?.modelRoute).toBe(route);
   });
@@ -66,7 +64,7 @@ describe("viewerFrom", () => {
       tid: "real-tid",
       name: "Real Person",
       email: "real@example.com",
-      modelRoute: "bedrock"
+      modelRoute: "gateway"
     });
   });
 
@@ -93,10 +91,17 @@ describe("viewerFrom", () => {
     expect(await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN)).toEqual({ ...identity, modelRoute: "own-licence" });
   });
 
-  it("should put the session's person on the Bedrock route when the cookie carries the AIGateway.User role", async () => {
+  it("should put the session's person on the gateway route when the cookie carries the AIGateway.User role", async () => {
     const cookie = await sealSession({ oid: "real-oid", tid: "real-tid", name: "Real Person", aiGateway: true }, SECRET);
 
-    expect((await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN))?.modelRoute).toBe("bedrock");
+    expect((await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN))?.modelRoute).toBe("gateway");
+  });
+
+  // The two routes are the whole of the answer, whichever way the role goes: there is no third for anyone to land on.
+  it.each([true, false])("should put nobody signed in on a route outside the two when their AIGateway.User role is %s", async (aiGateway) => {
+    const cookie = await sealSession({ oid: "real-oid", tid: "real-tid", name: "Real Person", aiGateway }, SECRET);
+
+    expect((await viewerFrom(jar({ ah_session: cookie }), SIGNED_IN))?.modelRoute).toMatch(/^(gateway|own-licence)$/);
   });
 
   it("should be nobody when the session cookie does not open", async () => {

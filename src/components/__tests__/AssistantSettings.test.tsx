@@ -25,7 +25,9 @@ import { type AssistantTemplates, copyName } from "@/components/assistant/Templa
 import { DEFAULT_CLAUDE_MD, MAX_CLAUDE_MD_CHARACTERS } from "@/credentials/claude-md";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
+import type { ModelRoute } from "@/viewer/identity";
 import type { LoginState, LoginView } from "@/virtual-agents/logins";
+import { neededCredentials, optionalCredentials } from "@/virtual-agents/views";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
@@ -41,8 +43,8 @@ afterEach(() => {
   document.cookie = "asst_theme=; Path=/; Max-Age=0";
 });
 
-const KINDS: CredentialKind[] = ["github", "azure", "bedrock", "jenkins", "atlassian"];
-const ALL_SIGNED_IN: CredentialKind[] = ["github", "azure", "bedrock", "atlassian"];
+const KINDS: CredentialKind[] = ["github", "azure", "claude", "jenkins", "atlassian"];
+const ALL_SIGNED_IN: CredentialKind[] = ["github", "azure", "claude", "atlassian"];
 
 /** When a stored credential was saved, and a sign-in either side of it, so the two can be ordered on purpose. */
 const STORED_AT = "2026-10-24T09:00:00.000Z";
@@ -66,8 +68,12 @@ function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(Dat
   };
 }
 
+/**
+ * The sign-ins of somebody on their own Claude licence, which is the route whose model credential is a row of the
+ * list like any other. The gateway route's derived row has its own tests below.
+ */
 function data(stored: CredentialKind[], logins: LoginView[] = [], unavailable: string | null = null): ConnectionsData {
-  return { kinds: KINDS, statuses: stored.map((kind) => status(kind)), logins, unavailable };
+  return { route: "own-licence", kinds: KINDS, statuses: stored.map((kind) => status(kind)), logins, unavailable };
 }
 
 function cog(): HTMLElement {
@@ -154,20 +160,20 @@ describe("the Assistant's settings cog", () => {
   });
 
   it("should name both when GitHub is missing and the optional one has lapsed", () => {
-    render(<AssistantSettings now={Date.now()} connections={data(["bedrock"], [login("atlassian", "expired")])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["claude"], [login("atlassian", "expired")])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub and Atlassian need your attention");
   });
 
   it("should not nag about Atlassian when the person has simply never set it up", () => {
-    render(<AssistantSettings now={Date.now()} connections={data(["github", "azure", "bedrock"])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["github", "azure", "claude"])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings");
     expect(cog().textContent).toBe("");
   });
 
   it.each(["expired", "failed"] as const)("should warn about Atlassian once its sign-in has %s", (state) => {
-    render(<AssistantSettings now={Date.now()} connections={data(["github", "azure", "bedrock"], [login("atlassian", state)])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["github", "azure", "claude"], [login("atlassian", state)])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. Atlassian needs your attention");
   });
@@ -197,7 +203,7 @@ describe("the Assistant's settings cog", () => {
    */
   it.each([
     ["jenkins", "Jenkins"],
-    ["bedrock", "AI model access"]
+    ["claude", "Claude"]
   ] as const)("should say %s needs attention when a stored value is what a later sign-in lapsed over", (kind, name) => {
     const stale = login(kind, "expired", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
     render(<AssistantSettings now={Date.now()} connections={data([...ALL_SIGNED_IN, kind], [stale])} />);
@@ -233,7 +239,13 @@ describe("the Assistant's settings cog", () => {
     const built = Date.now() - 4 * 60_000;
     const relayed = login("github", "pending", new Date(built + 1000).toISOString(), new Date(built - 60_000).toISOString());
     const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString(), updatedVia: "pod" };
-    const connections = { kinds: KINDS, statuses: [stored, ...ALL_SIGNED_IN.map((kind) => status(kind))], logins: [relayed], unavailable: null };
+    const connections: ConnectionsData = {
+      route: "own-licence",
+      kinds: KINDS,
+      statuses: [stored, ...ALL_SIGNED_IN.map((kind) => status(kind))],
+      logins: [relayed],
+      unavailable: null
+    };
 
     const html = renderToString(<AssistantSettings now={built} connections={connections} />);
 
@@ -249,7 +261,13 @@ describe("the Assistant's settings cog", () => {
     render(
       <AssistantSettings
         now={built}
-        connections={{ kinds: KINDS, statuses: [stored, ...ALL_SIGNED_IN.map((kind) => status(kind))], logins: [relayed], unavailable: null }}
+        connections={{
+          route: "own-licence",
+          kinds: KINDS,
+          statuses: [stored, ...ALL_SIGNED_IN.map((kind) => status(kind))],
+          logins: [relayed],
+          unavailable: null
+        }}
       />
     );
 
@@ -264,13 +282,13 @@ describe("the Assistant's settings cog", () => {
   });
 
   it("should mark the cog with a visible exclamation, not colour alone, when a sign-in needs attention", () => {
-    render(<AssistantSettings now={Date.now()} connections={data(["azure", "bedrock", "atlassian"])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["azure", "claude", "atlassian"])} />);
 
     expect(cog().textContent).toBe("!");
   });
 
   it("should warn when a sign-in is still waiting for the person", () => {
-    render(<AssistantSettings now={Date.now()} connections={data(["azure", "bedrock", "atlassian"], [login("github", "pending")])} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["azure", "claude", "atlassian"], [login("github", "pending")])} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention");
   });
@@ -461,8 +479,9 @@ describe("the Assistant's settings dialog", () => {
       <AssistantSettings
         now={Date.now()}
         connections={{
+          route: "own-licence",
           kinds: KINDS,
-          statuses: [status("github", "alice@hmcts.net"), status("bedrock")],
+          statuses: [status("github", "alice@hmcts.net"), status("claude")],
           logins: [login("azure", "pending"), login("atlassian", "expired"), login("jenkins", "failed")],
           unavailable: null
         }}
@@ -475,7 +494,7 @@ describe("the Assistant's settings dialog", () => {
     expect(rows.map((row) => row.textContent)).toEqual([
       "GGitHubalice@hmcts.netConnected",
       "AzAzureYour HMCTS account, for pipelines and environments (optional)Waiting for you",
-      "AIAI model accessYour Claude Code connectionConnected",
+      "CClaudeYour Claude licenceConnected",
       "JJenkinsBuilds and pipelines on Jenkins (optional)Last sign-in failed",
       "AAtlassianJira tickets and Confluence pages (optional)Sign-in expired"
     ]);
@@ -483,7 +502,10 @@ describe("the Assistant's settings dialog", () => {
 
   it("should never list a CLAUDE.md or a git identity as a connection when they are among the kinds", () => {
     render(
-      <AssistantSettings now={Date.now()} connections={{ kinds: [...KINDS, "claude_md", "git_identity"], statuses: [], logins: [], unavailable: null }} />
+      <AssistantSettings
+        now={Date.now()}
+        connections={{ route: "own-licence", kinds: [...KINDS, "claude_md", "git_identity"], statuses: [], logins: [], unavailable: null }}
+      />
     );
     fireEvent.click(cog());
     go("Connections");
@@ -497,7 +519,7 @@ describe("the Assistant's settings dialog", () => {
     render(
       <AssistantSettings
         now={Date.now()}
-        connections={{ kinds: KINDS, statuses: [], logins: [], unavailable: "the credentials Key Vault is not configured" }}
+        connections={{ route: "own-licence", kinds: KINDS, statuses: [], logins: [], unavailable: "the credentials Key Vault is not configured" }}
       />
     );
 
@@ -518,7 +540,7 @@ describe("the Assistant's settings dialog", () => {
   });
 
   it("should explain what a person should do, without saying the assistant is broken, when a sign-in needs attention", () => {
-    open({ connections: data(["azure", "bedrock", "atlassian"]) }, "Connections");
+    open({ connections: data(["azure", "claude", "atlassian"]) }, "Connections");
     const dialog = screen.getByRole("dialog");
 
     expect(within(dialog).getByText("GitHub needs your attention")).toBeTruthy();
@@ -552,19 +574,115 @@ function connectWith(overrides: Partial<{ running: boolean; reconnect: FormActio
   return { assistantId: ASSISTANT_ID, running: true, reconnect: ok(), ...overrides };
 }
 
-function azureRow(): HTMLElement {
+/** The row the named connection's status is on, which is the one element that names it. */
+function connectionRow(name: string): HTMLElement {
   const row = within(screen.getByRole("list", { name: "Connections" }))
     .getAllByRole("listitem")
-    .find((item) => within(item).queryByText("Azure", { exact: true }) !== null);
+    .find((item) => within(item).queryByText(name, { exact: true }) !== null);
   if (row === undefined) {
-    throw new Error("no Azure row");
+    throw new Error(`no ${name} row`);
   }
   return row;
 }
 
+function azureRow(): HTMLElement {
+  return connectionRow("Azure");
+}
+
+/** Every row of the open Connections section, in the order the person reads them. */
+function connectionRows(): string[] {
+  return within(screen.getByRole("list", { name: "Connections" }))
+    .getAllByRole("listitem")
+    .map((row) => row.textContent ?? "");
+}
+
+/**
+ * The sign-ins one route's assistant asks for, in the order `connectionsData` puts them: needed first, then optional.
+ * Derived from the route rather than hand-listed, because where the model-access row lands depends on that order —
+ * and on the gateway route there is no Claude credential among them at all, which is what left the section silent
+ * about Claude.
+ */
+function routeData(route: ModelRoute, stored: CredentialKind[], logins: LoginView[] = []): ConnectionsData {
+  return {
+    route,
+    kinds: [...neededCredentials(route), ...optionalCredentials(route)],
+    statuses: stored.map((kind) => status(kind)),
+    logins,
+    unavailable: null
+  };
+}
+
+describe("how the Assistant's settings say its agents reach Claude", () => {
+  // Below GitHub, which is where the own-licence route's Claude token is, so Claude is in the same place either way.
+  it("should name the gateway and the sign-in behind it, below GitHub, when the agents reach Claude that way", () => {
+    open({ connections: routeData("gateway", ["github", "azure"]) }, "Connections");
+
+    expect(connectionRows()).toEqual([
+      "GGitHubRead repositories and open pull requestsConnected",
+      "CClaudeThrough the HMCTS AI Gateway, on your Azure sign-inConnected",
+      "AzAzureYour HMCTS account, which your agents reach Claude on, as well as your pipelines and environmentsConnected",
+      "JJenkinsBuilds and pipelines on Jenkins (optional)Not connected",
+      "AAtlassianJira tickets and Confluence pages (optional)Not connected"
+    ]);
+  });
+
+  // One row named Claude whichever route the person is on, in the same place: their token's own row here, which the
+  // route's order already puts below GitHub, and no derived row beside it.
+  it("should say Claude is the person's own licence, on the one row their token is, when that is what their agents use", () => {
+    open({ connections: routeData("own-licence", ALL_SIGNED_IN) }, "Connections");
+
+    expect(connectionRows().filter((row) => row.includes("Claude"))).toEqual(["CClaudeYour Claude licenceConnected"]);
+    expect(connectionRows().findIndex((row) => row.includes("Claude"))).toBe(1);
+  });
+
+  it.each([
+    ["waiting for the person", "pending", "Waiting for you"],
+    ["lapsed", "failed", "Last sign-in failed"]
+  ] as const)("should say Claude's access is %s when the Azure sign-in behind it is", (_what, state, detail) => {
+    open({ connections: routeData("gateway", ["github"], [login("azure", state)]) }, "Connections");
+
+    expect(within(connectionRow("Claude")).getByText(detail)).toBeTruthy();
+  });
+
+  // The sign-in is the Azure row's to make, and a second control for it on a row that is only a status would be two
+  // things to press for one job.
+  it("should offer nothing to press on the Claude row when Azure is not connected", () => {
+    open({ connections: routeData("gateway", ["github"]), connect: connectWith() }, "Connections");
+
+    expect(within(connectionRow("Claude")).queryByRole("button")).toBeNull();
+    expect(within(azureRow()).getByRole("button", { name: "Connect Azure" })).toBeTruthy();
+  });
+
+  it("should say Azure needs attention, and never Claude as well, when the sign-in behind both is waiting", () => {
+    render(<AssistantSettings now={Date.now()} connections={routeData("gateway", ["github"], [login("azure", "pending")])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Azure needs your attention");
+  });
+
+  /**
+   * The state with nowhere else to show: the credential is stored, so every other surface is satisfied, while the pod
+   * can mint no gateway token from it and fails every turn. On this route the cog is what says so.
+   */
+  it("should mark the cog when a stored Azure sign-in has lapsed on the gateway route", () => {
+    const over = login("azure", "failed", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
+    render(<AssistantSettings now={Date.now()} connections={routeData("gateway", ["github", "azure"], [over])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings. Azure needs your attention");
+    expect(cog().textContent).toBe("!");
+  });
+
+  it("should leave a lapsed Azure sign-in to this section on the own-licence route, where no model access rests on it", () => {
+    const over = login("azure", "failed", new Date(Date.now() - 600_000).toISOString(), AFTER_STORED);
+    render(<AssistantSettings now={Date.now()} connections={routeData("own-licence", ALL_SIGNED_IN, [over])} />);
+
+    expect(cog().getAttribute("aria-label")).toBe("Settings");
+    expect(cog().textContent).toBe("");
+  });
+});
+
 describe("connecting Azure from the Assistant's settings", () => {
   it("should offer to connect Azure when it is not connected", () => {
-    open({ connections: data(["github", "bedrock"]), connect: connectWith() }, "Connections");
+    open({ connections: data(["github", "claude"]), connect: connectWith() }, "Connections");
 
     expect(within(azureRow()).getByText("Not connected")).toBeTruthy();
     expect(within(azureRow()).getByRole("button", { name: "Connect Azure" }).textContent).toBe("Connect");
@@ -572,7 +690,7 @@ describe("connecting Azure from the Assistant's settings", () => {
 
   it("should restart the assistant to ask for the sign-in when the person confirms the connect", async () => {
     const reconnect = ok();
-    open({ connections: data(["github", "bedrock"]), connect: connectWith({ reconnect }) }, "Connections");
+    open({ connections: data(["github", "claude"]), connect: connectWith({ reconnect }) }, "Connections");
 
     fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
     expect(screen.getByText("Restart your assistant so it asks you to sign in to Azure? Your chats are kept.")).toBeTruthy();
@@ -585,7 +703,7 @@ describe("connecting Azure from the Assistant's settings", () => {
   });
 
   it("should say the sign-in is asked for at the next start when the assistant is stopped", () => {
-    open({ connections: data(["github", "bedrock"]), connect: connectWith({ running: false }) }, "Connections");
+    open({ connections: data(["github", "claude"]), connect: connectWith({ running: false }) }, "Connections");
 
     fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
 
@@ -593,7 +711,7 @@ describe("connecting Azure from the Assistant's settings", () => {
   });
 
   it("should put the question away again when the person cancels", () => {
-    open({ connections: data(["github", "bedrock"]), connect: connectWith() }, "Connections");
+    open({ connections: data(["github", "claude"]), connect: connectWith() }, "Connections");
 
     fireEvent.click(within(azureRow()).getByRole("button", { name: "Connect Azure" }));
     fireEvent.click(within(azureRow()).getByRole("button", { name: "Cancel" }));
@@ -605,7 +723,7 @@ describe("connecting Azure from the Assistant's settings", () => {
   it("should offer to sign in again, and say the saved sign-in goes, when a stored Azure sign-in has lapsed", () => {
     open(
       {
-        connections: data(["github", "bedrock", "azure"], [login("azure", "failed", new Date(Date.now() - 600_000).toISOString(), new Date().toISOString())]),
+        connections: data(["github", "claude", "azure"], [login("azure", "failed", new Date(Date.now() - 600_000).toISOString(), new Date().toISOString())]),
         connect: connectWith()
       },
       "Connections"
@@ -618,13 +736,13 @@ describe("connecting Azure from the Assistant's settings", () => {
   });
 
   it("should offer no connect when Azure is connected", () => {
-    open({ connections: data(["github", "bedrock", "azure"]), connect: connectWith() }, "Connections");
+    open({ connections: data(["github", "claude", "azure"]), connect: connectWith() }, "Connections");
 
     expect(within(azureRow()).queryByRole("button")).toBeNull();
   });
 
   it("should offer no connect while a code the person asked for is waiting for them", () => {
-    open({ connections: data(["github", "bedrock"], [login("azure", "pending")]), connect: connectWith() }, "Connections");
+    open({ connections: data(["github", "claude"], [login("azure", "pending")]), connect: connectWith() }, "Connections");
 
     expect(within(azureRow()).queryByRole("button")).toBeNull();
   });
@@ -637,7 +755,7 @@ describe("connecting Azure from the Assistant's settings", () => {
   });
 
   it("should only say where Azure stands when the page gives no way to connect it", () => {
-    open({ connections: data(["github", "bedrock"]) }, "Connections");
+    open({ connections: data(["github", "claude"]) }, "Connections");
 
     expect(within(azureRow()).queryByRole("button")).toBeNull();
   });
@@ -2164,7 +2282,7 @@ describe("the Assistant's size", () => {
   // One mark on the cog, however many reasons: a second badge beside the sign-ins one would be two things competing
   // to be noticed and neither read.
   it("should carry its warning on the one settings cog, naming both reasons when a sign-in needs attention too", () => {
-    render(<AssistantSettings now={Date.now()} connections={data(["azure", "bedrock", "atlassian"])} size={size({ use: use(0) })} />);
+    render(<AssistantSettings now={Date.now()} connections={data(["azure", "claude", "atlassian"])} size={size({ use: use(0) })} />);
 
     expect(cog().getAttribute("aria-label")).toBe("Settings. GitHub needs your attention. Your assistant is low on memory");
     expect(cog().textContent).toBe("!");

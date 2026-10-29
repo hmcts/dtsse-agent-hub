@@ -58,16 +58,13 @@ describe("parseLookupFrame", () => {
     expect(parseLookupFrame({ lookup_id: LOOKUP, kind: "jira_project", query: "vibe", space: "CCD" })?.space).toBeNull();
   });
 
-  it.each([
-    [{ lookup_id: "not-an-id" }],
-    [{ kind: "people" }],
-    [{ query: 4 }],
-    [{ query: "x".repeat(101) }],
-    [{ space: 'CCD" OR space = "HR' }]
-  ])("should drop the lookup when it has %j, since its values go into a search", (change) => {
-    // Act & Assert
-    expect(parseLookupFrame({ ...frame(), ...change })).toBeNull();
-  });
+  it.each([[{ lookup_id: "not-an-id" }], [{ kind: "people" }], [{ query: 4 }], [{ query: "x".repeat(101) }], [{ space: 'CCD" OR space = "HR' }]])(
+    "should drop the lookup when it has %j, since its values go into a search",
+    (change) => {
+      // Act & Assert
+      expect(parseLookupFrame({ ...frame(), ...change })).toBeNull();
+    }
+  );
 });
 
 describe("the search a lookup runs", () => {

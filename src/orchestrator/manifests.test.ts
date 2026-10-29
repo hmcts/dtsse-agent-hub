@@ -14,7 +14,7 @@ const AGENT: ClaimedAgent = {
   statefulset_name: "va-0f8a6a1e",
   pvc_name: "work-va-0f8a6a1e-0",
   delete_disk: false,
-  model_route: "bedrock",
+  model_route: "own_licence",
   owner: { oid: "owner" }
 };
 
@@ -29,6 +29,8 @@ const SPEC: VirtualAgentSpec = {
   hostAliases: [],
   publicDomain: "preview.platform.hmcts.net"
 };
+
+const GATEWAY = { apim_key: "apim-key" };
 
 const LABELS = {
   "app.kubernetes.io/name": "virtual-agent",
@@ -150,6 +152,27 @@ describe("statefulSet", () => {
     const [container] = podSpec(statefulSet(AGENT, SPEC, TOKEN)).containers;
 
     expect(container!.env.map((entry) => entry.name)).not.toContain("HAI_ENV_READY");
+  });
+
+  // The key alone, because hai resolves the gateway's host, its Entra scope and the apiKeyHelper in the pod.
+  it("should give the pod the gateway's APIM key and nothing else about the gateway when the claim carried one", () => {
+    const [container] = podSpec(statefulSet({ ...AGENT, model_route: "gateway", gateway: GATEWAY }, SPEC, TOKEN)).containers;
+
+    expect(container!.env).toContainEqual({ name: "HAI_GATEWAY_APIM_KEY", value: GATEWAY.apim_key });
+    expect(container!.env.map((entry) => entry.name).filter((name) => name.startsWith("AI_GATEWAY_"))).toEqual([]);
+  });
+
+  // The key is one service's rather than one agent's, so a pod that cannot use it must not carry it. The hub sends
+  // it for no other route, and this is what makes a claim that sent one anyway no way to get it into another pod.
+  it("should leave the gateway's APIM key out when the agent is on the own_licence route", () => {
+    const [container] = podSpec(statefulSet({ ...AGENT, model_route: "own_licence", gateway: GATEWAY }, SPEC, TOKEN)).containers;
+
+    expect(container!.env.map((entry) => entry.name).filter((name) => name.includes("GATEWAY"))).toEqual([]);
+  });
+
+  // A pod started without it could only boot, say which setting it was not given, and sit there.
+  it("should refuse to build a gateway pod when the claim carried no APIM key", () => {
+    expect(() => statefulSet({ ...AGENT, model_route: "gateway" }, SPEC, TOKEN)).toThrow(/AI_GATEWAY_APIM_KEY/);
   });
 
   // The figures, not the constant, because a cap is a measured limit on what a pod of that size can hold: reading it

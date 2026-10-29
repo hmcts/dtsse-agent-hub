@@ -6,10 +6,11 @@ import type { AgentStatus } from "../realtime/events.ts";
 import type { Database } from "../store/prisma.ts";
 import type { ConversationPage } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
+import type { ModelRoute } from "../viewer/identity.ts";
 import type { VirtualAgentDesired, VirtualAgentStatus } from "../virtual-agents/lifecycle.ts";
 import { type LoginView, loginViews } from "../virtual-agents/logins.ts";
 import type { VirtualAgentRow } from "../virtual-agents/store.ts";
-import { neededCredentials, OPTIONAL_CREDENTIALS } from "../virtual-agents/views.ts";
+import { neededCredentials, optionalCredentials } from "../virtual-agents/views.ts";
 import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
@@ -35,6 +36,8 @@ export interface AssistantSummary {
   /** When it was last asked to run, which names one wait: a choice about watching it does not outlive it. */
   startedAt: string;
   readiness: Readiness;
+  /** How its pod reaches Claude, which is fixed on its row and so is not always the person's own route. */
+  modelRoute: ModelRoute;
   needed: CredentialKind[];
   optional: CredentialKind[];
   logins: LoginView[];
@@ -65,11 +68,12 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
     statusChangedAt: assistant.statusChangedAt.toISOString(),
     startedAt: assistant.startedAt.toISOString(),
     readiness: readiness(assistant.status),
+    modelRoute: assistant.modelRoute,
     needed,
-    optional: OPTIONAL_CREDENTIALS,
+    optional: optionalCredentials(assistant.modelRoute),
     logins: await loginViews(db, assistant.id),
     onboarded: onboarded(needed, stored),
-    toChat: chatCredentials(needed)
+    toChat: chatCredentials(needed, assistant.modelRoute)
   };
 }
 

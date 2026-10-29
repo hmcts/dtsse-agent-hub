@@ -20,8 +20,9 @@ const CASE_TIMEOUT = 300_000;
 // keeps the two lists in step.
 const CASES = [
   "first-boot",
-  "bedrock-route",
-  "legacy-gateway-route",
+  "gateway-route",
+  "gateway-route-older-template",
+  "gateway-route-unconfigured",
   "unknown-route",
   "hai-install-blip-recovers",
   "hai-install-falls-back",

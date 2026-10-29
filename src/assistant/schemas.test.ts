@@ -49,12 +49,12 @@ describe("sessionsReportBody", () => {
 describe("jiraExportReportBody", () => {
   const EXPORT = "33333333-3333-4333-8333-333333333333";
 
-  it.each([
-    [{ export_id: EXPORT, key: "VIBE-123" }],
-    [{ export_id: EXPORT, error: "Story is not an issue type of VIBE" }]
-  ])("should accept %j when it is a key or a reason", (body) => {
-    expect(jiraExportReportBody.parse(body)).toEqual(body);
-  });
+  it.each([[{ export_id: EXPORT, key: "VIBE-123" }], [{ export_id: EXPORT, error: "Story is not an issue type of VIBE" }]])(
+    "should accept %j when it is a key or a reason",
+    (body) => {
+      expect(jiraExportReportBody.parse(body)).toEqual(body);
+    }
+  );
 
   it.each([
     [{ export_id: EXPORT, key: "vibe-123" }],
@@ -88,18 +88,14 @@ describe("uploadsReportBody", () => {
 
   // Leaving a list out would read as an authoritative empty one, and the hub acts on both: `deleted` is what ends a
   // deletion request, and `files` is what it shows. So absence is refused rather than defaulted.
-  it.each([
-    "files",
-    "deleted",
-    "files_total",
-    "uploads_bytes",
-    "volume_used_bytes",
-    "volume_total_bytes"
-  ] as const)("should refuse a report with no %s at all", (field) => {
-    const { [field]: _omitted, ...without } = report;
+  it.each(["files", "deleted", "files_total", "uploads_bytes", "volume_used_bytes", "volume_total_bytes"] as const)(
+    "should refuse a report with no %s at all",
+    (field) => {
+      const { [field]: _omitted, ...without } = report;
 
-    expect(uploadsReportBody.safeParse(without).success).toBe(false);
-  });
+      expect(uploadsReportBody.safeParse(without).success).toBe(false);
+    }
+  );
 
   it.each([
     ["files", "not an array"],

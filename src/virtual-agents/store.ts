@@ -9,7 +9,7 @@ import { afterApplyError, awaitsOwner, nextStatus, type Observation, type PodPha
 import { checkName, createRefusal } from "./limits.ts";
 import { availablePlugins, checkPlugins, samePlugins, storedPlugins } from "./plugins.ts";
 import { normalisePorts, samePorts } from "./ports.ts";
-import { diskTtlDays, orchestratorLeaseSeconds } from "./settings.ts";
+import { diskTtlDays, type GatewaySettings, gatewaySettings, orchestratorLeaseSeconds } from "./settings.ts";
 import { checkSize, sizeChangeRefusal, type VirtualAgentSize } from "./size.ts";
 import { announce, type StopReason } from "./stop.ts";
 
@@ -79,14 +79,30 @@ const SELECT = {
   createdAt: true
 } as const;
 
-type StoredRoute = "bedrock" | "own_licence";
+/**
+ * What the column can hold, which is wider than what the application writes. Postgres enum labels cannot hold a
+ * hyphen, so `own_licence` is spelled differently in the row; and `bedrock` is still a label on the type, because
+ * `20261107090000_bedrock_gone` moves every row off it without dropping it — the previous release has to keep
+ * reading the column while it is still serving. So this is the read boundary, and `toRoute` is where the wider
+ * type becomes the two routes the rest of the code knows about.
+ */
+type StoredRoute = "gateway" | "own_licence" | "bedrock";
 
+/**
+ * `bedrock` reads as `gateway` because that is where the migration moved every row carrying it. Nothing should ever
+ * answer it — the label outlives the rows by one release — and a row that somehow did is better read as the route
+ * it was migrated to than as a value the rest of the code has no arm for.
+ */
 function toRoute(stored: StoredRoute): ModelRoute {
-  return stored === "own_licence" ? "own-licence" : "bedrock";
+  if (stored === "own_licence") {
+    return "own-licence";
+  }
+  return stored === "bedrock" ? "gateway" : stored;
 }
 
-function fromRoute(route: ModelRoute): StoredRoute {
-  return route === "own-licence" ? "own_licence" : "bedrock";
+/** Only the two live routes are ever written, so this needs no arm for the label the migration left behind. */
+function fromRoute(route: ModelRoute): Exclude<StoredRoute, "bedrock"> {
+  return route === "own-licence" ? "own_licence" : route;
 }
 
 function toRow<R extends { modelRoute: StoredRoute; plugins: unknown }>(
@@ -571,6 +587,17 @@ export interface ClaimedVirtualAgent {
   owner: { oid: string };
   /** Only when this claim minted one. It is never stored and never returned again. */
   launch_token?: string;
+  /**
+   * What a `gateway` agent's pod needs to reach the HMCTS AI Gateway, for the orchestrator to put in its pod
+   * template. Only for an agent on that route that is meant to be running, which is the only thing a template is
+   * built for, and absent for every other agent — so no other pod carries the key, and neither does a claim that
+   * has no use for it. Absent too on a deployment with no gateway configured, where such a pod cannot start at all.
+   *
+   * It travels in the claim rather than in the orchestrator's own environment because the hub is what is configured:
+   * its chart holds the two plain values and reads the key from the `dtsse` vault, and the orchestrator's Deployment
+   * is in cnp-flux-config. The launch token takes the same path into the same pod template for the same reason.
+   */
+  gateway?: GatewaySettings;
 }
 
 export const CLAIM_LIMIT = 20;
@@ -698,6 +725,12 @@ async function takeOver(db: Database, cluster: string, now: Date): Promise<void>
  *
  * A launch token is minted, replacing any before it, when the agent is meant to be running and either has none or is
  * starting a new pod. Its plain value goes in this response and nowhere else.
+ *
+ * A running `gateway` agent also carries the AI Gateway's APIM subscription key, read from this hub's own
+ * environment: `gatewaySettings` refuses a deployment that has none, which fails the claim — and the whole
+ * transaction with it, so nothing is left claimed — rather than handing out a pod template that boots and then
+ * fails every turn. Only an agent on that route asks, so a deployment with nobody on the gateway is never refused
+ * for a gateway it has no use for.
  */
 export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, options: ClaimOptions = {}): Promise<ClaimResult> {
   const { limit = CLAIM_LIMIT, now = new Date(), leaseSeconds = orchestratorLeaseSeconds() } = options;
@@ -747,6 +780,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         });
         launchToken = minted.token;
       }
+      const gateway = row.model_route === "gateway" && row.desired === "running" ? gatewaySettings() : undefined;
       claimed.push({
         id: row.id,
         generation: row.generation,
@@ -760,7 +794,8 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         exposed_ports: row.exposed_ports,
         plugins: storedPlugins(row.plugins),
         owner: { oid: row.owner_oid },
-        ...(launchToken === undefined ? {} : { launch_token: launchToken })
+        ...(launchToken === undefined ? {} : { launch_token: launchToken }),
+        ...(gateway === undefined ? {} : { gateway })
       });
     }
     return { active: true, virtual_agents: claimed };

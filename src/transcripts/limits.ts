@@ -12,7 +12,7 @@ export const ENTRY_KEY_PATTERN = /^[A-Za-z0-9:_-]+$/;
 /** A redacted entry's `redacted`: the source of the secret pattern it matched, as the client's scanner reports it. */
 export const MAX_REDACTED_PATTERN = 1000;
 
-/** Entries are deleted this long after they occurred. */
+/** Entries are deleted this long after the hub stored them, whatever their own `occurred_at` says. */
 export const RETENTION_DAYS = 30;
 
 /** Beyond this, an agent's oldest entries are deleted first. */

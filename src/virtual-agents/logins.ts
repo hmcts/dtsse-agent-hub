@@ -1,6 +1,6 @@
 import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
-import type { CredentialKind } from "../credentials/names.ts";
+import { type CredentialKind, isCredentialKind } from "../credentials/names.ts";
 import { deleteCredential, type SecretStore } from "../credentials/store.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
@@ -366,14 +366,18 @@ export async function loginViews(db: Database, virtualAgentId: string): Promise<
     where: { virtualAgentId },
     select: { kind: true, prompt: true, userCode: true, verificationUri: true, expiresAt: true, state: true, updatedAt: true, pastedCodeExpiresAt: true }
   });
-  return rows.map((row) => ({
-    kind: row.kind,
-    prompt: row.prompt,
-    userCode: row.userCode,
-    verificationUri: row.verificationUri,
-    expiresAt: row.expiresAt.toISOString(),
-    state: row.state,
-    updatedAt: row.updatedAt.toISOString(),
-    codeWaitingUntil: row.pastedCodeExpiresAt?.toISOString() ?? null
-  }));
+  // The column's type still carries `bedrock`, which `20261107090000_bedrock_gone` deletes the rows for without
+  // dropping the label, so a row the application has no kind for is left out rather than widening the view.
+  return rows
+    .filter((row) => isCredentialKind(row.kind))
+    .map((row) => ({
+      kind: row.kind as CredentialKind,
+      prompt: row.prompt,
+      userCode: row.userCode,
+      verificationUri: row.verificationUri,
+      expiresAt: row.expiresAt.toISOString(),
+      state: row.state,
+      updatedAt: row.updatedAt.toISOString(),
+      codeWaitingUntil: row.pastedCodeExpiresAt?.toISOString() ?? null
+    }));
 }

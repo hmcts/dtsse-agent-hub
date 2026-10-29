@@ -6,7 +6,7 @@ import { collapse, oneLine, type TranscriptEntryView, toolSummary } from "@/tran
 import type { RedactedContent, TextContent, ToolResultContent, ToolUseContent } from "@/transcripts/schema";
 import { type TaskNotification, taskFailed, taskNotifications } from "@/transcripts/task-notification";
 
-const CHIP = "rounded border border-hub-line px-1 text-[11px] uppercase tracking-wide text-hub-muted";
+const CHIP = "rounded-sm border border-hub-line px-1 text-[11px] uppercase tracking-wide text-hub-muted";
 
 function Truncated({ entry }: { entry: TranscriptEntryView }) {
   return entry.truncated ? <span className={CHIP}>truncated</span> : null;
@@ -17,7 +17,7 @@ function Hidden({ content }: { content: RedactedContent }) {
   return (
     <span className="flex min-w-0 items-baseline gap-1 text-[13px] text-hub-muted">
       <span className="shrink-0 italic">hidden: matched secret pattern</span>
-      <code title={content.redacted} className="truncate rounded border border-hub-line bg-hub-raised px-1 font-mono text-[12px] text-hub-text">
+      <code title={content.redacted} className="truncate rounded-sm border border-hub-line bg-hub-raised px-1 font-mono text-[12px] text-hub-text">
         {content.redacted}
       </code>
     </span>
@@ -93,7 +93,7 @@ function Tool({ entry }: { entry: TranscriptEntryView }) {
           <Truncated entry={entry} />
         </p>
       ) : (
-        <details className={`rounded border-l-2 pl-2 ${error ? "border-red-800" : "border-hub-line"}`}>
+        <details className={`rounded-sm border-l-2 pl-2 ${error ? "border-red-800" : "border-hub-line"}`}>
           <summary className="flex min-w-0 cursor-pointer items-baseline gap-2 text-[13px] hover:bg-hub-raised">
             {summary}
             <Truncated entry={entry} />
@@ -135,7 +135,7 @@ function Tasks({ entry, tasks }: { entry: TranscriptEntryView; tasks: readonly T
             {line}
           </p>
         ) : (
-          <details key={index} className={`rounded border-l-2 pl-2 ${failed ? "border-red-800" : "border-hub-line"}`}>
+          <details key={index} className={`rounded-sm border-l-2 pl-2 ${failed ? "border-red-800" : "border-hub-line"}`}>
             <summary className="flex min-w-0 cursor-pointer items-baseline gap-2 text-[13px] hover:bg-hub-raised">{line}</summary>
             {whole === null ? null : <p className="mt-1 whitespace-pre-wrap break-words text-[13px] text-hub-text">{whole}</p>}
             {task.event === null ? null : <Output text={task.event} />}

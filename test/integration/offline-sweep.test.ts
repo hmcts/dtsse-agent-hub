@@ -6,6 +6,7 @@ import { ackDelivery, createDirect, queuedDeliveries } from "../../src/messages/
 import { decodeEvent, HUB_CHANNEL, type NotifiedEvent } from "../../src/realtime/events.ts";
 import type { PrismaClient } from "../../src/store/prisma.ts";
 import { connect, insertAgent, person, prisma, resetDatabase } from "./database.ts";
+import { until } from "./waits.ts";
 
 const ALICE = person("alice");
 const BOB = person("bob");
@@ -153,16 +154,6 @@ describe("delivery expiry", () => {
   });
 });
 
-async function until(check: () => boolean, timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!check()) {
-    if (Date.now() > deadline) {
-      throw new Error("timed out waiting for the sweeper");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
 describe("startOfflineSweep", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -189,7 +180,7 @@ describe("startOfflineSweep", () => {
 
       expect(info.mock.calls).toEqual([["offline sweep: 1 silent agents marked offline, 1 queued deliveries expired"]]);
     } finally {
-      sweeper.stop();
+      await sweeper.stop();
       await other.end();
     }
   });
@@ -208,7 +199,7 @@ describe("startOfflineSweep", () => {
     try {
       await until(() => warn.mock.calls.length >= 2);
     } finally {
-      sweeper.stop();
+      await sweeper.stop();
     }
 
     expect(warn.mock.calls.slice(0, 2)).toEqual([["the offline sweep failed: database gone"], ["the offline sweep failed: not an error"]]);

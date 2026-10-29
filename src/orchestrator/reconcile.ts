@@ -2,7 +2,7 @@ import { withoutLaunchTokens } from "../virtual-agents/launch-token.ts";
 import { FAILING_REASONS } from "../virtual-agents/lifecycle.ts";
 import { type Claim, type ClaimedAgent, type Hub, HubError, type Lease, type ObservedBody } from "./hub.ts";
 import { type Kind, type Kube, KubeError, type Pod, type Resource, type StatefulSet } from "./kube.ts";
-import { describeError, type Log } from "./log.ts";
+import { describeError, type Log, redacting, withoutSecrets } from "./log.ts";
 import { carriedOver, exposedPorts, ID_LABEL, ingress, MANAGED_BY, MANAGED_SELECTOR, podName, runsPodOf, service, statefulSet } from "./manifests.ts";
 import type { OrchestratorSettings } from "./settings.ts";
 
@@ -269,25 +269,41 @@ export async function sweepOrphans({ kube, hub, settings, log }: ReconcileDeps, 
 export const MAX_APPLY_ERROR = 500;
 
 /**
- * An apply error as it is logged and sent to the hub: on one line, and without launch tokens, since the API server's
- * refusal can quote the spec it was given, the pod's environment included.
+ * An apply error as it is logged and sent to the hub: on one line, and with neither a launch token nor one of
+ * `secrets` in it, since the API server's refusal can quote the spec it was given, the pod's environment included.
+ * The hub stores this as the agent's `status_detail` and shows it to its owner, so a secret that got this far would
+ * be on a web page as well as in the orchestrator's log.
  */
-export function applyErrorText(error: unknown): string {
-  const text = withoutLaunchTokens(describeError(error)).trim() || "unknown error";
+export function applyErrorText(error: unknown, secrets: readonly string[]): string {
+  const text = withoutSecrets(withoutLaunchTokens(describeError(error)), secrets).trim() || "unknown error";
   return text.length > MAX_APPLY_ERROR ? `${text.slice(0, MAX_APPLY_ERROR - 1)}…` : text;
+}
+
+/**
+ * What must not be quoted back out of this agent's apply: the AI Gateway's APIM subscription key, which a `gateway`
+ * agent's claim carries and its pod template holds as a plain value. One service's key rather than one agent's, so
+ * one leak is every `gateway` pod. The launch token is taken out by shape, which this cannot be: the key is opaque.
+ */
+function secretsOf(agent: ClaimedAgent): string[] {
+  return agent.gateway === undefined ? [] : [agent.gateway.apim_key];
 }
 
 /**
  * Applies one claimed agent and starts watching it; `false` when it could not be applied. A failure is reported to
  * the hub, which shows it to the owner, and the claim is left to lapse so the agent is tried again on the next.
+ *
+ * Everything the apply logs goes through this agent's secrets, because what quotes one is not this code but the API
+ * server refusing the spec it was handed.
  */
-async function applyClaimed(deps: ReconcileDeps, state: ReconcileState, agent: ClaimedAgent, now: number): Promise<boolean> {
+async function applyClaimed(outer: ReconcileDeps, state: ReconcileState, agent: ClaimedAgent, now: number): Promise<boolean> {
+  const secrets = secretsOf(agent);
+  const deps = secrets.length === 0 ? outer : { ...outer, log: redacting(outer.log, secrets) };
   const { hub, log } = deps;
   state.watching.delete(agent.id);
   try {
     await apply(deps, state, agent);
   } catch (error) {
-    const text = applyErrorText(error);
+    const text = applyErrorText(error, secrets);
     log("error", "could not apply", { id: agent.id, generation: agent.generation, desired: agent.desired, error: text });
     try {
       await hub.applyFailed(agent.id, { generation: agent.generation, error: text });

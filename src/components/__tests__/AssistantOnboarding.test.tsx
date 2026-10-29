@@ -12,7 +12,7 @@ import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { VirtualAgentStatus } from "@/virtual-agents/lifecycle";
 import type { LoginView } from "@/virtual-agents/logins";
-import { neededCredentials, OPTIONAL_CREDENTIALS } from "@/virtual-agents/views";
+import { neededCredentials, OPTIONAL_CREDENTIALS, optionalCredentials } from "@/virtual-agents/views";
 
 const refresh = vi.fn();
 const push = vi.fn();
@@ -41,6 +41,7 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
     statusChangedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
     readiness: readiness(status),
+    modelRoute: "own-licence",
     needed: neededCredentials("own-licence"),
     optional: OPTIONAL_CREDENTIALS,
     logins: [],
@@ -255,15 +256,83 @@ describe("GettingReady connectors", () => {
     expect(within(connector("GitHub")).getByText(/The sign-in will appear here/)).toBeTruthy();
   });
 
-  it("should offer a form for the Bedrock key once the person clicks Connect, even while the assistant starts", () => {
-    render(ready({ assistant: assistant("provisioning", { needed: ["github", "azure", "bedrock"] }) }));
+  // The gateway authorises the person, so this route asks for no model credential of theirs: the row says how its
+  // access is come by and has nothing on it to paste or press, the Azure row below being where they act.
+  it("should say how the agents reach Claude, and ask for no model key, when the assistant is on the gateway route", () => {
+    const summary = assistant("awaiting_credentials", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway")
+    });
+    render(ready({ assistant: summary, statuses: statuses("github") }));
 
-    const bedrock = connector("AI model access");
-    expect(within(bedrock).queryByRole("form")).toBeNull();
-    fireEvent.click(within(bedrock).getByRole("button", { name: "Connect" }));
+    const claude = connector("Claude");
+    expect(within(claude).getByText("Through the HMCTS AI Gateway, on your Azure sign-in")).toBeTruthy();
+    expect(within(claude).queryByRole("button")).toBeNull();
+    expect(within(claude).queryByRole("form")).toBeNull();
+    // What it does ask for: the Azure sign-in the gateway authorises, which is this route's model credential.
+    expect(connectionsPrompt("connect", summary.needed, new Set<CredentialKind>(["github"]))?.message).toContain("Azure");
+    expect(connector("Azure")).toBeTruthy();
+  });
 
-    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Claude Code key" });
-    expect((within(form).getByLabelText("Claude Code key") as HTMLInputElement).type).toBe("password");
+  // Second, below GitHub, which is where the own-licence route's Claude token is: the same place on both routes.
+  it("should list how the agents reach Claude below GitHub on the gateway route", () => {
+    const summary = assistant("awaiting_credentials", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway")
+    });
+    render(ready({ assistant: summary, statuses: statuses("github") }));
+
+    const rows = within(screen.getByRole("list", { name: "Connections" })).getAllByRole("listitem");
+    expect(within(rows[0] as HTMLElement).getByText("GitHub")).toBeTruthy();
+    expect(within(rows[1] as HTMLElement).getByText("Claude")).toBeTruthy();
+  });
+
+  it("should say Claude is connected once the Azure sign-in behind it is, on the gateway route", () => {
+    const summary = assistant("running", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway"),
+      onboarded: true
+    });
+    render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
+
+    expect(within(connector("Claude")).getByText("✓ Connected")).toBeTruthy();
+  });
+
+  /**
+   * One credential, so one answer: the derived row and the sign-in it is read from have to say the same words, or the
+   * screen has Claude calling Azure a liar about the state of a single thing. These are the two states the two rows
+   * used to word differently — the screen says "Connecting…" for a sign-in on its way and "Waiting for you" for
+   * either way one waits on the person, where the settings list has its own words for both.
+   */
+  it.each([
+    ["is on its way while the assistant starts", "awaiting_credentials", [] as CredentialKind[], [] as LoginView[], "Connecting…"],
+    ["waits on the person for a fresh code", "awaiting_login", ["azure"] as CredentialKind[], [login("azure")], "Waiting for you"]
+  ] as const)("should word Claude as the Azure sign-in behind it is worded when that %s", (_what, status, stored, logins, words) => {
+    const summary = assistant(status, {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway"),
+      logins: [...logins]
+    });
+    render(ready({ assistant: summary, statuses: statuses("github", ...stored) }));
+
+    for (const name of ["Claude", "Azure"]) {
+      expect(within(connector(name)).getByText(words)).toBeTruthy();
+    }
+  });
+
+  it("should offer a form for the Claude token once the person clicks Connect, even while the assistant starts", () => {
+    render(ready({ assistant: assistant("provisioning", { needed: ["github", "azure", "claude"] }) }));
+
+    const claude = connector("Claude");
+    expect(within(claude).queryByRole("form")).toBeNull();
+    fireEvent.click(within(claude).getByRole("button", { name: "Connect" }));
+
+    const form = within(connector("Claude")).getByRole("form", { name: "Save your Claude token" });
+    expect((within(form).getByLabelText("Claude token") as HTMLInputElement).type).toBe("password");
   });
 });
 
@@ -273,20 +342,6 @@ describe("GettingReady connectors", () => {
  * the bar sits where the pod left it, and the ask never clears.
  */
 describe("GettingReady asks the person can act on", () => {
-  it("should offer the Bedrock key the ask names when the bedrock route is missing it", () => {
-    const summary = assistant("awaiting_credentials", { needed: ["github", "azure", "bedrock"] });
-    render(ready({ assistant: summary, statuses: statuses("github", "azure") }));
-
-    const missing = connectionsPrompt("connect", summary.needed, new Set<CredentialKind>(["github", "azure"]));
-    expect(missing?.message).toContain("AI model access");
-    const row = connector("AI model access");
-    fireEvent.click(within(row).getByRole("button", { name: "Connect" }));
-
-    const form = within(connector("AI model access")).getByRole("form", { name: "Save your Claude Code key" });
-    expect(within(form).getByLabelText("Claude Code key")).toBeTruthy();
-    expect((form.querySelector('input[name="kind"]') as HTMLInputElement).value).toBe("bedrock");
-  });
-
   // The pod gives up driving `claude setup-token` and asks the owner to paste the token, so a note about a sign-in
   // that is never coming would leave them with the ask and nowhere to answer it.
   it("should offer the Claude token the ask names when the own-licence route is missing it", () => {
@@ -323,8 +378,8 @@ describe("GettingReady asks the person can act on", () => {
   });
 
   it("should offer a row for a sign-in the assistant is waiting on that it would not offer unasked", () => {
-    const summary = assistant("awaiting_login", { needed: ["github", "azure", "bedrock"], logins: [login("jenkins")] });
-    render(ready({ assistant: summary, statuses: statuses("github", "azure", "bedrock", "atlassian") }));
+    const summary = assistant("awaiting_login", { needed: ["github", "azure"], logins: [login("jenkins")] });
+    render(ready({ assistant: summary, statuses: statuses("github", "azure", "atlassian") }));
 
     const jenkins = connector("Jenkins");
     expect(within(jenkins).getByText("Waiting for you")).toBeTruthy();
@@ -333,8 +388,8 @@ describe("GettingReady asks the person can act on", () => {
 
   it("should leave nothing the assistant is waiting on off the list", () => {
     const waitingOn: CredentialKind[] = ["azure", "jenkins"];
-    const summary = assistant("awaiting_login", { needed: ["github", "azure", "bedrock"], logins: waitingOn.map((kind) => login(kind)) });
-    render(ready({ assistant: summary, statuses: statuses("github", "bedrock", "atlassian") }));
+    const summary = assistant("awaiting_login", { needed: ["github", "azure"], logins: waitingOn.map((kind) => login(kind)) });
+    render(ready({ assistant: summary, statuses: statuses("github", "atlassian") }));
 
     const shown = offeredConnections(summary, Date.now()).map((row) => String(row.kind));
     expect(waitingOn.filter((kind) => !shown.includes(kind))).toEqual([]);
@@ -563,6 +618,24 @@ describe("OnboardingGate", () => {
     expect(screen.queryByRole("region", { name: "Sign in" })).toBeNull();
   });
 
+  /**
+   * The same sign-in on the route that reaches Claude through it, where letting it lapse is not a choice somebody
+   * made but the end of every turn: the credential is still stored, so the connect ask is satisfied and the chat gate
+   * is open, and no pod relays this one by itself. Nothing but this would say so.
+   */
+  it("should ask for a lapsed Azure sign-in on the gateway route, where it is what the agents reach Claude on", () => {
+    const summary = assistant("running", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway"),
+      onboarded: true,
+      logins: [lapsed("azure")]
+    });
+    render(gate(summary, statuses("github", "azure")));
+
+    expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("could not sign in to Azure");
+  });
+
   it("should open the connections when the person asks for them from the banner", () => {
     render(gate(assistant()));
 
@@ -603,11 +676,11 @@ describe("OnboardingGate", () => {
   // to have that sign-in on it: a screen listing every other connection as connected is an ask nobody can clear.
   it("should list the sign-in the pod is waiting on when someone who has onboarded opens the progress", () => {
     const summary = assistant("awaiting_login", {
-      needed: ["github", "azure", "bedrock"],
+      needed: ["github", "azure"],
       onboarded: true,
       logins: [login("jenkins")]
     });
-    render(gate(summary, statuses("github", "azure", "bedrock", "atlassian"), true));
+    render(gate(summary, statuses("github", "azure", "atlassian"), true));
 
     expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("sign in to Jenkins");
     fireEvent.click(screen.getByRole("button", { name: "Show the sign-in" }));
@@ -817,20 +890,20 @@ describe("OnboardingGate", () => {
     });
 
     /**
-     * `saveCredential` refuses a Claude token from somebody whose agents run on Amazon Bedrock, and a lapsed Claude
+     * `saveCredential` refuses a Claude token from somebody whose agents run on the gateway, and a lapsed Claude
      * row's only control is that box. Nothing clears the login row either, so an ask here would be one the person
      * can neither satisfy nor dismiss, for as long as they use the Assistant.
      */
     it("should ask for nothing when the only lapsed sign-in is one the hub would take no value for", () => {
-      const summary = assistant("running", { needed: ["github", "azure", "bedrock"], onboarded: true, logins: [lapsed("claude")] });
-      render(gate(summary, statuses("github", "azure", "bedrock", "atlassian")));
+      const summary = assistant("running", { needed: ["github", "azure"], onboarded: true, logins: [lapsed("claude")] });
+      render(gate(summary, statuses("github", "azure", "atlassian")));
 
       expect(screen.queryByRole("region")).toBeNull();
     });
 
     it("should still ask while that sign-in's code is live, which goes back through the pod rather than the hub", () => {
-      const summary = assistant("running", { needed: ["github", "azure", "bedrock"], onboarded: true, logins: [login("claude")] });
-      render(gate(summary, statuses("github", "azure", "bedrock", "atlassian")));
+      const summary = assistant("running", { needed: ["github", "azure"], onboarded: true, logins: [login("claude")] });
+      render(gate(summary, statuses("github", "azure", "atlassian")));
 
       expect(screen.getByRole("region", { name: "Sign in" }).textContent).toContain("sign in to Claude");
     });
@@ -867,7 +940,7 @@ describe("OnboardingGate", () => {
       const LIVE = () => new Date(Date.now() + 10 * 60_000).toISOString();
       const PAST = () => new Date(Date.now() - 60_000).toISOString();
       /** What the assistant under test needs and offers, and so the credentials the hub would take from the person. */
-      const NEEDS: CredentialKind[] = ["bedrock"];
+      const NEEDS: CredentialKind[] = ["github"];
       const OFFERS: CredentialKind[] = ["jenkins", "atlassian"];
       const SITUATIONS = {
         "a live code": { make: (kind: CredentialKind) => login(kind, { expiresAt: LIVE() }), live: true },
@@ -879,7 +952,7 @@ describe("OnboardingGate", () => {
           live: null
         }
       };
-      const CASES = (["github", "azure", "claude", "bedrock", "jenkins", "atlassian"] as const).flatMap((kind) =>
+      const CASES = (["github", "azure", "claude", "jenkins", "atlassian"] as const).flatMap((kind) =>
         Object.keys(SITUATIONS).flatMap((situation) => [true, false].map((held) => ({ kind, situation, held })))
       );
 
@@ -893,7 +966,7 @@ describe("OnboardingGate", () => {
         // Nothing the assistant needs is ever the kind under test, so `onboarded` is honestly true and the ask under
         // test is the sign-in one rather than the connect one.
         const summary = assistant("running", { needed: NEEDS, optional: OFFERS, onboarded: true, logins: [make(kind)] });
-        render(gate(summary, held ? statuses("bedrock", kind) : statuses("bedrock")));
+        render(gate(summary, held ? statuses("github", kind) : statuses("github")));
 
         // Asserted rather than skipped past, so every case says something. A code they have already sent back waits
         // on nobody. A live one always asks, because finishing it goes back through the pod rather than through a
@@ -954,8 +1027,8 @@ describe("OnboardingGate", () => {
  * made from the same number and there is nothing for hydration to disagree about.
  */
 describe("OnboardingGate holding the person at GitHub and Claude", () => {
-  const OWN_LICENCE: Partial<AssistantSummary> = { needed: ["github", "azure", "claude"], toChat: ["github", "claude"] };
-  const BEDROCK: Partial<AssistantSummary> = { needed: ["github", "azure", "bedrock"], toChat: ["github", "bedrock"] };
+  const OWN_LICENCE: Partial<AssistantSummary> = { modelRoute: "own-licence", needed: ["github", "azure", "claude"], toChat: ["github", "claude"] };
+  const GATEWAY: Partial<AssistantSummary> = { modelRoute: "gateway", needed: ["github", "azure"], toChat: ["github", "azure"] };
 
   function held(summary: AssistantSummary, stored: CredentialStatus[] = [], options: { dismissed?: boolean; unavailable?: string | null } = {}) {
     return (
@@ -1009,15 +1082,15 @@ describe("OnboardingGate holding the person at GitHub and Claude", () => {
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
   });
 
-  it("should hold the screen on the Bedrock key and not take a Claude token for it when the assistant runs on Bedrock", () => {
-    render(held(assistant("awaiting_credentials", BEDROCK), statuses("github", "claude")));
+  it("should hold the screen on the Azure sign-in and not take a Claude token for it when the assistant runs on the gateway", () => {
+    render(held(assistant("awaiting_credentials", GATEWAY), statuses("github", "claude")));
 
     expect(screen.getByRole("dialog", { name: "Your assistant is getting ready" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Go to your chats" })).toBeNull();
   });
 
-  it("should let the person through to their chats when the assistant runs on Bedrock and GitHub and its key are connected", () => {
-    render(held(assistant("running", { ...BEDROCK, onboarded: true }), statuses("github", "azure", "bedrock")));
+  it("should let the person through to their chats when the assistant runs on the gateway and GitHub and Azure are connected", () => {
+    render(held(assistant("running", { ...GATEWAY, onboarded: true }), statuses("github", "azure")));
 
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -1122,15 +1195,15 @@ describe("the HTML the server sends", () => {
     expect(html).toContain("Paste the Claude code");
   });
 
-  // Both ways a Claude sign-in can be over for somebody on the Bedrock route: a pod's report, and a code that simply
+  // Both ways a Claude sign-in can be over for somebody on the gateway route: a pod's report, and a code that simply
   // ran out. The second is the one a clock decides, so it is the one a stand-in clock would read as live.
   it.each([
     ["a pod reported it expired", "expired" as const],
     ["its code ran out with no report", "pending" as const]
   ])("should raise no ask for a Claude sign-in the hub would take no value for when %s", (_what, state) => {
     const over = login("claude", { state, expiresAt: AN_HOUR_AGO(), updatedAt: AN_HOUR_AGO() });
-    const summary = assistant("running", { needed: ["github", "azure", "bedrock"], onboarded: true, logins: [over] });
-    const html = serverHtml(gate(summary, statuses("github", "azure", "bedrock", "atlassian")));
+    const summary = assistant("running", { needed: ["github", "azure"], onboarded: true, logins: [over] });
+    const html = serverHtml(gate(summary, statuses("github", "azure", "atlassian")));
 
     expect(html).not.toContain("Claude");
     expect(html).not.toContain("Sign in");

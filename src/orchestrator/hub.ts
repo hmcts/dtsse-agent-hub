@@ -1,15 +1,18 @@
 import type { TokenCredential } from "@azure/identity";
+import type { GatewaySettings } from "../virtual-agents/settings.ts";
 import type { VirtualAgentSize } from "../virtual-agents/size.ts";
 import { withoutTrailingSlashes } from "./settings.ts";
 
 /**
  * The hub's `/api/orchestrator/**` routes in `docs/agent-api.md`, called with the orchestrator's own app-only token.
- * A claim's launch tokens are in the response and nowhere else, so no response body is ever logged or put in an error.
+ * A claim's launch tokens and the AI Gateway's APIM key are in the response and nowhere else, so no response body is
+ * ever logged or put in an error.
  */
 
 export type Desired = "running" | "stopped" | "deleted";
 
-export type ModelRoute = "bedrock" | "own_licence";
+/** The stored labels, which is what the claim sends and the pod is given as `AGENT_HUB_MODEL_ROUTE`. */
+export type ModelRoute = "gateway" | "own_licence";
 
 export interface ClaimedAgent {
   id: string;
@@ -29,6 +32,13 @@ export interface ClaimedAgent {
   plugins?: string[];
   owner: { oid: string };
   launch_token?: string;
+  /**
+   * The AI Gateway's APIM subscription key, which the hub reads from its own environment and only ever sends for a
+   * running agent on the `gateway` route; `hai` resolves the rest of that route in the pod. Absent for every other
+   * agent, and for one on that route claimed by a hub too old to send it — which the orchestrator refuses to build
+   * a pod from.
+   */
+  gateway?: GatewaySettings;
 }
 
 export interface ObservedBody {

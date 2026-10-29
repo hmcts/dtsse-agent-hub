@@ -244,80 +244,39 @@ describe("DELETE /api/agent/credentials/{kind}", () => {
     expect((await remove(ALICE, "ssh")).status).toBe(404);
   });
 
-  it("should remove a stored Claude Code key when the owner deletes it from the command line", async () => {
-    await put(ALICE, "bedrock", { value: BEDROCK });
-
-    expect((await remove(ALICE, "bedrock")).status).toBe(204);
-
-    expect(await prisma.credential.count()).toBe(0);
-    expect((await read(ALICE, "bedrock")).status).toBe(404);
+  it("should answer 404 when the kind is the Amazon Bedrock API key, which is no longer one", async () => {
+    expect((await remove(ALICE, "bedrock")).status).toBe(404);
   });
 });
 
-describe("a Claude Code key", () => {
-  it("should store the caller's key from the command line when it is valid", async () => {
-    expect((await put(ALICE, "bedrock", { value: ` ${BEDROCK}\n` })).status).toBe(204);
+// Agents reach Claude through the gateway or their owner's own licence, so there is no key to store under any name.
+describe("an Amazon Bedrock API key", () => {
+  it("should answer 404 and store nothing when one is sent from the command line", async () => {
+    expect((await put(ALICE, "bedrock", { value: BEDROCK })).status).toBe(404);
 
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
-      ownerOid: ALICE.oid,
-      kind: "bedrock",
-      secretName: "u-dev-alice-bedrock",
-      updatedVia: "cli"
-    });
-    expect(await everythingStored()).not.toContain(BEDROCK);
-  });
-
-  it("should refuse a pasted GitHub token with an error saying what it is, never echoing it", async () => {
-    const response = await put(ALICE, "bedrock", { value: GITHUB });
-
-    expect(response.status).toBe(400);
-    const body = await response.text();
-    expect(body).toContain("GitHub token, not a Claude Code key");
-    expect(body).not.toContain(GITHUB);
     expect(await prisma.credential.count()).toBe(0);
   });
 });
 
 describe("reading credentials back", () => {
-  it("should give the owner their own Claude Code key when it is stored", async () => {
-    await put(ALICE, "bedrock", { value: BEDROCK });
-
-    const response = await read(ALICE, "bedrock");
-
-    expect(response.status).toBe(200);
-    expect(await jsonOf(response)).toEqual({ value: BEDROCK });
+  it("should answer 404 when the owner asks for an Amazon Bedrock API key, which is not a kind", async () => {
+    expect((await read(ALICE, "bedrock")).status).toBe(404);
   });
 
-  it("should answer 404 when the owner has no Claude Code key stored", async () => {
-    const response = await read(ALICE, "bedrock");
+  it.each(["github", "azure", "claude", "jenkins", "atlassian"])(
+    "should answer 405 and never the value when the owner asks for their stored %s",
+    async (kind) => {
+      const values: Record<string, string> = { github: GITHUB, azure: AZURE, claude: CLAUDE, jenkins: JENKINS, atlassian: ATLASSIAN };
+      expect((await put(ALICE, kind, { value: values[kind] })).status).toBe(204);
 
-    expect(response.status).toBe(404);
-    expect(await jsonOf(response)).toEqual({ error: "no bedrock credential is stored" });
-  });
+      const response = await read(ALICE, kind);
 
-  it("should give each person only their own Claude Code key when two have one stored", async () => {
-    await put(ALICE, "bedrock", { value: BEDROCK });
-
-    expect((await read(BOB, "bedrock")).status).toBe(404);
-  });
-
-  it.each([
-    "github",
-    "azure",
-    "claude",
-    "jenkins",
-    "atlassian"
-  ])("should answer 405 and never the value when the owner asks for their stored %s", async (kind) => {
-    const values: Record<string, string> = { github: GITHUB, azure: AZURE, claude: CLAUDE, jenkins: JENKINS, atlassian: ATLASSIAN };
-    expect((await put(ALICE, kind, { value: values[kind] })).status).toBe(204);
-
-    const response = await read(ALICE, kind);
-
-    expect(response.status).toBe(405);
-    const body = await response.text();
-    expect(body).toContain("write-only");
-    expect(body).not.toContain(values[kind]!);
-  });
+      expect(response.status).toBe(405);
+      const body = await response.text();
+      expect(body).toContain("write-only");
+      expect(body).not.toContain(values[kind]!);
+    }
+  );
 
   it("should answer 404 when the owner asks for an unknown kind", async () => {
     expect((await read(ALICE, "ssh")).status).toBe(404);
@@ -333,7 +292,6 @@ describe("reading credentials back", () => {
       ["github", true],
       ["azure", true],
       ["claude", false],
-      ["bedrock", false],
       ["jenkins", false],
       ["claude_md", false],
       ["git_identity", false],
@@ -346,23 +304,23 @@ describe("reading credentials back", () => {
   it("should give the settings page metadata and never a value when the viewer has credentials stored", async () => {
     await put(ALICE, "github", { value: GITHUB });
 
-    const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" });
+    const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" });
 
-    expect(settings).toMatchObject({ available: true, modelRoute: "bedrock" });
+    expect(settings).toMatchObject({ available: true, modelRoute: "gateway" });
     expect(JSON.stringify(settings)).not.toContain(GITHUB);
   });
 
   it("should tell the settings page credentials are unavailable when the deployment cannot store them", async () => {
     vi.stubEnv("CREDENTIALS_VAULT_URL", "https://dtsse-ah-creds-test.vault.azure.net/");
 
-    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" })).toMatchObject({
+    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" })).toMatchObject({
       available: false,
       reason: expect.stringContaining("development identity")
     });
 
     vi.stubEnv("CREDENTIALS_VAULT_URL", "");
     vi.stubEnv("SESSION_SECRET", "");
-    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" })).toMatchObject({ available: false });
+    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" })).toMatchObject({ available: false });
   });
 });
 
@@ -418,12 +376,12 @@ describe("saveCredential and removeCredential", () => {
     expect(JSON.stringify(result)).not.toContain(GITHUB);
   });
 
-  it("should refuse a Claude token when the viewer's agents use HMCTS Claude Code access", async () => {
+  it("should refuse a Claude token when the viewer's agents reach Claude through HMCTS", async () => {
     actAs("alice");
 
     expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toMatchObject({
       ok: false,
-      error: expect.stringContaining("Claude Code through HMCTS")
+      error: expect.stringContaining("reach Claude through HMCTS")
     });
     expect(await prisma.credential.count()).toBe(0);
   });
@@ -435,24 +393,24 @@ describe("saveCredential and removeCredential", () => {
     expect(await readCredential(prisma, localStore(), devIdentity("own-licence").oid, "claude")).toBe(CLAUDE);
   });
 
-  it.each([
-    ["bedrock", "bedrock", false],
-    ["own-licence", "own-licence", true]
-  ] as const)("should leave a Claude token as it was when the viewer is on %s and so is their agent", async (persona, route, stored) => {
-    const who = person(persona);
-    await insertUser(who);
-    await createVirtualAgent(prisma, { owner: who, modelRoute: route, name: "assistant" });
-    actAs(persona);
+  it.each([["own-licence", "own-licence", true]] as const)(
+    "should leave a Claude token as it was when the viewer is on %s and so is their agent",
+    async (persona, route, stored) => {
+      const who = person(persona);
+      await insertUser(who);
+      await createVirtualAgent(prisma, { owner: who, modelRoute: route, name: "assistant" });
+      actAs(persona);
 
-    await saveCredential(form({ kind: "claude", value: CLAUDE }));
+      await saveCredential(form({ kind: "claude", value: CLAUDE }));
 
-    expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(stored ? CLAUDE : undefined);
-  });
+      expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(stored ? CLAUDE : undefined);
+    }
+  );
 
   // The agent's route is fixed on its row when it is created, and its pod boots on that; the viewer's follows their
-  // `AIGateway.User` app role. Someone granted that role afterwards is on Bedrock while an agent of theirs is still
-  // on their own licence, waiting for the Claude token the web refused to take.
-  it("should save a Claude token when the viewer is on Bedrock but an agent of theirs is on their own licence", async () => {
+  // `AIGateway.User` app role. Someone granted that role afterwards is on the gateway while an agent of theirs is
+  // still on their own licence, waiting for the Claude token the web refused to take.
+  it("should save a Claude token when the viewer is on the gateway but an agent of theirs is on their own licence", async () => {
     await insertUser(ALICE);
     await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
     actAs("alice");
@@ -461,10 +419,10 @@ describe("saveCredential and removeCredential", () => {
     expect(await readCredential(prisma, localStore(), ALICE.oid, "claude")).toBe(CLAUDE);
   });
 
-  it("should save a Claude token when the viewer is on their own licence but every agent of theirs is on Bedrock", async () => {
+  it("should save a Claude token when the viewer is on their own licence but every agent of theirs is on the gateway", async () => {
     const who = person("own-licence");
     await insertUser(who);
-    await createVirtualAgent(prisma, { owner: who, modelRoute: "bedrock", name: "assistant" });
+    await createVirtualAgent(prisma, { owner: who, modelRoute: "gateway", name: "assistant" });
     actAs("own-licence");
 
     expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toEqual({ ok: true, confirmation: "Your Claude token is stored" });
@@ -479,42 +437,33 @@ describe("saveCredential and removeCredential", () => {
 
     expect(await saveCredential(form({ kind: "claude", value: CLAUDE }))).toMatchObject({
       ok: false,
-      error: expect.stringContaining("Claude Code through HMCTS")
+      error: expect.stringContaining("reach Claude through HMCTS")
     });
     expect(await prisma.credential.count()).toBe(0);
   });
 
-  it("should tell the settings page a Claude token is wanted when the viewer is on Bedrock and an agent of theirs is not", async () => {
+  it("should tell the settings page a Claude token is wanted when the viewer is on the gateway and an agent of theirs is not", async () => {
     await insertUser(ALICE);
     await createVirtualAgent(prisma, { owner: ALICE, modelRoute: "own-licence", name: "assistant" });
 
-    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" })).toMatchObject({ modelRoute: "bedrock", claudeTokenUsable: true });
+    expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" })).toMatchObject({ modelRoute: "gateway", claudeTokenUsable: true });
   });
 
-  it.each(["alice", "own-licence"])("should save a pasted Claude Code key from the web when the viewer is the %s persona", async (persona) => {
+  it.each(["alice", "own-licence"])("should refuse a pasted Amazon Bedrock API key from the web when the viewer is the %s persona", async (persona) => {
     actAs(persona);
 
     const result = await saveCredential(form({ kind: "bedrock", value: BEDROCK }));
 
-    expect(result).toEqual({ ok: true, confirmation: "Your Claude Code key is stored" });
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity(persona).oid, kind: "bedrock", updatedVia: "web" });
-    expect(await readCredential(prisma, localStore(), devIdentity(persona).oid, "bedrock")).toBe(BEDROCK);
-    expect(JSON.stringify(result)).not.toContain(BEDROCK);
-  });
-
-  it("should delete a stored Claude Code key from the web when asked", async () => {
-    actAs("alice");
-    await saveCredential(form({ kind: "bedrock", value: BEDROCK }));
-
-    expect(await removeCredential(form({ kind: "bedrock" }))).toEqual({ ok: true });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("can be pasted here") });
     expect(await prisma.credential.count()).toBe(0);
+    expect(JSON.stringify(result)).not.toContain(BEDROCK);
   });
 
   it.each([
     ["an Azure cache, which comes from the virtual agent", { kind: "azure", value: AZURE }, "can be pasted here"],
     ["an unknown kind", { kind: "ssh", value: GITHUB }, "can be pasted here"],
     ["a property every object has", { kind: "toString", value: GITHUB }, "can be pasted here"],
-    ["a Claude token pasted as a Claude Code key", { kind: "bedrock", value: CLAUDE }, "Claude licence token, not a Claude Code key"],
+    ["an Amazon Bedrock API key, which is no longer a kind", { kind: "bedrock", value: BEDROCK }, "can be pasted here"],
     ["a malformed token", { kind: "github", value: "nope" }, "GitHub token"]
   ])("should refuse %s when it is pasted", async (_label, values, error) => {
     actAs("alice");
@@ -711,9 +660,9 @@ describe("a CLAUDE.md", () => {
   it("should leave it out of the credentials the settings list shows when one is stored", async () => {
     await put(ALICE, "claude_md", { value: TEXT });
 
-    const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" });
+    const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" });
 
-    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "bedrock", "jenkins", "atlassian"]);
+    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "jenkins", "atlassian"]);
   });
 
   it("should not be pasteable as an ordinary credential when the credentials form names it", async () => {
@@ -836,9 +785,9 @@ describe("a git identity", () => {
   it("should leave it out of the credentials the settings list shows when one is stored", async () => {
     await put(ALICE, "git_identity", { value: IDENTITY });
 
-    const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "bedrock" });
+    const settings = await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" });
 
-    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "bedrock", "jenkins", "atlassian"]);
+    expect(settings.available && settings.statuses.map((status) => status.kind)).toEqual(["github", "azure", "claude", "jenkins", "atlassian"]);
   });
 
   it("should not be pasteable as an ordinary credential when the credentials form names it", async () => {

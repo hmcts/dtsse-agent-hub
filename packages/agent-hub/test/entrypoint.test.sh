@@ -19,7 +19,8 @@
 # shellcheck disable=SC2015,SC2016
 set -u
 
-CASES=(first-boot bedrock-route legacy-gateway-route unknown-route hai-install-blip-recovers hai-install-falls-back
+CASES=(first-boot gateway-route gateway-route-older-template gateway-route-unconfigured
+    unknown-route hai-install-blip-recovers hai-install-falls-back
     hai-installed-off-path hai-install-retries hai-install-keeps-failing hai-install-leaves-no-binary
     continues-a-conversation git-identity-fails later-boot-fails sigterm-mid-clone claude-md-stored
     claude-md-missing claude-md-error claude-md-restart atlassian-fails atlassian-not-signed-in atlassian-sigterm
@@ -110,8 +111,13 @@ for a; do f=$a; done
 cat "$f"
 EOF
     printf '#!/bin/sh\nexit 0\n' >"$F/bin/node"
-    # The owner's object id once the fake client has signed az in, and nothing before.
-    printf '#!/bin/sh\n[ -f "$FAKE_DIR/az-signed-in" ] || exit 1\necho 0f8a6a10-0000-4000-8000-000000000001\n' >"$F/bin/az"
+    # The owner's object id, once the fake client has signed az in, and nothing before: that is the only thing this
+    # file asks az for, since the gateway's own token is minted by the apiKeyHelper hai writes.
+    cat >"$F/bin/az" <<'EOF'
+#!/bin/sh
+[ -f "$FAKE_DIR/az-signed-in" ] || exit 1
+echo 0f8a6a10-0000-4000-8000-000000000001
+EOF
 
     # Every backoff the entrypoint waits out is a `sleep` on this PATH — retry()'s 30s and 60s, the restart
     # delay, fatal()'s hour — and waiting them out is what made this suite take minutes. The schedule is
@@ -135,7 +141,7 @@ echo "start $n $(grep '^state=' "$VIRTUAL_AGENT_STATE/repos-state" 2>/dev/null)"
 echo "claude $n" >>"$FAKE_DIR/order.log"
 printf '%s\n' "$@" >"$FAKE_DIR/hai.argv.$n"
 pwd >"$FAKE_DIR/hai.pwd.$n"
-env | grep -E '^(HAI_ROUTE|HAI_IN_CONTAINER|HAI_NO_UPDATE|AGENT_HUB_MODEL_ROUTE|AWS_BEARER_TOKEN_BEDROCK|CLAUDE_CODE_OAUTH_TOKEN|AGENT_HUB_CLAUDE_SETTINGS)=' | sort >"$FAKE_DIR/hai.env.$n"
+env | grep -E '^(HAI_ROUTE|HAI_IN_CONTAINER|HAI_NO_UPDATE|HAI_ENV_READY|HAI_GATEWAY_APIM_KEY|AGENT_HUB_MODEL_ROUTE|AWS_BEARER_TOKEN_BEDROCK|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_SKIP_BEDROCK_AUTH|CLAUDE_CODE_API_KEY_HELPER_TTL_MS|AWS_REGION|ANTHROPIC_BEDROCK_BASE_URL|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|AGENT_HUB_CLAUDE_SETTINGS)=' | sort >"$FAKE_DIR/hai.env.$n"
 cp "$HOME/.claude/CLAUDE.md" "$FAKE_DIR/claude_md.seen.$n" 2>/dev/null
 if [ "$n" -eq 1 ] && [ -n "${FAKE_CLAUDE_EXIT_FIRST:-}" ]; then "$REAL_SLEEP" 2; exit 0; fi
 exec "$REAL_SLEEP" 1000
@@ -213,7 +219,8 @@ case "$1 $2" in
         exit "${FAKE_ATLASSIAN_RC:-0}" ;;
     "virtual credential") printf 'sk-ant-oat-fake' ;;
     "credentials get")
-        [ "$3" = claude_md ] || { printf 'ABSKfake'; exit 0; }
+        # Any kind but the CLAUDE.md is an opaque token to the entrypoint; `jenkins` is the one it asks for.
+        [ "$3" = claude_md ] || { printf 'fake-opaque-token'; exit 0; }
         case "${FAKE_CLAUDE_MD:-missing}" in
             stored) cat "$FAKE_DIR/claude_md" ;;
             error) echo "agent-hub: GET /api/virtual/x/credentials/claude_md: 502" >&2; exit 1 ;;
@@ -351,7 +358,7 @@ case_first_boot() {
     hai_env 1 "HAI_ROUTE=byol" && ok "should map own_licence to HAI_ROUTE=byol when that is the hub's route" || no "hai env: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
     hai_env 1 "AGENT_HUB_MODEL_ROUTE=own_licence" && ok "should pass the hub's own_licence route on unrenamed when it hands over to hai" || no "AGENT_HUB_MODEL_ROUTE was rewritten"
     hai_env_has 1 CLAUDE_CODE_OAUTH_TOKEN && ok "should put the Claude token in hai's environment when the route is own_licence" || no "no CLAUDE_CODE_OAUTH_TOKEN"
-    hai_env_has 1 AWS_BEARER_TOKEN_BEDROCK && no "the Bedrock key leaked into the own_licence route" || ok "should leave the Bedrock key out when the route is own_licence"
+    hai_env_has 1 AWS_BEARER_TOKEN_BEDROCK && no "a Bedrock bearer token reached the own_licence route" || ok "should set no Bedrock bearer token when the route is own_licence"
     hai_env 1 "HAI_IN_CONTAINER=1" && ok "should tell hai it is already in a container when it starts a session" || no "hai would start a container of its own: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
     # Both markers, not just the one: the hub's pod template sets them too, but a pod still on an older
     # template has only what this file exports, and without HAI_NO_UPDATE every session self-updates.
@@ -384,24 +391,60 @@ case_first_boot() {
         ok "should log which hai the pod got when the install succeeds" || no "did not log the installed hai version"
 }
 
-case_bedrock_route() {
-    setup bedrock-route
-    start AGENT_HUB_MODEL_ROUTE=bedrock FAKE_REPO_SECONDS=0.2
-    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when the route is bedrock" || no "Claude did not start on the bedrock route"
-    hai_env 1 "HAI_ROUTE=bedrock" && ok "should map bedrock to HAI_ROUTE=bedrock when that is the hub's route" || no "hai env: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
-    hai_env 1 "AWS_BEARER_TOKEN_BEDROCK=ABSKfake" && ok "should put the stored Bedrock key in hai's environment when the route is bedrock" || no "no Bedrock key in hai's environment"
-    hai_env_has 1 CLAUDE_CODE_OAUTH_TOKEN && no "the Claude token leaked into the bedrock route" || ok "should leave the Claude token out when the route is bedrock"
+# Everything hai's ai-gateway route resolves for itself, which this file must now set none of: a copy of any of them
+# that drifted from hai's would give a pod that boots, reports healthy and fails every turn.
+GATEWAY_HAI_OWNS="CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_SKIP_BEDROCK_AUTH CLAUDE_CODE_API_KEY_HELPER_TTL_MS AWS_REGION
+ANTHROPIC_BEDROCK_BASE_URL ANTHROPIC_CUSTOM_HEADERS ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL
+ANTHROPIC_DEFAULT_OPUS_MODEL"
+
+case_gateway_route() {
+    setup gateway-route
+    start AGENT_HUB_MODEL_ROUTE=gateway FAKE_AZURE_STORED=1 HAI_GATEWAY_APIM_KEY=apim-key FAKE_REPO_SECONDS=0.2
+    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when the route is the AI Gateway" || no "Claude did not start on the gateway route"
+    hai_env 1 "AGENT_HUB_MODEL_ROUTE=gateway" && ok "should pass the gateway route on unrenamed when it hands over to hai" || no "AGENT_HUB_MODEL_ROUTE was rewritten"
+    hai_env 1 "HAI_ROUTE=ai-gateway" && ok "should name hai's own ai-gateway route when the hub's route is the gateway" || no "hai env: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
+    hai_env 1 "HAI_GATEWAY_APIM_KEY=apim-key" &&
+        ok "should hand hai the APIM subscription key when the route is the gateway" || no "no HAI_GATEWAY_APIM_KEY"
+    # The marker would short-circuit the resolution that builds the rest of this route, which is now hai's.
+    hai_env_has 1 HAI_ENV_READY && no "HAI_ENV_READY=1 would stop hai resolving the gateway" ||
+        ok "should leave hai to resolve the gateway when the route is the gateway"
+    hai_env 1 "HAI_IN_CONTAINER=1" && ok "should tell hai it is already in a container when the route is the gateway" || no "hai would start a container of its own"
+    left=""
+    for v in $GATEWAY_HAI_OWNS; do hai_env_has 1 "$v" && left="$left $v"; done
+    [ -z "$left" ] && ok "should set none of the gateway's Bedrock and model variables when the route is the gateway" || no "set by the pod:$left"
+    hai_env_has 1 AWS_BEARER_TOKEN_BEDROCK && no "a Bedrock key leaked into the gateway route" || ok "should leave any Bedrock key out when the route is the gateway"
+    hai_env_has 1 CLAUDE_CODE_OAUTH_TOKEN && no "the Claude token leaked into the gateway route" || ok "should leave the Claude token out when the route is the gateway"
+    # hai writes the apiKeyHelper, and merges the settings it is handed over its own, so naming one here would take
+    # the token refresh away from it.
     [ "$(hai_argv 1)" = "--settings $SETTINGS --dangerously-skip-permissions " ] &&
-        ok "should give hai the same argv on the bedrock route as on any other" || no "hai argv: $(hai_argv 1)"
+        ok "should name no apiKeyHelper of its own in the settings when the route is the gateway" || no "hai argv: $(hai_argv 1)"
+    hai_env 1 "AGENT_HUB_CLAUDE_SETTINGS=$SETTINGS" &&
+        ok "should give the summariser the same settings when the route is the gateway" || no "settings: $(grep AGENT_HUB_CLAUDE_SETTINGS "$F/hai.env.1" 2>/dev/null)"
+    [ ! -f "$STATE/gateway-token.sh" ] && ok "should write no token helper of its own when the route is the gateway" || no "helper: $(cat "$STATE/gateway-token.sh" 2>/dev/null)"
+    # Nothing is pasted on this route, so nothing may be waited for either.
+    hub_has 'awaiting_credentials' && no "the gateway route waited for a credential" || ok "should wait for no credential of the owner's when the route is the gateway"
+    hub_has 'failed' && no "the gateway route failed the agent" || ok "should leave the agent running when the route is the gateway"
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
-case_legacy_gateway_route() {
-    setup legacy-gateway-route
+# A pod still on the template from before the key was renamed, which is every running gateway agent until its
+# pod_generation moves: this file ships with the client and is upgraded a boot ahead of it.
+case_gateway_route_older_template() {
+    setup gateway-route-older-template
+    start AGENT_HUB_MODEL_ROUTE=gateway FAKE_AZURE_STORED=1 AI_GATEWAY_APIM_KEY=apim-key FAKE_REPO_SECONDS=0.2
+    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when the key arrives under its older name" || no "Claude did not start on an older pod template"
+    hai_env 1 "HAI_GATEWAY_APIM_KEY=apim-key" &&
+        ok "should hand hai the APIM subscription key when the pod template names it AI_GATEWAY_APIM_KEY" || no "no HAI_GATEWAY_APIM_KEY"
+    stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
+}
+
+# No key at all, which is a pod that would boot and then 401 every turn with nothing saying why.
+case_gateway_route_unconfigured() {
+    setup gateway-route-unconfigured
     start AGENT_HUB_MODEL_ROUTE=gateway FAKE_REPO_SECONDS=0.2
-    wait_for 10 test -f "$F/hai.argv.1" && ok "should start Claude when the route is the legacy gateway" || no "Claude did not start on the legacy gateway route"
-    hai_env 1 "HAI_ROUTE=bedrock" && ok "should map the legacy gateway route to HAI_ROUTE=bedrock when the hub sends one" || no "hai env: $(tr '\n' ' ' <"$F/hai.env.1" 2>/dev/null)"
-    hai_env 1 "AGENT_HUB_MODEL_ROUTE=bedrock" && ok "should report the legacy gateway route to the hub as bedrock when it normalises it" || no "AGENT_HUB_MODEL_ROUTE was not normalised"
+    wait_for 10 hub_has 'failed the AI Gateway route needs its APIM subscription key' &&
+        ok "should fail the agent naming the setting it was not given when the gateway has no key" || no "a missing APIM key did not fail the agent: $(cat "$F/hub.log" 2>/dev/null)"
+    [ ! -f "$F/hai.argv.1" ] && ok "should start no session when the gateway has no key" || no "a session started without the gateway's key"
     stop && ok "should stop the entrypoint when it gets SIGTERM" || no "the entrypoint did not stop on SIGTERM"
 }
 
@@ -542,7 +585,11 @@ case_sigterm_mid_clone() {
     grep -q "clone step" "$T/out" && ok "should log that it stopped the clone step when it gets SIGTERM" || no "did not log the clone stop"
 }
 
-DEFAULT_CLAUDE_MD="You are running in a pod in Preview and connected via the agent hub."
+# Read from the script under test rather than written out again here: a third copy of the words
+# would pass while saying something the pod never gets. That the entrypoint's copy matches the
+# hub's is checked by src/credentials/claude-md.test.ts.
+DEFAULT_CLAUDE_MD=$(sed -n 's/^DEFAULT_CLAUDE_MD="\(.*\)"$/\1/p' "$ENTRYPOINT")
+[ -n "$DEFAULT_CLAUDE_MD" ] || { echo "could not read DEFAULT_CLAUDE_MD from $ENTRYPOINT" >&2; exit 1; }
 same() { [ -f "$2" ] && [ "$(od -c <"$1")" = "$(od -c <"$2")" ]; }
 
 case_claude_md_stored() {
@@ -863,8 +910,9 @@ case_broken_workspace_shim() {
 run_case() {
     case "$1" in
         first-boot) case_first_boot ;;
-        bedrock-route) case_bedrock_route ;;
-        legacy-gateway-route) case_legacy_gateway_route ;;
+        gateway-route) case_gateway_route ;;
+        gateway-route-older-template) case_gateway_route_older_template ;;
+        gateway-route-unconfigured) case_gateway_route_unconfigured ;;
         unknown-route) case_unknown_route ;;
         hai-install-blip-recovers) case_hai_install_blip_recovers ;;
         hai-install-falls-back) case_hai_install_falls_back ;;

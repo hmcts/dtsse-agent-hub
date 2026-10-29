@@ -249,7 +249,7 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
           aria-expanded={results.length > 0}
           aria-controls={listId}
           aria-activedescendant={current === -1 ? undefined : optionId(current)}
-          className="min-w-0 flex-1 rounded-[9px] border border-asst-strong bg-asst-field px-3 py-[7px] text-[13px] text-asst-text outline-none placeholder:text-asst-faint focus:border-asst-accent-line"
+          className="min-w-0 flex-1 rounded-[9px] border border-asst-strong bg-asst-field px-3 py-[7px] text-[13px] text-asst-text outline-hidden placeholder:text-asst-faint focus:border-asst-accent-line"
         />
         <button type="button" onClick={onCancel} className="shrink-0 text-xs text-asst-muted underline hover:text-asst-text">
           Cancel
@@ -285,8 +285,8 @@ export function AtlassianSearch({ kind, label, placeholder, scope = null, access
         role="listbox"
         aria-label={kind === "jira_project" ? "Jira projects found" : "Confluence pages found"}
         hidden={results.length === 0}
-        // `flex` would override the `hidden` attribute and leave its border and padding as an empty box under the
-        // search, so the display class itself switches as well.
+        // The display class switches as well as the attribute, so the border and padding never stand as an empty box
+        // under the search whichever of the two wins.
         className={`${results.length === 0 ? "hidden" : "flex"} max-h-56 min-w-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden rounded-[9px] border border-asst-line bg-asst-field p-1`}
       >
         {results.map((result, index) => (

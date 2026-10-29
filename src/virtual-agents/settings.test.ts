@@ -7,6 +7,7 @@ import {
   DEFAULT_ORCHESTRATOR_LEASE_SECONDS,
   diskTtlDays,
   eveningStop,
+  gatewaySettings,
   idleMinutes,
   orchestratorLeaseSeconds,
   orchestratorOids,
@@ -118,5 +119,34 @@ describe("publicDomain", () => {
 
   it("should be the setting when it is set", () => {
     expect(publicDomain({ VIRTUAL_AGENT_PUBLIC_DOMAIN: " example.net " })).toBe("example.net");
+  });
+});
+
+describe("gatewaySettings", () => {
+  it("should read the APIM subscription key when the deployment is given one", () => {
+    expect(gatewaySettings({ AI_GATEWAY_APIM_KEY: " apim-key " })).toEqual({ apim_key: "apim-key" });
+  });
+
+  // The pod needs nothing else of the hub: hai resolves the gateway's host, its Entra scope and the apiKeyHelper
+  // itself, so a copy of any of them here could only drift from the ones hai uses.
+  it("should read nothing but the key when a deployment still sets the gateway's host and scope", () => {
+    expect(
+      gatewaySettings({
+        AI_GATEWAY_APIM_KEY: "apim-key",
+        AI_GATEWAY_BASE_URL: "https://ai-gateway.staging.platform.hmcts.net",
+        AI_GATEWAY_AUDIENCE: "api://97f4f377-1eda-417b-8367-17c2c64cecd8/.default"
+      })
+    ).toEqual({ apim_key: "apim-key" });
+  });
+
+  // Asked only for an agent on the gateway route that is meant to be running, so this is that pod being refused and
+  // not a deployment with nobody on the gateway.
+  it.each(["", " "])("should refuse to run a gateway agent naming the setting when the key is %p", (apimKey) => {
+    expect(() => gatewaySettings({ AI_GATEWAY_APIM_KEY: apimKey })).toThrow(VirtualAgentConfigurationError);
+    expect(() => gatewaySettings({ AI_GATEWAY_APIM_KEY: apimKey })).toThrow("AI_GATEWAY_APIM_KEY");
+  });
+
+  it("should refuse to run a gateway agent when the deployment has no gateway configured at all", () => {
+    expect(() => gatewaySettings({})).toThrow("AI_GATEWAY_APIM_KEY");
   });
 });

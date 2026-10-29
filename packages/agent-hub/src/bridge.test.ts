@@ -251,16 +251,13 @@ describe("parseJiraExportFrame", () => {
     expect(parseAssistantFrame({ conversation_id: "c1", jira_export: pending })?.jira_export).toEqual(pending);
   });
 
-  it.each([
-    [{ export_id: "e1" }],
-    [{ project: "VIBE; rm -rf /" }],
-    [{ issue_type: "Story --yes" }],
-    [{ labels: ["a,b"] }],
-    [{ labels: "hmcts-assistant" }]
-  ])("should drop the export when it has %j, since its values go into a command", (change) => {
-    // Act & Assert
-    expect(parseJiraExportFrame({ ...pending, ...change })).toBeNull();
-  });
+  it.each([[{ export_id: "e1" }], [{ project: "VIBE; rm -rf /" }], [{ issue_type: "Story --yes" }], [{ labels: ["a,b"] }], [{ labels: "hmcts-assistant" }]])(
+    "should drop the export when it has %j, since its values go into a command",
+    (change) => {
+      // Act & Assert
+      expect(parseJiraExportFrame({ ...pending, ...change })).toBeNull();
+    }
+  );
 });
 
 describe("parseConfluenceExportFrame", () => {
@@ -272,15 +269,13 @@ describe("parseConfluenceExportFrame", () => {
     expect(parseAssistantFrame({ conversation_id: "c1", confluence_export: pending })?.confluence_export).toEqual(pending);
   });
 
-  it.each([
-    [{ export_id: "e1" }],
-    [{ space_id: "CCD" }],
-    [{ parent_id: "1; rm -rf /" }],
-    [{ parent_id: 280959611 }]
-  ])("should drop the export when it has %j, since its values go into a command", (change) => {
-    // Act & Assert
-    expect(parseConfluenceExportFrame({ ...pending, ...change })).toBeNull();
-  });
+  it.each([[{ export_id: "e1" }], [{ space_id: "CCD" }], [{ parent_id: "1; rm -rf /" }], [{ parent_id: 280959611 }]])(
+    "should drop the export when it has %j, since its values go into a command",
+    (change) => {
+      // Act & Assert
+      expect(parseConfluenceExportFrame({ ...pending, ...change })).toBeNull();
+    }
+  );
 });
 
 describe("parseAssistantFrame", () => {

@@ -7,7 +7,7 @@ import { withRetry } from "../retry.ts";
 import { EXIT_NO_CREDENTIAL } from "./phases.ts";
 
 /** The kinds agent-hub gives back to their owner, not only to the owner's virtual agents. */
-export const OWNER_READABLE: readonly CredentialKind[] = ["bedrock", "claude_md", "git_identity"];
+export const OWNER_READABLE: readonly CredentialKind[] = ["claude_md", "git_identity"];
 
 // `Array.prototype.includes` does not narrow, so a kind read off argv reaches `Api`, whose credential calls
 // take the union rather than a string, only through a type predicate.

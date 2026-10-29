@@ -4,8 +4,17 @@
  * so the page's editor shares the limit and the default with the server's check.
  */
 
-/** What a virtual agent gets, and the page shows, while its owner has stored nothing. */
-export const DEFAULT_CLAUDE_MD = "You are running in a pod in Preview and connected via the agent hub.";
+/**
+ * What a virtual agent gets, and the page shows, while its owner has stored nothing. The
+ * entrypoint keeps the same words as its own fallback, for a pod that cannot reach the hub to ask;
+ * change both together.
+ */
+export const DEFAULT_CLAUDE_MD = [
+  "You are running in a pod in Preview and connected via the agent hub.",
+  "The pod has no Docker: no socket, no root, nothing to escalate to, so anything that reaches for a container fails.",
+  "Cftlib can run its dependencies as host processes instead, so set RSE_LIB_DEPENDENCY_MODE=process to boot CCD services here.",
+  "A repo whose cftlib is older than that mode ignores the variable and still reaches for Docker, so bump the plugin version first."
+].join(" ");
 
 export const MAX_CLAUDE_MD_CHARACTERS = 20_000;
 

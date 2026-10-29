@@ -54,6 +54,10 @@ export const ENV_KEYS = [
   // are all pinned to github.com, so a host that is not github.com would store its token against the wrong one.
   "GITHUB_OAUTH_CLIENT_ID",
   "GITHUB_OAUTH_HOST",
+  // The apiKeyHelper hai gave this session, which it publishes on the AI Gateway route alone. The summariser spawns
+  // its own `claude` and so has to name the helper itself; hai owning the path is what keeps this repository from
+  // restating the layout of hai's state directory.
+  "HAI_API_KEY_HELPER",
   "HOME",
   "NVM_DIR",
   "PATH",

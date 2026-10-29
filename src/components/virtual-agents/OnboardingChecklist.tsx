@@ -17,7 +17,6 @@ const TITLES: Record<CredentialKind, string> = {
   github: "GitHub",
   azure: "Azure",
   claude: "Claude",
-  bedrock: "Claude Code key",
   jenkins: "Jenkins API token",
   claude_md: "CLAUDE.md",
   git_identity: "Git identity",
@@ -26,7 +25,7 @@ const TITLES: Record<CredentialKind, string> = {
 
 /** The kinds the owner can paste here; GitHub, Azure and Atlassian come only from the virtual agent's own sign-in. */
 function isPasted(kind: CredentialKind): boolean {
-  return kind === "bedrock" || kind === "jenkins" || kind === "claude";
+  return kind === "jenkins" || kind === "claude";
 }
 
 /** What the owner pastes for `kind`: a Claude token, as opposed to the Claude sign-in. */
@@ -37,10 +36,10 @@ function pastedName(kind: CredentialKind): string {
 const INPUT = "mt-1 block w-full min-w-0 rounded-md border border-hub-line bg-hub-pane px-2 py-1 font-mono text-sm text-hub-text";
 const FIELD = "block min-w-0 flex-1 basis-48";
 const FORM = "flex min-w-0 flex-wrap items-end gap-3";
-const BUTTON = "shrink-0 rounded bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
-const SECONDARY = "shrink-0 rounded border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
-const DANGER = "shrink-0 rounded bg-red-700 px-3 py-1 text-sm font-medium text-white hover:bg-red-600";
-const ICON_BUTTON = "ml-auto shrink-0 rounded p-1 text-hub-muted hover:bg-hub-raised hover:text-white";
+const BUTTON = "shrink-0 rounded-sm bg-[#007a5a] px-3 py-1 text-sm font-medium text-white hover:bg-[#148567]";
+const SECONDARY = "shrink-0 rounded-sm border border-hub-line px-3 py-1 text-sm text-hub-text hover:bg-hub-raised";
+const DANGER = "shrink-0 rounded-sm bg-red-700 px-3 py-1 text-sm font-medium text-white hover:bg-red-600";
+const ICON_BUTTON = "ml-auto shrink-0 rounded-sm p-1 text-hub-muted hover:bg-hub-raised hover:text-white";
 
 export type ChecklistState = "stored" | "login" | "waiting";
 
@@ -329,7 +328,7 @@ function Card({
 
 /**
  * What the virtual agent needs before it can work, one card per credential: stored, a sign-in waiting for the owner
- * with its code or a box to paste one into, lapsed, or nothing yet. A key the owner pastes (Bedrock, Claude, the
+ * with its code or a box to paste one into, lapsed, or nothing yet. A value the owner pastes (a Claude token, the
  * optional Jenkins token) offers its box until it is stored; GitHub, Azure and the optional Atlassian come from the
  * agent's own sign-in, which the owner can have it do again. Only the owner ever sees this page.
  *

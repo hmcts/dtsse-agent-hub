@@ -320,9 +320,10 @@ describe("the client's Welsh calls", () => {
     // Assert
     expect(put).toEqual({ file_id: FILE });
     expect(Array.from(got)).toEqual([0x50, 0x4b]);
-    expect(calls[0]?.url).toBe(`http://hub/api/virtual/va/welsh/${JOB}/files`);
-    expect((calls[0]?.init.headers as Record<string, string>)["X-File-Name"]).toBe(encodeURIComponent("cath ŵ.xlsx"));
-    expect(calls[2]?.init.body).toBe(JSON.stringify({ result: { total: 0 } }));
+    const [upload, , answer] = calls;
+    expect(upload?.url).toBe(`http://hub/api/virtual/va/welsh/${JOB}/files`);
+    expect((upload?.init.headers ?? {}) as Record<string, string>).toMatchObject({ "X-File-Name": encodeURIComponent("cath ŵ.xlsx") });
+    expect(answer?.init.body).toBe(JSON.stringify({ result: { total: 0 } }));
 
     // A refused upload is an ApiError, as every other call's is.
     const refusing = createApi({

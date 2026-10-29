@@ -330,7 +330,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   }
 
   const PHASES = new Set(["provisioning", "awaiting_credentials", "awaiting_login", "cloning", "running", "failed"]);
-  const KINDS = new Set(["github", "azure", "claude", "bedrock", "jenkins", "atlassian", "claude_md", "git_identity"]);
+  const KINDS = new Set(["github", "azure", "claude", "jenkins", "atlassian", "claude_md", "git_identity"]);
   const DEFAULT_CLAUDE_MD = "You are running in a pod in Preview and connected via the agent hub.";
 
   function handleVirtual(req: IncomingMessage, res: ServerResponse, parts: string[], body: Body, launch: LaunchToken | null | undefined) {
@@ -630,7 +630,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       }
       const mine = personCredentials.get(oid) as Map<string, string>;
       if (req.method === "GET") {
-        if (kind !== "bedrock" && kind !== "claude_md") {
+        if (kind !== "claude_md" && kind !== "git_identity") {
           return send(res, 405, { error: "write-only" });
         }
         return mine.has(kind) ? send(res, 200, { value: mine.get(kind) }) : send(res, 404, { error: "no credential" });

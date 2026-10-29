@@ -40,6 +40,8 @@ const SETTINGS: OrchestratorSettings = {
   }
 };
 
+const GATEWAY = { apim_key: "apim-key" };
+
 function agent(overrides: Partial<ClaimedAgent> = {}): ClaimedAgent {
   const id = overrides.id ?? ID;
   return {
@@ -49,7 +51,7 @@ function agent(overrides: Partial<ClaimedAgent> = {}): ClaimedAgent {
     statefulset_name: `va-${id.slice(0, 8)}`,
     pvc_name: `work-va-${id.slice(0, 8)}-0`,
     delete_disk: false,
-    model_route: "bedrock",
+    model_route: "own_licence",
     owner: { oid: "owner" },
     ...overrides
   };
@@ -61,11 +63,13 @@ function fakeKube() {
   const store: Store = { statefulsets: new Map(), pods: new Map(), services: new Map(), ingresses: new Map() };
   const calls: string[] = [];
   const failing = new Set<string>();
+  /** What a failing call says, for a refusal that quotes the spec it was given; its own name by default. */
+  const failureMessages = new Map<string, string>();
   const forbidden = new Set<string>();
   const guard = (call: string) => {
     calls.push(call);
     if (failing.has(call)) {
-      throw new KubeError(`${call} failed`, 500);
+      throw new KubeError(failureMessages.get(call) ?? `${call} failed`, 500);
     }
     if (forbidden.has(call)) {
       throw new KubeError(`${call}: 403 forbidden`, 403);
@@ -99,7 +103,7 @@ function fakeKube() {
       found.spec = { ...found.spec, replicas };
     }
   };
-  return { kube, store, calls, failing, forbidden };
+  return { kube, store, calls, failing, failureMessages, forbidden };
 }
 
 function fakeHub(claims: ClaimedAgent[][] = [], live: LiveAgent[] = []) {
@@ -178,14 +182,12 @@ describe("podReason", () => {
     expect(podReason(null, now)).toBeNull();
   });
 
-  it.each([
-    "CrashLoopBackOff",
-    "ImagePullBackOff",
-    "ErrImagePull",
-    "CreateContainerConfigError"
-  ])("should report %s when the container waits on it", (reason) => {
-    expect(podReason(waiting(reason), now)).toBe(reason);
-  });
+  it.each(["CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError"])(
+    "should report %s when the container waits on it",
+    (reason) => {
+      expect(podReason(waiting(reason), now)).toBe(reason);
+    }
+  );
 
   it("should report OOMKilled when the container has terminated with it", () => {
     expect(podReason(pod("Running", { containerStatuses: [{ name: "agent", state: { terminated: { reason: "OOMKilled" } } }] }), now)).toBe("OOMKilled");
@@ -267,7 +269,7 @@ function existing(overrides: Partial<ClaimedAgent> = {}, token = "ahv_old"): Sta
 }
 
 function envOf(set: StatefulSet | undefined): Record<string, unknown> {
-  const containers = (set?.spec as { template: { spec: { containers: { env: { name: string; value: unknown }[] }[] } } }).template.spec.containers;
+  const containers = (set!.spec as { template: { spec: { containers: { env: { name: string; value: unknown }[] }[] } } }).template.spec.containers;
   return Object.fromEntries(containers[0]!.env.map((entry) => [entry.name, entry.value]));
 }
 
@@ -474,6 +476,21 @@ describe("reconcilePass", () => {
     expect(t.observed.map((entry) => entry.id)).toEqual([OTHER]);
     expect(t.state.watching.has(ID)).toBe(false);
     expect(t.logs.find((entry) => entry.level === "error")).toMatchObject({ message: "could not apply", fields: { id: ID } });
+  });
+
+  // The API server's refusal can quote the spec it was given, and a gateway pod's template holds the APIM key as a
+  // plain value. It is one service's key, so one leak is every gateway pod — and an apply error is also stored as
+  // the agent's status_detail and shown on its page.
+  it("should take the gateway's APIM key out of what it logs and reports when the API server quotes the spec back", async () => {
+    const t = setup([[agent({ launch_token: "a", model_route: "gateway", gateway: GATEWAY })]]);
+    const call = `apply statefulsets ${STS}`;
+    t.failing.add(call);
+    t.failureMessages.set(call, `StatefulSet is invalid: spec.template.spec.containers[0].env[6].value: "${GATEWAY.apim_key}" is not allowed`);
+
+    expect(await t.pass()).toMatchObject({ errors: 1 });
+
+    expect(t.applyFailures[0]?.body.error).toBe('StatefulSet is invalid: spec.template.spec.containers[0].env[6].value: "[redacted]" is not allowed');
+    expect(JSON.stringify(t.logs)).not.toContain(GATEWAY.apim_key);
   });
 
   it("should count a scaling failure as that agent's error", async () => {
@@ -962,10 +979,19 @@ describe("apply errors", () => {
   });
 
   it("should keep a short error whole and cut a long one to the limit", () => {
-    expect(applyErrorText(new Error(" boom\nagain "))).toBe("boom again");
-    expect(applyErrorText("")).toBe("unknown error");
-    const long = applyErrorText(new Error("x".repeat(2000)));
+    expect(applyErrorText(new Error(" boom\nagain "), [])).toBe("boom again");
+    expect(applyErrorText("", [])).toBe("unknown error");
+    const long = applyErrorText(new Error("x".repeat(2000)), []);
     expect(long).toHaveLength(MAX_APPLY_ERROR);
     expect(long.endsWith("…")).toBe(true);
+  });
+
+  // The hub stores this as the agent's status_detail and shows it on their page, so the key would be on a web page.
+  it("should take the gateway's APIM key out of an apply error when the API server quotes the spec back", () => {
+    const refusal = new Error('StatefulSet is invalid: spec.template.spec.containers[0].env[6].value: "apim-key" and ahv_token');
+
+    expect(applyErrorText(refusal, ["apim-key"])).toBe(
+      'StatefulSet is invalid: spec.template.spec.containers[0].env[6].value: "[redacted]" and ahv_[redacted]'
+    );
   });
 });

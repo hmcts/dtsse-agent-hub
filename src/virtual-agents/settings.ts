@@ -93,3 +93,39 @@ export function orchestratorRole(env: Environment = process.env): string | null 
 export function publicDomain(env: Environment = process.env): string {
   return env.VIRTUAL_AGENT_PUBLIC_DOMAIN?.trim() || DEFAULT_PUBLIC_DOMAIN;
 }
+
+/**
+ * What a pod on the `gateway` route needs of the deployment to reach the HMCTS AI Gateway, as a claim carries it to
+ * the orchestrator.
+ *
+ * One value, because `hai` resolves the rest of the route in the pod — the gateway host, the Entra scope, the
+ * `apiKeyHelper` and the model ids are all its own. The APIM subscription key is the exception: `hai` reads it from a
+ * Key Vault with no public endpoint, which a pod can never reach, and `HAI_GATEWAY_APIM_KEY` is how it takes one
+ * instead. Named as the claim's JSON, since that is the only thing that reads it.
+ */
+export interface GatewaySettings {
+  /** The APIM subscription key, which `hai` sends as `Ocp-Apim-Subscription-Key`. One service's, not one person's. */
+  apim_key: string;
+}
+
+/**
+ * `AI_GATEWAY_APIM_KEY`, for an agent that is on the `gateway` route and meant to be running.
+ *
+ * There is no half-configured state left to describe — the key is the whole of what a deployment holds — so a
+ * deployment without it cannot run that agent at all, and this throws rather than answering with nothing. Asked only
+ * for such an agent, so a deployment with nobody on the gateway is never refused for a gateway it has no use for.
+ *
+ * Refused by throwing, as every other setting in this file is: the claim is the one caller, and a claim that answered
+ * 500 is an orchestrator retrying a pass against a deployment nobody has finished configuring, which is the loudest
+ * the hub can be about it without failing agents that have nothing to do with the gateway. The key itself is never
+ * named in a message, since a `VirtualAgentConfigurationError` is logged and answered with.
+ */
+export function gatewaySettings(env: Environment = process.env): GatewaySettings {
+  const apimKey = env.AI_GATEWAY_APIM_KEY?.trim() || undefined;
+  if (apimKey === undefined) {
+    throw new VirtualAgentConfigurationError(
+      "AI_GATEWAY_APIM_KEY is not set, so this deployment cannot run an agent on the AI Gateway route: the pod needs the APIM subscription key, which is the one thing hai cannot fetch for itself"
+    );
+  }
+  return { apim_key: apimKey };
+}

@@ -59,7 +59,7 @@ jobs:
       IMAGE: virtual-agent:${{ github.sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Az CLI login
         # Pinned by commit: a tag can be moved, and this one federates to Azure.
@@ -106,7 +106,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Compute the tags
         id: tags

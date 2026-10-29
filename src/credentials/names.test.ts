@@ -44,11 +44,12 @@ describe("isCredentialKind", () => {
     ["github", true],
     ["azure", true],
     ["claude", true],
-    ["bedrock", true],
     ["jenkins", true],
     ["claude_md", true],
     ["git_identity", true],
     ["atlassian", true],
+    // The pasted Amazon Bedrock API key is gone: agents reach Claude through the gateway or their own licence.
+    ["bedrock", false],
     ["claude-md", false],
     ["GitHub", false],
     ["", false],

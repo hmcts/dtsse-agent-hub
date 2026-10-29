@@ -57,7 +57,7 @@ it is read by its owner and by people they share it with by name, read-only. The
 | `/assistant`, `/assistant/[id]` | with virtual agents on: the HMCTS Assistant, a plain-language chat for people who are not engineers, full screen and without the hub's sidebar, light or dark. It runs on the viewer's first virtual agent, creating one on their first visit if they have none and starting it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). The id of a conversation's agent redirects here |
 | `/assistant/shared`, `/assistant/shared/[id]` | the chats you have shared and those shared with you, and one shared chat to read: its messages, its document, and how many files each message carried. Only its owner and the people they named can open it, so a link alone opens nothing. `/assistant/[id]?share=1` is the dialog the owner names them in. The list is linked from the Assistant's sidebar, from that dialog and from every shared chat |
 | `/hub/virtual` | with virtual agents on: your virtual agents, creating one (which opens its page), your credentials (the section `/hub/settings/credentials` redirects to), with your git identity, and your CLAUDE.md. `/hub/virtual/[id]` redirects to `/hub/agents/[id]`. Every address the hub answered on before it moved under `/hub` still redirects, from `redirects()` in `next.config.mjs` |
-| `/hub/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Bedrock API key, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/hub/virtual#credentials`, the same section there |
+| `/hub/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/hub/virtual#credentials`, the same section there |
 
 Pages are server components reading through `src/web/data.ts`; writes are the server actions in
 `src/app/_actions/`, each of which reads the viewer from the session cookie itself. A person's direct message to
@@ -120,7 +120,9 @@ the `-staging` release.
 | `VIRTUAL_AGENT_DISK_TTL_DAYS` | `14` | Days a stopped agent's disk is kept before the orchestrator deletes it |
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
 | `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain a reported port's URL is under, as `https://<statefulset_name>-<port>.<domain>`; the orchestrator reads it too |
+| `AGENT_HUB_VIEWER_HOST` | none | The viewer's own host, as `agent-hub-viewer.aat.platform.hmcts.net`, which serves each port to its owner off the VPN. It also needs `SESSION_SECRET` and `ENTRA_REDIRECT_URI`, whose origin is where it sends a person to sign in. With none, owners get the VPN URLs alone |
 | `VIRTUAL_AGENT_PLUGINS` | none | The workspace marketplace plugins an owner can tick, comma-separated `name` or `name=description`, as `pcs=PCS team workflows,dtsse=DTSSE docs`. A name is lowercase letters, digits and hyphens; any other makes the pages that read it fail. With none, the create form and the agent's page offer no plugins |
+| `AI_GATEWAY_APIM_KEY` | none | The HMCTS AI Gateway's APIM subscription key, from the `dtsse` vault, and the whole of what this hub holds about the gateway: `hai` resolves the host, the Entra scope, the `apiKeyHelper` and the model ids in the pod, and this key is the one value it cannot fetch there. Each claim for a running `gateway` agent carries it to the orchestrator, which puts it in that pod and no other. Without it a claim for such an agent is refused, so a deployment with nobody on the gateway needs none |
 
 ### HMCTS Assistant
 
@@ -157,16 +159,68 @@ Each virtual agent has a model route, set from its owner's sign-in when it is cr
 
 | Route | Who | The model | Credentials it needs |
 | --- | --- | --- | --- |
-| `bedrock` | holders of the `AIGateway.User` app role | Amazon Bedrock, called directly with the owner's own Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) | `github`, `bedrock` |
+| `gateway` | holders of the `AIGateway.User` app role | Amazon Bedrock through the HMCTS AI Gateway, on the owner's own relayed Azure sign-in | `github`, `azure` |
 | `own_licence` | everyone else | the owner's own Claude licence | `github`, `claude` |
 
-The Bedrock API key is pasted, in the credentials section of `/hub/virtual` (`/hub/settings/credentials` with virtual agents off) or the agent's page, or sent with
-`PUT /api/agent/credentials/bedrock`; until it is stored the pod reports `awaiting_credentials` with `bedrock: …`.
-It is the one credential its owner can read back, with `GET /api/agent/credentials/bedrock`, because `hai` on their
-laptop uses it too. Anyone holding a person's agent-hub token can therefore read their Bedrock key;
-`docs/agent-api.md` (Credentials) has the detail.
+These two and no third: there is no pasted model key anywhere in the hub, on any screen or under any route.
 
-An Azure sign-in (`azure`) is optional on either route. It lets Claude run `az` as the owner — pipelines,
+`modelRouteFor` in `src/viewer/identity.ts` is the one place a person's route is decided, so swapping the
+`AIGateway.User` app role for a check of the gateway's own Entra group is a change to that function alone.
+
+**The `gateway` route asks the person for no model credential at all.** The gateway authorises them, not a key of
+theirs: `hai` writes an `apiKeyHelper` that runs `az account get-access-token` for the gateway's scope as the owner,
+and sends that token with the APIM subscription key the hub injects. Its Azure sign-in is therefore `needed` rather
+than optional, is what the connections banner asks for, and is the one credential other than GitHub that gates the
+Assistant's chat — a pod whose helper has no sign-in to mint from fails every turn.
+
+**`hai` owns this route; the hub passes one value.** The gateway's host, the Entra scope the token is minted for, the
+`apiKeyHelper`, the Bedrock switches and the model ids are all resolved by `hai` in the pod, from its own defaults —
+the staging gateway and the staging audience, which is what a CFT cluster can reach. The exception is the APIM
+subscription key: `hai` reads that from `sps-ai-kv-stg`, a vault with no public endpoint, which a pod can never reach
+however well it is authenticated, so `HAI_GATEWAY_APIM_KEY` is how it takes one instead. With the key handed in,
+`hai` makes no Key Vault call and no VPN probe and resolves everything else itself. Stage 1 therefore sets
+`HAI_ROUTE=ai-gateway` and that one variable, and no `HAI_ENV_READY`: a second copy of the host or the scope here
+could only drift from the ones `hai` uses, which is a pod that boots, reports healthy and fails every turn.
+
+**The hub is what is configured with the gateway, not the orchestrator.** It reads `AI_GATEWAY_APIM_KEY` from the
+`dtsse` vault and hands it to the orchestrator in each claim for a running agent on that route, the way a launch
+token travels into the same pod template. The orchestrator puts it in the pod as `HAI_GATEWAY_APIM_KEY`, and refuses
+to build a `gateway` pod it was sent none for; `gatewaySettings` refuses the claim itself when the deployment has no
+key, rather than handing out a pod that boots and then fails every turn. Nothing in `cnp-flux-config` has to change
+for the route to work; the one step outside this repository is that `apim-subscription-dtsse-ai-gateway-bedrock-swe`
+in `sps-ai-kv-stg` has to be copied into the `dtsse` vault as `agent-hub-ai-gateway-apim-key` before the chart ships,
+since that vault has no public endpoint and the hub's pods cannot start without a secret the chart names.
+
+The key is one service's rather than one person's, so the orchestrator redacts it by value from every log line and
+every apply error it reports for that agent: the API server's refusal of an apply can quote the spec it was given,
+and an apply error is stored as the agent's `status_detail` and shown to its owner.
+
+**The gateway's APIM subscription is rate-limited to 30 requests a minute and 1000 a day**, counted across
+the key rather than per caller, and every `gateway` pod shares the one key — so the ceiling is the whole route's, not
+each person's. Worth sizing a rollout against before adding people to the Entra group.
+
+**Known gap: nothing checks the owner's entitlement any more.** The gateway grants its access by assigning an app
+role to one Entra group, and a group's assignment only reaches a member's own token — so an owner outside **DTSSE AI
+Gateway Bedrock Developer** holds a token the gateway accepts as a token and refuses as an entitlement, with no
+credential missing for anything to ask about. Stage 1 used to mint the token before the first session and require
+`AI.Gateway.Standard` in its `roles` claim, failing the agent with a detail naming that group. That check needed the
+audience to mint the token with, which is now `hai`'s and not the hub's, and `hai` refuses nobody on an explicit
+`HAI_ROUTE`. So such an owner now gets a pod that boots, reports healthy, and fails at their first message with
+whatever `hai` or Claude Code says, instead of a boot failure naming the group to ask for. Putting it back wants
+either the group check through Graph that `hai` already has on its own unset path, or the hub checking the group when
+it decides the owner's route.
+
+**The summariser's gateway credential comes from `hai`, as one variable.** The stop-worker's summariser spawns
+`claude` itself rather than through `hai` (`packages/agent-hub/src/stop-worker/haiku.ts`), and `claude --settings`
+keeps only the last one it is given, so it has to name the `apiKeyHelper` in its own settings. The helper is `hai`'s,
+written in `hai`'s own state directory, so `hai` publishes its path into the session as `HAI_API_KEY_HELPER` on that
+route and the summariser reads it from there. Nothing here reconstructs the path: a second copy of `hai`'s state-
+directory layout is the same drift that naming the gateway host here would be. The variable is set on the
+`ai-gateway` route alone and `hai` clears an inherited one on every other, so the `own_licence` route — which has no
+helper at all — is unaffected, and a pod running a `hai` from before the variable existed sees none and behaves as it
+did: the summary of a stopping session is lost, and nothing else.
+
+An Azure sign-in (`azure`) is optional on `own_licence` and needed on `gateway`. It lets Claude run `az` as the owner — pipelines,
 environments, AKS, Key Vault and the workspace scripts that fetch secrets with `az` — and gives Jenkins the owner's
 Entra object id; nothing else needs it. A pod restores a stored one before Claude starts, and with none it carries on
 without Azure and relays no code. The owner connects it when they want it: **Connect** on the Azure row of the
@@ -258,6 +312,16 @@ chooses them. Each one bound beyond loopback is served at `https://<statefulset_
 to anyone on the HMCTS VPN, and the agent's page links it; one bound to loopback only is listed with how to open it. A
 change never restarts the pod: it bumps `generation` but not the `pod_generation` the pod template is stamped with.
 
+**The viewer.** With `AGENT_HUB_VIEWER_HOST` set, the agent's page links each port at
+`https://<AGENT_HUB_VIEWER_HOST>/<virtual agent id>/<port>/` too, which works off the VPN for its owner alone. The hub
+forwards each request to the port's VPN URL. A browser without the port's cookie is sent through the hub, which signs
+it in if need be and hands back a ticket lasting a minute, swapped for an 8-hour cookie scoped to that port's path.
+It is a host of its own so that nothing an agent serves shares the hub's origin and its `ah_session`; the hub never
+serves its own pages there. A server that links to its assets from `/` needs telling its base path, which it is sent
+as `X-Forwarded-Prefix`, and WebSockets are not forwarded. `docs/agent-api.md` (The viewer) has the detail. In AAT,
+Front Door (`azure-platform-terraform`, `environments/stg/stg.tfvars`) and both DNS zones carry the host, and the
+chart adds it to the Ingress as `additionalIngressHosts`.
+
 A pasted sign-in code is sealed under a key derived from `SESSION_SECRET`, so that must be set too. Locally, the
 orchestrator can be stood in for with `X-Dev-Orchestrator: <name>` under `AGENT_AUTH_DISABLED=true`:
 
@@ -305,7 +369,7 @@ lease comes back to it, it behaves as above.
 **A switchover** moves agents once the old cluster's orchestrator stops renewing the lease. After
 `ORCHESTRATOR_LEASE_SECONDS` (two minutes by default) the new cluster's next claim takes the lease, and with it every
 agent meant to be running: each is started on the new cluster on a fresh disk, with a new launch token that shuts the
-old pod out at once. The pod restores the owner's GitHub and Bedrock or Claude credentials, and their Azure sign-in if they connected one, from the hub and re-bootstraps
+old pod out at once. The pod restores the owner's GitHub credential and whatever its route needs, and their Azure sign-in if they connected one, from the hub and re-bootstraps
 its repos. Uncommitted work and Claude's own session history on the old disk are lost; the conversation the hub
 stored stays on the agent's page. Stopped agents are not moved; one that is started again starts on
 the new cluster. If the old cluster stays up, its orchestrator, now on standby, deletes the moved agents'
@@ -449,6 +513,10 @@ AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev    # http://localhost:3000
 `yarn dev` starts Postgres 16 in Docker on 5432 (`yarn deps:up`), regenerates the Prisma client and applies any
 pending migrations before it starts Next, so pulling a new migration needs no extra step.
 
+If `yarn deps:up` fails with `initdb: error: directory "/var/lib/postgresql/data" exists but is not empty`, the
+checkout's volume holds a cluster written by a different major version. `docker compose down -v` discards it, and the
+next `yarn dev` migrates a fresh one.
+
 With `AGENT_AUTH_DISABLED=true` the agent API takes the caller from an `X-Dev-User: <oid>|<name>|<email>` header
 instead of a bearer token. It works under `next dev` only: a production build, `yarn start` included, refuses it
 with `503`. Point the workspace client at it with:
@@ -489,9 +557,9 @@ each value AES-256-GCM sealed under a key derived from `SESSION_SECRET`, so set 
 SESSION_SECRET=$(openssl rand -base64 48) AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev
 ```
 
-The local store refuses to start under `NODE_ENV=production`. With sign-in disabled every persona is on the Bedrock
-route except `own-licence` and `own-licence-…`, which are on their own Claude licence, so
-`ah_dev_persona=own-licence` shows the Claude token field.
+The local store refuses to start under `NODE_ENV=production`. With sign-in disabled every persona is on the gateway
+route except `own-licence` and `own-licence-…`, which are on their own Claude licence — so
+`ah_dev_persona=own-licence` shows the Claude token field and any other persona shows the gateway.
 
 ### The deployed secrets are opt-in
 
@@ -506,7 +574,7 @@ database: localhost:5432/agent_hub
 
 ```bash
 yarn test                # unit
-yarn test:integration    # needs `yarn deps:up`; creates and migrates agent_hub_test itself
+yarn test:integration    # needs `yarn deps:up`; a database per worker, migrated on use
 yarn lint
 yarn typecheck
 ```
@@ -522,9 +590,32 @@ AUTH_DISABLED=true AGENT_AUTH_DISABLED=true yarn dev &
 yarn test:e2e
 ```
 
-The integration suite truncates every table between cases, so by default it uses its own `agent_hub_test` database
-on the compose server, creating it if it is missing, and leaves `yarn dev`'s `agent_hub` alone. An explicit
-`DATABASE_URL` replaces that default, as the pipeline's does; do not point it at anything you want to keep.
+The integration suite truncates every table between cases, so its files cannot share a database. Each worker gets
+one of its own on the compose server — `agent_hub_test_{checkout}_w{n}`, created on first use, migrated on use and
+never dropped, so only the first run on a checkout pays to create them — and `yarn dev`'s `agent_hub` is left alone.
+A database per worker rather than a schema per worker because `LISTEN`/`NOTIFY` and the advisory locks the sweeps
+take are scoped per database, and the tests that cover contention would otherwise see each other. The `{checkout}`
+part keeps this clone's databases separate from each worktree's; two runs of the *same* checkout at once still share
+them, so give one of them an explicit `DATABASE_URL`. An explicit `DATABASE_URL` names the server and the stem the
+worker names are built from, as the pipeline's does; do not point it at anything you want to keep.
+
+`INTEGRATION_WORKERS` sets how many workers run (default 6). The ceiling is the server's `max_connections`, which is
+the stock 100 against a Prisma pool of 10 per worker — not the cores available.
+
+Because the worker databases are kept, editing the SQL of a migration that has already been applied to them fails
+every later run with `has changed since it was applied` — the ledger holds its old checksum. That is the migrator
+working as intended; drop them and let the next run rebuild:
+
+```bash
+docker compose exec postgres psql -U hmcts -d postgres -tAc \
+  "select 'drop database \"' || datname || '\";' from pg_database where datname like 'agent_hub_test%'" \
+  | docker compose exec -T postgres psql -U hmcts -d postgres
+```
+
+`migrate.test.ts` sits in a `migrations` project of its own, with one worker and a longer timeout. It creates and
+drops whole databases, and each of those forces a checkpoint that flushes every dirty page the server is holding —
+so it is charged for whatever else has been written to that server. On a quiet one it takes 3s; sharing one with the
+rest of this suite it has taken 80s and more, which is what the longer timeout is measured against.
 
 ## Deployment
 

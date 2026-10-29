@@ -62,25 +62,37 @@ export function configuredDevUser(env: Environment = process.env): Identity | un
 }
 
 /**
- * Which model a person's virtual agents use: Amazon Bedrock, called directly with the Bedrock API key they store with
- * the hub, for holders of the `AIGateway.User` app role, or a Claude licence of their own, whose token they store.
+ * Which model a person's virtual agents use. These two and no third.
+ *
+ * - `gateway` — Amazon Bedrock through the HMCTS AI Gateway, which authorises the owner's own relayed Azure sign-in,
+ *   so there is no model credential for them to store at all.
+ * - `own-licence` — a Claude licence of their own, whose token their pod signs in for and they paste back.
  */
-export type ModelRoute = "bedrock" | "own-licence";
+export type ModelRoute = "gateway" | "own-licence";
 
 export interface Viewer extends Identity {
   modelRoute: ModelRoute;
 }
 
-/** A persona named `own-licence` or `own-licence-…` is on the own-licence route; every other persona is on Bedrock. */
+/** A persona named `own-licence` or `own-licence-…` is on the own-licence route; every other one is on the gateway. */
 export const OWN_LICENCE_PERSONA = "own-licence";
 
+/**
+ * The one place a person's route is decided. Today the signal is the hub's own `AIGateway.User` app role, which is
+ * what the session carries; whether that role is assigned to the gateway's Entra group is a separate question, and
+ * swapping the signal for a group membership check is a change to this function alone.
+ */
 export function modelRouteFor(aiGateway: boolean): ModelRoute {
-  return aiGateway ? "bedrock" : "own-licence";
+  return aiGateway ? "gateway" : "own-licence";
+}
+
+function named(persona: string, name: string): boolean {
+  return persona === name || persona.startsWith(`${name}-`);
 }
 
 function devModelRoute(identity: Identity): ModelRoute {
   const persona = identity.oid.slice(DEV_OID_PREFIX.length);
-  return persona === OWN_LICENCE_PERSONA || persona.startsWith(`${OWN_LICENCE_PERSONA}-`) ? "own-licence" : "bedrock";
+  return named(persona, OWN_LICENCE_PERSONA) ? "own-licence" : "gateway";
 }
 
 /** The viewer, or `undefined` when nobody may be served: no session, a session that does not open, no secret. */
@@ -88,7 +100,7 @@ export async function viewerFrom(cookie: CookieReader, env: Environment = proces
   if (!authRequired(env)) {
     const configured = configuredDevUser(env);
     if (configured !== undefined) {
-      return { ...configured, modelRoute: "bedrock" };
+      return { ...configured, modelRoute: "gateway" };
     }
     const persona = devIdentity(cookie(DEV_PERSONA_COOKIE));
     return { ...persona, modelRoute: devModelRoute(persona) };

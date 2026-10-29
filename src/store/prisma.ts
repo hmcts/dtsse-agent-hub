@@ -4,8 +4,8 @@ import { applyDatabaseUrl } from "./database-url.ts";
 import { PrismaClient } from "./generated/client.js";
 
 /**
- * Resolved at module load, which is why `instrumentation.ts` and `cli/migrate.ts` import this only after the Key
- * Vault secrets have been loaded: the chart mounts `POSTGRES_*` as files, and they exist as variables only once
+ * Resolved at module load, which is why `instrumentation-node.ts` and `cli/migrate.ts` import this only after the
+ * Key Vault secrets have been loaded: the chart mounts `POSTGRES_*` as files, and they exist as variables only once
  * `getPropertiesVolumeSecrets` has run.
  */
 const connectionString = applyDatabaseUrl();

@@ -23,7 +23,7 @@ export function parseModel(value: unknown): string | null {
  * What the launcher is given for a model: the id itself, on both model routes. Nothing is prefixed or suffixed here
  * because hai pins the version of each family in the pod — it exports `ANTHROPIC_DEFAULT_SONNET_MODEL` and
  * `ANTHROPIC_DEFAULT_OPUS_MODEL`, so Claude Code resolves `sonnet` and `opus` to that family's Bedrock inference
- * profile on `bedrock` and to the family's current model on a person's own Claude licence. Null when the id is not
+ * profile on `gateway` and to the family's current model on a person's own Claude licence. Null when the id is not
  * one, which leaves the session on hai's own default rather than on a model that fails.
  */
 export function launcherModel(model: string | null): string | null {

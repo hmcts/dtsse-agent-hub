@@ -15,7 +15,7 @@ const viewer = (who: Person): Identity => ({ ...who, tid: "dev" });
 
 /** The agent `who` sees on `/hub/agents/{id}`, when it is an agent shown as itself. */
 async function agentPage(who: Person, id: string): Promise<AgentView | undefined> {
-  const route = await agentRoute({ ...viewer(who), modelRoute: "bedrock" }, id);
+  const route = await agentRoute({ ...viewer(who), modelRoute: "gateway" }, id);
   return route?.variant === "local" ? route.view : undefined;
 }
 

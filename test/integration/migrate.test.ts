@@ -17,9 +17,8 @@ function urlFor(database: string): string {
 
 /**
  * Unique per process, so two concurrent runs never create and drop one another's scratch databases mid-suite. It is
- * not derived from `DATABASE_URL`, because the two ways this suite is normally run both leave that at a fixed name —
- * `vitest.integration.config.mts` falls back to `agent_hub_test`, and `Jenkinsfile_CNP` sets `agent_hub` — so a name
- * derived from it would collide for exactly the people who have not overridden it.
+ * not derived from `DATABASE_URL`, which is this worker's own database and so already unique to the run: these are
+ * databases beside it on the same server, named from scratch, and the uniqueness has to be their own.
  */
 const RUN = `${process.pid.toString(36)}_${randomBytes(4).toString("hex")}`;
 
@@ -326,7 +325,7 @@ describe("the bedrock migration", () => {
   const MIGRATION = "20261009090000_bedrock";
   const { database: RENAME, earlier } = migrationFixture("migrate_bedrock", MIGRATION);
 
-  it("should move existing gateway virtual agents to bedrock and add the bedrock credential kind when it is applied", async () => {
+  it("should move existing gateway virtual agents to bedrock, and leave them back on gateway at head, when it is applied", async () => {
     await migrate(earlier());
     await query(RENAME, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
     await query(
@@ -336,9 +335,12 @@ describe("the bedrock migration", () => {
 
     expect((await migrate())[0]).toBe(MIGRATION);
 
+    // `migrate()` applies every migration from this one on, so what is asserted is the state at head rather than the
+    // one this migration left: `20261107090000_bedrock_gone` moves the renamed row back to `gateway` and takes the
+    // value out of both enums again.
     const agents = await query<{ name: string; model_route: string }>(RENAME, `SELECT name, model_route::text FROM "virtual_agent" ORDER BY name`);
     expect(agents).toEqual([
-      { name: "on-gateway", model_route: "bedrock" },
+      { name: "on-gateway", model_route: "gateway" },
       { name: "own", model_route: "own_licence" }
     ]);
     const labels = await query<{ type: string; label: string }>(
@@ -346,6 +348,10 @@ describe("the bedrock migration", () => {
       `SELECT t.typname AS type, e.enumlabel AS label FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
         WHERE t.typname IN ('credential_kind', 'model_route') ORDER BY t.typname, e.enumsortorder`
     );
+    // `bedrock` is still a label on both types at head: `20261107090000_bedrock_gone` moves every row off it and
+    // deletes the credentials, and leaves the labels for a release so the build it replaces can keep reading the
+    // columns. `model_route` carries it first because the rename this migration makes keeps the value's sort order
+    // and `20261106090000_model_route_gateway` added `gateway` after it.
     expect(labels).toEqual([
       { type: "credential_kind", label: "github" },
       { type: "credential_kind", label: "azure" },
@@ -356,7 +362,69 @@ describe("the bedrock migration", () => {
       { type: "credential_kind", label: "git_identity" },
       { type: "credential_kind", label: "atlassian" },
       { type: "model_route", label: "bedrock" },
+      { type: "model_route", label: "gateway" },
       { type: "model_route", label: "own_licence" }
+    ]);
+  });
+});
+
+describe("the bedrock-gone migration", () => {
+  const MIGRATION = "20261107090000_bedrock_gone";
+  const { database: GONE, earlier } = migrationFixture("migrate_bedrock_gone", MIGRATION);
+
+  it("should move a bedrock agent to the gateway, bump its generations and delete the stored keys when it is applied", async () => {
+    await migrate(earlier());
+    await query(GONE, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      GONE,
+      `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'assistant', 'bedrock'), ('dev-alice', 'own', 'own_licence')`
+    );
+    await query(
+      GONE,
+      `INSERT INTO "credential" (owner_oid, kind, secret_name, updated_via)
+        VALUES ('dev-alice', 'bedrock', 'u-dev-alice-bedrock', 'web'), ('dev-alice', 'github', 'u-dev-alice-github', 'web')`
+    );
+    // A key was pasted rather than signed in for, so this row should never exist; seeded because one that did would
+    // otherwise be left behind pointing at a kind the application no longer has.
+    await query(
+      GONE,
+      `INSERT INTO "virtual_agent_login" (virtual_agent_id, kind, prompt, verification_uri, expires_at)
+        SELECT id, 'bedrock', 'paste_code', 'https://example.invalid', now() + interval '1 hour'
+          FROM "virtual_agent" WHERE name = 'assistant'`
+    );
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const agents = await query<{ name: string; model_route: string }>(GONE, `SELECT name, model_route::text FROM "virtual_agent" ORDER BY name`);
+    expect(agents).toEqual([
+      { name: "assistant", model_route: "gateway" },
+      { name: "own", model_route: "own_licence" }
+    ]);
+    const credentials = await query<{ kind: string }>(GONE, `SELECT kind::text FROM "credential" ORDER BY kind::text`);
+    expect(credentials).toEqual([{ kind: "github" }]);
+    expect(await query(GONE, `SELECT 1 FROM "virtual_agent_login"`)).toEqual([]);
+    // The orchestrator claims a row only when its generation is ahead of the one it last observed, so a pod already
+    // running on the old route is re-applied onto the gateway rather than keeping the route in its environment.
+    const moved = await query<{ generation: number; pod_generation: number }>(
+      GONE,
+      `SELECT generation, pod_generation FROM "virtual_agent" WHERE name = 'assistant'`
+    );
+    const untouched = await query<{ generation: number; pod_generation: number }>(
+      GONE,
+      `SELECT generation, pod_generation FROM "virtual_agent" WHERE name = 'own'`
+    );
+    expect(Number(moved[0]?.generation)).toBeGreaterThan(Number(untouched[0]?.generation));
+    expect(Number(moved[0]?.pod_generation)).toBeGreaterThan(Number(untouched[0]?.pod_generation));
+    // Both labels stay on their types for one release. The previous build is still serving while this commits, and
+    // rebuilding either type would change the column's result-type OID under its cached statements.
+    const labels = await query<{ type: string; label: string }>(
+      GONE,
+      `SELECT t.typname AS type, e.enumlabel AS label FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+        WHERE t.typname IN ('credential_kind', 'model_route') AND e.enumlabel = 'bedrock' ORDER BY t.typname`
+    );
+    expect(labels).toEqual([
+      { type: "credential_kind", label: "bedrock" },
+      { type: "model_route", label: "bedrock" }
     ]);
   });
 });
@@ -368,7 +436,7 @@ describe("the assistant product list migration", () => {
   it("should move conversations off the retired product and default new ones to general when it is applied", async () => {
     await migrate(earlier());
     await query(REMAP, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
-    await query(REMAP, `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'assistant', 'bedrock')`);
+    await query(REMAP, `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'assistant', 'own_licence')`);
     await query(
       REMAP,
       `INSERT INTO "assistant_conversation" (owner_oid, virtual_agent_id, title, product, product_history)
@@ -400,24 +468,17 @@ describe("the assistant product list migration", () => {
 describe("the scratch database sweep's pattern", () => {
   const pattern = new RegExp(SCRATCH_PATTERN);
 
-  it.each([
-    "migrate",
-    "migrate_bedrock",
-    "migrate_product",
-    "assistant2",
-    "x",
-    "a_much_longer_suffix_9"
-  ])("should match the name the generator produces for the %s suffix", (suffix) => {
-    expect(scratchDatabase(suffix)).toMatch(pattern);
-  });
+  it.each(["migrate", "migrate_bedrock", "migrate_bedrock_gone", "migrate_product", "assistant2", "x", "a_much_longer_suffix_9"])(
+    "should match the name the generator produces for the %s suffix",
+    (suffix) => {
+      expect(scratchDatabase(suffix)).toMatch(pattern);
+    }
+  );
 
-  it.each([
-    "agent_hub",
-    "agent_hub_test",
-    "agent_hub_migrate_probe",
-    "agent_hub_scratch_probe",
-    `${SCRATCH_PREFIX}_migrate`
-  ])("should leave %s alone, because nothing generated it", (name) => {
-    expect(name).not.toMatch(pattern);
-  });
+  it.each(["agent_hub", "agent_hub_test", "agent_hub_migrate_probe", "agent_hub_scratch_probe", `${SCRATCH_PREFIX}_migrate`])(
+    "should leave %s alone, because nothing generated it",
+    (name) => {
+      expect(name).not.toMatch(pattern);
+    }
+  );
 });
