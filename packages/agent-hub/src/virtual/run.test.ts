@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createGithubDeviceFlowStub, STUB_USER_CODE } from "../__fixtures__/github-device-flow-stub.ts";
 import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
 import { captureStderr, createPodShims, type PodShims, podSecrets, usePodEnv } from "../__fixtures__/pod-shims.ts";
@@ -176,6 +176,74 @@ describe("runVirtual azure-login", () => {
     // Assert
     expect(r.code).toBe(0);
     expect(virtual().completes).toEqual([expect.objectContaining({ kind: "azure" })]);
+  });
+});
+
+describe("runVirtual kube-contexts", () => {
+  // These are the only cases that replace the fixture's `az`, which pod.reset() does not put back, and the
+  // git-identity cases below read the owner's address from it.
+  const SHIMS = ["az", "kubelogin", "kubectl"];
+  let saved: (string | undefined)[] = [];
+
+  beforeEach(() => {
+    saved = SHIMS.map((name) => {
+      const file = path.join(pod.bin, name);
+      return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : undefined;
+    });
+  });
+
+  afterEach(() => {
+    SHIMS.forEach((name, i) => {
+      const file = path.join(pod.bin, name);
+      if (saved[i] === undefined) {
+        fs.rmSync(file, { force: true });
+      } else {
+        fs.writeFileSync(file, saved[i] as string, { mode: 0o755 });
+      }
+    });
+  });
+
+  const kubeShims = (azExit: number) => {
+    pod.shim("az", `exit ${azExit}`);
+    pod.shim("kubelogin", "exit 0");
+    pod.shim("kubectl", "exit 0");
+  };
+
+  it("should exit 0 and select the pod's own cluster when the clusters answer", async () => {
+    // Arrange
+    kubeShims(0);
+
+    // Act
+    const r = await virtualCommand(["kube-contexts"], { env: pod.env({ AGENT_HUB_CLUSTER: "cft-preview-00" }) });
+
+    // Assert
+    expect(r.code).toBe(0);
+    expect(r.stderr).toMatch(/the current one is cft-preview-00-aks/);
+  });
+
+  it("should exit 4 when no cluster answers, which is an owner with no AKS access", async () => {
+    // Arrange
+    kubeShims(1);
+
+    // Act
+    const r = await virtualCommand(["kube-contexts"], { env: pod.env({ AGENT_HUB_CLUSTER: "cft-preview-00" }) });
+
+    // Assert
+    expect(r.code).toBe(EXIT_NO_CREDENTIAL);
+    expect(r.stderr).toMatch(/kubectl is not configured/);
+  });
+
+  it("should configure the contexts after a sign-in the owner asked for, without failing the command", async () => {
+    // Arrange
+    virtual().signInRequests.add("azure");
+    pod.shim("kubelogin", "exit 1");
+
+    // Act
+    const r = await virtualCommand(["azure-login", "--if-requested"], { env: pod.env({ AGENT_HUB_CLUSTER: "cft-preview-00" }) });
+
+    // Assert
+    expect(r.code).toBe(0);
+    expect(r.stderr).toMatch(/kube:/);
   });
 });
 
@@ -383,5 +451,25 @@ describe("runVirtual outside a pod", () => {
     expect(noId.stderr).toContain("AGENT_HUB_VIRTUAL_AGENT_ID is not set; this only runs in a virtual agent pod");
     expect(noToken.code).toBe(1);
     expect(noToken.stderr).toContain("AGENT_HUB_LAUNCH_TOKEN is not set");
+  });
+
+  it("should exit 1 without touching a kubeconfig when kube-contexts is run outside a pod", async () => {
+    // Arrange: ahead of the fixture's own on PATH, so its fake az, which other cases read, is left alone.
+    const bin = fs.mkdtempSync(path.join(pod.stateDir, "kube-guard-"));
+    const log = path.join(bin, "calls.log");
+    for (const name of ["az", "kubelogin", "kubectl"]) {
+      fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${log}"\n`, { mode: 0o755 });
+    }
+    const env = pod.env();
+
+    // Act
+    const r = await virtualCommand(["kube-contexts"], {
+      env: { ...env, PATH: `${bin}:${env.PATH}`, AGENT_HUB_VIRTUAL_AGENT_ID: "", AGENT_HUB_LAUNCH_TOKEN: "" }
+    });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("this only runs in a virtual agent pod");
+    expect(fs.existsSync(log)).toBe(false);
   });
 });

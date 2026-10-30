@@ -19,6 +19,7 @@ const AGENT: ClaimedAgent = {
 };
 
 const SPEC: VirtualAgentSpec = {
+  cluster: "cft-preview-00",
   namespace: "dtsse",
   image: `registry.example/agent@sha256:${"b".repeat(64)}`,
   serviceAccount: "default",
@@ -120,7 +121,7 @@ describe("statefulSet", () => {
     ]);
   });
 
-  it("should give the pod its hub, identity, model route, plugins and launch token as plain values", () => {
+  it("should give the pod its hub, identity, model route, plugins, cluster and launch token as plain values", () => {
     const [container] = podSpec(statefulSet({ ...AGENT, model_route: "own_licence" }, SPEC, TOKEN)).containers;
 
     expect(container!.env).toEqual([
@@ -130,6 +131,7 @@ describe("statefulSet", () => {
       { name: "AGENT_HUB_MODEL_ROUTE", value: "own_licence" },
       { name: "AGENT_HUB_PLUGINS", value: "" },
       { name: "AGENT_HUB_MAX_SESSIONS", value: "4" },
+      { name: "AGENT_HUB_CLUSTER", value: "cft-preview-00" },
       { name: "AZURE_TENANT_ID", value: "tenant" },
       { name: "DISABLE_AUTOUPDATER", value: "1" },
       { name: "HAI_IN_CONTAINER", value: "1" },

@@ -23,6 +23,7 @@ describe("orchestratorSettings", () => {
       orphanSweepEvery: 30,
       port: 8080,
       agent: {
+        cluster: "cft-preview-00",
         namespace: "virtual-agents",
         image: IMAGE,
         serviceAccount: "default",
@@ -59,6 +60,10 @@ describe("orchestratorSettings", () => {
       diskSize: "64Gi",
       storageClass: "managed-csi-premium"
     });
+  });
+
+  it("should give the virtual agents the cluster the orchestrator runs in", () => {
+    expect(orchestratorSettings({ ...ENV, ORCHESTRATOR_CLUSTER: "cft-preview-01" }, "ns").agent.cluster).toBe("cft-preview-01");
   });
 
   it("should give the virtual agents the orchestrator's hub URL when no other is set", () => {

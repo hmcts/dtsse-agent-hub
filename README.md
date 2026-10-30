@@ -332,6 +332,39 @@ O='X-Dev-Orchestrator: local'
 curl -s -XPOST localhost:3000/api/orchestrator/claim -H "$O" -H 'content-type: application/json' -d '{"cluster":"local"}'
 ```
 
+### kubectl in a pod
+
+A pod has no cluster credential of its own — the pod template mounts no ServiceAccount token and no CA bundle, so
+`kubectl` with no kubeconfig falls back to `localhost:8080` — but the image carries `kubectl`, `kubelogin` and `az`,
+and the pod holds its owner's own relayed Azure sign-in. That is the whole of what a CFT kubeconfig needs: every user
+entry in one is `kubelogin get-token --login azurecli`, which asks the signed-in `az` for a token on each call, and
+there is no secret anywhere in the file. So the pod can make its own.
+
+`virtual/kube.ts` does, from `virtual azure-login` whenever a sign-in works, and on demand as `virtual
+kube-contexts`. It runs `az aks get-credentials` for the pod's own cluster and both AAT clusters, converts the file
+with `kubelogin convert-kubeconfig -l azurecli` — without which `kubectl` would relay a device code nobody is there
+to enter — and selects the pod's own cluster.
+
+Which preview cluster is live changes without notice and only one is, so the context cannot be fixed in advance, and
+the pod cannot work out where it is for itself, having no API server to ask. The orchestrator passes it as
+`AGENT_HUB_CLUSTER` from its own `ORCHESTRATOR_CLUSTER`, and a switchover recreates the pod on the new cluster with
+the new name, so the contexts follow it.
+
+An agent gets exactly its owner's access and no more. An owner with no live AKS access gets a kubeconfig that answers
+401, which is the ordinary case rather than a failure: the sign-in's exit code is unchanged by it, a refusal comes
+back in seconds, and an agent can run `agent-hub virtual kube-contexts` itself once its owner has elevated. Prod is
+deliberately not in the list — an agent acting on an elevation its owner took for something else is the thing not to
+build. Both AAT clusters are, because a service runs on both and an agent cannot know in advance which holds the pod
+it wants, so an unqualified `kubectl` reads preview and AAT needs `--context cft-aat-00-aks` or `-01-aks`.
+
+`az aks get-credentials` makes each cluster it fetches the current context, so the last one fetched — an AAT
+cluster — is current until the pod's own is selected. When it cannot be (a pod started before `AGENT_HUB_CLUSTER`
+was in its template, or one whose own cluster did not answer), the current context is unset rather than left on
+AAT, so an unqualified `kubectl` fails instead of acting on the wrong cluster. A pod picks the variable up the next
+time it is started, which the evening stop makes daily.
+
+Nothing yet tells a session the contexts are there; an agent that tries `kubectl` finds it works.
+
 ## Orchestrator
 
 `src/orchestrator/`, run as `node dist/cli/orchestrator.js` from the hub's image. It and its pods run in the preview
@@ -465,7 +498,7 @@ successful.
 | Variable | Default | What it is |
 | --- | --- | --- |
 | `VIRTUAL_AGENT_IMAGE` | required | The virtual-agent image, pinned by digest (`<registry>/<repository>@sha256:<digest>`) |
-| `ORCHESTRATOR_CLUSTER` | required | The cluster's name, sent with each claim, as `cft-preview-00` |
+| `ORCHESTRATOR_CLUSTER` | required | The cluster's name, sent with each claim and passed on to the pods as `AGENT_HUB_CLUSTER`, as `cft-preview-00` |
 | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_FEDERATED_TOKEN_FILE` | set by workload identity | The orchestrator's identity; `AZURE_TENANT_ID` is passed on to the pods |
 | `AGENT_HUB_URL` | `https://agent-hub.aat.platform.hmcts.net` | The hub the orchestrator calls |
 | `AGENT_HUB_AUDIENCE` | `api://dtsse-agent-hub` | The hub's Application ID URI; the token is asked for `<it>/.default` |
