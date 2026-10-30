@@ -3,7 +3,7 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationLink, ConversationMark, LocalSession } from "@/assistant/views";
+import type { ConversationLink, ConversationMark, LocalSession, PodSession } from "@/assistant/views";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
@@ -59,6 +59,11 @@ function link(id: string, title: string, mark: ConversationMark = null): Convers
 /** A chat on the person's own computer, whose session is in one of the three states its mark carries. */
 function onComputer(session: LocalSession): ConversationMark {
   return { where: "computer", session };
+}
+
+/** A chat on the person's assistant, whose session is in one of the four states its mark carries. */
+function onAssistant(session: PodSession): ConversationMark {
+  return { where: "assistant", session };
 }
 
 function shell(props: Partial<Parameters<typeof AssistantShell>[0]> = {}) {
@@ -146,13 +151,27 @@ describe("AssistantShell", () => {
   it("should mark a chat on the assistant once the person has one on their own computer as well", () => {
     render(
       shell({
-        groups: [{ label: "Today", items: [link("a", "Event help", { where: "assistant" }), link("b", "Fixing the sweep", onComputer("ready"))] }]
+        groups: [{ label: "Today", items: [link("a", "Event help", onAssistant("ready")), link("b", "Fixing the sweep", onComputer("ready"))] }]
       })
     );
 
     const nav = screen.getByRole("navigation", { name: "Chats" });
-    expect(within(nav).getByRole("link", { name: /On your assistant/ }).textContent).toBe("On your assistant: Event help");
+    expect(within(nav).getByRole("link", { name: /On your assistant/ }).textContent).toBe("On your assistant, ready: Event help");
     expect(within(nav).getByRole("link", { name: /On your computer/ }).textContent).toBe("On your computer, ready: Fixing the sweep");
+  });
+
+  // As for the laptop, colour is never the only carrier (WCAG 1.4.1): the state is in the row's name and the tooltip.
+  it.each([
+    ["ready", "On your assistant, ready", "text-asst-ok"],
+    ["working", "On your assistant, working", "text-asst-warn"],
+    ["starting", "On your assistant, starting", "text-asst-warn"],
+    ["disconnected", "On your assistant, not connected", "text-asst-faint"]
+  ] as const)("should name and colour a pod chat's mark when its session is %s", (session: PodSession, words: string, colour: string) => {
+    render(shell({ groups: [{ label: "Today", items: [link("a", "Event help", onAssistant(session)), link("b", "Fixing the sweep", onComputer("ready"))] }] }));
+
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    expect(within(nav).getByRole("link", { name: new RegExp(`^${words}`) }).textContent).toBe(`${words}: Event help`);
+    expect(screen.getByTitle(words).className).toContain(colour);
   });
 
   it("should mark no chat when every one of the person's chats runs on their assistant", () => {

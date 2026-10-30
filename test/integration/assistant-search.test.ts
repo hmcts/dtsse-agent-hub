@@ -308,7 +308,7 @@ describe("a chat with no assistant behind it", () => {
     expect(new Map(matches.map((match) => [match.title, match.mark]))).toEqual(
       new Map([
         ["A possession claim with no assistant", { where: "computer", session: "disconnected" }],
-        ["A possession claim on my assistant", { where: "assistant" }]
+        ["A possession claim on my assistant", { where: "assistant", session: "disconnected" }]
       ])
     );
   });
@@ -350,7 +350,7 @@ describe("a chat with no assistant behind it", () => {
 
     const mixed = new Map([
       [ON_LAPTOP, { where: "computer", session: "disconnected" }],
-      [ON_POD, { where: "assistant" }]
+      [ON_POD, { where: "assistant", session: "disconnected" }]
     ]);
     expect(await marked(ALICE)).toEqual(mixed);
     expect(new Map((await asked("alice", "possession")).map((match) => [match.title, match.mark]))).toEqual(mixed);
