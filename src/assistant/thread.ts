@@ -79,22 +79,33 @@ function commandNotice(text: string): string | undefined {
 }
 
 /** Turns the harness writes as the user that carry nothing a person should read: a command's output and its caveat. */
-const SILENT_TURNS = ["<local-command-stdout>", "<local-command-stderr>", "<local-command-caveat>", "<system-reminder>"];
+const SILENT_TURNS = ["local-command-stdout", "local-command-stderr", "local-command-caveat", "system-reminder"];
+
+/** The longest a notice is, so one monitor event or a skill's long arguments cannot fill the line. */
+const NOTICE_LIMIT = 200;
+
+/** One line, bounded: harness text can carry newlines and whole prompts. */
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > NOTICE_LIMIT ? `${flat.slice(0, NOTICE_LIMIT - 1)}…` : flat;
+}
 
 /**
  * What a local chat's user turn is when the harness wrote it: notices to show, an empty list to show nothing, or
  * `undefined` when the person typed it.
  */
-function harnessTurn(text: string, truncated: boolean): { text: string; failed: boolean }[] | undefined {
+function harnessTurn(raw: string, truncated: boolean): { text: string; failed: boolean }[] | undefined {
+  const text = raw.trim();
   const command = commandNotice(text);
   if (command !== undefined) {
-    return [{ text: command, failed: false }];
+    return [{ text: oneLine(command), failed: false }];
   }
-  if (SILENT_TURNS.some((tag) => text.startsWith(tag))) {
+  // Only a turn that is wholly one such block: a person quoting output at the start of their own prompt is not dropped.
+  if (SILENT_TURNS.some((tag) => text.startsWith(`<${tag}>`) && text.endsWith(`</${tag}>`))) {
     return [];
   }
   return taskNotifications(text, { truncated })?.map((task) => ({
-    text: task.summary ?? task.event ?? "A background task finished",
+    text: oneLine(task.summary ?? task.event ?? "A background task finished"),
     failed: taskFailed(task.status)
   }));
 }

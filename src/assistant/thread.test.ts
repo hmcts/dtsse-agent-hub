@@ -688,3 +688,24 @@ describe("harness turns in a local chat", () => {
     expect(threadItems(localItems("fix the bug"), [], [], true)).toMatchObject([{ type: "user", text: "fix the bug" }]);
   });
 });
+
+describe("harness turns that are not wholly harness text", () => {
+  const localItems = (text: string) => conversationItems([], [entry("user", { text }, T(1))]);
+
+  it("should read a command turn that starts with whitespace", () => {
+    expect(threadItems(localItems("\n <command-name>/clear</command-name>"), [], [], true)).toMatchObject([{ type: "notice", text: "Ran /clear" }]);
+  });
+
+  it("should keep a prompt that merely starts by quoting command output", () => {
+    const thread = threadItems(localItems("<local-command-stdout>ok</local-command-stdout> why did this fail?"), [], [], true);
+
+    expect(thread).toMatchObject([{ type: "user" }]);
+  });
+
+  it("should bound a long notice to one line", () => {
+    const thread = threadItems(localItems(`<command-name>/skill</command-name><command-args>${"word\n".repeat(200)}</command-args>`), [], [], true);
+
+    expect(thread[0]).toMatchObject({ type: "notice" });
+    expect((thread[0] as { text: string }).text.length).toBeLessThanOrEqual(200);
+  });
+});
