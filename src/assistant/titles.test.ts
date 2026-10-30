@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isHarnessTurn } from "../transcripts/harness-turn.ts";
+import { isHarnessTurn, withoutIdeContext } from "../transcripts/harness-turn.ts";
 import { firstPromptTitle, localTitle, messageTitle, type PromptEntry, TITLE_FROM_MESSAGE, TITLE_MAX } from "./titles.ts";
 
 function prompt(text: unknown, overrides: Partial<PromptEntry> = {}): PromptEntry {
@@ -105,5 +105,21 @@ describe("isHarnessTurn", () => {
 
   it("should not recognise a prompt that only mentions a tag", () => {
     expect(isHarnessTurn("why does <bash-input> appear?")).toBe(false);
+  });
+});
+
+describe("editor context in front of a prompt", () => {
+  const IDE = "<ide_opened_file>The user opened the file /a/b.ts in the IDE.</ide_opened_file>";
+
+  it("should strip the blocks and keep the words", () => {
+    expect(withoutIdeContext(`${IDE}\n<ide_selection>x = 1</ide_selection>\nfix this`)).toBe("fix this");
+  });
+
+  it("should name a chat after the words that follow the editor context", () => {
+    expect(firstPromptTitle([{ content: { text: `${IDE} fix this` }, redacted: false, messageId: null }])).toBe("fix this");
+  });
+
+  it("should name nothing from a prompt that is only editor context", () => {
+    expect(firstPromptTitle([{ content: { text: IDE }, redacted: false, messageId: null }])).toBeNull();
   });
 });

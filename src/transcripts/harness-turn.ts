@@ -26,3 +26,15 @@ export function isHarnessTurn(text: string): boolean {
   const start = text.trimStart();
   return HARNESS_OPENERS.some((opener) => start.startsWith(opener));
 }
+
+/** The editor's context an IDE integration puts in front of a prompt: the file that was open, the text selected. */
+const IDE_CONTEXT = /^(?:\s*<(ide_opened_file|ide_selection)>[\s\S]*?<\/\1>)+/;
+
+/**
+ * What the person typed, without the editor context in front of it: `<ide_opened_file>…</ide_opened_file>` and
+ * `<ide_selection>…</ide_selection>` blocks are added by the VS Code and JetBrains integrations to the prompt they
+ * send, so the words are what follows them. Text with none is returned as it is.
+ */
+export function withoutIdeContext(text: string): string {
+  return text.replace(IDE_CONTEXT, "").trim();
+}

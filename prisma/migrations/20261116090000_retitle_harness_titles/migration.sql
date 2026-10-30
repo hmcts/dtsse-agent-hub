@@ -14,7 +14,7 @@
 -- Not announced: there is no connection to tell, and the next page load reads the rows.
 WITH named AS (
   SELECT c."id",
-         (SELECT NULLIF(LEFT(regexp_replace(btrim(p."content"->>'text'), '\s+', ' ', 'g'), 60), '')
+         (SELECT NULLIF(LEFT(regexp_replace(btrim(regexp_replace(btrim(p."content"->>'text'), '^(\s*<(ide_opened_file|ide_selection)>.*?</(ide_opened_file|ide_selection)>)+', '')), '\s+', ' ', 'g'), 60), '')
             FROM (
               SELECT t."content", t."redacted", t."message_id", t."occurred_at", t."id"
                 FROM "agent" a
@@ -26,14 +26,14 @@ WITH named AS (
             ) p
            WHERE NOT p."redacted"
              AND p."message_id" IS NULL
-             AND btrim(COALESCE(p."content"->>'text', '')) <> ''
-             AND p."content"->>'text' !~ '^\s*(<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>|bash-input>|bash-stdout>|bash-stderr>|user-prompt-submit-hook>)|\[Request interrupted by user)'
+             AND btrim(COALESCE(regexp_replace(btrim(p."content"->>'text'), '^(\s*<(ide_opened_file|ide_selection)>.*?</(ide_opened_file|ide_selection)>)+', ''), '')) <> ''
+             AND regexp_replace(btrim(p."content"->>'text'), '^(\s*<(ide_opened_file|ide_selection)>.*?</(ide_opened_file|ide_selection)>)+', '') !~ '^\s*(<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>|bash-input>|bash-stdout>|bash-stderr>|user-prompt-submit-hook>)|\[Request interrupted by user)'
            ORDER BY p."occurred_at", p."id"
            LIMIT 1) AS title
     FROM "assistant_conversation" c
    WHERE c."virtual_agent_id" IS NULL
      AND c."title_source" <> 'user'
-     AND c."title" ~ '^(<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>|bash-input>|bash-stdout>|bash-stderr>|user-prompt-submit-hook>)|\[Request interrupted by user)'
+     AND c."title" ~ '^(<(ide_opened_file>|ide_selection>|command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>|bash-input>|bash-stdout>|bash-stderr>|user-prompt-submit-hook>)|\[Request interrupted by user)'
 )
 UPDATE "assistant_conversation" c
    SET "title" = n.title,

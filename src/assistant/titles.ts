@@ -1,5 +1,5 @@
 import { collapse } from "../transcripts/conversation.ts";
-import { isHarnessTurn } from "../transcripts/harness-turn.ts";
+import { isHarnessTurn, withoutIdeContext } from "../transcripts/harness-turn.ts";
 
 /**
  * What a conversation is called: the lengths a title may be, the three things that can name one, and the rules for
@@ -90,7 +90,8 @@ export function firstPromptTitle(entries: readonly PromptEntry[]): string | null
       continue;
     }
     const text = (entry.content as { text?: unknown } | null)?.text;
-    const title = typeof text === "string" && !isHarnessTurn(text) ? messageTitle(text) : null;
+    const typed = typeof text === "string" ? withoutIdeContext(text) : "";
+    const title = isHarnessTurn(typed) ? null : messageTitle(typed);
     if (title !== null) {
       return title;
     }

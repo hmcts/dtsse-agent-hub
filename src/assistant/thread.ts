@@ -3,6 +3,7 @@ import type { QuestionView } from "../questions/views.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { byCodePoint } from "../topics/slug.ts";
 import { type ConversationItem, toolSummary } from "../transcripts/conversation.ts";
+import { withoutIdeContext } from "../transcripts/harness-turn.ts";
 import { taskFailed, taskNotifications } from "../transcripts/task-notification.ts";
 import { productLabel } from "./products.ts";
 import type { MessageAttachment } from "./upload-store.ts";
@@ -240,13 +241,15 @@ export function threadItems(
     } else if (local && item.entry.role === "user") {
       // A prompt whose words were redacted is left out rather than shown as an empty bubble, as a wordless assistant
       // entry is: `textOf` answers nothing for the `{redacted}` content such an entry keeps.
-      const text = textOf(item.entry.content);
+      const typed = textOf(item.entry.content);
+      // Without the editor context an IDE integration puts in front of the words; a prompt of nothing else says nothing.
+      const text = typed === undefined ? undefined : withoutIdeContext(typed);
       const harness = text === undefined ? undefined : harnessTurn(text, item.entry.truncated);
       if (harness !== undefined) {
         for (const [index, notice] of harness.entries()) {
           thread.push({ type: "notice", key: `${item.key}:${index}`, at: item.at, text: notice.text, failed: notice.failed });
         }
-      } else if (text !== undefined) {
+      } else if (text !== undefined && text !== "") {
         // No delivery and no attachments: this is what was typed at the laptop, not a message the hub carried there.
         thread.push({ type: "user", key: item.key, at: item.at, text, delivery: null, attachments: [] });
       }
