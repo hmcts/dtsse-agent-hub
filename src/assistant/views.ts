@@ -86,7 +86,7 @@ const LOCAL_SESSION: Record<AgentStatus, LocalSession> = { idle: "ready", busy: 
  * agent looks at the pod's `sessionState`, where `starting` and `queued` are both "not connected yet, and the pod
  * is on it" — the difference between them is said in words on the chat's own page, and two shades of waiting would
  * be more than a list can carry. `live` on an offline agent is a heartbeat that has lapsed under a session the
- * supervisor still counts, which is not connected, and so is `null`.
+ * supervisor still counts, and `null` is no report at all; both are not connected.
  */
 export type PodSession = "ready" | "working" | "starting" | "disconnected";
 
