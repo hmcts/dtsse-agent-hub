@@ -21,6 +21,12 @@ export function ViewportFit() {
     }
     const root = document.documentElement;
     const adjust = () => {
+      // Pinching in shrinks the visual viewport too, and that is the person looking closer, not a keyboard: leave the
+      // layout and the page's own panning alone until they zoom back out.
+      if (viewport.scale > 1.01) {
+        root.style.removeProperty("--app-height");
+        return;
+      }
       root.style.setProperty("--app-height", `${Math.round(viewport.height)}px`);
       // The browser panned the page to show the focused field; the layout is already the visible height, so put it back.
       if (window.scrollY !== 0 || viewport.offsetTop !== 0) {

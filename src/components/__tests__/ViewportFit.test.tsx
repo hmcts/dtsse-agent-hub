@@ -5,11 +5,12 @@ import { ViewportFit } from "@/components/ViewportFit";
 
 type Listener = () => void;
 
-function fakeViewport(height: number, offsetTop = 0) {
+function fakeViewport(height: number, offsetTop = 0, scale = 1) {
   const listeners = new Map<string, Set<Listener>>();
   const viewport = {
     height,
     offsetTop,
+    scale,
     addEventListener: (type: string, listener: Listener) => listeners.set(type, (listeners.get(type) ?? new Set()).add(listener)),
     removeEventListener: (type: string, listener: Listener) => listeners.get(type)?.delete(listener)
   };
@@ -60,6 +61,21 @@ describe("ViewportFit", () => {
     unmount();
 
     expect(document.documentElement.style.getPropertyValue("--app-height")).toBe("");
+  });
+
+  it("should leave the layout and the scroll alone while the person is pinch-zoomed", () => {
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    const { viewport, fire } = fakeViewport(800);
+    render(<ViewportFit />);
+    scrollTo.mockClear();
+
+    viewport.height = 400;
+    viewport.scale = 2;
+    viewport.offsetTop = 90;
+    fire("resize");
+
+    expect(document.documentElement.style.getPropertyValue("--app-height")).toBe("");
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 
   it("should do nothing in a browser without a visual viewport", () => {
