@@ -15,5 +15,5 @@ export function ChatMark({ mark }: { mark: ConversationMark }) {
   if (mark === null) {
     return null;
   }
-  return mark.where === "computer" ? <LocalMark session={mark.session} /> : <PodMark />;
+  return mark.where === "computer" ? <LocalMark session={mark.session} /> : <PodMark session={mark.session} />;
 }

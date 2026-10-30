@@ -78,6 +78,29 @@ export type LocalSession = "ready" | "working" | "disconnected";
 const LOCAL_SESSION: Record<AgentStatus, LocalSession> = { idle: "ready", busy: "working", offline: "disconnected" };
 
 /**
+ * Which of four states the session of a chat on the person's assistant is in: answering, connected and waiting,
+ * on its way, or not connected and nothing on its way.
+ *
+ * Worked out from two reports. The agent's own status is first, as for a local chat: a session that is not
+ * `offline` is connected whatever a supervisor report yet to land says, `busy` being mid-turn. Only an `offline`
+ * agent looks at the pod's `sessionState`, where `starting` and `queued` are both "not connected yet, and the pod
+ * is on it" — the difference between them is said in words on the chat's own page, and two shades of waiting would
+ * be more than a list can carry. `live` on an offline agent is a heartbeat that has lapsed under a session the
+ * supervisor still counts, which is not connected, and so is `null`.
+ */
+export type PodSession = "ready" | "working" | "starting" | "disconnected";
+
+export function podSessionOf(agentStatus: AgentStatus, sessionState: SessionState | null): PodSession {
+  if (agentStatus === "busy") {
+    return "working";
+  }
+  if (agentStatus === "idle") {
+    return "ready";
+  }
+  return sessionState === "starting" || sessionState === "queued" ? "starting" : "disconnected";
+}
+
+/**
  * What a chat's row in the sidebar, and its result in the search, is marked with.
  *
  * Decided here rather than in either list, so a chat found by searching is marked exactly as the same chat in the
@@ -88,11 +111,12 @@ const LOCAL_SESSION: Record<AgentStatus, LocalSession> = { idle: "ready", busy: 
  *   from here and answers only while the laptop is connected. `hasPod` is what decides it, so the screens and the
  *   stores cannot disagree. The state of its session rides along, because that is the other thing the person cannot
  *   see from the title and the mark is the only place it is said in the list.
- * - `assistant` — a chat running on their assistant's pod, marked only to tell it apart from a local one.
+ * - `assistant` — a chat running on their assistant's pod, marked to tell it apart from a local one, and carrying
+ *   its session's state as the local mark does; see `podSessionOf`.
  * - `null` — nothing to mark. Every one of the person's chats runs on their assistant, so a cloud against each of
  *   them would distinguish them from nothing; see `hasLocalConversation`.
  */
-export type ConversationMark = { where: "computer"; session: LocalSession } | { where: "assistant" } | null;
+export type ConversationMark = { where: "computer"; session: LocalSession } | { where: "assistant"; session: PodSession } | null;
 
 export interface ConversationLink {
   id: string;
@@ -125,14 +149,14 @@ export async function assistantSummary(db: Database, assistant: VirtualAgentRow,
   };
 }
 
-type LinkRow = Pick<ConversationListRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId" | "agentStatus">;
+type LinkRow = Pick<ConversationListRow, "id" | "title" | "product" | "lastActiveAt" | "virtualAgentId" | "agentStatus" | "sessionState">;
 
 /** `anyLocal` is `hasLocalConversation`'s answer for the whole of the person's list; see `ConversationMark`. */
 function markOf(row: LinkRow, anyLocal: boolean): ConversationMark {
   if (!hasPod(row)) {
     return { where: "computer", session: LOCAL_SESSION[row.agentStatus] };
   }
-  return anyLocal ? { where: "assistant" } : null;
+  return anyLocal ? { where: "assistant", session: podSessionOf(row.agentStatus, row.sessionState) } : null;
 }
 
 function toLink(row: LinkRow, anyLocal: boolean): ConversationLink {

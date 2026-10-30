@@ -124,12 +124,13 @@ describe("ConversationSearch", () => {
   });
 
   it("should mark a result that runs on the assistant once the person has a chat on their own computer", async () => {
-    search.mockResolvedValue([{ ...match("c1", "Possession claim help"), mark: { where: "assistant" } }]);
+    search.mockResolvedValue([{ ...match("c1", "Possession claim help"), mark: { where: "assistant", session: "disconnected" } }]);
     render_();
 
     await type("possession");
 
-    expect(screen.getByRole("option", { name: /On your assistant/ }).textContent).toContain("On your assistant: Possession claim help");
+    expect(screen.getByRole("option", { name: /On your assistant/ }).textContent).toContain("On your assistant, not connected: Possession claim help");
+    expect(screen.getByTitle("On your assistant, not connected").className).toContain("text-asst-faint");
   });
 
   it("should mark no result when every one of the person's chats runs on their assistant", async () => {

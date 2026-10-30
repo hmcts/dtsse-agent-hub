@@ -313,6 +313,8 @@ export interface ConversationMatchRow {
   lastActiveAt: Date;
   /** The status of the chat's current agent, as `ConversationListRow` carries it, so a result is marked as a row is. */
   agentStatus: AgentStatus;
+  /** What the chat's pod last reported of its session, as `ConversationRow` carries it; null for no session. */
+  sessionState: SessionState | null;
   /** The words of a message around the match, when a message rather than the title is why the chat matched. */
   excerpt: string | null;
 }
@@ -353,6 +355,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
       product: string;
       lastActiveAt: Date;
       agentStatus: AgentStatus | null;
+      sessionState: string | null;
       excerpt: string | null;
     }[]
   >`
@@ -373,7 +376,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
       -- searchable like any other. An inner join would drop every local chat from the sidebar's search, since there
       -- is no virtual_agent row for it to match. The current agent is joined the same way and for the same reason:
       -- a chat with no agent yet is still a chat, and its status reads as offline.
-      SELECT c.id, c.owner_oid, c.virtual_agent_id, c.title, c.product, c.last_active_at, cur.status::text AS agent_status
+      SELECT c.id, c.owner_oid, c.virtual_agent_id, c.title, c.product, c.last_active_at, cur.status::text AS agent_status, c.session_state
         FROM assistant_conversation c
         LEFT JOIN virtual_agent v ON v.id = c.virtual_agent_id
         LEFT JOIN agent cur ON cur.id = c.agent_id
@@ -395,7 +398,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
        WHERE to_tsvector('english', COALESCE(o.title, '')) @@ q.tsq OR b.body IS NOT NULL
     )
     SELECT o.id::text AS id, o.owner_oid AS "ownerOid", o.virtual_agent_id::text AS "virtualAgentId", o.title, o.product,
-           o.last_active_at AS "lastActiveAt", o.agent_status AS "agentStatus", e.excerpt
+           o.last_active_at AS "lastActiveAt", o.agent_status AS "agentStatus", o.session_state AS "sessionState", e.excerpt
       FROM owned o
       JOIN (SELECT id FROM hit GROUP BY id HAVING count(*) = (SELECT count(*) FROM query)) matched ON matched.id = o.id
       LEFT JOIN LATERAL (
@@ -411,7 +414,12 @@ export async function searchConversations(db: Database, ownerOid: string, query:
   // Nothing leaves the store carrying a product the list no longer offers, as `toRow` does for a whole conversation.
   return visibleMatches(
     ownerOid,
-    rows.map((row) => ({ ...row, product: storedProduct(row.product), agentStatus: row.agentStatus ?? "offline" }))
+    rows.map((row) => ({
+      ...row,
+      product: storedProduct(row.product),
+      agentStatus: row.agentStatus ?? "offline",
+      sessionState: row.sessionState === "starting" || row.sessionState === "live" || row.sessionState === "queued" ? row.sessionState : null
+    }))
   );
 }
 
