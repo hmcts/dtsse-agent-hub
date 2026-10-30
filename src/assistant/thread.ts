@@ -262,6 +262,62 @@ export function runningHelpers(items: readonly ConversationItem[], since: string
   return Math.min(running, MAX_HELPERS);
 }
 
+/** A launch older than this, measured from the newest entry, is taken to have ended without telling anyone. */
+const BACKGROUND_HELPER_WINDOW_MS = 60 * 60 * 1000;
+
+const TASK_TOOL_USE_ID = /<tool-use-id>([^<]+)<\/tool-use-id>/;
+
+/**
+ * How many subagents launched to run in the background are still running, wherever in the conversation they began.
+ *
+ * Separate from `runningHelpers` because the two are different facts. That counts the subagents an answer is waiting
+ * on, so it only looks at the current turn and only for calls with no result. A background launch is answered at once,
+ * so it never looks running there, and it outlives the turn that started it: the session's status goes idle while the
+ * work carries on, and nothing else on the page says so. A background launch is running until the harness reports it
+ * back as a `<task-notification>` naming the call's `tool_use_id`.
+ *
+ * A launch with no report that is more than an hour older than the newest entry is not counted: a session that was
+ * killed never sends one, and a chip claiming work for ever is worse than missing a very long task.
+ */
+export function backgroundHelpers(items: readonly ConversationItem[]): number {
+  const launched = new Map<string, string>();
+  const reported = new Set<string>();
+  let newest = "";
+  for (const item of items) {
+    if (item.type !== "entry") {
+      continue;
+    }
+    const { role, content } = item.entry;
+    if (byCodePoint(item.at, newest) > 0) {
+      newest = item.at;
+    }
+    if (role === "tool_use") {
+      const input = "input" in content && typeof content.input === "object" && content.input !== null ? content.input : undefined;
+      if (
+        "id" in content &&
+        typeof content.id === "string" &&
+        "name" in content &&
+        typeof content.name === "string" &&
+        HELPER_TOOLS.includes(content.name) &&
+        input !== undefined &&
+        "run_in_background" in input &&
+        input.run_in_background === true
+      ) {
+        launched.set(content.id, item.at);
+      }
+    } else if (role === "user") {
+      const text = textOf(content);
+      const id = text?.startsWith("<task-notification>") ? TASK_TOOL_USE_ID.exec(text)?.[1] : undefined;
+      if (id !== undefined) {
+        reported.add(id.trim());
+      }
+    }
+  }
+  const cutoff = Date.parse(newest) - BACKGROUND_HELPER_WINDOW_MS;
+  const running = [...launched].filter(([id, at]) => !reported.has(id) && !(Date.parse(at) < cutoff)).length;
+  return Math.min(running, MAX_HELPERS);
+}
+
 /**
  * What to say about an offline agent the person's last message is waiting on.
  *

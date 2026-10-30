@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ThreadMessage } from "../messages/direct-thread.ts";
 import type { QuestionView } from "../questions/views.ts";
 import { type ConversationItem, conversationItems, type TranscriptEntryView } from "../transcripts/conversation.ts";
-import { activityLabel, MAX_HELPERS, progress, progressAnnouncement, progressLabel, runningHelpers, threadItems } from "./thread.ts";
+import { activityLabel, backgroundHelpers, MAX_HELPERS, progress, progressAnnouncement, progressLabel, runningHelpers, threadItems } from "./thread.ts";
 
 let next = 0;
 
@@ -524,5 +524,35 @@ describe("progressLabel and progressAnnouncement", () => {
   ])("should show %j as its own line and announce only what has settled", (doing, shown, announced) => {
     expect(progressLabel(doing)).toBe(shown);
     expect(progressAnnouncement(doing)).toBe(announced);
+  });
+});
+
+describe("backgroundHelpers", () => {
+  const launch = (id: string, at: string) => entry("tool_use", { id, name: "Agent", input: { run_in_background: true } }, at);
+  const reportOf = (id: string, at: string) =>
+    entry("user", { text: `<task-notification><tool-use-id>${id}</tool-use-id><status>completed</status></task-notification>` }, at);
+
+  it("should count a background subagent whose launch was answered but which has not reported back", () => {
+    const items = conversationItems([], [launch("a", T(1)), entry("tool_result", { tool_use_id: "a", is_error: false, output: "launched" }, T(2))]);
+
+    expect(backgroundHelpers(items)).toBe(1);
+  });
+
+  it("should stop counting a subagent once its notification arrives", () => {
+    const items = conversationItems([], [launch("a", T(1)), launch("b", T(2)), reportOf("a", T(3))]);
+
+    expect(backgroundHelpers(items)).toBe(1);
+  });
+
+  it("should leave out a foreground subagent, which runningHelpers reports", () => {
+    const items = conversationItems([], [entry("tool_use", { id: "a", name: "Agent", input: {} }, T(1))]);
+
+    expect(backgroundHelpers(items)).toBe(0);
+  });
+
+  it("should leave out a launch an hour older than the newest entry that never reported", () => {
+    const items = conversationItems([], [launch("a", T(1)), entry("assistant", { text: "later" }, "2026-10-21T12:00:00.000Z")]);
+
+    expect(backgroundHelpers(items)).toBe(0);
   });
 });
