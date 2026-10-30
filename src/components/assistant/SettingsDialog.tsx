@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -223,6 +224,20 @@ function Appearance({ theme }: { theme: Theme }) {
   );
 }
 
+function SharedChats() {
+  return (
+    <section aria-labelledby="assistant-settings-sharing" className="flex flex-col gap-2.5">
+      <h3 id="assistant-settings-sharing" className="text-sm font-semibold">
+        Shared chats
+      </h3>
+      <p className="text-[13px] text-asst-muted">Chats that others have shared with you, and the ones you have shared.</p>
+      <Link href="/assistant/shared" className="self-start rounded-[10px] border border-asst-strong px-3 py-2 text-[13px] hover:bg-asst-hover">
+        View shared chats
+      </Link>
+    </section>
+  );
+}
+
 function Connections({ list, access, connect, unavailable, warning }: Pick<SettingsView, "list" | "access" | "connect" | "unavailable" | "warning">) {
   return (
     <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-2.5">
@@ -355,6 +370,7 @@ const SECTIONS: readonly SettingsSection[] = [
     shown: (view) => view.exports !== undefined,
     panel: (view) => (view.exports === undefined ? null : <ExportSettings exports={view.exports} />)
   },
+  { id: "sharing", label: "Sharing", group: "General", shown: () => true, panel: () => <SharedChats /> },
   {
     id: "model",
     label: "Model",
@@ -441,7 +457,7 @@ function BackIcon() {
 }
 
 const NAV_ITEM = "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] leading-tight";
-const GROUP_LABEL = "px-3 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-asst-muted first:pt-0";
+const GROUP_LABEL = "px-3 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-asst-muted not-first:mt-4 first:pt-0";
 
 /**
  * The navigation, as a vertical tablist over the panel beside it.

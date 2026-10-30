@@ -108,12 +108,6 @@ describe("AssistantShell", () => {
     expect(within(nav).getByRole("link", { name: "Event help" }).textContent).toBe("Event help");
   });
 
-  it("should link to the shared chats when the person has no chats of their own as well", () => {
-    render(shell({ groups: [] }));
-
-    expect(screen.getByRole("link", { name: "Shared chats" }).getAttribute("href")).toBe("/assistant/shared");
-  });
-
   it("should say chats will appear when there are none", () => {
     render(shell({ groups: [] }));
 
