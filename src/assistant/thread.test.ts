@@ -641,3 +641,50 @@ describe("backgroundHelpers", () => {
     expect(backgroundHelpers(conversationItems([], [launch("a", T(1))]), NOW + 2 * 60 * 60 * 1000)).toBe(0);
   });
 });
+
+describe("harness turns in a local chat", () => {
+  const localItems = (...texts: string[]) =>
+    conversationItems(
+      [],
+      texts.map((text, index) => entry("user", { text }, T(index + 1)))
+    );
+
+  it("should show a slash command as a quiet notice rather than its XML", () => {
+    const thread = threadItems(
+      localItems("<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"),
+      [],
+      [],
+      true
+    );
+
+    expect(thread).toMatchObject([{ type: "notice", text: "Ran /clear", failed: false }]);
+  });
+
+  it("should show a command's arguments after its name", () => {
+    const thread = threadItems(localItems("<command-name>/model</command-name><command-args>opus</command-args>"), [], [], true);
+
+    expect(thread).toMatchObject([{ type: "notice", text: "Ran /model opus" }]);
+  });
+
+  it("should show a finished background task as its summary, and a failed one as failed", () => {
+    const done =
+      '<task-notification><task-id>x</task-id><status>completed</status><summary>Agent "Review" finished</summary><result>long report</result></task-notification>';
+    const bad = "<task-notification><status>failed</status><summary>Build broke</summary></task-notification>";
+    const thread = threadItems(localItems(done, bad), [], [], true);
+
+    expect(thread).toMatchObject([
+      { type: "notice", text: 'Agent "Review" finished', failed: false },
+      { type: "notice", text: "Build broke", failed: true }
+    ]);
+  });
+
+  it("should leave out a command's output and caveat", () => {
+    expect(threadItems(localItems("<local-command-stdout>ok</local-command-stdout>", "<local-command-caveat>x</local-command-caveat>"), [], [], true)).toEqual(
+      []
+    );
+  });
+
+  it("should keep a prompt the person typed as their own message", () => {
+    expect(threadItems(localItems("fix the bug"), [], [], true)).toMatchObject([{ type: "user", text: "fix the bug" }]);
+  });
+});

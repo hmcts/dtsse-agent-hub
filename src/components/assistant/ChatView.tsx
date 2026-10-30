@@ -207,6 +207,13 @@ function Item({ item, answerQuestion, repoBase }: { item: ThreadItem; answerQues
       </li>
     );
   }
+  if (item.type === "notice") {
+    return (
+      <li className={`flex min-w-0 items-baseline gap-2 text-xs ${item.failed ? "text-asst-error" : "text-asst-faint"}`}>
+        <span className="min-w-0 truncate">{item.text}</span>
+      </li>
+    );
+  }
   if (item.type === "user") {
     return (
       <li className="flex flex-col items-end gap-1">
