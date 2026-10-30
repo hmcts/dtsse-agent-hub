@@ -101,6 +101,7 @@ export function AssistantShell({
   connect,
   now,
   plugins,
+  welsh = false,
   model,
   claudeMd,
   templates,
@@ -123,6 +124,8 @@ export function AssistantShell({
   now: number;
   /** The workspace plugins the footer's settings lets the person tick. */
   plugins?: AssistantPlugins;
+  /** Their assistant has the Welsh plugin ticked, so the way to the Welsh page is shown. */
+  welsh?: boolean;
   /** The Claude model the person's chats run on, which the footer's settings shows and changes. */
   model?: AssistantModelSetting;
   /** The person's own CLAUDE.md, which the footer's settings shows and edits. */
@@ -241,15 +244,18 @@ export function AssistantShell({
               </span>
               New chat
             </Link>
-            {/* The Welsh page, a business analyst's tools for a service's Welsh: its own page too, so a link. */}
-            <Link
-              href="/assistant/welsh"
-              aria-label="Welsh translations"
-              title="Welsh translations"
-              className="flex w-[44px] shrink-0 items-center justify-center self-stretch rounded-[10px] border border-asst-strong text-[12px] font-semibold tracking-wide text-asst-muted hover:bg-asst-hover hover:text-asst-text"
-            >
-              <span aria-hidden="true">CY</span>
-            </Link>
+            {/* The Welsh page, a business analyst's tools for a service's Welsh: its own page, so a link, and only for
+                someone whose assistant has the plugin that runs them. */}
+            {welsh ? (
+              <Link
+                href="/assistant/welsh"
+                aria-label="Welsh translations"
+                title="Welsh translations"
+                className="flex w-[44px] shrink-0 items-center justify-center self-stretch rounded-[10px] border border-asst-strong text-[12px] font-semibold tracking-wide text-asst-muted hover:bg-asst-hover hover:text-asst-text"
+              >
+                <span aria-hidden="true">CY</span>
+              </Link>
+            ) : null}
           </div>
           <ConversationSearch>
             {groups.length === 0 ? <p className="px-2.5 text-[13px] text-asst-faint">Your chats appear here.</p> : null}

@@ -41,7 +41,7 @@ export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "me
  * owner's Jira or Confluence with twg. The hub gates on it, answering `unsupported` to a pod that did not claim it.
  *
  * `welsh` is claimed because the assistant supervisor answers the sessions stream's `welsh` frame, running
- * cft-workspace's `scripts/welsh` for the HMCTS Assistant's Welsh page. The hub gates on it, answering `unsupported`
+ * the welsh plugin's `scripts/welsh` for the CFT Workspace's Welsh page. The hub gates on it, answering `unsupported`
  * to a pod that did not claim it.
  *
  * `memory-anon` is claimed because the assistant supervisor reads its own container's memory cgroup and reports it,

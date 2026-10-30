@@ -1,5 +1,5 @@
 // Welsh translation jobs end to end through Postgres: the page's request, the frame the pod is sent, the pod's
-// answer and files, and who may read any of it. The pod's own half — running scripts/welsh — is in the client
+// answer and files, and who may read any of it. The pod's own half — running the welsh plugin's scripts/welsh — is in the client
 // package's `src/assistant/welsh.test.ts`.
 import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +9,7 @@ import * as welshRoute from "../../src/app/api/ui/assistant/welsh/route.ts";
 import { WELSH_JOB_TIMEOUT_MS, WELSH_RATE_LIMIT, WELSH_RETENTION_MS } from "../../src/assistant/welsh.ts";
 import { answerWelsh, askWelsh, ownerFile, pendingWelsh, podFile, putJobFile, readWelsh, saveUpload } from "../../src/assistant/welsh-store.ts";
 import { setDesired } from "../../src/virtual-agents/store.ts";
-import { ALICE, BOB, podFixture } from "./assistant-pod.ts";
+import { ALICE, type AssistantFixture, BOB, podFixture } from "./assistant-pod.ts";
 import { connect, prisma, resetDatabase } from "./database.ts";
 import { jsonOf } from "./routes.ts";
 
@@ -26,7 +26,14 @@ beforeEach(async () => {
 });
 
 /** The shared fixture, bound to the claim this suite is about: the pod's own session runs Welsh jobs. */
-const assistantOf = podFixture(["welsh"]);
+const claimingWelsh = podFixture(["welsh"]);
+
+/** That assistant with the Welsh plugin ticked as well, which every job and upload needs. */
+const assistantOf: AssistantFixture = async (...args) => {
+  const id = await claimingWelsh(...args);
+  await prisma.virtualAgent.update({ where: { id }, data: { plugins: ["welsh"] } });
+  return id;
+};
 const XLSX = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
 
 function browser(
@@ -104,6 +111,22 @@ describe("welsh jobs", () => {
     expect(await podFile(prisma, { id: bobs.id, ownerOid: BOB.oid }, uploaded.file_id)).toBeUndefined();
     expect(download.headers.get("content-disposition")).toBe(`attachment; filename="Ymateb _.xlsx"; filename*=UTF-8''${encodeURIComponent("Ymateb ŵ.xlsx")}`);
     expect(download.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("should refuse a job and an upload, recording neither, when the person's assistant does not have the Welsh plugin", async () => {
+    // Arrange
+    await claimingWelsh(ALICE);
+
+    // Act
+    const job = await start({ kind: "info", product: "cath", args: {} });
+    const uploaded = await browser(uploadRoute.POST, "/api/ui/assistant/welsh/files", { body: XLSX, headers: { "x-file-name": "return.xlsx" } });
+
+    // Assert
+    expect(job.status).toBe(409);
+    expect(await jsonOf(job)).toEqual({ error: "turn on Welsh translations in Settings, under Tools, first" });
+    expect(uploaded.status).toBe(409);
+    expect(await prisma.assistantWelshJob.count()).toBe(0);
+    expect(await prisma.assistantWelshFile.count()).toBe(0);
   });
 
   it("should answer a pod that has not claimed welsh, a stopped assistant, and a bad request without recording a job", async () => {

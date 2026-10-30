@@ -9,9 +9,11 @@ import { setDesired } from "../virtual-agents/store.ts";
 import { findAssistant } from "./store.ts";
 import {
   fileIdsOf,
+  hasWelshPlugin,
   MAX_WELSH_FILE_BYTES,
   MAX_WELSH_FILES_PER_JOB,
   resultFits,
+  WELSH_NOT_TURNED_ON,
   WELSH_RATE_LIMIT,
   WELSH_RATE_WINDOW_MS,
   WELSH_RETENTION_MS,
@@ -47,6 +49,9 @@ export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, no
   const assistant = await findAssistant(prisma, question.viewerOid);
   if (assistant === undefined || !canUseWelsh(question.viewerOid, assistant)) {
     throw new HttpError(404, "you have no assistant to run that with yet");
+  }
+  if (!hasWelshPlugin(assistant)) {
+    throw new HttpError(409, WELSH_NOT_TURNED_ON);
   }
   const files = await Promise.all(
     fileIdsOf(question.args).map((id) => prisma.assistantWelshFile.findUnique({ where: { id }, select: { ownerOid: true, jobId: true } }))
@@ -244,6 +249,9 @@ export async function saveUpload(prisma: PrismaClient, viewerOid: string, name: 
   const assistant = await findAssistant(prisma, viewerOid);
   if (assistant === undefined || !canUseWelsh(viewerOid, assistant)) {
     throw new HttpError(404, "you have no assistant to run that with yet");
+  }
+  if (!hasWelshPlugin(assistant)) {
+    throw new HttpError(409, WELSH_NOT_TURNED_ON);
   }
   if (bytes.length === 0 || bytes.length > MAX_WELSH_FILE_BYTES) {
     throw new HttpError(413, "that spreadsheet is over 5 MB");

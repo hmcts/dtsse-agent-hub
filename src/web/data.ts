@@ -34,6 +34,7 @@ import {
   type UnsentChat,
   unsentChat
 } from "../assistant/views.ts";
+import { hasWelshPlugin } from "../assistant/welsh.ts";
 import { findChannel, listChannels } from "../channels/store.ts";
 import { credentialBackend } from "../credentials/backend.ts";
 import { DEFAULT_CLAUDE_MD } from "../credentials/claude-md.ts";
@@ -284,6 +285,8 @@ export interface AssistantHome {
    * cannot be read, which is not the same as its offering nothing.
    */
   plugins: { available: PluginOption[]; checked: string[] } | null;
+  /** Its assistant has the Welsh plugin ticked, so the sidebar offers the Welsh page; read from the row, not the offer. */
+  welsh: boolean;
   /** Whether the page may render the chat, or only the getting-ready screen; see `chatGate`. */
   chat: ChatGate;
 }
@@ -335,7 +338,14 @@ export async function openAssistant(viewer: Viewer): Promise<AssistantHome> {
   const assistant = await ensureAssistant(prisma, viewer);
   const [credentials, conversations] = await Promise.all([credentialSettings(viewer), conversationGroups(prisma, viewer.oid)]);
   const summary = await assistantSummary(prisma, assistant, storedKinds(credentials));
-  return { assistant: summary, credentials, conversations, plugins: pluginSettings(assistant), chat: chatGateOf(summary.toChat, credentials) };
+  return {
+    assistant: summary,
+    credentials,
+    conversations,
+    plugins: pluginSettings(assistant),
+    welsh: hasWelshPlugin(assistant),
+    chat: chatGateOf(summary.toChat, credentials)
+  };
 }
 
 /**
@@ -381,6 +391,12 @@ export async function assistantFiles(viewer: Viewer): Promise<UploadsOnDisk | un
  * Its own read rather than part of `openAssistant`, as the files are: only the settings dialog uses it, and it costs a
  * second query over the viewer's conversations. The owner check is the store's, through `canSeeAssistantMemory`.
  */
+/** Whether the viewer's assistant has the Welsh plugin ticked, which is what the Welsh page needs to run anything. */
+export async function assistantHasWelsh(viewer: Identity): Promise<boolean> {
+  const assistant = await findAssistant(prisma, viewer.oid);
+  return assistant !== undefined && hasWelshPlugin(assistant);
+}
+
 export async function assistantSize(viewer: Viewer): Promise<AssistantMemory | undefined> {
   const assistant = await findAssistant(prisma, viewer.oid);
   return assistant === undefined ? undefined : await assistantMemory(prisma, viewer.oid, assistant.id);

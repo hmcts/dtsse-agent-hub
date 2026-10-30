@@ -3,7 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { WelshAnswer } from "../api.ts";
-import { createWelshRunner, failureDetail, parseWelshFrame, runWelsh, signInNeeded, type WelshDeps, welshArgs, welshOutputs, welshPaths } from "./welsh.ts";
+import {
+  createWelshRunner,
+  failureDetail,
+  NOT_LOADED,
+  parseWelshFrame,
+  runWelsh,
+  signInNeeded,
+  type WelshDeps,
+  welshArgs,
+  welshOutputs,
+  welshPaths
+} from "./welsh.ts";
 
 const JOB = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const FILE = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
@@ -155,17 +166,26 @@ describe("failures", () => {
     expect(failureDetail("welsh scan: no product apps/zzz in this workspace\n  usage: scripts/welsh scan …", 2)).toBe("no product apps/zzz in this workspace");
     expect(failureDetail("Error: could not clone hmcts/x\n    at ensureClone (clones.ts:20)", 1)).toBe("could not clone hmcts/x");
     expect(failureDetail("", 1)).toBe("That did not work. Try again.");
-    expect(failureDetail("", 127)).toMatch(/does not have the Welsh tools yet/);
+    expect(failureDetail("", 127)).toBe(NOT_LOADED);
     expect(failureDetail(`welsh x: ${"y".repeat(600)}`, 2)).toHaveLength(500);
   });
 });
 
-function workspace(): string {
+/** A checkout whose marketplace lists the welsh plugin, with its script; `withPlugin: false` leaves the plugin out. */
+function workspace({ withPlugin = true } = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "welsh-ws-"));
-  mkdirSync(join(dir, "scripts"));
-  writeFileSync(join(dir, "scripts", "welsh"), "#!/bin/sh\n");
+  mkdirSync(join(dir, ".claude-plugin"));
+  writeFileSync(join(dir, ".claude-plugin", "marketplace.json"), JSON.stringify({ plugins: [{ name: "welsh", source: "./welsh/.claude" }] }));
+  if (withPlugin) {
+    mkdirSync(join(dir, "welsh", ".claude", ".claude-plugin"), { recursive: true });
+    mkdirSync(join(dir, "welsh", ".claude", "scripts"));
+    writeFileSync(join(dir, "welsh", ".claude", ".claude-plugin", "plugin.json"), JSON.stringify({ name: "welsh" }));
+    writeFileSync(join(dir, "welsh", ".claude", "scripts", "welsh"), "#!/bin/sh\n");
+  }
   return dir;
 }
+
+const TICKED = { AGENT_HUB_PLUGINS: "pcs,welsh" };
 
 function deps(over: Partial<WelshDeps> = {}) {
   const answers: { id: string; body: WelshAnswer }[] = [];
@@ -181,7 +201,7 @@ function deps(over: Partial<WelshDeps> = {}) {
     }),
     welshFile: vi.fn(async () => new TextEncoder().encode("PK-return"))
   };
-  const d: WelshDeps = { api, id: "va", env: {}, workspace: workspace(), now: () => new Date("2026-10-29T09:00:00Z"), run: vi.fn(), ...over };
+  const d: WelshDeps = { api, id: "va", env: TICKED, workspace: workspace(), now: () => new Date("2026-10-29T09:00:00Z"), run: vi.fn(), ...over };
   return { d, api, answers, files };
 }
 
@@ -238,11 +258,24 @@ describe("runWelsh", () => {
     expect(junk.answers[0]?.body).toMatchObject({ error: "failed" });
   });
 
-  it("should say the tools are missing when the workspace has no scripts/welsh, without running anything", async () => {
-    const { d, answers } = deps({ workspace: mkdtempSync(join(tmpdir(), "welsh-empty-")) });
+  it("should run the welsh plugin's own script when the owner ticked it", async () => {
+    const { d } = deps({ run: vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" })) });
+    await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+    expect(d.run).toHaveBeenCalledWith(join(d.workspace, "welsh", ".claude", "scripts", "welsh"), expect.any(Array), expect.any(Object));
+  });
+
+  it("should say Welsh is not turned on, without running anything, when the owner has not ticked the plugin", async () => {
+    const { d, answers } = deps({ env: { AGENT_HUB_PLUGINS: "pcs" } });
     await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
     expect(d.run).not.toHaveBeenCalled();
-    expect(answers[0]?.body).toMatchObject({ error: "failed", detail: expect.stringMatching(/does not have the Welsh tools/) });
+    expect(answers[0]?.body).toEqual({ error: "failed", detail: NOT_LOADED });
+  });
+
+  it("should say Welsh is not turned on, without running anything, when the checkout does not have the plugin yet", async () => {
+    const { d, answers } = deps({ workspace: workspace({ withPlugin: false }) });
+    await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+    expect(d.run).not.toHaveBeenCalled();
+    expect(answers[0]?.body).toEqual({ error: "failed", detail: NOT_LOADED });
   });
 
   it("should answer failed rather than throw when fetching the return fails", async () => {
