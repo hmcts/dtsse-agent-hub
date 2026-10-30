@@ -110,6 +110,14 @@ body {
   height: 100%;
 }
 
+/* The height of what is visible, which on a phone is less than the window while the keyboard is up; see ViewportFit. */
+@supports (height: 100dvh) {
+  html,
+  body {
+    height: var(--app-height, 100dvh);
+  }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

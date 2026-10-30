@@ -9,6 +9,12 @@ describe("exempt", () => {
     }
   );
 
+  it("should serve the web app manifest and its icon without a session, because the browser fetches them to offer an install", () => {
+    expect(exempt("/manifest.webmanifest")).toBe(true);
+    expect(exempt("/assistant/icon.svg")).toBe(true);
+    expect(exempt("/assistant/icon.svg.bak")).toBe(false);
+  });
+
   it("should serve the sign-in routes without a session, or nobody could ever get one", () => {
     expect(exempt("/auth/login")).toBe(true);
     expect(exempt("/auth/callback")).toBe(true);

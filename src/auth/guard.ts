@@ -4,7 +4,11 @@
  * redirect.
  */
 
-const EXEMPT_PATHS = ["/health", "/liveness", "/readiness", "/favicon.ico"];
+/**
+ * The web app manifest and its icon are fetched by the browser to offer an install, without the page's cookies, and a
+ * redirect to sign-in is not a manifest. Neither holds anything about a person.
+ */
+const EXEMPT_PATHS = ["/health", "/liveness", "/readiness", "/favicon.ico", "/manifest.webmanifest", "/assistant/icon.svg"];
 
 /**
  * Every prefix ends in `/`, so `/health` does not also exempt `/health-summary`.
