@@ -443,6 +443,22 @@ describe("naming a chat from the first prompt it uploads", () => {
     expect(await title(localChat)).toEqual({ title: "now try it without the secret", titleSource: "message" });
   });
 
+  // The refresh is the hub's answer to what the person typed, so it is gated on the batch carrying something they
+  // typed. A hub message relayed into the session is a colleague's words, which `firstPromptTitle` passes over, so a
+  // batch of nothing but those is not read any further — and the `/rename` it arrived after is followed on the next
+  // prompt instead. Only the title waits: the renamed agent row is there as soon as the heartbeat lands.
+  it("should follow a /rename on the next prompt rather than on a hub message relayed into the session", async () => {
+    await prisma.agent.update({ where: { id: local }, data: { name: "hdpi-9653-welsh", nameSource: "user" } });
+    const relayed = await createDirect(prisma, { author: { oid: BOB.oid, agentId: null }, targetAgentId: local, inReplyTo: null, body: "have a look at this" });
+
+    await accepted(local, [entry("s1:1", { role: "user", content: { text: "have a look at this" }, message_id: relayed.id })]);
+    expect(await title(localChat)).toEqual({ title: "hmcts-25", titleSource: "agent" });
+
+    await accepted(local, [user("s1:2", "what did they mean by that")]);
+
+    expect(await title(localChat)).toEqual({ title: "hdpi-9653-welsh", titleSource: "agent" });
+  });
+
   it("should never overwrite a title the person chose when a prompt arrives afterwards", async () => {
     await renameConversation(prisma, ALICE.oid, localChat, "  HDPI-8713   flaky E2E  ");
 

@@ -489,6 +489,7 @@ describe("the conversation title source migration", () => {
         ('dev-alice', 'renamed', 'hdpi-9653-welsh'),
         ('dev-alice', 'silent', 'hmcts-99'),
         ('dev-alice', 'blank', 'hmcts-ab'),
+        ('dev-alice', 'branch-named', 'update-the-db'),
         ('dev-alice', 'pod', 'assistant')`
     );
     await query(
@@ -497,7 +498,8 @@ describe("the conversation title source migration", () => {
         SELECT 'dev-alice', a.id, t.title
           FROM "agent" a
           JOIN (VALUES ('stale', 'hmcts-25'), ('session-id', 'a1b2c3d4'), ('generated', 'local-chat-titles'),
-                       ('renamed', 'hdpi-9653-welsh'), ('silent', 'hmcts-99'), ('blank', NULL::text)) AS t (session_id, title)
+                       ('renamed', 'hdpi-9653-welsh'), ('silent', 'hmcts-99'), ('blank', NULL::text),
+                       ('branch-named', 'update-the-db')) AS t (session_id, title)
             ON t.session_id = a.session_id`
     );
     await query(
@@ -520,6 +522,7 @@ describe("the conversation title source migration", () => {
                  ('renamed', '1', '{"text": "look at the failing run on PR 2114"}', false, '2026-11-14T09:00:00Z'),
                  ('blank', '1', '{"text": "   "}', false, '2026-11-14T09:00:00Z'),
                  ('blank', '2', '{"text": "the first prompt with words in it"}', false, '2026-11-14T09:01:00Z'),
+                 ('branch-named', '1', '{"text": "a prompt this chat must not be renamed to"}', false, '2026-11-14T09:00:00Z'),
                  ('pod', '1', '{"text": "the session reading the message back"}', false, '2026-11-14T09:00:00Z'))
                AS t (session_id, entry_key, content, redacted, at)
             ON t.session_id = a.session_id`
@@ -534,6 +537,10 @@ describe("the conversation title source migration", () => {
     expect(chats).toEqual([
       // Its client reported no name at all, and its opening prompt is whitespace: the next one names it.
       { session_id: "blank", title: "the first prompt with words in it", title_source: "message" },
+      // A /rename whose last segment is two hex characters fits the handle shape, and branch-style names do that, so
+      // a tail that reads as a word or an abbreviation is refused. The handles this costs are `summariser-cwd-*`
+      // background sessions; the names it saves are people's own.
+      { session_id: "branch-named", title: "update-the-db", title_source: "message" },
       // A name Claude Code generated for the conversation reads exactly like a /rename, so it is left alone — and
       // what it is left with is a readable name rather than a handle, which is why that costs the person little.
       { session_id: "generated", title: "local-chat-titles", title_source: "message" },

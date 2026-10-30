@@ -191,19 +191,23 @@ export function sampleTranscript(prefix: string): TranscriptEntry[] {
 }
 
 /**
- * The sidebar row of a local session registered as `title`, found by its accessible name — the local marker's words
- * joined to the title (`LocalMark`) — so every spec using it also fails on a chat the sidebar has stopped marking.
+ * The sidebar row of a local chat called `title`, found by its accessible name — the local marker's words joined to
+ * the title (`LocalMark`) — so every spec using it also fails on a chat the sidebar has stopped marking.
+ *
+ * `title` is what the chat is called now, which is the name its session registered under only until a batch carrying
+ * a prompt renames it to that prompt (`refreshLocalTitle`); a caller that uploaded one passes the prompt.
  *
  * The state of the session is part of those words and is matched loosely, because it is whatever the session was
  * doing when the page rendered; that the row is marked, and marked as being on the person's own computer, is what
- * this pins. `unique` titles are alphanumeric and so need no escaping here.
+ * this pins. Both the `unique` titles and the prompts passed here are lower-case words, digits, spaces and hyphens,
+ * so none of them needs escaping.
  */
 export function localChatRow(page: Page, title: string): Locator {
   return page.getByRole("navigation", { name: "Chats" }).getByRole("link", { name: new RegExp(`^On your computer, [a-z ]+: ${title}$`) });
 }
 
 /**
- * Opens the chat of a local session registered as `title` from the Assistant's sidebar, and returns its path.
+ * Opens the local chat called `title` from the Assistant's sidebar, and returns its path.
  *
  * The sidebar is where a spec learns the conversation's id: the registration answers with the agent alone, and
  * nothing names the conversation the hub made for it. `page` is already showing a page of the Assistant, so the

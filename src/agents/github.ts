@@ -6,7 +6,14 @@
 
 export type Environment = Readonly<Record<string, string | undefined>>;
 
-/** Every repo an agent registers is HMCTS's; settable so a fork or a test can name another owner. */
+/**
+ * Every repo an agent registers is HMCTS's; settable so a fork or a test can name another owner.
+ *
+ * One owner for the whole deployment, while `repo` comes from each clone's own `origin`, so a session in a personal
+ * fork or a non-HMCTS clone gets a `github.com/hmcts/<repo>` link that 404s rather than no link at all. The fix is
+ * for the client to send the owner it already reads off `origin` at collection time, which needs a client release —
+ * pending anyway for a `repo` fallback for a session at the workspace root, and for pinning the commit SHA.
+ */
 export const DEFAULT_GITHUB_ORG = "hmcts";
 
 export function githubOrg(env: Environment = process.env): string {

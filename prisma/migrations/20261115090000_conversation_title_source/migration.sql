@@ -42,11 +42,22 @@ ALTER TABLE "assistant_conversation"
 --     when the transcript has no title it can read.
 --   * Eight hex digits, which is `agentName`'s last resort, the start of the session id.
 --
--- Measured against the 383 entries in one engineer's own session registry: all 372 names recorded `nameSource:
--- derived` match the first shape, and none of the 6 recorded `user` — the `/rename`s — match either, nor do the 5
--- Claude Code named itself (`nameSource: auto`, e.g. `local-sessions-as-conversations`). A `/rename` ending in two
--- hex digits (`pcs-ab`) would be caught, which is the residual risk and is why the shapes are this narrow rather
--- than "lower case and hyphens", which every `/rename` in that sample matches.
+-- The first shape also fits a `/rename` whose last segment happens to be two hex characters, and branch-style names
+-- do that: `update-the-db`, `fix-the-cd`, `welsh-ad`. So a two-character tail that reads as a word or an
+-- abbreviation is refused — `aa ad ba be ca cd db dd de ed ee fe` — which costs a handful of real handles to keep
+-- the migration from doing the one thing its own rules forbid.
+--
+-- Measured on one engineer's `~/.claude/sessions`, against its 385 derived names and 9 `/rename`s:
+--
+--   * The shape alone catches all 385, and none of the 9 renames collide — every one of their tails is longer than
+--     two characters (`-stg`, `-welsh`, `-review`, `-uploads`, `-resume`). Real risk, unrealised in this sample.
+--   * Restricting the prefix to a single segment (`^[a-z0-9]+-[0-9a-f]{2}$`) catches 32 of 385, so it would miss
+--     most of the chats this exists to fix. Rejected.
+--   * The shape with those twelve tails refused catches 363 of 385. Every one of the 22 it gives up is another of
+--     the client's own handles — all but one a `summariser-cwd-*` background session, the odd one out `hmcts-ad` —
+--     rather than anything a person reads, which is what makes that the trade to take.
+--
+-- The exclusion is only on this shape. Eight hex digits is a session id, where a word-shaped tail means nothing.
 --
 -- Everything else local keeps `message`: a title that may be the first thing said in the chat, a name the person
 -- chose with `/rename`, a title they typed in the hub, or one Claude Code generated — the hub cannot tell which, and
@@ -55,7 +66,8 @@ UPDATE "assistant_conversation" c
    SET "title_source" = 'agent'
  WHERE c."virtual_agent_id" IS NULL
    AND (c."title" IS NULL
-        OR c."title" ~ '^[a-z0-9]+(-[a-z0-9]+)*-[0-9a-f]{2}$'
+        OR (c."title" ~ '^[a-z0-9]+(-[a-z0-9]+)*-[0-9a-f]{2}$'
+            AND right(c."title", 2) NOT IN ('aa', 'ad', 'ba', 'be', 'ca', 'cd', 'db', 'dd', 'de', 'ed', 'ee', 'fe'))
         OR c."title" ~ '^[0-9a-f]{8}$');
 
 -- The recovery: every local chat that is provably carrying a handle is named after its own first prompt.

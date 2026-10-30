@@ -684,6 +684,11 @@ async function nameLocalChat(
  * transcript upload inside its transaction — the moment the hub learns what the person typed — and does nothing at
  * all for a chat with a pod, or for one whose owner has renamed it in the hub.
  *
+ * The upload only calls it for an agent whose row it has already read as a local chat's, and only for a batch
+ * carrying a prompt that could name one, so the read below is not paid by the board sessions and pod chats this
+ * can do nothing for. Both conditions are checked again here: the caller's are what make this cheap, and these are
+ * what make it right.
+ *
  * Two derivations, strongest first:
  *
  * - **The session's name, when the person chose it** (`name_source = 'user'`, which is Claude Code's `/rename`).
@@ -700,7 +705,8 @@ async function nameLocalChat(
  * The prompts are read by agent rather than by conversation because a local chat has exactly one: `linkLocalSession`
  * links the session's own agent and `conversationAgent`, which is what ever makes a second, refuses a chat with no
  * pod. That keeps the read on `transcript_entry_agent_id_occurred_at_id_idx`, and it is only reached while a prompt
- * could still claim the title — after that this is one indexed read per upload and nothing else.
+ * could still claim the title — after that a titled chat costs one indexed read per prompt-carrying upload and
+ * nothing else.
  */
 export async function refreshLocalTitle(db: Database, agentId: string, now: Date = new Date()): Promise<void> {
   const agent = await db.agent.findUnique({
