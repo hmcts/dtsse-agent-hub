@@ -2037,6 +2037,12 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     expect(sections()).toContain("Jira & Confluence");
   });
 
+  it("should link to the shared chats from the Sharing section", () => {
+    open({}, "Sharing");
+
+    expect(screen.getByRole("link", { name: "View shared chats" }).getAttribute("href")).toBe("/assistant/shared");
+  });
+
   it("should save a Jira project the person found by searching their own Jira", async () => {
     vi.useFakeTimers();
     const exports = exportsSettings();
