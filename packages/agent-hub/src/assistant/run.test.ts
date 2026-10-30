@@ -94,6 +94,54 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
+  it("should run a Welsh job on the sessions stream with scripts/welsh and answer what it printed", async () => {
+    // Arrange
+    fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
+    const hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
+    const url = await hub.listen();
+    const stop = new AbortController();
+    const jobId = "6c1f8d2b-1111-4222-8333-444455556666";
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "welsh-ws-"));
+    fs.mkdirSync(path.join(workspace, "scripts"));
+    fs.writeFileSync(path.join(workspace, "scripts", "welsh"), "#!/bin/sh\n");
+    const ran: { cmd: string; args: string[] }[] = [];
+    const running = runAssistantSupervisor({
+      api: createApi({ baseUrl: url, launchToken: LAUNCH }),
+      id: VID,
+      env: {},
+      tmux: fakeTmux(),
+      canRun: () => true,
+      cwd: CWD,
+      signal: stop.signal,
+      tickMs: 50,
+      welsh: {
+        workspace,
+        run: async (cmd, args) => {
+          ran.push({ cmd, args });
+          return { code: 0, stdout: JSON.stringify({ total: 0, hits: [] }), stderr: "0 match(es)" };
+        }
+      }
+    });
+
+    try {
+      await waitUntil(() => hub.sessionStreams.has(VID), "the sessions stream to open");
+
+      // Act
+      hub.sendWelsh(VID, { job_id: jobId, kind: "search", product: "cath", args: { query: "back" } });
+
+      // Assert
+      await waitUntil(() => hub.welshAnswers.length === 1, "the Welsh job to be answered");
+      expect(hub.welshAnswers[0]).toEqual({ virtual_id: VID, job_id: jobId, body: { result: { total: 0, hits: [], message: "0 match(es)" } } });
+      expect(ran[0]?.cmd).toBe(path.join(workspace, "scripts", "welsh"));
+      expect(ran[0]?.args.at(-1)).toBe("back");
+    } finally {
+      stop.abort();
+      await running;
+      await hub.close();
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("should start sessions for the wakes on the sessions stream, reconnect at once at its lifetime and stop one on close", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
@@ -202,6 +250,9 @@ describe("runAssistantSupervisor", () => {
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
       putLookup: async () => null,
+      putWelsh: async () => null,
+      putWelshFile: async () => ({ file_id: "f" }),
+      welshFile: async () => new Uint8Array(),
       putMemory: async () => null,
       sessionsStream: async (): Promise<Response> => {
         opens.push(Date.now());
@@ -251,6 +302,9 @@ describe("runAssistantSupervisor", () => {
         conversations: async () => ({ conversations: [] }),
         putUploads: async () => null,
         putLookup: async () => null,
+        putWelsh: async () => null,
+        putWelshFile: async () => ({ file_id: "f" }),
+        welshFile: async () => new Uint8Array(),
         putMemory: async () => null,
         sessionsStream: async () => new Response("", { status: 200 })
       },
@@ -335,6 +389,9 @@ describe("runAssistantSupervisor", () => {
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
       putLookup: async () => null,
+      putWelsh: async () => null,
+      putWelshFile: async () => ({ file_id: "f" }),
+      welshFile: async () => new Uint8Array(),
       putMemory: async (_id: string, body: unknown) => {
         attempts.push(body);
         return await held;
@@ -381,6 +438,9 @@ describe("runAssistantSupervisor", () => {
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
       putLookup: async () => null,
+      putWelsh: async () => null,
+      putWelshFile: async () => ({ file_id: "f" }),
+      welshFile: async () => new Uint8Array(),
       putMemory: async () => null,
       sessionsStream: async () => new Response("", { status: 200 })
     };
@@ -424,6 +484,9 @@ describe("runAssistantSupervisor", () => {
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
       putLookup: async () => null,
+      putWelsh: async () => null,
+      putWelshFile: async () => ({ file_id: "f" }),
+      welshFile: async () => new Uint8Array(),
       putMemory: async () => null,
       sessionsStream: async (_id: string, opts: { signal?: AbortSignal } = {}): Promise<Response> => {
         opens += 1;
@@ -470,6 +533,9 @@ describe("runAssistantSupervisor", () => {
       conversations: async () => ({ conversations: [] }),
       putUploads: async () => null,
       putLookup: async () => null,
+      putWelsh: async () => null,
+      putWelshFile: async () => ({ file_id: "f" }),
+      welshFile: async () => new Uint8Array(),
       putMemory: async () => null,
       sessionsStream: async () => new Response("event: wake\ndata: {oops\n\nevent: close\ndata: nope\n\nevent: reconnect\ndata: {}\n\n", { status: 200 })
     };

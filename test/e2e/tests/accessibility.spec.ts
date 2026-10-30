@@ -165,6 +165,24 @@ test.describe("accessibility @nightly", () => {
   });
 
   /**
+   * The Assistant's Welsh page, as it renders before any job has answered: the service picker, the tasks and the
+   * catalogue search. Gated on the Assistant being on, as the new-chat screen above is; without a pod the page says its
+   * assistant is starting, which is part of what is audited.
+   */
+  test("should raise no WCAG A or AA violations on the Assistant's Welsh page @nightly @a11y", async ({ page, request }) => {
+    await connectForChat(request, PERSONA);
+    const response = await page.goto("/assistant/welsh");
+    // Skipped only where the deployment has the Assistant off (VIRTUAL_AGENTS_ENABLED "false" answers 404), as the
+    // new-chat audit above is; it runs unchanged wherever the flag is on.
+    test.skip(response?.status() === 404, "the Assistant is off on this deployment");
+    expect(response?.status()).toBe(200);
+
+    await expect(page.getByRole("heading", { name: "Welsh translations" })).toBeVisible();
+    await expect(page.getByLabel("English or Welsh")).toBeVisible();
+    await expectNoViolations(page);
+  });
+
+  /**
    * A chat that is a Claude Code session on the person's own computer, which is the one conversation a deployment can
    * show without a pod: the session is already running elsewhere, so registering one is all this needs.
    *

@@ -31,7 +31,9 @@ export const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Ex
   assistant_stop: [{ type: "assistant_stop", conversation_id: "c-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_uploads: [{ type: "assistant_uploads", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
   assistant_lookup: [{ type: "assistant_lookup", lookup_id: "l-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
-  assistant_lookup_answered: [{ type: "assistant_lookup_answered", lookup_id: "l-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }]
+  assistant_lookup_answered: [{ type: "assistant_lookup_answered", lookup_id: "l-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
+  assistant_welsh: [{ type: "assistant_welsh", job_id: "w-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }],
+  assistant_welsh_answered: [{ type: "assistant_welsh_answered", job_id: "w-a", virtual_agent_id: "va-a", owner_oid: "oid-a" }]
 };
 
 /** Every type that crosses pods, in the order the samples are written. */

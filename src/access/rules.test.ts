@@ -30,6 +30,7 @@ import {
   canSuggestAgent,
   canSuggestPerson,
   canUseCredentialRoutes,
+  canUseWelsh,
   canViewAgent,
   canViewConversation,
   canViewSharedConversation,
@@ -883,6 +884,18 @@ describe("tagRefusal", () => {
   it("should refuse an agent tagging itself, and not the same agent in a person's post", () => {
     expect(tagRefusal(TARGET.id, TARGET)).toBe("itself");
     expect(tagRefusal(null, TARGET)).toBeUndefined();
+  });
+});
+
+describe("the Welsh rule", () => {
+  // A job opens pull requests and edits Jira stories with the owner's own sign-ins, so nobody else may run one, and no
+  // share of a chat of theirs reaches it.
+  it("should let only the owner run a Welsh job through their own assistant", () => {
+    expect(canUseWelsh(OWNER, { ownerOid: OWNER })).toBe(true);
+  });
+
+  it.each(EVERYONE_ELSE)("should refuse %s a Welsh job through somebody else's assistant", (_who, oid) => {
+    expect(canUseWelsh(oid, { ownerOid: OWNER })).toBe(false);
   });
 });
 

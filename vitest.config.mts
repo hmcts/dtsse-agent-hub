@@ -61,6 +61,7 @@ export default defineConfig({
         "src/assistant/confluence-store.ts",
         "src/assistant/local-sweep.ts",
         "src/assistant/lookup-store.ts",
+        "src/assistant/welsh-store.ts",
         "src/assistant/model-access-store.ts",
         "src/assistant/export-default-store.ts",
         "src/assistant/fork-store.ts",

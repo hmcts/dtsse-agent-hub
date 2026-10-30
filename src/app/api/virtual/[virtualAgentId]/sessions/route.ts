@@ -5,6 +5,7 @@ import { sessionsReportBody } from "@/assistant/schemas";
 import { sessionStream } from "@/assistant/session-stream";
 import { pendingWake, pendingWakes, reportSessions } from "@/assistant/store";
 import { pendingUploadDeletions } from "@/assistant/upload-disk";
+import { pendingWelsh } from "@/assistant/welsh-store";
 import { RECONNECT_FRAME } from "@/realtime/agent-stream";
 import { realtime } from "@/realtime/process";
 import { openSseStream, SSE_HEADERS } from "@/realtime/sse";
@@ -14,7 +15,7 @@ import { prisma } from "@/store/prisma";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** The virtual agent's conversation wakes and closes, and its owner's lookups, counted against its owner's agent streams. */
+/** The virtual agent's conversation wakes and closes, and its owner's lookups and Welsh jobs, counted against its owner's agent streams. */
 export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgent, request }) => {
   const { hub, listener } = realtime();
   const release = streamLimits().agent.take(virtualAgent.ownerOid);
@@ -31,7 +32,8 @@ export const GET = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgen
       wakes: () => pendingWakes(prisma, virtualAgent.id),
       wake: (conversationId) => pendingWake(prisma, virtualAgent.id, conversationId),
       deletions: () => pendingUploadDeletions(prisma, virtualAgent.id),
-      lookup: (lookupId) => pendingLookup(prisma, virtualAgent.id, lookupId)
+      lookup: (lookupId) => pendingLookup(prisma, virtualAgent.id, lookupId),
+      welsh: (jobId) => pendingWelsh(prisma, virtualAgent.id, jobId)
     })
   });
   return new Response(body, { headers: SSE_HEADERS });

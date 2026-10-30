@@ -19,7 +19,7 @@ describe("CLIENT_FEATURES", () => {
   // an assertion below, which the per-name list cannot, and which is how this file came to claim a standard it did
   // not meet.
   it("should hold every feature this build claims, so a name dropped in a merge fails here", () => {
-    expect(CLIENT_FEATURES).toHaveLength(8);
+    expect(CLIENT_FEATURES).toHaveLength(9);
   });
 
   /**
@@ -37,7 +37,7 @@ describe("CLIENT_FEATURES", () => {
    * what is withheld is a reassurance: the Model section tells the person their choice waits for the next start,
    * which is wrong for a pod running this build.
    */
-  it.each(["attachments", "files", "lookups", "memory", "memory-anon", "model", "model-alias", "stop"])("should claim %s", (feature) => {
+  it.each(["attachments", "files", "lookups", "memory", "memory-anon", "model", "model-alias", "stop", "welsh"])("should claim %s", (feature) => {
     expect(CLIENT_FEATURES).toContain(feature);
   });
 });

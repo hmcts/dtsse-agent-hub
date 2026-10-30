@@ -61,10 +61,20 @@ describe("HUB_EVENT_TYPES", () => {
   // listener, so the page just never updates. The samples record enumerates the hub's union at runtime, so a new
   // member of it fails here as well as at the type-level check in hub-client.ts.
   it("should subscribe to every event that crosses pods, and to the resync the other two arrive as", () => {
-    // `grant` and `credential` arrive as `resync`; `assistant_stop`, `assistant_uploads` and the lookups reach no browser at all,
-    // all of them being instructions to a pod. `tagged_post` reaches none either: it is how one agent's stream picks
-    // out a post of its own, and the browser is sent that post as the `post` beside it.
-    const unframed: string[] = ["grant", "credential", "tagged_post", "assistant_stop", "assistant_uploads", "assistant_lookup", "assistant_lookup_answered"];
+    // `grant` and `credential` arrive as `resync`; `assistant_stop`, `assistant_uploads`, the lookups and the Welsh jobs
+    // reach no browser at all, all of them being instructions to a pod. `tagged_post` reaches none either: it is how one
+    // agent's stream picks out a post of its own, and the browser is sent that post as the `post` beside it.
+    const unframed: string[] = [
+      "grant",
+      "credential",
+      "tagged_post",
+      "assistant_stop",
+      "assistant_uploads",
+      "assistant_lookup",
+      "assistant_lookup_answered",
+      "assistant_welsh",
+      "assistant_welsh_answered"
+    ];
     const frames = NOTIFIED_EVENT_TYPES.filter((type) => !unframed.includes(type));
 
     expect(new Set(HUB_EVENT_TYPES)).toEqual(new Set([...frames, "resync"]));

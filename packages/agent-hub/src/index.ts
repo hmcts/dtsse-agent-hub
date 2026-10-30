@@ -120,6 +120,7 @@ export {
   createAssistantSupervisor,
   createLookupRunner,
   createTmux,
+  createWelshRunner,
   DEFAULT_IDLE_MINUTES,
   DEFAULT_MAX_SESSIONS,
   EXIT_GRACE_MS,

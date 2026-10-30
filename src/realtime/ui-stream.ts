@@ -167,6 +167,10 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     case "assistant_lookup":
     case "assistant_lookup_answered":
       return undefined;
+    // The same for a Welsh job: the Welsh page reads its own job back.
+    case "assistant_welsh":
+    case "assistant_welsh_answered":
+      return undefined;
     case "resync":
       return RESYNC;
   }
