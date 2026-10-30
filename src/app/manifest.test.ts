@@ -7,7 +7,7 @@ describe("the web app manifest", () => {
       name: "CFT Workspace",
       start_url: "/assistant",
       display: "standalone",
-      icons: [expect.objectContaining({ src: "/assistant/icon.svg" })]
+      icons: expect.arrayContaining([expect.objectContaining({ src: "/pwa-icon/512.png", purpose: "any" }), expect.objectContaining({ purpose: "maskable" })])
     });
   });
 });
