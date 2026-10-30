@@ -717,13 +717,13 @@ describe("ChatView product", () => {
       <ChatView
         jira={NO_JIRA}
         viewerOid={VIEWER}
-        view={conversation({ product: "sscs", productLabel: "SSCS (Social Security and Child Support)" })}
+        view={conversation({ product: "sscs", productLabel: "Social Security and Child Support (SSCS)" })}
         templates={TEMPLATES}
         actions={actions()}
       />
     );
 
-    const drawn = screen.getAllByText("SSCS (Social Security and Child Support)").filter((node) => node.tagName !== "OPTION");
+    const drawn = screen.getAllByText("Social Security and Child Support (SSCS)").filter((node) => node.tagName !== "OPTION");
 
     expect(drawn).toHaveLength(1);
     expect((screen.getByRole("combobox", { name: "Product" }) as HTMLSelectElement).value).toBe("sscs");

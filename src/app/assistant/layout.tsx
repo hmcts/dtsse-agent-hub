@@ -9,7 +9,7 @@ import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "HMCTS Assistant",
+  title: "CFT Workspace",
   description: "Ask for help with user stories, research, analysis and prototypes"
 };
 

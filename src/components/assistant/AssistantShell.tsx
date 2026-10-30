@@ -218,7 +218,7 @@ export function AssistantShell({
         >
           <div className="flex items-center gap-2.5 px-4 pb-3 pt-4">
             <Mark />
-            <span className="text-sm font-semibold">HMCTS Assistant</span>
+            <span className="text-sm font-semibold">CFT Workspace</span>
             <button
               type="button"
               onClick={() => setOpen(false)}
@@ -240,21 +240,6 @@ export function AssistantShell({
                 +
               </span>
               New chat
-            </Link>
-            {/* The way to chats that are not the person's own: those shared with them and those they have shared. The
-                list is its own page, outside this frame, so it is a link rather than a row of the list below. */}
-            <Link
-              href="/assistant/shared"
-              aria-label="Shared chats"
-              title="Shared chats"
-              className="flex w-[44px] shrink-0 items-center justify-center self-stretch rounded-[10px] border border-asst-strong text-asst-muted hover:bg-asst-hover hover:text-asst-text"
-            >
-              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className="h-[18px] w-[18px]">
-                <circle cx="4" cy="8" r="2" />
-                <circle cx="12" cy="3.5" r="2" />
-                <circle cx="12" cy="12.5" r="2" />
-                <path d="M5.8 7 10.2 4.5M5.8 9l4.4 2.5" />
-              </svg>
             </Link>
             {/* The Welsh page, a business analyst's tools for a service's Welsh: its own page too, so a link. */}
             <Link
