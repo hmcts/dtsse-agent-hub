@@ -12,6 +12,7 @@ import { requireVirtualAgent } from "../virtual-agent.ts";
 import { atlassianLogin } from "./atlassian.ts";
 import { cacheSync } from "./cache-sync.ts";
 import { readStdinText, runCredentialCommand } from "./credentials.ts";
+import { configureKubeContexts } from "./kube.ts";
 import { EXIT_FATAL, EXIT_NO_CREDENTIAL, FatalError, isVirtualPhase, PHASES, say } from "./phases.ts";
 import { azureLogin, claudeLogin, GITHUB_SIGN_IN_GAP_MS, githubLogin, run } from "./sign-in.ts";
 
@@ -22,7 +23,10 @@ export const VIRTUAL_USAGE = `usage: ${CLI} virtual <command>
                               restore the stored Azure sign-in, or relay a device-code sign-in. With
                               --restore-only, never relay; with --if-requested, relay one only when the owner
                               has asked for it from their settings. Either exits ${EXIT_NO_CREDENTIAL} when Azure stays
-                              unconnected
+                              unconnected. Configures the kube contexts after a sign-in that worked
+  kube-contexts               write the kubeconfig for the pod's own cluster and both AAT clusters, on the
+                              owner's Azure sign-in, and select the pod's own; exit ${EXIT_NO_CREDENTIAL} when no cluster
+                              answered, which is what an owner with no AKS access gets
   github-login                relay GitHub device-code sign-ins and store the token; exit ${EXIT_NO_CREDENTIAL} when every
                               code was shown to the owner and none completed, which asking again will not fix
   claude-login                relay a Claude sign-in (own licence) and store the token
@@ -72,8 +76,17 @@ export async function runVirtual(
       }
       case "azure-login": {
         const mode = rest.includes("--restore-only") ? "restore" : rest.includes("--if-requested") ? "requested" : "relay";
-        return (await azureLogin({ api: hub(), env, mode })) === "not-connected" ? EXIT_NO_CREDENTIAL : 0;
+        if ((await azureLogin({ api: hub(), env, mode })) === "not-connected") {
+          return EXIT_NO_CREDENTIAL;
+        }
+        // The kube contexts are made of the sign-in that just succeeded, so they are remade whenever it is, and an
+        // owner who connects Azure later gets them without a restart. Never fatal: `az` is what the sign-in was
+        // for, and an owner with no AKS access is the ordinary case rather than a failed boot.
+        await configureKubeContexts({ env });
+        return 0;
       }
+      case "kube-contexts":
+        return (await configureKubeContexts({ env })) === "not-configured" ? EXIT_NO_CREDENTIAL : 0;
       case "github-login":
         return (await githubLogin({ api: hub(), env })) === "not-signed-in" ? EXIT_NO_CREDENTIAL : 0;
       case "claude-login":
