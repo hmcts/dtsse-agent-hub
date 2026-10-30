@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { clientSupports } from "@/agents/client-features";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
@@ -296,7 +296,7 @@ export function ChatView({
   const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
   const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
   // Not part of `doing`: background work carries on after the session goes idle, so it has to show when nothing else does.
-  const background = status === "offline" ? 0 : backgroundHelpers(live.items);
+  const background = useMemo(() => (status === "offline" ? 0 : backgroundHelpers(live.items)), [status, live.items]);
   /**
    * Both halves of "there is something to stop, and stopping it will work".
    *
