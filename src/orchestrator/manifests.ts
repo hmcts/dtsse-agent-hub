@@ -90,7 +90,7 @@ export function plugins(agent: Pick<ClaimedAgent, "plugins">): string[] {
 }
 
 /**
- * How many HMCTS Assistant conversation sessions a pod runs at once beside its own, by size.
+ * How many CFT Workspace conversation sessions a pod runs at once beside its own, by size.
  *
  * **A session costs about 0.65Gi of anonymous memory, and bursts past four CPUs on its own.** The memory figure is
  * the drop in the container cgroup's `memory.stat` `anon` when a preview pod went from two sessions to one — 0.64Gi,

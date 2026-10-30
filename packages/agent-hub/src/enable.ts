@@ -117,7 +117,7 @@ export async function enableSession(
   }
   const hub = api ?? createApi();
   const { agent, meta } = await registerAgent(hub, sid, { cwd, env });
-  // An HMCTS Assistant conversation is one person's chat, not a session on a repo, so it follows no topics of its own.
+  // A CFT Workspace conversation is one person's chat, not a session on a repo, so it follows no topics of its own.
   const wanted = [...new Set([...(conversationId(env) ? [] : autoTopics(meta)), ...topics])];
   let subscribed = wanted;
   if (wanted.length) {

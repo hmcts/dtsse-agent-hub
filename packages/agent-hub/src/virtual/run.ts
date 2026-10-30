@@ -36,7 +36,7 @@ export const VIRTUAL_USAGE = `usage: ${CLI} virtual <command>
                               change, refreshing twg when due (every 10 min)
   git-identity                set the global git user.name and user.email (and push/init defaults)
   watch-ports                 report the ports listening in the pod to agent-hub when they change (every 5s)
-  assistant-supervisor        beside the main session: run one Claude session per HMCTS Assistant conversation
+  assistant-supervisor        beside the main session: run one Claude session per CFT Workspace conversation
                               the hub wakes, in tmux session c-<first 8 of its id>, and stop the idle ones
   credential get <kind>       print a stored credential (exit ${EXIT_NO_CREDENTIAL} if there is none)
   credential put <kind>       store a credential read from stdin

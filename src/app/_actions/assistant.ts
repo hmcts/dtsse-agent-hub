@@ -39,13 +39,13 @@ import { type ActionResult, runAction, text } from "@/web/action";
 import { assistantChatGate } from "@/web/data";
 
 /**
- * The HMCTS Assistant's writes, each for the signed-in person's own conversations only: `findConversation` reports
+ * The CFT Workspace's writes, each for the signed-in person's own conversations only: `findConversation` reports
  * anyone else's as missing. A message is an ordinary direct message to the conversation's agent, through the same
  * `directAsPerson` as the hub's composer, followed by a wake when no session is running for it.
  */
 
 // The Assistant runs on a virtual agent, so it is available exactly where they are.
-const OFF: { ok: false; error: string } = { ok: false, error: "the HMCTS Assistant is not available on this deployment" };
+const OFF: { ok: false; error: string } = { ok: false, error: "the CFT Workspace is not available on this deployment" };
 
 const MISSING: { ok: false; error: string } = { ok: false, error: "that conversation no longer exists" };
 

@@ -46,7 +46,7 @@
   }
 }
 
-/* The HMCTS Assistant's own theme, from its prototype: cool greys with one teal accent, dark or light. Each colour is
+/* The CFT Workspace's own theme, from its prototype: cool greys with one teal accent, dark or light. Each colour is
  * the three bare oklch components held in a CSS variable set by `.asst-theme` below, so `oklch()` has to wrap the
  * variable rather than the variable hold a colour. `@theme inline` is what makes that work: it writes the `oklch(…)`
  * into each utility instead of a `var(--color-asst-…)` reference, so the components are substituted on the element
@@ -216,7 +216,7 @@ body {
 /* END: printing an Assistant document */
 
 /*
- * The HMCTS Assistant's themes. Dark unless the person chose light, or chose to follow their system and it is light.
+ * The CFT Workspace's themes. Dark unless the person chose light, or chose to follow their system and it is light.
  * `data-theme` is the person's choice, from the `asst_theme` cookie; with none, the system decides.
  */
 .asst-theme {

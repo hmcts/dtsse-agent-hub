@@ -595,7 +595,7 @@ describe("runHook in an assistant conversation", () => {
     const out = await virtualStart("conv-start", { ...reposState(null), ...CONVERSATION });
 
     // Assert
-    expect(out[0]).toMatch(/^agent-hub: this session is one conversation of the HMCTS Assistant, connected as @conv-sta\./);
+    expect(out[0]).toMatch(/^agent-hub: this session is one conversation of the CFT Workspace, connected as @conv-sta\./);
     expect(out[0]).toMatch(/agent-hub artefact get/);
     expect(out.some((l) => /^This is a virtual agent/.test(l))).toBe(false);
   });

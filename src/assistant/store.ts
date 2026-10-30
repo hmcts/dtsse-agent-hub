@@ -14,7 +14,7 @@ import { SEARCH_LIMIT, SNIPPET_MAX_WORDS, SNIPPET_MIN_WORDS, searchTerms, visibl
 import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
 
 /**
- * The HMCTS Assistant: each person's one assistant virtual agent, and its conversations.
+ * The CFT Workspace: each person's one assistant virtual agent, and its conversations.
  *
  * A conversation's agent is created with it, offline and with a session id the hub chose, so a message can queue for
  * it before any session runs. The pod's supervisor starts a session under that id when the conversation is woken,

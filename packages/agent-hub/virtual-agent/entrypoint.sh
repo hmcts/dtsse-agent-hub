@@ -3,7 +3,7 @@
 # gh is signed in. Restores the owner's stored Azure sign-in, starts the optional Azure and Atlassian sign-ins and
 # the workspace's own clone step in the background, sets up Claude Code for the model route, reports the web
 # servers listening in the pod, and keeps Claude running in tmux session "claude" until SIGTERM. Beside it, it
-# keeps the conversation supervisor running, which runs one Claude per HMCTS Assistant conversation in tmux
+# keeps the conversation supervisor running, which runs one Claude per CFT Workspace conversation in tmux
 # sessions "c-…".
 #
 # This file is the pod's runtime and ships with the client, so a pod gets it from the package it boots on rather
@@ -831,7 +831,7 @@ start_claude() {
     tmux new-session -d -s claude -x 220 -y 50 -c "$WS" "$launch"
 }
 
-# The conversation supervisor starts one Claude per HMCTS Assistant conversation that the hub wakes,
+# The conversation supervisor starts one Claude per CFT Workspace conversation that the hub wakes,
 # beside the main session, and is restarted with the same backoff as Claude. Monitor mode gives it its
 # own process group, so SIGTERM stops the restart loop with it.
 supervise() {

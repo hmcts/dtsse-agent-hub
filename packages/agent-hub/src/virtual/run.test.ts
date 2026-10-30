@@ -425,7 +425,7 @@ describe("runVirtual help", () => {
     expect(nothing.printed).toEqual([VIRTUAL_USAGE]);
     expect(VIRTUAL_USAGE).toContain("usage: agent-hub virtual <command>");
     expect(VIRTUAL_USAGE).toContain("Kinds: github, azure, claude, jenkins, atlassian, claude_md, git_identity.");
-    expect(VIRTUAL_USAGE).toMatch(/assistant-supervisor {8}beside the main session: run one Claude session per HMCTS Assistant conversation/);
+    expect(VIRTUAL_USAGE).toMatch(/assistant-supervisor {8}beside the main session: run one Claude session per CFT Workspace conversation/);
     expect(VIRTUAL_USAGE).toContain("AGENT_HUB_MAX_SESSIONS");
   });
 

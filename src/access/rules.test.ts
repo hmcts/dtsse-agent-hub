@@ -273,7 +273,7 @@ describe("replyRoute", () => {
   });
 });
 
-/** A pod conversation's agent: the HMCTS Assistant, which no post may tag. */
+/** A pod conversation's agent: the CFT Workspace, which no post may tag. */
 const POD_CHAT_AGENT: AgentRef = { id: "agent-conversation", ownerOid: OWNER, ownerOnly: true };
 
 /** A conversation of a session on the owner's own laptop: an ordinary agent, which a post may tag. */

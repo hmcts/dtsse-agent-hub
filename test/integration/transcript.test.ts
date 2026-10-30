@@ -273,7 +273,7 @@ describe("GET /api/ui/agents/{id}/transcript", () => {
 /**
  * A conversation of a session on somebody's own laptop, which has no pod. Its agent is one of the owner's ordinary
  * sessions: on their roster, in their messageable list, and taggable by anyone in a post. A pod conversation's
- * agent, the HMCTS Assistant, is in none of those places — not even for its owner, who reaches that chat through
+ * agent, the CFT Workspace, is in none of those places — not even for its owner, who reaches that chat through
  * the Assistant — and is here as the contrast.
  *
  * The local one is a real registration, so these read the rows the hub itself writes.

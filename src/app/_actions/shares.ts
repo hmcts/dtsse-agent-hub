@@ -13,7 +13,7 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * another owner's chat is shared with; `shareConversation` reports a conversation that is not theirs as missing.
  */
 
-const OFF: { ok: false; error: string } = { ok: false, error: "the HMCTS Assistant is not available on this deployment" };
+const OFF: { ok: false; error: string } = { ok: false, error: "the CFT Workspace is not available on this deployment" };
 
 export async function shareChat(input: { conversationId: unknown; recipientOid: unknown }): Promise<ActionResult<{ people: SharePerson[] }>> {
   return await runAction<{ people: SharePerson[] }>("share chat", async () => {

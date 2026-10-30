@@ -1,4 +1,4 @@
-// Files attached to an HMCTS Assistant message, end to end through Postgres: the browser's parts, the message that
+// Files attached to a CFT Workspace message, end to end through Postgres: the browser's parts, the message that
 // claims them, the frame that names them, the pod's fetch, and the sweep that is the backstop for all of it.
 //
 // The two assertions in "the hub's memory" are the point of the transport's design and not a formality: every byte of
@@ -1616,7 +1616,7 @@ describe("attaching on the new-chat screen", () => {
     const opened = await actions.openConversation({ product: "pcs" });
 
     // Assert
-    expect(opened).toEqual({ ok: false, error: "the HMCTS Assistant is not available on this deployment" });
+    expect(opened).toEqual({ ok: false, error: "the CFT Workspace is not available on this deployment" });
     expect(await prisma.assistantConversation.count()).toBe(0);
   });
 });

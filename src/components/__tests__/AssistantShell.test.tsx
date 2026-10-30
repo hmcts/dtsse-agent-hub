@@ -718,6 +718,6 @@ describe("AssistantChatsPanel", () => {
     const { AssistantChatsPanel } = await import("@/components/virtual-agents/AssistantChatsPanel");
     render(<AssistantChatsPanel chats={[]} />);
 
-    expect(screen.getByRole("link", { name: "HMCTS Assistant" }).getAttribute("href")).toBe("/assistant");
+    expect(screen.getByRole("link", { name: "CFT Workspace" }).getAttribute("href")).toBe("/assistant");
   });
 });

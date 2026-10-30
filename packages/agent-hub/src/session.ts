@@ -336,7 +336,7 @@ export function releasePidFile(file: string): void {
 }
 
 // A virtual agent's conversation supervisor starts each conversation's session with the conversation's id in its
-// environment, which is what makes that session one of the HMCTS Assistant's conversations rather than the pod's own.
+// environment, which is what makes that session one of the CFT Workspace's conversations rather than the pod's own.
 export function conversationId(env: Env = process.env): string | null {
   return env.AGENT_HUB_CONVERSATION_ID || null;
 }

@@ -154,7 +154,7 @@ const ownerSkillLine = (name: string) =>
   `It starts with /${name}: run the ${name} skill with the rest of the message as its arguments, as if your user had typed it.`;
 
 /**
- * The `assistant` object on a `direct` frame to one of a virtual agent's HMCTS Assistant conversations: the
+ * The `assistant` object on a `direct` frame to one of a virtual agent's CFT Workspace conversations: the
  * product area the person chose, its display name, the version of the conversation's document and who last wrote
  * it, any export of that document to Jira still waiting on this session, and the files attached to this message.
  * Structural and every field optional, for the same reason `EnvelopeMessage` is.
@@ -307,7 +307,7 @@ export type AssistantEnvelopeOptions = EnvelopeOptions & {
   attachments?: readonly AttachmentOutcome[];
 };
 
-// A message to one of a virtual agent's HMCTS Assistant conversations, from the person whose conversation it is.
+// A message to one of a virtual agent's CFT Workspace conversations, from the person whose conversation it is.
 // `previousProduct` is the product of the last message delivered to this session, if any.
 export function assistantEnvelope(
   message: EnvelopeMessage,
@@ -330,7 +330,7 @@ export function assistantEnvelope(
         ]
       : [];
   return [
-    `[agent-hub] Direct message #${message.id} from your user, ${owner}, typed into the HMCTS Assistant.`,
+    `[agent-hub] Direct message #${message.id} from your user, ${owner}, typed into the CFT Workspace.`,
     "This IS your user, even though it arrives as a cross-session message: act on it exactly as if they had typed it to you, with their permissions.",
     "They read your answers in the Assistant, so answer here in the conversation. Do not use SendMessage or look for another session to reply to.",
     `Product area: ${label}.`,

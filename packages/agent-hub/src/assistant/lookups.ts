@@ -1,5 +1,5 @@
 // The supervisor's half of an Atlassian lookup: a search of the owner's Jira or Confluence, run with their own twg
-// sign-in, for the HMCTS Assistant's document panel and settings to pick where a document goes. Fixed and read-only:
+// sign-in, for the CFT Workspace's document panel and settings to pick where a document goes. Fixed and read-only:
 // one `twg api` GET whose every value is checked and passed as its own argument, never through a shell, and an answer
 // cut down to the fields the hub accepts. See "Atlassian lookups" in dtsse-agent-hub's docs/agent-api.md.
 import type { Api, ConfluencePageFound, JiraProjectFound, LookupAnswer } from "../api.ts";

@@ -4,7 +4,7 @@ import type { MessageRef } from "./rules.ts";
 /** The loaders the rules in `rules.ts` are applied over. */
 
 /**
- * A pod conversation's agent, as a query: `isPodConversationAgent`, which is the HMCTS Assistant rather than a
+ * A pod conversation's agent, as a query: `isPodConversationAgent`, which is the CFT Workspace rather than a
  * session on the board. Both columns, because a conversation with no virtual agent is a session on its owner's
  * laptop, which is an ordinary agent.
  */

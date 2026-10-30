@@ -18,7 +18,7 @@ import { describeSize } from "./upload-report.ts";
 export const MEMORY_REPORT_INTERVAL_MINUTES = 10;
 
 /**
- * What one HMCTS Assistant conversation costs the pod: about 0.65Gi, the drop in the container cgroup's
+ * What one CFT Workspace conversation costs the pod: about 0.65Gi, the drop in the container cgroup's
  * `memory.stat` `anon` when a preview pod went from two sessions to one. The same subtraction of every process's
  * proportional set size puts it at 0.68Gi, and of `memory.current` at 0.69Gi. The session's own MCP servers —
  * playwright-mcp, azmcp, mcp-jenkins and their wrappers — are about half of it, `claude` itself under a third, and

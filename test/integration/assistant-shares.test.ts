@@ -14,7 +14,7 @@ import { call, jsonOf } from "./routes.ts";
 import { WAIT_MS } from "./waits.ts";
 
 /**
- * Sharing an HMCTS Assistant conversation, read-only, with people the owner names.
+ * Sharing a CFT Workspace conversation, read-only, with people the owner names.
  *
  * Alice owns the chat, Bob is named in a share of it, Carol is not. A share row is the only thing that names
  * anyone, so Carol is a stranger to this chat however much else she has: no agent of Alice's is hers to see and no

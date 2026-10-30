@@ -1,6 +1,6 @@
-# HMCTS Assistant: to-do
+# CFT Workspace: to-do
 
-The HMCTS Assistant (`/assistant`) is built across two repositories, each on a branch named `feat/hmcts-assistant`:
+The CFT Workspace (`/assistant`) is built across two repositories, each on a branch named `feat/hmcts-assistant`:
 
 - **`hmcts/dtsse-agent-hub`** (this repo): the UI, the stores, the routes and the contract (`docs/agent-api.md`, Conversations).
 - **`hmcts/cft-workspace`**: the pod side. That's the supervisor (`scripts/lib/agent-hub/assistant.mjs`), which every virtual agent's pod runs beside its own session (`.devcontainer/virtual-agent/entrypoint.sh`), the `artefact` CLI, the conversation envelope and `assistant-prompt.md`.

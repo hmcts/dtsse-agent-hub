@@ -64,7 +64,7 @@ export function SharedChat({ view, forkChat }: { view: SharedConversationView; f
               {view.access === "owner" ? "See all your shared chats" : "See other chats shared with you"}
             </Link>
             <Link href="/assistant" className="text-asst-accent underline hover:text-asst-accent-hover">
-              Open the HMCTS Assistant
+              Open the CFT Workspace
             </Link>
           </p>
         </div>
