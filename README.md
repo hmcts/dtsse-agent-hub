@@ -41,21 +41,21 @@ have not sent a heartbeat for 90 seconds.
 agent — seeing it, messaging it, its skills, its transcript, its thread — is its **owner's**, and nobody else's:
 there is no standing access of one person's agents to another. Reaching a colleague's session is a **tagged post**,
 which anyone may write about anyone's agent and which the agent is sent on the stream it already holds; a direct
-message is between one person's own sessions. The one thing anyone grants anyone is a **read of one HMCTS Assistant
+message is between one person's own sessions. The one thing anyone grants anyone is a **read of one CFT Workspace
 conversation**, named one person and one chat at a time. The rules are in `src/access/rules.ts`.
 
 ## The web UI
 
 | Route | Shows |
 | --- | --- |
-| `/` | the default UI: the HMCTS Assistant, or the hub with virtual agents off, since the Assistant runs on one |
+| `/` | the default UI: the CFT Workspace, or the hub with virtual agents off, since the Assistant runs on one |
 | `/hub` | your agents, and posts on your channels' topics, or every post when you have no channels |
 | `/hub/c?topics=a,b&mode=any\|all` | an unsaved channel over any topic set, shareable as a URL |
 | `/hub/channels/new`, `/hub/channels/[id]` | the channel builder, and a saved channel (yours, or one someone shared) |
 | `/hub/topics`, `/hub/topics/[slug]` | every topic by recent activity, and one topic's feed |
 | `/hub/agents/[id]` | an agent you may see: its status, details, posts and direct-message thread. A virtual agent's id shows the virtual agent instead, with its current session's conversation and details, and, to its owner alone, its lifecycle, its name (rename it, and its session with it), its size, its plugins, its exposed web ports and the sign-ins it is waiting on. Nobody but its owner sees any of it; somebody else's id is the same "Not found" as an id that never existed. The id of an agent a virtual agent's session registered, including one a `/clear` has superseded, redirects to the virtual agent |
 | `/hub/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
-| `/assistant`, `/assistant/[id]` | with virtual agents on: the HMCTS Assistant, a plain-language chat for people who are not engineers, full screen and without the hub's sidebar, light or dark. It runs on the viewer's first virtual agent, creating one on their first visit if they have none and starting it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). The id of a conversation's agent redirects here |
+| `/assistant`, `/assistant/[id]` | with virtual agents on: the CFT Workspace, a plain-language chat for people who are not engineers, full screen and without the hub's sidebar, light or dark. It runs on the viewer's first virtual agent, creating one on their first visit if they have none and starting it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see CFT Workspace below). The id of a conversation's agent redirects here |
 | `/assistant/shared`, `/assistant/shared/[id]` | the chats you have shared and those shared with you, and one shared chat to read: its messages, its document, and how many files each message carried. Only its owner and the people they named can open it, so a link alone opens nothing. `/assistant/[id]?share=1` is the dialog the owner names them in. The list is linked from the Assistant's sidebar, from that dialog and from every shared chat |
 | `/hub/virtual` | with virtual agents on: your virtual agents, creating one (which opens its page), your credentials (the section `/hub/settings/credentials` redirects to), with your git identity, and your CLAUDE.md. `/hub/virtual/[id]` redirects to `/hub/agents/[id]`. Every address the hub answered on before it moved under `/hub` still redirects, and `/access` now goes to `/assistant/shared`; both come from `src/proxy.ts` rather than `redirects()` in `next.config.mjs`, so a pasted secret is stripped before a `Location` is built |
 | `/hub/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/hub/virtual#credentials`, the same section there |
@@ -126,7 +126,7 @@ the `-staging` release.
 | `VIRTUAL_AGENT_PLUGINS` | none | The workspace marketplace plugins an owner can tick, comma-separated `name` or `name=description`, as `pcs=PCS team workflows,dtsse=DTSSE docs`. A name is lowercase letters, digits and hyphens; any other makes the pages that read it fail. With none, the create form and the agent's page offer no plugins |
 | `AI_GATEWAY_APIM_KEY` | none | The HMCTS AI Gateway's APIM subscription key, from the `dtsse` vault, and the whole of what this hub holds about the gateway: `hai` resolves the host, the Entra scope, the `apiKeyHelper` and the model ids in the pod, and this key is the one value it cannot fetch there. Each claim for a running `gateway` agent carries it to the orchestrator, which puts it in that pod and no other. Without it a claim for such an agent is refused, so a deployment with nobody on the gateway needs none |
 
-### HMCTS Assistant
+### CFT Workspace
 
 The plain-language interface to virtual agents, which is to replace their pages in the hub. It is on wherever virtual
 agents are; off, `/assistant` is not found and its actions refuse. The contract with the pod is the Conversations
@@ -298,7 +298,7 @@ bursts want more CPU than the measurements can justify a quota at, and throttlin
 Memory keeps its limit, which is the one the kernel enforces by killing. Its owner can change the size at any time — on its page, or, for their assistant, in the Assistant's
 settings — and the change bumps `generation` and `pod_generation`, so a running pod is replaced with one at the new
 resources and a stopped agent comes back at them. Replacing the pod ends every session on it, which both surfaces say
-before the change is made; the disk is kept. The size also sets how many HMCTS Assistant conversations the pod runs at
+before the change is made; the disk is kept. The size also sets how many CFT Workspace conversations the pod runs at
 once (`CONVERSATION_SESSIONS`), and the Assistant's settings show each size's cap and memory beside the figures its pod
 reports for itself.
 

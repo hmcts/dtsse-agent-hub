@@ -66,19 +66,19 @@ export const USAGE = `usage: ${CLI} <command> [args]
   send <agent> <text…>        send a direct message to an agent (id or name)
   reply <message-id> <text…>  reply to a message's author
   agents                      list agents you may message
-  artefact get [--json]       in an HMCTS Assistant conversation: print its shared markdown document
+  artefact get [--json]       in a CFT Workspace conversation: print its shared markdown document
                               (--json: with its title, version and who last wrote it)
   artefact put [--title T] [--base N]
                               replace the document with markdown read from stdin; --base is the version
                               it was edited from (read first when omitted), and a newer one is refused
   jira export <export-id> --project P --type T [--labels a,b]
-                              in an HMCTS Assistant conversation: create the Jira ticket for an export the
+                              in a CFT Workspace conversation: create the Jira ticket for an export the
                               user asked for with twg, signing in first if it is not, and report it; run
                               again for the same export, it reports the ticket already made
   jira report <export-id> --key K | --error E
                               report the Jira ticket made for an export by hand, or why it could not be made
   confluence export <export-id> --space-id S --parent-id P
-                              in an HMCTS Assistant conversation: publish the document as a new Confluence
+                              in a CFT Workspace conversation: publish the document as a new Confluence
                               page under page P for an export the user asked for, with twg, signing in first
                               if it is not, and report it; run again for the same export, it reports the page
                               already made
@@ -619,7 +619,7 @@ const artefact: Command = async (cli, argv) => {
   // Only a conversation's agent has a document, so a 404 here is the session, not a missing agent.
   const notConversation = (e: unknown): never => {
     if (e instanceof ApiError && e.status === 404) {
-      throw new Error("this session is not an HMCTS Assistant conversation, so it has no document");
+      throw new Error("this session is not a CFT Workspace conversation, so it has no document");
     }
     throw e;
   };
@@ -672,7 +672,7 @@ const WORD_RE = /^[A-Za-z0-9_-]{1,64}$/;
 // Only a conversation's agent has a document and an export, so a 404 is the session, not a missing agent.
 function noExport(e: unknown): never {
   if (e instanceof ApiError && e.status === 404) {
-    throw new Error("this session is not an HMCTS Assistant conversation, so it has no Jira export");
+    throw new Error("this session is not a CFT Workspace conversation, so it has no Jira export");
   }
   throw e;
 }
@@ -756,7 +756,7 @@ const jira: Command = async (cli, argv) => {
 // Only a conversation's agent has a document and an export, so a 404 is the session, not a missing agent.
 function noConfluenceExport(e: unknown): never {
   if (e instanceof ApiError && e.status === 404) {
-    throw new Error("this session is not an HMCTS Assistant conversation, so it has no Confluence export");
+    throw new Error("this session is not a CFT Workspace conversation, so it has no Confluence export");
   }
   throw e;
 }

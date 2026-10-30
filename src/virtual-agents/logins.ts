@@ -209,7 +209,7 @@ async function leaveAwaitingLogin(tx: Database, virtualAgent: VirtualAgentRow, d
  * dead code on the owner's screen into something that says so.
  *
  * A sign-in already completed is left alone and answered `204`. Two of a pod's sessions can relay a sign-in of the
- * same kind at once — the HMCTS Assistant runs one session per conversation and they share one `twg` config — and
+ * same kind at once — the CFT Workspace runs one session per conversation and they share one `twg` config — and
  * the loser reporting its own code expired must not un-complete the winner's working sign-in.
  */
 export async function failLogin(

@@ -157,7 +157,7 @@ export interface AgentRow {
   status: AgentStatus;
   /** The virtual agent whose session registered it, if any. */
   virtualAgentId: string | null;
-  /** A pod conversation's agent: the HMCTS Assistant, which no post may tag. */
+  /** A pod conversation's agent: the CFT Workspace, which no post may tag. */
   ownerOnly: boolean;
   /** A local chat's agent: a session on somebody's own computer, whose chat is the one the hub titles itself. */
   localConversation: boolean;

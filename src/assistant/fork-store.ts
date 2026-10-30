@@ -16,7 +16,7 @@ import { PART_BYTES, partCount, storedNameOf } from "./uploads.ts";
 import { UNTITLED } from "./views.ts";
 
 /**
- * Forking an HMCTS Assistant conversation: the owner offers it to people they name, one at a time, and each of them
+ * Forking a CFT Workspace conversation: the owner offers it to people they name, one at a time, and each of them
  * can take their own copy and carry on with it in their own Assistant.
  *
  * The offer is a row naming one person, as a share is, so it is chosen the same way and revoked the same way: the

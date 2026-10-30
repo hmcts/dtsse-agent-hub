@@ -70,7 +70,7 @@ describe("pageTitle, pageBody and datedTitle", () => {
     // Act & Assert
     expect(pageTitle(DOC)).toBe("Case flags guide");
     expect(pageTitle({ title: null, markdown: "Intro\n\n## Flags for caseworkers\n" })).toBe("Flags for caseworkers");
-    expect(pageTitle({ title: "  ", markdown: "" })).toBe("HMCTS Assistant document");
+    expect(pageTitle({ title: "  ", markdown: "" })).toBe("CFT Workspace document");
     expect(pageBody(DOC.markdown, "Case flags guide")).toBe("How flags work.");
     expect(pageBody("# Something else\n\nBody", "Case flags guide")).toBe("# Something else\n\nBody");
   });

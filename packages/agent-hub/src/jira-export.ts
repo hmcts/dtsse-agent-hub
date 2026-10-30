@@ -1,4 +1,4 @@
-// `agent-hub jira export`: everything an HMCTS Assistant conversation's session does to turn its document into a
+// `agent-hub jira export`: everything a CFT Workspace conversation's session does to turn its document into a
 // Jira ticket, as one command. The session still runs it, so the ticket is made with the owner's own twg sign-in and
 // they are its reporter; what this saves is a model turn per step. Each step the session runs as its own tool call
 // is another round trip to the model, which is far slower than the twg and hub calls it wraps. See
@@ -20,7 +20,7 @@ export const MAX_JIRA_ERROR = 300;
 export const JIRA_BROWSE_URL = "https://hmcts.atlassian.net/browse/";
 // Jira refuses a summary over 255 characters.
 export const MAX_SUMMARY = 255;
-const FALLBACK_SUMMARY = "HMCTS Assistant document";
+const FALLBACK_SUMMARY = "CFT Workspace document";
 // Long enough for a slow Jira, short enough that a hung twg is reported well inside the hub's 15-minute timeout.
 const CREATE_TIMEOUT_MS = 120000;
 

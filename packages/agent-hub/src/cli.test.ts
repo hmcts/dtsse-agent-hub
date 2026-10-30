@@ -1445,7 +1445,7 @@ describe("artefact, in an assistant conversation", () => {
 
     // Assert
     expect(r.code).toBe(1);
-    expect(r.errors.join("\n")).toMatch(/not an HMCTS Assistant conversation/);
+    expect(r.errors.join("\n")).toMatch(/not a CFT Workspace conversation/);
   });
 
   it("should refuse the arguments the other action takes, and a --base that is not a version", async () => {
@@ -1674,7 +1674,7 @@ process.exit(2);
 
     // Assert
     expect(r.code).toBe(1);
-    expect(r.errors.join("\n")).toMatch(/not an HMCTS Assistant conversation, so it has no Jira export/);
+    expect(r.errors.join("\n")).toMatch(/not a CFT Workspace conversation, so it has no Jira export/);
   });
 });
 

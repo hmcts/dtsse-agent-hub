@@ -321,7 +321,7 @@ export type StoredAgent = {
   topics?: string[];
   pending_subscribe?: string[];
   handed_off_from?: string;
-  /** Set only for a pod's HMCTS Assistant conversation session, which registers with it. */
+  /** Set only for a pod's CFT Workspace conversation session, which registers with it. */
   conversation_id?: string;
 };
 

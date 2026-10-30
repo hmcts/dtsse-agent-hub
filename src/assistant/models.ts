@@ -1,5 +1,5 @@
 /**
- * The Claude models the HMCTS Assistant runs on. One choice per person, stored against them and sent to their pod in
+ * The Claude models the CFT Workspace runs on. One choice per person, stored against them and sent to their pod in
  * every wake and every message frame.
  *
  * The id is a bare family alias — `sonnet`, `opus` — and never a version. The version is pinned per family in the

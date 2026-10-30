@@ -17,7 +17,7 @@ import { firstPromptTitle, localTitle, messageTitle, PROMPT_CANDIDATES, TITLE_MA
 import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
 
 /**
- * The HMCTS Assistant: each person's one assistant virtual agent, and its conversations.
+ * The CFT Workspace: each person's one assistant virtual agent, and its conversations.
  *
  * A conversation's agent is created with it, offline and with a session id the hub chose, so a message can queue for
  * it before any session runs. The pod's supervisor starts a session under that id when the conversation is woken,
@@ -460,7 +460,7 @@ export async function createConversation(
   }
   const assistant = await findAssistant(prisma, ownerOid);
   if (assistant === undefined) {
-    throw new HttpError(409, "open the Assistant first, so it can be set up");
+    throw new HttpError(409, "open the CFT Workspace first, so it can be set up");
   }
   const title = messageTitle(request.title ?? "");
   return await prisma.$transaction(async (tx) => {

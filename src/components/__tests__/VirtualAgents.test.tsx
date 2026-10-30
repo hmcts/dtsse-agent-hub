@@ -470,7 +470,7 @@ describe("the plugins choice", () => {
       "Size",
       "Plugins",
       "Web servers",
-      "HMCTS Assistant chats",
+      "CFT Workspace chats",
       "Sign-ins",
       "GitHub"
     ]);

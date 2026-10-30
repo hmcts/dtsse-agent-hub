@@ -824,12 +824,12 @@ describe("EmptyChat attaching before the chat exists", () => {
   });
 
   it("should show the refusal on the chip and offer Try again when the conversation cannot be opened", async () => {
-    const acts = emptyActions({ open: vi.fn(async () => ({ ok: false as const, error: "the HMCTS Assistant is not available on this deployment" })) });
+    const acts = emptyActions({ open: vi.fn(async () => ({ ok: false as const, error: "the CFT Workspace is not available on this deployment" })) });
     newChat(acts);
 
     await choose(file("letter.pdf", 2048));
 
-    expect(chips()[0]?.textContent).toContain("the HMCTS Assistant is not available on this deployment");
+    expect(chips()[0]?.textContent).toContain("the CFT Workspace is not available on this deployment");
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 

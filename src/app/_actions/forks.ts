@@ -17,7 +17,7 @@ import { assistantChatGate } from "@/web/data";
  * someone else; the store reports either as a conversation that is missing.
  */
 
-const OFF: { ok: false; error: string } = { ok: false, error: "the HMCTS Assistant is not available on this deployment" };
+const OFF: { ok: false; error: string } = { ok: false, error: "the CFT Workspace is not available on this deployment" };
 
 export async function offerChatFork(input: { conversationId: unknown; recipientOid: unknown }): Promise<ActionResult<{ people: SharePerson[] }>> {
   return await runAction<{ people: SharePerson[] }>("offer chat fork", async () => {

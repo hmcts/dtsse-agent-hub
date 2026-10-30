@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Where the two UIs live. The HMCTS Assistant is the default UI, so `/` is it wherever it runs and the hub keeps its
+ * Where the two UIs live. The CFT Workspace is the default UI, so `/` is it wherever it runs and the hub keeps its
  * own pages under `/hub`. Every address the hub used to answer on still redirects, because `/hub/agents/{id}` and
  * `/hub/topics/{slug}` are pasted into chats and tickets.
  */

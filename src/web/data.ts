@@ -269,7 +269,7 @@ export async function agentRoute(viewer: Viewer, id: string): Promise<AgentRoute
   if (view.agent.virtualAgentId === null) {
     return { variant: "local", view };
   }
-  // A conversation's agent is a chat in the HMCTS Assistant, and is shown there rather than as a session.
+  // A conversation's agent is a chat in the CFT Workspace, and is shown there rather than as a session.
   const agent = await prisma.agent.findUnique({ where: { id: view.agent.id }, select: { assistantConversationId: true } });
   const conversationId = agent?.assistantConversationId ?? null;
   return { variant: "moved", to: conversationId === null ? agentPath(view.agent) : `/assistant/${conversationId}` };

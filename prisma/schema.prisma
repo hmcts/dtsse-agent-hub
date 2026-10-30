@@ -494,7 +494,7 @@ model VirtualAgentLogin {
   @@map("virtual_agent_login")
 }
 
-/// One HMCTS Assistant chat. Its agent is created with it, so messages queue before the pod starts a session for it.
+/// One CFT Workspace chat. Its agent is created with it, so messages queue before the pod starts a session for it.
 model AssistantConversation {
   id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   ownerOid          String    @map("owner_oid")

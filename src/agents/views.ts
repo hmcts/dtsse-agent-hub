@@ -74,7 +74,7 @@ export function byLiveness<A extends { status: AgentStatus; lastHeartbeatAt: str
 /** The viewer's own sessions, which is every agent they may see. */
 export async function visibleAgents(db: Database, oid: string): Promise<AgentCard[]> {
   const rows = await db.agent.findMany({
-    // A pod conversation's agent is shown in the HMCTS Assistant, not among the viewer's sessions. A laptop
+    // A pod conversation's agent is shown in the CFT Workspace, not among the viewer's sessions. A laptop
     // session's is a session they are working in, so it stays on the roster once it has a conversation too.
     where: { ownerOid: oid, NOT: POD_CONVERSATION_AGENT },
     select: CARD,

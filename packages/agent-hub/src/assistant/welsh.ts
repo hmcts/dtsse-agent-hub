@@ -1,4 +1,4 @@
-// The supervisor's half of a Welsh translation job for the HMCTS Assistant's Welsh page: one run of cft-workspace's
+// The supervisor's half of a Welsh translation job for the CFT Workspace's Welsh page: one run of cft-workspace's
 // `scripts/welsh`, as the owner, with their own GitHub and twg sign-ins. Fixed: every value in the frame is checked
 // again here and passed as its own argument, never through a shell, and the only program run is that script. No job
 // goes through a model, and none generates Welsh — the script takes it from the catalogue or a Welsh Language Unit

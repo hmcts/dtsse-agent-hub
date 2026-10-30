@@ -8,9 +8,9 @@ import type { ActionResult } from "@/web/action";
 export type ForkChatAction = (input: { conversationId: unknown }) => Promise<ActionResult<{ id: string }>>;
 
 /**
- * "Continue in my Assistant", on a chat its owner offered the viewer to fork: makes their own copy, or opens the one
+ * "Continue in my CFT Workspace", on a chat its owner offered the viewer to fork: makes their own copy, or opens the one
  * they already took. A button rather than a link for the first, because taking the copy is a write — to the viewer's
- * own Assistant, never to the chat on this page.
+ * own CFT Workspace, never to the chat on this page.
  */
 export function ForkButton({ conversationId, copyId, forkChat }: { conversationId: string; copyId: string | null; forkChat: ForkChatAction }) {
   const router = useRouter();
@@ -54,7 +54,7 @@ export function ForkButton({ conversationId, copyId, forkChat }: { conversationI
         onClick={() => void fork()}
         className="rounded-[9px] bg-asst-accent px-3 py-1.5 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-60"
       >
-        {pending ? "Copying" : "Continue in my Assistant"}
+        {pending ? "Copying" : "Continue in my CFT Workspace"}
       </button>
     </span>
   );

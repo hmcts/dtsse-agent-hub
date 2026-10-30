@@ -9,7 +9,7 @@ import { devIdentity } from "../../src/viewer/identity.ts";
 import { connectForChat, type Person, prisma, resetDatabase } from "./database.ts";
 
 /**
- * Forking an HMCTS Assistant conversation: Alice offers her chat to Bob, who takes his own copy into his own
+ * Forking a CFT Workspace conversation: Alice offers her chat to Bob, who takes his own copy into his own
  * Assistant and carries on there. Carol holds a plain read share of the chat, which makes her the right stranger to
  * the fork: as close to it as anyone can be without being offered it.
  */

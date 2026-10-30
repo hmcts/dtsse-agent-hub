@@ -638,7 +638,7 @@ export function createApi({
     },
     loginComplete: (id, kind, body = {}) => request<null>("POST", v(id, `login/${k(kind)}/complete`), body),
     loginFailed: (id, kind, body) => request<null>("POST", v(id, `login/${k(kind)}/failed`), body),
-    // A virtual agent's HMCTS Assistant conversations: wakes and closes on the sessions stream, and what its
+    // A virtual agent's CFT Workspace conversations: wakes and closes on the sessions stream, and what its
     // supervisor runs.
     sessionsStream: (id, opts) => openStream(v(id, "sessions"), opts),
     putSessions: (id, body) => request<null>("PUT", v(id, "sessions"), body),

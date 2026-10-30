@@ -64,7 +64,7 @@ export default async function SharedChatsPage() {
             reply, edit anything, or open files sent in the chat.
           </p>
           <p className="text-pretty text-sm text-asst-text">
-            If you let them fork it, they can copy the chat into their own Assistant and carry on there. Your original stays yours.
+            If you let them fork it, they can copy the chat into their own CFT Workspace and carry on there. Your original stays yours.
           </p>
         </div>
         <Chats label="Chats you have shared" chats={given} manage empty="You have not shared any of your chats." />

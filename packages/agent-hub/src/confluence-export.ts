@@ -1,4 +1,4 @@
-// `agent-hub confluence export`: everything an HMCTS Assistant conversation's session does to publish its document
+// `agent-hub confluence export`: everything a CFT Workspace conversation's session does to publish its document
 // as a new Confluence page, as one command. The session still runs it, so the page is created with the owner's own
 // twg sign-in and they are its author; what this saves is a model turn per step. See "Confluence export" under
 // Conversations in dtsse-agent-hub's docs/agent-api.md.
@@ -15,7 +15,7 @@ export const CONFLUENCE_ID_RE = /^[0-9]{1,20}$/;
 export const MAX_CONFLUENCE_ERROR = 300;
 // Confluence refuses a title over 255 characters.
 export const MAX_PAGE_TITLE = 255;
-const FALLBACK_TITLE = "HMCTS Assistant document";
+const FALLBACK_TITLE = "CFT Workspace document";
 const CREATE_TIMEOUT_MS = 120000;
 
 export type { RunResult } from "./virtual/sign-in.ts";
