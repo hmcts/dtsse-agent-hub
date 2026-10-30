@@ -38,6 +38,7 @@ import {
   canVirtualAgentStoreCredential,
   canWriteUpload,
   conversationAccess,
+  isLocalConversationAgent,
   isPodConversationAgent,
   MAX_PEOPLE_SUGGESTIONS,
   type MessageRef,
@@ -315,6 +316,19 @@ describe("isPodConversationAgent", () => {
     ["a local conversation's agent", "chat-1", null, false]
   ])("should answer for %s from the row alone", (_label, assistantConversationId, virtualAgentId, expected) => {
     expect(isPodConversationAgent({ assistantConversationId, virtualAgentId })).toBe(expected);
+  });
+});
+
+// The same four rows as above, so the two rules are seen to split them between them: a local chat's agent is the one row
+// the pod rule refuses that this one takes, and neither takes a session that belongs to no conversation.
+describe("isLocalConversationAgent", () => {
+  it.each<[string, string | null, string | null, boolean]>([
+    ["a session on a laptop", null, null, false],
+    ["a virtual agent's own pod session", null, "va-1", false],
+    ["a pod conversation's agent", "chat-1", "va-1", false],
+    ["a local conversation's agent", "chat-1", null, true]
+  ])("should answer for %s from the row alone", (_label, assistantConversationId, virtualAgentId, expected) => {
+    expect(isLocalConversationAgent({ assistantConversationId, virtualAgentId })).toBe(expected);
   });
 });
 
