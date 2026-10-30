@@ -27,13 +27,13 @@ WITH named AS (
            WHERE NOT p."redacted"
              AND p."message_id" IS NULL
              AND btrim(COALESCE(p."content"->>'text', '')) <> ''
-             AND p."content"->>'text' !~ '^\s*<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>)'
+             AND p."content"->>'text' !~ '^\s*(<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>|bash-input>|bash-stdout>|bash-stderr>|user-prompt-submit-hook>)|\[Request interrupted by user)'
            ORDER BY p."occurred_at", p."id"
            LIMIT 1) AS title
     FROM "assistant_conversation" c
    WHERE c."virtual_agent_id" IS NULL
      AND c."title_source" <> 'user'
-     AND c."title" ~ '^<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>)'
+     AND c."title" ~ '^(<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>|bash-input>|bash-stdout>|bash-stderr>|user-prompt-submit-hook>)|\[Request interrupted by user)'
 )
 UPDATE "assistant_conversation" c
    SET "title" = n.title,

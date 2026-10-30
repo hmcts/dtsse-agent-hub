@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isHarnessTurn } from "../transcripts/harness-turn.ts";
 import { firstPromptTitle, localTitle, messageTitle, type PromptEntry, TITLE_FROM_MESSAGE, TITLE_MAX } from "./titles.ts";
 
 function prompt(text: unknown, overrides: Partial<PromptEntry> = {}): PromptEntry {
@@ -87,5 +88,22 @@ describe("firstPromptTitle and the harness's own turns", () => {
 
   it("should keep a prompt that only mentions a tag further in", () => {
     expect(firstPromptTitle([prompt("why does <command-name> show up in titles?")])).toBe("why does <command-name> show up in titles?");
+  });
+});
+
+describe("isHarnessTurn", () => {
+  it.each([
+    "<command-name>/clear</command-name>",
+    "  \n<local-command-stdout></local-command-stdout>",
+    "<bash-input>ls</bash-input>",
+    "<user-prompt-submit-hook>x</user-prompt-submit-hook>",
+    "[Request interrupted by user]",
+    "<task-notification><status>completed</status></task-notification>"
+  ])("should recognise %s as written by the harness", (text) => {
+    expect(isHarnessTurn(text)).toBe(true);
+  });
+
+  it("should not recognise a prompt that only mentions a tag", () => {
+    expect(isHarnessTurn("why does <bash-input> appear?")).toBe(false);
   });
 });
