@@ -15,4 +15,4 @@ Each conversation has one shared markdown document, shown beside the chat in the
 
 ## Replying
 
-Reply in the conversation as you normally would. Your answer reaches them in the Assistant without you doing anything else: do not send it with `scripts/agent-hub reply`, SendMessage or any other tool.
+Reply in the conversation as you normally would. Your answer reaches them in the CFT Workspace chat app without you doing anything else: do not send it with `scripts/agent-hub reply`, SendMessage or any other tool.

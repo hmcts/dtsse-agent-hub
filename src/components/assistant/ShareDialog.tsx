@@ -26,7 +26,7 @@ import type { ActionResult } from "@/web/action";
 
 /**
  * `read` shares the chat to be read; `fork` offers it to be forked, which lets the people named read it on the same
- * page and take their own copy into their own Assistant. One dialog for both, because choosing a person, the list and
+ * page and take their own copy into their own CFT Workspace. One dialog for both, because choosing a person, the list and
  * the revocation are the same in each, and the two differ only in what the person named can do.
  */
 export type ShareMode = "read" | "fork";
@@ -46,7 +46,7 @@ const WORDS: Record<ShareMode, { title: string; who: string; can: string; nobody
     can: "can fork",
     nobody: "Nobody has been offered this chat to fork.",
     list: "Offered to",
-    link: "The link opens the chat for the people above, with a button to continue it in their own Assistant. Anyone else who is sent it sees nothing."
+    link: "The link opens the chat for the people above, with a button to continue it in their own CFT Workspace. Anyone else who is sent it sees nothing."
   }
 };
 
@@ -167,7 +167,7 @@ export function ShareDialog({
         {mode === "fork" ? (
           <p className="text-pretty text-[13px] text-asst-body">
             The people you name can read this chat and its document, and can take <strong className="font-semibold text-asst-text">their own copy</strong> of it
-            to carry on in their own Assistant.
+            to carry on in their own CFT Workspace.
           </p>
         ) : (
           <p className="text-pretty text-[13px] text-asst-body">

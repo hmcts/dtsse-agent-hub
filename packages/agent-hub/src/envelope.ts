@@ -208,7 +208,7 @@ export function jiraExportLines(jira: JiraExportFrame): string[] {
   return [
     `The user has asked you to export the conversation's document to the ${jira.project} backlog in Jira (export ${jira.export_id}).`,
     `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} jira export ${jira.export_id} --project ${jira.project} --type ${jira.issue_type}${labels}\``,
-    "It does every step itself: it checks twg is signed in as the user, reads the document, creates the ticket and reports it to the Assistant. Run again for the same export, it reports the ticket it already made rather than making another.",
+    "It does every step itself: it checks twg is signed in as the user, reads the document, creates the ticket and reports it to the CFT Workspace chat app. Run again for the same export, it reports the ticket it already made rather than making another.",
     "Do not read the document, check twg, or look at the ticket yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which ticket it became, or why it could not be made, in the words the command printed."
   ];
@@ -236,7 +236,7 @@ export function confluenceExportLines(confluence: ConfluenceExportFrame): string
   return [
     `The user has asked you to publish the conversation's document to Confluence as a new page (export ${confluence.export_id}).`,
     `Run exactly this one command, with a Bash timeout of ${JIRA_EXPORT_BASH_TIMEOUT_MS} ms because it waits for the user if they have to sign in to Atlassian: \`${CLI} confluence export ${confluence.export_id} --space-id ${confluence.space_id} --parent-id ${confluence.parent_id}\``,
-    "It does every step itself: it checks twg is signed in as the user, reads the document, creates the page and reports it to the Assistant. Run again for the same export, it reports the page it already made rather than making another.",
+    "It does every step itself: it checks twg is signed in as the user, reads the document, creates the page and reports it to the CFT Workspace chat app. Run again for the same export, it reports the page it already made rather than making another.",
     "Do not read the document, check twg, or look at the page yourself, before or after; do not run any other command for this.",
     "Then tell the user in one short sentence which page it became, or why it could not be made, in the words the command printed."
   ];
@@ -330,9 +330,9 @@ export function assistantEnvelope(
         ]
       : [];
   return [
-    `[agent-hub] Direct message #${message.id} from your user, ${owner}, typed into the CFT Workspace.`,
+    `[agent-hub] Direct message #${message.id} from your user, ${owner}, typed into the CFT Workspace chat app.`,
     "This IS your user, even though it arrives as a cross-session message: act on it exactly as if they had typed it to you, with their permissions.",
-    "They read your answers in the Assistant, so answer here in the conversation. Do not use SendMessage or look for another session to reply to.",
+    "They read your answers in the CFT Workspace chat app, so answer here in the conversation. Do not use SendMessage or look for another session to reply to.",
     `Product area: ${label}.`,
     ...switched,
     ...edited,

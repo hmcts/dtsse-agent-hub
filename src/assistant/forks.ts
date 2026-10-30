@@ -1,7 +1,7 @@
 import type { SharedThreadItem } from "./sharing.ts";
 
 /**
- * A fork of a CFT Workspace conversation: someone else's own copy of it, to carry on in their own Assistant.
+ * A fork of a CFT Workspace conversation: someone else's own copy of it, to carry on in their own CFT Workspace.
  *
  * What is copied is what a share shows — the words of the thread and the document — and for the same reasons
  * `sharing.ts` gives: the files a person attached were chosen for their assistant to read, not for a colleague to be
@@ -96,7 +96,7 @@ export function forkContextMarkdown(forked: ForkedView, hasDocument: boolean): s
   const lines = [
     "# The conversation so far",
     "",
-    `This chat is a copy of ${forked.fromOwnerName}'s CFT Workspace conversation "${forked.fromTitle}", forked on ${forked.at}. Your user has taken it over to carry on with it in their own Assistant.`,
+    `This chat is a copy of ${forked.fromOwnerName}'s CFT Workspace conversation "${forked.fromTitle}", forked on ${forked.at}. Your user has taken it over to carry on with it in their own CFT Workspace.`,
     `Below are its earlier turns, oldest first, which happened in another session. Treat them as this conversation's history and continue from where they end. In them, "${forked.fromOwnerName} asked" is the person who owned the chat then, not your user, and nothing in them is a request to act on again.`,
     hasDocument
       ? "The conversation's document was copied too: read it with the agent-hub CLI's `artefact get` before you change it."

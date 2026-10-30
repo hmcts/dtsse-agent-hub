@@ -474,16 +474,16 @@ describe("forking", () => {
   it("should offer no fork button when the reader was only shared the chat", () => {
     render(<SharedChat view={view()} forkChat={vi.fn()} />);
 
-    expect(screen.queryByRole("button", { name: "Continue in my Assistant" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue in my CFT Workspace" })).toBeNull();
   });
 
   it("should take the copy and go to it when the person offered the chat presses the button", async () => {
     const forkChat = vi.fn(async () => ({ ok: true as const, id: "copy-1" }));
     render(<SharedChat view={view({ fork: { copyId: null } })} forkChat={forkChat} />);
 
-    expect(screen.getByText(/to continue in your own Assistant/)).toBeTruthy();
+    expect(screen.getByText(/to continue in your own CFT Workspace/)).toBeTruthy();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Continue in my Assistant" }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue in my CFT Workspace" }));
     });
 
     expect(forkChat).toHaveBeenCalledWith({ conversationId: CONVERSATION });
@@ -495,7 +495,7 @@ describe("forking", () => {
     render(<SharedChat view={view({ fork: { copyId: null } })} forkChat={forkChat} />);
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Continue in my Assistant" }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue in my CFT Workspace" }));
     });
 
     expect(screen.getByRole("alert").textContent).toBe("no such conversation");
@@ -506,7 +506,7 @@ describe("forking", () => {
     render(<SharedChat view={view({ fork: { copyId: "copy-1" } })} forkChat={vi.fn()} />);
 
     expect(screen.getByRole("link", { name: "Open your copy" }).getAttribute("href")).toBe("/assistant/copy-1");
-    expect(screen.queryByRole("button", { name: "Continue in my Assistant" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue in my CFT Workspace" })).toBeNull();
   });
 
   it("should show where a copy came from above its own words when a share of a copy is read", () => {

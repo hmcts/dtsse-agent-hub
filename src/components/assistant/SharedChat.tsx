@@ -13,7 +13,7 @@ import { SharedItem } from "@/components/assistant/SharedItem";
  * even if a rule above it were wrong. It is also a snapshot — the thread as it stood when the page was read.
  *
  * The one control is the fork's, for someone the owner offered the chat to, and it writes nothing here either: it
- * makes the viewer their own copy in their own Assistant.
+ * makes the viewer their own copy in their own CFT Workspace.
  */
 
 function headline(view: SharedConversationView): string {
@@ -22,7 +22,7 @@ function headline(view: SharedConversationView): string {
   }
   return view.fork === null
     ? `Shared with you by ${view.ownerName}. You can read it only.`
-    : `Shared with you by ${view.ownerName}, to continue in your own Assistant if you want to.`;
+    : `Shared with you by ${view.ownerName}, to continue in your own CFT Workspace if you want to.`;
 }
 
 export function SharedChat({ view, forkChat }: { view: SharedConversationView; forkChat?: ForkChatAction }) {

@@ -426,7 +426,7 @@ export async function createConversation(
   }
   const assistant = await findAssistant(prisma, ownerOid);
   if (assistant === undefined) {
-    throw new HttpError(409, "open the Assistant first, so it can be set up");
+    throw new HttpError(409, "open the CFT Workspace first, so it can be set up");
   }
   const title = request.title?.trim().slice(0, TITLE_FROM_MESSAGE) || null;
   return await prisma.$transaction(async (tx) => {

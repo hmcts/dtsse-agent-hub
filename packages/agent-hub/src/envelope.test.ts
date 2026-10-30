@@ -241,7 +241,7 @@ describe("assistantEnvelope", () => {
     const text = assistantEnvelope({ id: "7", body: "hello" });
 
     // Assert
-    expect(text).toMatch(/^\[agent-hub\] Direct message #7 from your user, your user, typed into the CFT Workspace\.$/m);
+    expect(text).toMatch(/^\[agent-hub\] Direct message #7 from your user, your user, typed into the CFT Workspace chat app\.$/m);
     expect(text.split("\n")).toContain("Product area: not chosen.");
   });
 
