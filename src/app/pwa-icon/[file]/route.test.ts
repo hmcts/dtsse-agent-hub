@@ -16,3 +16,16 @@ describe("the installed app's icons", () => {
     expect((await ask(file)).status).toBe(404);
   });
 });
+
+describe("every icon the app points at", () => {
+  it("should be served, and be served without a session", async () => {
+    const { default: manifest } = await import("../../manifest.ts");
+    const { exempt } = await import("../../../auth/guard.ts");
+    const urls = [...manifest().icons!.map((icon) => icon.src), "/pwa-icon/180.png"];
+
+    for (const url of urls) {
+      expect(exempt(url), url).toBe(true);
+      expect((await ask(url.replace("/pwa-icon/", ""))).status, url).toBe(200);
+    }
+  });
+});

@@ -6,6 +6,7 @@
 // nothing to copy. The mark is white on the Assistant's dark background with the colours fixed: the browser-tab icon
 // (`src/app/assistant/icon.svg`) switches colour with the browser's theme, and on a launcher it came out as nothing
 // at all, because a transparent icon has no background to be seen against.
+// `sharp` is not a dependency of its own: Next installs it for image optimisation, which is what this borrows.
 import { readFileSync, writeFileSync } from "node:fs";
 import sharp from "sharp";
 
@@ -13,7 +14,11 @@ const BACKGROUND = "#0b0c0c";
 const source = readFileSync(new URL("../src/app/assistant/icon.svg", import.meta.url), "utf8");
 const mark = [...source.matchAll(/<(?:path|circle)\b[^>]*\/>/g)].map((match) => match[0]).join("");
 
-/** `fraction` of the square is the mark; `rounded` draws the corners for icons the system does not mask itself. */
+/**
+ * `fraction` of the square is the mark, centred and nudged up two source units, because the crown's weight is in its
+ * lower half and it reads as sitting low when its box is centred. `rounded` draws the corners for icons the system
+ * does not mask itself.
+ */
 function svg(size, fraction, rounded) {
   const scale = (size * fraction) / 64;
   const offset = (size - 64 * scale) / 2;
