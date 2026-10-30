@@ -642,7 +642,8 @@ export function Composer({
           {notice}
         </p>
       )}
-      <p className="text-center text-xs text-asst-faint">
+      {/* Left off a phone: the keyboard leaves little height, and the line is the one thing here that can go. */}
+      <p className="text-center text-xs text-asst-faint max-md:hidden">
         Answers can be wrong. Check against official guidance before you act on them. Do not enter personal data beyond what the task needs.
       </p>
       <AnnouncerRegion text={files.text} />
