@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { clientSupports } from "@/agents/client-features";
 import { EXPIRE_AFTER_SECONDS } from "@/agents/liveness";
 import type { ArtefactSnapshot } from "@/app/_actions/assistant";
@@ -9,6 +9,7 @@ import { type ExportDefaults, NO_DEFAULTS } from "@/assistant/export-defaults";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
 import {
+  backgroundHelpers,
   type Progress,
   progress,
   progressAnnouncement,
@@ -362,6 +363,8 @@ export function ChatView({
   const pod = !view.local;
   const thread = threadItems(live.items, view.productHistory, view.stopHistory, view.local);
   const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
+  // Not part of `doing`: background work carries on after the session goes idle, so it has to show when nothing else does.
+  const background = useMemo(() => (status === "offline" ? 0 : backgroundHelpers(live.items)), [status, live.items]);
   /**
    * What to say about the session behind this chat while there is nothing to say about an answer. `view.local` is the
    * reading `pod` negates, passed on so the rule that a chat with no pod gets none of this is kept where the wording
@@ -524,6 +527,15 @@ export function ChatView({
                 <Dots doing={doing} />
                 {stoppable ? <StopButton onStop={stop} /> : null}
               </div>
+            )}
+            {background === 0 ? null : (
+              <p
+                data-testid="background-helpers"
+                className="flex items-center gap-2 self-start rounded-full border border-asst-strong px-3 py-1 text-[13px] text-asst-muted"
+              >
+                <span aria-hidden="true" className="h-1.5 w-1.5 animate-asst-dot rounded-full bg-asst-accent" />
+                {background === 1 ? "1 helper working in the background" : `${background} helpers working in the background`}
+              </p>
             )}
             {/*
               The one live region on the page, and always in it even with nothing to say: a live region added to the

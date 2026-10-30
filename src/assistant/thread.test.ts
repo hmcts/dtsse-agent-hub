@@ -4,6 +4,7 @@ import type { QuestionView } from "../questions/views.ts";
 import { type ConversationItem, conversationItems, type TranscriptEntryView } from "../transcripts/conversation.ts";
 import {
   activityLabel,
+  backgroundHelpers,
   MAX_HELPERS,
   progress,
   progressAnnouncement,
@@ -595,5 +596,48 @@ describe("progressLabel and progressAnnouncement", () => {
   ])("should show %j as its own line and announce only what has settled", (doing, shown, announced) => {
     expect(progressLabel(doing)).toBe(shown);
     expect(progressAnnouncement(doing)).toBe(announced);
+  });
+});
+
+describe("backgroundHelpers", () => {
+  const NOW = Date.parse(T(30));
+  const launch = (id: string, at: string) => entry("tool_use", { id, name: "Agent", input: { run_in_background: true } }, at);
+  const answered = (id: string, at: string, failed = false) => entry("tool_result", { tool_use_id: id, is_error: failed, output: "launched" }, at);
+  const reportOf = (ids: string[], at: string) =>
+    entry(
+      "user",
+      { text: `<task-notification>${ids.map((id) => `<tool-use-id>${id}</tool-use-id>`).join("")}<status>completed</status></task-notification>` },
+      at
+    );
+
+  it("should count a background subagent whose launch was answered but which has not reported back", () => {
+    expect(backgroundHelpers(conversationItems([], [launch("a", T(1)), answered("a", T(2))]), NOW)).toBe(1);
+  });
+
+  it("should stop counting a subagent once its notification arrives, however many a notification names", () => {
+    const items = conversationItems([], [launch("a", T(1)), launch("b", T(2)), launch("c", T(3)), reportOf(["a", "b"], T(4))]);
+
+    expect(backgroundHelpers(items, NOW)).toBe(1);
+  });
+
+  it("should leave out a launch that failed, since nothing will report back", () => {
+    expect(backgroundHelpers(conversationItems([], [launch("a", T(1)), answered("a", T(2), true)]), NOW)).toBe(0);
+  });
+
+  it("should leave out a foreground subagent, which runningHelpers reports", () => {
+    const items = conversationItems([], [entry("tool_use", { id: "a", name: "Agent", input: {} }, T(1))]);
+
+    expect(backgroundHelpers(items, NOW)).toBe(0);
+  });
+
+  it("should not report a background launch with no result yet as a foreground helper as well", () => {
+    const items = conversationItems([person("hi", T(1))], [launch("a", T(2))]);
+
+    expect(runningHelpers(items, T(1))).toBe(0);
+    expect(backgroundHelpers(items, NOW)).toBe(1);
+  });
+
+  it("should leave out a launch over an hour old that never reported, even when it is the last entry", () => {
+    expect(backgroundHelpers(conversationItems([], [launch("a", T(1))]), NOW + 2 * 60 * 60 * 1000)).toBe(0);
   });
 });
