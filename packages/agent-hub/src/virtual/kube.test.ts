@@ -17,8 +17,11 @@ const calls = (): string[] => {
   return fs.existsSync(log) ? fs.readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
 };
 
-/** `az` answers for the clusters `aks` names and fails for the rest, as it does for one nobody can read. */
-const shims = ({ aks = "all", kubelogin = 0, kubectl = 0 }: { aks?: string; kubelogin?: number; kubectl?: number } = {}) => {
+/**
+ * `az` answers for the clusters `aks` names and fails for the rest, as it does for one nobody can read. `useContext`
+ * and `unset` are the exits of those two `kubectl config` calls.
+ */
+const shims = ({ aks = "all", kubelogin = 0, useContext = 0, unset = 0 }: { aks?: string; kubelogin?: number; useContext?: number; unset?: number } = {}) => {
   pod.shim(
     "az",
     `echo "az $*" >> "$SHIM_STATE/kube.log"
@@ -28,7 +31,12 @@ echo "ERROR: (ResourceGroupNotFound)" >&2
 exit 1`
   );
   pod.shim("kubelogin", `echo "kubelogin $*" >> "$SHIM_STATE/kube.log"\nexit ${kubelogin}`);
-  pod.shim("kubectl", `echo "kubectl $*" >> "$SHIM_STATE/kube.log"\nexit ${kubectl}`);
+  pod.shim(
+    "kubectl",
+    `echo "kubectl $*" >> "$SHIM_STATE/kube.log"
+case "$2" in use-context) exit ${useContext} ;; unset) exit ${unset} ;; esac
+exit 0`
+  );
 };
 
 beforeAll(() => {
@@ -111,14 +119,32 @@ describe("configureKubeContexts", () => {
     expect(stderr).toContain("the current one is cft-preview-00-aks");
   });
 
-  it("should leave kubectl needing a context when the pod is not told its cluster", async () => {
+  it("should unset the current context get-credentials left on AAT when the pod is not told its cluster", async () => {
     shims();
 
     const { result, stderr } = await captureStderr(() => configureKubeContexts({ env: pod.env() }));
 
     expect(result).toBe("configured");
     expect(calls().some((c) => c.startsWith("kubectl config use-context"))).toBe(false);
+    expect(calls().at(-1)).toBe("kubectl config unset current-context");
     expect(stderr).toContain("kubectl needs --context");
+  });
+
+  it("should not unset the current context when the pod's own is selected", async () => {
+    shims();
+
+    await captureStderr(() => configureKubeContexts({ env: pod.env({ AGENT_HUB_CLUSTER: "cft-preview-00" }) }));
+
+    expect(calls()).not.toContain("kubectl config unset current-context");
+  });
+
+  it("should say an unqualified kubectl may act on AAT when the current context cannot be unset", async () => {
+    shims({ unset: 1 });
+
+    const { result, stderr } = await captureStderr(() => configureKubeContexts({ env: pod.env() }));
+
+    expect(result).toBe("configured");
+    expect(stderr).toContain("may act on AAT");
   });
 
   it("should configure the clusters that answered when one of them does not", async () => {
@@ -159,12 +185,13 @@ describe("configureKubeContexts", () => {
     expect(calls().some((c) => c.includes("cft-prod-00-rg"))).toBe(false);
   });
 
-  it("should still configure the AAT clusters when selecting the pod's own context fails", async () => {
-    shims({ kubectl: 1 });
+  it("should unset the current context when selecting the pod's own fails", async () => {
+    shims({ useContext: 1 });
 
     const { result, stderr } = await captureStderr(() => configureKubeContexts({ env: pod.env({ AGENT_HUB_CLUSTER: "cft-preview-00" }) }));
 
     expect(result).toBe("configured");
+    expect(calls().at(-1)).toBe("kubectl config unset current-context");
     expect(stderr).toContain("kubectl needs --context");
   });
 });

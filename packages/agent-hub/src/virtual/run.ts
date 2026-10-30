@@ -86,6 +86,9 @@ export async function runVirtual(
         return 0;
       }
       case "kube-contexts":
+        // It calls no hub route, so nothing else would stop it outside a pod, where it would rewrite a person's
+        // own kubeconfig.
+        requireVirtualAgent(env);
         return (await configureKubeContexts({ env })) === "not-configured" ? EXIT_NO_CREDENTIAL : 0;
       case "github-login":
         return (await githubLogin({ api: hub(), env })) === "not-signed-in" ? EXIT_NO_CREDENTIAL : 0;

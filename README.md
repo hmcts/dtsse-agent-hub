@@ -351,11 +351,17 @@ the pod cannot work out where it is for itself, having no API server to ask. The
 the new name, so the contexts follow it.
 
 An agent gets exactly its owner's access and no more. An owner with no live AKS access gets a kubeconfig that answers
-401, which is the ordinary case rather than a failure: the sign-in's exit code is unchanged by it, nothing holds the
-boot, and an agent can run `agent-hub virtual kube-contexts` itself once its owner has elevated. Prod is deliberately
-not in the list — an agent acting on an elevation its owner took for something else is the thing not to build. Both
-AAT clusters are, because a service runs on both and an agent cannot know in advance which holds the pod it wants, so
-an unqualified `kubectl` reads preview and AAT needs `--context cft-aat-00-aks` or `-01-aks`.
+401, which is the ordinary case rather than a failure: the sign-in's exit code is unchanged by it, a refusal comes
+back in seconds, and an agent can run `agent-hub virtual kube-contexts` itself once its owner has elevated. Prod is
+deliberately not in the list — an agent acting on an elevation its owner took for something else is the thing not to
+build. Both AAT clusters are, because a service runs on both and an agent cannot know in advance which holds the pod
+it wants, so an unqualified `kubectl` reads preview and AAT needs `--context cft-aat-00-aks` or `-01-aks`.
+
+`az aks get-credentials` makes each cluster it fetches the current context, so the last one fetched — an AAT
+cluster — is current until the pod's own is selected. When it cannot be (a pod started before `AGENT_HUB_CLUSTER`
+was in its template, or one whose own cluster did not answer), the current context is unset rather than left on
+AAT, so an unqualified `kubectl` fails instead of acting on the wrong cluster. A pod picks the variable up the next
+time it is started, which the evening stop makes daily.
 
 Nothing yet tells a session the contexts are there; an agent that tries `kubectl` finds it works.
 

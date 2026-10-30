@@ -108,8 +108,15 @@ export async function configureKubeContexts({ env = process.env }: { env?: Env }
   const selected = own ? await run("kubectl", ["config", "use-context", contextFor(own)], { env }) : undefined;
   if (selected?.code === 0) {
     say(`kube: ${added} context(s) configured; the current one is ${contextFor(own as string)}`);
-  } else {
+    return "configured";
+  }
+  // `az aks get-credentials` makes each cluster it fetches the current context, so without the pod's own selected
+  // the current one is whichever AAT cluster came last, and an unqualified `kubectl` would act on AAT.
+  const unset = await run("kubectl", ["config", "unset", "current-context"], { env });
+  if (unset.code === 0) {
     say(`kube: ${added} context(s) configured; there is no current context, so kubectl needs --context`);
+  } else {
+    say(`kube: ${added} context(s) configured; could not unset the current context (exit ${unset.code}), so an unqualified kubectl may act on AAT`);
   }
   return "configured";
 }

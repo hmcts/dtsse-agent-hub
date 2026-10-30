@@ -452,4 +452,24 @@ describe("runVirtual outside a pod", () => {
     expect(noToken.code).toBe(1);
     expect(noToken.stderr).toContain("AGENT_HUB_LAUNCH_TOKEN is not set");
   });
+
+  it("should exit 1 without touching a kubeconfig when kube-contexts is run outside a pod", async () => {
+    // Arrange: ahead of the fixture's own on PATH, so its fake az, which other cases read, is left alone.
+    const bin = fs.mkdtempSync(path.join(pod.stateDir, "kube-guard-"));
+    const log = path.join(bin, "calls.log");
+    for (const name of ["az", "kubelogin", "kubectl"]) {
+      fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${log}"\n`, { mode: 0o755 });
+    }
+    const env = pod.env();
+
+    // Act
+    const r = await virtualCommand(["kube-contexts"], {
+      env: { ...env, PATH: `${bin}:${env.PATH}`, AGENT_HUB_VIRTUAL_AGENT_ID: "", AGENT_HUB_LAUNCH_TOKEN: "" }
+    });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("this only runs in a virtual agent pod");
+    expect(fs.existsSync(log)).toBe(false);
+  });
 });
