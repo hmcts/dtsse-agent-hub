@@ -536,7 +536,7 @@ describe("the Assistant's settings dialog", () => {
     open({ connections: undefined });
 
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
-    expect(sections()).toEqual(["Appearance"]);
+    expect(sections()).toEqual(["Appearance", "Sharing"]);
   });
 
   it("should explain what a person should do, without saying the assistant is broken, when a sign-in needs attention", () => {
@@ -784,7 +784,7 @@ describe("the Assistant's team tools", () => {
   it("should still offer the appearance and the connections when there are no team tools to show", () => {
     open({ plugins: undefined });
 
-    expect(sections()).toEqual(["Appearance", "Connections"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Sharing"]);
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
     go("Connections");
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
@@ -897,7 +897,7 @@ describe("the Assistant's own templates", () => {
   it("should still offer the appearance and the connections when the templates section is not shown", () => {
     open({ templates: undefined });
 
-    expect(sections()).toEqual(["Appearance", "Connections"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Sharing"]);
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
     go("Connections");
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
@@ -1124,7 +1124,7 @@ describe("the Assistant's own templates", () => {
   it("should offer every section the page passes, each in the focus trap, when they are all passed", () => {
     open({ plugins: plugins(), claudeMd: claudeMd(), templates: templates({ mine: [row("Stand-up")] }) });
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Claude.md", "Tools"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Claude.md", "Tools"]);
     expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
     go("Connections");
     expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
@@ -1261,7 +1261,7 @@ describe("the Assistant's model", () => {
   it("should sit under Agent, above the CLAUDE.md, and leave the other sections reachable when it is shown", () => {
     open({ model: modelSetting(), claudeMd: claudeMd(), plugins: plugins() }, "Model");
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Model", "Claude.md", "Tools"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Sharing", "Model", "Claude.md", "Tools"]);
     expect(screen.getByRole("heading", { name: "Model" })).toBeTruthy();
     go("Claude.md");
     expect(screen.getByRole("heading", { name: "Your CLAUDE.md" })).toBeTruthy();
@@ -1303,7 +1303,7 @@ describe("the Assistant's CLAUDE.md", () => {
   it("should sit under Agent, beside the tools, and leave the other sections reachable when it is shown", () => {
     open({ claudeMd: claudeMd(), plugins: plugins() }, "Claude.md");
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Claude.md", "Tools"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Sharing", "Claude.md", "Tools"]);
     expect(screen.getByRole("heading", { name: "Your CLAUDE.md" })).toBeTruthy();
     go("Tools");
     expect(screen.getByRole("form", { name: FORM })).toBeTruthy();
@@ -1499,8 +1499,8 @@ describe("the Assistant's settings navigation", () => {
   it("should gather the sections under the headings they belong to when it opens", () => {
     open(everything());
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Model", "Claude.md", "Tools", "Size", "Files"]);
-    expect(nav().textContent).toBe("GeneralAppearanceConnectionsTemplatesAgentModelClaude.mdToolsSizeFiles");
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Model", "Claude.md", "Tools", "Size", "Files"]);
+    expect(nav().textContent).toBe("GeneralAppearanceConnectionsTemplatesSharingAgentModelClaude.mdToolsSizeFiles");
   });
 
   // A tablist owns tabs and nothing else, so the two group headings are shown rather than announced, and the panel's
@@ -1508,7 +1508,7 @@ describe("the Assistant's settings navigation", () => {
   it("should keep its group headings out of what a screen reader is read when it opens", () => {
     open(everything());
 
-    expect(within(nav()).getAllByRole("tab")).toHaveLength(8);
+    expect(within(nav()).getAllByRole("tab")).toHaveLength(9);
     for (const group of ["General", "Agent"]) {
       expect(within(nav()).getByText(group).getAttribute("aria-hidden")).toBe("true");
     }
@@ -1631,7 +1631,7 @@ describe("the Assistant's settings on a narrow screen", () => {
       within(screen.getByRole("list", { name: "Settings sections" }))
         .getAllByRole("button")
         .map((item) => item.textContent)
-    ).toEqual(["Appearance", "Connections", "Templates", "Model", "Claude.md", "Tools", "Size", "Files"]);
+    ).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Model", "Claude.md", "Tools", "Size", "Files"]);
     expect(screen.queryByRole("radiogroup", { name: "Appearance" })).toBeNull();
   });
 
@@ -1845,7 +1845,7 @@ describe("the Assistant's files", () => {
   it("should offer Files as its own section, after the agent's own, when the page passes it", () => {
     open({ ...everything(), files: files() });
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Model", "Claude.md", "Tools", "Size", "Files"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Model", "Claude.md", "Tools", "Size", "Files"]);
   });
 
   // Two figures, never one: the uploads are a share of a volume the repository clones are on too, and the second
@@ -2037,6 +2037,12 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     expect(sections()).toContain("Jira & Confluence");
   });
 
+  it("should link to the shared chats from the Sharing section", () => {
+    open({}, "Sharing");
+
+    expect(screen.getByRole("link", { name: "View shared chats" }).getAttribute("href")).toBe("/assistant/shared");
+  });
+
   it("should save a Jira project the person found by searching their own Jira", async () => {
     vi.useFakeTimers();
     const exports = exportsSettings();
@@ -2157,7 +2163,7 @@ describe("the Assistant's size", () => {
   it("should offer Size under Agent, after the tools, when the page passes it", () => {
     open(everything());
 
-    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Model", "Claude.md", "Tools", "Size", "Files"]);
+    expect(sections()).toEqual(["Appearance", "Connections", "Templates", "Sharing", "Model", "Claude.md", "Tools", "Size", "Files"]);
   });
 
   // The figures a person reads, not a read-back of the constants they come from.
