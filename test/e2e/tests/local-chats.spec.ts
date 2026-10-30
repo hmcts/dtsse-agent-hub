@@ -4,6 +4,7 @@ import {
   chatPersona,
   connectForChat,
   dismissGettingReady,
+  localChatRow,
   openLocalChat,
   readAgentStream,
   registerAgent,
@@ -27,6 +28,11 @@ import {
  *
  * Every spec names its person with `chatPersona` and connects their accounts, because the Assistant renders no chat at
  * all while it is asking for those — a local chat does not need them, but the screen in front of it is not local.
+ *
+ * A chat is titled after the name its session registered under only until a batch carrying a prompt arrives:
+ * `refreshLocalTitle` then renames it to the chat's first prompt, inside the upload's own transaction. So a spec that
+ * uploads before it reads the sidebar finds its row under that prompt and not under the registered name. Every prompt
+ * here is one line and well inside `TITLE_FROM_MESSAGE`, so the title is the prompt unchanged.
  */
 
 const CANNOT_REGISTER = "this deployment checks real agent tokens, so the suite cannot register an agent";
@@ -72,8 +78,9 @@ test.describe("local chats @regression", () => {
       // Created as the session registered, so it is today's.
       await expect(chats.getByRole("heading", { level: 2, name: "Today" })).toBeVisible();
       // The marker is words before an icon, which is the whole point of it: a small laptop outline says nothing on
-      // its own. They lead the title, so the row's accessible name is the two joined.
-      const row = chats.getByRole("link", { name: `On your computer: ${name}` });
+      // its own, and neither does the colour it carries the session's state in. They lead the title, so the row's
+      // accessible name is the two joined.
+      const row = localChatRow(page, name);
       await expect(row).toBeVisible();
       expect(await row.getAttribute("href")).toMatch(/^\/assistant\/[0-9a-f-]{36}$/);
     } finally {
@@ -105,7 +112,11 @@ test.describe("local chats @regression", () => {
       const response = await page.goto("/assistant");
       test.skip(response?.status() === 404, ASSISTANT_OFF);
       await dismissGettingReady(page);
-      await openLocalChat(page, name);
+      // The upload above renamed the chat from `name` to its first prompt, and that is the one title the sidebar
+      // offers it under: a rename replaces the registered name rather than sitting beside it. Read after the row
+      // has been found and opened, so an empty sidebar cannot answer it.
+      await openLocalChat(page, words.prompt);
+      await expect(localChatRow(page, name)).toHaveCount(0);
 
       const thread = page.getByRole("list", { name: "Conversation" });
       // The prompt was typed at the laptop, so it is a transcript entry rather than a message the hub carried: a
@@ -246,7 +257,8 @@ test.describe("local chats @regression", () => {
       const response = await page.goto("/assistant");
       test.skip(response?.status() === 404, ASSISTANT_OFF);
       await dismissGettingReady(page);
-      const path = await openLocalChat(page, name);
+      // By its first prompt: the upload above renamed the chat from the name its session registered under.
+      const path = await openLocalChat(page, words.prompt);
 
       // Only people who have used the hub can be named, so the recipient loads a page first: that is what records
       // them, and it is the hub's own page rather than the Assistant, which would give them an assistant they have
@@ -302,14 +314,15 @@ test.describe("local chats @regression", () => {
       const response = await page.goto("/assistant");
       test.skip(response?.status() === 404, ASSISTANT_OFF);
       await dismissGettingReady(page);
-      const path = await openLocalChat(page, name);
+      // By its first prompt: the upload above renamed the chat from the name its session registered under.
+      const path = await openLocalChat(page, words.prompt);
 
       // The chat's own menu, named so it is not the sidebar row's.
       await page.getByRole("button", { name: "Chat options" }).click();
       await page.getByRole("menuitem", { name: "Delete chat" }).click();
       await page.getByRole("button", { name: "Delete", exact: true }).click();
       await page.waitForURL(/\/assistant$/);
-      await expect(page.getByRole("navigation", { name: "Chats" }).getByRole("link", { name: `On your computer: ${name}` })).toHaveCount(0);
+      await expect(localChatRow(page, words.prompt)).toHaveCount(0);
       expect((await page.goto(path))?.status()).toBe(404);
 
       // The session on the laptop is untouched. Removing the chat detaches it rather than deleting it, because the

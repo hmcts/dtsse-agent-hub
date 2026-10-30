@@ -184,7 +184,21 @@ export function findSessionEntry(sid: string): SessionEntry | null {
   return null;
 }
 
-// Title entries are re-appended throughout a transcript, so the tail holds the current ones.
+/**
+ * How much of each end of the transcript a title is looked for in.
+ *
+ * `ai-title` is written once and early: Claude Code names the conversation after its first turn and never revisits
+ * it. Measured over the 1,714 transcripts on one machine larger than the tail window, its offset is 133 KiB at the
+ * median, 482 KiB at the 99th centile and 675 KiB at the furthest, so 1 MiB of head reaches every one of them —
+ * while the tail alone reached 35 of 287, because the file had long outgrown the window by the time it ended.
+ *
+ * `custom-title` is appended wherever the person ran /rename, which can be at any point in a session, so the last
+ * one in the file is the one they chose. Measured over the same transcripts, it is never more than 34 KiB from the
+ * end.
+ *
+ * Both ends and nothing in between: a transcript reaches hundreds of megabytes and this is read on a hook path.
+ */
+const TITLE_HEAD_BYTES = 1024 * 1024;
 const TITLE_TAIL_BYTES = 256 * 1024;
 
 // Where Claude Code keeps the transcript of a session run from `cwd`.
@@ -212,24 +226,31 @@ export type ConversationTitles = {
   ai?: string;
 };
 
-// The latest `custom-title` and `ai-title` entries in the transcript, the title /resume shows.
-export function conversationTitles(file: string): ConversationTitles {
-  let text: string;
-  try {
-    const size = fs.statSync(file).size;
-    const start = Math.max(0, size - TITLE_TAIL_BYTES);
-    const buf = Buffer.alloc(size - start);
-    const fd = fs.openSync(file, "r");
-    try {
-      fs.readSync(fd, buf, 0, buf.length, start);
-    } finally {
-      fs.closeSync(fd);
-    }
-    text = buf.toString("utf8");
-  } catch {
-    return {};
+type TitleRange = { start: number; length: number };
+
+/**
+ * The parts of the file to read, the end of it first so that a title written late beats the same kind written
+ * early. One range for a transcript that fits inside both windows, so a small file's middle is not read twice.
+ */
+function titleRanges(size: number): TitleRange[] {
+  if (size <= TITLE_HEAD_BYTES + TITLE_TAIL_BYTES) {
+    return [{ start: 0, length: size }];
   }
-  const titles: ConversationTitles = {};
+  return [
+    { start: size - TITLE_TAIL_BYTES, length: TITLE_TAIL_BYTES },
+    { start: 0, length: TITLE_HEAD_BYTES }
+  ];
+}
+
+function readRange(fd: number, range: TitleRange): string {
+  const buf = Buffer.alloc(range.length);
+  const read = fs.readSync(fd, buf, 0, range.length, range.start);
+  return buf.toString("utf8", 0, read);
+}
+
+// Fills in whichever titles `titles` is still missing, reading backwards so the latest of each kind in `text` wins.
+// A line cut in half by the window boundary does not parse, which is the same as not matching.
+function takeTitles(text: string, titles: ConversationTitles): void {
   const lines = text.split("\n");
   for (let i = lines.length - 1; i >= 0 && !(titles.custom && titles.ai); i--) {
     const line = lines[i] ?? "";
@@ -247,6 +268,26 @@ export function conversationTitles(file: string): ConversationTitles {
       titles.ai = entry.aiTitle;
     }
   }
+}
+
+// The latest `custom-title` and `ai-title` entries in the transcript, the title /resume shows. Whatever was found
+// before an unreadable file or a failed read, which for a missing file is nothing.
+export function conversationTitles(file: string): ConversationTitles {
+  const titles: ConversationTitles = {};
+  try {
+    const { size } = fs.statSync(file);
+    const fd = fs.openSync(file, "r");
+    try {
+      for (const range of titleRanges(size)) {
+        takeTitles(readRange(fd, range), titles);
+        if (titles.custom && titles.ai) {
+          return titles;
+        }
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {}
   return titles;
 }
 
@@ -259,9 +300,23 @@ export function nameSlug(title: string | null | undefined): string {
     .replace(/-+$/, "");
 }
 
+/**
+ * Where the name `agentName` answers with came from, which the service is told so that it can keep a name the
+ * person chose and replace one this client invented.
+ *
+ * `user` is a `/rename` and nothing else. Claude Code records `auto` for a name it generated from the conversation
+ * itself, and that is `derived` here along with every title this client slugs and every registry handle: automatic
+ * is automatic, whoever automated it.
+ */
+export type NameSource = "user" | "derived";
+
+export function nameSource(entry: SessionEntry | null): NameSource {
+  return entry?.nameSource === "user" && entry.name ? "user" : "derived";
+}
+
 // A /rename wins, then the conversation's title, then the handle Claude Code derived for the session.
 export function agentName(sid: string, entry: SessionEntry | null = findSessionEntry(sid)): string {
-  if (entry?.nameSource === "user" && entry.name) {
+  if (nameSource(entry) === "user" && entry?.name) {
     return entry.name;
   }
   const file = transcriptPath(sid, entry);
@@ -272,6 +327,8 @@ export function agentName(sid: string, entry: SessionEntry | null = findSessionE
 export type SessionInfo = {
   pid: number | null;
   name: string;
+  /** Where `name` came from, reported on every register and heartbeat so the service can tell the two apart. */
+  nameSource: NameSource;
   cwd: string | null;
   socketPath: string | null;
 };
@@ -282,6 +339,7 @@ export function sessionInfo(sid: string, env: Env = process.env): SessionInfo {
   return {
     pid: Number.isInteger(envPid) ? envPid : (entry?.pid ?? null),
     name: agentName(sid, entry),
+    nameSource: nameSource(entry),
     cwd: entry?.cwd || null,
     // The token in the environment belongs to the socket in the environment, so that pair wins; the registry
     // path is the fallback for processes started without it.

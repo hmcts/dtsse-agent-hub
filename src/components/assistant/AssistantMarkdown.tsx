@@ -50,6 +50,6 @@ function assistantTheme(document: boolean): MarkupTheme {
 const ANSWER = assistantTheme(false);
 const DOCUMENT = assistantTheme(true);
 
-export function AssistantMarkdown({ source, document = false }: { source: string; document?: boolean }) {
-  return <Markup source={source} theme={document ? DOCUMENT : ANSWER} />;
+export function AssistantMarkdown({ source, document = false, repoBase = null }: { source: string; document?: boolean; repoBase?: string | null }) {
+  return <Markup source={source} theme={document ? DOCUMENT : ANSWER} repoBase={repoBase} />;
 }

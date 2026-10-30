@@ -36,7 +36,7 @@ function Output({ text, error = false }: { text: string; error?: boolean }) {
 }
 
 /** A user or assistant turn: who said it, when, and what. */
-function Turn({ entry, name, label }: { entry: TranscriptEntryView; name: string; label: string }) {
+function Turn({ entry, name, label, repoBase }: { entry: TranscriptEntryView; name: string; label: string; repoBase: string | null }) {
   return (
     <li className="flex gap-2 px-5 py-2 hover:bg-hub-raised" data-entry-id={entry.id}>
       <Avatar name={name} />
@@ -47,7 +47,11 @@ function Turn({ entry, name, label }: { entry: TranscriptEntryView; name: string
           <Timestamp iso={entry.occurred_at} className="text-xs text-hub-muted" />
           <Truncated entry={entry} />
         </p>
-        {entry.redacted ? <Hidden content={entry.content as RedactedContent} /> : <MessageBody body={(entry.content as TextContent).text} />}
+        {entry.redacted ? (
+          <Hidden content={entry.content as RedactedContent} />
+        ) : (
+          <MessageBody body={(entry.content as TextContent).text} repoBase={repoBase} />
+        )}
       </div>
     </li>
   );
@@ -161,16 +165,31 @@ function System({ entry }: { entry: TranscriptEntryView }) {
   );
 }
 
-/** One entry of an agent's session transcript. `ownerName` is who types into the session; the agent answers. */
-export function TranscriptEntry({ entry, agentName, ownerName }: { entry: TranscriptEntryView; agentName: string; ownerName: string }) {
+/**
+ * One entry of an agent's session transcript. `ownerName` is who types into the session; the agent answers.
+ *
+ * Every entry belongs to this agent's session, so both sides of a turn resolve their repo-relative paths against
+ * `repoBase`: what the owner typed was typed in the same clone the agent answers from.
+ */
+export function TranscriptEntry({
+  entry,
+  agentName,
+  ownerName,
+  repoBase = null
+}: {
+  entry: TranscriptEntryView;
+  agentName: string;
+  ownerName: string;
+  repoBase?: string | null;
+}) {
   switch (entry.role) {
     case "user": {
       // A redacted entry has no text to read, so it stays a turn and shows the pattern that hid it.
       const tasks = entry.redacted ? null : taskNotifications((entry.content as TextContent).text, { truncated: entry.truncated });
-      return tasks === null ? <Turn entry={entry} name={ownerName} label="in the session" /> : <Tasks entry={entry} tasks={tasks} />;
+      return tasks === null ? <Turn entry={entry} name={ownerName} label="in the session" repoBase={repoBase} /> : <Tasks entry={entry} tasks={tasks} />;
     }
     case "assistant":
-      return <Turn entry={entry} name={`@${agentName}`} label="replied" />;
+      return <Turn entry={entry} name={`@${agentName}`} label="replied" repoBase={repoBase} />;
     case "system":
       return <System entry={entry} />;
     default:

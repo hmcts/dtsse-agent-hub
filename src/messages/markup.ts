@@ -3,7 +3,8 @@ import { parseMessageRef } from "./permalink.ts";
 /**
  * A small markdown subset for message bodies, parsed into a tree the UI renders as React elements. Bodies are written
  * by agents and people across the organisation, so nothing here produces HTML: every leaf is text, and a link is only
- * kept when its scheme is on the allow-list.
+ * kept when its scheme is on the allow-list, or when it is a path inside the repo the body was written in and the
+ * caller said where that repo is.
  *
  * Every scan is linear in the body's length. Searches for a closing marker are memoised so a run of unmatched openers
  * cannot rescan the rest of the body once per opener.
@@ -50,13 +51,21 @@ export type Block =
 
 const SAFE_SCHEMES = new Set(["http:", "https:", "mailto:"]);
 
-/** The normalised URL when it is absolute and its scheme is http, https or mailto; otherwise null. */
-export function safeHref(raw: string): string | null {
+/** Whether every character is one a URL may carry: a space or a control character is what a parser would strip. */
+function printable(raw: string): boolean {
   for (let i = 0; i < raw.length; i++) {
     const code = raw.charCodeAt(i);
     if (code <= 0x20 || code === 0x7f) {
-      return null;
+      return false;
     }
+  }
+  return true;
+}
+
+/** The normalised URL when it is absolute and its scheme is http, https or mailto; otherwise null. */
+export function safeHref(raw: string): string | null {
+  if (!printable(raw)) {
+    return null;
   }
   let url: URL;
   try {
@@ -65,6 +74,59 @@ export function safeHref(raw: string): string | null {
     return null;
   }
   return SAFE_SCHEMES.has(url.protocol) ? url.href : null;
+}
+
+/**
+ * What a target has to look like to be read as a path inside the author's repo: at least one `/`, and a file
+ * extension on the last segment, before any `#fragment` or `?query`.
+ *
+ * Both, because either alone reads prose as a path. A slash on its own is in `and/or`, `yes/no` and `9/10`; an
+ * extension on its own is in `v1.2` and `README.md`, where a bare file name is as likely to be the name of a thing
+ * being discussed as a file to open. Together they are what a citation actually looks like —
+ * `apps/ccd/docs/how-to/decentralise-a-service.md` — and the cost is that a link to a directory or to an
+ * extensionless file stays the text the author wrote, which is what it does today.
+ */
+const REPO_PATH = /^[^\s?#]*\/[^\s/?#]*\.[A-Za-z0-9]{1,10}(?:[?#]\S*)?$/;
+
+/**
+ * A repo-relative path resolved against `base`, or null when the target is not a path or does not stay on `base`'s
+ * host. `base` is a `repoFileBase` from `src/agents/github.ts`.
+ *
+ * The origin is what is compared, not the scheme: `//evil.example/x.md` resolves to `https://evil.example/x.md`,
+ * which is https and nowhere near GitHub, and a `..` run that climbs past the repo stops at the origin rather than
+ * leaving it.
+ */
+export function repoHref(raw: string, base: string): string | null {
+  if (!printable(raw) || !REPO_PATH.test(raw)) {
+    return null;
+  }
+  let root: URL;
+  let url: URL;
+  try {
+    root = new URL(base);
+    url = new URL(raw, root);
+  } catch {
+    return null;
+  }
+  return url.origin === root.origin ? url.href : null;
+}
+
+/** A link target's href: an absolute allow-listed URL, or a repo path when the surface knows where the repo is. */
+function linkHref(raw: string, base: string | null): string | null {
+  const absolute = safeHref(raw);
+  if (absolute !== null || base === null) {
+    return absolute;
+  }
+  return repoHref(raw, base);
+}
+
+/** How a body is parsed: everything the subset needs to know that the body itself does not say. */
+export interface MarkupOptions {
+  /**
+   * The `…/blob/<ref>/` URL of the repo the body was written in, when the surface rendering it knows. A
+   * repo-relative link resolves against it; without one such a link stays the text the author wrote.
+   */
+  repoBase?: string | null;
 }
 
 const MAX_LIST_DEPTH = 4;
@@ -271,8 +333,8 @@ function rowCells(line: string): string[] {
 }
 
 /** A cell's inline markup. `rowCells` has resolved its escapes; the spaces its pipes were padded with go here. */
-function cellInlines(cell: string): Inline[] {
-  return parseInline(cell.trim());
+function cellInlines(cell: string, base: string | null): Inline[] {
+  return inlines(cell.trim(), base);
 }
 
 /**
@@ -357,9 +419,15 @@ function markerRows(lines: string[], from: number): boolean {
  * one likely mistake here, an unescaped `|` in a cell, costs that cell its spacing rather than ending the table and
  * leaving every row below it as literal text. GFM truncates such a row, which would drop the author's words.
  */
-function parseTable(lines: string[], from: number, align: Alignment[], budget: number): { table: TableBlock; next: number; cells: number } {
+function parseTable(
+  lines: string[],
+  from: number,
+  align: Alignment[],
+  budget: number,
+  base: string | null
+): { table: TableBlock; next: number; cells: number } {
   const columns = align.length;
-  const table: TableBlock = { type: "table", align, header: rowCells(lines[from]!).map(cellInlines), rows: [] };
+  const table: TableBlock = { type: "table", align, header: rowCells(lines[from]!).map((cell) => cellInlines(cell, base)), rows: [] };
   let cells = columns;
   let i = from + 2;
   // The run of list items being read, answered once at its first line and spent on every line of it.
@@ -381,7 +449,7 @@ function parseTable(lines: string[], from: number, align: Alignment[], budget: n
         break;
       }
     }
-    const row = fitRow(rowCells(line), columns).map(cellInlines);
+    const row = fitRow(rowCells(line), columns).map((cell) => cellInlines(cell, base));
     // GFM pads a short row, so every row is as wide as the header.
     while (row.length < columns) {
       row.push([]);
@@ -399,14 +467,14 @@ interface Level {
   container: ListBlock[];
 }
 
-function nestLists(flat: FlatItem[]): ListBlock[] {
+function nestLists(flat: FlatItem[], base: string | null): ListBlock[] {
   const root: ListBlock[] = [];
   const stack: Level[] = [];
   for (const item of flat) {
     while (stack.length > 0 && item.indent < stack[stack.length - 1]!.indent) {
       stack.pop();
     }
-    const entry: ListItem = { children: parseInline(item.lines.join("\n")), lists: [] };
+    const entry: ListItem = { children: inlines(item.lines.join("\n"), base), lists: [] };
     const top = stack[stack.length - 1];
     if (top && (item.indent === top.indent || stack.length >= MAX_LIST_DEPTH) && item.ordered === top.list.ordered) {
       top.list.items.push(entry);
@@ -430,7 +498,7 @@ function nestLists(flat: FlatItem[]): ListBlock[] {
   return root;
 }
 
-function parseList(lines: string[], from: number, blocks: Block[]): number {
+function parseList(lines: string[], from: number, blocks: Block[], base: string | null): number {
   const flat: FlatItem[] = [];
   let i = from;
   while (i < lines.length) {
@@ -459,12 +527,12 @@ function parseList(lines: string[], from: number, blocks: Block[]): number {
     }
     break;
   }
-  blocks.push(...nestLists(flat));
+  blocks.push(...nestLists(flat, base));
   return i;
 }
 
 /** A body as blocks: fenced code, headings, lists, pipe tables and paragraphs. A paragraph keeps its line breaks. */
-export function parseMarkup(source: string): Block[] {
+export function parseMarkup(source: string, { repoBase = null }: MarkupOptions = {}): Block[] {
   const lines = source.split(/\r?\n/);
   const blocks: Block[] = [];
   // Shared by every table in the body, so a run of wide tables cannot cost more than one of them.
@@ -491,18 +559,18 @@ export function parseMarkup(source: string): Block[] {
     }
     const heading = HEADING.exec(line);
     if (heading) {
-      blocks.push({ type: "heading", level: heading[1]!.length, children: parseInline(headingText(heading[2]!)) });
+      blocks.push({ type: "heading", level: heading[1]!.length, children: inlines(headingText(heading[2]!), repoBase) });
       i++;
       continue;
     }
     if (listItem(line)) {
-      i = parseList(lines, i, blocks);
+      i = parseList(lines, i, blocks, repoBase);
       continue;
     }
     const align = tableHead(line, lines[i + 1]);
     // A table only opens while the body has room for its header; once the budget is spent the lines stay text.
     if (align && align.length <= budget) {
-      const { table, next, cells } = parseTable(lines, i, align, budget);
+      const { table, next, cells } = parseTable(lines, i, align, budget, repoBase);
       blocks.push(table);
       budget -= cells;
       i = next;
@@ -513,7 +581,7 @@ export function parseMarkup(source: string): Block[] {
     while (i < lines.length && !isBlank(lines[i]!) && !startsBlock(lines[i]!, lines[i + 1])) {
       i++;
     }
-    blocks.push({ type: "paragraph", children: parseInline(lines.slice(start, i).join("\n")) });
+    blocks.push({ type: "paragraph", children: inlines(lines.slice(start, i).join("\n"), repoBase) });
   }
   return blocks;
 }
@@ -614,7 +682,7 @@ function codeSpan(raw: string): string {
   return raw.length > 2 && raw.startsWith(" ") && raw.endsWith(" ") && raw.trim() !== "" ? raw.slice(1, -1) : raw;
 }
 
-function parseRange(text: string, start: number, end: number, depth: number, links: boolean): Inline[] {
+function parseRange(text: string, start: number, end: number, depth: number, links: boolean, base: string | null): Inline[] {
   const out: Inline[] = [];
   const emphasis = depth < MAX_INLINE_DEPTH;
   // The range is all a nested parse may look at, so a marker just outside it neither opens nor closes anything.
@@ -681,7 +749,7 @@ function parseRange(text: string, start: number, end: number, depth: number, lin
       if (opensAfter(charAt(i - 1)) && !isSpace(charAt(i + 2))) {
         const close = strongCloser(i + 3);
         if (close !== -1) {
-          emit({ type: "strong", children: parseRange(text, i + 2, close, depth + 1, links) }, i, close + 2);
+          emit({ type: "strong", children: parseRange(text, i + 2, close, depth + 1, links, base) }, i, close + 2);
           continue;
         }
       }
@@ -694,7 +762,7 @@ function parseRange(text: string, start: number, end: number, depth: number, lin
       if (opensAfter(charAt(i - 1)) && next !== undefined && !isSpace(next) && next !== char) {
         const close = (char === "*" ? starCloser : underscoreCloser)(i + 2);
         if (close !== -1) {
-          emit({ type: "emphasis", children: parseRange(text, i + 1, close, depth + 1, links) }, i, close + 1);
+          emit({ type: "emphasis", children: parseRange(text, i + 1, close, depth + 1, links, base) }, i, close + 1);
           continue;
         }
       }
@@ -706,9 +774,9 @@ function parseRange(text: string, start: number, end: number, depth: number, lin
       const bracket = bracketCloser(i + 1);
       if (bracket !== -1 && bracket !== rejectedBracket && charAt(bracket + 1) === "(") {
         const paren = parenCloser(bracket + 2);
-        const href = paren === -1 || paren - bracket - 2 > MAX_LINK_URL ? null : safeHref(text.slice(bracket + 2, paren));
+        const href = paren === -1 || paren - bracket - 2 > MAX_LINK_URL ? null : linkHref(text.slice(bracket + 2, paren), base);
         if (href !== null) {
-          const children = bracket > i + 1 ? parseRange(text, i + 1, bracket, depth + 1, false) : [{ type: "text" as const, text: href }];
+          const children = bracket > i + 1 ? parseRange(text, i + 1, bracket, depth + 1, false, base) : [{ type: "text" as const, text: href }];
           emit({ type: "link", href, children }, i, paren + 1);
           continue;
         }
@@ -755,7 +823,12 @@ function parseRange(text: string, start: number, end: number, depth: number, lin
   return out;
 }
 
+/** One block's inlines, as the block parsers above read them: the whole of `text`, with links and references on. */
+function inlines(text: string, base: string | null): Inline[] {
+  return parseRange(text, 0, text.length, 0, true, base);
+}
+
 /** Inline code, bold, italics, links and `#1234` message references within one block. Everything else, line breaks included, stays as text. */
-export function parseInline(text: string): Inline[] {
-  return parseRange(text, 0, text.length, 0, true);
+export function parseInline(text: string, { repoBase = null }: MarkupOptions = {}): Inline[] {
+  return inlines(text, repoBase);
 }

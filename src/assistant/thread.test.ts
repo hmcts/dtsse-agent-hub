@@ -2,7 +2,18 @@ import { describe, expect, it } from "vitest";
 import type { ThreadMessage } from "../messages/direct-thread.ts";
 import type { QuestionView } from "../questions/views.ts";
 import { type ConversationItem, conversationItems, type TranscriptEntryView } from "../transcripts/conversation.ts";
-import { activityLabel, backgroundHelpers, MAX_HELPERS, progress, progressAnnouncement, progressLabel, runningHelpers, threadItems } from "./thread.ts";
+import {
+  activityLabel,
+  backgroundHelpers,
+  MAX_HELPERS,
+  progress,
+  progressAnnouncement,
+  progressLabel,
+  runningHelpers,
+  sessionNotice,
+  threadItems,
+  WARMING_QUIPS
+} from "./thread.ts";
 
 let next = 0;
 
@@ -499,6 +510,67 @@ describe("runningHelpers", () => {
 
     expect(runningHelpers(items, T(1))).toBe(MAX_HELPERS);
   });
+});
+
+describe("sessionNotice", () => {
+  const IDLE = { state: "idle" } as const;
+
+  it("should say nothing while a session is live, which will answer whatever is sent to it", () => {
+    expect(sessionNotice("live", "offline", IDLE)).toBeNull();
+  });
+
+  it("should offer the warming quips while the pod is starting a session", () => {
+    const notice = sessionNotice("starting", "offline", IDLE);
+
+    expect(notice).toEqual({ state: "starting", words: WARMING_QUIPS, announcement: "Starting your assistant" });
+    expect(notice?.words.length).toBeGreaterThan(1);
+  });
+
+  // Every quip has to carry the one fact on its own: it is the only line on the screen, and somebody reading one of
+  // them and nothing else must not come away thinking the assistant is there.
+  it.each(WARMING_QUIPS)("should still say an assistant is coming in %j", (quip) => {
+    expect(quip).toMatch(/assistant/i);
+    expect(quip).toMatch(/start|warm|wak|kettle|lur/i);
+  });
+
+  // A real wait with a real cause — the pod is at its cap and another chat has to give up its session first. A joke
+  // over it would hide both, so this is the same plain wording the line under the thread uses.
+  it("should say plainly that the chat is waiting its turn when the pod has queued it", () => {
+    expect(sessionNotice("queued", "offline", IDLE)).toEqual({
+      state: "queued",
+      words: ["Waiting for a free assistant…"],
+      announcement: "Waiting for a free assistant"
+    });
+  });
+
+  it("should say what will start a session when nothing has asked for one", () => {
+    expect(sessionNotice(null, "offline", IDLE)).toEqual({
+      state: "unstarted",
+      words: ["Your assistant starts when you send a message."],
+      announcement: "Your assistant starts when you send a message."
+    });
+  });
+
+  // No pod, no supervisor, and `localOfflineNote` already says the one thing there is to say about a laptop that is
+  // away. This is what keeps the two from both being on the screen.
+  it.each(["starting", "queued", "live", null] as const)("should say nothing at all on a local chat reading %j", (session) => {
+    expect(sessionNotice(session, "offline", IDLE, true)).toBeNull();
+  });
+
+  // Whatever a report yet to land says, an agent answering the hub has a session behind it — and is also the agent
+  // the composer's wake on focus leaves alone, so this is the same bound the wake itself is gated on.
+  it.each(["idle", "busy"] as const)("should say nothing about a session when the agent is %j", (agentStatus) => {
+    expect(sessionNotice(null, agentStatus, IDLE)).toBeNull();
+  });
+
+  // The line under the thread words the wait once the person has sent something. Both would be the same wait said
+  // twice, directly above and below each other.
+  it.each([[{ state: "waking", label: "Starting your assistant…" } as const], [{ state: "working", label: "Reading", helpers: 0 } as const]])(
+    "should leave the wait to the progress line when it is already saying %j",
+    (doing) => {
+      expect(sessionNotice("starting", "offline", doing)).toBeNull();
+    }
+  );
 });
 
 describe("progressLabel and progressAnnouncement", () => {

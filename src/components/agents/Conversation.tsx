@@ -29,6 +29,7 @@ export function Conversation({
   agentName,
   ownerName,
   virtualAgentId = null,
+  repoBase = null,
   viewerOid,
   status,
   initial,
@@ -42,6 +43,8 @@ export function Conversation({
   ownerName: string;
   /** The virtual agent whose session this agent is, or `null` for a session on a laptop. */
   virtualAgentId?: string | null;
+  /** Where this agent's repo is on GitHub, so a repo-relative path in its own words resolves; see `Markup`. */
+  repoBase?: string | null;
   /** Who is reading, which the composer keys its draft on. */
   viewerOid: string;
   status: AgentStatus;
@@ -108,14 +111,14 @@ export function Conversation({
             <ol aria-label="Conversation">
               {items.map((item) =>
                 item.type === "message" ? (
-                  <DirectMessage key={item.key} agentId={agentId} message={item.message} />
+                  <DirectMessage key={item.key} agentId={agentId} message={item.message} repoBase={repoBase} />
                 ) : item.type === "question" ? (
                   <li key={item.key} className="px-5 py-2">
                     {/* The action is offered unconditionally: this page is the agent owner's, and an owner may always answer. */}
                     <QuestionCard view={item.question} tone="hub" answer={answerQuestion} />
                   </li>
                 ) : (
-                  <TranscriptEntry key={item.key} entry={item.entry} agentName={agentName} ownerName={ownerName} />
+                  <TranscriptEntry key={item.key} entry={item.entry} agentName={agentName} ownerName={ownerName} repoBase={repoBase} />
                 )
               )}
             </ol>

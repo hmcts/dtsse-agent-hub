@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { findAgent, listMessageableAgents, registerAgent } from "../../src/agents/store.ts";
+import { findAgent, heartbeat, listMessageableAgents, registerAgent } from "../../src/agents/store.ts";
 import { visibleAgents } from "../../src/agents/views.ts";
 import { POST as upload } from "../../src/app/api/agent/[agentId]/transcript/route.ts";
 import { GET as conversation } from "../../src/app/api/ui/agents/[id]/transcript/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
+import { renameConversation } from "../../src/assistant/store.ts";
 import { directAsAgent } from "../../src/messages/send.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
@@ -359,6 +360,150 @@ describe("an agent in a conversation", () => {
         await reader.cancel();
       }
     }
+  });
+});
+
+/**
+ * What a chat on somebody's own computer ends up called. The client has only the session's own name to offer, and
+ * that name is the session registry's handle — `hmcts-25` — at the moment the session registers and its chat is
+ * made; the hub holds the prompts, so the upload is where the chat gets a name worth reading.
+ *
+ * The local chat is a real registration and the prompts arrive through the real route, so these read what the hub
+ * itself writes on the path a laptop actually takes.
+ */
+describe("naming a chat from the first prompt it uploads", () => {
+  let local: string;
+  let localChat: string;
+  let pod: string;
+  let podChat: string;
+
+  async function title(conversationId: string): Promise<{ title: string | null; titleSource: string }> {
+    return await prisma.assistantConversation.findUniqueOrThrow({ where: { id: conversationId }, select: { title: true, titleSource: true } });
+  }
+
+  function user(key: string, text: string): Record<string, unknown> {
+    return entry(key, { role: "user", content: { text } });
+  }
+
+  function redacted(key: string, pattern: string): Record<string, unknown> {
+    return entry(key, { role: "user", content: { redacted: pattern }, redacted: true });
+  }
+
+  beforeEach(async () => {
+    local = (
+      await registerAgent(
+        prisma,
+        { oid: ALICE.oid, tid: "dev", name: ALICE.name, email: ALICE.email },
+        { sessionId: "alices-laptop", name: "hmcts-25", cwd: null, repo: null, branch: null, host: null }
+      )
+    ).id;
+    localChat = (await prisma.agent.findUniqueOrThrow({ where: { id: local }, select: { assistantConversationId: true } })).assistantConversationId!;
+    pod = await insertAgent(ALICE, "alices-assistant");
+    const assistant = await prisma.virtualAgent.create({ data: { ownerOid: ALICE.oid, name: "assistant", modelRoute: "gateway" }, select: { id: true } });
+    const chat = await prisma.assistantConversation.create({
+      data: { ownerOid: ALICE.oid, virtualAgentId: assistant.id, agentId: pod, title: "what the person asked for", titleSource: "message" },
+      select: { id: true }
+    });
+    podChat = chat.id;
+    await prisma.agent.update({ where: { id: pod }, data: { assistantConversationId: chat.id, virtualAgentId: assistant.id } });
+  });
+
+  it("should start the chat on the name its session reported, which is all the hub has when the session registers", async () => {
+    expect(await title(localChat)).toEqual({ title: "hmcts-25", titleSource: "agent" });
+  });
+
+  it("should name the chat after its first prompt when one arrives", async () => {
+    expect(await accepted(local, [user("s1:1", "  why can't this user   see tasks?  ")])).toBe(1);
+
+    expect(await title(localChat)).toEqual({ title: "why can't this user see tasks?", titleSource: "message" });
+  });
+
+  it("should keep the first prompt as the name when later prompts arrive", async () => {
+    await accepted(local, [user("s1:1", "the first thing I asked")]);
+
+    await accepted(local, [user("s1:2", "and the second, much later")]);
+
+    expect(await title(localChat)).toEqual({ title: "the first thing I asked", titleSource: "message" });
+  });
+
+  it("should leave the name its session reported when the upload carries no prompt at all", async () => {
+    await accepted(local, [entry("s1:1"), entry("s1:2", { role: "tool_use", content: { id: "t1", name: "Read", input: {} } })]);
+
+    expect(await title(localChat)).toEqual({ title: "hmcts-25", titleSource: "agent" });
+  });
+
+  // A redacted entry holds the pattern the secret scanner matched and none of the words, so there is nothing in it
+  // to name a chat after — and "azure-client-secret" is not a title.
+  it("should pass over a redacted prompt and name the chat after the next one with words in it", async () => {
+    await accepted(local, [redacted("s1:1", "azure-client-secret")]);
+    expect(await title(localChat)).toEqual({ title: "hmcts-25", titleSource: "agent" });
+
+    await accepted(local, [user("s1:2", "now try it without the secret")]);
+
+    expect(await title(localChat)).toEqual({ title: "now try it without the secret", titleSource: "message" });
+  });
+
+  // The refresh is the hub's answer to what the person typed, so it is gated on the batch carrying something they
+  // typed. A hub message relayed into the session is a colleague's words, which `firstPromptTitle` passes over, so a
+  // batch of nothing but those is not read any further — and the `/rename` it arrived after is followed on the next
+  // prompt instead. Only the title waits: the renamed agent row is there as soon as the heartbeat lands.
+  it("should follow a /rename on the next prompt rather than on a hub message relayed into the session", async () => {
+    await prisma.agent.update({ where: { id: local }, data: { name: "hdpi-9653-welsh", nameSource: "user" } });
+    const relayed = await createDirect(prisma, { author: { oid: BOB.oid, agentId: null }, targetAgentId: local, inReplyTo: null, body: "have a look at this" });
+
+    await accepted(local, [entry("s1:1", { role: "user", content: { text: "have a look at this" }, message_id: relayed.id })]);
+    expect(await title(localChat)).toEqual({ title: "hmcts-25", titleSource: "agent" });
+
+    await accepted(local, [user("s1:2", "what did they mean by that")]);
+
+    expect(await title(localChat)).toEqual({ title: "hdpi-9653-welsh", titleSource: "agent" });
+  });
+
+  it("should never overwrite a title the person chose when a prompt arrives afterwards", async () => {
+    await renameConversation(prisma, ALICE.oid, localChat, "  HDPI-8713   flaky E2E  ");
+
+    await accepted(local, [user("s1:1", "look at the failing run on PR 2114")]);
+
+    expect(await title(localChat)).toEqual({ title: "HDPI-8713 flaky E2E", titleSource: "user" });
+  });
+
+  // The complaint this came from: the chats the person was happy with were the ones they had run `/rename` on, so a
+  // first prompt that replaced those would fix the bad names by taking away the good ones. The client reports where
+  // the name came from for exactly this.
+  it("should keep the name the person chose with /rename rather than the chat's first prompt", async () => {
+    await prisma.agent.update({ where: { id: local }, data: { name: "hdpi-9653-welsh", nameSource: "user" } });
+
+    await accepted(local, [user("s1:1", "look at the failing run on PR 2114")]);
+
+    expect(await title(localChat)).toEqual({ title: "hdpi-9653-welsh", titleSource: "agent" });
+  });
+
+  // A `/rename` happens part-way through a session, which is after the chat has been named and after prompts have
+  // been uploaded, so the heartbeat is the only place it can arrive and it has to outrank what is already there.
+  it("should take a /rename reported by a heartbeat after a prompt had already named the chat", async () => {
+    await accepted(local, [user("s1:1", "the prompt that named it first")]);
+    expect(await title(localChat)).toEqual({ title: "the prompt that named it first", titleSource: "message" });
+
+    await heartbeat(prisma, local, "idle", "hdpi-9653-welsh", undefined, "user");
+    await accepted(local, [user("s1:2", "and another prompt after the rename")]);
+
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: local }, select: { nameSource: true } })).toEqual({ nameSource: "user" });
+    expect(await title(localChat)).toEqual({ title: "hdpi-9653-welsh", titleSource: "agent" });
+  });
+
+  it("should leave a title the person typed in the hub alone, whatever the session is called", async () => {
+    await renameConversation(prisma, ALICE.oid, localChat, "HDPI-8713 flaky E2E");
+    await prisma.agent.update({ where: { id: local }, data: { name: "hdpi-9653-welsh", nameSource: "user" } });
+
+    await accepted(local, [user("s1:1", "look at the failing run on PR 2114")]);
+
+    expect(await title(localChat)).toEqual({ title: "HDPI-8713 flaky E2E", titleSource: "user" });
+  });
+
+  it("should leave a chat on a pod named after the message the person sent it", async () => {
+    await accepted(pod, [user("p1:1", "what the session read the message back as")]);
+
+    expect(await title(podChat)).toEqual({ title: "what the person asked for", titleSource: "message" });
   });
 });
 

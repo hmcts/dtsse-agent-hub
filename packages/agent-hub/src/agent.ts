@@ -15,6 +15,7 @@ import {
   conversationId,
   ensureStateDir,
   log,
+  type NameSource,
   pidAlive,
   projectDir,
   readJson,
@@ -159,6 +160,8 @@ function relativeTo(root: string, p: string): string | null {
 export type AgentMetadata = {
   session_id: string;
   name: string;
+  /** Where `name` came from, so the service can keep a name the person chose and replace one this client invented. */
+  name_source: NameSource;
   cwd: string;
   repo: string | null;
   branch: string | null;
@@ -180,6 +183,7 @@ export function gatherMetadata(sid: string, { cwd, root = workspaceRoot() }: Gat
   return {
     session_id: sid,
     name: info.name,
+    name_source: info.nameSource,
     cwd: dir,
     repo: repoDir ? repoName(repoDir) : null,
     branch: repoDir ? gitBranch(repoDir) : null,

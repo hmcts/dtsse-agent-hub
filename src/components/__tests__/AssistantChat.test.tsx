@@ -5,8 +5,9 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Skill } from "@/agents/skills";
 import { STARTERS, TEMPLATES } from "@/assistant/starters";
+import { WARMING_QUIPS } from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
-import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
+import { type ChatActions, ChatView, QUIP_INTERVAL_MS } from "@/components/assistant/ChatView";
 import { Composer } from "@/components/assistant/Composer";
 import { EmptyChat, type EmptyChatActions, NEW_CHAT_DRAFT } from "@/components/assistant/EmptyChat";
 import { draftKey } from "@/components/useDraft";
@@ -112,6 +113,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     local: false,
     agentId: AGENT,
     agentStatus: "idle",
+    repoBase: null,
     skills: [],
     clientFeatures: null,
     sessionState: null,
@@ -252,6 +254,34 @@ describe("ChatView thread", () => {
     expect(screen.getByRole("menuitem", { name: "Share" }).getAttribute("href")).toBe(`/assistant/${CONVERSATION}?share=1`);
     expect(screen.getByRole("menuitem", { name: "Fork" }).getAttribute("href")).toBe(`/assistant/${CONVERSATION}?fork=1`);
   });
+
+  // What a session working in a clone actually wrote, which the reader saw as the raw markdown of it.
+  const FOLLOW_UPS =
+    "Follow-ups: [Decentralise a service](apps/ccd/docs/how-to/decentralise-a-service.md) (step-by-step), " +
+    "[Decentralised callbacks reference](apps/ccd/docs/reference/decentralised-callbacks.md)";
+  const CITED = page({ entries: [entry("2", { content: { text: FOLLOW_UPS } })] });
+
+  it("should link a repo path the assistant cited to GitHub when the conversation's session reported its repo", () => {
+    const view = conversation({ page: CITED, repoBase: "https://github.com/hmcts/cft-workspace/blob/master/" });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={view} templates={TEMPLATES} actions={actions()} />);
+
+    const thread = screen.getByRole("list", { name: "Conversation" });
+    expect(within(thread).getByRole("link", { name: "Decentralise a service" }).getAttribute("href")).toBe(
+      "https://github.com/hmcts/cft-workspace/blob/master/apps/ccd/docs/how-to/decentralise-a-service.md"
+    );
+    expect(within(thread).getByRole("link", { name: "Decentralised callbacks reference" }).getAttribute("href")).toBe(
+      "https://github.com/hmcts/cft-workspace/blob/master/apps/ccd/docs/reference/decentralised-callbacks.md"
+    );
+    expect(within(thread).queryByText(/\]\(apps\/ccd/)).toBeNull();
+  });
+
+  it("should leave a cited repo path as the text it was written as when the session reported no repo", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={conversation({ page: CITED })} templates={TEMPLATES} actions={actions()} />);
+
+    const thread = screen.getByRole("list", { name: "Conversation" });
+    expect(within(thread).queryByRole("link")).toBeNull();
+    expect(within(thread).getByText(FOLLOW_UPS)).toBeTruthy();
+  });
 });
 
 describe("ChatView progress", () => {
@@ -381,6 +411,138 @@ describe("ChatView progress", () => {
     emit("agent_status", { agent_id: AGENT, status: "busy" });
     expect(screen.queryByText("Starting your assistant…")).toBeNull();
     expect(screen.getByText("Thinking")).toBeTruthy();
+  });
+});
+
+/**
+ * A pod runs a bounded number of sessions and `/exit`s one after twenty idle minutes, so an old chat on a running pod
+ * has no session behind it. Until this, nothing above the composer said so: the wake fires when the message box is
+ * focused and said nothing, and the person learnt a session was starting only once they had sent.
+ */
+describe("ChatView session notice", () => {
+  /** A chat whose agent is not answering, which is every state this line has anything to say about. */
+  function cold(overrides: Partial<ConversationView> = {}): ConversationView {
+    return conversation({ agentStatus: "offline", ...overrides });
+  }
+
+  /**
+   * That the line above the composer says this, and only it does. Matched on its `aria-hidden`, which is both what
+   * keeps the rotation out of the reader's way and what tells it apart from the live region's copy of the state —
+   * the unstarted wording reads the same spoken as it does shown.
+   */
+  function note(text: string): void {
+    expect(screen.getAllByText(text).filter((line) => line.getAttribute("aria-hidden") === "true")).toHaveLength(1);
+  }
+
+  it("should say nothing when a session is live, which will answer whatever is sent to it", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={cold({ sessionState: "live" })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByText(WARMING_QUIPS[0])).toBeNull();
+    expect(screen.queryByText(/Your assistant starts when you send/)).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
+  it("should rotate the warming quips while the pod is starting a session", () => {
+    vi.useFakeTimers();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={cold({ sessionState: "starting" })} templates={TEMPLATES} actions={actions()} />);
+
+    note(WARMING_QUIPS[0]);
+
+    act(() => {
+      vi.advanceTimersByTime(QUIP_INTERVAL_MS);
+    });
+
+    expect(screen.queryByText(WARMING_QUIPS[0])).toBeNull();
+    note(WARMING_QUIPS[1] ?? "");
+  });
+
+  // The quip changes every few seconds and is a decoration over one unchanging fact. A live region carrying it would
+  // read a different joke out for as long as the wait ran; the fact is announced once instead (WCAG 4.1.3).
+  it("should announce that the assistant is starting once, rather than every quip", () => {
+    vi.useFakeTimers();
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={cold({ sessionState: "starting" })} templates={TEMPLATES} actions={actions()} />);
+
+    const region = screen.getByRole("status");
+    expect(region.textContent).toBe("Starting your assistant");
+
+    act(() => {
+      vi.advanceTimersByTime(QUIP_INTERVAL_MS * 3);
+    });
+
+    expect(region.textContent).toBe("Starting your assistant");
+    expect(screen.queryByText(WARMING_QUIPS[0])).toBeNull();
+    // One region, not two: the quips are outside it and nothing else on the page is reading itself out.
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
+  // Rotating text is motion of a kind, and uninterruptible motion at that: it cannot be paused, and the person it
+  // takes the line away from is the one reading slowly. The quip itself is words, so the first one stands.
+  it("should hold on the first quip when the person has asked for less motion", () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: (query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined
+      })
+    });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={cold({ sessionState: "starting" })} templates={TEMPLATES} actions={actions()} />);
+
+    act(() => {
+      vi.advanceTimersByTime(QUIP_INTERVAL_MS * 4);
+    });
+
+    note(WARMING_QUIPS[0]);
+    expect(screen.getByRole("status").textContent).toBe("Starting your assistant");
+  });
+
+  it("should say plainly that the chat is waiting its turn when the pod has queued it", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={cold({ sessionState: "queued" })} templates={TEMPLATES} actions={actions()} />);
+
+    note("Waiting for a free assistant…");
+    expect(screen.queryByText(WARMING_QUIPS[0])).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Waiting for a free assistant");
+  });
+
+  it("should say what starts a session when the chat has none and nothing has asked for one", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={cold()} templates={TEMPLATES} actions={actions()} />);
+
+    note("Your assistant starts when you send a message.");
+    expect(screen.getByRole("status").textContent).toBe("Your assistant starts when you send a message.");
+  });
+
+  // What the silent wake on focus becomes: the line is already there to be read when the box is clicked, and the
+  // state it reports changes as the pod's supervisor reports the session it was asked for.
+  it("should give way to the starting line when the wake it asked for reaches the supervisor", () => {
+    const { rerender } = render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={cold()} templates={TEMPLATES} actions={actions()} />);
+    fireEvent.focus(screen.getByRole("textbox", { name: "Message" }));
+
+    rerender(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={cold({ sessionState: "starting" })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByText(/Your assistant starts when you send/)).toBeNull();
+    note(WARMING_QUIPS[0]);
+  });
+
+  // The thread's own line words the wait from the moment there is a message waiting on it. Both would be the same
+  // wait said twice, directly above and below each other.
+  it("should leave the wait to the line under the thread once a message is waiting on it", () => {
+    const waiting = cold({ sessionState: "starting", page: page({ messages: [message("1", { delivery: "queued" })] }) });
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={waiting} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.getByText("Starting your assistant…")).toBeTruthy();
+    expect(screen.queryByText(WARMING_QUIPS[0])).toBeNull();
+  });
+
+  // No pod, no supervisor, and `localOfflineNote` already says the one thing there is to say about a laptop that is
+  // away. It is in the same slot, so a notice here would stack on top of it.
+  it("should say none of this on a chat that runs on the person's own computer", () => {
+    render(<ChatView jira={NO_JIRA} viewerOid={VIEWER} view={cold({ local: true, sessionState: "starting" })} templates={TEMPLATES} actions={actions()} />);
+
+    expect(screen.queryByText(WARMING_QUIPS[0])).toBeNull();
+    expect(screen.queryByText(/Your assistant starts when you send/)).toBeNull();
+    expect(screen.getByText(/not connected/)).toBeTruthy();
   });
 });
 

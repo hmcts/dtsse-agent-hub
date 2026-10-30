@@ -55,6 +55,24 @@ describe("MessageBody", () => {
     expect(container.textContent).toBe("[click](javascript:alert(1)) [data](data:text/html,x)");
   });
 
+  it("should render a repo path as a new-tab GitHub link when the caller says where the repo is", () => {
+    const base = "https://github.com/hmcts/cft-workspace/blob/master/";
+    render(<MessageBody body="see [the guide](apps/ccd/docs/how-to/decentralise-a-service.md)" repoBase={base} />);
+
+    const guide = screen.getByRole("link", { name: "the guide" });
+    expect(guide.getAttribute("href")).toBe(`${base}apps/ccd/docs/how-to/decentralise-a-service.md`);
+    expect(guide.getAttribute("target")).toBe("_blank");
+    expect(guide.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("should render a repo path as the text it was written as when the caller says nothing about a repo", () => {
+    const body = "see [the guide](apps/ccd/docs/how-to/decentralise-a-service.md)";
+    const container = renderBody(body);
+
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toBe(body);
+  });
+
   it("should render inline code, bold and italics when a body uses them", () => {
     const container = renderBody("run `yarn test` **now** and _then_ *rest*");
 

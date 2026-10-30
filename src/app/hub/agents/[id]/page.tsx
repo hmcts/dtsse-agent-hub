@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
+import { repoFileBase } from "@/agents/github";
 import type { AgentView } from "@/agents/views";
 import { saveCredential } from "@/app/_actions/credentials";
 import { sendDirect } from "@/app/_actions/direct";
@@ -50,6 +51,7 @@ async function AgentConversation({ viewer, activity, view }: { viewer: Viewer; a
       agentName={agent.name}
       ownerName={agent.owner.name}
       virtualAgentId={agent.virtualAgentId}
+      repoBase={repoFileBase(agent.repo, agent.branch)}
       viewerOid={viewer.oid}
       status={agent.status}
       initial={conversation}

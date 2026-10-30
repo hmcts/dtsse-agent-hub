@@ -514,6 +514,19 @@ describe("runStopWorker", () => {
 });
 
 describe("followWork", () => {
+  // `~/.claude/sessions/<pid>.json` is where a /rename lands, and so is the only honest source for the name a
+  // register reports and for where that name came from.
+  const sessionsDir = () => path.join(home.claude, "sessions");
+  const registry = (fields: Record<string, unknown>) => {
+    fs.mkdirSync(sessionsDir(), { recursive: true });
+    fs.writeFileSync(path.join(sessionsDir(), `${SID}.json`), JSON.stringify({ pid: 424242, sessionId: SID, cwd: W, ...fields }));
+  };
+
+  beforeEach(() => {
+    fs.rmSync(sessionsDir(), { recursive: true, force: true });
+    fs.mkdirSync(sessionsDir(), { recursive: true });
+  });
+
   const followRun = (api: FakeApi, entries: unknown[], extra: Partial<RunStopWorkerOptions> = {}) => {
     fs.writeFileSync(transcript, jsonlOf([{ type: "user", message: { content: "go" } }, ...entries]));
     return runStopWorker({
@@ -532,6 +545,7 @@ describe("followWork", () => {
   it("should re-register on the repo worked in and subscribe to it and its product", async () => {
     // Arrange
     writeJson(statePath(SID, "agent.json"), { agent_id: "agent-1", name: "me", cwd: W, repo: null, branch: null, topics: ["pcs-api"] });
+    registry({ name: "me", nameSource: "derived" });
     const api = followApi({ subscribed: ["pcs-api"] });
 
     // Act
@@ -548,6 +562,7 @@ describe("followWork", () => {
     expect(register.branch).toBe("VIBE-607-web-ui");
     expect(register.cwd).toBe(W);
     expect(register.name).toBe("me");
+    expect(register.name_source).toBe("derived");
     expect(register.host).toBeTruthy();
     expect(callsOf(api, "subscribe")[0]?.[1]).toEqual(["dtsse-agent-hub", "dtsse", "cnp-flux-config", "platops"]);
     const agent = readJson(statePath(SID, "agent.json")) as Record<string, unknown>;
@@ -566,6 +581,22 @@ describe("followWork", () => {
       api.calls.filter((c) => c[0] === "register" || c[0] === "subscribe"),
       "nothing changed"
     ).toHaveLength(0);
+  });
+
+  // The service replaces both columns with whatever a register reports, so a stale name beside a fresh
+  // `name_source` would have it record a handle the person had replaced as the one they chose — and the next
+  // transcript batch pins the chat's title to it.
+  it("should report the renamed handle when the session was renamed after it first registered", async () => {
+    // Arrange: agent.json keeps the name of the first registration, and no /rename rewrites it.
+    writeJson(statePath(SID, "agent.json"), { agent_id: "agent-1", name: "hmcts-25", cwd: W, repo: null, branch: null });
+    registry({ name: "my-feature-work", nameSource: "user" });
+    const api = followApi();
+
+    // Act
+    await followRun(api, [toolUse("Edit", { file_path: "/work/cft-workspace/apps/dtsse/dtsse-agent-hub/src/a.ts" })]);
+
+    // Assert
+    expect(callsOf(api, "register")[0]?.[1]).toMatchObject({ name: "my-feature-work", name_source: "user" });
   });
 
   it("should still report what this build understands when it re-registers on another repo", async () => {

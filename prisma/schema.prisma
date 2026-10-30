@@ -181,6 +181,9 @@ model Agent {
   ownerOid        String      @map("owner_oid")
   sessionId       String      @unique @map("session_id")
   name            String
+  /// Where `name` came from: user for a name the person chose with Claude Code's /rename, derived for one the
+  /// client worked out, which is also what a client that does not report it is read as. See src/agents/name-source.ts.
+  nameSource      String      @default("derived") @map("name_source")
   cwd             String?
   repo            String?
   branch          String?
@@ -500,6 +503,10 @@ model AssistantConversation {
   virtualAgentId    String?   @map("virtual_agent_id") @db.Uuid
   agentId           String?   @map("agent_id") @db.Uuid
   title             String?
+  /// Which of the three things that can name a conversation named this one: agent, message or user, and message for
+  /// a title from before this column that could not be attributed. See src/assistant/titles.ts; it is what keeps an
+  /// automatic title refreshable and a chosen one alone.
+  titleSource       String    @default("message") @map("title_source")
   /// One of src/assistant/products.ts.
   product           String    @default("general")
   /// Every change of product, as [{product, at}].

@@ -266,12 +266,20 @@ export async function followWork(ctx: PassContext, { agent, touches, root }: Fol
     try {
       const repo = repoName(top.dir) || top.slug;
       const branch = branchOf(top.dir);
-      // `client_features` goes on this register too, not just the one in `agent.ts`: the service replaces the
-      // column with whatever a register reports, so leaving it off here would downgrade a capable session to
-      // "claims nothing" the first time the person's edits moved to another repo.
+      // `client_features` and `name_source` go on this register too, not just the one in `agent.ts`: the service
+      // replaces both columns with whatever a register reports, so leaving either off here would downgrade a capable
+      // session to "claims nothing", and a session the person had renamed to one whose name came from nowhere, the
+      // first time their edits moved to another repo.
+      //
+      // The name and where it came from are both read from the session registry, in one call. `agent.json` holds the
+      // name of the first registration and no /rename rewrites it, so reporting that name beside a live `name_source`
+      // would tell the service the person chose a handle they had since replaced — and the next transcript batch
+      // would pin the chat's title to the handle they moved away from.
+      const session = sessionInfo(sid);
       await api.register({
         session_id: sid,
-        name: agent.name ?? "",
+        name: session.name,
+        name_source: session.nameSource,
         cwd: agent.cwd,
         repo,
         branch,

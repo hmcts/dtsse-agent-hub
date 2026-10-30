@@ -3,7 +3,7 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationLink } from "@/assistant/views";
+import type { ConversationLink, ConversationMark, LocalSession } from "@/assistant/views";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";
@@ -52,8 +52,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function link(id: string, title: string, local = false): ConversationLink {
-  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", local };
+function link(id: string, title: string, mark: ConversationMark = null): ConversationLink {
+  return { id, title, product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-21T09:00:00.000Z", mark };
+}
+
+/** A chat on the person's own computer, whose session is in one of the three states its mark carries. */
+function onComputer(session: LocalSession): ConversationMark {
+  return { where: "computer", session };
 }
 
 function shell(props: Partial<Parameters<typeof AssistantShell>[0]> = {}) {
@@ -98,14 +103,79 @@ describe("AssistantShell", () => {
   // The icon alone would say nothing to a screen reader, and where a chat runs is the one thing about it that is not
   // in its title: a local chat takes no files, cannot be stopped from here and answers only while the laptop is on.
   it("should mark a chat that is a session on the person's own computer, in words as well as an icon", () => {
-    render(shell({ groups: [{ label: "Today", items: [link("a", "Event help"), link("b", "Fixing the sweep", true)] }] }));
+    render(shell({ groups: [{ label: "Today", items: [link("a", "Event help"), link("b", "Fixing the sweep", onComputer("ready"))] }] }));
 
     const nav = screen.getByRole("navigation", { name: "Chats" });
     const row = within(nav).getByRole("link", { name: /On your computer/ });
     expect(row.getAttribute("href")).toBe("/assistant/b");
     // The words lead the title, so where the chat runs is the first thing read out rather than trailing it.
-    expect(row.textContent).toBe("On your computer: Fixing the sweep");
+    expect(row.textContent).toBe("On your computer, ready: Fixing the sweep");
     expect(within(nav).getByRole("link", { name: "Event help" }).textContent).toBe("Event help");
+  });
+
+  // Colour is never the only thing carrying the state (WCAG 1.4.1): each of the three names itself in the row's own
+  // accessible name, so a session that is not connected is not told apart from a working one by a hue alone.
+  it.each([
+    ["ready", "On your computer, ready"],
+    ["working", "On your computer, working"],
+    ["disconnected", "On your computer, not connected"]
+  ] as const)("should name the state of a local chat's session in its row when it is %s", (session: LocalSession, words: string) => {
+    render(shell({ groups: [{ label: "Today", items: [link("b", "Fixing the sweep", onComputer(session))] }] }));
+
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    // The words lead the name, so the state is the first thing read out rather than trailing the title.
+    expect(within(nav).getByRole("link", { name: new RegExp(`^${words}`) }).textContent).toBe(`${words}: Fixing the sweep`);
+    // The tooltip says the same to a pointer, which has no other way of being told.
+    expect(screen.getByTitle(words)).toBeTruthy();
+  });
+
+  // The three are the theme's own colours rather than raw palette values, so the mark stays legible in both themes.
+  it.each([
+    ["ready", "text-asst-ok"],
+    ["working", "text-asst-warn"],
+    ["disconnected", "text-asst-faint"]
+  ] as const)("should colour a local chat's mark when its session is %s", (session: LocalSession, colour: string) => {
+    render(shell({ groups: [{ label: "Today", items: [link("b", "Fixing the sweep", onComputer(session))] }] }));
+
+    const mark = screen.getByTitle(/On your computer/);
+    expect(mark.className).toContain(colour);
+  });
+
+  // The cloud is only ever there to tell a pod chat from a local one, so a list with nothing but pod chats carries
+  // no marks at all: a cloud against every row would distinguish them from nothing.
+  it("should mark a chat on the assistant once the person has one on their own computer as well", () => {
+    render(
+      shell({
+        groups: [{ label: "Today", items: [link("a", "Event help", { where: "assistant" }), link("b", "Fixing the sweep", onComputer("ready"))] }]
+      })
+    );
+
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    expect(within(nav).getByRole("link", { name: /On your assistant/ }).textContent).toBe("On your assistant: Event help");
+    expect(within(nav).getByRole("link", { name: /On your computer/ }).textContent).toBe("On your computer, ready: Fixing the sweep");
+  });
+
+  it("should mark no chat when every one of the person's chats runs on their assistant", () => {
+    render(shell({ groups: [{ label: "Today", items: [link("a", "Event help"), link("b", "Story draft")] }] }));
+
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    expect(within(nav).getByRole("link", { name: "Event help" }).textContent).toBe("Event help");
+    expect(within(nav).queryByTitle(/On your/)).toBeNull();
+  });
+
+  it("should still mark a chat on the person's own computer when every one of their chats is one", () => {
+    render(
+      shell({
+        groups: [{ label: "Today", items: [link("a", "Event help", onComputer("ready")), link("b", "Fixing the sweep", onComputer("disconnected"))] }]
+      })
+    );
+
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((row) => row.textContent)
+    ).toEqual(["On your computer, ready: Event help", "On your computer, not connected: Fixing the sweep"]);
   });
 
   it("should say chats will appear when there are none", () => {
@@ -706,7 +776,7 @@ describe("AssistantChatsPanel", () => {
     const { AssistantChatsPanel } = await import("@/components/virtual-agents/AssistantChatsPanel");
     render(
       <AssistantChatsPanel
-        chats={[{ id: "c1", title: "Listing story", product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-22T09:00:00.000Z", local: false }]}
+        chats={[{ id: "c1", title: "Listing story", product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-22T09:00:00.000Z", mark: null }]}
       />
     );
 

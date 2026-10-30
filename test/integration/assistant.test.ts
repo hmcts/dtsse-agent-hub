@@ -96,12 +96,14 @@ function register(
   token: string,
   sessionId: string,
   conversationId?: string,
-  reported: { skills?: { name: string; description: string }[]; clientFeatures?: string[] } = {}
+  reported: { skills?: { name: string; description: string }[]; clientFeatures?: string[]; repo?: string; branch?: string } = {}
 ): Promise<Response> {
   return pod(registerRoute.POST, token, "/api/agent/register", {}, "POST", {
     session_id: sessionId,
     name: "session",
     ...(conversationId === undefined ? {} : { conversation_id: conversationId }),
+    ...(reported.repo === undefined ? {} : { repo: reported.repo }),
+    ...(reported.branch === undefined ? {} : { branch: reported.branch }),
     ...(reported.skills === undefined ? {} : { skills: reported.skills }),
     // Left out unless a test is a newer client: a pod runs whatever client version its image booted with.
     ...(reported.clientFeatures === undefined ? {} : { client_features: reported.clientFeatures })
@@ -472,6 +474,22 @@ describe("conversations", () => {
     ]);
   });
 
+  /** Where a repo-relative path in an answer resolves to, which is the registering session's repo and branch. */
+  it("should carry the session's repo and branch to the conversation page as a GitHub base, and none before it registers", async () => {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+    const { sessionId } = await sessionOf(id);
+
+    expect((await assistantConversation(VIEWER, id))?.repoBase).toBeNull();
+
+    await register(token, sessionId, id, { repo: "cft-workspace", branch: "feat/repo-relative-links" });
+    expect((await assistantConversation(VIEWER, id))?.repoBase).toBe("https://github.com/hmcts/cft-workspace/blob/feat/repo-relative-links/");
+
+    // A session with no branch to report — a detached HEAD, or a worktree git answered nothing for — still links.
+    await register(token, sessionId, id, { repo: "cft-workspace" });
+    expect((await assistantConversation(VIEWER, id))?.repoBase).toBe("https://github.com/hmcts/cft-workspace/blob/HEAD/");
+  });
+
   it("should record each change of product, and leave it alone when it is the same", async () => {
     await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
@@ -718,22 +736,50 @@ describe("conversations", () => {
     const { token } = await startedAssistant();
     const onPod = ((await actions.startConversation({ product: "general", body: "on my assistant" })) as { id: string }).id;
     await register(token, (await sessionOf(onPod)).sessionId, onPod);
-    await registerAgent(
-      prisma,
-      { ...ALICE, tid: "dev" },
-      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
-    );
-    const onLaptop = (await prisma.assistantConversation.findFirstOrThrow({ where: { virtualAgentId: null } })).id;
+    const onLaptop = await laptopChat();
 
     expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
     expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
-    expect(new Map(listed.map((item) => [item.id, item.local]))).toEqual(
+    expect(new Map(listed.map((item) => [item.id, item.mark?.where ?? null]))).toEqual(
       new Map([
-        [onLaptop, true],
-        [onPod, false]
+        [onLaptop, "computer"],
+        [onPod, "assistant"]
       ])
     );
+  });
+
+  /**
+   * A local chat's mark is coloured by the state of its session, which lives on the agent rather than on the
+   * conversation: the sidebar's read has to bring `agent.status` back with each row or every laptop would be marked
+   * the same whatever its session was doing.
+   */
+  it.each([
+    ["busy", "working"],
+    ["idle", "ready"],
+    ["offline", "disconnected"]
+  ] as const)("should mark a listed local chat as %s with the state of its session", async (status, session) => {
+    await startedAssistant();
+    const onLaptop = await laptopChat();
+    await prisma.agent.updateMany({ where: { assistantConversationId: onLaptop }, data: { status } });
+
+    const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
+
+    expect(listed.map((item) => [item.id, item.mark])).toEqual([[onLaptop, { where: "computer", session }]]);
+  });
+
+  /**
+   * The cloud is there only to tell a pod chat from a local one, so somebody who has never run a session on their
+   * own computer sees no marks at all. One read answers it for the whole list; see `hasLocalConversation`.
+   */
+  it("should mark no chat when every one of the person's chats runs on their assistant", async () => {
+    const { token } = await startedAssistant();
+    const onPod = ((await actions.startConversation({ product: "general", body: "on my assistant" })) as { id: string }).id;
+    await register(token, (await sessionOf(onPod)).sessionId, onPod);
+
+    const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
+
+    expect(listed.map((item) => [item.id, item.mark])).toEqual([[onPod, null]]);
   });
 
   it("should wake a conversation when its composer is focused and the session is offline", async () => {

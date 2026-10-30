@@ -18,8 +18,13 @@ function DeliveryBadge({ state }: { state: DeliveryView }) {
   return <span className={`rounded-sm border px-1 text-[11px] uppercase tracking-wide ${DELIVERY_STYLE[state]}`}>{state}</span>;
 }
 
-/** One direct message in an agent's conversation, with which way it went and its delivery to the target. */
-export function DirectMessage({ agentId, message }: { agentId: string; message: ThreadMessage }) {
+/**
+ * One direct message in an agent's conversation, with which way it went and its delivery to the target.
+ *
+ * `repoBase` is this agent's repo, so it is handed to the body only for a message this agent wrote: a message from
+ * somebody else's session cites paths in whatever repo that one is working in, which is not this one.
+ */
+export function DirectMessage({ agentId, message, repoBase = null }: { agentId: string; message: ThreadMessage; repoBase?: string | null }) {
   const fromAgent = message.author.agent_id === agentId;
   const name = senderName(message);
   return (
@@ -34,7 +39,7 @@ export function DirectMessage({ agentId, message }: { agentId: string; message: 
           <MessageLink id={message.id} className={BYLINE_ID} />
           {message.delivery !== null ? <DeliveryBadge state={message.delivery} /> : null}
         </p>
-        <MessageBody body={message.body} />
+        <MessageBody body={message.body} repoBase={fromAgent ? repoBase : null} />
       </div>
     </li>
   );

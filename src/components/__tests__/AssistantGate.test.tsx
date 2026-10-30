@@ -108,6 +108,7 @@ function conversation(local: boolean): ConversationView {
     local,
     agentId: AGENT,
     agentStatus: "idle",
+    repoBase: null,
     skills: [],
     clientFeatures: null,
     sessionState: null,

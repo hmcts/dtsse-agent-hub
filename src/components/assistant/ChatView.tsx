@@ -8,7 +8,17 @@ import type { ArtefactSnapshot } from "@/app/_actions/assistant";
 import { type ExportDefaults, NO_DEFAULTS } from "@/assistant/export-defaults";
 import { PRODUCTS, productLabel, storedProduct } from "@/assistant/products";
 import type { Template } from "@/assistant/starters";
-import { backgroundHelpers, type Progress, progress, progressAnnouncement, progressLabel, type ThreadItem, threadItems } from "@/assistant/thread";
+import {
+  backgroundHelpers,
+  type Progress,
+  progress,
+  progressAnnouncement,
+  progressLabel,
+  type SessionNotice,
+  sessionNotice,
+  type ThreadItem,
+  threadItems
+} from "@/assistant/thread";
 import type { ConversationView } from "@/assistant/views";
 import { useLiveConversation } from "@/components/agents/useLiveConversation";
 import { ArtefactPanel, type SaveArtefactAction } from "@/components/assistant/ArtefactPanel";
@@ -100,7 +110,65 @@ export function localOfflineNote(): string {
   return `This chat is a Claude Code session on your own computer, and it is not connected. Your message is kept and delivered when it reconnects, for up to ${duration(EXPIRE_AFTER_SECONDS)} offline.`;
 }
 
-function Item({ item, answerQuestion }: { item: ThreadItem; answerQuestion: AnswerQuestionAction }) {
+/** How long each warming quip stands before the next, which is a few seconds of a wait that is usually a few more. */
+export const QUIP_INTERVAL_MS = 3000;
+
+/** Whether the person has asked their system for less motion, followed as it changes as `useNarrow` follows a resize. */
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReduced(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return reduced;
+}
+
+/**
+ * What is happening to the session behind this chat, above the composer, for the whole of the wait before the person
+ * has sent anything — which until now said nothing at all, including while a session was being started for them.
+ *
+ * `aria-hidden`, all of it. The warming words rotate every few seconds and are a decoration over one unchanging
+ * fact; a live region here would read a different joke out every few seconds and talk over the person for the length
+ * of the wait. The fact itself is announced once by the one region the page already keeps, which carries
+ * `notice.announcement` whenever `progress` has nothing of its own to say (WCAG 4.1.3).
+ *
+ * Under `prefers-reduced-motion` the rotation stops and the first quip stands for the whole wait. The quip is words
+ * and stays — there is nothing in reading a sentence for somebody who finds movement painful or distracting — but
+ * text that swaps itself out on a timer is movement, and it is also uninterruptible: it cannot be paused, and the
+ * person reading slowly is the one it takes the line away from.
+ *
+ * The rotation itself is deterministic: it starts at the first quip and goes through them in order, so what is on the
+ * screen is a function of how long the wait has run and nothing else.
+ */
+function SessionNote({ notice }: { notice: SessionNotice | null }) {
+  const hold = useReducedMotion();
+  const [shown, setShown] = useState(0);
+  // How many words there are to go through, which `starting` is the only state with more than one of. Both the thing
+  // that decides whether anything rotates and, changing, the thing that says this is a different wait from the last.
+  const count = notice?.words.length ?? 0;
+  useEffect(() => {
+    // Back to the first quip, so a later wait does not open part-way through the rotation of the one before it.
+    setShown(0);
+    if (hold || count < 2) {
+      return;
+    }
+    const rotate = setInterval(() => setShown((at) => at + 1), QUIP_INTERVAL_MS);
+    return () => clearInterval(rotate);
+  }, [count, hold]);
+  if (notice === null) {
+    return null;
+  }
+  return (
+    <p aria-hidden="true" className="pb-2 text-center text-[13px] text-asst-muted">
+      {notice.words[shown % notice.words.length] ?? notice.words[0]}
+    </p>
+  );
+}
+
+function Item({ item, answerQuestion, repoBase }: { item: ThreadItem; answerQuestion: AnswerQuestionAction; repoBase: string | null }) {
   if (item.type === "question") {
     return (
       <li>
@@ -158,7 +226,7 @@ function Item({ item, answerQuestion }: { item: ThreadItem; answerQuestion: Answ
       </span>
       <div className="min-w-0 flex-1 text-asst-body">
         <span className="sr-only">The assistant said:</span>
-        <AssistantMarkdown source={item.text} />
+        <AssistantMarkdown source={item.text} repoBase={repoBase} />
       </div>
     </li>
   );
@@ -297,6 +365,14 @@ export function ChatView({
   const doing: Progress = progress(live.items, thread, status, view.sessionState, view.local);
   // Not part of `doing`: background work carries on after the session goes idle, so it has to show when nothing else does.
   const background = useMemo(() => (status === "offline" ? 0 : backgroundHelpers(live.items)), [status, live.items]);
+  /**
+   * What to say about the session behind this chat while there is nothing to say about an answer. `view.local` is the
+   * reading `pod` negates, passed on so the rule that a chat with no pod gets none of this is kept where the wording
+   * is; `status` rather than `view.agentStatus`, so the line goes the moment the stream says the session is up.
+   */
+  const notice = sessionNotice(view.sessionState, status, doing, view.local);
+  /** The one live region's text. At most one of the two can have anything: `sessionNotice` answers for an idle thread alone. */
+  const announced = notice === null ? progressAnnouncement(doing) : notice.announcement;
   /**
    * Both halves of "there is something to stop, and stopping it will work".
    *
@@ -443,7 +519,7 @@ export function ChatView({
             )}
             <ol aria-label="Conversation" className="flex flex-col gap-[26px]">
               {thread.map((item) => (
-                <Item key={item.key} item={item} answerQuestion={actions.answerQuestion} />
+                <Item key={item.key} item={item} answerQuestion={actions.answerQuestion} repoBase={view.repoBase} />
               ))}
             </ol>
             {doing.state === "idle" ? null : (
@@ -462,12 +538,14 @@ export function ChatView({
               </p>
             )}
             {/*
-              Always in the page, even with nothing to say: a live region added to the document at the same moment as
-              its first text is not reliably announced. Emptying it as the answer settles is deliberate too, so the
-              next thing it says is read as new.
+              The one live region on the page, and always in it even with nothing to say: a live region added to the
+              document at the same moment as its first text is not reliably announced. Emptying it as the answer
+              settles is deliberate too, so the next thing it says is read as new. It carries what the assistant is
+              doing or, while it is doing nothing, the state of the session behind the chat — one at a time, because a
+              second region beside it would be two things reading themselves out over each other.
             */}
             <p role="status" className="sr-only">
-              {progressAnnouncement(doing)}
+              {announced}
             </p>
           </div>
           <AnnouncerRegion text={arrivals.text} />
@@ -486,6 +564,12 @@ export function ChatView({
               which for a laptop session is the clock that runs rather than the delivery's own age.
             */}
             {view.local && status === "offline" ? <p className="pb-2 text-center text-[13px] text-asst-muted">{localOfflineNote()}</p> : null}
+            {/*
+              The same slot as the note above it, and at most one of the two is ever in it: that one is a laptop
+              session that is away, this one a pod's session that is not up yet, and `sessionNotice` answers nothing
+              for a chat with no pod.
+            */}
+            <SessionNote notice={notice} />
             <Composer
               templates={templates}
               viewerOid={viewerOid}

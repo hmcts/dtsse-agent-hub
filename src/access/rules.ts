@@ -56,7 +56,7 @@ export interface AgentRef {
   ownerOnly?: boolean;
 }
 
-/** The columns `isPodConversationAgent` reads: an agent row's own, so deciding joins nothing. */
+/** The columns `isPodConversationAgent` and `isLocalConversationAgent` read: an agent row's own, so deciding joins nothing. */
 export interface AgentConversationColumns {
   assistantConversationId: string | null;
   virtualAgentId: string | null;
@@ -72,6 +72,18 @@ export interface AgentConversationColumns {
  */
 export function isPodConversationAgent(agent: AgentConversationColumns): boolean {
   return agent.assistantConversationId !== null && agent.virtualAgentId !== null;
+}
+
+/**
+ * Whether an agent row is the agent of a chat on somebody's own computer: a conversation of its own, and no virtual
+ * agent behind it for the reason `isPodConversationAgent` gives.
+ *
+ * It is the only kind of chat whose title the hub derives — a pod's is named after the person's first message and a
+ * board session has no chat at all — so an upload reads it to decide whether a title refresh could apply before
+ * paying for one.
+ */
+export function isLocalConversationAgent(agent: AgentConversationColumns): boolean {
+  return agent.assistantConversationId !== null && agent.virtualAgentId === null;
 }
 
 export interface MessageRef {

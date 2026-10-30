@@ -148,6 +148,14 @@ export function LaptopIcon() {
   );
 }
 
+export function CloudIcon() {
+  return (
+    <Icon>
+      <path d="M14.6 15.5H7.6a5.4 5.4 0 1 1 5.2-7h1.4a3.5 3.5 0 1 1 0 7Z" />
+    </Icon>
+  );
+}
+
 export function ChatIcon() {
   return (
     <Icon>

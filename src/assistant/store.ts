@@ -1,5 +1,7 @@
 import { HttpError } from "../agent-api/http.ts";
 import { clientSupports } from "../agents/client-features.ts";
+import { nameSourceOf } from "../agents/name-source.ts";
+import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
@@ -11,6 +13,7 @@ import { hasPod } from "./pods.ts";
 import { DEFAULT_PRODUCT, isProduct, productLabel, storedProduct } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
 import { SEARCH_LIMIT, SNIPPET_MAX_WORDS, SNIPPET_MIN_WORDS, searchTerms, visibleMatches } from "./search.ts";
+import { firstPromptTitle, localTitle, messageTitle, PROMPT_CANDIDATES, TITLE_MAX, type TitleSource } from "./titles.ts";
 import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
 
 /**
@@ -23,12 +26,6 @@ import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
  */
 
 export const ASSISTANT_NAME = "assistant";
-
-/** A new conversation's title is the start of its first message, until the person renames it. */
-export const TITLE_FROM_MESSAGE = 60;
-
-/** The longest title a conversation can carry, whoever wrote it: the person renaming it, or a local session's name. */
-export const TITLE_MAX = 200;
 
 const MAX_PRODUCT_HISTORY = 50;
 const MAX_STOP_HISTORY = 50;
@@ -91,18 +88,6 @@ const SELECT = {
   lastActiveAt: true,
   createdAt: true
 } as const;
-
-/**
- * A local session's title: the name its client reported, which the client derives from the transcript's own title.
- * Normalised exactly as a rename is, so the two cannot disagree about what a title may be.
- *
- * Kept even when the client had nothing better and sent the first characters of the session id. That reads as
- * nothing, but it is what the hub calls the same session everywhere else, and the alternative is a sidebar in which
- * every laptop says "New chat"; the person can rename it.
- */
-function localTitle(name: string): string | null {
-  return name.trim().replace(/\s+/g, " ").slice(0, TITLE_MAX) || null;
-}
 
 function storedHistory(value: unknown): ProductChange[] {
   if (!Array.isArray(value)) {
@@ -225,24 +210,52 @@ export async function findConversation(db: Database, ownerOid: string, id: strin
 }
 
 /**
+ * A listed conversation with the status of its current agent, which is what a sidebar row needs and a conversation's
+ * own row does not carry: `agent_id` names the agent, and the status lives on that agent.
+ */
+export interface ConversationListRow extends ConversationRow {
+  /** The status of the conversation's current agent; `offline` when it has no agent yet, as its own page reads it. */
+  agentStatus: AgentStatus;
+}
+
+/**
  * The owner's conversations, most recently active first; only those on `virtualAgentId` when it is given.
  *
  * A conversation with no pod is listed outright. `virtualAgent: { desired: … }` is a relation filter on an optional
  * to-one, so a row with no related virtual agent does not satisfy it at all — reading the pod's state alone would
  * leave every local chat out of the sidebar rather than only the ones whose pod is going.
+ *
+ * The current agent's status comes back with each row, because the sidebar colours a local chat's mark by it: a
+ * second read per row would be one query per chat, and one read of the whole list is what keeps the mark and the
+ * chat's own page saying the same thing about the same session.
  */
-export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationRow[]> {
+export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationListRow[]> {
   const rows = await db.assistantConversation.findMany({
     where: {
       ownerOid,
       OR: [{ virtualAgentId: null }, { virtualAgent: { desired: { not: "deleted" } } }],
       ...(virtualAgentId === undefined ? {} : { virtualAgentId })
     },
-    select: SELECT,
+    select: { ...SELECT, agent: { select: { status: true } } },
     orderBy: [{ lastActiveAt: "desc" }, { id: "asc" }],
     take: limit
   });
-  return rows.map(toRow);
+  return rows.map(({ agent, ...row }) => ({ ...toRow(row), agentStatus: agent?.status ?? "offline" }));
+}
+
+/**
+ * Whether any of the owner's conversations is a session on their own computer.
+ *
+ * A fact about the whole list rather than about any one row, and so its own read: it is what decides whether a chat
+ * running on a pod is marked as one at all, since a cloud beside every row of a list that holds nothing else tells
+ * nobody anything. Asked here, by both the sidebar's list and its search, so the two cannot answer it differently
+ * for the same person — and asked of every one of their conversations rather than of the page the sidebar loaded,
+ * which is capped and so could miss the only local chat they have.
+ *
+ * No `virtual_agent` filter, unlike `listConversations`: these rows have no related virtual agent to be deleted.
+ */
+export async function hasLocalConversation(db: Database, ownerOid: string): Promise<boolean> {
+  return (await db.assistantConversation.findFirst({ where: { ownerOid, virtualAgentId: null }, select: { id: true } })) !== null;
 }
 
 /**
@@ -298,6 +311,8 @@ export interface ConversationMatchRow {
   title: string | null;
   product: string;
   lastActiveAt: Date;
+  /** The status of the chat's current agent, as `ConversationListRow` carries it, so a result is marked as a row is. */
+  agentStatus: AgentStatus;
   /** The words of a message around the match, when a message rather than the title is why the chat matched. */
   excerpt: string | null;
 }
@@ -330,7 +345,16 @@ export async function searchConversations(db: Database, ownerOid: string, query:
     return [];
   }
   const rows = await db.$queryRaw<
-    { id: string; ownerOid: string; virtualAgentId: string | null; title: string | null; product: string; lastActiveAt: Date; excerpt: string | null }[]
+    {
+      id: string;
+      ownerOid: string;
+      virtualAgentId: string | null;
+      title: string | null;
+      product: string;
+      lastActiveAt: Date;
+      agentStatus: AgentStatus | null;
+      excerpt: string | null;
+    }[]
   >`
     WITH query AS (
       -- quote_literal is what makes a typed term safe to put in a query. A single-quoted string in a tsquery is
@@ -347,10 +371,12 @@ export async function searchConversations(db: Database, ownerOid: string, query:
     owned AS (
       -- LEFT JOIN, with the null counted in: a conversation with no pod is one of the viewer's own chats and is
       -- searchable like any other. An inner join would drop every local chat from the sidebar's search, since there
-      -- is no virtual_agent row for it to match.
-      SELECT c.id, c.owner_oid, c.virtual_agent_id, c.title, c.product, c.last_active_at
+      -- is no virtual_agent row for it to match. The current agent is joined the same way and for the same reason:
+      -- a chat with no agent yet is still a chat, and its status reads as offline.
+      SELECT c.id, c.owner_oid, c.virtual_agent_id, c.title, c.product, c.last_active_at, cur.status::text AS agent_status
         FROM assistant_conversation c
         LEFT JOIN virtual_agent v ON v.id = c.virtual_agent_id
+        LEFT JOIN agent cur ON cur.id = c.agent_id
        WHERE c.owner_oid = ${ownerOid} AND (v.id IS NULL OR v.desired <> 'deleted')
     ),
     in_body AS (
@@ -369,7 +395,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
        WHERE to_tsvector('english', COALESCE(o.title, '')) @@ q.tsq OR b.body IS NOT NULL
     )
     SELECT o.id::text AS id, o.owner_oid AS "ownerOid", o.virtual_agent_id::text AS "virtualAgentId", o.title, o.product,
-           o.last_active_at AS "lastActiveAt", e.excerpt
+           o.last_active_at AS "lastActiveAt", o.agent_status AS "agentStatus", e.excerpt
       FROM owned o
       JOIN (SELECT id FROM hit GROUP BY id HAVING count(*) = (SELECT count(*) FROM query)) matched ON matched.id = o.id
       LEFT JOIN LATERAL (
@@ -385,7 +411,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
   // Nothing leaves the store carrying a product the list no longer offers, as `toRow` does for a whole conversation.
   return visibleMatches(
     ownerOid,
-    rows.map((row) => ({ ...row, product: storedProduct(row.product) }))
+    rows.map((row) => ({ ...row, product: storedProduct(row.product), agentStatus: row.agentStatus ?? "offline" }))
   );
 }
 
@@ -428,7 +454,7 @@ export async function createConversation(
   if (assistant === undefined) {
     throw new HttpError(409, "open the Assistant first, so it can be set up");
   }
-  const title = request.title?.trim().slice(0, TITLE_FROM_MESSAGE) || null;
+  const title = messageTitle(request.title ?? "");
   return await prisma.$transaction(async (tx) => {
     const created = await tx.assistantConversation.create({
       data: { ownerOid, virtualAgentId: assistant.id, product, title },
@@ -450,7 +476,16 @@ export async function createConversation(
  */
 export async function createLocalConversation(db: Database, session: { ownerOid: string; agentId: string; title: string | null }): Promise<ConversationRow> {
   const created = await db.assistantConversation.create({
-    data: { ownerOid: session.ownerOid, virtualAgentId: null, agentId: session.agentId, product: DEFAULT_PRODUCT, title: session.title },
+    data: {
+      ownerOid: session.ownerOid,
+      virtualAgentId: null,
+      agentId: session.agentId,
+      product: DEFAULT_PRODUCT,
+      title: session.title,
+      // Whatever the session's client reported, which is as weak as a title gets: `refreshLocalTitle` replaces
+      // it with the chat's first prompt as soon as the session uploads one.
+      titleSource: "agent" satisfies TitleSource
+    },
     select: SELECT
   });
   await announce(db, created);
@@ -550,11 +585,20 @@ export async function conversationAgent(prisma: PrismaClient, conversation: Conv
   });
 }
 
-/** Activity on the conversation: it moves up the list, and a first message names it. */
+/**
+ * Activity on the conversation: it moves up the list, and a first message names it.
+ *
+ * Only while it has no title at all, which is the precedent `refreshLocalTitle` follows for a chat on somebody's
+ * own computer. A local chat reaches here with the name its session reported already on it, so a message sent into
+ * one from the hub leaves that name standing and the chat's own first prompt is what replaces it.
+ */
 export async function touchConversation(prisma: PrismaClient, conversation: ConversationRow, firstMessage: string, now: Date = new Date()): Promise<void> {
-  const title = conversation.title ?? (firstMessage.trim().replace(/\s+/g, " ").slice(0, TITLE_FROM_MESSAGE) || null);
+  const title = conversation.title === null ? messageTitle(firstMessage) : null;
   await prisma.$transaction(async (tx) => {
-    await tx.assistantConversation.update({ where: { id: conversation.id }, data: { title, lastActiveAt: now, updatedAt: now } });
+    await tx.assistantConversation.update({
+      where: { id: conversation.id },
+      data: { ...(title === null ? {} : { title, titleSource: "message" satisfies TitleSource }), lastActiveAt: now, updatedAt: now }
+    });
     await announce(tx, conversation);
   });
 }
@@ -604,6 +648,95 @@ export async function linkLocalSession(db: Database, session: { ownerOid: string
     return undefined;
   }
   return created;
+}
+
+/**
+ * Writes a title the hub derived for a chat with no pod, and announces it when it landed.
+ *
+ * Every condition is repeated here rather than trusted from the caller's read, so two uploads for one session
+ * racing cannot both name it: the second blocks on the row, re-reads it and matches nothing. `replaceable` is which
+ * titles this derivation outranks, and `IS DISTINCT FROM` is what makes a derivation that agrees with the row cost
+ * one statement and no write — including the common case of the same `/rename` arriving on upload after upload.
+ */
+async function nameLocalChat(
+  db: Database,
+  conversation: { id: string; ownerOid: string },
+  title: string,
+  source: TitleSource,
+  replaceable: readonly TitleSource[],
+  now: Date
+): Promise<void> {
+  const named = await db.$executeRaw`
+    UPDATE assistant_conversation
+       SET title = ${title}, title_source = ${source}, updated_at = ${now}
+     WHERE id = ${conversation.id}::uuid
+       AND virtual_agent_id IS NULL
+       AND title_source = ANY(${replaceable}::text[])
+       AND title IS DISTINCT FROM ${title}
+  `;
+  if (named > 0) {
+    await announce(db, { id: conversation.id, virtualAgentId: null, ownerOid: conversation.ownerOid });
+  }
+}
+
+/**
+ * Keeps the title of a chat on somebody's own computer in step with the best name available for it. Called from the
+ * transcript upload inside its transaction — the moment the hub learns what the person typed — and does nothing at
+ * all for a chat with a pod, or for one whose owner has renamed it in the hub.
+ *
+ * The upload only calls it for an agent whose row it has already read as a local chat's, and only for a batch
+ * carrying a prompt that could name one, so the read below is not paid by the board sessions and pod chats this
+ * can do nothing for. Both conditions are checked again here: the caller's are what make this cheap, and these are
+ * what make it right.
+ *
+ * Two derivations, strongest first:
+ *
+ * - **The session's name, when the person chose it** (`name_source = 'user'`, which is Claude Code's `/rename`).
+ *   That is the person saying what this session is, so it outranks the chat's own prompts and replaces a title
+ *   already taken from one. The chat keeps `title_source = 'agent'`, because the title still follows the session's
+ *   name and a second `/rename` should move it again.
+ * - **The chat's first prompt**, while the title is still the name the client reported. The hub can name a local
+ *   chat better than its client can: the client has only the session's own name to offer, which it derives from the
+ *   transcript's conversation title and which is the session registry's `hmcts-25` at the moment the session
+ *   registers and its chat is made. A chat's first prompt is what the chat is about, which is already how a chat on
+ *   a pod is named (`touchConversation`). `firstPromptTitle` decides which prompt — a redacted or relayed one names
+ *   nothing.
+ *
+ * The prompts are read by agent rather than by conversation because a local chat has exactly one: `linkLocalSession`
+ * links the session's own agent and `conversationAgent`, which is what ever makes a second, refuses a chat with no
+ * pod. That keeps the read on `transcript_entry_agent_id_occurred_at_id_idx`, and it is only reached while a prompt
+ * could still claim the title — after that a titled chat costs one indexed read per prompt-carrying upload and
+ * nothing else.
+ */
+export async function refreshLocalTitle(db: Database, agentId: string, now: Date = new Date()): Promise<void> {
+  const agent = await db.agent.findUnique({
+    where: { id: agentId },
+    select: { name: true, nameSource: true, assistantConversation: { select: { id: true, ownerOid: true, virtualAgentId: true, titleSource: true } } }
+  });
+  const conversation = agent?.assistantConversation ?? null;
+  if (agent === null || conversation === null || conversation.virtualAgentId !== null || conversation.titleSource === "user") {
+    return;
+  }
+  if (nameSourceOf(agent.nameSource) === "user") {
+    const chosen = localTitle(agent.name);
+    if (chosen !== null) {
+      await nameLocalChat(db, conversation, chosen, "agent", ["agent", "message"], now);
+    }
+    return;
+  }
+  if (conversation.titleSource !== "agent") {
+    return;
+  }
+  const prompts = await db.transcriptEntry.findMany({
+    where: { agentId, role: "user" },
+    select: { content: true, redacted: true, messageId: true },
+    orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+    take: PROMPT_CANDIDATES
+  });
+  const title = firstPromptTitle(prompts);
+  if (title !== null) {
+    await nameLocalChat(db, conversation, title, "message", ["agent"], now);
+  }
 }
 
 /**
@@ -661,7 +794,8 @@ export async function renameConversation(prisma: PrismaClient, ownerOid: string,
     throw new ConversationNotFound();
   }
   await prisma.$transaction(async (tx) => {
-    await tx.assistantConversation.update({ where: { id }, data: { title: trimmed, updatedAt: new Date() } });
+    // `user` is what makes this the last word on the title: nothing the hub derives replaces one a person chose.
+    await tx.assistantConversation.update({ where: { id }, data: { title: trimmed, titleSource: "user" satisfies TitleSource, updatedAt: new Date() } });
     await announce(tx, conversation);
   });
 }

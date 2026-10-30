@@ -7,12 +7,12 @@ import type { ConnectionsData } from "@/assistant/connections";
 import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
+import { ChatMark } from "@/components/assistant/ChatMark";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
-import { LocalMark } from "@/components/assistant/LocalMark";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
@@ -266,7 +266,7 @@ export function AssistantShell({
                           item.id === activeId ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
                         }`}
                       >
-                        {item.local ? <LocalMark /> : null}
+                        <ChatMark mark={item.mark} />
                         {/* The title is what gives way, so the marker beside it stays whole at any sidebar width. */}
                         <span className="min-w-0 truncate">{item.title}</span>
                       </Link>
