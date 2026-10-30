@@ -233,6 +233,11 @@ describe("a laptop session's conversation", () => {
       wakeRequestedAt: null
     });
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).assistantConversationId).toBe(conversation.id);
+    // Nothing has been said in it yet, so it is not in the sidebar until the session has a prompt or an answer.
+    expect(await listConversations(prisma, ALICE.oid)).toEqual([]);
+    await prisma.transcriptEntry.create({
+      data: { agentId: agent_id, sessionId: "s-1", entryKey: "e1", role: "user", content: { text: "look at the claim" }, occurredAt: new Date() }
+    });
     expect((await listConversations(prisma, ALICE.oid)).map((chat) => [chat.id, chat.title])).toEqual([[conversation.id, "alice-pcs-api"]]);
   });
 

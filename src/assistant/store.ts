@@ -219,6 +219,37 @@ export interface ConversationListRow extends ConversationRow {
 }
 
 /**
+ * The owner's chats on their own computer that have nothing in them: no answer from the session, no prompt the person
+ * typed and no message to or from it, only the harness's records of a `/clear` or a finished task, or nothing at all. A session registers
+ * the moment it starts, which makes a chat the sidebar would list as a handle with nothing behind it.
+ *
+ * A chat on a pod is never one: it is made by the person opening it, and has its messages. The same predicate is
+ * written out in `searchConversations`, which cannot call this.
+ */
+async function emptyLocalConversationIds(db: Database, ownerOid: string): Promise<string[]> {
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    SELECT c.id::text AS id
+      FROM assistant_conversation c
+     WHERE c.owner_oid = ${ownerOid}
+       AND c.virtual_agent_id IS NULL
+       AND (NOT EXISTS (SELECT 1
+           FROM agent sa
+           JOIN transcript_entry st ON st.agent_id = sa.id
+          WHERE sa.assistant_conversation_id = c.id
+            AND (st.role = 'assistant'
+                 OR (st.role = 'user'
+                     AND st.message_id IS NULL
+                     AND NOT st.redacted
+                     AND btrim(COALESCE(st.content->>'text', '')) <> ''
+                     AND st.content->>'text' !~ '^\\s*<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>)'))) AND NOT EXISTS (SELECT 1
+           FROM agent sa
+           JOIN message sm ON sm.kind = 'direct' AND (sm.target_agent_id = sa.id OR sm.author_agent_id = sa.id)
+          WHERE sa.assistant_conversation_id = c.id))
+  `;
+  return rows.map((row) => row.id);
+}
+
+/**
  * The owner's conversations, most recently active first; only those on `virtualAgentId` when it is given.
  *
  * A conversation with no pod is listed outright. `virtualAgent: { desired: … }` is a relation filter on an optional
@@ -230,9 +261,11 @@ export interface ConversationListRow extends ConversationRow {
  * chat's own page saying the same thing about the same session.
  */
 export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationListRow[]> {
+  const empty = await emptyLocalConversationIds(db, ownerOid);
   const rows = await db.assistantConversation.findMany({
     where: {
       ownerOid,
+      ...(empty.length === 0 ? {} : { id: { notIn: empty } }),
       OR: [{ virtualAgentId: null }, { virtualAgent: { desired: { not: "deleted" } } }],
       ...(virtualAgentId === undefined ? {} : { virtualAgentId })
     },
@@ -255,7 +288,13 @@ export async function listConversations(db: Database, ownerOid: string, limit = 
  * No `virtual_agent` filter, unlike `listConversations`: these rows have no related virtual agent to be deleted.
  */
 export async function hasLocalConversation(db: Database, ownerOid: string): Promise<boolean> {
-  return (await db.assistantConversation.findFirst({ where: { ownerOid, virtualAgentId: null }, select: { id: true } })) !== null;
+  const empty = await emptyLocalConversationIds(db, ownerOid);
+  return (
+    (await db.assistantConversation.findFirst({
+      where: { ownerOid, virtualAgentId: null, ...(empty.length === 0 ? {} : { id: { notIn: empty } }) },
+      select: { id: true }
+    })) !== null
+  );
 }
 
 /**
@@ -381,6 +420,20 @@ export async function searchConversations(db: Database, ownerOid: string, query:
         LEFT JOIN virtual_agent v ON v.id = c.virtual_agent_id
         LEFT JOIN agent cur ON cur.id = c.agent_id
        WHERE c.owner_oid = ${ownerOid} AND (v.id IS NULL OR v.desired <> 'deleted')
+         -- Not an empty chat on the person's own computer; see emptyLocalConversationIds, whose predicate this is.
+         AND (c.virtual_agent_id IS NOT NULL OR (EXISTS (SELECT 1
+           FROM agent sa
+           JOIN transcript_entry st ON st.agent_id = sa.id
+          WHERE sa.assistant_conversation_id = c.id
+            AND (st.role = 'assistant'
+                 OR (st.role = 'user'
+                     AND st.message_id IS NULL
+                     AND NOT st.redacted
+                     AND btrim(COALESCE(st.content->>'text', '')) <> ''
+                     AND st.content->>'text' !~ '^\\s*<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>)'))) OR EXISTS (SELECT 1
+           FROM agent sa
+           JOIN message sm ON sm.kind = 'direct' AND (sm.target_agent_id = sa.id OR sm.author_agent_id = sa.id)
+          WHERE sa.assistant_conversation_id = c.id)))
     ),
     in_body AS (
       SELECT DISTINCT ON (o.id, q.n) o.id AS conversation_id, q.n, m.body

@@ -92,6 +92,61 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+/** A local chat with nothing said in it by anyone but, perhaps, the harness: the entries are its transcript's. */
+async function localChat(title: string, entries: readonly { role: "user" | "assistant"; text: string }[]): Promise<ConversationRow> {
+  const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+  const agentId = await conversationAgent(prisma, conversation);
+  await renameConversation(prisma, ALICE.oid, conversation.id, title);
+  for (const [index, entry] of entries.entries()) {
+    await prisma.transcriptEntry.create({
+      data: {
+        agentId,
+        sessionId: "s",
+        entryKey: `k${index}`,
+        role: entry.role,
+        content: { text: entry.text },
+        occurredAt: new Date(Date.UTC(2026, 9, 30, 10, 0, index))
+      }
+    });
+  }
+  await withoutPod(conversation);
+  return conversation;
+}
+
+describe("a chat on the person's own computer with nothing in it", () => {
+  const CLEAR = "<command-name>/clear</command-name><command-message>clear</command-message><command-args></command-args>";
+
+  it("should be left out of the list and the search when it has no transcript and no message", async () => {
+    await localChat("Possession handle", []);
+
+    expect(await listed(ALICE)).toEqual([]);
+    expect(await found(ALICE, "possession")).toEqual([]);
+  });
+
+  it("should be left out when all it holds is the harness's record of a command", async () => {
+    await localChat("Possession handle", [{ role: "user", text: CLEAR }]);
+
+    expect(await listed(ALICE)).toEqual([]);
+    expect(await found(ALICE, "possession")).toEqual([]);
+  });
+
+  it("should be listed and found once the person has typed a prompt", async () => {
+    await localChat("Possession handle", [
+      { role: "user", text: CLEAR },
+      { role: "user", text: "look at the possession claim" }
+    ]);
+
+    expect(await listed(ALICE)).toEqual(["Possession handle"]);
+    expect(await found(ALICE, "possession")).toEqual(["Possession handle"]);
+  });
+
+  it("should be listed once the session has answered, whatever the person typed", async () => {
+    await localChat("Possession handle", [{ role: "assistant", text: "hello" }]);
+
+    expect(await listed(ALICE)).toEqual(["Possession handle"]);
+  });
+});
+
 describe("searching conversations", () => {
   it("should find a chat by a word in its title", async () => {
     const conversation = await chat(ALICE, ["Something else entirely"]);
