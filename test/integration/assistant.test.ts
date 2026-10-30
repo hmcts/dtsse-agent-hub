@@ -133,6 +133,14 @@ async function laptopChat(sessionId = "alices-laptop"): Promise<string> {
   return (await prisma.assistantConversation.findFirstOrThrow({ where: { virtualAgentId: null }, orderBy: { createdAt: "desc" } })).id;
 }
 
+/** A prompt typed at the laptop: a chat with nothing said in it is left out of the list, so a test that lists one needs this. */
+async function typedAtLaptop(conversationId: string): Promise<void> {
+  const agent = await prisma.agent.findFirstOrThrow({ where: { assistantConversationId: conversationId } });
+  await prisma.transcriptEntry.create({
+    data: { agentId: agent.id, sessionId: agent.sessionId, entryKey: "typed", role: "user", content: { text: "look at the claim" }, occurredAt: new Date() }
+  });
+}
+
 assistantSuite([ALICE, BOB]);
 
 describe("the person's assistant", () => {
@@ -737,6 +745,7 @@ describe("conversations", () => {
     const onPod = ((await actions.startConversation({ product: "general", body: "on my assistant" })) as { id: string }).id;
     await register(token, (await sessionOf(onPod)).sessionId, onPod);
     const onLaptop = await laptopChat();
+    await typedAtLaptop(onLaptop);
 
     expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
     expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
@@ -761,6 +770,7 @@ describe("conversations", () => {
   ] as const)("should mark a listed local chat as %s with the state of its session", async (status, session) => {
     await startedAssistant();
     const onLaptop = await laptopChat();
+    await typedAtLaptop(onLaptop);
     await prisma.agent.updateMany({ where: { assistantConversationId: onLaptop }, data: { status } });
 
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
