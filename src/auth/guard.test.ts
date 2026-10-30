@@ -13,6 +13,8 @@ describe("exempt", () => {
     expect(exempt("/manifest.webmanifest")).toBe(true);
     expect(exempt("/assistant/icon.svg")).toBe(true);
     expect(exempt("/assistant/icon.svg.bak")).toBe(false);
+    expect(exempt("/pwa-icon/192.png")).toBe(true);
+    expect(exempt("/pwa-iconography")).toBe(false);
   });
 
   it("should serve the sign-in routes without a session, or nobody could ever get one", () => {
