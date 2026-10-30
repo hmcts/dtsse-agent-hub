@@ -80,7 +80,7 @@ export default async function SharedChatsPage() {
         <Chats label="Chats you can fork" chats={forkable} manage={false} empty="Nobody has offered you a chat to fork." />
         <p className="text-[13px]">
           <Link href="/assistant" className="text-asst-accent underline hover:text-asst-accent-hover">
-            Back to the HMCTS Assistant
+            Back to CFT Workspace
           </Link>
         </p>
       </div>

@@ -29,7 +29,7 @@ export default async function WelshTranslationsPage({
         <WelshPage products={WELSH_PRODUCTS} initialProduct={initial} initialTask={isWelshTask(task) ? task : null} />
         <p className="text-[13px]">
           <Link href="/assistant" className="text-asst-accent underline hover:text-asst-accent-hover">
-            Back to the HMCTS Assistant
+            Back to CFT Workspace
           </Link>
         </p>
       </div>
