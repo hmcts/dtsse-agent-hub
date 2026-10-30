@@ -165,9 +165,9 @@ test.describe("accessibility @nightly", () => {
   });
 
   /**
-   * The Assistant's Welsh page, as it renders before any job has answered: the service picker, the tasks and the
-   * catalogue search. Gated on the Assistant being on, as the new-chat screen above is; without a pod the page says its
-   * assistant is starting, which is part of what is audited.
+   * The Assistant's Welsh page for someone whose assistant does not have the Welsh plugin ticked, which is every
+   * persona here: no spec ticks a plugin. It says how to turn Welsh on, in place of the tasks. Gated on the Assistant
+   * being on, as the new-chat screen above is.
    */
   test("should raise no WCAG A or AA violations on the Assistant's Welsh page @nightly @a11y", async ({ page, request }) => {
     await connectForChat(request, PERSONA);
@@ -178,7 +178,7 @@ test.describe("accessibility @nightly", () => {
     expect(response?.status()).toBe(200);
 
     await expect(page.getByRole("heading", { name: "Welsh translations" })).toBeVisible();
-    await expect(page.getByLabel("English or Welsh")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Turn on Welsh translations first" })).toBeVisible();
     await expectNoViolations(page);
   });
 

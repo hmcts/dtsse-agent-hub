@@ -197,6 +197,18 @@ describe("AssistantShell", () => {
     ).toEqual(["On your computer, ready: Event help", "On your computer, not connected: Fixing the sweep"]);
   });
 
+  it("should link to the Welsh page when the person's assistant has the Welsh plugin ticked", () => {
+    render(shell({ welsh: true }));
+
+    expect(screen.getByRole("link", { name: "Welsh translations" }).getAttribute("href")).toBe("/assistant/welsh");
+  });
+
+  it("should not offer the Welsh page when the person's assistant does not have the Welsh plugin", () => {
+    render(shell());
+
+    expect(screen.queryByRole("link", { name: "Welsh translations" })).toBeNull();
+  });
+
   it("should say chats will appear when there are none", () => {
     render(shell({ groups: [] }));
 

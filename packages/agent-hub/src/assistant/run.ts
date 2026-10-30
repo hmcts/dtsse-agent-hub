@@ -32,7 +32,7 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
   cgroupRoot?: string;
   memoryFs?: MemoryFs;
   /** How lookups run twg and sign it in; a test passes its own rather than a twg on PATH. */
-  /** How Welsh jobs run cft-workspace's scripts/welsh, and where that checkout is; a test passes its own. */
+  /** How Welsh jobs run the welsh plugin's scripts/welsh, and the cft-workspace checkout it is found in; a test passes its own. */
   welsh?: { run?: Run; workspace?: string };
   lookups?: Partial<LookupDeps>;
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */

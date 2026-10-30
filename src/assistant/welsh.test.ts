@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fileIdsOf,
+  hasWelshPlugin,
   isRepoOf,
   isWelshKind,
   isWelshProduct,
@@ -134,5 +135,13 @@ describe("the public-facing services", () => {
   it("should each be a product the Assistant knows", async () => {
     const { PUBLIC_FACING_SERVICES, WELSH_PRODUCTS } = await import("./welsh.ts");
     expect(WELSH_PRODUCTS.map((p) => p.slug).sort((a, b) => (a < b ? -1 : 1))).toEqual([...PUBLIC_FACING_SERVICES].sort((a, b) => (a < b ? -1 : 1)));
+  });
+});
+
+describe("hasWelshPlugin", () => {
+  it("should be true only when the welsh plugin is among the ticked ones", () => {
+    expect(hasWelshPlugin({ plugins: ["dtsse", "welsh"] })).toBe(true);
+    expect(hasWelshPlugin({ plugins: ["pcs"] })).toBe(false);
+    expect(hasWelshPlugin({ plugins: [] })).toBe(false);
   });
 });

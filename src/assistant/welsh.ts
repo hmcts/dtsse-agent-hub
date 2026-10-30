@@ -4,12 +4,26 @@ import { PRODUCTS } from "./products.ts";
 
 /**
  * Welsh translation jobs for the Assistant's Welsh page: the kinds, what each takes, the limits, what the pod may
- * answer, and what the browser is shown. Pure. Every job is one run of cft-workspace's `scripts/welsh` in the person's
- * pod, with their own GitHub and `twg` sign-ins, so the hub holds neither and calls nothing; `welsh-store.ts` records
+ * answer, and what the browser is shown. Pure. Every job is one run of the `welsh` plugin's `scripts/welsh` in the
+ * person's pod, with their own GitHub and `twg` sign-ins, so the hub holds neither and calls nothing; `welsh-store.ts` records
  * the job and reads back the answer. No job goes through a model turn, and none generates Welsh: it comes from the
  * service's catalogue or a Welsh Language Unit return, and `scripts/welsh verify` refuses anything else. See "Welsh
  * translation jobs" in docs/agent-api.md.
  */
+
+/**
+ * The cft-workspace marketplace plugin that carries the Welsh tools. The Welsh page is for people who ticked it for
+ * their assistant: the pod loads only what is ticked, so for anyone else there would be nothing to run a job with.
+ */
+export const WELSH_PLUGIN = "welsh";
+
+/** Whether a virtual agent has the Welsh plugin ticked. */
+export function hasWelshPlugin(virtualAgent: { plugins: readonly string[] }): boolean {
+  return virtualAgent.plugins.includes(WELSH_PLUGIN);
+}
+
+/** What a Welsh job or upload is refused with when the person's assistant has not got the plugin ticked. */
+export const WELSH_NOT_TURNED_ON = "turn on Welsh translations in Settings, under Tools, first";
 
 export const WELSH_KINDS = [
   "info",
