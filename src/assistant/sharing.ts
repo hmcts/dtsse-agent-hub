@@ -50,7 +50,7 @@ export type SharedThreadItem =
  * assistant asked, which are controls rather than words — a recipient must not answer one, and an answered question
  * is quoted back in the owner's own answering message, which a share does show.
  *
- * The tool calls go too. A share carries the words, and the one reader a tool row is for is the developer whose own
+ * The tool calls and the harness notices (a command run, a background task reporting) go too. A share carries the words, and the one reader a tool row is for is the developer whose own
  * session made the call: it names a path on their disk, a command they ran or a repository they were in, none of
  * which is anything the chat was about. `sharedConversation` asks for the thread without them in any case, since
  * only a local chat has them; this is the type refusing to carry one that reached here another way.
@@ -65,7 +65,7 @@ export function sharedThreadItems(items: readonly ThreadItem[]): SharedThreadIte
       shared.push({ type: "user", key: item.key, at: item.at, text: item.text, attachmentCount: item.attachments.length });
     } else if (item.type === "assistant") {
       shared.push({ type: "assistant", key: item.key, at: item.at, text: item.text });
-    } else if (item.type !== "question" && item.type !== "tool") {
+    } else if (item.type !== "question" && item.type !== "tool" && item.type !== "notice") {
       shared.push(item);
     }
   }

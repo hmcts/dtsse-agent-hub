@@ -3,6 +3,7 @@ import type { QuestionView } from "../questions/views.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { byCodePoint } from "../topics/slug.ts";
 import { type ConversationItem, toolSummary } from "../transcripts/conversation.ts";
+import { taskFailed, taskNotifications } from "../transcripts/task-notification.ts";
 import { productLabel } from "./products.ts";
 import type { MessageAttachment } from "./upload-store.ts";
 
@@ -41,7 +42,13 @@ export type ThreadItem =
    * keeps no `tool_use_id` — leaves every call it might have answered neutral, because marking a call failed on a
    * guess is worse than saying nothing about how it went.
    */
-  | { type: "tool"; key: string; at: string; name: string; summary: string; failed: boolean };
+  | { type: "tool"; key: string; at: string; name: string; summary: string; failed: boolean }
+  /**
+   * A line the harness wrote into the session's user turns rather than the person: a slash command they ran, or a
+   * background task reporting back. Local chats only, since a pod chat's user turns are all hub messages. Shown as a
+   * quiet line, because the raw text is XML nobody typed.
+   */
+  | { type: "notice"; key: string; at: string; text: string; failed: boolean };
 
 export interface ProductMark {
   product: string;
@@ -58,6 +65,49 @@ function textOf(content: unknown): string | undefined {
     return text === "" ? undefined : text;
   }
   return undefined;
+}
+
+/** The text of a slash command's turn, or `undefined` when it is not one. */
+function commandNotice(text: string): string | undefined {
+  if (!text.startsWith("<command-name>")) {
+    return undefined;
+  }
+  const field = (tag: string) => new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(text)?.[1]?.trim() ?? "";
+  const name = field("command-name");
+  const args = field("command-args");
+  return name === "" ? undefined : `Ran ${name}${args === "" ? "" : ` ${args}`}`;
+}
+
+/** Turns the harness writes as the user that carry nothing a person should read: a command's output and its caveat. */
+const SILENT_TURNS = ["local-command-stdout", "local-command-stderr", "local-command-caveat", "system-reminder"];
+
+/** The longest a notice is, so one monitor event or a skill's long arguments cannot fill the line. */
+const NOTICE_LIMIT = 200;
+
+/** One line, bounded: harness text can carry newlines and whole prompts. */
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > NOTICE_LIMIT ? `${flat.slice(0, NOTICE_LIMIT - 1)}…` : flat;
+}
+
+/**
+ * What a local chat's user turn is when the harness wrote it: notices to show, an empty list to show nothing, or
+ * `undefined` when the person typed it.
+ */
+function harnessTurn(raw: string, truncated: boolean): { text: string; failed: boolean }[] | undefined {
+  const text = raw.trim();
+  const command = commandNotice(text);
+  if (command !== undefined) {
+    return [{ text: oneLine(command), failed: false }];
+  }
+  // Only a turn that is wholly one such block: a person quoting output at the start of their own prompt is not dropped.
+  if (SILENT_TURNS.some((tag) => text.startsWith(`<${tag}>`) && text.endsWith(`</${tag}>`))) {
+    return [];
+  }
+  return taskNotifications(text, { truncated })?.map((task) => ({
+    text: oneLine(task.summary ?? task.event ?? "A background task finished"),
+    failed: taskFailed(task.status)
+  }));
 }
 
 /** A tool call the session made, with what came back. */
@@ -191,7 +241,12 @@ export function threadItems(
       // A prompt whose words were redacted is left out rather than shown as an empty bubble, as a wordless assistant
       // entry is: `textOf` answers nothing for the `{redacted}` content such an entry keeps.
       const text = textOf(item.entry.content);
-      if (text !== undefined) {
+      const harness = text === undefined ? undefined : harnessTurn(text, item.entry.truncated);
+      if (harness !== undefined) {
+        for (const [index, notice] of harness.entries()) {
+          thread.push({ type: "notice", key: `${item.key}:${index}`, at: item.at, text: notice.text, failed: notice.failed });
+        }
+      } else if (text !== undefined) {
         // No delivery and no attachments: this is what was typed at the laptop, not a message the hub carried there.
         thread.push({ type: "user", key: item.key, at: item.at, text, delivery: null, attachments: [] });
       }
