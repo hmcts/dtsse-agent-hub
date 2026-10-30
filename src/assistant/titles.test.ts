@@ -67,3 +67,25 @@ describe("firstPromptTitle", () => {
     expect(firstPromptTitle([prompt("x".repeat(TITLE_FROM_MESSAGE + 20))])).toHaveLength(TITLE_FROM_MESSAGE);
   });
 });
+
+describe("firstPromptTitle and the harness's own turns", () => {
+  const prompt = (text: string) => ({ content: { text }, redacted: false, messageId: null });
+
+  it("should skip a slash command's record and name the chat after what the person typed next", () => {
+    const entries = [
+      prompt("<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"),
+      prompt("<local-command-stdout></local-command-stdout>"),
+      prompt("fix the search page")
+    ];
+
+    expect(firstPromptTitle(entries)).toBe("fix the search page");
+  });
+
+  it("should name nothing when every prompt offered was written by the harness", () => {
+    expect(firstPromptTitle([prompt("<task-notification><status>completed</status></task-notification>")])).toBeNull();
+  });
+
+  it("should keep a prompt that only mentions a tag further in", () => {
+    expect(firstPromptTitle([prompt("why does <command-name> show up in titles?")])).toBe("why does <command-name> show up in titles?");
+  });
+});

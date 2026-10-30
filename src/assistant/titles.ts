@@ -1,4 +1,5 @@
 import { collapse } from "../transcripts/conversation.ts";
+import { isHarnessTurn } from "../transcripts/harness-turn.ts";
 
 /**
  * What a conversation is called: the lengths a title may be, the three things that can name one, and the rules for
@@ -51,9 +52,10 @@ export function messageTitle(text: string): string | null {
  * How many of a chat's earliest prompts are read when looking for one to name it after. More than one, because the
  * first can be redacted or a relayed message; a handful rather than all of them, because this is read on the
  * transcript upload path and a chat whose opening prompts are all unusable keeps the name its session reported,
- * which is a title, rather than costing a scan of every prompt it has.
+ * which is a title, rather than costing a scan of every prompt it has. Ten, because a `/clear` alone writes three
+ * harness turns before the person has said anything.
  */
-export const PROMPT_CANDIDATES = 5;
+export const PROMPT_CANDIDATES = 10;
 
 /** One `role = 'user'` transcript entry, as much of it as naming a chat depends on. */
 export interface PromptEntry {
@@ -67,12 +69,14 @@ export interface PromptEntry {
  * The title a local chat takes from its own prompts: the first of them with words in it, cut as a pod chat's first
  * message is, or null when none of the entries offered can name a chat.
  *
- * Three kinds are passed over rather than used:
+ * Four kinds are passed over rather than used:
  *
  * - **A redacted prompt.** The secret scanner replaced its text with the pattern it matched, so there is nothing
  *   left to name the chat after — and "redacted" is not a title.
  * - **A prompt that is a relayed hub message** (`messageId`). It is a colleague's words, or an answer to a question
  *   the session asked, delivered into the session by the bridge; the chat is not about it.
+ * - **A turn the harness wrote** (`isHarnessTurn`): a slash command's record, its output, or a background task's
+ *   notification. Nobody typed it, and it named half of a sidebar `<command-name>/clear</command-name>…`.
  * - **A prompt that is whitespace, or whose content is not the `{text}` of an ordinary entry.** The second cannot
  *   happen through `POST /api/agent/{agent_id}/transcript`, which checks the shape against the role, and is still
  *   read for: `content` is jsonb and this is the only thing that reads it as a title.
@@ -86,7 +90,7 @@ export function firstPromptTitle(entries: readonly PromptEntry[]): string | null
       continue;
     }
     const text = (entry.content as { text?: unknown } | null)?.text;
-    const title = typeof text === "string" ? messageTitle(text) : null;
+    const title = typeof text === "string" && !isHarnessTurn(text) ? messageTitle(text) : null;
     if (title !== null) {
       return title;
     }
