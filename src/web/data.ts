@@ -56,7 +56,7 @@ import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
 import { availablePlugins, PluginConfigurationError, type PluginOffer, type PluginOption } from "../virtual-agents/plugins.ts";
 import { liveModelRoutes } from "../virtual-agents/store.ts";
-import { claudeTokenUsable, neededCredentials, type VirtualAgentCard, virtualAgentCards } from "../virtual-agents/views.ts";
+import { claudeTokenUsable, neededCredentials, type VirtualAgentCard, virtualAgentCards, virtualAgentDetail } from "../virtual-agents/views.ts";
 import { type AgentAddress, NO_AGENT } from "./home.ts";
 
 /**
@@ -347,6 +347,24 @@ export async function assistantSize(viewer: Viewer): Promise<AssistantMemory | u
  */
 export async function assistantTemplates(viewer: Identity): Promise<SavedTemplate[]> {
   return await listTemplates(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
+}
+
+/** What the settings show and manage of the virtual agent the viewer's Assistant runs on. */
+export type AssistantAgent = Pick<VirtualAgentCard, "id" | "name" | "desired" | "status" | "statusDetail" | "exposedPorts" | "localOnlyPorts">;
+
+/**
+ * The viewer's assistant as its settings manage it: its name and where it stands, and the web servers its pod
+ * reports. `undefined` when they have no assistant at all, which is the one case those sections are not offered.
+ * The owner check is `virtualAgentDetail`'s, through `canManageVirtualAgent`.
+ */
+export async function assistantAgent(viewer: Viewer): Promise<AssistantAgent | undefined> {
+  const assistant = await findAssistant(prisma, viewer.oid);
+  const detail = assistant === undefined ? undefined : await virtualAgentDetail(prisma, viewer.oid, assistant.id);
+  if (detail === undefined) {
+    return undefined;
+  }
+  const { id, name, desired, status, statusDetail, exposedPorts, localOnlyPorts } = detail.card;
+  return { id, name, desired, status, statusDetail, exposedPorts, localOnlyPorts };
 }
 
 /**

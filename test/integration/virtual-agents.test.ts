@@ -59,7 +59,7 @@ vi.mock("next/cache", async () => {
 
 const { actAs, revalidated } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/virtual-agents.ts");
-const { agentAddress, virtualAgentsPage } = await import("../../src/web/data.ts");
+const { agentAddress, assistantAgent, virtualAgentsPage } = await import("../../src/web/data.ts");
 const credentialsPage = await import("../../src/app/hub/settings/credentials/page.tsx");
 const agentsPage = await import("../../src/app/hub/agents/[id]/page.tsx");
 const oldVirtualAgentPage = await import("../../src/app/hub/virtual/[id]/page.tsx");
@@ -1921,6 +1921,80 @@ describe("the web UI's reads and actions", () => {
     const agent = await create(ALICE, "pcs-api", "own-licence");
 
     expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "claude"]);
+  });
+});
+
+/** What the Assistant's settings read and post to for the virtual agent the Assistant runs on. */
+describe("the Assistant's settings for its agent", () => {
+  const ALICE_VIEWER = { ...ALICE, tid: "dev", modelRoute: "gateway" as const };
+
+  it("should give the owner their assistant's name, state and ports, linked on the viewer under the port's prefix", async () => {
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", "agent-hub-viewer.example");
+    vi.stubEnv("ENTRA_REDIRECT_URI", "https://agent-hub.example/auth/callback");
+    const { id } = await started(ALICE, "assistant");
+    await reportPorts(prisma, id, { ports: [3000], localOnly: [5173] });
+
+    const agent = await assistantAgent(ALICE_VIEWER);
+
+    expect(agent).toMatchObject({ id, name: "assistant", desired: "running", localOnlyPorts: [5173] });
+    expect(agent?.exposedPorts).toEqual([
+      { port: 3000, url: expect.stringMatching(/^https:\/\/va-[0-9a-f]{8}-3000\./), viewerUrl: `https://agent-hub-viewer.example/${id}/3000/` }
+    ]);
+  });
+
+  it("should give nobody else anything, and the owner nothing before they have an assistant", async () => {
+    await insertUser(BOB);
+    expect(await assistantAgent({ ...BOB, tid: "dev", modelRoute: "gateway" })).toBeUndefined();
+    await started(ALICE, "assistant");
+
+    expect(await assistantAgent({ ...BOB, tid: "dev", modelRoute: "gateway" })).toBeUndefined();
+  });
+
+  it("should rename the owner's agent through the action, and answer as for no such agent when someone else tries", async () => {
+    const agent = await create(ALICE, "assistant");
+    actAs("alice");
+
+    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "mine" }))).toEqual({ ok: true, confirmation: "Renamed to mine" });
+    expect((await row(agent.id)).name).toBe("mine");
+    expect(await actions.renameVirtualAgent(form({ id: "", name: "x" }))).toEqual({ ok: false, error: "no virtual agent was named" });
+    actAs("bob");
+    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "bobs" }))).toEqual({ ok: false, error: "no such virtual agent" });
+    expect((await row(agent.id)).name).toBe("mine");
+  });
+
+  it("should replace a running agent's pod when the owner restarts it, and leave one that is not running alone", async () => {
+    const { id } = await started(ALICE, "assistant");
+    const before = await row(id);
+    actAs("alice");
+
+    expect(await actions.restartVirtualAgent(form({ id }))).toEqual({ ok: true, confirmation: "Restarting. Your chats are kept." });
+    const after = await row(id);
+    expect(after.podGeneration).toBeGreaterThan(before.podGeneration);
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { launchTokenHash: true } })).launchTokenHash).toBeNull();
+
+    await setDesired(prisma, ALICE.oid, id, "stopped");
+    const stopped = await row(id);
+    expect(await actions.restartVirtualAgent(form({ id }))).toMatchObject({ ok: true });
+    expect((await row(id)).podGeneration).toBe(stopped.podGeneration);
+  });
+
+  it("should refuse a restart of somebody else's agent as for no such agent, and change nothing", async () => {
+    const { id } = await started(ALICE, "assistant");
+    const before = await row(id);
+    await insertUser(BOB);
+    actAs("bob");
+
+    expect(await actions.restartVirtualAgent(form({ id }))).toEqual({ ok: false, error: "no such virtual agent" });
+    expect((await row(id)).podGeneration).toBe(before.podGeneration);
+  });
+
+  it("should refuse a rename and a restart with a sentence when virtual agents are off", async () => {
+    const agent = await create(ALICE, "assistant");
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
+    actAs("alice");
+
+    expect(await actions.renameVirtualAgent(form({ id: agent.id, name: "x" }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
+    expect(await actions.restartVirtualAgent(form({ id: agent.id }))).toMatchObject({ ok: false, error: expect.stringContaining("not available") });
   });
 });
 

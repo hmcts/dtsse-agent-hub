@@ -17,14 +17,18 @@ import { memoryPressure, memoryWarning } from "@/assistant/memory-report";
 import type { AssistantPluginsData } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { AgentSettings, type AssistantAgentSettings } from "@/components/assistant/AgentSettings";
 import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { type AssistantExportDefaults, ExportSettings } from "@/components/assistant/ExportSettings";
 import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
+import { type AssistantGitIdentity, GitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantModelSetting, ModelSettings } from "@/components/assistant/ModelSettings";
+import { PortSettings } from "@/components/assistant/PortSettings";
 import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
+import { type AssistantTokens, pastedTokens, TokenSettings } from "@/components/assistant/TokenSettings";
 import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import { pluginChoices } from "@/components/virtual-agents/PluginsField";
 
@@ -39,7 +43,7 @@ export interface AssistantConnect {
   reconnect: FormAction;
 }
 
-/** The plugins the dialog shows, with the action it posts a change to: the one the hub's `/agents/{id}` page uses. */
+/** The plugins the dialog shows, with the action it posts a change to, `setVirtualAgentPlugins`. */
 export type AssistantPlugins = AssistantPluginsData & { save: FormAction };
 
 interface SettingsView {
@@ -57,6 +61,9 @@ interface SettingsView {
   files: AssistantFiles | undefined;
   size: AssistantSize | undefined;
   exports: AssistantExportDefaults | undefined;
+  agent: AssistantAgentSettings | undefined;
+  git: AssistantGitIdentity | undefined;
+  tokens: AssistantTokens | undefined;
 }
 
 /**
@@ -277,7 +284,7 @@ function Connections({ list, access, connect, unavailable, warning }: Pick<Setti
 /**
  * The plugins in plain words: whatever the hub's configuration says each one is for, with its marketplace name
  * underneath for anyone who knows it. A plugin the hub has stopped offering can be unticked but not ticked again,
- * which is `pluginChoices`'s rule and the hub's own page's.
+ * which is `pluginChoices`'s rule.
  */
 function Plugins({ plugins }: { plugins: AssistantPlugins }) {
   const choices = pluginChoices(plugins.available, plugins.checked);
@@ -357,6 +364,13 @@ const SECTIONS: readonly SettingsSection[] = [
     panel: (view) => <Connections list={view.list} access={view.access} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
   },
   {
+    id: "tokens",
+    label: "Tokens",
+    group: "General",
+    shown: (view) => view.tokens !== undefined && pastedTokens(view.list).length > 0,
+    panel: (view) => (view.tokens === undefined ? null : <TokenSettings list={view.list} tokens={view.tokens} />)
+  },
+  {
     id: "templates",
     label: "Templates",
     group: "General",
@@ -372,6 +386,13 @@ const SECTIONS: readonly SettingsSection[] = [
   },
   { id: "sharing", label: "Sharing", group: "General", shown: () => true, panel: () => <SharedChats /> },
   {
+    id: "assistant",
+    label: "Assistant",
+    group: "Agent",
+    shown: (view) => view.agent !== undefined,
+    panel: (view) => (view.agent === undefined ? null : <AgentSettings settings={view.agent} />)
+  },
+  {
     id: "model",
     label: "Model",
     // With the agent, because it is the one choice about how the agent answers rather than about this screen.
@@ -385,6 +406,13 @@ const SECTIONS: readonly SettingsSection[] = [
     group: "Agent",
     shown: (view) => view.claudeMd !== undefined,
     panel: (view) => (view.claudeMd === undefined ? null : <ClaudeMd claudeMd={view.claudeMd} />)
+  },
+  {
+    id: "git",
+    label: "Git identity",
+    group: "Agent",
+    shown: (view) => view.git !== undefined,
+    panel: (view) => (view.git === undefined ? null : <GitIdentity git={view.git} />)
   },
   {
     id: "tools",
@@ -403,6 +431,13 @@ const SECTIONS: readonly SettingsSection[] = [
     group: "Agent",
     shown: (view) => view.size !== undefined,
     panel: (view) => (view.size === undefined ? null : <Size size={view.size} />)
+  },
+  {
+    id: "ports",
+    label: "Web servers",
+    group: "Agent",
+    shown: (view) => view.agent !== undefined,
+    panel: (view) => (view.agent === undefined ? null : <PortSettings agent={view.agent.agent} />)
   },
   {
     id: "files",
@@ -748,7 +783,10 @@ export function AssistantSettings({
   templates,
   files,
   size,
-  exports
+  exports,
+  agent,
+  git,
+  tokens
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
@@ -763,6 +801,9 @@ export function AssistantSettings({
   files?: AssistantFiles;
   size?: AssistantSize;
   exports?: AssistantExportDefaults;
+  agent?: AssistantAgentSettings;
+  git?: AssistantGitIdentity;
+  tokens?: AssistantTokens;
 }) {
   const cog = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -854,7 +895,10 @@ export function AssistantSettings({
                 templates,
                 files,
                 size,
-                exports
+                exports,
+                agent,
+                git,
+                tokens
               }}
               onClose={close}
             />,

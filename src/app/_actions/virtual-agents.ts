@@ -9,14 +9,21 @@ import { requireViewer } from "@/viewer/current";
 import { isSignInKind, reconnectSignIn as reconnect, SIGN_IN_TITLES, storePastedCode } from "@/virtual-agents/logins";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { sizeChangeRollsPod } from "@/virtual-agents/size";
-import { createVirtualAgent as create, findVirtualAgent, setVirtualAgentPlugins as setPlugins, setVirtualAgentSize } from "@/virtual-agents/store";
+import {
+  createVirtualAgent as create,
+  findVirtualAgent,
+  renameVirtualAgent as rename,
+  restartVirtualAgent as restart,
+  setVirtualAgentPlugins as setPlugins,
+  setVirtualAgentSize
+} from "@/virtual-agents/store";
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
- * Creating and resizing the signed-in person's own virtual agents, choosing their plugins, pasting a login code back to
- * one, and having one sign in again. The owner is always the session's identity; an id from the form names an agent,
- * and `setVirtualAgentSize`, `setVirtualAgentPlugins`, `storePastedCode` and `reconnectSignIn` refuse one that is not
- * the viewer's.
+ * Creating, renaming, restarting and resizing the signed-in person's own virtual agents, choosing their plugins, pasting
+ * a login code back to one, and having one sign in again. The owner is always the session's identity; an id from the
+ * form names an agent, and `renameVirtualAgent`, `restartVirtualAgent`, `setVirtualAgentSize`, `setVirtualAgentPlugins`,
+ * `storePastedCode` and `reconnectSignIn` refuse one that is not the viewer's.
  */
 
 const LIST_PATH = "/hub/virtual";
@@ -42,6 +49,50 @@ export async function createVirtualAgent(form: FormData): Promise<ActionResult<{
     });
     revalidate();
     return { ok: true, id: row.id, confirmation: `${row.name} is starting` };
+  });
+}
+
+/**
+ * A new name for the virtual agent and its sessions. Its pod, disk and chats are named from its id, so nothing they
+ * hold changes and nothing restarts.
+ */
+export async function renameVirtualAgent(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("rename virtual agent", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const id = text(form.get("id"));
+    if (id === "") {
+      return { ok: false, error: "no virtual agent was named" };
+    }
+    const row = await rename(prisma, viewer.oid, id, form.get("name"));
+    revalidate();
+    return { ok: true, confirmation: `Renamed to ${row.name}` };
+  });
+}
+
+/**
+ * Replaces a running agent's pod, so it boots again with its owner's credentials and settings read afresh. What each
+ * chat was working on at that moment stops; the chats themselves are kept. An agent that is not running is left as
+ * it is, since it boots afresh when it next starts anyway.
+ */
+export async function restartVirtualAgent(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("restart virtual agent", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const id = text(form.get("id"));
+    if (id === "") {
+      return { ok: false, error: "no virtual agent was named" };
+    }
+    const row = await restart(prisma, viewer.oid, id, "restarting because you asked it to");
+    revalidate();
+    return {
+      ok: true,
+      confirmation: row.desired === "running" ? "Restarting. Your chats are kept." : "It is not running, so it starts afresh next time anyway."
+    };
   });
 }
 

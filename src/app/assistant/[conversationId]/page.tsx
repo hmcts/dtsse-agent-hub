@@ -13,13 +13,13 @@ import {
   warmConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { resetClaudeMd, saveClaudeMd } from "@/app/_actions/credentials";
+import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, renameVirtualAgent, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
 import { assistantPluginsData } from "@/assistant/settings";
 import { offeredTemplates } from "@/assistant/templates";
@@ -31,6 +31,7 @@ import { type ChatActions, ChatView } from "@/components/assistant/ChatView";
 import { ShareGate } from "@/components/assistant/ShareGate";
 import { requireViewer } from "@/viewer/current";
 import {
+  assistantAgent,
   assistantConversation,
   assistantExportDefaults,
   assistantFiles,
@@ -40,6 +41,7 @@ import {
   chatForks,
   chatShares,
   claudeMdSettings,
+  gitIdentitySettings,
   openAssistant
 } from "@/web/data";
 
@@ -75,7 +77,7 @@ export default async function ConversationPage({
   // queries to fill a dialog, and this is the page that loads most often.
   const sharing = query.share === "1";
   const forking = !sharing && query.fork === "1";
-  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model] = await Promise.all([
+  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model, agent, git] = await Promise.all([
     openAssistant(viewer),
     assistantConversation(viewer, conversationId),
     claudeMdSettings(viewer),
@@ -85,7 +87,9 @@ export default async function ConversationPage({
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer),
-    assistantModel(viewer)
+    assistantModel(viewer),
+    assistantAgent(viewer),
+    gitIdentitySettings(viewer)
   ]);
   if (view === undefined) {
     notFound();
@@ -113,6 +117,9 @@ export default async function ConversationPage({
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: jira }}
+      agent={agent === undefined ? undefined : { agent, rename: renameVirtualAgent, restart: restartVirtualAgent }}
+      git={{ settings: git, save: saveGitIdentity, clear: clearGitIdentity }}
+      tokens={{ save: saveCredential, remove: removeCredential }}
     >
       {/* `local` so a chat on the person's own computer is not held behind credentials only a pod needs. */}
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme} local={view.local}>

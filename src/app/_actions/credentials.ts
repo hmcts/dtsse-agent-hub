@@ -19,8 +19,8 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * licence: the Azure token cache and the Atlassian sign-in come from the virtual agent's own device-code logins, and
  * the gateway route has no model credential to paste at all.
  *
- * A CLAUDE.md and a git identity each have their own two actions, because they are written and reset on the virtual
- * agents page rather than pasted, and only exist for virtual agents.
+ * A CLAUDE.md and a git identity each have their own two actions, because they are written and reset rather than
+ * pasted, in the Assistant's settings and on `/hub/virtual`, and only exist for virtual agents.
  */
 
 /** The standalone page, and the virtual agents page that has them as a section when the feature is on. */

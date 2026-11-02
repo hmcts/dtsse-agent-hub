@@ -136,6 +136,10 @@ section of [`docs/agent-api.md`](docs/agent-api.md).
   have none; it counts towards the limit of 3 like any other. Every virtual agent can hold conversations: its pod
   runs a supervisor beside its own session, with up to `AGENT_HUB_MAX_SESSIONS` conversation sessions (4, 6 or 8
   by size; `docs/agent-api.md` under Capacity has why). The Assistant's sidebar lists its chats.
+- **Its settings manage it**: its name, a restart (which says first that it stops whatever a chat is doing), the web
+  servers its pod reports, the git identity its commits use, and the pasted tokens it uses, each replaceable and
+  removable. There is no stop and no delete: opening the Assistant starts its agent and creates one when there is
+  none, so either would be undone by the next page load. The idle sweep stops it when nobody is using it.
 - **A conversation's agent is created with it**, offline, under a session id the hub chose, so the person's messages
   queue as ordinary deliveries before any session runs. A message to an offline conversation sets a wake; the pod
   hears it on `GET /api/virtual/{id}/sessions`, starts `hai --session-id` (or `--resume`) in a tmux session of its
@@ -289,8 +293,8 @@ because it may hold private context, and its owner can read it back. With nothin
 "You are running in a pod in Preview and connected via the agent hub."; "Reset to default" deletes the stored text.
 
 A virtual agent commits as its owner's GitHub profile name and their HMCTS email when it is on their GitHub account,
-otherwise their GitHub noreply address. The owner can override either in the "Git identity" card of the credentials
-section of `/hub/virtual` (`git_identity`, JSON `{name, email}`); a pod reads it but cannot change it, and "Clear" deletes it.
+otherwise their GitHub noreply address. The owner can override either under Git identity in the Assistant's settings, or in the "Git identity" card of the
+credentials section of `/hub/virtual` (`git_identity`, JSON `{name, email}`); a pod reads it but cannot change it, and "Clear" deletes it.
 
 **Sizes.** An agent is `small` (from 1 CPU, 4–8Gi), `medium` (from 2 CPU, 8–16Gi) or `large` (from 4 CPU, 16–32Gi),
 chosen when it is created. No size caps CPU: a pod is guaranteed its request and bursts above it, because a session's
@@ -311,11 +315,11 @@ name its checkout does not have.
 
 **Web ports.** The pod reports the ports it finds listening (`PUT /api/virtual/{id}/ports`), up to 10, 1024–65535; nobody
 chooses them. Each one bound beyond loopback is served at `https://<statefulset_name>-<port>.<VIRTUAL_AGENT_PUBLIC_DOMAIN>`
-to anyone on the HMCTS VPN; one bound to loopback only cannot be reached from outside the pod. No page of the web UI shows these URLs. A
+to anyone on the HMCTS VPN; one bound to loopback only cannot be reached from outside the pod. The Assistant's settings list them under Web servers. A
 change never restarts the pod: it bumps `generation` but not the `pod_generation` the pod template is stamped with.
 
 **The viewer.** With `AGENT_HUB_VIEWER_HOST` set, each port is also served at
-`https://<AGENT_HUB_VIEWER_HOST>/<virtual agent id>/<port>/`, which works off the VPN for its owner alone. The hub
+`https://<AGENT_HUB_VIEWER_HOST>/<virtual agent id>/<port>/` — the link the Assistant's settings give first — which works off the VPN for its owner alone. The hub
 forwards each request to the port's VPN URL. A browser without the port's cookie is sent through the hub, which signs
 it in if need be and hands back a ticket lasting a minute, swapped for an 8-hour cookie scoped to that port's path.
 It is a host of its own so that nothing an agent serves shares the hub's origin and its `ah_session`; the hub never
