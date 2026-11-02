@@ -6,6 +6,7 @@ import type { EventHub } from "../realtime/hub.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { setDesired } from "../virtual-agents/store.ts";
+import { findAssistant } from "./assistant-store.ts";
 import {
   checkResults,
   LOOKUP_RATE_LIMIT,
@@ -16,7 +17,6 @@ import {
   type LookupResponse,
   lookupResponse
 } from "./lookups.ts";
-import { findAssistant } from "./store.ts";
 
 /**
  * A lookup as the hub keeps it: recorded when the owner asks, sent to their pod on its sessions stream, answered by

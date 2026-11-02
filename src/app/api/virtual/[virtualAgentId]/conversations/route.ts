@@ -1,6 +1,6 @@
 import { json } from "@/agent-api/http";
 import { virtualRoute } from "@/agent-api/route";
-import { conversationIdsOf } from "@/assistant/store";
+import { conversationIdsOf } from "@/assistant/conversation-store";
 import { prisma } from "@/store/prisma";
 
 export const runtime = "nodejs";

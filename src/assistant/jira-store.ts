@@ -1,9 +1,9 @@
 import { HttpError } from "../agent-api/http.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { announce, type ConversationRow } from "./conversation-row.ts";
 import { isJiraProject, JIRA_EXPORT_TIMEOUT_MS, JIRA_SELECT, type JiraExportView, jiraExportView } from "./jira.ts";
 import { hasPod } from "./pods.ts";
 import { MAX_JIRA_ERROR } from "./schemas.ts";
-import { announce, type ConversationRow } from "./store.ts";
 
 /**
  * A conversation's Jira export as the hub keeps it: claimed when its owner asks, carried to the conversation's

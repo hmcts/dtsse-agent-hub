@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEventHub } from "../realtime/hub.ts";
 import type { LookupFrame } from "./lookup-store.ts";
+import type { Wake } from "./session-store.ts";
 import { closeFrame, deleteUploadsFrame, interruptFrame, lookupFrame, sessionStream, wakeFrame, welshFrame } from "./session-stream.ts";
-import type { Wake } from "./store.ts";
 import type { WelshFrame } from "./welsh-store.ts";
 
 const ASSISTANT = "va-1";

@@ -1,5 +1,6 @@
 import type { AgentRef } from "../access/rules.ts";
-import { announceFirstContent, refreshLocalTitle } from "../assistant/store.ts";
+import { announceFirstContent } from "../assistant/first-content.ts";
+import { refreshLocalTitle } from "../assistant/local-chat-store.ts";
 import { shownInThread } from "../assistant/thread.ts";
 import { firstPromptTitle, type PromptEntry } from "../assistant/titles.ts";
 import { notify } from "../realtime/notify.ts";

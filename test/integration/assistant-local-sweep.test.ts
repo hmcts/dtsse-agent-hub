@@ -7,8 +7,11 @@
 // delete that did not detach the session first would take the live agent row, its transcript, its subscriptions and
 // every message to or from it — which was the worst bug on this branch.
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { createConversation } from "../../src/assistant/conversation-store.ts";
+import { linkLocalSession } from "../../src/assistant/local-chat-store.ts";
 import { LOCAL_CONVERSATION_RETENTION_HOURS, startLocalConversationSweep, sweepLocalConversations } from "../../src/assistant/local-sweep.ts";
-import { createConversation, ensureAssistant, linkLocalSession, writeArtefact } from "../../src/assistant/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import { recordQuestion } from "../../src/questions/store.ts";
 import { decodeEvent, HUB_CHANNEL } from "../../src/realtime/events.ts";

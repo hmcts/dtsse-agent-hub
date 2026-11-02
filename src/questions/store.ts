@@ -1,6 +1,6 @@
 import { HttpError } from "../agent-api/http.ts";
 import type { AgentRow } from "../agents/store.ts";
-import { announceFirstContent } from "../assistant/store.ts";
+import { announceFirstContent } from "../assistant/first-content.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { offerExpired, type QuestionPost, type QuestionSetAnswer } from "./questions.ts";

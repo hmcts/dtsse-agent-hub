@@ -22,7 +22,9 @@ import * as partRoute from "../../src/app/api/ui/uploads/[uploadId]/parts/[index
 import * as discardRoute from "../../src/app/api/ui/uploads/[uploadId]/route.ts";
 import * as uploadRoute from "../../src/app/api/ui/uploads/route.ts";
 import * as conversationsRoute from "../../src/app/api/virtual/[virtualAgentId]/conversations/route.ts";
-import { createConversation, ensureAssistant, linkLocalSession } from "../../src/assistant/store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { createConversation } from "../../src/assistant/conversation-store.ts";
+import { linkLocalSession } from "../../src/assistant/local-chat-store.ts";
 import { startUploadSweep, sweepUploads } from "../../src/assistant/upload-sweep.ts";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_BYTES, MAX_UPLOAD_BYTES, PART_BYTES } from "../../src/assistant/uploads.ts";
 import { unsentChat } from "../../src/assistant/views.ts";

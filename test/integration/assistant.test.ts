@@ -15,24 +15,18 @@ import * as uiTranscriptRoute from "../../src/app/api/ui/agents/[id]/transcript/
 import * as lookupsRoute from "../../src/app/api/ui/assistant/lookups/route.ts";
 import * as lookupAnswerRoute from "../../src/app/api/virtual/[virtualAgentId]/lookups/[lookupId]/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
+import { writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
+import { createConversation, findConversation, hasLocalConversation, listConversations } from "../../src/assistant/conversation-store.ts";
 import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
+import { assistantFrame } from "../../src/assistant/frame.ts";
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
 import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
+import { searchConversations } from "../../src/assistant/search-store.ts";
+import { linkSession, pendingWakes } from "../../src/assistant/session-store.ts";
 import { accessToConversation, conversationsSharedBy, conversationsSharedWith, shareConversation } from "../../src/assistant/shares.ts";
-import {
-  assistantFrame,
-  createConversation,
-  ensureAssistant,
-  findConversation,
-  hasLocalConversation,
-  linkSession,
-  listConversations,
-  pendingWakes,
-  searchConversations,
-  writeArtefact
-} from "../../src/assistant/store.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
 import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
