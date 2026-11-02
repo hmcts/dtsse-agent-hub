@@ -30,9 +30,34 @@ export const CLAUDE = `sk-ant-oat01-${"Qw_-".repeat(12)}`;
 export const JENKINS = `11${"a4f9c2e7b1".repeat(3)}`;
 export const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
 
-export function azureCacheFor(oid: string): string {
-  const account = { username: "alice@example.com", home_account_id: `${oid}.${TENANT}`, local_account_id: oid, realm: TENANT };
-  return gzipSync(Buffer.from(JSON.stringify({ Account: { a: account } }))).toString("base64");
+const AZURE_CLI = "04b07795-8ddb-461a-bbee-02f9e1bf7b46";
+const LOGIN = "login.microsoftonline.com";
+
+export type AzureCacheOptions = {
+  /** One account per realm: `az login --tenant` writes the one, `az login` alone also `organizations` and every tenant it lists. */
+  realms?: string[];
+  /** A B2B guest's names them in their home tenant. */
+  home?: string;
+  /** The `home_account_id` of each refresh token, `undefined` for one with none. */
+  refreshTokens?: (string | undefined)[];
+};
+
+/** A cache as the pod uploads it: `az login`'s MSAL cache without its access tokens. */
+export function azureCacheFor(oid: string, { realms = [TENANT], home = `${oid}.${TENANT}`, refreshTokens = [home] }: AzureCacheOptions = {}): string {
+  const Account = Object.fromEntries(
+    realms.map((realm) => [
+      `${home}-${LOGIN}-${realm}`.toLowerCase(),
+      { home_account_id: home, environment: LOGIN, realm, local_account_id: oid, username: "alice@example.com", authority_type: "MSSTS" }
+    ])
+  );
+  const RefreshToken = Object.fromEntries(
+    refreshTokens.map((owner, i) => [
+      `${owner ?? ""}-${LOGIN}-refreshtoken-${AZURE_CLI}--${i}`.toLowerCase(),
+      { credential_type: "RefreshToken", secret: "refresh-secret", home_account_id: owner, environment: LOGIN, client_id: AZURE_CLI, family_id: "1" }
+    ])
+  );
+  const AppMetadata = { [`appmetadata-${LOGIN}-${AZURE_CLI}`]: { client_id: AZURE_CLI, environment: LOGIN, family_id: "1" } };
+  return gzipSync(Buffer.from(JSON.stringify({ Account, RefreshToken, AppMetadata }))).toString("base64");
 }
 
 export const AZURE = azureCacheFor(ALICE.oid);

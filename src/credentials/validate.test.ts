@@ -130,41 +130,112 @@ describe("decodeAzureCache", () => {
 describe("checkAzureCacheOwner", () => {
   const OID = "a1b2c3d4-0000-4000-8000-000000000001";
   const TID = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
-
   const OTHER_OID = "b1b2c3d4-0000-4000-8000-000000000002";
   const OTHER_TID = "99999999-9999-9999-9999-999999999999";
+  const MEMBER = `${OID}.${TID}`;
+  const GUEST = `c1b2c3d4-0000-4000-8000-000000000003.${OTHER_TID}`;
 
-  /** An Account entry as MSAL writes it: a member's `home_account_id` is `<local_account_id>.<realm>`. */
-  function account(localAccountId: unknown, realm: unknown, home: unknown = `${localAccountId}.${realm}`) {
+  function account(home: unknown, localAccountId: unknown, realm: unknown) {
     return { username: "a.person@justice.gov.uk", home_account_id: home, local_account_id: localAccountId, realm };
   }
 
-  it("should accept a cache when its every account is the owner's in this tenant", () => {
-    const cache = azureCache({ Account: { one: account(OID, TID), two: account(OID.toUpperCase(), TID.toUpperCase()) } });
+  function refreshToken(home: unknown) {
+    return { credential_type: "RefreshToken", secret: "refresh-secret", home_account_id: home };
+  }
+
+  /** A cache with one refresh token for each distinct `home_account_id` among its accounts, as MSAL writes it. */
+  function cacheOf(accounts: Record<string, unknown>, refreshTokens?: Record<string, unknown>): string {
+    const homes = [...new Set(Object.values(accounts).map((a) => (a as { home_account_id?: unknown } | null)?.home_account_id))];
+    return azureCache({ Account: accounts, RefreshToken: refreshTokens ?? Object.fromEntries(homes.map((home, i) => [`rt-${i}`, refreshToken(home)])) });
+  }
+
+  it.each([
+    ["this tenant", TID],
+    ["another tenant", OTHER_TID],
+    ["organizations", "organizations"]
+  ])("should accept a member's cache when its realm is %s", (_label, realm) => {
+    expect(checkAzureCacheOwner(cacheOf({ a: account(MEMBER, OID, realm) }), OID, TID)).toEqual({ ok: true });
+  });
+
+  it("should accept a member's cache when az login without a tenant wrote an account for each tenant", () => {
+    const cache = cacheOf({ a: account(MEMBER, OID, "organizations"), b: account(MEMBER, OID, TID), c: account(MEMBER, OID, OTHER_TID) });
 
     expect(checkAzureCacheOwner(` ${cache}\n`, OID, TID)).toEqual({ ok: true });
   });
 
-  it("should accept a cache when the owner is a guest whose home account is in another tenant", () => {
-    const cache = azureCache({ Account: { a: account(OID, TID, `${OTHER_OID}.${OTHER_TID}`) } });
+  it("should accept a member's cache when its ids differ only in case", () => {
+    const cache = cacheOf({ a: account(MEMBER.toUpperCase(), OID, TID) }, { r: refreshToken(MEMBER) });
 
-    expect(checkAzureCacheOwner(cache, OID, TID)).toEqual({ ok: true });
+    expect(checkAzureCacheOwner(cache, OID.toUpperCase(), TID.toUpperCase())).toEqual({ ok: true });
+  });
+
+  it("should accept a guest's cache when they signed in to this tenant", () => {
+    expect(checkAzureCacheOwner(cacheOf({ a: account(GUEST, OID.toUpperCase(), TID.toUpperCase()) }), OID, TID)).toEqual({ ok: true });
+  });
+
+  it("should accept a cache when it has no RefreshToken section", () => {
+    expect(checkAzureCacheOwner(azureCache({ Account: { a: account(MEMBER, OID, TID) } }), OID, TID)).toEqual({ ok: true });
   });
 
   it.each([
-    ["someone else's account in this tenant", { a: account(OTHER_OID, TID) }],
-    ["someone else's account whose home_account_id names the owner", { a: account(OTHER_OID, TID, `${OID}.${TID}`) }],
-    ["the owner's oid in another realm", { a: account(OID, OTHER_TID) }],
-    ["the owner's oid in another realm whose home_account_id is the owner's here", { a: account(OID, OTHER_TID, `${OID}.${TID}`) }],
-    ["the owner's account beside someone else's", { a: account(OID, TID), b: account(OTHER_OID, TID) }],
-    ["an account with no local_account_id", { a: { username: "x", home_account_id: `${OID}.${TID}`, realm: TID } }],
-    ["an account with no realm", { a: { username: "x", home_account_id: `${OID}.${TID}`, local_account_id: OID } }],
-    ["a local_account_id that is not a string", { a: account(42, TID, `${OID}.${TID}`) }],
-    ["a realm that is not a string", { a: account(OID, 42, `${OID}.${TID}`) }],
+    ["a colleague in this tenant", { a: account(`${OTHER_OID}.${TID}`, OTHER_OID, TID) }],
+    ["a colleague in this tenant whose local_account_id claims the owner", { a: account(`${OTHER_OID}.${TID}`, OID, TID) }],
+    ["the owner beside a colleague in this tenant", { a: account(MEMBER, OID, TID), b: account(`${OTHER_OID}.${TID}`, OTHER_OID, TID) }],
+    [
+      "the owner's local_account_id under a foreign home beside another person's in this realm",
+      { a: account(GUEST, OID, TID), b: account(GUEST, OTHER_OID, TID) }
+    ],
+    ["a guest whose local_account_id is someone else's", { a: account(GUEST, OTHER_OID, TID) }],
+    ["a guest with no local_account_id", { a: { username: "x", home_account_id: GUEST, realm: TID } }],
+    ["a guest whose local_account_id is not a string", { a: account(GUEST, 42, TID) }],
+    ["a home_account_id of one part", { a: account(OID, OID, TID) }],
+    ["a home_account_id of three parts", { a: account(`${MEMBER}.extra`, OID, TID) }],
+    ["a home_account_id with an empty part", { a: account(`.${TID}`, OID, TID) }],
+    ["a home_account_id that is not a string", { a: account(42, OID, TID) }],
+    ["an account with no home_account_id", { a: { username: "x", local_account_id: OID, realm: TID } }],
     ["a null account", { a: null }],
     ["no accounts", {}]
-  ])("should refuse a cache when it holds %s", (_label, accounts) => {
-    expect(checkAzureCacheOwner(azureCache({ Account: accounts }), OID, TID)).toMatchObject({ ok: false, reason: "not-owner" });
+  ])("should refuse a cache as not the owner's when it holds %s", (_label, accounts) => {
+    expect(checkAzureCacheOwner(cacheOf(accounts), OID, TID)).toEqual({
+      ok: false,
+      reason: "not-owner",
+      error: expect.stringMatching(/someone other than you|holds no account/)
+    });
+  });
+
+  it.each([
+    ["a refresh token for no account in it", { r: refreshToken(MEMBER), s: refreshToken(`${OTHER_OID}.${TID}`) }],
+    ["a refresh token with no home_account_id", { r: { credential_type: "RefreshToken", secret: "refresh-secret" } }],
+    ["a refresh token whose home_account_id is not a string", { r: refreshToken(42) }],
+    ["a null refresh token", { r: null }]
+  ])("should refuse a member's cache as not the owner's when it holds %s", (_label, refreshTokens) => {
+    expect(checkAzureCacheOwner(cacheOf({ a: account(MEMBER, OID, TID) }, refreshTokens), OID, TID)).toMatchObject({ ok: false, reason: "not-owner" });
+  });
+
+  it("should refuse a member's cache as not the owner's when its RefreshToken section is not an object", () => {
+    expect(checkAzureCacheOwner(azureCache({ Account: { a: account(MEMBER, OID, TID) }, RefreshToken: "token" }), OID, TID)).toMatchObject({
+      ok: false,
+      reason: "not-owner"
+    });
+  });
+
+  it.each([
+    ["another realm", { a: account(GUEST, OID, OTHER_TID) }],
+    ["organizations", { a: account(GUEST, OID, "organizations") }],
+    ["another realm beside this one", { a: account(GUEST, OID, TID), b: account(GUEST, OID, OTHER_TID) }],
+    ["no realm", { a: { username: "x", home_account_id: GUEST, local_account_id: OID } }],
+    ["a realm that is not a string", { a: account(GUEST, OID, 42) }]
+  ])("should refuse a guest's cache as in another tenant when an account has %s", (_label, accounts) => {
+    const refused = checkAzureCacheOwner(cacheOf(accounts), OID, TID);
+
+    expect(refused).toEqual({ ok: false, reason: "other-tenant", error: expect.stringContaining(`az login --tenant ${TID}`) });
+    expect(JSON.stringify(refused)).not.toContain(OTHER_TID);
+  });
+
+  it("should refuse a guest's cache in another realm as not the owner's when it also holds someone else's refresh token", () => {
+    const cache = cacheOf({ a: account(GUEST, OID, OTHER_TID) }, { r: refreshToken(GUEST), s: refreshToken(`${OTHER_OID}.${TID}`) });
+
+    expect(checkAzureCacheOwner(cache, OID, TID)).toMatchObject({ ok: false, reason: "not-owner" });
   });
 
   it.each([
@@ -177,7 +248,7 @@ describe("checkAzureCacheOwner", () => {
   });
 
   it.each([undefined, " "])("should refuse to judge when the hub's tenant is %j", (tenant) => {
-    expect(checkAzureCacheOwner(azureCache({ Account: { a: account(OID, TID) } }), OID, tenant)).toMatchObject({ ok: false, reason: "unconfigured" });
+    expect(checkAzureCacheOwner(cacheOf({ a: account(MEMBER, OID, TID) }), OID, tenant)).toMatchObject({ ok: false, reason: "unconfigured" });
   });
 });
 
