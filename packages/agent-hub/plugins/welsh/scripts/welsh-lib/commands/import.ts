@@ -16,7 +16,7 @@
  * needs-review rather than replacing it.
  */
 
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -24,6 +24,7 @@ import { loadCatalogue } from "../catalogue.ts";
 import { branchName, HOME_OVERRIDE, homeRepo, inHome, welshDir } from "../home.ts";
 import { fail, requireService, say } from "../io.ts";
 import { readReturn } from "../returns.ts";
+import { REVIEW_FILE, reviewMarkdown } from "../review.ts";
 import { writeRequest } from "../xlsx.ts";
 
 export async function importCmd(argv: string[]): Promise<unknown> {
@@ -80,6 +81,7 @@ export async function importCmd(argv: string[]): Promise<unknown> {
       copyFileSync(file, kept);
     }
     cat.save();
+    writeFileSync(join(dir, REVIEW_FILE), reviewMarkdown(cat));
     if (check.problems.length) {
       queries = values["queries-out"] ? resolve(values["queries-out"]) : join(dir, "returns", `${batch}-queries.xlsx`);
       mkdirSync(dirname(queries), { recursive: true });

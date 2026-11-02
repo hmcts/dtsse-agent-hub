@@ -119,3 +119,18 @@ test("search finds either side and shows needs-review but hides superseded", () 
   assert.equal(search("allgofnodi", svc, "contains", true).length, 2);
   assert.equal(search("Draft", svc, "exact", false)[0].status, "needs-review");
 });
+
+test("the review list has every needs-review row, grouped by English, with why", async () => {
+  const { reviewMarkdown } = await import("../review.ts");
+  writeFileSync(join(ws, "apps", "demo", "demo-app", "welsh", "catalogue.csv"), "");
+  const cat = loadCatalogue("demo");
+  cat.add({ english: "Continue", welsh: "Parhau", source: "legacy", status: "needs-review", notes: "Two renderings" });
+  cat.add({ english: "Continue", welsh: "Ymlaen", source: "legacy", status: "needs-review", notes: "Two renderings" });
+  cat.add({ english: "Download", welsh: "Download", source: "legacy", status: "needs-review", notes: "Same as the English" });
+  cat.add({ english: "Back", welsh: "Yn ôl", source: "WLU" });
+  const md = reviewMarkdown(cat);
+  assert.match(md, /2 English string\(s\)/);
+  assert.match(md, /\| Continue \| {2}\| Parhau _\(\w+\)_<br><br>Ymlaen _\(\w+\)_ \| Two renderings \|/);
+  assert.match(md, /\| Download \| {2}\| Download _\(\w+\)_ \| Same as the English \|/);
+  assert.doesNotMatch(md, /Yn ôl/);
+});

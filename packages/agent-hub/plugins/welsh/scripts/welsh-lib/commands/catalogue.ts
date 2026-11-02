@@ -8,6 +8,7 @@ import { loadConfig } from "../config.ts";
 import { branchName, HOME_OVERRIDE, homeRepo, inHome, noHome } from "../home.ts";
 import { fail, requireService, say } from "../io.ts";
 import { importLegacy, type LegacySource } from "../legacy.ts";
+import { REVIEW_FILE, reviewMarkdown } from "../review.ts";
 
 /** Sets a service up: a welsh/ folder in its home repo, committed on a branch, and a draft PR there with --pr. */
 export async function init(argv: string[]): Promise<unknown> {
@@ -84,7 +85,7 @@ export async function importLegacyCmd(argv: string[]): Promise<unknown> {
       xlsx: { type: "string", multiple: true },
       json: { type: "string", multiple: true },
       received: { type: "string" },
-      "conflicts-out": { type: "string" },
+      "review-out": { type: "string" },
       pr: { type: "boolean" }
     }
   });
@@ -114,25 +115,23 @@ export async function importLegacyCmd(argv: string[]): Promise<unknown> {
   const report = await importLegacy(cat, sources, values.received ?? new Date().toISOString().slice(0, 10));
   cat.save();
 
-  const conflictsOut = values["conflicts-out"] ?? join(dirname(cataloguePath(service)), "legacy-conflicts.md");
-  if (report.conflicts.length) {
-    writeFileSync(conflictsOut, conflictsMarkdown(service, report.conflicts));
-  }
+  const reviewOut = values["review-out"] ?? join(dirname(cataloguePath(service)), REVIEW_FILE);
+  writeFileSync(reviewOut, reviewMarkdown(cat));
   say(
     `Read ${report.read} legacy entries → ${report.added} catalogue rows added, ${report.unchanged} already present` +
       ` (${report.overriddenCopies} JSON copies dropped in favour of the spreadsheet).\n` +
       `${report.needsReview} rows are needs-review and will not be used to fill anything until a BA approves them.\n` +
       (report.conflicts.length
-        ? `${report.conflicts.length} English strings have more than one Welsh rendering — listed in ${conflictsOut}.`
+        ? `${report.conflicts.length} English strings have more than one Welsh rendering. Every needs-review row is listed in ${reviewOut}.`
         : "No conflicting renderings.")
   );
-  return { service, catalogue: cat.path, ...report, conflictsReport: report.conflicts.length ? conflictsOut : null, conflicts: report.conflicts.length };
+  return { service, catalogue: cat.path, ...report, review: reviewOut, conflicts: report.conflicts.length };
 }
 
 /** The seeding, run again in a worktree of the home repo with the sources' absolute paths, committed there. */
 function legacyInHome(service: string, argv: string[], pr: boolean): unknown {
   // The worktree run starts elsewhere, so every source path is made absolute first.
-  const absolute = argv.map((a, i) => (["--xlsx", "--json", "--conflicts-out"].includes(argv[i - 1] ?? "") ? resolve(a) : a));
+  const absolute = argv.map((a, i) => (["--xlsx", "--json", "--review-out"].includes(argv[i - 1] ?? "") ? resolve(a) : a));
   const done = inHome<{ added: number; needsReview: number; conflicts: number }>(
     service,
     ["import-legacy", ...absolute],
@@ -143,30 +142,12 @@ function legacyInHome(service: string, argv: string[], pr: boolean): unknown {
       body:
         `Seeds \`welsh/catalogue.csv\` from the service's existing Welsh: ${r.added} rows, ${r.needsReview} of them \`needs-review\`, which are not used until a BA approves them. ` +
         (r.conflicts
-          ? `${r.conflicts} English strings have more than one Welsh rendering; \`welsh/legacy-conflicts.md\` lists them for the BA to settle with the Welsh Language Unit.`
+          ? `${r.conflicts} English strings have more than one Welsh rendering. \`welsh/needs-review.md\` lists every row for the BA to settle with the Welsh Language Unit.`
           : "")
     })
   );
   say(done.pr ? `Draft PR: ${done.pr}` : done.branch ? `Committed on ${done.branch} in ${homeRepo(service)}.` : "Nothing new for the catalogue.");
   return { ...done.result, branch: done.branch, pr: done.pr };
-}
-
-function conflictsMarkdown(service: string, conflicts: Awaited<ReturnType<typeof importLegacy>>["conflicts"]): string {
-  const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
-  const lines = [
-    `# Legacy catalogue conflicts — ${service}`,
-    "",
-    "Each English string below has more than one Welsh rendering across the legacy catalogues.",
-    "All renderings are in `catalogue.csv` with status `needs-review`, so none is used to fill anything.",
-    "Confirm the correct one with the Welsh Language Unit, set that row to `approved` and the others to `superseded`.",
-    "",
-    "| English | Context | Welsh options (source) |",
-    "|---|---|---|"
-  ];
-  for (const c of conflicts) {
-    lines.push(`| ${cell(c.english)} | ${cell(c.context)} | ${c.options.map((o) => `${cell(o.welsh)} _(${cell(o.where)})_`).join("<br><br>")} |`);
-  }
-  return `${lines.join("\n")}\n`;
 }
 
 const CONFIG_TEMPLATE = (service: string) => `# Welsh translation settings for ${service}. Read by the agent-hub welsh plugin.
