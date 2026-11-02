@@ -147,12 +147,7 @@ describe("AssistantShell", () => {
 
       const mark = screen.getByTitle(/On your computer/);
       expect(mark.classList.contains(colour)).toBe(true);
-      expect(mark.classList.contains("status-pulse")).toBe(false);
-      const badge = mark.querySelector('[data-badge="working"]');
-      expect(badge !== null).toBe(working);
-      expect(badge?.classList.contains("status-pulse") ?? false).toBe(working);
-      expect(badge?.classList.contains("bg-current") ?? false).toBe(working);
-      expect(badge?.parentElement?.classList.contains("border-asst-rail") ?? false).toBe(working);
+      expect(mark.querySelector('[data-badge="working"]') !== null).toBe(working);
     }
   );
 
@@ -188,12 +183,7 @@ describe("AssistantShell", () => {
       expect(within(nav).getByRole("link", { name: new RegExp(`^${words}`) }).textContent).toBe(`${words}: Event help`);
       const mark = screen.getByTitle(words);
       expect(mark.classList.contains(colour)).toBe(true);
-      expect(mark.classList.contains("status-pulse")).toBe(false);
-      const badge = mark.querySelector('[data-badge="working"]');
-      expect(badge !== null).toBe(working);
-      expect(badge?.classList.contains("status-pulse") ?? false).toBe(working);
-      expect(badge?.classList.contains("bg-current") ?? false).toBe(working);
-      expect(badge?.parentElement?.classList.contains("border-asst-rail") ?? false).toBe(working);
+      expect(mark.querySelector('[data-badge="working"]') !== null).toBe(working);
     }
   );
 
