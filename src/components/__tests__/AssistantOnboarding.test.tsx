@@ -266,8 +266,8 @@ describe("GettingReady connectors", () => {
     expect(reconnect).not.toHaveBeenCalled();
   });
 
-  // The pod relays an Azure sign-in only once asked, so Connect has to ask, or no code ever arrives and a person on
-  // the gateway route, whose chats wait on Azure, is held here for good.
+  // A running gateway assistant with no Azure code and none stored is one whose boot relay never reached the person,
+  // so Connect has to ask, or no code ever arrives and a person whose chats wait on Azure is held here for good.
   it("should ask for the Azure sign-in when the person clicks Connect on the gateway route", async () => {
     const reconnect = ok();
     const summary = assistant("running", {
@@ -287,8 +287,69 @@ describe("GettingReady connectors", () => {
     const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
     expect(sent.get("id")).toBe(ASSISTANT);
     expect(sent.get("kind")).toBe("azure");
+    // The row shows nothing stored, so it asks no question, and so it must not delete one saved since either.
+    expect(sent.get("keep")).toBe("stored");
     expect(within(connector("Azure")).getByText("Connecting…")).toBeTruthy();
     expect(within(connector("Azure")).getByText(/The sign-in will appear here/)).toBeTruthy();
+  });
+
+  it("should disable Connect for Azure while asking for its sign-in is in flight, so a second click posts nothing", async () => {
+    let answer: (result: { ok: true }) => void = () => undefined;
+    const reconnect = vi.fn(() => new Promise<{ ok: true }>((resolve) => (answer = resolve)));
+    const summary = assistant("running", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway")
+    });
+    render(ready({ assistant: summary, statuses: statuses("github"), reconnect }));
+
+    const button = within(connector("Azure")).getByRole("button", { name: "Connect" }) as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(button.disabled).toBe(true);
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(reconnect).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      answer({ ok: true });
+    });
+    expect(within(connector("Azure")).getByText("Connecting…")).toBeTruthy();
+  });
+
+  it("should offer Connect for Azure again once the assistant has restarted without relaying a code", async () => {
+    const gateway = (status: VirtualAgentStatus) =>
+      assistant(status, { modelRoute: "gateway", needed: neededCredentials("gateway"), optional: optionalCredentials("gateway") });
+    const { rerender } = render(ready({ assistant: gateway("running"), statuses: statuses("github") }));
+
+    await act(async () => {
+      fireEvent.click(within(connector("Azure")).getByRole("button", { name: "Connect" }));
+    });
+    // Still the page from before the restart: the ask has gone, and the row waits for the restart to show.
+    expect(within(connector("Azure")).getByText("Connecting…")).toBeTruthy();
+
+    rerender(ready({ assistant: gateway("provisioning"), statuses: statuses("github") }));
+    expect(within(connector("Azure")).getByText("Connecting…")).toBeTruthy();
+
+    rerender(ready({ assistant: gateway("running"), statuses: statuses("github") }));
+    expect(within(connector("Azure")).queryByText("Connecting…")).toBeNull();
+    expect(within(connector("Azure")).getByRole("button", { name: "Connect" })).toBeTruthy();
+  });
+
+  it("should show the Azure code relayed at boot, with Claude waiting on it, on the gateway route with nothing stored", () => {
+    const summary = assistant("awaiting_login", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway"),
+      logins: [login("azure")]
+    });
+    render(ready({ assistant: summary, statuses: statuses("github") }));
+
+    expect(within(connector("Azure")).getByText("ABCD-1234")).toBeTruthy();
+    expect(within(connector("Claude")).getByText("Waiting for you")).toBeTruthy();
+    expect(within(connector("Azure")).queryByRole("button", { name: "Connect" })).toBeNull();
   });
 
   it("should keep offering Connect for Azure when asking for its sign-in is refused", async () => {
@@ -306,6 +367,8 @@ describe("GettingReady connectors", () => {
 
     const azure = connector("Azure");
     expect(within(azure).getByRole("alert").textContent).toBe("that virtual agent is being deleted");
+    // Across the row rather than in the column beside the button.
+    expect(within(azure).getByRole("alert").closest(".items-end")).toBeNull();
     expect(within(azure).getByRole("button", { name: "Connect" })).toBeTruthy();
     expect(within(azure).queryByText("Connecting…")).toBeNull();
   });

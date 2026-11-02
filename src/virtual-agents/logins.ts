@@ -40,8 +40,8 @@ async function lockLogin(db: Database, virtualAgentId: string, kind: CredentialK
 
 /**
  * The pod's new login, replacing any earlier one of the same kind and any code pasted for it. The agent shows as
- * `awaiting_login` until the pod reports its next step. A relayed Azure sign-in is the one the owner asked for, so
- * the request is spent: the next boot relays another only if they ask again.
+ * `awaiting_login` until the pod reports its next step. A relayed Azure sign-in spends any request the owner made, so
+ * off the `gateway` route the next boot relays another only if they ask again.
  */
 export async function startLogin(
   prisma: PrismaClient,
@@ -74,16 +74,21 @@ export async function startLogin(
 }
 
 /**
- * Whether the owner has asked this agent for a sign-in of `kind` that its pod has yet to relay. Only Azure is signed in
- * to on request, because it is optional and nothing should put a code in front of somebody who never asked for one;
- * a pod relays every other sign-in it has no credential for whether or not anybody asked.
+ * Whether a pod that found no working credential of `kind` should relay a sign-in of it. Only Azure is ever asked
+ * about: a pod relays every other sign-in it has no credential for whether or not anybody asked.
+ *
+ * On `gateway` the answer is always yes, because Azure is that route's model credential and a pod without it fails
+ * every turn. Nothing stored needs checking first: the pod asks only once restoring what is stored has failed, and a
+ * stored sign-in it could not use is no better than none. Elsewhere Azure is optional, and nothing should put a code
+ * in front of somebody who never asked for one, so the answer is yes only while the owner has asked for a sign-in
+ * that no pod has relayed yet.
  */
 export async function signInRequested(db: Database, virtualAgentId: string, kind: CredentialKind): Promise<boolean> {
   if (kind !== "azure") {
     return false;
   }
-  const row = await db.virtualAgent.findUnique({ where: { id: virtualAgentId }, select: { azureSignInRequestedAt: true } });
-  return row?.azureSignInRequestedAt != null;
+  const row = await db.virtualAgent.findUnique({ where: { id: virtualAgentId }, select: { azureSignInRequestedAt: true, modelRoute: true } });
+  return row !== null && (row.modelRoute === "gateway" || row.azureSignInRequestedAt !== null);
 }
 
 /**
@@ -309,8 +314,13 @@ export const SIGN_IN_TITLES: Record<SignInKind, string> = { github: "GitHub", az
  * virtual agent, if it is running, restarted, so its new pod finds none and relays a fresh sign-in. A stopped one
  * signs in when it next starts. The agent is checked first, so an id that is not the actor's deletes nothing.
  *
- * An Azure sign-in is relayed only on request, so this is also how the owner connects Azure at all: it records the
- * request for `signInRequested`, which the new pod reads, before restarting.
+ * Off the `gateway` route an Azure sign-in is relayed only on request, so this is also how the owner connects Azure
+ * at all: it records the request for `signInRequested`, which the new pod reads, before restarting.
+ *
+ * `keepStored` asks for the sign-in without deleting anything, for a control offered only while the person's screen
+ * shows nothing stored. That screen can be out of date, and the credential is shared by all their agents, so the
+ * restart alone is what such a control may do without a confirmation: a pod that can still use a stored value
+ * restores it, and one that cannot relays a code.
  */
 export async function reconnectSignIn(
   prisma: PrismaClient,
@@ -318,6 +328,7 @@ export async function reconnectSignIn(
   actorOid: string,
   virtualAgentId: string,
   kind: SignInKind,
+  { keepStored = false }: { keepStored?: boolean } = {},
   now: Date = new Date()
 ): Promise<VirtualAgentRow> {
   const virtualAgent = await findVirtualAgent(prisma, virtualAgentId);
@@ -327,7 +338,9 @@ export async function reconnectSignIn(
   if (virtualAgent.desired === "deleted") {
     throw new HttpError(409, "that virtual agent is being deleted");
   }
-  await deleteCredential(prisma, store, { actorOid, ownerOid: virtualAgent.ownerOid, kind });
+  if (!keepStored) {
+    await deleteCredential(prisma, store, { actorOid, ownerOid: virtualAgent.ownerOid, kind });
+  }
   if (kind === "azure") {
     await prisma.virtualAgent.update({ where: { id: virtualAgentId }, data: { azureSignInRequestedAt: now } });
   }
