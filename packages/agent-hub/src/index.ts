@@ -148,6 +148,7 @@ export type {
   EnvelopeAuthor,
   EnvelopeMessage,
   EnvelopeOptions,
+  GithubExportFrame,
   JiraExportFrame,
   OwnerLaptopOptions,
   SessionKind
@@ -162,6 +163,8 @@ export {
   describeAuthor,
   directEnvelope,
   formatMessage,
+  GITHUB_EXPORT_BASH_TIMEOUT_MS,
+  githubExportLines,
   JIRA_EXPORT_BASH_TIMEOUT_MS,
   jiraExportLines,
   leadingSkill,
@@ -172,7 +175,14 @@ export {
 export type { ClientFeature } from "./features.ts";
 export { CLIENT_FEATURES } from "./features.ts";
 export type { DirectEventAuthor, DirectEventMessage } from "./frames.ts";
-export { parseAssistantFrame, parseAssistantProduct, parseConfluenceExportFrame, parseDirectEventMessage, parseJiraExportFrame } from "./frames.ts";
+export {
+  parseAssistantFrame,
+  parseAssistantProduct,
+  parseConfluenceExportFrame,
+  parseDirectEventMessage,
+  parseGithubExportFrame,
+  parseJiraExportFrame
+} from "./frames.ts";
 export type {
   ChooseIdentityOptions,
   ChosenIdentity,

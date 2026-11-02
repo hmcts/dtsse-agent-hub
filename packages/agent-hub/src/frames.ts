@@ -1,7 +1,7 @@
 // How the bridge reads a `direct` stream event. The stream is untrusted input from a hub that may be older or newer
 // than this client, so every field is checked here and anything that does not fit is dropped or left absent.
 import { parseModel } from "./assistant/models.ts";
-import type { AssistantFrame, AssistantProduct, ConfluenceExportFrame, JiraExportFrame } from "./envelope.ts";
+import type { AssistantFrame, AssistantProduct, ConfluenceExportFrame, GithubExportFrame, JiraExportFrame } from "./envelope.ts";
 
 // Structural, and every field optional: it is the shape both `directs` and `envelope` read, so a message
 // narrowed here fits either without this module choosing one of their author types over the other.
@@ -108,6 +108,7 @@ export function parseAssistantFrame(value: unknown): AssistantFrame | null {
     artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
     artefact_updated_by: asNullableString(raw.artefact_updated_by),
     jira_export: parseJiraExportFrame(raw.jira_export),
+    github_export: parseGithubExportFrame(raw.github_export),
     confluence_export: parseConfluenceExportFrame(raw.confluence_export),
     // Left as it came: `readAttachments`, at the point of delivery, is what decides which entries this client will
     // fetch and what the envelope says about the rest, so checking them here would only do it twice.
@@ -139,6 +140,20 @@ export function parseJiraExportFrame(value: unknown): JiraExportFrame | null {
     return null;
   }
   return { export_id: raw.export_id, project: raw.project, issue_type: raw.issue_type, labels: raw.labels as string[] };
+}
+
+const GITHUB_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
+
+/**
+ * A pending GitHub export on the frame, or null. Its values go into the `github export` command the session is told
+ * to run, so anything but an id and an `owner/name` repository is dropped rather than passed on.
+ */
+export function parseGithubExportFrame(value: unknown): GithubExportFrame | null {
+  const raw = asRecord(value);
+  if (!raw || typeof raw.export_id !== "string" || !EXPORT_ID_RE.test(raw.export_id) || typeof raw.repo !== "string" || !GITHUB_REPO_RE.test(raw.repo)) {
+    return null;
+  }
+  return { export_id: raw.export_id, repo: raw.repo };
 }
 
 const NUMERIC_ID_RE = /^\d{1,20}$/;

@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Api } from "./api.ts";
 import { createApi } from "./api.ts";
-import { artefact, confluence, jira } from "./cli/assistant.ts";
+import { artefact, confluence, github, jira } from "./cli/assistant.ts";
 import { agents, chat, directory, post, read, subscribe, topics, unsubscribe } from "./cli/board.ts";
 import { type Cli, type Command, errorMessage, readStdinText, UsageError } from "./cli/command.ts";
 import { credentials } from "./cli/credentials.ts";
@@ -62,6 +62,12 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               again for the same export, it reports the ticket already made
   jira report <export-id> --key K | --error E
                               report the Jira ticket made for an export by hand, or why it could not be made
+  github export <export-id> --repo owner/name
+                              in an HMCTS Assistant conversation: create the GitHub issue for an export the
+                              user asked for with gh, and report it; run again for the same export, it
+                              reports the issue already made
+  github report <export-id> --number N | --error E
+                              report the GitHub issue made for an export by hand, or why it could not be made
   confluence export <export-id> --space-id S --parent-id P
                               in an HMCTS Assistant conversation: publish the document as a new Confluence
                               page under page P for an export the user asked for, with twg, signing in first
@@ -104,6 +110,7 @@ export const COMMANDS: Record<string, Command> = {
   agents,
   artefact,
   jira,
+  github,
   confluence,
   hook,
   bridge,

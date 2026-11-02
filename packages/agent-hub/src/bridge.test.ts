@@ -17,7 +17,14 @@ import { type RunBridgeOptions, runBridge, sessionKind } from "./bridge.ts";
 import { readDirects } from "./directs.ts";
 import type { Env } from "./env.ts";
 import { CLIENT_FEATURES } from "./features.ts";
-import { parseAssistantFrame, parseAssistantProduct, parseConfluenceExportFrame, parseDirectEventMessage, parseJiraExportFrame } from "./frames.ts";
+import {
+  parseAssistantFrame,
+  parseAssistantProduct,
+  parseConfluenceExportFrame,
+  parseDirectEventMessage,
+  parseGithubExportFrame,
+  parseJiraExportFrame
+} from "./frames.ts";
 import { nextBackoff, RAPID_CLOSE_MS, RAPID_CLOSES_BEFORE_BACKOFF, reconnectDelay } from "./reconnect.ts";
 import { ensureStateDir, readText, statePath, writeJson } from "./session.ts";
 import { type SkillListing, skillsHash } from "./skills.ts";
@@ -268,6 +275,24 @@ describe("parseJiraExportFrame", () => {
   );
 });
 
+describe("parseGithubExportFrame", () => {
+  const pending = { export_id: "5b0e7c1a-1111-4222-8333-444455556666", repo: "hmcts/cft-workspace" };
+
+  it("should keep a pending export when every value is one the hub would send", () => {
+    // Act & Assert
+    expect(parseGithubExportFrame(pending)).toEqual(pending);
+    expect(parseAssistantFrame({ conversation_id: "c1", github_export: pending })?.github_export).toEqual(pending);
+  });
+
+  it.each([[{ export_id: "e1" }], [{ repo: "cft-workspace" }], [{ repo: "hmcts/x; rm -rf /" }], [{ repo: "-x/y" }], [{ repo: "hmcts/.." }], [{ repo: 42 }]])(
+    "should drop the export when it has %j, since its values go into a command",
+    (change) => {
+      // Act & Assert
+      expect(parseGithubExportFrame({ ...pending, ...change })).toBeNull();
+    }
+  );
+});
+
 describe("parseConfluenceExportFrame", () => {
   const pending = { export_id: "5b0e7c1a-1111-4222-8333-444455556666", space_id: "280952876", parent_id: "280959611" };
 
@@ -308,7 +333,7 @@ describe("parseAssistantFrame", () => {
     };
 
     // Act & Assert
-    expect(parseAssistantFrame(sent)).toEqual({ ...sent, jira_export: null, confluence_export: null });
+    expect(parseAssistantFrame(sent)).toEqual({ ...sent, jira_export: null, github_export: null, confluence_export: null });
     expect(parseAssistantFrame({ conversation_id: "c1", product: null, product_label: null, artefact_version: 0, artefact_updated_by: null })).toEqual({
       conversation_id: "c1",
       product: null,
@@ -317,6 +342,7 @@ describe("parseAssistantFrame", () => {
       artefact_version: 0,
       artefact_updated_by: null,
       jira_export: null,
+      github_export: null,
       confluence_export: null
     });
   });
@@ -350,6 +376,7 @@ describe("parseAssistantFrame", () => {
       artefact_version: null,
       artefact_updated_by: undefined,
       jira_export: null,
+      github_export: null,
       confluence_export: null
     });
   });

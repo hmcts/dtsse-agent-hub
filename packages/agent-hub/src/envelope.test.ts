@@ -392,6 +392,28 @@ describe("assistantEnvelope", () => {
     expect(assistantEnvelope(personMessage, { ...pcs, confluence_export: null }, null)).not.toMatch(/Confluence/);
   });
 
+  it("should give one github export command for the export id and nothing else to run when a GitHub export is pending", () => {
+    // Arrange
+    const exportId = "5b0e7c1a-1111-4222-8333-444455556666";
+    const frame: AssistantFrame = { ...pcs, github_export: { export_id: exportId, repo: "hmcts/cft-workspace" } };
+
+    // Act
+    const text = assistantEnvelope({ ...personMessage, body: "Please create a GitHub issue for this document in hmcts/cft-workspace." }, frame, null);
+
+    // Assert
+    expect(text).toMatch(`create a GitHub issue for the conversation's document in hmcts/cft-workspace (export ${exportId})`);
+    expect(text).toContain(`\`agent-hub github export ${exportId} --repo hmcts/cft-workspace\``);
+    expect(text).toMatch(/Bash timeout of 240000 ms/);
+    expect(text).toMatch(/reports the issue it already made rather than making another/);
+    expect(text).not.toMatch(/gh issue create|artefact get|github report|twg/);
+    expect(text.endsWith("\n---\nPlease create a GitHub issue for this document in hmcts/cft-workspace.")).toBe(true);
+  });
+
+  it("should say nothing of GitHub when no export is pending", () => {
+    // Act & Assert
+    expect(assistantEnvelope(personMessage, { ...pcs, github_export: null }, null)).not.toMatch(/GitHub|github export/);
+  });
+
   it("should say nothing of Jira when no export is pending", () => {
     // Act & Assert
     expect(assistantEnvelope(personMessage, { ...pcs, jira_export: null }, null)).not.toMatch(/Jira|twg/);

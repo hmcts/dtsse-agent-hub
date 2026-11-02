@@ -174,6 +174,9 @@ export type SessionsBody = {
 /** A conversation's Jira export result, as its session reports it: the issue key it created, or why it could not. */
 export type JiraExportReport = { export_id: string; key: string } | { export_id: string; error: string };
 
+/** A conversation's GitHub export result, as its session reports it: the issue number it created, or why it could not. */
+export type GithubExportReport = { export_id: string; number: number } | { export_id: string; error: string };
+
 /** A conversation's Confluence export result: the page it created and the title it was created with, or why it could not. */
 export type ConfluenceExportReport = { export_id: string; page_id: string; title?: string } | { export_id: string; error: string };
 
