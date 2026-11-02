@@ -8,7 +8,11 @@ import { AssistantShell, type ConversationActions, SidebarToggle } from "@/compo
 
 const refresh = vi.fn();
 const push = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push }), usePathname: () => "/assistant" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh, push }),
+  usePathname: () => "/assistant",
+  useSearchParams: () => new URLSearchParams(window.location.search)
+}));
 
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: () => undefined,

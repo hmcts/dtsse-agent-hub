@@ -23,15 +23,6 @@ export function HomeIcon() {
   );
 }
 
-export function LockIcon() {
-  return (
-    <Icon>
-      <rect x="4.5" y="9" width="11" height="8" rx="1.5" />
-      <path d="M7 9V6.5a3 3 0 0 1 6 0V9" />
-    </Icon>
-  );
-}
-
 export function HashIcon() {
   return (
     <Icon>
@@ -72,16 +63,6 @@ export function SendIcon() {
   );
 }
 
-export function ServerIcon() {
-  return (
-    <Icon>
-      <rect x="3.5" y="4" width="13" height="5" rx="1" />
-      <rect x="3.5" y="11" width="13" height="5" rx="1" />
-      <path d="M6.5 6.5h.01M6.5 13.5h.01" />
-    </Icon>
-  );
-}
-
 export function MenuIcon() {
   return (
     <Icon>
@@ -94,22 +75,6 @@ export function CloseIcon() {
   return (
     <Icon>
       <path d="m5 5 10 10M15 5 5 15" />
-    </Icon>
-  );
-}
-
-export function PencilIcon() {
-  return (
-    <Icon>
-      <path d="M13.5 3.5a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2L7 16l-3.5 1 1-3.5 9-10ZM12 5l3 3" />
-    </Icon>
-  );
-}
-
-export function ReconnectIcon() {
-  return (
-    <Icon>
-      <path d="M16 10a6 6 0 0 1-10.5 4M4 10a6 6 0 0 1 10.5-4M14.5 2.5V6H11M5.5 17.5V14H9" />
     </Icon>
   );
 }

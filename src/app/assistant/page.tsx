@@ -9,13 +9,14 @@ import {
   startConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { resetClaudeMd, saveClaudeMd } from "@/app/_actions/credentials";
+import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
+import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
-import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
-import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, renameVirtualAgent, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
+import { savedCredentialsData } from "@/assistant/saved-credentials";
 import { assistantPluginsData } from "@/assistant/settings";
 import { STARTERS } from "@/assistant/starters";
 import { offeredTemplates } from "@/assistant/templates";
@@ -33,10 +34,8 @@ import {
   assistantTemplates,
   claudeMdSettings,
   openAssistant,
-  sharedChats,
   unsentNewChat
 } from "@/web/data";
-import { SETTINGS_PARAM } from "@/web/home";
 
 export const dynamic = "force-dynamic";
 
@@ -51,16 +50,12 @@ const CHAT_ACTIONS: EmptyChatActions = {
 /** What a conversation's row in the sidebar offers. */
 const ROW_ACTIONS: ConversationActions = { rename: renameConversation, remove: deleteConversation };
 
-/** How the settings' Sharing section changes who a chat is shared with or offered to. */
-const SHARING_ACTIONS = { share: shareChat, unshare: unshareChat, offer: offerChatFork, withdraw: withdrawChatFork };
-
 /** A new chat. Opening it creates the viewer's assistant on their first visit, and starts it whenever it is stopped. */
-export default async function AssistantPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+export default async function AssistantPage() {
   const viewer = await requireViewer();
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
-  const settings = (await searchParams)[SETTINGS_PARAM];
-  const [home, unsent, claudeMd, mine, files, size, defaults, model, shared] = await Promise.all([
+  const [home, unsent, claudeMd, mine, files, size, defaults, model] = await Promise.all([
     openAssistant(viewer),
     unsentNewChat(viewer),
     claudeMdSettings(viewer),
@@ -68,8 +63,7 @@ export default async function AssistantPage({ searchParams }: { searchParams: Pr
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer),
-    assistantModel(viewer),
-    sharedChats(viewer)
+    assistantModel(viewer)
   ]);
   // The same sign-in the conversation page gives the document panel, for the settings' searches.
   const atlassian = {
@@ -95,8 +89,10 @@ export default async function AssistantPage({ searchParams }: { searchParams: Pr
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
-      sharing={{ chats: shared, ...SHARING_ACTIONS }}
-      settings={typeof settings === "string" ? settings : undefined}
+      sharing={SHARING_SETTINGS}
+      agent={{ load: readAssistantAgent, rename: renameVirtualAgent, restart: restartVirtualAgent }}
+      git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
+      tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       {/* No `local` here: this screen is about to start a chat on a pod, so it needs what a pod needs. */}
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>

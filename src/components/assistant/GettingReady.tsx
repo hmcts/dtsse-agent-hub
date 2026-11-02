@@ -5,6 +5,7 @@ import {
   type Connection,
   type ConnectionsPrompt,
   type Connector,
+  checklistState,
   codeCollectable,
   connectionState,
   connections,
@@ -35,9 +36,8 @@ import {
 import { ActionForm, type FormAction } from "@/components/ActionForm";
 import { Mark } from "@/components/assistant/AssistantShell";
 import { useVisit } from "@/components/assistant/AssistantVisit";
+import { LoginCountdown } from "@/components/assistant/LoginCountdown";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
-import { LoginCountdown } from "@/components/virtual-agents/LoginCountdown";
-import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { LoginView } from "@/virtual-agents/logins";

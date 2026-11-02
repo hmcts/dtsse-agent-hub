@@ -409,6 +409,25 @@ describe("ShareEditor", () => {
     expect(share).toHaveBeenCalledWith({ conversationId: CONVERSATION, recipientOid: "bob" });
     expect(within(screen.getByRole("list", { name: "Offered to" })).getByText("can fork")).toBeTruthy();
   });
+
+  it("should tell its frame when a change is saved, and not when one is refused", async () => {
+    const onChange = vi.fn();
+    const refused = vi.fn(async () => ({ ok: false as const, error: "that chat is not yours to share" }));
+    render(editor({ people: [person("bob", "Bob Tester"), person("carol", "Carol Tester")], unshare: refused, onChange }));
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0] as HTMLElement);
+    });
+    expect(onChange).not.toHaveBeenCalled();
+
+    cleanup();
+    render(editor({ people: [person("bob", "Bob Tester")], unshare: ok([]), onChange }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
 });
 
 function view(overrides: Partial<SharedConversationView> = {}): SharedConversationView {

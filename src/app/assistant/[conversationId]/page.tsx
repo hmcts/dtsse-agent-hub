@@ -13,14 +13,17 @@ import {
   warmConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
-import { resetClaudeMd, saveClaudeMd } from "@/app/_actions/credentials";
+import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
+import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { offerChatFork, withdrawChatFork } from "@/app/_actions/forks";
 import { answerAgentQuestion } from "@/app/_actions/questions";
 import { shareChat, unshareChat } from "@/app/_actions/shares";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
-import { reconnectSignIn, resizeVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { reconnectSignIn, renameVirtualAgent, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
+import { savedCredentialsData } from "@/assistant/saved-credentials";
 import { assistantPluginsData } from "@/assistant/settings";
 import { offeredTemplates } from "@/assistant/templates";
 import { THEME_COOKIE, themeOf } from "@/assistant/theme";
@@ -40,10 +43,8 @@ import {
   chatForks,
   chatShares,
   claudeMdSettings,
-  openAssistant,
-  sharedChats
+  openAssistant
 } from "@/web/data";
-import { SETTINGS_PARAM } from "@/web/home";
 
 export const dynamic = "force-dynamic";
 
@@ -59,9 +60,6 @@ const ACTIONS: ChatActions = {
   exportToJira: exportArtefactToJira,
   exportToConfluence: exportArtefactToConfluence
 };
-
-/** How the settings' Sharing section changes who a chat is shared with or offered to. */
-const SHARING_ACTIONS = { share: shareChat, unshare: unshareChat, offer: offerChatFork, withdraw: withdrawChatFork };
 
 /** One of the viewer's conversations. Anyone else's, or one deleted, is not found. */
 export default async function ConversationPage({
@@ -80,8 +78,7 @@ export default async function ConversationPage({
   // queries to fill a dialog, and this is the page that loads most often.
   const sharing = query.share === "1";
   const forking = !sharing && query.fork === "1";
-  const settings = query[SETTINGS_PARAM];
-  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model, shared] = await Promise.all([
+  const [home, view, claudeMd, mine, shares, forks, files, size, defaults, model] = await Promise.all([
     openAssistant(viewer),
     assistantConversation(viewer, conversationId),
     claudeMdSettings(viewer),
@@ -91,8 +88,7 @@ export default async function ConversationPage({
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer),
-    assistantModel(viewer),
-    sharedChats(viewer)
+    assistantModel(viewer)
   ]);
   if (view === undefined) {
     notFound();
@@ -120,8 +116,10 @@ export default async function ConversationPage({
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: jira }}
-      sharing={{ chats: shared, ...SHARING_ACTIONS }}
-      settings={typeof settings === "string" ? settings : undefined}
+      sharing={SHARING_SETTINGS}
+      agent={{ load: readAssistantAgent, rename: renameVirtualAgent, restart: restartVirtualAgent }}
+      git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
+      tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       {/* `local` so a chat on the person's own computer is not held behind credentials only a pod needs. */}
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme} local={view.local}>

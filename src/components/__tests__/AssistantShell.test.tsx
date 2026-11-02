@@ -11,7 +11,11 @@ import { AssistantShell, SidebarToggle } from "@/components/assistant/AssistantS
 import { ProductSelect } from "@/components/assistant/ProductSelect";
 
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh }),
+  usePathname: () => "/assistant",
+  useSearchParams: () => new URLSearchParams(window.location.search)
+}));
 
 const hubHandlers = new Map<string, (data: unknown) => void>();
 vi.mock("@/components/live/HubStream", () => ({
@@ -787,26 +791,5 @@ describe("ProductSelect", () => {
     fireEvent.change(select, { target: { value: "nfdiv" } });
 
     expect(onChange).toHaveBeenCalledWith("nfdiv");
-  });
-});
-
-describe("AssistantChatsPanel", () => {
-  it("should link each chat on the virtual agent to the Assistant when it has some", async () => {
-    const { AssistantChatsPanel } = await import("@/components/virtual-agents/AssistantChatsPanel");
-    render(
-      <AssistantChatsPanel
-        chats={[{ id: "c1", title: "Listing story", product: "ccd", productLabel: "CCD", lastActiveAt: "2026-10-22T09:00:00.000Z", mark: null }]}
-      />
-    );
-
-    expect(screen.getByRole("link", { name: "Listing story" }).getAttribute("href")).toBe("/assistant/c1");
-    expect(screen.getByText("CCD")).toBeDefined();
-  });
-
-  it("should point to the Assistant when the virtual agent has no chats yet", async () => {
-    const { AssistantChatsPanel } = await import("@/components/virtual-agents/AssistantChatsPanel");
-    render(<AssistantChatsPanel chats={[]} />);
-
-    expect(screen.getByRole("link", { name: "HMCTS Assistant" }).getAttribute("href")).toBe("/assistant");
   });
 });

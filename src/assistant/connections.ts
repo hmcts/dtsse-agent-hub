@@ -112,13 +112,19 @@ export function connectorFor(kind: ConnectionKind, route: ModelRoute): Connector
  */
 export type ConnectionState = "connected" | "finishing" | "refreshing" | "signing-in" | "expired" | "failed" | "waiting";
 
-/** What `checklistState` answers, named here so this module does not import the checklist that owns those states. */
+/** Where one credential stands before what became of its last sign-in is read: `checklistState`'s answer. */
 export type ChecklistAnswer = "stored" | "login" | "waiting";
 
+/** A sign-in the person has to act on comes first, then whether a value is stored. */
+export function checklistState(stored: boolean, login: LoginView | undefined, now: number): ChecklistAnswer {
+  if (login !== undefined && login.state === "pending" && new Date(login.expiresAt).getTime() > now) {
+    return "login";
+  }
+  return stored ? "stored" : "waiting";
+}
+
 /**
- * Each state in the Assistant's words, for its connection rows and its settings dialog. The hub's own agent page
- * words the same states differently, in `SIGN_IN_DETAIL`, because its cards are the owner's view of one agent's
- * credentials rather than a person's view of their sign-ins: there "waiting" means waiting for the agent to ask.
+ * Each state in the Assistant's words, for its connection rows and its settings dialog: the only wording of them.
  */
 export const CONNECTION_DETAILS: Record<ConnectionState, string> = {
   connected: "Connected",
@@ -324,7 +330,7 @@ function isModelCredential(route: ModelRoute, kind: CredentialKind): boolean {
 
 /**
  * One row per sign-in `data.kinds` asks for, in that order, leaving out anything that is not a sign-in. `checklist`
- * is `checklistState` from the onboarding checklist, passed in so the two views cannot drift apart.
+ * is `checklistState`, passed in so a test can stand in its own.
  *
  * `now` is given to both halves of the answer from here rather than closed over by the caller, so there is one clock
  * behind them. Two would be a row saying a code is waiting beside one saying the credential still works.

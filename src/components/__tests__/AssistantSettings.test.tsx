@@ -30,10 +30,15 @@ import type { CredentialStatus } from "@/credentials/store";
 import type { ModelRoute } from "@/viewer/identity";
 import type { LoginState, LoginView } from "@/virtual-agents/logins";
 import { neededCredentials, optionalCredentials } from "@/virtual-agents/views";
+import type { SharedChats } from "@/web/data";
 
 const refresh = vi.fn();
-const replaced: string[] = [];
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, replace: (to: string) => void replaced.push(to) }), usePathname: () => "/assistant" }));
+// The address as the browser has it, read on every render as Next's own hook is kept in step with `history`.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh }),
+  usePathname: () => "/assistant",
+  useSearchParams: () => new URLSearchParams(window.location.search)
+}));
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: () => undefined,
   useEndSession: () => () => undefined
@@ -42,7 +47,7 @@ vi.mock("@/components/live/HubStream", () => ({
 afterEach(() => {
   cleanup();
   refresh.mockReset();
-  replaced.length = 0;
+  window.history.replaceState(null, "", "/");
   // biome-ignore lint/suspicious/noDocumentCookie: clears what the appearance switch under test wrote, the way it wrote it
   document.cookie = "asst_theme=; Path=/; Max-Age=0";
 });
@@ -80,10 +85,11 @@ function data(stored: CredentialKind[], logins: LoginView[] = [], unavailable: s
   return { route: "own-licence", kinds: KINDS, statuses: stored.map((kind) => status(kind)), logins, unavailable };
 }
 
-/** The four lists the Sharing section shows, empty unless a test says otherwise, and its four actions. */
-function sharingSettings(overrides: Partial<AssistantSharing> = {}): AssistantSharing {
+/** The Sharing section's read of its four lists, each empty unless a test says otherwise, and its four actions. */
+function sharingSettings(chats: Partial<SharedChats> = {}, overrides: Partial<AssistantSharing> = {}): AssistantSharing {
   const none = vi.fn(async () => ({ ok: true as const, people: [] as SharePerson[] }));
-  return { chats: { given: [], received: [], offered: [], forkable: [] }, share: none, unshare: none, offer: none, withdraw: none, ...overrides };
+  const lists: SharedChats = { given: [], received: [], offered: [], forkable: [], ...chats };
+  return { load: vi.fn(async () => lists), share: none, unshare: none, offer: none, withdraw: none, ...overrides };
 }
 
 function cog(): HTMLElement {
@@ -2439,7 +2445,6 @@ describe("the Assistant's Sharing section", () => {
     wideAgain();
     vi.useRealTimers();
     vi.unstubAllGlobals();
-    window.history.replaceState(null, "", "/");
   });
 
   function chat(id: string, title: string, withWhom: string): SharedChatLink {
@@ -2450,16 +2455,28 @@ describe("the Assistant's Sharing section", () => {
     return { oid, name, email: `${oid}@example.com`, sharedAt: "2026-10-25T09:00:00.000Z" };
   }
 
+  const EVERY_LIST: SharedChats = {
+    given: [chat(MINE, "Writing a possession order", "1 person")],
+    received: [chat(THEIRS, "Bob's research", "Bob Tester")],
+    offered: [chat(OFFERED, "A claim to carry on", "2 people")],
+    forkable: [chat(FORKABLE, "Carol's prototype", "Carol Tester")]
+  };
+
   function everyList(overrides: Partial<AssistantSharing> = {}): AssistantSharing {
-    return sharingSettings({
-      chats: {
-        given: [chat(MINE, "Writing a possession order", "1 person")],
-        received: [chat(THEIRS, "Bob's research", "Bob Tester")],
-        offered: [chat(OFFERED, "A claim to carry on", "2 people")],
-        forkable: [chat(FORKABLE, "Carol's prototype", "Carol Tester")]
-      },
-      ...overrides
-    });
+    return sharingSettings(EVERY_LIST, overrides);
+  }
+
+  /** Opens the dialog at Sharing, as the cog and the navigation do, and lets its read of the lists answer. */
+  async function openSharing(sharing: AssistantSharing = everyList()): Promise<void> {
+    open({ sharing }, "Sharing");
+    await act(async () => undefined);
+  }
+
+  /** The page as `?settings=` loads it: the address first, then the settings reading it after their first render. */
+  async function addressed(search: string, sharing: AssistantSharing = everyList(), path = "/assistant"): Promise<void> {
+    window.history.replaceState(null, "", `${path}${search}`);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharing} />);
+    await act(async () => undefined);
   }
 
   /**
@@ -2491,8 +2508,8 @@ describe("the Assistant's Sharing section", () => {
     });
   }
 
-  it("should list the chats shared and offered both ways, each linking to its read-only page", () => {
-    open({ sharing: everyList() }, "Sharing");
+  it("should list the chats shared and offered both ways, each linking to its read-only page, when the section opens", async () => {
+    await openSharing();
 
     const given = within(list("Chats you have shared"));
     expect(given.getByRole("link", { name: "Writing a possession order" }).getAttribute("href")).toBe(`/assistant/shared/${MINE}`);
@@ -2504,8 +2521,35 @@ describe("the Assistant's Sharing section", () => {
     expect(within(list("Chats you can fork")).getByRole("link", { name: "Carol's prototype" }).getAttribute("href")).toBe(`/assistant/shared/${FORKABLE}`);
   });
 
-  it("should say what a share lets someone do, under the same headings as each list", () => {
-    open({ sharing: everyList() }, "Sharing");
+  it("should read the four lists only when the Sharing section is opened", async () => {
+    const sharing = everyList();
+    open({ sharing });
+    await act(async () => undefined);
+    expect(sharing.load).not.toHaveBeenCalled();
+
+    go("Sharing");
+    await act(async () => undefined);
+
+    expect(sharing.load).toHaveBeenCalledTimes(1);
+    expect(list("Chats you have shared")).toBeTruthy();
+  });
+
+  it("should say the lists are being read when the section has opened and they have not answered yet", () => {
+    open({ sharing: sharingSettings({}, { load: () => new Promise<SharedChats>(() => undefined) }) }, "Sharing");
+
+    expect(screen.getByText("Reading your shared chats…")).toBeTruthy();
+    expect(screen.getByRole("tabpanel").querySelector("[aria-busy='true']")).not.toBeNull();
+  });
+
+  it("should say so when the lists cannot be read", async () => {
+    await openSharing(sharingSettings({}, { load: async () => Promise.reject(new Error("down")) }));
+
+    expect(screen.getByText(/Your shared chats could not be read/)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Chats you have shared" })).toBeNull();
+  });
+
+  it("should say what a share lets someone do, under the same headings as each list, when the section opens", async () => {
+    await openSharing();
     const panel = screen.getByRole("tabpanel");
 
     expect(within(panel).getByRole("heading", { name: "Shared chats" })).toBeTruthy();
@@ -2518,8 +2562,8 @@ describe("the Assistant's Sharing section", () => {
     ).toEqual(["Chats you have shared", "Chats shared with you", "Chats you have let people fork", "Chats you can fork"]);
   });
 
-  it("should say so in each list when nothing has been shared either way", () => {
-    open({}, "Sharing");
+  it("should say so in each list when nothing has been shared either way", async () => {
+    await openSharing(sharingSettings());
 
     expect(screen.getByText("You have not shared any of your chats.")).toBeTruthy();
     expect(screen.getByText("Nobody has shared a chat with you.")).toBeTruthy();
@@ -2528,8 +2572,8 @@ describe("the Assistant's Sharing section", () => {
     expect(screen.queryByRole("list", { name: "Chats you have shared" })).toBeNull();
   });
 
-  it("should offer to change who can read or fork only the person's own chats", () => {
-    open({ sharing: everyList() }, "Sharing");
+  it("should offer to change who can read or fork a chat only when it is the person's own", async () => {
+    await openSharing();
 
     expect(within(list("Chats you have shared")).getByRole("button", { name: /^Change who can read it/ })).toBeTruthy();
     expect(within(list("Chats you have let people fork")).getByRole("button", { name: /^Change who can fork it/ })).toBeTruthy();
@@ -2543,9 +2587,9 @@ describe("the Assistant's Sharing section", () => {
     expect(sections()).not.toContain("Sharing");
   });
 
-  it("should open an editor under the row, in the settings rather than over them, with who it is shared with", async () => {
+  it("should open an editor under the row, in the settings rather than over them, with who it is shared with, when its button is pressed", async () => {
     const asked = answering([person("bob", "Bob Tester")]);
-    open({ sharing: everyList() }, "Sharing");
+    await openSharing();
 
     await change(/^Change who can read it/);
 
@@ -2562,7 +2606,7 @@ describe("the Assistant's Sharing section", () => {
 
   it("should read who a chat is offered to when the row is one the person has let people fork", async () => {
     const asked = answering([person("carol", "Carol Tester")]);
-    open({ sharing: everyList() }, "Sharing");
+    await openSharing();
 
     await change(/^Change who can fork it/);
 
@@ -2572,7 +2616,7 @@ describe("the Assistant's Sharing section", () => {
 
   it("should close the editor again when its button is pressed a second time", async () => {
     answering([]);
-    open({ sharing: everyList() }, "Sharing");
+    await openSharing();
 
     await change(/^Change who can read it/);
     await change(/^Change who can read it/);
@@ -2583,7 +2627,7 @@ describe("the Assistant's Sharing section", () => {
 
   it("should say so when who a chat is shared with cannot be read", async () => {
     answering(null);
-    open({ sharing: everyList() }, "Sharing");
+    await openSharing();
 
     await change(/^Change who can read it/);
 
@@ -2591,10 +2635,11 @@ describe("the Assistant's Sharing section", () => {
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
-  it("should share the chat with the person picked, through the share action, and read the page again", async () => {
+  it("should share the chat through the share action, and read the lists again, when a person is picked", async () => {
     answering([], [{ oid: "carol", name: "Carol Tester", email: "carol@example.com" }]);
     const share = vi.fn(async () => ({ ok: true as const, people: [person("carol", "Carol Tester")] }));
-    open({ sharing: everyList({ share }) }, "Sharing");
+    const sharing = everyList({ share });
+    await openSharing(sharing);
     await change(/^Change who can read it/);
     vi.useFakeTimers();
 
@@ -2608,13 +2653,14 @@ describe("the Assistant's Sharing section", () => {
 
     expect(share).toHaveBeenCalledWith({ conversationId: MINE, recipientOid: "carol" });
     expect(within(screen.getByRole("list", { name: "Shared with" })).getByText(/Carol Tester/)).toBeTruthy();
+    expect(sharing.load).toHaveBeenCalledTimes(2);
     expect(refresh).toHaveBeenCalled();
   });
 
   it("should offer the chat to fork through the offer action when the row is one the person has let people fork", async () => {
     answering([], [{ oid: "carol", name: "Carol Tester", email: null }]);
     const offer = vi.fn(async () => ({ ok: true as const, people: [person("carol", "Carol Tester")] }));
-    open({ sharing: everyList({ offer }) }, "Sharing");
+    await openSharing(everyList({ offer }));
     await change(/^Change who can fork it/);
     vi.useFakeTimers();
 
@@ -2632,7 +2678,7 @@ describe("the Assistant's Sharing section", () => {
   it("should take a person off through the unshare action when their share is removed", async () => {
     answering([person("bob", "Bob Tester")]);
     const unshare = vi.fn(async () => ({ ok: true as const, people: [] as SharePerson[] }));
-    open({ sharing: everyList({ unshare }) }, "Sharing");
+    await openSharing(everyList({ unshare }));
     await change(/^Change who can read it/);
 
     await act(async () => {
@@ -2644,29 +2690,37 @@ describe("the Assistant's Sharing section", () => {
     expect(refresh).toHaveBeenCalled();
   });
 
-  it("should drop the row and its editor when the page is read again without it, as it is once the last person is removed", async () => {
+  it("should keep the open row and its editor when the lists are read again without it, until the person closes it", async () => {
     answering([person("bob", "Bob Tester")]);
-    const sharing = everyList();
-    const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={sharing} section="sharing" />);
-    await act(async () => undefined);
-    await change(/^Change who can read it/);
+    const others = chat("55555555-5555-5555-5555-555555555555", "Another of mine", "3 people");
+    const reads = [
+      { ...EVERY_LIST, given: [chat(MINE, "Writing a possession order", "1 person"), others] },
+      { ...EVERY_LIST, given: [others] }
+    ];
+    const load = vi.fn(async () => reads[Math.min(load.mock.calls.length - 1, reads.length - 1)] as SharedChats);
+    const unshare = vi.fn(async () => ({ ok: true as const, people: [] as SharePerson[] }));
+    await openSharing(everyList({ load, unshare }));
+    await change(/^Change who can read it: Writing a possession order/);
 
-    rerender(
-      <AssistantSettings
-        now={Date.now()}
-        connections={data(ALL_SIGNED_IN)}
-        sharing={{ ...sharing, chats: { ...sharing.chats, given: [] } }}
-        section="sharing"
-      />
-    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    });
 
-    expect(screen.getByText("You have not shared any of your chats.")).toBeTruthy();
+    expect(load).toHaveBeenCalledTimes(2);
+    const rows = within(list("Chats you have shared")).getAllByRole("listitem");
+    expect(rows.map((row) => within(row).getAllByRole("link")[0]?.textContent)).toEqual(["Writing a possession order", "Another of mine"]);
+    expect(screen.getByText("This chat is not shared with anyone.")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Who can read it" })).toBeTruthy();
+
+    await change(/^Change who can read it: Writing a possession order/);
+
+    expect(within(list("Chats you have shared")).queryByRole("link", { name: "Writing a possession order" })).toBeNull();
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
-  it("should shut the list of people on Escape without closing the settings", async () => {
+  it("should shut the list of people without closing the settings when Escape is pressed in the name box", async () => {
     answering([], [{ oid: "carol", name: "Carol Tester", email: null }]);
-    open({ sharing: everyList() }, "Sharing");
+    await openSharing();
     await change(/^Change who can read it/);
     vi.useFakeTimers();
     const box = screen.getByRole("combobox", { name: "Who can read it" });
@@ -2681,9 +2735,9 @@ describe("the Assistant's Sharing section", () => {
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
   });
 
-  it("should keep the editor's controls inside the dialog's focus trap", async () => {
+  it("should keep the editor's controls inside the dialog's focus trap when an editor is open", async () => {
     answering([person("bob", "Bob Tester")]);
-    open({ sharing: everyList() }, "Sharing");
+    await openSharing();
 
     await change(/^Change who can read it/);
 
@@ -2693,26 +2747,30 @@ describe("the Assistant's Sharing section", () => {
     expect(reachable).not.toContain(screen.getByRole("listbox", { hidden: true }));
   });
 
-  it("should open on the section the address names, without the cog being pressed", async () => {
-    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />);
-    await act(async () => undefined);
+  it("should open on the section the address names, without the cog being pressed, when the page loads with ?settings=", async () => {
+    await addressed("?settings=sharing");
 
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
     expect(selected()).toBe("Sharing");
     expect(screen.getByRole("heading", { name: "Shared chats" })).toBeTruthy();
+    expect(window.location.search).toBe("?settings=sharing");
+  });
+
+  it("should open on the first section the address names when ?settings= appears more than once", async () => {
+    await addressed("?settings=sharing&settings=appearance");
+
+    expect(selected()).toBe("Sharing");
   });
 
   it("should open on the first section when the address names one the dialog does not have", async () => {
-    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="nowhere" />);
-    await act(async () => undefined);
+    await addressed("?settings=nowhere");
 
     expect(selected()).toBe("Appearance");
   });
 
-  it("should drill into the section the address names on a narrow screen", async () => {
+  it("should drill into the section the address names when the screen is narrow", async () => {
     narrow();
-    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />);
-    await act(async () => undefined);
+    await addressed("?settings=sharing");
 
     expect(screen.queryByRole("list", { name: "Settings sections" })).toBeNull();
     expect(screen.getByRole("button", { name: "Back to settings" })).toBeTruthy();
@@ -2720,48 +2778,68 @@ describe("the Assistant's Sharing section", () => {
   });
 
   it("should render nothing of the dialog in the page's HTML when the address names a section", () => {
-    const html = renderToString(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />);
+    window.history.replaceState(null, "", "/assistant?settings=sharing");
+    const html = renderToString(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} />);
 
     expect(html).not.toContain('role="dialog"');
   });
 
   it("should take the parameter off the address, and keep the rest of it, when the dialog it opened is closed", async () => {
-    window.history.replaceState(null, "", `/assistant/${MINE}?settings=sharing&share=1`);
-    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />);
-    await act(async () => undefined);
+    await addressed("?settings=sharing&share=1", everyList(), `/assistant/${MINE}`);
+    const replace = vi.spyOn(window.history, "replaceState");
 
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close settings" }));
 
-    expect(replaced).toEqual([`/assistant/${MINE}?share=1`]);
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(`${window.location.pathname}${window.location.search}`).toBe(`/assistant/${MINE}?share=1`);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(cog());
+    replace.mockRestore();
+  });
+
+  it("should leave the rest of the query encoded as it was when the dialog the address opened is closed", async () => {
+    await addressed("?view=a,b&settings=sharing&q=x%20y#top");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(`${window.location.search}${window.location.hash}`).toBe("?view=a,b&q=x%20y#top");
+  });
+
+  it("should leave the address alone when the dialog the cog opened is closed", async () => {
+    window.history.replaceState(null, "", "/assistant?share=1");
+    await openSharing();
+    const replace = vi.spyOn(window.history, "replaceState");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(replace).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    replace.mockRestore();
+  });
+
+  it("should close the dialog the address opened, and put focus back on the cog, when the back button takes the parameter off", async () => {
+    window.history.replaceState(null, "", "/assistant");
+    window.history.pushState(null, "", "/assistant?settings=sharing");
+    const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} />);
+    await act(async () => undefined);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true);
+
+    // What the back button leaves behind, which Next then renders the page again for.
+    window.history.replaceState(null, "", "/assistant");
+    rerender(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} />);
+
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(cog());
   });
 
-  it("should leave the address alone when the dialog the cog opened is closed", () => {
-    open({ sharing: everyList() }, "Sharing");
-
-    fireEvent.keyDown(document, { key: "Escape" });
-
-    expect(replaced).toEqual([]);
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("should close the dialog the address opened when the parameter goes, which is what the back button does", async () => {
-    const { rerender } = render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />);
-    await act(async () => undefined);
-    expect(screen.getByRole("dialog")).toBeTruthy();
-
-    rerender(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} />);
-
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("should raise no WCAG A or AA violations with Sharing open and an editor showing", async () => {
+  it("should raise no WCAG A or AA violations when Sharing is open with an editor showing", async () => {
     answering([person("bob", "Bob Tester")]);
     const root = document.createElement("div");
     root.className = "asst-theme";
     document.body.append(root);
-    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} section="sharing" />, { container: root });
+    window.history.replaceState(null, "", "/assistant?settings=sharing");
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} sharing={everyList()} />, { container: root });
     await act(async () => undefined);
     await change(/^Change who can read it/);
 

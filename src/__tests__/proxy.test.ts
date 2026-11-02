@@ -195,11 +195,9 @@ describe("proxy hub address redirect", () => {
     ["/c", "/hub/c"],
     ["/channels/new", "/hub/channels/new"],
     ["/m/42", "/hub/m/42"],
-    ["/settings/credentials", "/hub/settings/credentials"],
     ["/topics", "/hub/topics"],
     ["/topics/pcs-api", "/hub/topics/pcs-api"],
-    ["/virtual", "/hub/virtual"],
-    ["/virtual/0f8a", "/hub/virtual/0f8a"]
+    ["/virtual/0f8a/ports/3000", "/hub/virtual/0f8a/ports/3000"]
   ])("should redirect the bare address %s to %s", async (from, to) => {
     const response = await proxy(askWith("GET", from));
 
@@ -221,7 +219,7 @@ describe("proxy hub address redirect", () => {
   );
 
   it.each(["/access", "/hub/access", "/assistant/shared"])(
-    "should redirect the retired %s to the settings' Sharing section, ahead of the sign-in check",
+    "should redirect the retired %s to the settings' Sharing section, ahead of the sign-in check, when virtual agents are on",
     async (from) => {
       vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
 
@@ -232,18 +230,51 @@ describe("proxy hub address redirect", () => {
     }
   );
 
-  it("should add a query to the one the Sharing section's address already has when the retired address carries one", async () => {
-    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+  // An incoming `settings` must not ride along beside the section this sends people to.
+  it.each(["/access?settings=assistant&from=ticket", "/assistant/shared?settings=x"])(
+    "should drop the whole query, its own settings parameter among it, when the retired address %s carries one",
+    async (from) => {
+      vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
 
-    const response = await proxy(askWith("GET", "/assistant/shared?from=ticket"));
+      const response = await proxy(askWith("GET", from));
 
-    expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant?settings=sharing&from=ticket");
-  });
+      expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant?settings=sharing");
+    }
+  );
 
   it("should leave a shared chat's own page alone when the list it sat under is retired", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
 
     expect((await proxy(askWith("GET", "/assistant/shared/33333333-3333-3333-3333-333333333333"))).status).toBe(200);
+  });
+
+  it.each([
+    ["/virtual", "/assistant?settings=assistant"],
+    ["/hub/virtual", "/assistant?settings=assistant"],
+    ["/virtual/0f8a", "/assistant?settings=assistant"],
+    ["/hub/virtual/0f8a", "/assistant?settings=assistant"],
+    ["/settings/credentials", "/assistant?settings=credentials"],
+    ["/hub/settings/credentials", "/assistant?settings=credentials"]
+  ])("should redirect the retired %s to %s in one hop, dropping its query, when virtual agents are on", async (from, to) => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+
+    const response = await proxy(askWith("GET", `${from}?tab=1`));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(`https://agent-hub.example${to}`);
+  });
+
+  it.each(["/hub/virtual", "/hub/settings/credentials"])("should redirect the retired %s to the hub when virtual agents are off", async (from) => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
+
+    expect((await proxy(askWith("GET", from))).headers.get("location")).toBe("https://agent-hub.example/hub");
+  });
+
+  // The viewer's ticket route is under `/hub/virtual/{id}`, and is still served.
+  it("should leave the viewer's ticket route alone when virtual agents are on", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+
+    expect((await proxy(askWith("GET", "/hub/virtual/0f8a/ports/3000"))).status).toBe(200);
   });
 
   it("should redirect before the sign-in check, so the login's redirect= carries the new address", async () => {

@@ -72,7 +72,8 @@ export function ShareEditor({
   share,
   unshare,
   mode = "read",
-  boxRef
+  boxRef,
+  onChange
 }: {
   mode?: ShareMode;
   conversationId: string;
@@ -81,6 +82,8 @@ export function ShareEditor({
   unshare: ShareAction;
   /** The name box, for a frame that puts focus in it as it opens. */
   boxRef?: Ref<HTMLInputElement>;
+  /** Called once a change is saved, for a frame that shows something the change alters. */
+  onChange?: () => void;
 }) {
   const router = useRouter();
   const words = WORDS[mode];
@@ -124,8 +127,9 @@ export function ShareEditor({
       if (result.ok) {
         setPeople(result.people);
         suggestions.clear();
-        // The chat's own page shows nothing about its shares, but the sidebar and the settings' Sharing section do.
+        // The chat's own page shows nothing about its shares, but the sidebar does.
         router.refresh();
+        onChange?.();
       } else {
         setError(result.error);
       }

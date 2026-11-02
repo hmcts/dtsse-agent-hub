@@ -1,7 +1,14 @@
 import "server-only";
-import { canManageConversationShares, canOwnerReadCredential, canReadMessage } from "../access/rules.ts";
-import { agentPath } from "../agents/path.ts";
-import { type AgentView, agentView, visibleAgents } from "../agents/views.ts";
+import {
+  canManageConversationShares,
+  canManageVirtualAgent,
+  canOwnerReadCredential,
+  canReadMessage,
+  canViewAgent,
+  canViewVirtualAgent,
+  isPodConversationAgent
+} from "../access/rules.ts";
+import { isUuid } from "../agents/store.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
@@ -29,7 +36,6 @@ import {
   type ConversationLink,
   type ConversationView,
   conversationGroups,
-  conversationLinks,
   conversationView,
   type UnsentChat,
   unsentChat
@@ -41,29 +47,18 @@ import { type GitIdentity, readGitIdentity } from "../credentials/git-identity.t
 import type { CredentialKind } from "../credentials/names.ts";
 import { type CredentialStatus, credentialStatus, ownerRefusal, readCredential } from "../credentials/store.ts";
 import { type LoadedThreadMessage, loadReplies, loadThreadMessage, type ThreadMessage } from "../messages/direct-thread.ts";
-import { agentPosts, channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
+import { channelFeed, type Match, type PostScope, recentPosts } from "../messages/feed.ts";
 import { FEED_PAGE_SIZE, type FeedPageView, toPage } from "../messages/pagination.ts";
 import { parseMessageRef } from "../messages/permalink.ts";
-import { agentQuestions } from "../questions/views.ts";
 import { prisma } from "../store/prisma.ts";
 import { hiddenTopicPrefix } from "../topics/slug.ts";
 import { listTopics, mostActiveTopics } from "../topics/store.ts";
-import { agentConversation } from "../transcripts/views.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
 import { availablePlugins, PluginConfigurationError, type PluginOffer, type PluginOption } from "../virtual-agents/plugins.ts";
-import { virtualAgentsEnabled } from "../virtual-agents/settings.ts";
-import { liveModelRoutes } from "../virtual-agents/store.ts";
-import {
-  claudeTokenUsable,
-  neededCredentials,
-  type VirtualAgentCard,
-  type VirtualAgentDetail,
-  type VirtualAgentSummary,
-  virtualAgentCards,
-  virtualAgentDetail,
-  virtualAgentSummary
-} from "../virtual-agents/views.ts";
+import { liveModelRoutes, type VirtualAgentRow } from "../virtual-agents/store.ts";
+import { claudeTokenUsable, neededCredentials, type PortLink, portLinks } from "../virtual-agents/views.ts";
+import { type AgentAddress, NO_AGENT } from "./home.ts";
 
 /**
  * The reads the pages make, in one place. `server-only` so a client component importing it fails the build rather
@@ -74,12 +69,8 @@ import {
 const SIDEBAR_TOPICS = 12;
 
 export async function sidebarData(viewer: Identity) {
-  const [agents, channels, topics] = await Promise.all([
-    visibleAgents(prisma, viewer.oid),
-    listChannels(prisma, viewer.oid),
-    mostActiveTopics(prisma, SIDEBAR_TOPICS, hiddenTopicPrefix(""))
-  ]);
-  return { agents, channels, topics };
+  const [channels, topics] = await Promise.all([listChannels(prisma, viewer.oid), mostActiveTopics(prisma, SIDEBAR_TOPICS, hiddenTopicPrefix(""))]);
+  return { channels, topics };
 }
 
 export async function feedPage(topics: PostScope, match: Match): Promise<FeedPageView> {
@@ -89,24 +80,14 @@ export async function feedPage(topics: PostScope, match: Match): Promise<FeedPag
 
 /** Home watches the topics of the viewer's own channels, or every post when they have none. */
 export async function overview(viewer: Identity) {
-  const [agents, channels] = await Promise.all([visibleAgents(prisma, viewer.oid), listChannels(prisma, viewer.oid)]);
+  const channels = await listChannels(prisma, viewer.oid);
   const topics = [...new Set(channels.mine.flatMap((channel) => channel.topics))];
   const watched: PostScope = topics.length > 0 ? topics : "everything";
-  return { agents, channels, topics, watched, activity: await feedPage(watched, "any") };
+  return { topics, watched, activity: await feedPage(watched, "any") };
 }
 
 export async function channel(viewer: Identity, id: string) {
   return await findChannel(prisma, viewer.oid, id);
-}
-
-/** The rest of an agent's page, which it streams in once `agentRoute` has decided the viewer may see the agent. */
-export async function agentActivity(viewer: Identity, view: AgentView) {
-  const [conversation, posts, questions] = await Promise.all([
-    agentConversation(prisma, viewer.oid, view.ref),
-    agentPosts(prisma, view.agent.id, 20),
-    agentQuestions(prisma, viewer.oid, view.ref)
-  ]);
-  return { conversation, posts, questions };
 }
 
 export async function topics(prefix: string) {
@@ -214,65 +195,36 @@ export async function messagePage(viewer: Identity, rawId: string): Promise<Mess
   };
 }
 
-export interface VirtualAgentsPageView {
-  modelRoute: ModelRoute;
-  agents: VirtualAgentCard[];
-}
-
-/** The viewer's own virtual agents. Nobody sees anyone else's. */
-export async function virtualAgentsPage(viewer: Viewer): Promise<VirtualAgentsPageView> {
-  return { modelRoute: viewer.modelRoute, agents: await virtualAgentCards(prisma, viewer.oid) };
-}
-
-export interface VirtualAgentPageView {
-  summary: VirtualAgentSummary;
-  /** Its lifecycle, settings and sign-ins, for its owner; `null` for anyone else. */
-  manage: { detail: VirtualAgentDetail; credentials: CredentialSettings; chats: ConversationLink[] } | null;
-  /** The agent its current session registered, once there is one. */
-  linked: AgentView | null;
-}
-
-/** A virtual agent the viewer may see, or `undefined` for the not-found the page answers. */
-export async function virtualAgentPage(viewer: Viewer, id: string): Promise<VirtualAgentPageView | undefined> {
-  const summary = await virtualAgentSummary(prisma, viewer.oid, id);
-  if (summary === undefined) {
-    return undefined;
+/**
+ * What `/hub/agents/{id}` names for the viewer, for `retiredAgentPath` to send them on from. Only their own agents and
+ * virtual agents are told apart from nothing, as `canViewAgent` and `canViewVirtualAgent` decide.
+ */
+export async function agentAddress(viewer: Identity, id: string): Promise<AgentAddress> {
+  if (!isUuid(id)) {
+    return NO_AGENT;
   }
-  const [detail, linked] = await Promise.all([
-    virtualAgentDetail(prisma, viewer.oid, id),
-    summary.agentId === null ? undefined : agentView(prisma, viewer.oid, summary.agentId)
+  const [virtualAgent, agent] = await Promise.all([
+    prisma.virtualAgent.findUnique({ where: { id }, select: { id: true, ownerOid: true } }),
+    prisma.agent.findUnique({ where: { id }, select: { id: true, ownerOid: true, virtualAgentId: true, assistantConversationId: true } })
   ]);
-  const manage =
-    detail === undefined ? null : { detail, credentials: await credentialSettings(viewer), chats: await conversationLinks(prisma, viewer.oid, detail.card.id) };
-  return { summary, manage, linked: linked ?? null };
+  if (virtualAgent !== null && canViewVirtualAgent(viewer.oid, virtualAgent)) {
+    return await virtualAddress(viewer, virtualAgent.id);
+  }
+  if (agent === null || !canViewAgent(viewer.oid, { id: agent.id, ownerOid: agent.ownerOid, ownerOnly: isPodConversationAgent(agent) })) {
+    return NO_AGENT;
+  }
+  if (agent.assistantConversationId !== null) {
+    return { kind: "chat", conversationId: agent.assistantConversationId };
+  }
+  return agent.virtualAgentId === null ? NO_AGENT : await virtualAddress(viewer, agent.virtualAgentId);
 }
-
-export type AgentRoute = { variant: "virtual"; page: VirtualAgentPageView } | { variant: "local"; view: AgentView } | { variant: "moved"; to: string };
 
 /**
- * What `/hub/agents/{id}` shows. A virtual agent's id is its page. An agent one of its sessions registered moves there,
- * since a virtual agent registers a new agent on every `/clear` and its page always shows the current one. Any other
- * agent is shown as itself. `undefined` is the not-found for an id that is none of these, or that the viewer may not
- * see.
+ * A virtual agent of the viewer's, and whether it is the one their Assistant runs on: only that one is what the
+ * Assistant's settings show and restart, so only its address may be sent there.
  */
-export async function agentRoute(viewer: Viewer, id: string): Promise<AgentRoute | undefined> {
-  if (virtualAgentsEnabled()) {
-    const page = await virtualAgentPage(viewer, id);
-    if (page !== undefined) {
-      return { variant: "virtual", page };
-    }
-  }
-  const view = await agentView(prisma, viewer.oid, id);
-  if (view === undefined) {
-    return undefined;
-  }
-  if (view.agent.virtualAgentId === null) {
-    return { variant: "local", view };
-  }
-  // A conversation's agent is a chat in the HMCTS Assistant, and is shown there rather than as a session.
-  const agent = await prisma.agent.findUnique({ where: { id: view.agent.id }, select: { assistantConversationId: true } });
-  const conversationId = agent?.assistantConversationId ?? null;
-  return { variant: "moved", to: conversationId === null ? agentPath(view.agent) : `/assistant/${conversationId}` };
+async function virtualAddress(viewer: Identity, virtualAgentId: string): Promise<AgentAddress> {
+  return { kind: "virtual", assistant: (await findAssistant(prisma, viewer.oid))?.id === virtualAgentId };
 }
 
 export interface AssistantHome {
@@ -301,13 +253,11 @@ function chatGateOf(toChat: readonly CredentialKind[], credentials: CredentialSe
  * malformed configuration gets, which every surface that offers plugins reads through, so none of them can let it
  * throw out through a page.
  *
- * What a surface then does with an unreadable configuration differs, and the asymmetry is deliberate. The hub's own
- * plugin surfaces, `/hub/virtual` and `/hub/agents/{id}`, name the variable and the fault in place of the plugin
- * form, because the person reading them is the person who can fix it, and that now costs the plugin form alone
- * rather than the whole page. The Assistant says nothing and hides the section, because it is someone's whole chat
- * surface and a configuration they can neither see nor fix must not put a hub error in front of their chats.
+ * The Assistant, the one surface that offers plugins, says nothing about an unreadable configuration and hides the
+ * section, because it is someone's whole chat surface and a configuration they can neither see nor fix must not put a
+ * hub error in front of their chats.
  *
- * Neither may answer an unreadable configuration with an empty offer. "The hub offers none" is a state a person can
+ * Nor may it answer an unreadable configuration with an empty offer. "The hub offers none" is a state a person can
  * trust and act on; "the configuration cannot be read" is not, and silently merging the two would show every plugin
  * an agent already loads as one the hub no longer offers.
  */
@@ -396,6 +346,25 @@ export async function assistantTemplates(viewer: Identity): Promise<SavedTemplat
   return await listTemplates(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
 }
 
+/** What the settings show and manage of the virtual agent the viewer's Assistant runs on. */
+export type AssistantAgent = Pick<VirtualAgentRow, "id" | "name" | "desired" | "status" | "statusDetail"> & {
+  exposedPorts: PortLink[];
+  localOnlyPorts: number[];
+};
+
+/**
+ * The viewer's assistant as its settings manage it: its name and where it stands, and the web servers its pod
+ * reports. `undefined` when they have no assistant at all, which is the one case those sections are not offered.
+ * Built from the one row `findAssistant` reads and nothing more, since every Assistant page asks for it.
+ */
+export async function assistantAgent(viewer: Viewer): Promise<AssistantAgent | undefined> {
+  const row = await findAssistant(prisma, viewer.oid);
+  if (row === undefined || !canManageVirtualAgent(viewer.oid, row)) {
+    return undefined;
+  }
+  return { id: row.id, name: row.name, desired: row.desired, status: row.status, statusDetail: row.statusDetail, ...portLinks(row) };
+}
+
 /**
  * The Claude model the viewer's chats run on, for the settings to show and change, with whether their assistant's pod
  * can act on a choice yet. `undefined` when they have no assistant at all, which is the one case the section is not
@@ -455,9 +424,14 @@ export async function chatForks(viewer: Identity, id: string): Promise<SharePers
  * Both sides of the viewer's shares and fork offers: their own chats they have shared or offered, and the chats
  * shared with or offered to them.
  */
-export async function sharedChats(
-  viewer: Identity
-): Promise<{ given: SharedChatLink[]; received: SharedChatLink[]; offered: SharedChatLink[]; forkable: SharedChatLink[] }> {
+export interface SharedChats {
+  given: SharedChatLink[];
+  received: SharedChatLink[];
+  offered: SharedChatLink[];
+  forkable: SharedChatLink[];
+}
+
+export async function sharedChats(viewer: Identity): Promise<SharedChats> {
   const [given, received, offered, forkable] = await Promise.all([
     conversationsSharedBy(prisma, viewer.oid),
     conversationsSharedWith(prisma, viewer.oid),

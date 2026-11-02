@@ -10,81 +10,34 @@ import { isSignInKind, reconnectSignIn as reconnect, SIGN_IN_TITLES, storePasted
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
 import { sizeChangeRollsPod } from "@/virtual-agents/size";
 import {
-  createVirtualAgent as create,
   findVirtualAgent,
   renameVirtualAgent as rename,
-  setDesired,
+  restartVirtualAgent as restart,
   setVirtualAgentPlugins as setPlugins,
   setVirtualAgentSize
 } from "@/virtual-agents/store";
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
- * Creating, starting, stopping, renaming, resizing and deleting the signed-in person's own virtual agents, choosing
- * their plugins, pasting a login code back to one, and having one sign in again. The owner is always the session's
- * identity; an id from the form names an agent, and `setDesired`, `renameVirtualAgent`, `setVirtualAgentSize`,
- * `setVirtualAgentPlugins`, `storePastedCode` and `reconnectSignIn` refuse one that is not the viewer's.
+ * Renaming, restarting and resizing the signed-in person's own virtual agents and choosing their plugins, which the
+ * Assistant's settings post to; having one sign in again, which they and the getting-ready screen (`AssistantGate`)
+ * post to; and pasting a login code back to one, which only the getting-ready screen does. The owner is always the
+ * session's identity; an id from the form names an agent, and `renameVirtualAgent`, `restartVirtualAgent`,
+ * `setVirtualAgentSize`, `setVirtualAgentPlugins`, `storePastedCode` and `reconnectSignIn` refuse one that is not the
+ * viewer's.
  */
-
-const LIST_PATH = "/hub/virtual";
-
-const PAGE_PATH = "/hub/agents";
 
 const OFF: { ok: false; error: string } = { ok: false, error: "virtual agents are not available on this deployment" };
 
-function revalidate(id?: string): void {
-  revalidatePath(LIST_PATH);
-  if (id !== undefined) {
-    revalidatePath(`${PAGE_PATH}/${id}`);
-  }
+/** Every Assistant page, since each one renders the settings these change. */
+function revalidate(): void {
+  revalidatePath("/assistant", "layout");
 }
 
-export async function createVirtualAgent(form: FormData): Promise<ActionResult<{ confirmation: string; id: string }>> {
-  return await runAction<{ confirmation: string; id: string }>("create virtual agent", async () => {
-    if (!virtualAgentsEnabled()) {
-      return OFF;
-    }
-    const viewer = await requireViewer();
-    const row = await create(prisma, {
-      owner: viewer,
-      modelRoute: viewer.modelRoute,
-      name: form.get("name"),
-      size: form.get("size"),
-      plugins: form.getAll("plugins")
-    });
-    revalidate();
-    return { ok: true, id: row.id, confirmation: `${row.name} is starting` };
-  });
-}
-
-async function desire(name: string, form: FormData, desired: "running" | "stopped" | "deleted"): Promise<ActionResult> {
-  return await runAction(name, async () => {
-    if (!virtualAgentsEnabled()) {
-      return OFF;
-    }
-    const viewer = await requireViewer();
-    const id = text(form.get("id"));
-    if (id === "") {
-      return { ok: false, error: "no virtual agent was named" };
-    }
-    await setDesired(prisma, viewer.oid, id, desired);
-    revalidate(id);
-    return { ok: true };
-  });
-}
-
-export async function startVirtualAgent(form: FormData): Promise<ActionResult> {
-  return await desire("start virtual agent", form, "running");
-}
-
-export async function stopVirtualAgent(form: FormData): Promise<ActionResult> {
-  return await desire("stop virtual agent", form, "stopped");
-}
-
-export async function deleteVirtualAgent(form: FormData): Promise<ActionResult> {
-  return await desire("delete virtual agent", form, "deleted");
-}
-
+/**
+ * A new name for the virtual agent and its sessions. Its pod, disk and chats are named from its id, so nothing they
+ * hold changes and nothing restarts.
+ */
 export async function renameVirtualAgent(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
   return await runAction<{ confirmation: string }>("rename virtual agent", async () => {
     if (!virtualAgentsEnabled()) {
@@ -96,13 +49,37 @@ export async function renameVirtualAgent(form: FormData): Promise<ActionResult<{
       return { ok: false, error: "no virtual agent was named" };
     }
     const row = await rename(prisma, viewer.oid, id, form.get("name"));
-    revalidate(id);
+    revalidate();
     return { ok: true, confirmation: `Renamed to ${row.name}` };
   });
 }
 
 /**
- * The one path that changes a size, used by the hub's own agent page and by the Assistant's settings. It does not
+ * Replaces a running agent's pod, so it boots again with its owner's credentials and settings read afresh. What each
+ * chat was working on at that moment stops; the chats themselves are kept. An agent that is not running is left as
+ * it is, since it boots afresh when it next starts anyway.
+ */
+export async function restartVirtualAgent(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
+  return await runAction<{ confirmation: string }>("restart virtual agent", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const id = text(form.get("id"));
+    if (id === "") {
+      return { ok: false, error: "no virtual agent was named" };
+    }
+    const row = await restart(prisma, viewer.oid, id, "restarting because you asked it to");
+    revalidate();
+    return {
+      ok: true,
+      confirmation: row.desired === "running" ? "Restarting. Your chats are kept." : "It is not running, so it starts afresh next time anyway."
+    };
+  });
+}
+
+/**
+ * The one path that changes a size, used by the Assistant's settings. It does not
  * trust an owner from the form: the viewer is re-read and `setVirtualAgentSize` refuses an agent that is not theirs.
  *
  * The confirmation says what the change did rather than only what the size is now, because a running pod is replaced
@@ -119,7 +96,7 @@ export async function resizeVirtualAgent(form: FormData): Promise<ActionResult<{
       return { ok: false, error: "no virtual agent was named" };
     }
     const row = await setVirtualAgentSize(prisma, viewer.oid, id, form.get("size"));
-    revalidate(id);
+    revalidate();
     return {
       ok: true,
       confirmation: sizeChangeRollsPod(row)
@@ -145,7 +122,7 @@ export async function setVirtualAgentPlugins(form: FormData): Promise<ActionResu
     }
     const before = await findVirtualAgent(prisma, id);
     const row = await setPlugins(prisma, viewer.oid, id, form.getAll("plugins"));
-    revalidate(id);
+    revalidate();
     if (row.generation === before?.generation) {
       return { ok: true, confirmation: "Its plugins are unchanged" };
     }
@@ -173,7 +150,7 @@ export async function pasteLoginCode(form: FormData): Promise<ActionResult<{ con
       return { ok: false, error: "this deployment has no SESSION_SECRET, so a pasted code cannot be kept for the agent" };
     }
     await storePastedCode(prisma, viewer.oid, id, kind, form.get("code"), secret);
-    revalidate(id);
+    revalidate();
     return { ok: true, confirmation: "Sent to your virtual agent" };
   });
 }
@@ -199,8 +176,7 @@ export async function reconnectSignIn(form: FormData): Promise<ActionResult<{ co
       return { ok: false, error: backend.reason };
     }
     const row = await reconnect(prisma, backend.store, viewer.oid, id, kind);
-    revalidate(id);
-    revalidatePath("/hub/settings/credentials");
+    revalidate();
     const title = SIGN_IN_TITLES[kind];
     return {
       ok: true,

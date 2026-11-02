@@ -7,18 +7,21 @@ import type { ConnectionsData } from "@/assistant/connections";
 import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
+import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
 import { ChatMark } from "@/components/assistant/ChatMark";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
+import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
+import type { AssistantTokens } from "@/components/assistant/TokenSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import type { ActionResult } from "@/web/action";
 
@@ -109,7 +112,9 @@ export function AssistantShell({
   size,
   exports,
   sharing,
-  settings,
+  agent,
+  git,
+  tokens,
   actions,
   children
 }: {
@@ -137,10 +142,14 @@ export function AssistantShell({
   size?: AssistantSize;
   /** Where the person's documents go by default, which the footer's settings shows and edits. */
   exports?: AssistantExportDefaults;
-  /** The person's shared chats and the actions that change who they are shared with, for the footer's settings. */
+  /** How the footer's settings reads the person's shared chats once its Sharing section opens, and changes who each is shared with. */
   sharing?: AssistantSharing;
-  /** The settings section the page's `?settings=` names, which the footer's settings opens on. */
-  settings?: string;
+  /** The virtual agent the Assistant runs on, which the footer's settings renames and restarts and lists the web servers of. */
+  agent?: AssistantAgentSettings;
+  /** The git identity the person's agents commit as, which the footer's settings shows and changes. */
+  git?: AssistantGitIdentity;
+  /** How the footer's settings replaces and removes a pasted token. */
+  tokens?: AssistantTokens;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
   actions?: ConversationActions;
   children: React.ReactNode;
@@ -347,7 +356,9 @@ export function AssistantShell({
               size={size}
               exports={exports}
               sharing={sharing}
-              section={settings}
+              agent={agent}
+              git={git}
+              tokens={tokens}
             />
           </div>
           {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,
