@@ -53,8 +53,8 @@ export async function answerAgentQuestion(input: { questionId: unknown; answers:
       return checked;
     }
     const body = answerMessage(questions, checked.answer);
-    const record = async (tx: Parameters<typeof recordAnswer>[0], messageId: bigint) => {
-      await recordAnswer(tx, question, checked.answer, messageId);
+    const record = async (tx: Parameters<typeof recordAnswer>[0]) => {
+      await recordAnswer(tx, question, checked.answer);
     };
     const conversation = agent.assistantConversationId === null ? undefined : await findConversation(prisma, viewer.oid, agent.assistantConversationId);
     if (conversation !== undefined) {

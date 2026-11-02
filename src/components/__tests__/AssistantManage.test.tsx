@@ -54,7 +54,7 @@ const VPN_3000 = "https://va-0f8a6a1e-3000.preview.platform.hmcts.net";
 const VIEWER_3000 = `https://agent-hub-viewer.example/${ID}/3000/`;
 
 function status(kind: CredentialKind, accountLabel: string | null = null): CredentialStatus {
-  return { kind, stored: true, accountLabel, updatedAt: "2026-10-24T09:00:00.000Z", updatedVia: "web" };
+  return { kind, stored: true, accountLabel, updatedAt: "2026-10-24T09:00:00.000Z" };
 }
 
 function connections(stored: CredentialKind[], kinds: CredentialKind[] = ["github", "claude", "jenkins"]): ConnectionsData {

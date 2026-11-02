@@ -451,11 +451,10 @@ describe("answering a question", () => {
     ]);
     const stored = await prisma.agentQuestion.findUniqueOrThrow({
       where: { id: questionId },
-      select: { answer: true, answeredAt: true, answerMessageId: true }
+      select: { answer: true, answeredAt: true }
     });
     expect(stored.answer).toEqual({ answers: [{ labels: ["Red"], text: null }] });
     expect(stored.answeredAt).toBeInstanceOf(Date);
-    expect(stored.answerMessageId).toBe(messages[0]?.id);
     // The same delivery the composer's send gets, so nothing new has to carry the answer to the session, and the
     // conversation counts the answer as activity.
     expect(await prisma.delivery.count({ where: { agentId, state: "queued" } })).toBe(1);

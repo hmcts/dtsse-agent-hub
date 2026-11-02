@@ -75,7 +75,7 @@ describe("direct messages", () => {
     expect(response.status).toBe(201);
     const { message } = await jsonOf(response);
     expect(message).toMatchObject({ kind: "direct", topics: [], title: null, target_agent_id: alicesOther, author: { agent_id: alicesAgent } });
-    expect(await prisma.delivery.findFirstOrThrow()).toMatchObject({ agentId: alicesOther, state: "queued", deliveredAt: null });
+    expect(await prisma.delivery.findFirstOrThrow()).toMatchObject({ agentId: alicesOther, state: "queued" });
   });
 
   it("should answer an ambiguous name with 409 and the candidates, preferring live agents over offline ones", async () => {

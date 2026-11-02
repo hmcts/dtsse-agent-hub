@@ -4,7 +4,7 @@ import type { CredentialStatus } from "../credentials/store.ts";
 import { savedCredentials, savedCredentialsData } from "./saved-credentials.ts";
 
 function stored(kind: CredentialKind): CredentialStatus {
-  return { kind, stored: true, accountLabel: null, updatedAt: "2026-10-24T09:00:00.000Z", updatedVia: "pod" };
+  return { kind, stored: true, accountLabel: null, updatedAt: "2026-10-24T09:00:00.000Z" };
 }
 
 describe("savedCredentials", () => {

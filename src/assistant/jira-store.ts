@@ -82,7 +82,7 @@ export async function recordJiraExport(
   const where = { id: conversation.id, jiraExportId: result.export_id, jiraKey: null };
   const data =
     "key" in result
-      ? { jiraStatus: "done", jiraKey: result.key, jiraError: null, jiraExportedAt: now, updatedAt: now }
+      ? { jiraStatus: "done", jiraKey: result.key, jiraError: null, updatedAt: now }
       : { jiraStatus: "failed", jiraError: result.error.slice(0, MAX_JIRA_ERROR), updatedAt: now };
   await prisma.$transaction(async (tx) => {
     const { count } = await tx.assistantConversation.updateMany({ where, data });

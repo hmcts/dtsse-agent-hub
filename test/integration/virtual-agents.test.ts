@@ -242,22 +242,14 @@ describe("creating virtual agents", () => {
     await expect(setDesired(prisma, ALICE.oid, stopped.id, "running")).resolves.toMatchObject({ desired: "running" });
   });
 
-  it("should keep why an agent failed when its owner stops it themselves", async () => {
+  it("should record the stop as its owner's and clear the failure's detail when its owner stops a failed agent", async () => {
     const agent = await create(ALICE, "failed");
-    const detail = "github: the signed-in account cannot clone hmcts/cft-workspace";
-    await reportStatus(prisma, agent.id, "failed", detail);
+    await reportStatus(prisma, agent.id, "failed", "github: the signed-in account cannot clone hmcts/cft-workspace");
 
     const stopped = await setDesired(prisma, ALICE.oid, agent.id, "stopped");
 
-    expect(stopped).toMatchObject({ desired: "stopped", stopReason: "user", stopDetail: detail });
+    expect(stopped).toMatchObject({ desired: "stopped", stopReason: "user" });
     expect(stopped.statusDetail).toBeNull();
-  });
-
-  it("should keep no stop detail when its owner stops an agent that had not failed", async () => {
-    const agent = await create(ALICE, "running");
-    await reportStatus(prisma, agent.id, "running", "Claude is ready; repositories ready");
-
-    expect(await setDesired(prisma, ALICE.oid, agent.id, "stopped")).toMatchObject({ stopReason: "user", stopDetail: null });
   });
 
   it("should let only one of two concurrent creates through when one place is left", async () => {
@@ -559,7 +551,7 @@ describe("the launch token across stop and start", () => {
     expect(restarting?.launch_token).not.toBe(token);
     expect((await status(id, token, { phase: "provisioning" })).status).toBe(401);
     expect((await status(id, restarting!.launch_token!, { phase: "provisioning" })).status).toBe(204);
-    expect(await row(id)).toMatchObject({ status: "provisioning", stopReason: null, stoppedAt: null, diskExpiresAt: null });
+    expect(await row(id)).toMatchObject({ status: "provisioning", stopReason: null, diskExpiresAt: null });
   });
 });
 
@@ -589,11 +581,13 @@ describe("POST /api/orchestrator/virtual-agents/{id}/observed", () => {
     await setDesired(prisma, ALICE.oid, id, "stopped");
     const [claimed] = await claim();
 
+    const before = Date.now();
     await observe(id, { generation: claimed!.generation, replicas_ready: 0 });
+    const after = Date.now();
 
-    const stored = await row(id);
-    expect(stored.stoppedAt).not.toBeNull();
-    expect(stored.diskExpiresAt!.getTime() - stored.stoppedAt!.getTime()).toBe(14 * 24 * 60 * 60_000);
+    const expires = (await row(id)).diskExpiresAt!.getTime();
+    expect(expires).toBeGreaterThanOrEqual(before + 14 * 24 * 60 * 60_000);
+    expect(expires).toBeLessThanOrEqual(after + 14 * 24 * 60 * 60_000);
   });
 
   it("should hand an expired disk to the orchestrator for deletion until it reports the disk gone", async () => {
@@ -945,7 +939,6 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
       ownerOid: ALICE.oid,
       kind: "azure",
-      updatedVia: "pod",
       accountLabel: "alice@example.com"
     });
   });
@@ -964,7 +957,6 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
       kind: "atlassian",
       secretName: `u-${ALICE.oid}-atlassian`,
-      updatedVia: "pod",
       accountLabel: "alice@justice.gov.uk"
     });
   });
@@ -985,7 +977,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
 
     expect(response.status).toBe(204);
     expect(await readCredential(prisma, localStore(), ALICE.oid, "atlassian")).toBe(value);
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ kind: "atlassian", updatedVia: "pod", accountLabel: "alice@justice.gov.uk" });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ kind: "atlassian", accountLabel: "alice@justice.gov.uk" });
   });
 
   it("should refuse a twg auth.conf with no refresh token with 400 and never echo it", async () => {
@@ -1057,7 +1049,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     });
 
     expect(response.status).toBe(204);
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: ALICE.oid, kind: "jenkins", updatedVia: "pod" });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: ALICE.oid, kind: "jenkins" });
     expect(await readCredential(prisma, localStore(), ALICE.oid, "jenkins")).toBe(JENKINS);
   });
 
@@ -1754,7 +1746,7 @@ describe("sweepVirtualAgents", () => {
     expect((await row(agent.id)).desired).toBe("running");
   });
 
-  it("should stop a failed agent whose pod is still watching for a credential nobody has stored, and keep why it failed", async () => {
+  it("should stop a failed agent whose pod is still watching for a credential nobody has stored", async () => {
     const agent = await create(ALICE, "token-watch");
     const detail = "github: three sign-in codes went unused; paste a token on the credentials page, or stop and start this agent";
     // The pod's budget runs out, it reports failed, and then watches for a stored token without reporting again.
@@ -1765,9 +1757,7 @@ describe("sweepVirtualAgents", () => {
 
     expect(result).toMatchObject({ afterFailure: [agent.id], idle: [], awaitingOwner: [], evening: [] });
     const stopped = await row(agent.id);
-    expect(stopped).toMatchObject({ desired: "stopped", stopReason: "failed", stopDetail: detail });
-    // The stop clears status_detail and the orchestrator's observation of the stopped set would too, so the owner
-    // reads the failure off stop_detail from here on.
+    expect(stopped).toMatchObject({ desired: "stopped", stopReason: "failed" });
     expect(stopped.statusDetail).toBeNull();
   });
 
@@ -1793,18 +1783,6 @@ describe("sweepVirtualAgents", () => {
 
     expect(result).toMatchObject({ afterFailure: [], idle: [], awaitingOwner: [] });
     expect(await row(agent.id)).toMatchObject({ desired: "running", status: "provisioning" });
-  });
-
-  it("should clear a kept failure when its owner starts the agent again", async () => {
-    const agent = await create(ALICE, "restarted");
-    await reportStatus(prisma, agent.id, "failed", "github: the sign-in budget ran out", ago(OVERNIGHT));
-    await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(OVERNIGHT) } });
-    await sweepVirtualAgents(prisma, OPTIONS);
-    expect((await row(agent.id)).stopDetail).not.toBeNull();
-
-    await setDesired(prisma, ALICE.oid, agent.id, "running");
-
-    expect(await row(agent.id)).toMatchObject({ desired: "running", stopReason: null, stopDetail: null });
   });
 
   it("should shut a swept pod out, so it cannot report its way back out of the stop", async () => {

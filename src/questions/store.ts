@@ -110,11 +110,11 @@ export async function findQuestion(db: Database, id: string): Promise<QuestionRo
  * Records the answer, inside the transaction of the message carrying it. Refuses a question already answered, which
  * rolls that message back: two tabs on the same card are a real case, and the session must be told once.
  */
-export async function recordAnswer(tx: Database, question: QuestionRow, answer: QuestionSetAnswer, messageId: bigint, now: Date = new Date()): Promise<void> {
+export async function recordAnswer(tx: Database, question: QuestionRow, answer: QuestionSetAnswer, now: Date = new Date()): Promise<void> {
   const { count } = await tx.agentQuestion.updateMany({
     where: { id: question.id, answeredAt: null },
     // The cast is Prisma's `InputJsonValue`, which wants an index signature a named interface does not have.
-    data: { answeredAt: now, answer: { ...answer } as object, answerMessageId: messageId }
+    data: { answeredAt: now, answer: { ...answer } as object }
   });
   if (count === 0) {
     throw new HttpError(409, "that question has already been answered");

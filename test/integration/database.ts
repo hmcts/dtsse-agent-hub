@@ -69,8 +69,7 @@ export async function connectForChat(who: Person): Promise<void> {
     data: (["github", "azure", "claude", "jenkins"] as const).map((kind) => ({
       ownerOid: who.oid,
       kind,
-      secretName: `u-${who.oid}-${kind}`,
-      updatedVia: "web" as const
+      secretName: `u-${who.oid}-${kind}`
     })),
     skipDuplicates: true
   });

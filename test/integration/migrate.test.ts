@@ -337,8 +337,8 @@ describe("the bedrock migration", () => {
     expect((await migrate())[0]).toBe(MIGRATION);
 
     // `migrate()` applies every migration from this one on, so what is asserted is the state at head rather than the
-    // one this migration left: `20261107090000_bedrock_gone` moves the renamed row back to `gateway` and takes the
-    // value out of both enums again.
+    // one this migration left: `20261107090000_bedrock_gone` moves the renamed row back to `gateway`, and
+    // `20261120090000_retired_enum_labels` takes the value out of both enums again.
     const agents = await query<{ name: string; model_route: string }>(RENAME, `SELECT name, model_route::text FROM "virtual_agent" ORDER BY name`);
     expect(agents).toEqual([
       { name: "on-gateway", model_route: "gateway" },
@@ -349,20 +349,14 @@ describe("the bedrock migration", () => {
       `SELECT t.typname AS type, e.enumlabel AS label FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
         WHERE t.typname IN ('credential_kind', 'model_route') ORDER BY t.typname, e.enumsortorder`
     );
-    // `bedrock` is still a label on both types at head: `20261107090000_bedrock_gone` moves every row off it and
-    // deletes the credentials, and leaves the labels for a release so the build it replaces can keep reading the
-    // columns. `model_route` carries it first because the rename this migration makes keeps the value's sort order
-    // and `20261106090000_model_route_gateway` added `gateway` after it.
     expect(labels).toEqual([
       { type: "credential_kind", label: "github" },
       { type: "credential_kind", label: "azure" },
       { type: "credential_kind", label: "claude" },
-      { type: "credential_kind", label: "bedrock" },
       { type: "credential_kind", label: "jenkins" },
       { type: "credential_kind", label: "claude_md" },
       { type: "credential_kind", label: "git_identity" },
       { type: "credential_kind", label: "atlassian" },
-      { type: "model_route", label: "bedrock" },
       { type: "model_route", label: "gateway" },
       { type: "model_route", label: "own_licence" }
     ]);
@@ -416,17 +410,6 @@ describe("the bedrock-gone migration", () => {
     );
     expect(Number(moved[0]?.generation)).toBeGreaterThan(Number(untouched[0]?.generation));
     expect(Number(moved[0]?.pod_generation)).toBeGreaterThan(Number(untouched[0]?.pod_generation));
-    // Both labels stay on their types for one release. The previous build is still serving while this commits, and
-    // rebuilding either type would change the column's result-type OID under its cached statements.
-    const labels = await query<{ type: string; label: string }>(
-      GONE,
-      `SELECT t.typname AS type, e.enumlabel AS label FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-        WHERE t.typname IN ('credential_kind', 'model_route') AND e.enumlabel = 'bedrock' ORDER BY t.typname`
-    );
-    expect(labels).toEqual([
-      { type: "credential_kind", label: "bedrock" },
-      { type: "model_route", label: "bedrock" }
-    ]);
   });
 });
 
@@ -810,6 +793,124 @@ describe("the agent chat removed migration", () => {
     expect(await query<{ session_id: string; chat_removed_at: Date | null }>(REMOVED, `SELECT session_id, chat_removed_at FROM "agent"`)).toEqual([
       { session_id: "laptop", chat_removed_at: null }
     ]);
+  });
+});
+
+describe("the index tidy migration", () => {
+  const MIGRATION = "20261119090000_index_tidy";
+  const { database: TIDY, earlier } = migrationFixture("migrate_index_tidy", MIGRATION);
+
+  it("should drop the two indexes a unique index answers and index the messages transcript entries point at when it is applied", async () => {
+    await migrate(earlier());
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const indexes = await query<{ indexname: string; indexdef: string }>(
+      TIDY,
+      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename IN ('assistant_template', 'virtual_agent', 'transcript_entry') ORDER BY indexname`
+    );
+    const names = indexes.map((row) => row.indexname);
+    expect(names).not.toContain("assistant_template_owner_idx");
+    expect(names).not.toContain("virtual_agent_owner_oid_idx");
+    expect(names).toContain("assistant_template_owner_name_key");
+    expect(names).toContain("virtual_agent_owner_oid_name_key");
+    expect(indexes.find((row) => row.indexname === "transcript_entry_message_id_idx")?.indexdef).toBe(
+      "CREATE INDEX transcript_entry_message_id_idx ON public.transcript_entry USING btree (message_id) WHERE (message_id IS NOT NULL)"
+    );
+  });
+
+  it("should answer the foreign key's set-null lookup from the new index", async () => {
+    // The statement Postgres runs for `ON DELETE SET NULL`. Sequential scans are switched off because an empty table
+    // is cheapest to scan, and the question is whether the partial index can answer it at all.
+    const client = new pg.Client({ connectionString: urlFor(TIDY) });
+    await client.connect();
+    try {
+      await client.query("SET enable_seqscan = off");
+      const plan = await client.query<{ "QUERY PLAN": string }>(
+        `EXPLAIN UPDATE ONLY "public"."transcript_entry" SET "message_id" = NULL WHERE $1 OPERATOR(pg_catalog.=) "message_id"`,
+        ["42"]
+      );
+      expect(plan.rows.map((row) => row["QUERY PLAN"]).join("\n")).toContain("transcript_entry_message_id_idx");
+    } finally {
+      await client.end();
+    }
+  });
+});
+
+describe("the retired enum labels migration", () => {
+  const MIGRATION = "20261120090000_retired_enum_labels";
+  const { database: LABELS, earlier } = migrationFixture("migrate_retired_labels", MIGRATION);
+
+  it("should move every row off the retired labels and rebuild the types without them when it is applied", async () => {
+    await migrate(earlier());
+    await query(LABELS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      LABELS,
+      `INSERT INTO "virtual_agent" (owner_oid, name, model_route, desired, stop_reason)
+        VALUES ('dev-alice', 'bedrock', 'bedrock', 'running', NULL), ('dev-alice', 'quota', 'gateway', 'stopped', 'quota'),
+               ('dev-alice', 'expired', 'gateway', 'stopped', 'expired'), ('dev-alice', 'evening', 'own_licence', 'stopped', 'evening')`
+    );
+    await query(
+      LABELS,
+      `INSERT INTO "credential" (owner_oid, kind, secret_name, updated_via)
+        VALUES ('dev-alice', 'bedrock', 'u-dev-alice-bedrock', 'web'), ('dev-alice', 'github', 'u-dev-alice-github', 'web')`
+    );
+    await query(
+      LABELS,
+      `INSERT INTO "virtual_agent_login" (virtual_agent_id, kind, prompt, verification_uri, expires_at)
+        SELECT id, kind, 'paste_code', 'https://example.invalid', now() + interval '1 hour'
+          FROM "virtual_agent", (VALUES ('bedrock'::credential_kind), ('github'::credential_kind)) AS k (kind) WHERE name = 'bedrock'`
+    );
+    const [before] = await query<{ generation: number }>(LABELS, `SELECT generation FROM "virtual_agent" WHERE name = 'bedrock'`);
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const agents = await query<{ name: string; model_route: string; stop_reason: string | null; generation: number }>(
+      LABELS,
+      `SELECT name, model_route::text, stop_reason::text, generation FROM "virtual_agent" ORDER BY name`
+    );
+    expect(agents.map(({ generation: _, ...agent }) => agent)).toEqual([
+      { name: "bedrock", model_route: "gateway", stop_reason: null },
+      { name: "evening", model_route: "own_licence", stop_reason: "evening" },
+      { name: "expired", model_route: "gateway", stop_reason: null },
+      { name: "quota", model_route: "gateway", stop_reason: null }
+    ]);
+    expect(Number(agents[0]?.generation)).toBe(Number(before?.generation) + 1);
+    expect(await query(LABELS, `SELECT kind::text FROM "credential"`)).toEqual([{ kind: "github" }]);
+    expect(await query(LABELS, `SELECT kind::text FROM "virtual_agent_login"`)).toEqual([{ kind: "github" }]);
+
+    const labels = await query<{ type: string; labels: string }>(
+      LABELS,
+      `SELECT t.typname AS type, string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) AS labels
+         FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+        WHERE t.typname LIKE 'credential_kind%' OR t.typname LIKE 'model_route%' OR t.typname LIKE 'virtual_agent_stop_reason%'
+        GROUP BY t.typname ORDER BY t.typname`
+    );
+    expect(labels).toEqual([
+      { type: "credential_kind", labels: "github,azure,claude,jenkins,claude_md,git_identity,atlassian" },
+      { type: "model_route", labels: "gateway,own_licence" },
+      { type: "virtual_agent_stop_reason", labels: "user,idle,evening,failed,awaiting_owner" }
+    ]);
+  });
+});
+
+describe("the unread columns migration", () => {
+  const MIGRATION = "20261121090000_unread_columns_released";
+  const { database: UNREAD, earlier } = migrationFixture("migrate_unread_columns", MIGRATION);
+
+  it("should accept a credential with no updated_via and a delivered delivery with no delivered_at when it is applied", async () => {
+    await migrate(earlier());
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    await query(UNREAD, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(UNREAD, `INSERT INTO "credential" (owner_oid, kind, secret_name) VALUES ('dev-alice', 'github', 'u-dev-alice-github')`);
+    await query(UNREAD, `INSERT INTO "agent" (owner_oid, session_id, name) VALUES ('dev-alice', 'laptop', 'laptop')`);
+    await query(UNREAD, `INSERT INTO "message" (kind, author_oid, target_agent_id, body) SELECT 'direct', 'dev-alice', id, 'hello' FROM "agent"`);
+    await query(UNREAD, `INSERT INTO "delivery" (message_id, agent_id, state) SELECT m.id, a.id, 'delivered' FROM "message" m, "agent" a`);
+
+    expect(await query(UNREAD, `SELECT updated_via FROM "credential"`)).toEqual([{ updated_via: null }]);
+    expect(await query(UNREAD, `SELECT state::text, delivered_at FROM "delivery"`)).toEqual([{ state: "delivered", delivered_at: null }]);
   });
 });
 
