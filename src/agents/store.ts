@@ -1,7 +1,7 @@
 import { agentsMessageableBy, POD_CONVERSATION_AGENT, podConversationAgentSql } from "../access/load.ts";
 import { isPodConversationAgent } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
-import { linkLocalSession, linkSession } from "../assistant/store.ts";
+import { linkLocalSession, linkSession, needsLocalChatSql } from "../assistant/store.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
 import { likeLiteral } from "../store/like.ts";
@@ -101,7 +101,7 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
         : await tx.$queryRaw<
             { id: string; skills: unknown }[]
           >`SELECT id::text AS id, skills FROM agent WHERE session_id = ${registration.sessionId} FOR UPDATE`;
-    const [agent] = await tx.$queryRaw<{ id: string; name: string; conversation_id: string | null; chat_removed: boolean }[]>`
+    const [agent] = await tx.$queryRaw<{ id: string; name: string; conversation_id: string | null; needs_local_chat: boolean }[]>`
       INSERT INTO agent (owner_oid, session_id, name, name_source, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills, client_features, assistant_conversation_id)
       VALUES (
         ${owner.oid}, ${registration.sessionId},
@@ -127,7 +127,7 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
           -- already refuses. assistant_conversation_id is not in the SET list, so neither caller moves it.
           AND (agent.assistant_conversation_id IS NOT DISTINCT FROM EXCLUDED.assistant_conversation_id
                OR (EXCLUDED.virtual_agent_id IS NULL AND EXCLUDED.assistant_conversation_id IS NULL))
-      RETURNING id::text AS id, name, assistant_conversation_id::text AS conversation_id, chat_removed_at IS NOT NULL AS chat_removed
+      RETURNING id::text AS id, name, assistant_conversation_id::text AS conversation_id, ${needsLocalChatSql("agent")} AS needs_local_chat
     `;
     if (agent === undefined) {
       throw new SessionOwnedElsewhere("that session id is registered to someone else");
@@ -141,7 +141,7 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
     } else if (virtualAgentId !== null) {
       await tx.virtualAgent.update({ where: { id: virtualAgentId }, data: { agentId: agent.id, lastActiveAt: new Date(), updatedAt: new Date() } });
       await notify(tx, { type: "virtual_agent", virtual_agent_id: virtualAgentId, owner_oid: owner.oid });
-    } else if (local && agent.conversation_id === null && !agent.chat_removed) {
+    } else if (agent.needs_local_chat) {
       // The column as the upsert left it, read under the advisory lock, so a re-registration finds the conversation
       // the first one made rather than making a second. A session whose chat the person removed is given none
       // (`deleteConversation`); `chat_removed_at` is not in the upsert's SET list, so a re-registration keeps it.
@@ -178,10 +178,12 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
 async function lockAgent(
   db: Database,
   agentId: string
-): Promise<{ status: AgentStatus; ownerOid: string; virtualName: string | null; skills: Skill[]; name: string; local: boolean } | undefined> {
-  const [row] = await db.$queryRaw<{ status: AgentStatus; owner_oid: string; virtual_name: string | null; skills: unknown; name: string; local: boolean }[]>`
+): Promise<{ status: AgentStatus; ownerOid: string; virtualName: string | null; skills: Skill[]; name: string; needsLocalChat: boolean } | undefined> {
+  const [row] = await db.$queryRaw<
+    { status: AgentStatus; owner_oid: string; virtual_name: string | null; skills: unknown; name: string; needs_local_chat: boolean }[]
+  >`
     SELECT a.status::text AS status, a.owner_oid, v.name AS virtual_name, a.skills, a.name,
-           (a.virtual_agent_id IS NULL AND a.assistant_conversation_id IS NULL AND a.chat_removed_at IS NULL) AS local
+           ${needsLocalChatSql("a")} AS needs_local_chat
       FROM agent a LEFT JOIN virtual_agent v ON v.id = a.virtual_agent_id
      WHERE a.id = ${agentId}::uuid
        FOR UPDATE OF a
@@ -194,7 +196,7 @@ async function lockAgent(
         virtualName: row.virtual_name,
         skills: storedSkills(row.skills),
         name: row.name,
-        local: row.local
+        needsLocalChat: row.needs_local_chat
       };
 }
 
@@ -240,8 +242,8 @@ export async function heartbeat(
     // A laptop session with no conversation gets one here as well as at registration: the client registers only while
     // it holds no agent id and heartbeats ever after, so a session whose agent row has no conversation would otherwise
     // never get one. Under the same row lock the heartbeat already takes, so two heartbeats cannot both make one. Not a
-    // session whose chat the person removed, which `local` leaves out (`deleteConversation`).
-    if (before.local) {
+    // session whose chat the person removed, which `needsLocalChatSql` leaves out (`deleteConversation`).
+    if (before.needsLocalChat) {
       // The name this heartbeat reported, not the one the row held before it: the two differ exactly when the
       // client has just worked out a better one, and the chat made here would otherwise be named the worse of them.
       await linkLocalSession(tx, { ownerOid: before.ownerOid, agentId, name: name ?? before.name });

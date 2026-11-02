@@ -491,6 +491,7 @@ export function ChatView({
             <ChatMenu
               title={view.title}
               shareHref={`/assistant/${view.id}?share=1`}
+              local={view.local}
               forkHref={`/assistant/${view.id}?fork=1`}
               onRename={async (title) => {
                 const result = await actions.rename({ conversationId: view.id, title });

@@ -330,6 +330,78 @@ describe("a chat removed while its session is still running", () => {
   });
 });
 
+/**
+ * The person's delete and the local sweep reaching the same empty chat at once. The sweep detaches without marking
+ * the session, so whichever order the two land in, the delete has to leave the session marked or its next heartbeat
+ * gives the chat back.
+ */
+describe("a chat the person deletes while the local sweep collects it", () => {
+  /** Polls until another backend is waiting on a row lock, which is the delete parked behind the open transaction. */
+  async function waitForLockWaiter(): Promise<void> {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const [row] = await prisma.$queryRaw<{ waiting: bigint }[]>`
+        SELECT count(*) AS waiting FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'
+      `;
+      if (row !== undefined && row.waiting > 0n) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("nothing ever waited on the lock");
+  }
+
+  async function aged(): Promise<{ conversationId: string; agentId: string }> {
+    const chat = await laptopChat();
+    const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    await prisma.agent.update({ where: { id: chat.agentId }, data: { lastHeartbeatAt: old } });
+    await prisma.assistantConversation.update({ where: { id: chat.conversationId }, data: { createdAt: old } });
+    return chat;
+  }
+
+  it("should still mark the session when the sweep held the chat first and collected it", async () => {
+    const { conversationId, agentId } = await aged();
+    const sweep = await connect();
+    try {
+      // What `collectEmpty` does to the row, left uncommitted so the delete arrives in the middle of it.
+      await sweep.query("BEGIN");
+      await sweep.query("SELECT id FROM assistant_conversation WHERE id = $1 FOR UPDATE", [conversationId]);
+      await sweep.query("UPDATE agent SET assistant_conversation_id = NULL WHERE assistant_conversation_id = $1", [conversationId]);
+      await sweep.query("DELETE FROM assistant_conversation WHERE id = $1", [conversationId]);
+
+      const deleting = deleteConversation(prisma, ALICE.oid, conversationId);
+      await waitForLockWaiter();
+      await sweep.query("COMMIT");
+      await deleting;
+    } finally {
+      await sweep.end();
+    }
+
+    await heartbeat(prisma, agentId, "idle", "possession-work");
+
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).toMatchObject({ assistantConversationId: null, chatRemovedAt: expect.any(Date) });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+
+  it("should leave the chat to the person's delete when the delete held it first", async () => {
+    const { conversationId, agentId } = await aged();
+    const deleting = await connect();
+    try {
+      await deleting.query("BEGIN");
+      await deleting.query("SELECT id FROM assistant_conversation WHERE id = $1 FOR UPDATE", [conversationId]);
+
+      expect(await sweepLocalConversations(prisma)).toEqual({ collected: 0 });
+      await deleting.query("ROLLBACK");
+    } finally {
+      await deleting.end();
+    }
+    await deleteConversation(prisma, ALICE.oid, conversationId);
+    await heartbeat(prisma, agentId, "idle", "possession-work");
+
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: agentId } })).toMatchObject({ assistantConversationId: null, chatRemovedAt: expect.any(Date) });
+    expect(await prisma.assistantConversation.count()).toBe(0);
+  });
+});
+
 describe("a chat on the person's own computer whose transcript has been swept", () => {
   it("should stay listed and not be collected when everything it held has aged out", async () => {
     const { conversationId, agentId } = await laptopChat();
