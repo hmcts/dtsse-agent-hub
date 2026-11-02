@@ -50,8 +50,11 @@
  * so the green keeps its contrast, and it is off entirely for anyone who asks for reduced motion. */
 @utility status-pulse {
   animation: status-pulse 1.6s ease-in-out 3;
+}
 
-  @media (prefers-reduced-motion: reduce) {
+/* Unlayered, so it wins over the utility in Tailwind's `utilities` layer. */
+@media (prefers-reduced-motion: reduce) {
+  .status-pulse {
     animation: none;
   }
 }

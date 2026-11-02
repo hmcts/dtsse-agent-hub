@@ -13,7 +13,7 @@ import type { ReactNode } from "react";
  * absolutely placed, so the row is laid out the same with or without it, and hidden from screen readers, because the
  * words already say the state.
  */
-export function SessionMark({ words, colour, working, icon }: { words: string; colour: string; working: boolean; icon: ReactNode }) {
+export function SessionMark({ words, colour, working, icon }: Readonly<{ words: string; colour: string; working: boolean; icon: ReactNode }>) {
   return (
     <span className={`relative flex shrink-0 items-center ${colour}`} title={words}>
       {icon}
