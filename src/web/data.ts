@@ -417,9 +417,14 @@ export async function chatForks(viewer: Identity, id: string): Promise<SharePers
  * Both sides of the viewer's shares and fork offers: their own chats they have shared or offered, and the chats
  * shared with or offered to them.
  */
-export async function sharedChats(
-  viewer: Identity
-): Promise<{ given: SharedChatLink[]; received: SharedChatLink[]; offered: SharedChatLink[]; forkable: SharedChatLink[] }> {
+export interface SharedChats {
+  given: SharedChatLink[];
+  received: SharedChatLink[];
+  offered: SharedChatLink[];
+  forkable: SharedChatLink[];
+}
+
+export async function sharedChats(viewer: Identity): Promise<SharedChats> {
   const [given, received, offered, forkable] = await Promise.all([
     conversationsSharedBy(prisma, viewer.oid),
     conversationsSharedWith(prisma, viewer.oid),

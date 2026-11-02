@@ -11,6 +11,9 @@ import { type ActionResult, runAction, text } from "@/web/action";
  * Sharing one of the signed-in person's own conversations, read-only, with one person they named, and taking that
  * share back. The owner is the session's identity rather than anything in the argument, so nobody can change who
  * another owner's chat is shared with; `shareConversation` reports a conversation that is not theirs as missing.
+ *
+ * Both revalidate `/assistant` as a layout, because the settings dialog on every Assistant page lists the shared chats,
+ * and the share page of the chat itself is under it.
  */
 
 const OFF: { ok: false; error: string } = { ok: false, error: "the HMCTS Assistant is not available on this deployment" };
@@ -27,8 +30,7 @@ export async function shareChat(input: { conversationId: unknown; recipientOid: 
     }
     const conversationId = text(input.conversationId);
     const people = await shareConversation(prisma, viewer.oid, conversationId, recipientOid);
-    revalidatePath("/assistant/shared");
-    revalidatePath(`/assistant/${conversationId}`);
+    revalidatePath("/assistant", "layout");
     return { ok: true, people };
   });
 }
@@ -45,8 +47,7 @@ export async function unshareChat(input: { conversationId: unknown; recipientOid
     }
     const conversationId = text(input.conversationId);
     const people = await unshareConversation(prisma, viewer.oid, conversationId, recipientOid);
-    revalidatePath("/assistant/shared");
-    revalidatePath(`/assistant/${conversationId}`);
+    revalidatePath("/assistant", "layout");
     return { ok: true, people };
   });
 }

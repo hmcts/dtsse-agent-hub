@@ -132,7 +132,7 @@ describe("the Assistant's settings for managing its agent", () => {
       within(nav())
         .getAllByRole("tab")
         .map((tab) => tab.textContent)
-    ).toEqual(["Appearance", "Connections", "Credentials", "Sharing", "Assistant", "Git identity", "Web servers"]);
+    ).toEqual(["Appearance", "Connections", "Credentials", "Assistant", "Git identity", "Web servers"]);
   });
 
   it("should offer none of them when the page gives none", async () => {
@@ -404,7 +404,7 @@ describe("the Assistant's settings deep link", () => {
     router.search = "";
   });
 
-  it("should open at the section ?settings= names, and take the parameter out of the address, when the page loads", async () => {
+  it("should open at the section ?settings= names, and take the parameter out of the address once closed, when the page loads", async () => {
     land("/assistant?settings=credentials&x=1");
     await act(async () => {
       render(page());
@@ -412,6 +412,10 @@ describe("the Assistant's settings deep link", () => {
 
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
     expect(within(nav()).getByRole("tab", { name: "Credentials" }).getAttribute("aria-selected")).toBe("true");
+    expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?settings=credentials&x=1");
+
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close settings" }));
+
     expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?x=1");
     expect(router.search).toBe("?x=1");
   });
@@ -436,7 +440,7 @@ describe("the Assistant's settings deep link", () => {
 
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
     expect(within(nav()).getByRole("tab", { name: "Credentials" }).getAttribute("aria-selected")).toBe("true");
-    expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant");
+    expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?settings=credentials");
   });
 
   // The router has to hear the parameter go, or the same link names what it already holds and changes nothing.
