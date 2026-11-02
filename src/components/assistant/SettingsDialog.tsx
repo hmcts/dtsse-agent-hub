@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -28,15 +27,16 @@ import { type AssistantGitIdentity, GitIdentity } from "@/components/assistant/G
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantModelSetting, ModelSettings } from "@/components/assistant/ModelSettings";
 import { PortSettings } from "@/components/assistant/PortSettings";
+import { type AssistantSharing, Sharing } from "@/components/assistant/SharingSettings";
 import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
 import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
-import { SETTINGS_PARAMETER } from "@/web/home";
+import { SETTINGS_PARAMETER, withoutSettingsParameter } from "@/web/home";
 
 /**
  * What a row needs to connect a sign-in the assistant makes only on request: the assistant it restarts and the action
- * that does it, `reconnectSignIn`, which the getting-ready screen's "Sign in again" posts to as well.
+ * that does it, `reconnectSignIn`, which the getting-ready screen's Connect and "Sign in again" post to as well.
  */
 export interface AssistantConnect {
   assistantId: string;
@@ -63,6 +63,7 @@ interface SettingsView {
   files: AssistantFiles | undefined;
   size: AssistantSize | undefined;
   exports: AssistantExportDefaults | undefined;
+  sharing: AssistantSharing | undefined;
   agent: AssistantAgentSettings | undefined;
   git: AssistantGitIdentity | undefined;
   tokens: AssistantTokens | undefined;
@@ -233,20 +234,6 @@ function Appearance({ theme }: { theme: Theme }) {
   );
 }
 
-function SharedChats() {
-  return (
-    <section aria-labelledby="assistant-settings-sharing" className="flex flex-col gap-2.5">
-      <h3 id="assistant-settings-sharing" className="text-sm font-semibold">
-        Shared chats
-      </h3>
-      <p className="text-[13px] text-asst-muted">Chats that others have shared with you, and the ones you have shared.</p>
-      <Link href="/assistant/shared" className="self-start rounded-[10px] border border-asst-strong px-3 py-2 text-[13px] hover:bg-asst-hover">
-        View shared chats
-      </Link>
-    </section>
-  );
-}
-
 function Connections({ list, access, connect, unavailable, warning }: Pick<SettingsView, "list" | "access" | "connect" | "unavailable" | "warning">) {
   return (
     <section aria-labelledby="assistant-settings-connections" className="flex flex-col gap-2.5">
@@ -386,7 +373,13 @@ const SECTIONS: readonly SettingsSection[] = [
     shown: (view) => view.exports !== undefined,
     panel: (view) => (view.exports === undefined ? null : <ExportSettings exports={view.exports} />)
   },
-  { id: "sharing", label: "Sharing", group: "General", shown: () => true, panel: () => <SharedChats /> },
+  {
+    id: "sharing",
+    label: "Sharing",
+    group: "General",
+    shown: (view) => view.sharing !== undefined,
+    panel: (view) => (view.sharing === undefined ? null : <Sharing sharing={view.sharing} />)
+  },
   {
     id: "assistant",
     label: "Assistant",
@@ -651,6 +644,7 @@ function Dialog({ view, onClose, initial = null }: { view: SettingsView; onClose
   const items = SECTIONS.filter((item) => item.shown(view));
   // Nothing open is the narrow interface showing its list. Wide has no such state: it always has a section beside the
   // navigation, so a chosen section that the page has stopped passing anything for falls back to the first offered one.
+  // A section the address names is open from the start at either width, which on the narrow one is drilled into.
   const [chosen, setChosen] = useState<string | null>(
     initial !== null && items.some((item) => item.id === initial) ? initial : wide ? (items[0]?.id ?? null) : null
   );
@@ -788,6 +782,7 @@ export function AssistantSettings({
   files,
   size,
   exports,
+  sharing,
   agent,
   git,
   tokens
@@ -805,13 +800,17 @@ export function AssistantSettings({
   files?: AssistantFiles;
   size?: AssistantSize;
   exports?: AssistantExportDefaults;
+  sharing?: AssistantSharing;
   agent?: AssistantAgentSettings;
   git?: AssistantGitIdentity;
   tokens?: AssistantTokens;
 }) {
+  // `get` is the first value, so an address carrying the parameter twice still names one section.
+  const addressed = useSearchParams().get(SETTINGS_PARAMETER);
   const cog = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [opening, setOpening] = useState<string | null>(null);
+  const fromAddress = useRef(false);
   // The page's own clock to begin with, then the browser's as it takes over and again whenever the dialog opens. A
   // sign-in's deadline moves slowly and a timer on every page to watch it would cost more than it is worth, but the
   // first read has to be the page's: `Date.now()` here would be the server's clock in the HTML and the browser's in
@@ -820,24 +819,6 @@ export function AssistantSettings({
   useEffect(() => {
     setNow(Date.now());
   }, []);
-  // `?settings=<section>` opens the dialog there, which is where the hub's retired management pages send people. The
-  // parameter is taken out of the address once read, so a reload or the back button does not open it again. Read
-  // whenever it changes rather than once on mount, because a client-side navigation to it keeps this mounted.
-  const requested = useSearchParams().get(SETTINGS_PARAMETER);
-  useEffect(() => {
-    if (requested === null) {
-      return;
-    }
-    const url = new URL(window.location.href);
-    url.searchParams.delete(SETTINGS_PARAMETER);
-    // A `null` state, not the current one: Next's patched `replaceState` leaves a state carrying its `__NA` marker to
-    // itself, so the router would keep the parameter, the same link would not open the dialog again and the next
-    // refresh would put it back. Given anything else it copies its own state across and takes the new URL. Not
-    // `router.replace`, which would fetch the page from the server again.
-    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-    setOpening(requested);
-    setOpen(true);
-  }, [requested]);
   // The appearance the switch starts from. `ThemeSwitch` writes the person's choice to the cookie and to the theme
   // root, not to the server tree, so `theme` keeps the value the page was rendered with and the dialog, which
   // unmounts when it closes, would otherwise reopen showing a choice the page has moved on from.
@@ -869,9 +850,42 @@ export function AssistantSettings({
     return live === undefined ? theme : themeOf(live);
   }
 
+  function show(section: string | null): void {
+    setNow(Date.now());
+    setShownTheme(shownNow());
+    setOpening(section);
+    setOpen(true);
+  }
+
+  // `?settings=<section>` opens the dialog there, which is where retired pages and the share dialog send people. It is
+  // read on the client, so opening and closing the dialog never re-renders the page on the server. Opened after the
+  // first render rather than in it, because the dialog is portalled into the theme root and the server has no document
+  // to find one in. Shut by the address too, so the back button closes a dialog the address opened, with focus back on
+  // the cog as any other close leaves it; one the cog opened is left alone.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the address alone, since `show` reads the page as it stands when the address changes
+  useEffect(() => {
+    if (addressed !== null) {
+      fromAddress.current = true;
+      show(addressed);
+    } else if (fromAddress.current) {
+      fromAddress.current = false;
+      setOpen(false);
+      cog.current?.focus();
+    }
+  }, [addressed]);
+
   function close(): void {
     setOpen(false);
     cog.current?.focus();
+    // Replaced rather than navigated, which Next keeps `useSearchParams` in step with, so a reload does not open the
+    // dialog again. The parameter is cut out as text, so the rest of the query keeps the encoding it came with. A `null`
+    // state, not the current one: Next's patched `replaceState` leaves a state carrying its `__NA` marker to itself, so
+    // the router would keep the parameter, the same link would not open the dialog again and the next refresh would put
+    // it back.
+    if (addressed !== null) {
+      const { pathname, search, hash } = window.location;
+      window.history.replaceState(null, "", `${pathname}${withoutSettingsParameter(search)}${hash}`);
+    }
   }
 
   return (
@@ -883,12 +897,7 @@ export function AssistantSettings({
         aria-expanded={open}
         aria-label={attention.length === 0 ? "Settings" : `Settings. ${attention.join(". ")}`}
         title="Settings"
-        onClick={() => {
-          setNow(Date.now());
-          setShownTheme(shownNow());
-          setOpening(null);
-          setOpen(true);
-        }}
+        onClick={() => show(null)}
         // 36px, the size of the composer's own buttons, with the two extra pixels each way taken out of the margin
         // again so the footer row stays the height the 32px avatar beside it sets.
         className="relative -my-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-asst-muted hover:bg-asst-hover hover:text-asst-text"
@@ -920,12 +929,15 @@ export function AssistantSettings({
                 files,
                 size,
                 exports,
+                sharing,
                 agent,
                 git,
                 tokens
               }}
-              onClose={close}
+              // Remounted for a section the address names while the dialog is already open, so it opens on that one.
+              key={opening ?? ""}
               initial={opening}
+              onClose={close}
             />,
             themeRoot()
           )

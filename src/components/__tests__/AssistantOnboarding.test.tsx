@@ -256,6 +256,60 @@ describe("GettingReady connectors", () => {
     expect(within(connector("GitHub")).getByText(/The sign-in will appear here/)).toBeTruthy();
   });
 
+  it("should post nothing when the person clicks Connect on a sign-in the pod relays by itself", () => {
+    const reconnect = ok();
+    render(ready({ assistant: assistant("running"), reconnect }));
+
+    expect(within(connector("GitHub")).queryByRole("form")).toBeNull();
+    fireEvent.click(within(connector("GitHub")).getByRole("button", { name: "Connect" }));
+
+    expect(reconnect).not.toHaveBeenCalled();
+  });
+
+  // The pod relays an Azure sign-in only once asked, so Connect has to ask, or no code ever arrives and a person on
+  // the gateway route, whose chats wait on Azure, is held here for good.
+  it("should ask for the Azure sign-in when the person clicks Connect on the gateway route", async () => {
+    const reconnect = ok();
+    const summary = assistant("running", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway")
+    });
+    render(ready({ assistant: summary, statuses: statuses("github"), reconnect }));
+
+    const azure = connector("Azure");
+    expect(within(azure).getByRole("form", { name: "Connect Azure" })).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(within(azure).getByRole("button", { name: "Connect" }));
+    });
+
+    expect(reconnect).toHaveBeenCalledTimes(1);
+    const sent = (reconnect.mock.calls[0] as unknown as [FormData])[0];
+    expect(sent.get("id")).toBe(ASSISTANT);
+    expect(sent.get("kind")).toBe("azure");
+    expect(within(connector("Azure")).getByText("Connecting…")).toBeTruthy();
+    expect(within(connector("Azure")).getByText(/The sign-in will appear here/)).toBeTruthy();
+  });
+
+  it("should keep offering Connect for Azure when asking for its sign-in is refused", async () => {
+    const reconnect = vi.fn(async () => ({ ok: false as const, error: "that virtual agent is being deleted" }));
+    const summary = assistant("running", {
+      modelRoute: "gateway",
+      needed: neededCredentials("gateway"),
+      optional: optionalCredentials("gateway")
+    });
+    render(ready({ assistant: summary, statuses: statuses("github"), reconnect }));
+
+    await act(async () => {
+      fireEvent.click(within(connector("Azure")).getByRole("button", { name: "Connect" }));
+    });
+
+    const azure = connector("Azure");
+    expect(within(azure).getByRole("alert").textContent).toBe("that virtual agent is being deleted");
+    expect(within(azure).getByRole("button", { name: "Connect" })).toBeTruthy();
+    expect(within(azure).queryByText("Connecting…")).toBeNull();
+  });
+
   // The gateway authorises the person, so this route asks for no model credential of theirs: the row says how its
   // access is come by and has nothing on it to paste or press, the Azure row below being where they act.
   it("should say how the agents reach Claude, and ask for no model key, when the assistant is on the gateway route", () => {

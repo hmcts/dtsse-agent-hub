@@ -400,7 +400,8 @@ export function modelAccessAfter(index: number): boolean {
 }
 
 /**
- * The sign-ins the assistant makes only when the person asks for one, from the Connections section of its settings.
+ * The sign-ins the assistant makes only when the person asks for one, from the Connections section of its settings or
+ * the getting-ready screen's Connect.
  * Azure lets it act as them with `az`, which nothing in a chat waits for, so it is in the background as a Jenkins token
  * is: nothing prompts for it, and a sign-in of it is raised as an ask only while the code they asked for is live. One
  * that lapsed is left to that section, where it says so and offers to connect again, rather than being put back in

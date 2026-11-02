@@ -1009,7 +1009,7 @@ export async function claudeLogin({
 
   say("claude: could not drive claude setup-token; waiting for the owner to store a token on agent-hub");
   await withRetry(() =>
-    api.virtualStatus(id, "awaiting_credentials", `claude: run "claude setup-token" and paste the token at ${hub}/hub/settings/credentials`)
+    api.virtualStatus(id, "awaiting_credentials", `claude: run "claude setup-token" and paste the token at ${hub}/assistant?settings=credentials`)
   );
   await waitForClaudeCredential(api, id, fallbackPollMs);
   return "stored";

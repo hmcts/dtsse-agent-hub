@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { assistantSettingsPath, defaultUi, homeFor, movedHubPath, movedPortTicketPath, NO_AGENT, retiredAgentPath, retiredHubPath } from "./home.ts";
+import {
+  assistantSettingsPath,
+  defaultUi,
+  homeFor,
+  movedHubPath,
+  movedPortTicketPath,
+  NO_AGENT,
+  retiredAgentPath,
+  retiredPath,
+  SHARED_CHATS,
+  withoutSettingsParameter
+} from "./home.ts";
 
 describe("homeFor", () => {
   it.each(["/hub", "/hub/topics", "/hub/agents/0f8a", "/hub/nonsense"])("should send someone back into the hub from %s", (pathname) => {
@@ -66,13 +77,13 @@ describe("movedHubPath", () => {
     expect(movedHubPath("/cx")).toBeUndefined();
   });
 
-  it("should leave the retired access page to `retiredHubPath`, which answers for both of its addresses", () => {
+  it("should leave the access page to `retiredPath` when given either of its addresses", () => {
     expect(movedHubPath("/access")).toBeUndefined();
     expect(movedHubPath("/hub/access")).toBeUndefined();
   });
 });
 
-describe("retiredHubPath", () => {
+describe("retiredPath", () => {
   it.each([
     ["/virtual", "/assistant?settings=assistant"],
     ["/hub/virtual", "/assistant?settings=assistant"],
@@ -80,35 +91,49 @@ describe("retiredHubPath", () => {
     ["/settings/credentials", "/assistant?settings=credentials"],
     ["/hub/settings/credentials", "/assistant?settings=credentials"]
   ])("should send %s to %s when virtual agents are on", (pathname, to) => {
-    expect(retiredHubPath(pathname, true)).toBe(to);
+    expect(retiredPath(pathname, true)).toBe(to);
   });
 
-  it.each(["/hub/virtual", "/hub/virtual/0f8a", "/hub/settings/credentials"])("should send %s to the hub when virtual agents are off", (pathname) => {
-    expect(retiredHubPath(pathname, false)).toBe("/hub");
+  it.each(["/access", "/hub/access", "/assistant/shared"])("should send %s to the settings' Sharing section when virtual agents are on", (pathname) => {
+    expect(retiredPath(pathname, true)).toBe("/assistant?settings=sharing");
   });
 
   it.each(["/hub/virtual/0f8a/ports/3000", "/virtual/0f8a/ports/3000", "/hub/settings", "/hub/virtualfoo"])(
     "should leave %s alone when it is not a retired page, the addresses movedPortTicketPath answers for among them",
     (pathname) => {
-      expect(retiredHubPath(pathname, true)).toBeUndefined();
+      expect(retiredPath(pathname, true)).toBeUndefined();
     }
   );
 
-  it.each(["/access", "/hub/access"])("should send %s to the shared chats", (pathname) => {
-    expect(retiredHubPath(pathname, true)).toBe("/assistant/shared");
+  it("should name the Sharing section when building the address shared chats are managed at", () => {
+    expect(SHARED_CHATS).toBe("/assistant?settings=sharing");
   });
 
   // There are no conversations to share with virtual agents off, and the Assistant's pages are not found at all.
-  it.each(["/access", "/hub/access"])("should send %s to the hub instead when virtual agents are off", (pathname) => {
-    expect(retiredHubPath(pathname, false)).toBe("/hub");
-  });
-
-  it.each(["/", "/hub", "/accessible", "/hub/accessible", "/hub/topics", "/assistant/shared"])(
-    "should leave %s alone, which is not the page that went",
+  it.each(["/access", "/hub/access", "/assistant/shared", "/hub/virtual", "/hub/virtual/0f8a", "/hub/settings/credentials"])(
+    "should send %s to the hub instead when virtual agents are off",
     (pathname) => {
-      expect(retiredHubPath(pathname, true)).toBeUndefined();
+      expect(retiredPath(pathname, false)).toBe("/hub");
     }
   );
+
+  it.each([
+    "/",
+    "/hub",
+    "/accessible",
+    "/hub/accessible",
+    "/hub/topics",
+    "/assistant",
+    "/assistant/shared/abc",
+    "/assistant/sharedfoo",
+    "/hub/assistant/shared",
+    "/hub/virtual/0f8a/ports/3000",
+    "/virtual/0f8a/ports/3000",
+    "/hub/settings",
+    "/hub/virtualfoo"
+  ])("should leave %s alone when it is not an address that went, the viewer's ticket route among them", (pathname) => {
+    expect(retiredPath(pathname, true)).toBeUndefined();
+  });
 });
 
 describe("movedPortTicketPath", () => {
@@ -189,5 +214,23 @@ describe("retiredAgentPath", () => {
 describe("assistantSettingsPath", () => {
   it("should name the section in the query the settings dialog reads when given one", () => {
     expect(assistantSettingsPath("connections")).toBe("/assistant?settings=connections");
+  });
+});
+
+describe("withoutSettingsParameter", () => {
+  it("should keep the rest of the query exactly as it was written when taking the settings pair out", () => {
+    expect(withoutSettingsParameter("?view=a,b&settings=sharing&q=x%20y&r=1+2")).toBe("?view=a,b&q=x%20y&r=1+2");
+  });
+
+  it("should take out every settings pair when the query carries more than one", () => {
+    expect(withoutSettingsParameter("?settings=sharing&share=1&settings=x")).toBe("?share=1");
+  });
+
+  it("should leave no question mark when the settings pair was all the query held", () => {
+    expect(withoutSettingsParameter("?settings=sharing")).toBe("");
+  });
+
+  it("should keep a pair whose name only starts with settings when taking the settings pair out", () => {
+    expect(withoutSettingsParameter("?settingsx=1&settings")).toBe("?settingsx=1");
   });
 });

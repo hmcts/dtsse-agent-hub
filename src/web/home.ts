@@ -12,9 +12,6 @@ const HUB = "/hub";
 
 const ASSISTANT = "/assistant";
 
-/** Where a person manages who may read or fork their conversations, the only access one person gives another. */
-const SHARED_CHATS = `${ASSISTANT}/shared`;
-
 /**
  * The HMCTS Assistant is the default UI, so `/` is the Assistant wherever it runs. It runs on a virtual agent, and
  * its pages answer 404 while virtual agents are off, so those deployments get the hub instead.
@@ -39,14 +36,32 @@ export function movedHubPath(pathname: string): string | undefined {
 }
 
 /**
- * The section of the Assistant's settings `?settings=` opens. The settings dialog reads the same parameter, so a link
- * made here and the section it opens cannot be spelled two ways.
+ * The section of the Assistant's settings `?settings=` opens, on any Assistant page. The settings dialog reads the same
+ * parameter, so a link made here and the section it opens cannot be spelled two ways.
  */
 export const SETTINGS_PARAMETER = "settings";
 
 export function assistantSettingsPath(section: string): string {
   return `${ASSISTANT}?${new URLSearchParams({ [SETTINGS_PARAMETER]: section })}`;
 }
+
+/**
+ * `search` with every `settings` pair taken out, cut as text rather than rebuilt through `URLSearchParams`, which
+ * would re-encode the rest: a channel view's commas, or a space written `%20`.
+ */
+export function withoutSettingsParameter(search: string): string {
+  const kept = search
+    .replace(/^\?/, "")
+    .split("&")
+    .filter((pair) => pair !== "" && pair.split("=")[0] !== SETTINGS_PARAMETER);
+  return kept.length === 0 ? "" : `?${kept.join("&")}`;
+}
+
+/**
+ * Where a person manages who may read or fork their conversations, the only access one person gives another: the
+ * settings' Sharing section, whose id in `SECTIONS` this names.
+ */
+export const SHARED_CHATS = assistantSettingsPath("sharing");
 
 /** Anything under the viewer's ticket route as it was, `/virtual/{id}/ports`, under `/hub` or bare. */
 const OLD_PORT_TICKET = /^(?:\/hub)?\/virtual\/[^/]+\/ports(?:\/|$)/;
@@ -82,30 +97,36 @@ export function movedPortTicketPath(pathname: string): MovedPortTicket | undefin
 /** `/virtual` and `/virtual/{id}` with nothing after the id, the virtual agents pages. */
 const VIRTUAL_AGENT_PAGES = /^\/virtual(?:\/[^/]+)?$/;
 
-/** The other retired pages, as `retiredHubPath` sees them with any `/hub` taken off. */
+/** The other retired pages, as `retiredPath` sees them with any `/hub` taken off. */
 const RETIRED_PAGES = new Map<string, string>([
   ["/access", SHARED_CHATS],
   ["/settings/credentials", assistantSettingsPath("credentials")]
 ]);
 
 /**
- * Where a retired hub address goes now, or `undefined` when the path is not one. Each goes where virtual agents are
- * managed now, and to the hub's home where virtual agents are off and the Assistant's pages are not found.
+ * Where a retired address goes now, or `undefined` when the path is not one. Each goes where what it showed is managed
+ * now, and to the hub's home where virtual agents are off and the Assistant's pages are not found.
  *
  * - `/access` goes to `SHARED_CHATS`: an agent is its owner's, somebody else's is reached by tagging it in a post, and
  *   the only access one person gives another is a share or fork of one conversation at a time, which is managed there.
+ * - `/assistant/shared` goes there too, an address bookmarked and pasted for the list of shared chats. The
+ *   `/assistant/shared/{id}` pages under it are a recipient's view of one chat, and are not retired.
  * - `/virtual` and `/virtual/{id}` go to the Assistant section of its settings: the Assistant's agent is the one
  *   virtual agent a person has, and its settings are where it is renamed, restarted and its web servers opened.
  *   `/virtual/{id}/ports/{port}` is not one of these: it is the viewer's old ticket route, which `movedPortTicketPath`
  *   sends on with its query.
- * - `/settings/credentials` goes to Credentials, where a token is pasted: the published client's pod boot messages still
- *   send people there to paste their GitHub token.
+ * - `/settings/credentials` goes to Credentials, where a token is pasted, so a pod's boot message linking either address
+ *   reaches the same box.
  *
- * Both the bare address and the `/hub` one, because each page existed under both and both were pasted into tickets.
- * Checked ahead of `movedHubPath`, which would otherwise send the bare one to a page that is no longer there.
+ * Both the bare address and the `/hub` one for the hub's pages, because each existed under both and both were pasted
+ * into tickets. Checked ahead of `movedHubPath`, which would otherwise send the bare one to a page that is no longer
+ * there.
  */
-export function retiredHubPath(pathname: string, virtualAgents: boolean): string | undefined {
+export function retiredPath(pathname: string, virtualAgents: boolean): string | undefined {
   const path = pathname.startsWith(`${HUB}/`) ? pathname.slice(HUB.length) : pathname;
+  if (pathname === `${ASSISTANT}/shared`) {
+    return virtualAgents ? SHARED_CHATS : HUB;
+  }
   const to = VIRTUAL_AGENT_PAGES.test(path) ? assistantSettingsPath("assistant") : RETIRED_PAGES.get(path);
   if (to === undefined) {
     return undefined;

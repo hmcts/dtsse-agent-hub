@@ -1025,7 +1025,7 @@ const credentials: Command = async (cli, argv) => {
   }
 
   if (pod) {
-    throw new UsageError("a virtual agent cannot delete its credentials; its owner removes them on agent-hub");
+    throw new UsageError("a virtual agent cannot delete its credentials; its owner removes them in the HMCTS Assistant's settings");
   }
   try {
     await api.deleteMyCredential(kind);
