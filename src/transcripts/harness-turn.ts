@@ -1,8 +1,8 @@
 /**
  * What of a user turn in a transcript the person typed: whether the harness wrote the turn instead, and what is left
- * of it once an IDE's editor context is taken off the front. `typedText` is the one rule; naming a chat
- * (`firstPromptTitle`) and deciding that a transcript batch gives a chat its first content (`appendEntries`) both
- * ask it.
+ * of it once an IDE's editor context is taken off the front. `typedText` is the rule for what can name a chat
+ * (`firstPromptTitle`). Whether a chat has anything in it is a different question, what its thread shows
+ * (`shownInThread` in src/assistant/thread.ts), because a turn can be shown without being able to name the chat.
  *
  * The rules are regular expressions kept as source strings, written in a narrow subset that Postgres reads as
  * JavaScript does, because two migrations carry SQL copies of them — `20261116090000_retitle_harness_titles` and the
@@ -96,7 +96,13 @@ export function typedText(text: string): string | null {
   return typed === "" || isHarnessTurn(typed) ? null : typed;
 }
 
-/** Whether a user turn is something the person said: `typedText` has words for it. */
+/**
+ * Whether a user turn is something the person said: `typedText` has words for it.
+ *
+ * Nothing in the app asks this any more. It is kept because the backfill in
+ * `20261117090000_conversation_first_content` decided which chats already had content by this rule, as a frozen SQL
+ * copy, and `test/integration/migrate.test.ts` holds that copy to it.
+ */
 export function isTypedPrompt(text: string): boolean {
   return typedText(text) !== null;
 }

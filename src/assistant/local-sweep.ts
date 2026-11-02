@@ -2,20 +2,18 @@ import type { Database, PrismaClient } from "../store/prisma.ts";
 import { announce } from "./store.ts";
 
 /**
- * The one thing that bounds how many conversations a person's own Claude Code sessions can put in their Assistant.
+ * The one thing that bounds how many conversations a person's own Claude Code sessions leave in their Assistant.
  *
  * Every ordinary registration that is nobody's pod and names no conversation gets one (`linkLocalSession`), and a new
- * session id is a new agent and so a new conversation — including every `/clear`, which mints one. Nothing removed
- * them: `dropAbandoned` in `upload-sweep.ts` requires a pod, because the cascade there would have taken the live
- * session's agent row with the chat. So the rows only ever accumulated, and `listConversations` answers with the 200
- * most recently active — at a measured 500 sessions a week, a developer crossed 200 inside a fortnight and their
- * actual Assistant chats fell out of the sidebar and out of `searchConversations` behind the empty ones.
+ * session id is a new agent and so a new conversation — including every `/clear`, which mints one, at a measured
+ * 500 sessions a week. The sidebar and the search leave out the ones nothing was said in (`first_content_at`), so they
+ * do not crowd out the chats that matter, but nothing else removes the rows: `dropAbandoned` in
+ * `upload-sweep.ts` requires a pod, because the cascade there would take the live session's agent row with the chat.
+ * Left alone they would only accumulate, each with its agent's link to it.
  *
- * This collects the local conversations nothing ever happened in. Two other answers were available and are worse:
- * raising the 200 defers the same arithmetic rather than fixing it, and the limit is also what bounds one sidebar
- * render and the search's candidate set; and not creating the conversation until the session has said something would
- * mean a laptop session the person wants to open a chat *with* does not appear until it has spoken, which is the one
- * thing the conversation is for.
+ * This collects the local conversations nothing ever happened in. Not creating the conversation until the session has
+ * said something was the other answer, and is worse: a laptop session the person wants to open a chat *with* would
+ * not have one until it had spoken, which is the one thing the conversation is for.
  *
  * What it must never do is cascade. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the agent's own
  * dependants cascade from there, so deleting the row under a live session would take its transcript, its deliveries,
@@ -82,15 +80,21 @@ export async function sweepLocalConversations(prisma: PrismaClient, options: Loc
 /**
  * Deletes the local conversations nothing ever happened in, detaching each one's session before the row goes.
  *
- * The conditions:
+ * `first_content_at` is what decides whether a chat is listed (`announceFirstContent`). It is not trusted alone to
+ * decide that one may be deleted, because a writer that does not set it — a pod still running the release before the
+ * column, during a rolling deploy — can have put words in a chat since the backfill ran, and deleting is the one
+ * mistake that cannot be put right. So the column is checked beside the data itself, and every condition must hold:
  *
- * - **Nothing was ever in it** (`first_content_at`, see `announceFirstContent`). Every write that puts something in a
- *   chat — an answer, a tool call or a prompt the person typed, a direct message to or from its session, a question
- *   it asked, a document — sets that in its own transaction, so this one column answers for all of them, and goes on
- *   answering once the transcript that held them has been swept after `RETENTION_DAYS`.
- * - **Its sessions uploaded no transcript at all.** Not content by the rule above, which passes over the harness's
- *   own turns, and still kept: a session that has written anything is one this sweep cannot be sure has finished
- *   with its chat, and keeping such a chat costs a row where collecting it wrongly would cost the person's work.
+ * - **Nothing was ever recorded in it** (`first_content_at IS NULL`). This is also what keeps a chat whose transcript
+ *   has been swept after `RETENTION_DAYS`: the data checks below would find nothing left, and the column remembers.
+ * - **Its sessions uploaded no transcript at all.** Not only none the sidebar would count: a session that has written
+ *   anything is one this sweep cannot be sure has finished with its chat, and keeping such a chat costs a row where
+ *   collecting it wrongly would cost the person's work.
+ * - **No direct message to or from any of its agents.** `kind = 'direct'` and not every message, unlike
+ *   `dropAbandoned`'s condition: a local session's agent is an ordinary agent on the roster, and the posts it wrote to
+ *   the boards are not words in this chat, while a direct is — the local thread merges directs with the transcript.
+ * - **Its sessions asked no question**, which the thread shows as a card.
+ * - **No document**, which the person and the session can both write.
  * - **It has no pod.** A conversation with one is the Assistant's own chat on a virtual agent, whose agent exists
  *   only to be that chat's session; `dropAbandoned` is what collects those, and the two sweeps must not both own a
  *   row.
@@ -106,18 +110,34 @@ async function collectEmpty(tx: Database, retentionHours: number, batch: number)
       FROM assistant_conversation c
      WHERE c.virtual_agent_id IS NULL
        AND c.first_content_at IS NULL
+       AND c.artefact_version = 0
        AND c.created_at < now() - make_interval(hours => ${retentionHours}::int)
        AND NOT EXISTS (
              SELECT 1 FROM agent a
               WHERE a.assistant_conversation_id = c.id
                 AND a.last_heartbeat_at >= now() - make_interval(hours => ${retentionHours}::int)
            )
-       -- Driven from agent and joined out to the entries, rather than asking the entries whose agent they are: that
-       -- way both steps are index scans, agent_assistant_conversation_id_idx then transcript_entry_agent_id_id_idx.
-       -- Written the other way round, as t.agent_id IN (SELECT ...), the planner reads the whole of transcript_entry
-       -- per candidate, which is the hub's largest table.
+       -- Each of these drives from agent and joins out to the dependant, rather than asking the dependant whose
+       -- agent it is: that way every step is an index scan — agent_assistant_conversation_id_idx, then
+       -- transcript_entry_agent_id_id_idx, agent_question_agent_idx, message_direct_target_idx and
+       -- message_author_agent_idx. Written the other way round, as t.agent_id IN (SELECT ...), the planner reads the
+       -- whole of transcript_entry per candidate, which is the hub's largest table.
        AND NOT EXISTS (
              SELECT 1 FROM agent a JOIN transcript_entry t ON t.agent_id = a.id
+              WHERE a.assistant_conversation_id = c.id
+           )
+       AND NOT EXISTS (
+             SELECT 1 FROM agent a JOIN agent_question q ON q.agent_id = a.id
+              WHERE a.assistant_conversation_id = c.id
+           )
+       -- What it received and what it sent, as two clauses rather than one OR across the two columns: each has its
+       -- own index, and an OR inside the join condition is a filter the planner cannot answer from either.
+       AND NOT EXISTS (
+             SELECT 1 FROM agent a JOIN message m ON m.kind = 'direct' AND m.target_agent_id = a.id
+              WHERE a.assistant_conversation_id = c.id
+           )
+       AND NOT EXISTS (
+             SELECT 1 FROM agent a JOIN message m ON m.kind = 'direct' AND m.author_agent_id = a.id
               WHERE a.assistant_conversation_id = c.id
            )
      ORDER BY c.created_at

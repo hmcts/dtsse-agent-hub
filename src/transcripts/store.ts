@@ -1,10 +1,10 @@
 import type { AgentRef } from "../access/rules.ts";
 import type { AgentRow } from "../agents/store.ts";
 import { announceFirstContent, refreshLocalTitle } from "../assistant/store.ts";
+import { shownInThread } from "../assistant/thread.ts";
 import { firstPromptTitle, type PromptEntry } from "../assistant/titles.ts";
 import { notify } from "../realtime/notify.ts";
 import type { PrismaClient } from "../store/prisma.ts";
-import { typedText } from "./harness-turn.ts";
 import type { NewTranscriptEntry } from "./schema.ts";
 
 /** What storing a batch needs of the agent it belongs to, all of it already read by `ownedAgentRoute`. */
@@ -20,10 +20,11 @@ type UploadAgent = AgentRef & Pick<AgentRow, "localConversation">;
  *   turn is not a title. This gates `refreshLocalTitle`'s other derivation too, so a `/rename` the session reported is
  *   followed on the person's next prompt rather than on the next hub message relayed into their session. The rename
  *   itself is on the agent row the moment its heartbeat lands; it is only the chat's title that waits for them to type.
- * - **`content`**: something the chat's thread shows, which is what makes the batch its first content
- *   (`announceFirstContent`): an answer, a tool call, or a prompt with words the person typed (`typedText`). Not a
- *   batch of nothing but `/clear`'s record and editor context, which costs the upload nothing. Relayed or not is not
- *   asked: a relayed prompt is in a chat that already has the message it relays.
+ * - **`content`**: something the chat's thread would show other than a notice (`shownInThread`, the thread's own
+ *   rule), which is what makes the batch its first content (`announceFirstContent`): an answer with words in it, a
+ *   tool call, or a user turn shown as a bubble. Not a batch of nothing but `/clear`'s record and editor context,
+ *   which costs the upload nothing. Relayed or not is not asked: a relayed prompt is in a chat that already has the
+ *   message it relays.
  *
  * `message_id` here is what the client claimed, where `firstPromptTitle` reads what was stored — an id naming
  * anything other than a direct message to this agent is stored as null. So a prompt wrongly claiming to be relayed
@@ -35,11 +36,8 @@ function whatItCarries(entries: readonly NewTranscriptEntry[]): { prompt: boolea
   for (const entry of entries) {
     if (entry.role === "user") {
       prompts.push({ content: entry.content, redacted: entry.redacted, messageId: entry.message_id });
-      const text = entry.redacted ? undefined : (entry.content as { text?: unknown }).text;
-      content ||= typeof text === "string" && typedText(text) !== null;
-    } else {
-      content ||= entry.role === "assistant" || entry.role === "tool_use";
     }
+    content ||= shownInThread(entry);
   }
   return { prompt: firstPromptTitle(prompts) !== null, content };
 }
@@ -61,12 +59,12 @@ function whatItCarries(entries: readonly NewTranscriptEntry[]): { prompt: boolea
  * first message rather than after what its session read that message back as. Asking the chat instead would charge
  * every one of them a read of the agent row to be told there was nothing to do.
  *
- * The same batch can be what puts a local chat in its owner's sidebar, which leaves out a chat with nothing in it:
- * a local chat's batch that brought content records its first content, and the chat is announced when that is the
+ * The same batch can be what puts a chat in its owner's sidebar, which leaves out a chat with nothing in it: a batch
+ * that brought content records its agent's conversation's first content, and the chat is announced when that is the
  * first time, so an open sidebar redraws and lists it; naming the chat in the same transaction announces it again,
- * which Postgres delivers once. A pod
- * chat's batch is not asked, because a pod's session only runs once a message has been sent, and that message was its
- * first content.
+ * which Postgres delivers once. Asked whatever `localConversation` said, because that was read before this
+ * transaction and a heartbeat may have linked the session's chat since. For a board session with no chat, or a chat
+ * that already has content, as a pod's has from its first message, it is one indexed update that writes nothing.
  */
 export async function appendEntries(prisma: PrismaClient, agent: UploadAgent, sessionId: string, entries: readonly NewTranscriptEntry[]): Promise<number> {
   return await prisma.$transaction(async (tx) => {
@@ -99,14 +97,14 @@ export async function appendEntries(prisma: PrismaClient, agent: UploadAgent, se
     if (accepted > 0 && inserted?.last_id) {
       await notify(tx, { type: "transcript", agent_id: agent.id, owner_oid: agent.ownerOid, last_id: inserted.last_id });
     }
-    if (accepted === 0 || !agent.localConversation) {
+    if (accepted === 0) {
       return accepted;
     }
     const carried = whatItCarries(entries);
     if (carried.content) {
       await announceFirstContent(tx, [agent.id]);
     }
-    if (carried.prompt) {
+    if (carried.prompt && agent.localConversation) {
       await refreshLocalTitle(tx, agent.id);
     }
     return accepted;

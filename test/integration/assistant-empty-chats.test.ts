@@ -1,11 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { registerAgent } from "../../src/agents/store.ts";
+import { heartbeat, registerAgent } from "../../src/agents/store.ts";
 import { acceptFork, offerFork } from "../../src/assistant/fork-store.ts";
 import { sweepLocalConversations } from "../../src/assistant/local-sweep.ts";
 import {
   type ConversationRow,
   conversationAgent,
   createConversation,
+  deleteConversation,
   ensureAssistant,
   hasLocalConversation,
   listConversations,
@@ -185,16 +186,15 @@ describe("a chat on a pod with nothing in it", () => {
   });
 });
 
-describe("a chat on the person's own computer whose prompts say nothing", () => {
+describe("a chat on the person's own computer whose thread shows nothing but notices", () => {
   it.each([
     ["editor context alone", IDE],
     ["editor context and whitespace JavaScript trims", `${IDE}\n<ide_selection>x</ide_selection>\u00a0\u3000`],
-    ["a shell command run with !", "<bash-input>ls</bash-input>"],
-    ["a shell command's output", "<bash-stdout>a.txt</bash-stdout><bash-stderr></bash-stderr>"],
-    ["a prompt hook's output", "<user-prompt-submit-hook>checked</user-prompt-submit-hook>"],
-    ["an interrupted request", "[Request interrupted by user]"],
-    ["a harness turn after editor context", `${IDE}${CLEAR}`]
-  ])("should be left out of the list, the search and the cloud-mark check when its only prompt is %s", async (_, text) => {
+    ["a slash command after editor context", `${IDE}${CLEAR}`],
+    ["a local command's output", "<local-command-stdout>Set model to opus</local-command-stdout>"],
+    ["a system reminder", "<system-reminder>be brief</system-reminder>"],
+    ["a background task's notification", "<task-notification><status>completed</status><summary>done</summary></task-notification>"]
+  ])("should be left out of the list, the search and the cloud-mark check when its only user turn is %s", async (_, text) => {
     const { agentId } = await laptopChat();
 
     await uploaded(agentId, [entry("1", "user", text)]);
@@ -204,13 +204,35 @@ describe("a chat on the person's own computer whose prompts say nothing", () => 
     expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(false);
   });
 
-  it("should be listed when words follow the editor context in its only prompt", async () => {
+  it("should be left out when its only answer has no words in it", async () => {
+    const { agentId } = await laptopChat();
+
+    await uploaded(agentId, [entry("1", "assistant", "  ")]);
+
+    expect(await listed()).toEqual([]);
+  });
+
+  it.each([
+    ["words after the editor context", `${IDE}\nwhy is the possession claim stuck?`],
+    ["a shell command run with !", "<bash-input>ls</bash-input>"],
+    ["a shell command's output", "<bash-stdout>a.txt</bash-stdout><bash-stderr></bash-stderr>"],
+    ["a prompt hook's output", "<user-prompt-submit-hook>checked</user-prompt-submit-hook>"],
+    ["an interrupted request", "[Request interrupted by user]"]
+  ])("should be listed when its only user turn is %s, which its thread shows as a bubble", async (_, text) => {
     const { conversationId, agentId } = await laptopChat();
 
-    await uploaded(agentId, [entry("1", "user", `${IDE}\nwhy is the possession claim stuck?`)]);
+    await uploaded(agentId, [entry("1", "user", text)]);
 
     expect(await listed()).toEqual([conversationId]);
     expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(true);
+  });
+
+  it("should be listed when the upload read the session as having no chat before a heartbeat linked one", async () => {
+    const { conversationId, agentId } = await laptopChat();
+
+    await appendEntries(prisma, { id: agentId, ownerOid: ALICE.oid, localConversation: false }, "s-1", [entry("1", "assistant", "Hello.")]);
+
+    expect(await listed()).toEqual([conversationId]);
   });
 
   it("should be listed when its only content is a tool call", async () => {
@@ -229,6 +251,39 @@ describe("a chat on the person's own computer whose prompts say nothing", () => 
     ]);
 
     expect(await listed()).toEqual([conversationId]);
+  });
+});
+
+describe("a chat linked to a session that has already said something", () => {
+  it("should be listed from the moment a heartbeat links it when the session answered before it had a chat", async () => {
+    const agentId = await insertAgent(ALICE, "running-all-along");
+    await appendEntries(prisma, { id: agentId, ownerOid: ALICE.oid, localConversation: false }, "s-1", [entry("1", "assistant", "Hello.")]);
+
+    await heartbeat(prisma, agentId, "idle", "running-all-along");
+
+    const { assistantConversationId } = await prisma.agent.findUniqueOrThrow({ where: { id: agentId } });
+    expect(await listed()).toEqual([assistantConversationId]);
+  });
+
+  it("should be listed again when the session whose chat was deleted heartbeats and is linked a new one", async () => {
+    const { conversationId, agentId } = await laptopChat();
+    await uploaded(agentId, [entry("1", "user", "look at the possession claim")]);
+    await deleteConversation(prisma, ALICE.oid, conversationId);
+
+    await heartbeat(prisma, agentId, "idle", "possession-work");
+
+    const { assistantConversationId } = await prisma.agent.findUniqueOrThrow({ where: { id: agentId } });
+    expect(assistantConversationId).not.toBe(conversationId);
+    expect(await listed()).toEqual([assistantConversationId]);
+  });
+
+  it("should start empty when all the session has written is the harness's own turns", async () => {
+    const agentId = await insertAgent(ALICE, "cleared");
+    await appendEntries(prisma, { id: agentId, ownerOid: ALICE.oid, localConversation: false }, "s-1", [entry("1", "user", CLEAR)]);
+
+    await heartbeat(prisma, agentId, "idle", "cleared");
+
+    expect(await listed()).toEqual([]);
   });
 });
 

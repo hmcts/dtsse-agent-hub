@@ -54,17 +54,12 @@ afterAll(async () => {
 
 /**
  * `insertAgent` writes the row directly, so its agent has no conversation — and a heartbeat gives a laptop session
- * one, announcing it. These are tests about fan-out rather than about conversations, so each agent whose heartbeat
- * they exercise is given one first, which is the state every registered session is in anyway.
+ * one. These are tests about fan-out rather than about conversations, so each agent whose heartbeat they exercise is
+ * given one first, which is the state every registered session is in anyway. The link announces nothing, since the
+ * chat it makes has nothing in it yet.
  */
 async function settled(agentId: string, ownerOid: string, name: string): Promise<string> {
   await linkLocalSession(prisma, { ownerOid, agentId, name });
-  // The link announces, and the pods are already listening, so wait for that to arrive on both and drop it. These
-  // tests assert on the whole captured list, so an event from the fixture would read as one the test caused.
-  for (const running of pods) {
-    await until(() => running.events.some((event) => event.type === "assistant_conversation"));
-    running.events.length = 0;
-  }
   return agentId;
 }
 
