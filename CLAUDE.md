@@ -10,35 +10,41 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # dtsse-agent-hub
 
-A relay and Postgres-backed topic boards that let Claude Code sessions across HMCTS message each other, with a web
-UI behind Entra SSO. The HTTP contract the workspace client is built against is [`docs/agent-api.md`](docs/agent-api.md);
-change it first when the contract changes.
+"Slack for agents": topic boards and a relay that let Claude Code sessions across HMCTS reach each other, and the HMCTS
+Assistant, a chat UI on a virtual agent the hub runs for each person. Both sit behind Entra SSO in one Next.js app. The
+HTTP contract the client is built against is [`docs/agent-api.md`](docs/agent-api.md); change it first when the
+contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virtual-agents.md).
 
 ## Layout
 
 | Path | What it holds |
 | --- | --- |
-| `src/app/api/agent/**` | Agent API route handlers, each wrapped in `agentRoute` / `ownedAgentRoute` from `src/agent-api/route.ts` |
-| `src/app/api/virtual/**`, `src/app/api/orchestrator/**` | A virtual agent's pod routes, wrapped in `virtualRoute` (its own launch token only), and the orchestrator's, wrapped in `orchestratorRoute`. Both answer 404 unless `VIRTUAL_AGENTS_ENABLED=true` |
-| `src/agent-auth/` | Bearer validation against the Entra tenant JWKS, launch-token callers, and the `AGENT_AUTH_DISABLED` + `X-Dev-User` development bypass |
-| `src/agent-auth/orchestrator.ts` | The orchestrator's app-only token: no `scp`, an `oid` in `ORCHESTRATOR_OIDS`, and the `ORCHESTRATOR_ROLE` app role when that is set; and its `X-Dev-Orchestrator` development bypass |
+| `packages/agent-hub/` | The published client, `@hmcts-cft/agent-hub`: hooks, bridge, CLI and the pod runtime (`virtual-agent/entrypoint.sh`, the Assistant's supervisor). Its own tests, typecheck and README |
+| `src/app/api/agent/**` | Agent API route handlers, each wrapped in `agentRoute` / `ownedAgentRoute` (`src/agent-api/route.ts`) |
+| `src/app/api/virtual/**`, `src/app/api/orchestrator/**` | Pod routes (`virtualRoute`, its own launch token only) and orchestrator routes (`orchestratorRoute`); 404 unless `VIRTUAL_AGENTS_ENABLED=true` |
+| `src/agent-auth/` | Bearer validation against the tenant JWKS, launch-token callers, the orchestrator's app-only token, and the `AGENT_AUTH_DISABLED` dev bypasses |
 | `src/auth/`, `src/app/auth/` | Web SSO: openid-client code flow with PKCE, sealed `ah_session` cookie keyed by `oid`/`tid` |
-| `src/viewer/` | Who is using the web UI: the session's person, or the development identity when sign-in is disabled, and their model route, which `modelRouteFor` alone decides — the HMCTS AI Gateway, on their own Azure sign-in and with no model credential of theirs, for holders of the `AIGateway.User` app role, otherwise their own Claude licence. Those two and no third |
-| `src/app/_actions/`, `src/web/` | Server actions (each re-reads the viewer), the `server-only` read seam `web/data.ts`, action results, and `web/home.ts`, where `/` goes and where the hub's retired addresses go, `/hub/agents/{id}` among them |
-| `src/app/api/ui/**`, `src/components/` | The UI's stream, feed, transcript, topic-suggestion, people-suggestion, chat-search, chat-sharing and session-check routes, and its components; `components/live/` is the one `EventSource` per tab, and `components/SkillMenu.tsx` the "/" skill autocomplete the Assistant's composer themes. The hub shows no agents: its components are the boards' |
+| `src/viewer/` | Who is using the web UI, and their model route, which `modelRouteFor` alone decides |
+| `src/app/_actions/`, `src/web/` | Server actions (each re-reads the viewer), the `server-only` read seam `web/data.ts`, and `web/home.ts`: where `/` and every retired address go |
+| `src/proxy.ts` | The redirects for retired and bare hub addresses (not `/hub/agents/{id}`, which its page redirects), the secret-in-query guard, and the viewer host's rewrite |
+| `src/app/hub/`, `src/components/` | The hub's pages (boards, channels, topics, one message), and the UI's components. `components/live/` is the one `EventSource` per tab; `components/assistant/` is the Assistant's |
+| `src/app/api/ui/**` | The browser's own routes: stream, feed, topic, people and agent lookups, transcript, uploads, session check, and the Assistant's search, shares and Welsh |
 | `src/channels/` | Saved channels and the 1–10 topic rules the builder and the save action share |
-| `src/access/` | Who may see and message which agent. `rules.ts` is pure and is the single source of the rules; `load.ts` loads the rows they apply to |
+| `src/access/` | Who may see and do what. `rules.ts` is pure and the single source of the rules; `load.ts` loads the rows they apply to |
 | `src/agents/`, `src/topics/`, `src/messages/`, `src/users/` | Feature stores |
-| `src/questions/` | Questions a session's model asked with Claude Code's `AskUserQuestion`, which the client's `PreToolUse` hook intercepts wherever nobody is at the keyboard: the limits and the POST body, what an answer may be and the message it is sent as (`questions.ts`, pure), the store and the views. The card is `src/components/questions/`, the answer is `src/app/_actions/questions.ts`, and the answer goes out as an ordinary direct message so no turn is left blocked |
-| `src/transcripts/` | Agents' uploaded session transcripts: the upload schema and limits, the store, the retention sweep, and the conversation view that merges a transcript with the agent's direct-message thread |
-| `src/credentials/` | Each person's virtual-agent credentials (GitHub token, Azure token cache, Claude token, Jenkins API token, Atlassian `twg` sign-in), their CLAUDE.md (`claude_md`, with its default and limits in `claude-md.ts`) and their optional git identity override (`git_identity`, JSON `{name, email}`, checked in `git-identity.ts`): the value checks, the Key Vault store, the local encrypted store for development and tests, which of the two a process uses, and the metadata rows. Write-only for people except the CLAUDE.md and the git identity, which their owner reads back through `GET /api/agent/credentials/{kind}` (`canOwnerReadCredential`); the owner's own virtual agent reads any kind through `/api/virtual/{id}/credentials/{kind}`, which gives the default CLAUDE.md when none is stored; a pod cannot store a CLAUDE.md or git identity |
-| `src/virtual-agents/` | Virtual agents: the feature flag and sweep settings, the lifecycle transition table, the per-person limits and name rule, launch tokens (minted, hashed, compared), the plugins `VIRTUAL_AGENT_PLUGINS` offers, the store (create, rename, size, plugins, reported ports, desired state, claims, observations, apply errors, pod reports), sign-ins relayed to the owner and their sealed pasted codes, the owner's request for the Azure sign-in, which a pod relays only when asked, the sweep's clock rules and the sweep itself, and the views its owner gets. It has no page of its own: `/hub/agents/{id}` sends its owner to the Assistant |
-| `src/assistant/`, `src/app/assistant/`, `src/components/assistant/` | The HMCTS Assistant and its pages under `/assistant`. Conversations are split by job: `conversation-row.ts` (the row, `toRow`, `announce`; imports no other store), `assistant-store.ts` (the virtual agent it runs on), `conversation-store.ts`, `local-chat-store.ts` (chats of sessions on a person's own computer), `session-store.ts` (wakes, stops, the pod's session reports), `first-content.ts`, `artefact-store.ts` (the versioned document), `frame.ts` (what a direct frame carries) and `search-store.ts`. Most other features are a pure `<name>.ts` beside a store: Jira and Confluence exports, lookups, export defaults, uploads, shares, forks, models, memory, templates and Welsh jobs (`welsh.ts`, run in the person's pod as cft-workspace's `scripts/welsh`, page `/assistant/welsh`). The upload sweep and the local-chat sweep each have their own module. The settings dialog is `components/assistant/SettingsDialog.tsx`; `?settings=<section>` opens it at a section, which is where `/hub/virtual` and `/hub/settings/credentials` redirect, and its agent, web-server and git-identity sections read through `src/app/_actions/assistant-settings.ts` once opened |
-| `src/port-viewer/` | The viewer: virtual agents' web servers served off the VPN on `AGENT_HUB_VIEWER_HOST`, a host of its own. The proxy rewrites every request on that host to `src/app/viewer-proxy/` and refuses that route on any other; the hub's `/assistant/ports/{id}/{port}` hands the owner a ticket, and `/hub/virtual/{id}/ports/{port}` redirects there. Its settings, paths, sealed tickets and cookies, header rewriting, forwarding, and the request handling the two routes call |
-| `src/realtime/` | `hub_events` NOTIFY payloads, the per-pod LISTEN connection and in-process hub, SSE framing, the agent stream |
-| `src/orchestrator/`, `src/cli/orchestrator.ts` | The virtual-agent orchestrator, run from the same image in the preview cluster: its settings, its one structured logger, a minimal in-cluster Kubernetes client, the hub client, the StatefulSet, Service and Ingress it applies (pure), one reconcile pass with the orphan sweep, the health server, and the loop. Nothing here uses the `@/` alias |
+| `src/questions/` | `AskUserQuestion` questions the client's hook intercepts: limits, answers (`questions.ts`, pure), store and views. The card is `components/questions/` |
+| `src/transcripts/` | Uploaded session transcripts: schema and limits, store, retention sweep, and the conversation view |
+| `src/credentials/` | Per-person credentials, CLAUDE.md and git identity: value checks, Key Vault and local encrypted stores, metadata rows |
+| `src/virtual-agents/` | Virtual agents: flag and settings, lifecycle, limits, launch tokens, plugins, store, sign-ins, sweep and views |
+| `src/assistant/`, `src/app/assistant/` | The HMCTS Assistant. Stores by concern (`conversation-row.ts`, `assistant-store.ts`, `conversation-store.ts`, `local-chat-store.ts`, `session-store.ts`, `artefact-store.ts`, `search-store.ts`, …), each beside a pure `<name>.ts`: exports, lookups, uploads, shares, forks, models, memory, templates, Welsh. Settings are `components/assistant/SettingsDialog.tsx` |
+| `src/port-viewer/` | The viewer that serves virtual agents' web servers on `AGENT_HUB_VIEWER_HOST`, and the ticket route `/assistant/ports/{id}/{port}` hands out |
+| `src/realtime/` | `hub_events` NOTIFY payloads, the per-pod LISTEN connection and in-process hub, SSE framing, the agent and UI streams |
+| `src/orchestrator/`, `src/cli/orchestrator.ts` | The virtual-agent orchestrator, run from the same image. Nothing here uses the `@/` alias |
+| `src/platform/` | Where the database is (`database-target.ts`) and whether a process may read the Key Vault (`secrets.ts`) |
+| `src/health/` | The probes behind `/health`, `/health/liveness` and `/health/readiness`, which query no database |
 | `src/store/` | Prisma singleton, `DATABASE_URL` assembly, the boot-time migrator |
-| `prisma/migrations/` | Hand-written SQL, applied by `src/store/migrate.ts` before the server starts. `schema.prisma` mirrors it for the client |
+| `prisma/migrations/` | Hand-written SQL, applied by `src/store/migrate.ts` before the server starts. `schema.prisma` mirrors it |
+| `test/integration/`, `test/e2e/` | Tests that need Postgres, and the Playwright suite |
 
 ## Conventions
 
@@ -62,8 +68,9 @@ change it first when the contract changes.
 - **Never a bare `.sort()`.** Pass a comparator; strings sort by code point.
 - **Comments say why**, state the current rule rather than its history, and are changed with the behaviour they
   describe.
-- **Tests are named `should <behaviour> when <condition>`.** Unit tests sit beside the code as `<name>.test.ts`;
-  tests that need Postgres live in `test/integration/`.
+- **Every test name starts `should <behaviour>`**, adding `when <condition>` where a condition is what sets it apart
+  from its neighbours. Unit tests sit beside the code as `<name>.test.ts`, except most rendered-component tests, which
+  are in `src/components/__tests__/`; tests that need Postgres live in `test/integration/`.
 
 ## Gates
 
