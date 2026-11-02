@@ -12,7 +12,7 @@
 #   apply          write approved Welsh into a clone on a branch; --pr opens a draft PR
 #   verify         prove every Welsh value a branch changed came from the WLU
 #
-# Guide: docs/how-to/manage-welsh-translations.md in cft-workspace
+# Guide: the plugin's README.md
 #
 # Welsh text only ever comes from the Welsh Language Unit — either a catalogue
 # row or a returned spreadsheet. Nothing here translates.

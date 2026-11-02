@@ -42,7 +42,6 @@ export function ensureClone(relPath: string): string {
 /** One repo's entry in workspace.yaml, as either form the manifest allows: `{ url: … }` on one line, or one key a line. */
 export interface ManifestEntry {
   url?: string;
-  welsh?: boolean;
 }
 
 /** workspace.yaml's repos, by workspace path; none when there is no manifest or it cannot be read. */

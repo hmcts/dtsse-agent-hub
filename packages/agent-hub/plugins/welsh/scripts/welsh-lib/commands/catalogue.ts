@@ -12,20 +12,25 @@ import { REVIEW_FILE, reviewMarkdown } from "../review.ts";
 
 /** Sets a service up: a welsh/ folder in its home repo, committed on a branch, and a draft PR there with --pr. */
 export async function init(argv: string[]): Promise<unknown> {
-  const { values } = parseArgs({ args: argv, options: { service: { type: "string" }, pr: { type: "boolean" } } });
+  const { values } = parseArgs({ args: argv, options: { service: { type: "string" }, pr: { type: "boolean" }, repo: { type: "string" } } });
   const service = requireService(values.service);
   if (!process.env[HOME_OVERRIDE]) {
+    // A service with no Welsh yet has no home repo to find, so --repo says which of its repos to put welsh/ in.
+    const repo = values.repo?.replace(/\/+$/, "");
+    if (repo !== undefined && !repo.startsWith(`apps/${service}/`)) {
+      fail(`--repo must be one of ${service}'s repos, apps/${service}/<repo>`);
+    }
     const done = inHome<{ created: string[] }>(
       service,
       ["init", "--service", service],
-      { branch: branchName(`${service}-init`), pr: Boolean(values.pr) },
+      { branch: branchName(`${service}-init`), pr: Boolean(values.pr), ...(repo === undefined ? {} : { repo }) },
       () => ({
         message: `Set up the ${service} Welsh catalogue`,
         title: `Welsh catalogue: set up ${service}`,
         body: "Adds an empty `welsh/catalogue.csv`, a `welsh/config.yaml` to fill in with the repos to scan, and `welsh/returns/` for the Welsh Language Unit's returns."
       })
     );
-    say(done.pr ? `Draft PR: ${done.pr}` : done.branch ? `Committed on ${done.branch} in ${homeRepo(service)}.` : `${service} is already set up.`);
+    say(done.pr ? `Draft PR: ${done.pr}` : done.branch ? `Committed on ${done.branch} in ${repo ?? homeRepo(service)}.` : `${service} is already set up.`);
     return { service, ...done.result, branch: done.branch, pr: done.pr };
   }
   const created: string[] = [];
@@ -151,7 +156,7 @@ function legacyInHome(service: string, argv: string[], pr: boolean): unknown {
 }
 
 const CONFIG_TEMPLATE = (service: string) => `# Welsh translation settings for ${service}. Read by the agent-hub welsh plugin.
-# Reference: docs/reference/welsh-catalogue-format.md
+# Reference: the agent hub welsh plugin's README (hmcts/dtsse-agent-hub, packages/agent-hub/plugins/welsh)
 
 # Repos to scan, and the adapter for each: "." for this repo, or another of the
 # service's repos by its path in cft-workspace.

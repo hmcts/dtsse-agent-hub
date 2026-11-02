@@ -8,12 +8,11 @@ import { test } from "node:test";
 const ws = mkdtempSync(join(tmpdir(), "welsh-cat-"));
 process.env.CFT_WELSH_WORKSPACE = ws;
 mkdirSync(join(ws, "apps", "demo", "demo-app", "welsh"), { recursive: true });
-// Each service's Welsh is in its home repo, the one workspace.yaml marks `welsh: true`.
-writeFileSync(
-  join(ws, "workspace.yaml"),
-  "repos:\n  apps/demo/demo-app: { url: hmcts/demo-app, welsh: true }\n  apps/other/other-app: { url: hmcts/other-app, welsh: true }\n"
-);
+// Each service's Welsh is in its home repo: whichever of its repos has welsh/config.yaml.
+writeFileSync(join(ws, "workspace.yaml"), "repos:\n  apps/demo/demo-app: { url: hmcts/demo-app }\n  apps/other/other-app: { url: hmcts/other-app }\n");
 mkdirSync(join(ws, "apps", "other", "other-app", "welsh"), { recursive: true });
+writeFileSync(join(ws, "apps", "demo", "demo-app", "welsh", "config.yaml"), "repos: []\n");
+writeFileSync(join(ws, "apps", "other", "other-app", "welsh", "config.yaml"), "repos: []\n");
 
 const { cataloguePath, loadCatalogue, lookup, search } = await import("../catalogue.ts");
 const { parseCsv, toCsv } = await import("../csv.ts");

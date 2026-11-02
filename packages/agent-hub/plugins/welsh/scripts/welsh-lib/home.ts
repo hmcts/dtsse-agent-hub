@@ -1,9 +1,9 @@
 /**
  * Where a service's Welsh lives: a welsh/ folder (catalogue.csv, config.yaml,
- * returns/) in one of its own repos, its home repo, which its workspace.yaml
- * entry marks with `welsh: true`:
- *
- *   apps/cath/cath-service: { url: hmcts/cath-service, welsh: true }
+ * returns/) in one of its own repos, its home repo. Nothing names it: the home
+ * repo is whichever of the service's repos in workspace.yaml has
+ * welsh/config.yaml on its default branch, so setting a service up is adding
+ * that folder to its repo.
  *
  * The catalogue is read from the home repo's latest default branch, never a
  * local checkout that may be behind it or carry someone's work in progress,
@@ -12,12 +12,13 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureClone, manifestEntries, tempWorktree } from "./clones.ts";
 import { COMMIT_TRAILER, commit, defaultBranch, draftPr, git, PR_FOOTER } from "./git.ts";
+import { WORKSPACE } from "./paths.ts";
 
 /** This CLI, which a change runs again in its worktree. */
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "cli.ts");
@@ -28,24 +29,76 @@ export const HOME_OVERRIDE = "CFT_WELSH_HOME";
 /** A home repo fetched this recently is read as it is: a search runs once per keystroke on the Welsh page. */
 const FRESH_MS = 60_000;
 
+/** A home repo found is trusted this long, and one not found is looked for again after the shorter wait. */
+const FOUND_MS = 10 * 60_000;
+const MISSING_MS = 60_000;
+
 /**
- * The workspace path of a service's home repo, or null when no entry under apps/<service>/ is marked. More than one
- * is refused rather than one chosen, since reads and pull requests would otherwise go to whichever came first.
+ * The workspace path of a service's home repo: the one of its repos under apps/<service>/ in workspace.yaml with
+ * welsh/config.yaml on its default branch, or null when none has. More than one is refused rather than one chosen,
+ * since reads and pull requests would otherwise go to whichever came first. Looking costs a fetch or a GitHub call per
+ * repo, and a search runs once per keystroke on the Welsh page, so the answer is kept for a while.
  */
 export function homeRepo(service: string): string | null {
-  const prefix = `apps/${service}/`;
-  const marked = Object.entries(manifestEntries())
-    .filter(([path, entry]) => path.startsWith(prefix) && entry?.welsh === true)
-    .map(([path]) => path);
-  if (marked.length > 1) {
-    throw new Error(`${service} has more than one repo marked welsh: true in workspace.yaml (${marked.join(", ")}); a service keeps its Welsh in one`);
+  const cacheFile = join(WORKSPACE, "apps", service, ".welsh-work", "home.json");
+  try {
+    const cached = JSON.parse(readFileSync(cacheFile, "utf8")) as { home: string | null; at: number };
+    if (Date.now() - cached.at < (cached.home === null ? MISSING_MS : FOUND_MS)) {
+      return cached.home;
+    }
+  } catch {
+    // Not looked for yet, or the note is unreadable: look again.
   }
-  return marked[0] ?? null;
+  const prefix = `apps/${service}/`;
+  const found = Object.entries(manifestEntries())
+    .filter(([path, entry]) => path.startsWith(prefix) && hasWelsh(path, entry?.url))
+    .map(([path]) => path);
+  if (found.length > 1) {
+    throw new Error(`${service} has a welsh/ folder in more than one repo (${found.join(", ")}); a service keeps its Welsh in one`);
+  }
+  const home = found[0] ?? null;
+  if (existsSync(join(WORKSPACE, "apps", service))) {
+    mkdirSync(dirname(cacheFile), { recursive: true });
+    writeFileSync(cacheFile, JSON.stringify({ home, at: Date.now() }));
+  }
+  return home;
+}
+
+/**
+ * Whether a repo has welsh/config.yaml on its default branch: asked of its clone when there is one, after a fetch, and
+ * of GitHub otherwise, so finding a service's home repo clones nothing. A directory that is not a clone (a test's
+ * scratch tree) is looked at as it is. Any GitHub answer but "not found", such as a sign-in that has run out, is said
+ * rather than taken for a repo without Welsh.
+ */
+function hasWelsh(path: string, url: string | undefined): boolean {
+  const abs = resolve(WORKSPACE, path);
+  if (existsSync(join(abs, ".git"))) {
+    if (!fetchedRecently(abs)) {
+      git(abs, ["fetch", "--quiet", "origin"], true);
+    }
+    const base = defaultBranch(abs);
+    const ref = git(abs, ["rev-parse", "--verify", "--quiet", `origin/${base}`], true) ? `origin/${base}` : "HEAD";
+    return spawnSync("git", ["-C", abs, "cat-file", "-e", `${ref}:welsh/config.yaml`]).status === 0;
+  }
+  if (existsSync(abs)) {
+    return existsSync(join(abs, "welsh", "config.yaml"));
+  }
+  if (!url) {
+    return false;
+  }
+  const asked = spawnSync("gh", ["api", `repos/${url}/contents/welsh/config.yaml`, "--silent"], { encoding: "utf8" });
+  if (asked.status === 0) {
+    return true;
+  }
+  if (/HTTP 404|Not Found/i.test(`${asked.stderr}${asked.stdout}`)) {
+    return false;
+  }
+  throw new Error(`could not check ${url} for a welsh/ folder: ${(asked.stderr || asked.stdout || String(asked.error ?? "")).trim()}`);
 }
 
 /** Why a service has no Welsh yet, in words a developer can act on. */
 export function noHome(service: string): string {
-  return `${service} has no Welsh catalogue yet: mark the repo that should hold it with \`welsh: true\` in workspace.yaml, then run welsh init --service ${service}`;
+  return `${service} has no Welsh catalogue yet: none of its repos has a welsh/config.yaml. Set one up with welsh init --service ${service} --repo apps/${service}/<repo> --pr`;
 }
 
 const read = new Map<string, string>();
@@ -111,6 +164,8 @@ function fetchedRecently(clone: string): boolean {
 export interface HomeChange {
   /** The branch the change is committed on. */
   branch: string;
+  /** The repo to make it in, when the service has no home repo yet: what `init --repo` sets up. */
+  repo?: string;
   /** Push and open a draft pull request; without it the commit stays on a local branch of the home repo's clone. */
   pr: boolean;
 }
@@ -136,9 +191,12 @@ export interface HomeChanged<T> {
  * and the branch is removed, when it changed nothing.
  */
 export function inHome<T>(service: string, argv: string[], change: HomeChange, describe: (result: T) => HomeChangeText): HomeChanged<T> {
-  const home = homeRepo(service);
+  const home = homeRepo(service) ?? change.repo ?? null;
   if (home === null) {
     throw new Error(noHome(service));
+  }
+  if (change.repo !== undefined && change.repo !== home) {
+    throw new Error(`${service}'s Welsh is already in ${home}, not ${change.repo}`);
   }
   const wt = tempWorktree(ensureClone(home), change.branch);
   let keep = false;
