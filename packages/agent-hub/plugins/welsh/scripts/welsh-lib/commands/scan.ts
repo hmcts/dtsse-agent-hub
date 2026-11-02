@@ -17,7 +17,7 @@ import { ensureClone, latestTree } from "../clones.ts";
 import { loadConfig, type RepoConfig } from "../config.ts";
 import { fail, requireService, say } from "../io.ts";
 import { matchKey } from "../normalise.ts";
-import { WORKSPACE } from "../paths.ts";
+import { workspace } from "../paths.ts";
 import { saveRequest, workDir } from "../requests.ts";
 import { type Finding, scanRepo } from "../scan.ts";
 
@@ -41,7 +41,7 @@ export async function scanCmd(argv: string[]): Promise<unknown> {
   const all: Finding[] = [];
   const perRepo: Record<string, unknown> = {};
   for (const repo of repos) {
-    const abs = isAbsolute(repo.path) || repo.path.startsWith("..") ? resolve(WORKSPACE, repo.path) : ensureClone(repo.path);
+    const abs = isAbsolute(repo.path) || repo.path.startsWith("..") ? resolve(workspace(), repo.path) : ensureClone(repo.path);
     if (!existsSync(abs)) {
       fail(`${repo.path} does not exist`);
     }
@@ -114,7 +114,7 @@ export async function scanCmd(argv: string[]): Promise<unknown> {
 export function resolveRepos(service: string, repoArg: string | undefined, adapters: string[] | undefined): RepoConfig[] {
   const config = loadConfig(service);
   if (repoArg) {
-    const rel = relative(WORKSPACE, resolve(repoArg));
+    const rel = relative(workspace(), resolve(repoArg));
     const known = config.repos.find((r) => r.path === rel);
     return [{ ...(known ?? { path: rel }), ...(adapters?.length ? { adapters } : {}) }];
   }

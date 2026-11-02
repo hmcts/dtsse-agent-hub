@@ -17,7 +17,7 @@ import type { Leaf } from "../adapters/types.ts";
 import { loadCatalogue } from "../catalogue.ts";
 import { defaultBranch, git } from "../git.ts";
 import { requireService, say } from "../io.ts";
-import { WORKSPACE } from "../paths.ts";
+import { workspace } from "../paths.ts";
 import { readReturn } from "../returns.ts";
 import { ADAPTERS } from "../scan.ts";
 import { type Pair, verify } from "../verify.ts";
@@ -31,7 +31,7 @@ export async function verifyCmd(argv: string[]): Promise<unknown> {
   const service = requireService(values.service);
   const results = [];
   for (const repo of resolveRepos(service, values.repo, undefined)) {
-    const abs = resolve(WORKSPACE, repo.path);
+    const abs = resolve(workspace(), repo.path);
     const base = values.base ?? `origin/${defaultBranch(abs)}`;
     const mergeBase = git(abs, ["merge-base", base, "HEAD"]);
     const changed = [

@@ -32,4 +32,13 @@ export function findWorkspace(env: NodeJS.ProcessEnv = process.env, cwd: string 
   return found;
 }
 
-export const WORKSPACE = findWorkspace();
+let found: string | undefined;
+
+/**
+ * The workspace, found the first time something needs it rather than when this module loads, so the parts of the
+ * engine that never touch a workspace (the adapters, the spreadsheets) run anywhere, a CI checkout of the hub included.
+ */
+export function workspace(): string {
+  found ??= findWorkspace();
+  return found;
+}

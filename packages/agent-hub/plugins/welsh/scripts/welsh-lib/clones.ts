@@ -14,11 +14,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
 import { defaultBranch, git } from "./git.ts";
-import { WORKSPACE } from "./paths.ts";
+import { workspace } from "./paths.ts";
 
 /** The clone at a workspace-relative path, cloned from workspace.yaml first if it is not there yet. */
 export function ensureClone(relPath: string): string {
-  const abs = resolve(WORKSPACE, relPath);
+  const abs = resolve(workspace(), relPath);
   if (existsSync(join(abs, ".git"))) {
     return abs;
   }
@@ -46,7 +46,7 @@ export interface ManifestEntry {
 
 /** workspace.yaml's repos, by workspace path; none when there is no manifest or it cannot be read. */
 export function manifestEntries(): Record<string, ManifestEntry> {
-  const manifest = join(WORKSPACE, "workspace.yaml");
+  const manifest = join(workspace(), "workspace.yaml");
   if (!existsSync(manifest)) {
     return {};
   }

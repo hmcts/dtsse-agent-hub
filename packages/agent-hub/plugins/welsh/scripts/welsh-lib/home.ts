@@ -18,7 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureClone, manifestEntries, tempWorktree } from "./clones.ts";
 import { COMMIT_TRAILER, commit, defaultBranch, draftPr, git, PR_FOOTER } from "./git.ts";
-import { WORKSPACE } from "./paths.ts";
+import { workspace } from "./paths.ts";
 
 /** This CLI, which a change runs again in its worktree. */
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "cli.ts");
@@ -40,7 +40,7 @@ const MISSING_MS = 60_000;
  * repo, and a search runs once per keystroke on the Welsh page, so the answer is kept for a while.
  */
 export function homeRepo(service: string): string | null {
-  const cacheFile = join(WORKSPACE, "apps", service, ".welsh-work", "home.json");
+  const cacheFile = join(workspace(), "apps", service, ".welsh-work", "home.json");
   try {
     const cached = JSON.parse(readFileSync(cacheFile, "utf8")) as { home: string | null; at: number };
     if (Date.now() - cached.at < (cached.home === null ? MISSING_MS : FOUND_MS)) {
@@ -57,7 +57,7 @@ export function homeRepo(service: string): string | null {
     throw new Error(`${service} has a welsh/ folder in more than one repo (${found.join(", ")}); a service keeps its Welsh in one`);
   }
   const home = found[0] ?? null;
-  if (existsSync(join(WORKSPACE, "apps", service))) {
+  if (existsSync(join(workspace(), "apps", service))) {
     mkdirSync(dirname(cacheFile), { recursive: true });
     writeFileSync(cacheFile, JSON.stringify({ home, at: Date.now() }));
   }
@@ -71,7 +71,7 @@ export function homeRepo(service: string): string | null {
  * rather than taken for a repo without Welsh.
  */
 function hasWelsh(path: string, url: string | undefined): boolean {
-  const abs = resolve(WORKSPACE, path);
+  const abs = resolve(workspace(), path);
   if (existsSync(join(abs, ".git"))) {
     if (!fetchedRecently(abs)) {
       git(abs, ["fetch", "--quiet", "origin"], true);

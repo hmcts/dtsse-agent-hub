@@ -23,7 +23,7 @@ import { loadConfig, type RepoConfig } from "../config.ts";
 import { COMMIT_TRAILER, commit, draftPr, git, PR_FOOTER } from "../git.ts";
 import { branchName } from "../home.ts";
 import { fail, requireService, say } from "../io.ts";
-import { WORKSPACE } from "../paths.ts";
+import { workspace } from "../paths.ts";
 import { readReturn } from "../returns.ts";
 import { ADAPTERS, type Finding, scanRepo } from "../scan.ts";
 import { tokenProblems } from "../tokens.ts";
@@ -52,7 +52,7 @@ export async function applyCmd(argv: string[]): Promise<unknown> {
     fail(`${service}'s welsh/config.yaml lists ${repos.length} repos — pick one with --repo`);
   }
   const repo = repos[0];
-  const clone = isAbsolute(repo.path) || repo.path.startsWith("..") ? resolve(WORKSPACE, repo.path) : ensureClone(repo.path);
+  const clone = isAbsolute(repo.path) || repo.path.startsWith("..") ? resolve(workspace(), repo.path) : ensureClone(repo.path);
   const batch = values.from === "catalogue" ? `catalogue-${new Date().toISOString().slice(0, 10)}` : basename(resolve(values.from)).replace(/\.xlsx$/i, "");
   const branch = values["dry-run"] ? `welsh-dry-run/${process.pid}-${Date.now()}` : branchName(batch);
   const wt = tempWorktree(clone, branch);

@@ -5,7 +5,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { WORKSPACE } from "./paths.ts";
+import { workspace } from "./paths.ts";
 
 /** Commentary for a human. Never stdout — that channel carries the result. */
 export function say(message: string): void {
@@ -23,7 +23,7 @@ export function requireService(value: string | undefined): string {
   if (!value) {
     fail("--service is required");
   }
-  if (!existsSync(join(WORKSPACE, "apps", value))) {
+  if (!existsSync(join(workspace(), "apps", value))) {
     fail(`no product apps/${value} in this workspace`);
   }
   return value;

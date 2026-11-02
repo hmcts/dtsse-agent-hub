@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { matchKey } from "./normalise.ts";
-import { WORKSPACE } from "./paths.ts";
+import { workspace } from "./paths.ts";
 import { type RequestRow, writeRequest } from "./xlsx.ts";
 
 /**
@@ -29,7 +29,7 @@ export function contentRef(service: string, english: string): string {
  * service's other scaffolding and ignored there, since the catalogue itself is in the service's home repo.
  */
 export function workDir(service: string, ...sub: string[]): string {
-  const dir = join(WORKSPACE, "apps", service, ".welsh-work", ...sub);
+  const dir = join(workspace(), "apps", service, ".welsh-work", ...sub);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
