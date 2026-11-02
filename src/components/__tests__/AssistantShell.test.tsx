@@ -151,6 +151,8 @@ describe("AssistantShell", () => {
       const badge = mark.querySelector('[data-badge="working"]');
       expect(badge !== null).toBe(working);
       expect(badge?.classList.contains("status-pulse") ?? false).toBe(working);
+      expect(badge?.classList.contains("bg-current") ?? false).toBe(working);
+      expect(badge?.parentElement?.classList.contains("border-asst-rail") ?? false).toBe(working);
     }
   );
 
@@ -190,6 +192,8 @@ describe("AssistantShell", () => {
       const badge = mark.querySelector('[data-badge="working"]');
       expect(badge !== null).toBe(working);
       expect(badge?.classList.contains("status-pulse") ?? false).toBe(working);
+      expect(badge?.classList.contains("bg-current") ?? false).toBe(working);
+      expect(badge?.parentElement?.classList.contains("border-asst-rail") ?? false).toBe(working);
     }
   );
 
