@@ -47,7 +47,7 @@ const INPUT =
   "min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 font-plex-mono text-sm text-asst-text outline-hidden focus:border-asst-accent-line";
 const PRIMARY = "shrink-0 rounded-[9px] bg-asst-accent px-3.5 py-1.5 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover";
 const CONNECT =
-  "h-[34px] shrink-0 rounded-[9px] border border-asst-accent-line px-3.5 text-[13px] font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink";
+  "h-[34px] shrink-0 rounded-[9px] border border-asst-accent-line px-3.5 text-[13px] font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink disabled:opacity-40";
 const FOOTER = "h-[42px] rounded-[10px] px-5 text-sm";
 const FOOTER_PRIMARY = `${FOOTER} bg-asst-accent font-semibold text-asst-ink disabled:opacity-40`;
 const FOOTER_QUIET = `${FOOTER} border border-asst-strong font-medium text-asst-body hover:bg-asst-active`;
@@ -328,6 +328,17 @@ function ConnectionRow({
   const [connecting, setConnecting] = useState(false);
   const answer = checklistState(status?.stored === true, login, now);
   const state = connectionState(answer, login, status, now);
+  // A sign-in asked for here waits on the restart the ask caused: "Connecting…" while the assistant starts again, and
+  // Connect back once it has started, or failed, with no code to show, so a pod that never relays one does not leave
+  // the row saying it is connecting for good.
+  const [restarted, setRestarted] = useState(false);
+  const asked = connecting && signsInOnRequest(kind);
+  if (asked && starting && !restarted) {
+    setRestarted(true);
+  } else if (asked && !starting && restarted && answer !== "login") {
+    setConnecting(false);
+    setRestarted(false);
+  }
   // What the person pastes to connect this one, or `null` when their assistant signs in and relays a code. The
   // connector's own answer, so a kind with no sign-in behind it is never offered a note about one never coming.
   const pasted = connector.paste;
@@ -339,25 +350,14 @@ function ConnectionRow({
   // Where this stands in the screen's words, which the derived model-access row reads from as well so the two cannot
   // word one credential two ways. `null` is a row with a control to press instead of anything to read.
   const words = screenDetail(state, pasted, connecting || starting);
-  let right: React.ReactNode;
-  if (words === null && signsInOnRequest(kind)) {
-    // Its pod relays this one only once asked, so Connect is `reconnectSignIn`: record the ask and restart. Nothing is
-    // stored for a row offering Connect, so there is nothing for it to delete and no question to ask first.
-    right = (
-      <ActionForm
-        action={reconnect}
-        label={`Connect ${connector.name}`}
-        className="flex shrink-0 flex-col items-end gap-1"
-        onSuccess={() => setConnecting(true)}
-      >
-        <input type="hidden" name="id" value={assistantId} />
-        <input type="hidden" name="kind" value={kind} />
-        <button type="submit" className={CONNECT}>
-          Connect
-        </button>
-      </ActionForm>
-    );
-  } else if (words === null) {
+  // A sign-in made on request, with nothing live and nothing lapsed, is one its pod is not relaying: off the `gateway`
+  // route because nobody asked, and on it because this boot's relay never reached the person. Connect is
+  // `reconnectSignIn`, recording the ask and restarting, sent as `keep=stored` so it deletes nothing: the row shows
+  // nothing stored, which is why it asks no question first, but a credential saved since would be the one every agent
+  // of theirs uses.
+  const askForm = words === null && signsInOnRequest(kind);
+  let right: React.ReactNode = null;
+  if (words === null && !askForm) {
     right = (
       <button type="button" onClick={() => setConnecting(true)} className={CONNECT}>
         Connect
@@ -367,7 +367,7 @@ function ConnectionRow({
     right = <span className="shrink-0 text-[13px] font-medium text-asst-ok">{words}</span>;
   } else if (again) {
     right = <span className="shrink-0 text-[13px] text-asst-warn">{words}</span>;
-  } else {
+  } else if (!askForm) {
     right = <span className="shrink-0 text-[13px] text-asst-accent-soft">{words}</span>;
   }
   // One thing to do at a time, chosen here rather than by three conditions that have to agree: a relayed sign-in and
@@ -395,18 +395,39 @@ function ConnectionRow({
   } else if (state !== "connected" && connecting) {
     below = <p className="text-xs text-asst-faint">Your assistant asks for this as it starts. The sign-in will appear here.</p>;
   }
+  const head = (control: React.ReactNode) => (
+    <div className="flex items-center gap-3.5">
+      <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-asst-active text-sm font-semibold">
+        {connector.initial}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col leading-tight">
+        <span className="text-[15px] font-medium">{connector.name}</span>
+        <span className="text-[13px] text-asst-muted">{connector.desc}</span>
+      </div>
+      {control}
+    </div>
+  );
   return (
     <li className={`flex flex-col gap-2.5 bg-asst-bg px-4 py-3.5 ${first ? "" : "border-t border-asst-line"}`}>
-      <div className="flex items-center gap-3.5">
-        <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-asst-active text-sm font-semibold">
-          {connector.initial}
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          <span className="text-[15px] font-medium">{connector.name}</span>
-          <span className="text-[13px] text-asst-muted">{connector.desc}</span>
-        </div>
-        {right}
-      </div>
+      {/* The form holds the whole head of the row, so a refusal reads across it rather than squeezed under the button. */}
+      {askForm ? (
+        <ActionForm action={reconnect} label={`Connect ${connector.name}`} className="flex flex-col gap-2.5" onSuccess={() => setConnecting(true)}>
+          {({ pending }) => (
+            <>
+              <input type="hidden" name="id" value={assistantId} />
+              <input type="hidden" name="kind" value={kind} />
+              <input type="hidden" name="keep" value="stored" />
+              {head(
+                <button type="submit" disabled={pending} className={CONNECT}>
+                  Connect
+                </button>
+              )}
+            </>
+          )}
+        </ActionForm>
+      ) : (
+        head(right)
+      )}
       {below}
       {/*
        * Only a lapsed key the person pastes reaches here — `again` has the rest — so the way out is the Connect this

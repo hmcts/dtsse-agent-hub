@@ -60,10 +60,15 @@ export type MsalCacheOptions = {
 
 /** An MSAL token cache shaped like the one `az login` writes, with `accessTokens` large access tokens. */
 export function msalCache({ refresh = podSecrets.azureRefresh, accessTokens = 3, padding = 0 }: MsalCacheOptions = {}): Record<string, unknown> {
+  const tenant = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
+  const home = `oid-owner.${tenant}`;
+  const environment = "login.microsoftonline.com";
+  const clientId = "04b07795-8ddb-461a-bbee-02f9e1bf7b46";
   const account = {
-    home_account_id: "oid-owner.tid",
-    environment: "login.microsoftonline.com",
-    realm: "531ff96d-0ae9-462a-8d2d-bec7c0b42082",
+    home_account_id: home,
+    local_account_id: "oid-owner",
+    environment,
+    realm: tenant,
     username: "olive@hmcts.net",
     authority_type: "MSSTS"
   };
@@ -73,10 +78,12 @@ export function msalCache({ refresh = podSecrets.azureRefresh, accessTokens = 3,
   }
   return {
     AccessToken,
-    Account: { "oid-owner.tid-login.microsoftonline.com-tid": account },
-    IdToken: { "id-1": { secret: `id-${"i".repeat(padding)}` } },
-    RefreshToken: { "rt-1": { secret: refresh, credential_type: "RefreshToken" } },
-    AppMetadata: { "app-1": { client_id: "04b07795" } }
+    Account: { [`${home}-${environment}-${tenant}`]: account },
+    IdToken: {
+      "id-1": { secret: `id-${"i".repeat(padding)}`, credential_type: "IdToken", home_account_id: home, environment, realm: tenant, client_id: clientId }
+    },
+    RefreshToken: { "rt-1": { secret: refresh, credential_type: "RefreshToken", home_account_id: home, environment, client_id: clientId, family_id: "1" } },
+    AppMetadata: { "app-1": { client_id: clientId, environment, family_id: "1" } }
   };
 }
 

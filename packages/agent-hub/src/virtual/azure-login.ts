@@ -11,9 +11,10 @@ import { FatalError, say } from "./phases.ts";
 import { run } from "./process.ts";
 
 /**
- * What `azureLogin` does when the pod has no working Azure sign-in. Azure is optional, so a pod's boot restores a
- * stored one (`restore`) and relays a device code only once the owner has asked for one from their settings
- * (`requested`), in the background. `relay` relays whether or not anybody asked, for a hand-run in a pod.
+ * What `azureLogin` does when the pod has no working Azure sign-in. A pod's boot restores a stored one (`restore`)
+ * and relays a device code, in the background, only when the hub says one is wanted (`requested`): on the `gateway`
+ * route, where Azure is the model credential, always, and otherwise once the owner has asked for one. `relay` relays
+ * whether or not anybody asked, for a hand-run in a pod.
  */
 export type AzureLoginMode = "relay" | "restore" | "requested";
 
@@ -106,7 +107,8 @@ async function relayAzureCode(api: Api, id: string, env: Env, mode: AzureLoginMo
   if (mode !== "requested") {
     throw new Error(`az login exited ${relayed.code}`);
   }
-  // The owner asked once, so one code is all they are shown: the next is theirs to ask for from their settings.
+  // One code per boot is all the owner is shown, so a code nobody uses is not replaced by another for ever: the
+  // next comes when they ask for it, or on the `gateway` route when the pod next starts.
   await reportAzureNotConnected(
     api,
     id,
@@ -139,8 +141,9 @@ async function completeAzureSignIn(api: Api, id: string, env: Env): Promise<void
 
 /**
  * Restores the Azure sign-in the hub holds, or, by `mode`, relays a device-code sign-in to the owner. See
- * `AzureLoginMode`: a pod's boot never relays one the owner did not ask for, because Azure only lets Claude act as
- * them with `az` and gives Jenkins their object id, and nothing else in the pod waits for it.
+ * `AzureLoginMode`: a pod's boot relays one only when the hub says it is wanted, because off the `gateway` route
+ * Azure only lets Claude act as them with `az` and gives Jenkins their object id, and nothing else in the pod waits
+ * for it.
  */
 export async function azureLogin({ api = createApi(), env = process.env, mode = "relay" }: AzureLoginOptions = {}): Promise<AzureLoginResult> {
   const { id } = requireVirtualAgent(env);

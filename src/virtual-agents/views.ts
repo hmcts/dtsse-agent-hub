@@ -39,7 +39,8 @@ export function portLinks(row: Pick<VirtualAgentRow, "id" | "statefulsetName" | 
  * waits for any of them. Azure is signed in to only when the owner asks, from the Assistant's settings.
  *
  * On the `gateway` route Azure is not one of these: `az` is where that route's model credential comes from, so it is
- * needed rather than optional there, and `optionalCredentials` is what keeps it out of both lists at once.
+ * needed rather than optional there, its pod relays a sign-in at boot whenever none it has works, and
+ * `optionalCredentials` is what keeps it out of both lists at once.
  */
 export const OPTIONAL_CREDENTIALS: CredentialKind[] = ["azure", "jenkins", "atlassian"];
 

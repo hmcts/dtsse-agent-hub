@@ -158,7 +158,7 @@ export async function pasteLoginCode(form: FormData): Promise<ActionResult<{ con
 /**
  * Signs the owner in to GitHub, Azure or Atlassian again: their stored credential goes, and the agent, if running,
  * restarts so its pod relays a fresh sign-in. The credential is the owner's, so their other virtual agents lose it
- * too.
+ * too. A form sending `keep=stored` restarts without deleting anything (see `reconnectSignIn` in logins).
  */
 export async function reconnectSignIn(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
   return await runAction<{ confirmation: string }>("reconnect sign-in", async () => {
@@ -175,7 +175,7 @@ export async function reconnectSignIn(form: FormData): Promise<ActionResult<{ co
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
-    const row = await reconnect(prisma, backend.store, viewer.oid, id, kind);
+    const row = await reconnect(prisma, backend.store, viewer.oid, id, kind, { keepStored: form.get("keep") === "stored" });
     revalidate();
     const title = SIGN_IN_TITLES[kind];
     return {

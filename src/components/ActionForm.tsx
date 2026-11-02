@@ -12,7 +12,8 @@ export type FormAction = (form: FormData) => Promise<ActionResult<object & { con
 /**
  * A form posting to a server action, showing its refusal or confirmation, and re-rendering the page on success, or
  * going to the page `navigate` names for the result. A form whose fields are controlled by its parent passes
- * `keepValues`, since resetting them would show stale text.
+ * `keepValues`, since resetting them would show stale text. Children given as a function are told whether a post is
+ * in flight, so a form whose submit must not be sent twice can disable it.
  */
 export function ActionForm<T extends object & { confirmation?: string }>({
   action,
@@ -37,7 +38,7 @@ export function ActionForm<T extends object & { confirmation?: string }>({
    */
   onRefused?: () => void;
   navigate?: (result: T) => string;
-  children: React.ReactNode;
+  children: React.ReactNode | ((state: { pending: boolean }) => React.ReactNode);
 }) {
   const router = useRouter();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -81,7 +82,7 @@ export function ActionForm<T extends object & { confirmation?: string }>({
   // and a native GET would put every field, a pasted credential included, in the URL.
   return (
     <form method="post" onSubmit={submit} aria-label={label} aria-busy={pending} className={className}>
-      {children}
+      {typeof children === "function" ? children({ pending }) : children}
       {signedOut ? (
         <p role="status" className="text-xs text-red-300">
           <SessionEndedMessage />

@@ -26,9 +26,9 @@ export const VIRTUAL_USAGE = `usage: ${CLI} virtual <command>
   status <phase> [detail…]    report a phase (${PHASES.join(", ")})
   azure-login [--restore-only | --if-requested]
                               restore the stored Azure sign-in, or relay a device-code sign-in. With
-                              --restore-only, never relay; with --if-requested, relay one only when the owner
-                              has asked for it from their settings. Either exits ${EXIT_NO_CREDENTIAL} when Azure stays
-                              unconnected. Configures the kube contexts after a sign-in that worked
+                              --restore-only, never relay; with --if-requested, relay one only when the hub
+                              says it is wanted: always on the gateway route, otherwise once the owner
+                              asks. Either exits ${EXIT_NO_CREDENTIAL} when Azure stays unconnected. Configures the kube contexts after a sign-in that worked
   kube-contexts               write the kubeconfig for the pod's own cluster and both AAT clusters, on the
                               owner's Azure sign-in, and select the pod's own; exit ${EXIT_NO_CREDENTIAL} when no cluster
                               answered, which is what an owner with no AKS access gets
