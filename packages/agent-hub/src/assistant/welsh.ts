@@ -327,6 +327,8 @@ export type WelshDeps = {
   env: Env;
   /** The cft-workspace checkout; `$VIRTUAL_AGENT_WORKSPACE` in a pod. */
   workspace: string;
+  /** Settles once the tools' dependencies are installed, or the attempt has failed; see `prepareWelsh`. */
+  ready?: Promise<void>;
   /** Makes the pod's copy of a bundled plugin; a test passes one that makes it somewhere of its own. */
   install?: (name: string, workspace: string) => string;
   say?: (message: string) => void;
@@ -339,6 +341,8 @@ export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void
   const dir = mkdtempSync(join(tmpdir(), "welsh-job-"));
   let answer: WelshAnswer;
   try {
+    // A job's time limit starts once the tools' first install is done, not while it waits for one.
+    await deps.ready;
     answer = await runIn(deps, frame, welshPaths(dir, frame));
   } catch (e) {
     answer = { error: "failed", detail: `That did not work: ${(e as Error).message}`.slice(0, MAX_DETAIL) };
@@ -397,18 +401,14 @@ export type WelshRunner = {
   idle: () => Promise<void>;
 };
 
-/**
- * Runs jobs beside the supervisor rather than behind it. Quick ones (`info`, `search`) run at most two at once,
- * since somebody is waiting on the page; the rest run one at a time, in the order they were started, because each
- * may clone, branch and push, and two at once in one checkout would get in each other's way.
- */
 /** Long enough for the first install of the tools' dependencies, which no job's own limit is. */
 const PREPARE_TIMEOUT_MS = 15 * 60_000;
 
 /**
  * Installs the Welsh tools' dependencies as the pod starts, when the owner ticked the plugin, so the first job does
- * not spend its own time limit on the install. A job that arrives meanwhile waits for it, since the script takes a
- * lock to install. Never throws: a failure is said, and the next job tries the install again.
+ * not spend its own time limit on the install. Jobs wait for this before they start (`ready` on their deps), so none
+ * is cut off by its own limit while the install runs. Never throws: a failure is said, and the next job tries the
+ * install again.
  */
 export async function prepareWelsh(deps: Pick<WelshDeps, "run" | "env" | "workspace" | "install" | "say">): Promise<void> {
   const say = deps.say ?? (() => {});
@@ -427,6 +427,11 @@ export async function prepareWelsh(deps: Pick<WelshDeps, "run" | "env" | "worksp
   }
 }
 
+/**
+ * Runs jobs beside the supervisor rather than behind it. Quick ones (`info`, `search`) run at most two at once,
+ * since somebody is waiting on the page; the rest run one at a time, in the order they were started, because each
+ * may clone, branch and push, and two at once in one checkout would get in each other's way.
+ */
 export function createWelshRunner(deps: WelshDeps & { maxQuick?: number }): WelshRunner {
   const say = deps.say ?? (() => {});
   const maxQuick = deps.maxQuick ?? MAX_RUNNING_QUICK;

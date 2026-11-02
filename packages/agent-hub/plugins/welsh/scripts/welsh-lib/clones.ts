@@ -12,6 +12,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import YAML from "yaml";
 import { defaultBranch, git } from "./git.ts";
 import { WORKSPACE } from "./paths.ts";
 
@@ -38,16 +39,30 @@ export function ensureClone(relPath: string): string {
   return abs;
 }
 
-/** `<org>/<repo>` for a path in workspace.yaml, or null. */
-export function manifestUrl(relPath: string): string | null {
+/** One repo's entry in workspace.yaml, as either form the manifest allows: `{ url: … }` on one line, or one key a line. */
+export interface ManifestEntry {
+  url?: string;
+  welsh?: boolean;
+}
+
+/** workspace.yaml's repos, by workspace path; none when there is no manifest or it cannot be read. */
+export function manifestEntries(): Record<string, ManifestEntry> {
   const manifest = join(WORKSPACE, "workspace.yaml");
   if (!existsSync(manifest)) {
-    return null;
+    return {};
   }
-  const line = readFileSync(manifest, "utf8")
-    .split("\n")
-    .find((l) => l.trim().startsWith(`${relPath}:`));
-  return line?.match(/url:\s*([\w.-]+\/[\w.-]+)/)?.[1] ?? null;
+  try {
+    const repos = (YAML.parse(readFileSync(manifest, "utf8")) as { repos?: unknown } | null)?.repos;
+    return repos && typeof repos === "object" ? (repos as Record<string, ManifestEntry>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** `<org>/<repo>` for a path in workspace.yaml, or null. */
+export function manifestUrl(relPath: string): string | null {
+  const url = manifestEntries()[relPath]?.url;
+  return typeof url === "string" && url !== "" ? url : null;
 }
 
 /**

@@ -12,13 +12,12 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureClone, tempWorktree } from "./clones.ts";
+import { ensureClone, manifestEntries, tempWorktree } from "./clones.ts";
 import { COMMIT_TRAILER, commit, defaultBranch, draftPr, git, PR_FOOTER } from "./git.ts";
-import { WORKSPACE } from "./paths.ts";
 
 /** This CLI, which a change runs again in its worktree. */
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "cli.ts");
@@ -29,20 +28,19 @@ export const HOME_OVERRIDE = "CFT_WELSH_HOME";
 /** A home repo fetched this recently is read as it is: a search runs once per keystroke on the Welsh page. */
 const FRESH_MS = 60_000;
 
-/** The workspace path of a service's home repo, or null when no entry under apps/<service>/ is marked. */
+/**
+ * The workspace path of a service's home repo, or null when no entry under apps/<service>/ is marked. More than one
+ * is refused rather than one chosen, since reads and pull requests would otherwise go to whichever came first.
+ */
 export function homeRepo(service: string): string | null {
-  const manifest = join(WORKSPACE, "workspace.yaml");
-  if (!existsSync(manifest)) {
-    return null;
-  }
   const prefix = `apps/${service}/`;
-  for (const line of readFileSync(manifest, "utf8").split("\n")) {
-    const entry = line.match(/^\s*([\w./-]+):\s*\{([^}]*)\}/);
-    if (entry?.[1]?.startsWith(prefix) && /\bwelsh:\s*true\b/.test(entry[2] ?? "")) {
-      return entry[1];
-    }
+  const marked = Object.entries(manifestEntries())
+    .filter(([path, entry]) => path.startsWith(prefix) && entry?.welsh === true)
+    .map(([path]) => path);
+  if (marked.length > 1) {
+    throw new Error(`${service} has more than one repo marked welsh: true in workspace.yaml (${marked.join(", ")}); a service keeps its Welsh in one`);
   }
-  return null;
+  return marked[0] ?? null;
 }
 
 /** Why a service has no Welsh yet, in words a developer can act on. */
@@ -82,10 +80,19 @@ export function welshDir(service: string): string {
     const scratch = mkdtempSync(join(tmpdir(), "welsh-home-"));
     process.once("exit", () => rmSync(scratch, { recursive: true, force: true }));
     // Only the welsh/ folder, so a large repo costs no more than its catalogue. A home repo without one gives an
-    // empty folder: the service is marked but not set up yet.
+    // empty folder: the service is marked but not set up yet. Any other failure, such as a sign-in a partial clone
+    // needs to fetch the files, is said as it is rather than taken for a service with no Welsh.
     const archive = spawnSync("git", ["-C", clone, "archive", "--format=tar", ref, "welsh"], { maxBuffer: 256 * 1024 * 1024 });
-    if (archive.status === 0) {
-      spawnSync("tar", ["-x", "-C", scratch], { input: archive.stdout });
+    if (archive.status !== 0) {
+      const why = archive.stderr.toString().trim();
+      if (!/did not match any files|pathspec 'welsh'/.test(why)) {
+        throw new Error(`could not read welsh/ from ${home}: ${why}`);
+      }
+    } else {
+      const tar = spawnSync("tar", ["-x", "-C", scratch], { input: archive.stdout });
+      if (tar.status !== 0) {
+        throw new Error(`could not unpack welsh/ from ${home}: ${tar.stderr.toString().trim()}`);
+      }
     }
     dir = join(scratch, "welsh");
   }
@@ -151,15 +158,20 @@ export function inHome<T>(service: string, argv: string[], change: HomeChange, d
     }
     const text = describe(result);
     commit(wt.dir, ["welsh"], `${text.message}${COMMIT_TRAILER}`);
-    keep = true;
+    // A PR that could not be opened takes its branch with it, so running the command again starts clean.
     const pr = change.pr ? draftPr(wt.dir, text.title, `${text.body}${PR_FOOTER}`) : null;
+    keep = true;
     return { result, branch: change.branch, pr };
   } finally {
     wt.remove(keep);
   }
 }
 
-/** A branch name from a label, as git accepts it. */
-export function branchName(label: string): string {
-  return `welsh/${label}`.toLowerCase().replace(/[^a-z0-9/._-]+/g, "-");
+/**
+ * A branch name from a label, as git accepts it, made unique with the time, so running a change again never meets the
+ * branch an earlier run left behind.
+ */
+export function branchName(label: string, now: Date = new Date()): string {
+  const stamp = now.toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
+  return `welsh/${label}-${stamp}`.toLowerCase().replace(/[^a-z0-9/._-]+/g, "-");
 }

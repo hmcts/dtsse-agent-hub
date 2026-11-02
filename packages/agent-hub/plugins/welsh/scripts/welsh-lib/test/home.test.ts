@@ -34,7 +34,7 @@ sh(clone, "remote", "set-head", "origin", "main");
 // Someone's unpushed work in the checkout, which nothing should read.
 writeFileSync(join(clone, "welsh", "catalogue.csv"), "id,english,welsh,context,notes,source,received,status\n");
 
-const { homeRepo, inHome, welshDir } = await import("../home.ts");
+const { branchName, homeRepo, inHome, welshDir } = await import("../home.ts");
 const { loadCatalogue } = await import("../catalogue.ts");
 const { loadConfig } = await import("../config.ts");
 
@@ -75,4 +75,24 @@ test("a change that changes nothing commits nothing and leaves no branch", () =>
   const done = inHome("cath", ["init", "--service", "cath"], { branch: "welsh/cath-init-again", pr: false }, () => ({ message: "m", title: "t", body: "b" }));
   assert.equal(done.branch, null);
   assert.equal(sh(clone, "branch", "--list", "welsh/cath-init-again"), "");
+});
+
+test("homeRepo reads the manifest's one-key-a-line form too, and refuses two homes for one service", () => {
+  const manifest = readFileSync(join(ws, "workspace.yaml"), "utf8");
+  try {
+    writeFileSync(join(ws, "workspace.yaml"), "repos:\n  apps/sscs/sscs-tribunals-frontend:\n    url: hmcts/sscs-tribunals-frontend\n    welsh: true\n");
+    assert.equal(homeRepo("sscs"), "apps/sscs/sscs-tribunals-frontend");
+    writeFileSync(
+      join(ws, "workspace.yaml"),
+      "repos:\n  apps/et/et-sya-frontend: { url: hmcts/et-sya-frontend, welsh: true }\n  apps/et/et-syr-frontend: { url: hmcts/et-syr-frontend, welsh: true }\n"
+    );
+    assert.throws(() => homeRepo("et"), /more than one repo marked welsh: true .*et-sya-frontend, apps\/et\/et-syr-frontend/);
+  } finally {
+    writeFileSync(join(ws, "workspace.yaml"), manifest);
+  }
+});
+
+test("a change's branch is new each run, so a retry never meets the branch an earlier one left", () => {
+  assert.equal(branchName("cath-Return 7", new Date("2026-11-02T16:12:05Z")), "welsh/cath-return-7-20261102-161205");
+  assert.notEqual(branchName("cath-x", new Date("2026-11-02T16:12:05Z")), branchName("cath-x", new Date("2026-11-02T16:12:06Z")));
 });

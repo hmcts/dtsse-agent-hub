@@ -21,6 +21,7 @@ import { loadCatalogue, type Row } from "../catalogue.ts";
 import { ensureClone, tempWorktree, type Worktree } from "../clones.ts";
 import { loadConfig, type RepoConfig } from "../config.ts";
 import { COMMIT_TRAILER, commit, draftPr, git, PR_FOOTER } from "../git.ts";
+import { branchName } from "../home.ts";
 import { fail, requireService, say } from "../io.ts";
 import { WORKSPACE } from "../paths.ts";
 import { readReturn } from "../returns.ts";
@@ -53,7 +54,7 @@ export async function applyCmd(argv: string[]): Promise<unknown> {
   const repo = repos[0];
   const clone = isAbsolute(repo.path) || repo.path.startsWith("..") ? resolve(WORKSPACE, repo.path) : ensureClone(repo.path);
   const batch = values.from === "catalogue" ? `catalogue-${new Date().toISOString().slice(0, 10)}` : basename(resolve(values.from)).replace(/\.xlsx$/i, "");
-  const branch = values["dry-run"] ? `welsh-dry-run/${process.pid}-${Date.now()}` : `welsh/${batch}`.toLowerCase().replace(/[^a-z0-9/._-]+/g, "-");
+  const branch = values["dry-run"] ? `welsh-dry-run/${process.pid}-${Date.now()}` : branchName(batch);
   const wt = tempWorktree(clone, branch);
   let keep = false;
   try {

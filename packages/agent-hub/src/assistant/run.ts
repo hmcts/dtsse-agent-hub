@@ -92,8 +92,7 @@ export async function runAssistantSupervisor({
     workspace,
     install
   };
-  const welsh = createWelshRunner(welshOptions);
-  void prepareWelsh(welshOptions);
+  const welsh = createWelshRunner({ ...welshOptions, ready: prepareWelsh(welshOptions) });
   const uploads = {
     api,
     id,

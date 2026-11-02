@@ -265,6 +265,27 @@ describe("runWelsh", () => {
     expect(answers[0]?.body).toEqual({ error: "failed", detail: NOT_LOADED });
   });
 
+  it("should not start a job, or its time limit, until the tools' first install has finished", async () => {
+    // Arrange
+    let installed: () => void = () => {};
+    const ready = new Promise<void>((resolve) => {
+      installed = resolve;
+    });
+    const { d, answers } = deps({ ready, run: vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" })) });
+
+    // Act
+    const job = runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const before = (d.run as ReturnType<typeof vi.fn>).mock.calls.length;
+    installed();
+    await job;
+
+    // Assert
+    expect(before).toBe(0);
+    expect(d.run).toHaveBeenCalledTimes(1);
+    expect(answers).toHaveLength(1);
+  });
+
   it("should answer failed with the reason rather than throw when the plugin cannot be copied onto the pod", async () => {
     const { d, answers } = deps({
       install: () => {
