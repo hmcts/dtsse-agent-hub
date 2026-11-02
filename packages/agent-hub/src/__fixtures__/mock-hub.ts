@@ -83,6 +83,8 @@ export type VirtualRecord = {
   sessionReports: SessionsReport[];
   /** What the pod said its volume holds, newest last; see `PUT /api/virtual/{id}/uploads`. */
   uploadsReports: Record<string, unknown>[];
+  /** The `client_features` each status report carried, newest last; `undefined` for a report that carried none. */
+  statusClaims: unknown[];
 };
 
 export type RecordedCall = {
@@ -231,7 +233,8 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
       ports: [],
       wakes: [],
       sessionReports: [],
-      uploadsReports: []
+      uploadsReports: [],
+      statusClaims: []
     });
   }
   let nextId = 1000;
@@ -474,6 +477,7 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         return send(res, 400, { error: "bad phase" });
       }
       v.status.push(body.detail ? { phase: body.phase, detail: body.detail } : { phase: body.phase });
+      v.statusClaims.push(body.client_features);
       return send(res, 204);
     }
     if (req.method === "GET" && area === "conversations" && !kind) {

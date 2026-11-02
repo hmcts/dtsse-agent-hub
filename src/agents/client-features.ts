@@ -61,3 +61,44 @@ export function storedClientFeatures(value: unknown): string[] | null {
 export function clientSupports(stored: unknown, feature: ClientFeature): boolean {
   return storedClientFeatures(stored)?.includes(feature) === true;
 }
+
+/** A virtual agent's own claim and its main-session agent's, as `podSupports` reads them. */
+export interface PodClaims {
+  clientFeatures: unknown;
+  agent?: { clientFeatures: unknown } | null;
+}
+
+/**
+ * What the client a virtual agent's pod booted on claims, or `null` while it has claimed nothing either way. The pod's
+ * own claim, reported with its status, decides whenever it holds a list, an empty one included. A pod whose client
+ * reports no claim falls back to the claim its main-session agent registered with, which is the same client build; a
+ * main-session agent that registered without one is an old client claiming nothing, not a pod still booting.
+ */
+function podClaim(pod: PodClaims): string[] | null {
+  const own = storedClientFeatures(pod.clientFeatures);
+  if (own !== null) {
+    return own;
+  }
+  return pod.agent === undefined || pod.agent === null ? null : (storedClientFeatures(pod.agent.clientFeatures) ?? []);
+}
+
+/** Whether the client a virtual agent's pod booted on claimed `feature`; `false` while it has claimed nothing. */
+export function podSupports(pod: PodClaims, feature: ClientFeature): boolean {
+  return podClaim(pod)?.includes(feature) === true;
+}
+
+/**
+ * Whether a request needing `feature` may be sent to the pod now. `waking` for a pod that is not running, or is
+ * running but has claimed nothing yet, which is a pod still booting; `unsupported` for one whose claim leaves the
+ * feature out.
+ */
+export function podGate(pod: PodClaims & { status: string }, feature: ClientFeature): "waking" | "unsupported" | "ok" {
+  if (pod.status !== "running") {
+    return "waking";
+  }
+  const claim = podClaim(pod);
+  if (claim === null) {
+    return "waking";
+  }
+  return claim.includes(feature) ? "ok" : "unsupported";
+}

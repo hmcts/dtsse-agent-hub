@@ -1,6 +1,7 @@
 import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { viewerSettings } from "../port-viewer/settings.ts";
+import { Prisma } from "../store/generated/client.js";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
@@ -209,6 +210,13 @@ const NO_MEMORY_REPORT = {
   memoryReportedAt: null
 } as const;
 
+/**
+ * The pod's client-features claim goes wherever the memory report does, and on every stop: a new boot may run another
+ * client, so it reads as having claimed nothing of its own until it reports, and `podSupports` falls back to its
+ * main-session agent meanwhile.
+ */
+const NO_CLIENT_CLAIM = { clientFeatures: Prisma.DbNull } as const;
+
 function statusChange(status: VirtualAgentStatus, now: Date) {
   return { status, statusDetail: null, statusChangedAt: now };
 }
@@ -251,12 +259,13 @@ export async function setDesired(
         diskExpiresAt: null,
         diskDeletedAt: null,
         ...NO_MEMORY_REPORT,
+        ...NO_CLIENT_CLAIM,
         ...statusChange("requested", now)
       };
     } else {
       const settled = desired === "stopped" && row.status === "stopped";
       const stop = desired === "stopped" ? { stopReason: "user" as const } : {};
-      data = { ...NO_TOKEN, ...NO_PORTS, ...stop, ...(settled ? {} : statusChange("stopping", now)) };
+      data = { ...NO_TOKEN, ...NO_PORTS, ...NO_CLIENT_CLAIM, ...stop, ...(settled ? {} : statusChange("stopping", now)) };
     }
     const updated = toRow(
       await tx.virtualAgent.update({
@@ -339,7 +348,7 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
-        data: { size: checked.size, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now },
+        data: { size: checked.size, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...NO_CLIENT_CLAIM, updatedAt: now },
         select: SELECT
       })
     );
@@ -382,7 +391,7 @@ export async function setVirtualAgentPlugins(
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
-        data: { plugins: checked.plugins, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now },
+        data: { plugins: checked.plugins, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...NO_CLIENT_CLAIM, updatedAt: now },
         select: SELECT
       })
     );
@@ -456,6 +465,7 @@ export async function restartVirtualAgent(
           ...NO_PORTS,
           ...POD_CHANGE,
           ...NO_MEMORY_REPORT,
+          ...NO_CLIENT_CLAIM,
           applyFailures: 0,
           status: "provisioning",
           statusDetail: detail,
@@ -502,8 +512,19 @@ export async function callerForLaunchToken(db: Database, token: string): Promise
  * nothing about the report itself gives it away: only the phase does. Counting those as activity is what let such a
  * pod hold a node for as long as it kept asking. What moves the agent on is its owner, and the status change that
  * follows is activity the sweep does see.
+ *
+ * A report that carries `clientFeatures` replaces the pod's claim with it; one that does not leaves the claim alone.
+ * The pod's boot script reports before the client is upgraded and sends none, so only the client that goes on to run
+ * makes the claim. Every path that brings a pod up clears it (`NO_CLIENT_CLAIM`), so a pod on a client that never
+ * reports one is read through its main-session agent's claim instead (`podSupports`).
  */
-export async function reportStatus(prisma: PrismaClient, id: string, phase: PodPhase, detail: string | null, now: Date = new Date()): Promise<VirtualAgentRow> {
+export async function reportStatus(
+  prisma: PrismaClient,
+  id: string,
+  phase: PodPhase,
+  detail: string | null,
+  { now = new Date(), clientFeatures }: { now?: Date; clientFeatures?: readonly string[] } = {}
+): Promise<VirtualAgentRow> {
   return await prisma.$transaction(async (tx) => {
     const row = await lockVirtualAgent(tx, id);
     if (row === undefined) {
@@ -524,6 +545,7 @@ export async function reportStatus(prisma: PrismaClient, id: string, phase: PodP
           statusDetail: outcome.detail ?? null,
           ...(outcome.status === row.status ? {} : { statusChangedAt: now }),
           ...(awaitsOwner(phase) ? {} : { lastActiveAt: now }),
+          ...(clientFeatures === undefined ? {} : { clientFeatures: [...clientFeatures] }),
           updatedAt: now
         },
         select: SELECT
@@ -757,7 +779,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         // ones and any warning computed from them.
         await tx.virtualAgent.update({
           where: { id: row.id },
-          data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now, ...NO_MEMORY_REPORT }
+          data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now, ...NO_MEMORY_REPORT, ...NO_CLIENT_CLAIM }
         });
         launchToken = minted.token;
       }
