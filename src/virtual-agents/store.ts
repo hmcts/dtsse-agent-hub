@@ -1,7 +1,7 @@
 import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { viewerSettings } from "../port-viewer/settings.ts";
-import { Prisma } from "../store/generated/client.js";
+import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
@@ -215,7 +215,9 @@ const NO_MEMORY_REPORT = {
  * client, so it reads as having claimed nothing of its own until it reports, and `podSupports` falls back to its
  * main-session agent meanwhile.
  */
-const NO_CLIENT_CLAIM = { clientFeatures: Prisma.DbNull } as const;
+function noClientClaim() {
+  return { clientFeatures: clientPrisma().DbNull };
+}
 
 function statusChange(status: VirtualAgentStatus, now: Date) {
   return { status, statusDetail: null, statusChangedAt: now };
@@ -259,13 +261,13 @@ export async function setDesired(
         diskExpiresAt: null,
         diskDeletedAt: null,
         ...NO_MEMORY_REPORT,
-        ...NO_CLIENT_CLAIM,
+        ...noClientClaim(),
         ...statusChange("requested", now)
       };
     } else {
       const settled = desired === "stopped" && row.status === "stopped";
       const stop = desired === "stopped" ? { stopReason: "user" as const } : {};
-      data = { ...NO_TOKEN, ...NO_PORTS, ...NO_CLIENT_CLAIM, ...stop, ...(settled ? {} : statusChange("stopping", now)) };
+      data = { ...NO_TOKEN, ...NO_PORTS, ...noClientClaim(), ...stop, ...(settled ? {} : statusChange("stopping", now)) };
     }
     const updated = toRow(
       await tx.virtualAgent.update({
@@ -348,7 +350,7 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
-        data: { size: checked.size, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...NO_CLIENT_CLAIM, updatedAt: now },
+        data: { size: checked.size, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...noClientClaim(), updatedAt: now },
         select: SELECT
       })
     );
@@ -391,7 +393,7 @@ export async function setVirtualAgentPlugins(
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
-        data: { plugins: checked.plugins, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...NO_CLIENT_CLAIM, updatedAt: now },
+        data: { plugins: checked.plugins, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...noClientClaim(), updatedAt: now },
         select: SELECT
       })
     );
@@ -465,7 +467,7 @@ export async function restartVirtualAgent(
           ...NO_PORTS,
           ...POD_CHANGE,
           ...NO_MEMORY_REPORT,
-          ...NO_CLIENT_CLAIM,
+          ...noClientClaim(),
           applyFailures: 0,
           status: "provisioning",
           statusDetail: detail,
@@ -515,7 +517,7 @@ export async function callerForLaunchToken(db: Database, token: string): Promise
  *
  * A report that carries `clientFeatures` replaces the pod's claim with it; one that does not leaves the claim alone.
  * The pod's boot script reports before the client is upgraded and sends none, so only the client that goes on to run
- * makes the claim. Every path that brings a pod up clears it (`NO_CLIENT_CLAIM`), so a pod on a client that never
+ * makes the claim. Every path that brings a pod up clears it (`noClientClaim`), so a pod on a client that never
  * reports one is read through its main-session agent's claim instead (`podSupports`).
  */
 export async function reportStatus(
@@ -779,7 +781,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         // ones and any warning computed from them.
         await tx.virtualAgent.update({
           where: { id: row.id },
-          data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now, ...NO_MEMORY_REPORT, ...NO_CLIENT_CLAIM }
+          data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now, ...NO_MEMORY_REPORT, ...noClientClaim() }
         });
         launchToken = minted.token;
       }

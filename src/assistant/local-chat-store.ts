@@ -1,5 +1,6 @@
 import { nameSourceOf } from "../agents/name-source.ts";
-import { Prisma } from "../store/generated/client.js";
+import { clientPrisma } from "../store/client-namespace.ts";
+import type { Prisma } from "../store/generated/client.js";
 import type { Database } from "../store/prisma.ts";
 import { announce, type ConversationRow, SELECT, toRow } from "./conversation-row.ts";
 import { DEFAULT_PRODUCT } from "./products.ts";
@@ -46,8 +47,9 @@ async function createLocalConversation(db: Database, session: { ownerOid: string
  * could do nothing. `alias` is always a literal of the caller's.
  */
 export function needsLocalChatSql(alias: string): Prisma.Sql {
-  const agent = Prisma.raw(alias);
-  return Prisma.sql`(${agent}.virtual_agent_id IS NULL AND ${agent}.assistant_conversation_id IS NULL AND ${agent}.chat_removed_at IS NULL)`;
+  const { raw, sql } = clientPrisma();
+  const agent = raw(alias);
+  return sql`(${agent}.virtual_agent_id IS NULL AND ${agent}.assistant_conversation_id IS NULL AND ${agent}.chat_removed_at IS NULL)`;
 }
 
 /**
