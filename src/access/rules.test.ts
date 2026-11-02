@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type AgentRef,
+  agentLookup,
   attachmentDownload,
   type ConversationShare,
   canActAsVirtualAgent,
@@ -65,19 +66,14 @@ const DIRECT_TO_TARGET: MessageRef = {
 };
 
 describe("isOwner", () => {
-  it("should allow the owner when they are asked about their own row", () => {
+  it("should allow the owner when the row is their own", () => {
     expect(isOwner(OWNER, TARGET)).toBe(true);
     expect(isOwner(OWNER, { ownerOid: OWNER })).toBe(true);
   });
 
-  it("should allow the owner when they are asked about an owner's oid alone", () => {
-    expect(isOwner(OWNER, OWNER)).toBe(true);
-  });
-
-  it.each(EVERYONE_ELSE)("should refuse %s when the row or the oid is the owner's", (_label, oid) => {
+  it.each(EVERYONE_ELSE)("should refuse %s when the row is the owner's", (_label, oid) => {
     expect(isOwner(oid, TARGET)).toBe(false);
     expect(isOwner(oid, { ownerOid: OWNER })).toBe(false);
-    expect(isOwner(oid, OWNER)).toBe(false);
   });
 });
 
@@ -742,6 +738,13 @@ describe("the people lookup rules", () => {
 
     it("should keep one answer short enough not to be a list", () => {
       expect(MAX_PEOPLE_SUGGESTIONS).toBe(8);
+    });
+  });
+
+  describe("agentLookup", () => {
+    it("should take the same bounds as the people lookup when the agent picker is searched", () => {
+      expect(agentLookup("  pcs  ")).toEqual({ ok: true, query: "pcs", limit: MAX_PEOPLE_SUGGESTIONS });
+      expect(agentLookup("p")).toEqual({ ok: false });
     });
   });
 

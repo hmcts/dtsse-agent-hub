@@ -22,7 +22,7 @@ export interface TemplateTarget {
 }
 
 function allow({ actorOid, ownerOid }: TemplateTarget): void {
-  if (!isOwner(actorOid, ownerOid)) {
+  if (!isOwner(actorOid, { ownerOid })) {
     throw new HttpError(403, "you can only change your own templates");
   }
 }

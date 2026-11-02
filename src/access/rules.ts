@@ -2,11 +2,12 @@
  * Who may do what, as pure functions over rows the caller has already loaded.
  *
  * - **Everything here is its owner's.** An agent, a virtual agent, an HMCTS Assistant conversation, a person's
- *   credentials, templates and export defaults, and what an assistant's pod reports are seen and acted on by the
- *   person who owns them and nobody else, and `isOwner` is that one decision. Two rules keep names of their own
- *   because each must be able to narrow without the rest: `canViewTranscript`, for what a session said, and
- *   `canManageVirtualAgent`, for whatever runs as the owner on their own sign-ins. A file attached to a message is
- *   narrower still: the upload rules hold it to its owner and also to its state, its conversation and its message.
+ *   templates and export defaults, a Welsh job and its files, and what an assistant's pod reports are seen and acted
+ *   on by the person who owns them and nobody else, and `isOwner` is that one decision. Two rules keep names of
+ *   their own because each must be able to narrow without the rest: `canViewTranscript`, for what a session said,
+ *   and `canManageVirtualAgent`, for whatever runs as the owner on their own sign-ins. A file attached to a message
+ *   is narrower still: the upload rules hold it to its owner and also to its state, its conversation and its
+ *   message.
  * - **Reaching somebody else's agent is a tagged post.** `tagRefusal` lets anyone tag anyone's agent, bar a pod
  *   conversation's (the Assistant, a private chat rather than a session on the board) and the tagger itself. It is
  *   the one cross-owner route to a session, and a public one: a post is on a board every signed-in person reads.
@@ -16,8 +17,9 @@
  *
  * A direct message is between one owner's sessions, or is an agent's reply to a person (`canReadMessage`,
  * `replyRoute`). A launch token acts as its owner only for its own virtual agent and the agents its sessions
- * registered. Credentials, saved templates and export defaults are their owner's by `isOwner` on every read and
- * write; which credential kinds a person reads back and a pod may store are rules of their own.
+ * registered. Only its owner saves, replaces or deletes a credential (`isOwner`), and its value is write-only for
+ * them except the kinds `canOwnerReadCredential` allows; which kinds a pod may store is
+ * `canVirtualAgentStoreCredential`.
  */
 
 export interface AgentRef {
@@ -59,14 +61,15 @@ export interface MessageRef {
 }
 
 /**
- * Whether `oid` owns `owned`, given as a row or as its owner's oid: who may see an agent or a virtual agent, message
- * an agent or answer its questions, be offered its skills, open, search, stop or share an Assistant conversation, see
- * what an assistant's pod reports about its memory and its disk, and read or change a person's credentials, templates
- * and export defaults. One decision, because each of those is something of the owner's that nobody else has standing
- * to reach; the share rows that `conversationAccess` reads are the only widening of any of it.
+ * Whether `oid` owns `owned`: who may see an agent or a virtual agent, message an agent or answer its questions, be
+ * offered its skills, open, search, stop or share an Assistant conversation, see what an assistant's pod reports
+ * about its memory and its disk, run a Welsh job and read it and its files, read or change a person's templates and
+ * export defaults, and save or delete their credentials. One decision, because each of those is something of the
+ * owner's that nobody else has standing to reach; the share rows that `conversationAccess` reads are the only
+ * widening of any of it. A row rather than a bare oid, so that an agent id passed by mistake does not type-check.
  */
-export function isOwner(oid: string, owned: { ownerOid: string } | string): boolean {
-  return oid === (typeof owned === "string" ? owned : owned.ownerOid);
+export function isOwner(oid: string, owned: { ownerOid: string }): boolean {
+  return oid === owned.ownerOid;
 }
 
 /**
@@ -284,11 +287,10 @@ export function canRemoveUploadFromDisk(viewerOid: string, upload: UploadRef): b
 
 /**
  * Whether `actorOid` may make a virtual agent act as its owner: start, stop, rename, resize or delete it, see its
- * device codes or paste a login code back to it, have its pod search Jira or Confluence or run a Welsh job, and read
- * that job's result or download its files. Its owner alone, and its own rule rather than `isOwner` because the reason
- * is narrower than ownership: the agent acts with the owner's GitHub, Azure and Atlassian sign-ins, so a code it shows
- * is a sign-in as them and a job it runs opens pull requests and edits Jira stories as them. Whatever ever widens who
- * may see a virtual agent must not widen this.
+ * device codes or paste a login code back to it, and have its pod search Jira or Confluence. Its owner alone, and its
+ * own rule rather than `isOwner` because the reason is narrower than ownership: the agent acts with the owner's
+ * GitHub, Azure and Atlassian sign-ins, so a code it shows is a sign-in as them and a search it runs reads Atlassian
+ * as them. Whatever ever widens who may see a virtual agent must not widen this.
  */
 export function canManageVirtualAgent(actorOid: string, virtualAgent: { ownerOid: string }): boolean {
   return isOwner(actorOid, virtualAgent);
@@ -390,10 +392,9 @@ export const MAX_PEOPLE_SUGGESTIONS = 8;
 export type PeopleLookup = { ok: true; query: string; limit: number } | { ok: false };
 
 /**
- * What `GET /api/ui/people` and `GET /api/ui/agents` may answer. The people endpoint is an access surface of its
- * own: it says who has used the hub, which is why it answers a search and never a list. A query shorter than
- * `MIN_PEOPLE_QUERY`, once trimmed, is refused rather than answered broadly, and no answer is longer than
- * `MAX_PEOPLE_SUGGESTIONS`.
+ * What `GET /api/ui/people` may answer. The endpoint is an access surface of its own: it says who has used the hub,
+ * which is why it answers a search and never a list. A query shorter than `MIN_PEOPLE_QUERY`, once trimmed, is
+ * refused rather than answered broadly, and no answer is longer than `MAX_PEOPLE_SUGGESTIONS`.
  *
  * What those two prevent is one request that hands over everyone. What they do not prevent is many: the answer is
  * ordered and never offset, so walking the prefixes and going deeper wherever a full eight come back recovers the
@@ -402,15 +403,22 @@ export type PeopleLookup = { ok: true; query: string; limit: number } | { ok: fa
  *
  * Anyone signed in may ask. The people it matches are colleagues in the same Entra tenant whose names and work
  * addresses that tenant's own directory already gives them; what this adds is only that they have used the hub.
- *
- * The agents endpoint is the post composer's tag picker, bounded the same way for the same reason. It matches every
- * agent rather than the viewer's own, because tagging does (`tagRefusal`), and what it hands over — an agent's name
- * and whose it is — is what every post of that agent's already shows in its byline to anyone signed in. It answers no
- * status, heartbeat or repo: those are its owner's alone.
  */
 export function peopleLookup(raw: string): PeopleLookup {
   const query = raw.trim();
   return query.length < MIN_PEOPLE_QUERY ? { ok: false } : { ok: true, query, limit: MAX_PEOPLE_SUGGESTIONS };
+}
+
+/**
+ * What `GET /api/ui/agents`, the post composer's tag picker, may answer. It matches every agent rather than the
+ * viewer's own, because tagging does (`tagRefusal`), and hands over only an agent's name and whose it is, which every
+ * post of that agent's already shows in its byline; no status, heartbeat or repo, which are its owner's alone.
+ *
+ * It shares `peopleLookup`'s bounds on purpose: a list of agents names the people who own them, so it must be no
+ * easier to walk than the people search.
+ */
+export function agentLookup(raw: string): PeopleLookup {
+  return peopleLookup(raw);
 }
 
 /** Whether a matched person may be offered to `viewerOid` as someone to share with: anyone but themselves. */

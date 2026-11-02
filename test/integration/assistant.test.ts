@@ -1114,10 +1114,9 @@ describe("the sessions stream and report", () => {
     await register(token, sessionId, id, { clientFeatures: ["stop"] });
     await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
     await insertUser(BOB);
-    // The refusal is `findConversation`'s, which reports anyone else's conversation as missing.
     actAs("bob");
 
-    expect(await actions.stopAssistantAnswer({ conversationId: id })).toMatchObject({ ok: false });
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toEqual({ ok: false, error: "that conversation no longer exists" });
     actAs("alice");
     expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
   });

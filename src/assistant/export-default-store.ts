@@ -14,7 +14,7 @@ export interface DefaultsTarget {
 }
 
 function allow({ actorOid, ownerOid }: DefaultsTarget): void {
-  if (!isOwner(actorOid, ownerOid)) {
+  if (!isOwner(actorOid, { ownerOid })) {
     throw new HttpError(403, "you can only change your own defaults");
   }
 }
