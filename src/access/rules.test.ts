@@ -142,7 +142,7 @@ describe("canAgentMessageAgent", () => {
 });
 
 describe("canPersonDirectAgent", () => {
-  const laptop = { id: "a-laptop", ownerOid: OWNER, virtualAgentId: null };
+  const laptop = { id: "a-laptop", ownerOid: OWNER, virtualAgentId: null, ownerOnly: false };
   const conversation = { id: "a-chat", ownerOid: OWNER, virtualAgentId: "va-1", ownerOnly: true };
   const podOwnSession = { id: "a-pod", ownerOid: OWNER, virtualAgentId: "va-1", ownerOnly: false };
 

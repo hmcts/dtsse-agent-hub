@@ -110,8 +110,8 @@ export function canAgentMessageAgent(sender: AgentRef, target: AgentRef): boolea
  * conversation's session with the frame that tells it the owner is writing; the client frames anything else a pod
  * session receives as a peer's, so a direct to the pod's own session would reach it disowned.
  */
-export function canPersonDirectAgent(senderOid: string, target: AgentRef & { virtualAgentId: string | null }): boolean {
-  return isOwner(senderOid, target) && (target.virtualAgentId === null || target.ownerOnly === true);
+export function canPersonDirectAgent(senderOid: string, target: AgentRef & { virtualAgentId: string | null; ownerOnly: boolean }): boolean {
+  return isOwner(senderOid, target) && (target.virtualAgentId === null || target.ownerOnly);
 }
 
 /** Why a post may not tag an agent: `not_taggable` is answered as a missing agent, `itself` as a bad request. */

@@ -16,11 +16,12 @@ import {
   type AttachmentOutcome,
   type ConfluenceExportFrame,
   chooseEnvelope,
-  type EnvelopeRoute,
-  type JiraExportFrame
+  type JiraExportFrame,
+  routeDelivery,
+  type SessionKind
 } from "./envelope.ts";
 import { describeInbound, type InboundOptions, type InboundResult, inboundAccepted, inboundFix } from "./inbound.ts";
-import { acquirePidFile, isEnabled, log, pidAlive, readJson, readText, releasePidFile, sessionInfo, statePath, writeJson } from "./session.ts";
+import { acquirePidFile, conversationId, isEnabled, log, pidAlive, readJson, readText, releasePidFile, sessionInfo, statePath, writeJson } from "./session.ts";
 import { collectSkills, type SkillListing, skillsHash } from "./skills.ts";
 import { deliverToSocket, NO_MESSAGING_TOKEN } from "./socket.ts";
 import { createSseParser, type SseEvent } from "./sse.ts";
@@ -159,6 +160,14 @@ export function parseDirectEventMessage(value: unknown): DirectEventMessage | nu
     created_at: asOptionalString(raw.created_at),
     author: parseAuthor(raw.author)
   };
+}
+
+/** Where this session runs, for `routeDelivery`: a conversation's id is set only by a pod's supervisor. */
+export function sessionKind(env: Env): SessionKind {
+  if (conversationId(env) !== null) {
+    return "conversation";
+  }
+  return virtualAgent(env) !== null ? "pod" : "laptop";
 }
 
 /**
@@ -551,19 +560,15 @@ export async function runBridge({
         return;
       }
       const info = sessionInfo(sid, env);
-      const pod = virtualAgent(env) !== null;
-      // The conversation frame, and with it the model switch, the attachment fetch and leaving the direct thread
-      // alone, belong to a pod's conversation session, and only the person whose conversation it is gets them.
-      const assistant = pod && fromOwner ? parseAssistantFrame(payload.assistant) : null;
-      const route: EnvelopeRoute = {
+      const delivery = routeDelivery({
         fromOwner,
-        pod,
-        assistant,
-        // Where the answer goes, not what it grants: the owner reads a conversational answer only while the transcript
-        // upload is on, and a CLI reply would duplicate it; with the upload off that reply is their only channel.
-        ownerReads: fromOwner && !pod && !transcriptOff(sid, env),
-        previousProduct: assistant ? parseAssistantProduct(readJson(productPath(sid))) : null
-      };
+        session: sessionKind(env),
+        frame: parseAssistantFrame(payload.assistant),
+        transcriptUploaded: !transcriptOff(sid, env)
+      });
+      // The frame is what the model switch, the attachment fetch and the recorded product act on.
+      const assistant = delivery.kind === "conversation" ? delivery.frame : null;
+      const previousProduct = assistant ? parseAssistantProduct(readJson(productPath(sid))) : null;
       // Fetched before the message is delivered, so the envelope can name the absolute path and the session has the
       // file the moment it reads about it. Nothing here throws: a file that could not be fetched comes back as an
       // outcome the envelope says so about, because a message delivered with the attachment silently missing would
@@ -584,7 +589,7 @@ export async function runBridge({
       }
       try {
         const skills = skillNames();
-        const content = chooseEnvelope(message, route, { skills, attachments });
+        const content = chooseEnvelope(message, delivery, { skills, attachments, previousProduct });
         await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, content);
         remember(message.id);
         if (assistant) {
@@ -593,7 +598,8 @@ export async function runBridge({
           } catch (e) {
             log(sid, `could not record the product of #${message.id}: ${(e as Error).message}`);
           }
-        } else {
+        }
+        if (delivery.kind !== "conversation") {
           try {
             recordDirect(sid, message, { direction: "in", peer: peerOf(message.author) });
           } catch (e) {

@@ -13,6 +13,7 @@ import {
   ownerHeader,
   ownerLaptopEnvelope,
   quoteBody,
+  routeDelivery,
   taggedPostEnvelope
 } from "./envelope.ts";
 import { toEntries } from "./transcript-sync.ts";
@@ -225,37 +226,58 @@ describe("taggedPostEnvelope", () => {
   });
 });
 
+describe("routeDelivery", () => {
+  const frame: AssistantFrame = { conversation_id: "c1", product: "pcs" };
+  const input = { fromOwner: true, frame, transcriptUploaded: true };
+
+  it("should treat the owner's message to a conversation as theirs, with the frame or without one", () => {
+    // Act & Assert
+    expect(routeDelivery({ ...input, session: "conversation" })).toEqual({ kind: "conversation", frame });
+    expect(routeDelivery({ ...input, session: "conversation", frame: null })).toEqual({ kind: "conversation", frame: null });
+  });
+
+  it("should treat the owner's message to a laptop session as theirs, with whether they read its transcript", () => {
+    // Act & Assert
+    expect(routeDelivery({ ...input, session: "laptop" })).toEqual({ kind: "laptop", ownerReads: true });
+    expect(routeDelivery({ ...input, session: "laptop", transcriptUploaded: false })).toEqual({ kind: "laptop", ownerReads: false });
+  });
+
+  it("should treat the owner's message to a pod's own session, and anyone else's anywhere, as a peer's", () => {
+    // Act & Assert
+    expect(routeDelivery({ ...input, session: "pod" })).toEqual({ kind: "peer" });
+    for (const session of ["laptop", "pod", "conversation"] as const) {
+      expect(routeDelivery({ ...input, fromOwner: false, session })).toEqual({ kind: "peer" });
+    }
+  });
+});
+
 describe("chooseEnvelope", () => {
   const ownMessage: EnvelopeMessage = { id: "9", body: "hello", author: { type: "user", owner_name: "Me Tester" } };
   const frame: AssistantFrame = { conversation_id: "c1", product: "pcs", product_label: "Possession claims", artefact_version: 0, artefact_updated_by: null };
-  const route = { fromOwner: true, pod: true, assistant: frame, ownerReads: true, previousProduct: null };
 
-  it("should give the Assistant's framing when the owner writes to a pod's conversation", () => {
-    // Act & Assert
-    expect(chooseEnvelope(ownMessage, route)).toBe(assistantEnvelope(ownMessage, frame));
-  });
-
-  it("should give the laptop owner's framing, with where they read, when the owner writes to a session on their computer", () => {
-    // Act & Assert
-    expect(chooseEnvelope(ownMessage, { ...route, pod: false, assistant: null, ownerReads: false })).toBe(ownerLaptopEnvelope(ownMessage, { reads: false }));
-  });
-
-  it("should frame the owner as a peer when their message reaches a pod session with no conversation frame", () => {
+  it("should give the Assistant's framing to a conversation, and keep it when the frame could not be read", () => {
     // Act
-    const text = chooseEnvelope(ownMessage, { ...route, assistant: null });
+    const framed = chooseEnvelope(ownMessage, { kind: "conversation", frame });
+    const frameless = chooseEnvelope(ownMessage, { kind: "conversation", frame: null });
 
     // Assert
-    expect(text).toBe(directEnvelope(ownMessage));
-    expect(text).toMatch(/NOT from your user/);
+    expect(framed).toBe(assistantEnvelope(ownMessage, frame));
+    expect(frameless).toBe(assistantEnvelope(ownMessage, {}));
+    expect(frameless).toMatch(/This IS your user/);
   });
 
-  it("should frame anyone but the owner as a peer, a post as a post, wherever the session runs", () => {
+  it("should give the laptop owner's framing, with where they read", () => {
+    // Act & Assert
+    expect(chooseEnvelope(ownMessage, { kind: "laptop", ownerReads: false })).toBe(ownerLaptopEnvelope(ownMessage, { reads: false }));
+  });
+
+  it("should frame a peer's direct as a direct and a tagged post as a post", () => {
     // Arrange
     const post: EnvelopeMessage = { ...agentMessage, kind: "post", topics: ["pcs-api"] };
 
     // Act & Assert
-    expect(chooseEnvelope(agentMessage, { ...route, fromOwner: false })).toBe(directEnvelope(agentMessage));
-    expect(chooseEnvelope(post, { ...route, fromOwner: false, pod: false, assistant: null })).toBe(taggedPostEnvelope(post));
+    expect(chooseEnvelope(agentMessage, { kind: "peer" })).toBe(directEnvelope(agentMessage));
+    expect(chooseEnvelope(post, { kind: "peer" })).toBe(taggedPostEnvelope(post));
   });
 });
 describe("assistantEnvelope", () => {

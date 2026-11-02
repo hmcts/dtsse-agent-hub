@@ -821,6 +821,21 @@ describe("runHook PreToolUse", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  // A virtual agent's own session, outside any conversation, has no chat to draw the card in, so the hub refuses it.
+  it("should tell the model to ask in words when the hub has no chat to show the question in", async () => {
+    // Arrange
+    registered("preq-no-chat");
+    const fetchImpl = vi.fn(async () => Response.json({ error: "this session has no chat in the HMCTS Assistant to show a question in" }, { status: 409 }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    // Act
+    const out = await hookJson(ask("preq-no-chat"), VIRTUAL);
+
+    // Assert
+    expect(reason(out)).toBe(UNDELIVERED_REASON);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   // A refusal is the hub reading the body and saying no, which asking again cannot change; the model is waiting on
   // this hook, so the budget is not spent repeating it.
   it("should tell the model to ask in words, without asking twice, when the hub refused the question", async () => {

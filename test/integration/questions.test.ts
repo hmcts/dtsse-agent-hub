@@ -91,6 +91,18 @@ async function conversationSession(): Promise<{ conversationId: string; agentId:
   return { conversationId: conversation.id, agentId: row.agentId!, token: assistant.token };
 }
 
+/** A session on Alice's own computer, registered as the client does, which gives it its chat in the Assistant. */
+async function laptopSession(name = "laptop"): Promise<string> {
+  await insertUser(ALICE);
+  const response = await call(registerRoute.POST, {
+    as: ALICE,
+    path: "/api/agent/register",
+    method: "POST",
+    body: { session_id: `laptop-${name}-${Math.random().toString(36).slice(2)}`, name }
+  });
+  return (await jsonOf<{ agent_id: string }>(response)).agent_id;
+}
+
 function ask(token: string, agentId: string, body: unknown = QUESTION): Promise<Response> {
   return pod(questionRoute.POST, token, `/api/agent/${agentId}/question`, { agentId }, "POST", body);
 }
@@ -300,7 +312,7 @@ describe("POST /api/agent/{agent_id}/question", () => {
 describe("who may read a question", () => {
   /** An ordinary session of Alice's with a question on it. */
   async function laptopQuestion(): Promise<string> {
-    const agentId = await insertAgent(ALICE, "laptop");
+    const agentId = await laptopSession();
     await call(questionRoute.POST, { as: ALICE, path: `/api/agent/${agentId}/question`, params: { agentId }, method: "POST", body: QUESTION });
     return agentId;
   }
@@ -405,7 +417,7 @@ describe("answering a question nobody answered in time", () => {
    * shows the controls, and this is what stops that press sending a message to a turn that ended hours ago.
    */
   it("should refuse the answer and send no message once the question is past its window", async () => {
-    const agentId = await insertAgent(ALICE, "laptop");
+    const agentId = await laptopSession();
     await call(questionRoute.POST, { as: ALICE, path: `/api/agent/${agentId}/question`, params: { agentId }, method: "POST", body: QUESTION });
     const row = await prisma.agentQuestion.findFirstOrThrow({ where: { agentId }, select: { id: true } });
     await prisma.agentQuestion.update({ where: { id: row.id }, data: { askedAt: new Date(Date.now() - QUESTION_OFFER_WINDOW_MS - 1000) } });
@@ -525,17 +537,13 @@ describe("answering a question", () => {
     });
   });
 
+  // A row from before its agent lost its chat: the person removed the chat after the question was asked.
   it("should refuse the answer and send nothing when the agent that asked has no conversation to show the card in", async () => {
     const agentId = await insertAgent(ALICE, "laptop");
-    const response = await call(questionRoute.POST, {
-      as: ALICE,
-      path: `/api/agent/${agentId}/question`,
-      params: { agentId },
-      method: "POST",
-      body: QUESTION
+    const row = await prisma.agentQuestion.create({
+      data: { agentId, sessionId: QUESTION.session_id, toolUseId: QUESTION.tool_use_id, questions: QUESTION.questions },
+      select: { id: true }
     });
-    expect(response.status).toBe(204);
-    const row = await prisma.agentQuestion.findFirstOrThrow({ where: { agentId }, select: { id: true } });
 
     expect(await answerAgentQuestion({ questionId: row.id, answers: { answers: [{ labels: ["Blue"], text: null }] } })).toEqual({
       ok: false,
@@ -544,5 +552,32 @@ describe("answering a question", () => {
 
     expect(await prisma.message.count({ where: { targetAgentId: agentId } })).toBe(0);
     expect((await prisma.agentQuestion.findUniqueOrThrow({ where: { id: row.id } })).answeredAt).toBeNull();
+  });
+});
+
+describe("a question from an agent with no chat", () => {
+  it("should refuse it with 409 and record nothing when a laptop session has no chat in the Assistant", async () => {
+    const agentId = await insertAgent(ALICE, "laptop");
+
+    const response = await call(questionRoute.POST, { as: ALICE, path: `/api/agent/${agentId}/question`, params: { agentId }, method: "POST", body: QUESTION });
+
+    expect(response.status).toBe(409);
+    expect(await jsonOf(response)).toEqual({ error: "this session has no chat in the HMCTS Assistant to show a question in" });
+    expect(await prisma.agentQuestion.count()).toBe(0);
+  });
+
+  it("should refuse it with 409 and record nothing when the session is a virtual agent's own, outside any conversation", async () => {
+    const assistant = await startedAssistant();
+    const registered = await pod(registerRoute.POST, assistant.token, "/api/agent/register", {}, "POST", {
+      session_id: "pod-own-session",
+      name: "session",
+      client_features: []
+    });
+    const agentId = (await jsonOf<{ agent_id: string }>(registered)).agent_id;
+
+    const response = await ask(assistant.token, agentId);
+
+    expect(response.status).toBe(409);
+    expect(await prisma.agentQuestion.count()).toBe(0);
   });
 });

@@ -376,34 +376,59 @@ export function assistantEnvelope(
   ].join("\n");
 }
 
-/** Who sent a delivered message and where this session runs, which together decide its envelope. */
-export type EnvelopeRoute = {
-  /** The hub's `from_owner`: it signed the sender in and checked that they own this agent. */
-  fromOwner: boolean;
-  /** Whether this session runs in a virtual agent's pod. */
-  pod: boolean;
-  /** The frame's `assistant` object, parsed; only a pod's conversation session reads it. */
-  assistant: AssistantFrame | null;
-  /** On a laptop, whether the owner reads this session's transcript; see `OwnerLaptopOptions`. */
-  ownerReads: boolean;
-  previousProduct: AssistantProduct | null;
-};
+/**
+ * Where this session runs: on someone's own computer, as a virtual agent's own session, or as one of its HMCTS
+ * Assistant conversations, which the supervisor starts with `AGENT_HUB_CONVERSATION_ID` set.
+ */
+export type SessionKind = "laptop" | "pod" | "conversation";
 
 /**
- * The envelope a delivered message goes in. Owner framing, and the owner's authority with it, needs the hub's
- * `from_owner` and one of two places it can be meant for: a pod's conversation session, which the frame's `assistant`
- * object names, or a session on the owner's own computer. Anything else is framed as a peer's — a post that tagged
- * this agent as a post, and a direct message as a direct — including an owner's message to a pod session outside a
- * conversation, since the HMCTS Assistant, the one place an owner writes from, never addresses one.
+ * How a delivered message is treated, one variant per case, so a case that cannot happen cannot be written down.
+ *
+ * - `conversation`: the owner writing to a conversation session. It carries the owner's authority, and the frame's
+ *   `assistant` object when it parsed: `null` is a message delivered as the owner's still, with no product, document,
+ *   model or attachments to act on.
+ * - `laptop`: the owner writing to a session on their own computer, with whether they read its transcript.
+ * - `peer`: everything else, including an owner's message to a pod's own session, since the HMCTS Assistant, the one
+ *   place an owner writes from, never addresses one.
  */
-export function chooseEnvelope(message: EnvelopeMessage, route: EnvelopeRoute, { skills, attachments }: AssistantEnvelopeOptions = {}): string {
-  if (route.fromOwner && route.pod && route.assistant) {
-    return assistantEnvelope(message, route.assistant, route.previousProduct, { skills, attachments });
+export type Delivery = { kind: "conversation"; frame: AssistantFrame | null } | { kind: "laptop"; ownerReads: boolean } | { kind: "peer" };
+
+export type DeliveryInput = {
+  /** The hub's `from_owner`: it signed the sender in and checked that they own this agent. */
+  fromOwner: boolean;
+  session: SessionKind;
+  /** The frame's `assistant` object as `parseAssistantFrame` read it, or null when it was missing or unreadable. */
+  frame: AssistantFrame | null;
+  /** Whether this session's transcript is uploaded, which on a laptop is how the owner reads an answer. */
+  transcriptUploaded: boolean;
+};
+
+/** The one place a message's treatment is decided: owner framing needs `from_owner` and a session it can be meant for. */
+export function routeDelivery({ fromOwner, session, frame, transcriptUploaded }: DeliveryInput): Delivery {
+  if (!fromOwner || session === "pod") {
+    return { kind: "peer" };
   }
-  if (route.fromOwner && !route.pod) {
-    return ownerLaptopEnvelope(message, { skills, reads: route.ownerReads });
+  return session === "conversation" ? { kind: "conversation", frame } : { kind: "laptop", ownerReads: transcriptUploaded };
+}
+
+/** What `chooseEnvelope` takes beyond the delivery: the product of the conversation's last message, read from disk. */
+export type ChooseEnvelopeOptions = AssistantEnvelopeOptions & { previousProduct?: AssistantProduct | null };
+
+/** The envelope a delivered message goes in, for the treatment `routeDelivery` decided. */
+export function chooseEnvelope(
+  message: EnvelopeMessage,
+  delivery: Delivery,
+  { skills, attachments, previousProduct = null }: ChooseEnvelopeOptions = {}
+): string {
+  switch (delivery.kind) {
+    case "conversation":
+      return assistantEnvelope(message, delivery.frame ?? {}, previousProduct, { skills, attachments });
+    case "laptop":
+      return ownerLaptopEnvelope(message, { skills, reads: delivery.ownerReads });
+    case "peer":
+      return message.kind === "post" ? taggedPostEnvelope(message, { skills }) : directEnvelope(message, { skills });
   }
-  return message.kind === "post" ? taggedPostEnvelope(message, { skills }) : directEnvelope(message, { skills });
 }
 
 // Only a skill the session has, so a message that merely starts with a path like /tmp is left alone.

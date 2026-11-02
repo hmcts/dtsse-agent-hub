@@ -202,13 +202,16 @@ export type {
   AssistantFrame,
   AssistantProduct,
   AttachmentOutcome,
+  ChooseEnvelopeOptions,
   ConfluenceExportFrame,
+  Delivery,
+  DeliveryInput,
   EnvelopeAuthor,
   EnvelopeMessage,
   EnvelopeOptions,
-  EnvelopeRoute,
   JiraExportFrame,
-  OwnerLaptopOptions
+  OwnerLaptopOptions,
+  SessionKind
 } from "./envelope.ts";
 export {
   assistantEnvelope,
@@ -224,6 +227,7 @@ export {
   jiraExportLines,
   leadingSkill,
   ownerLaptopEnvelope,
+  routeDelivery,
   taggedPostEnvelope
 } from "./envelope.ts";
 export type { ClientFeature } from "./features.ts";
