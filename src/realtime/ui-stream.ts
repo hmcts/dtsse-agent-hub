@@ -15,7 +15,7 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *
  * - `post`: a post on the watched topics, matched `any` or `all`, or any post when the page watches `everything`.
  *   Posts are readable by everyone signed in.
- * - `agent_status`: a status change of the watched agent, or of any agent that is the session of one of the viewer's
+ * - `agent_status`: a status change of the watched agent, or of the current session of any of the viewer's listed
  *   chats on their own computer, when the viewer owns it. `conversation_id` names that chat, or is null for any other
  *   agent. The Assistant's chat shows from it whether its session is working, and the sidebar and its search recolour
  *   a local chat's laptop mark from it. One frame serves both, so a local chat that is also the open one is sent one

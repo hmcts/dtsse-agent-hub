@@ -7,6 +7,7 @@ import type { LocalSession } from "@/assistant/local-session";
 import type { ConversationLink, ConversationMatch } from "@/assistant/views";
 import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { ConversationSearch, SEARCH_AFTER_MS } from "@/components/assistant/ConversationSearch";
+import { LiveLocalSessions } from "@/components/assistant/LiveLocalSessions";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => undefined, push: () => undefined }),
@@ -126,11 +127,34 @@ describe("a local chat's mark", () => {
     expect(row(/Fixing the sweep/).textContent).toBe("On your computer, not connected: Fixing the sweep");
   });
 
+  // A re-read that moved the mark on is newer than the live status, which must not come back when a later re-read
+  // happens to bring the mark it first arrived over.
+  it("should not bring back a dropped live status when a later re-read returns the mark it arrived over", () => {
+    const view = render(shell([local("a", "Fixing the sweep", "ready")]));
+
+    publish({ agent_id: "agent-a", status: "busy", conversation_id: "a" });
+    view.rerender(shell([local("a", "Fixing the sweep", "working")]));
+    // The idle status is missed, and the next re-read reads it.
+    view.rerender(shell([local("a", "Fixing the sweep", "ready")]));
+
+    expect(row(/Fixing the sweep/).textContent).toBe("On your computer, ready: Fixing the sweep");
+  });
+
+  it("should hear statuses through one subscription however many local chats are listed", () => {
+    render(shell([local("a", "Fixing the sweep", "ready"), local("b", "Reviewing the form", "ready"), local("c", "Old chat", "disconnected")]));
+
+    expect([...subscribers].filter((subscriber) => subscriber.type === "agent_status")).toHaveLength(1);
+  });
+
   it("should recolour a local chat among the search's results when its session changes", async () => {
     vi.useFakeTimers();
     const result: ConversationMatch = { ...local("c1", "Fixing the sweep", "disconnected"), snippet: null };
     const search = vi.fn<(query: string, signal: AbortSignal) => Promise<ConversationMatch[]>>().mockResolvedValue([result]);
-    render(<ConversationSearch search={search}>{null}</ConversationSearch>);
+    render(
+      <LiveLocalSessions served={new Map()}>
+        <ConversationSearch search={search}>{null}</ConversationSearch>
+      </LiveLocalSessions>
+    );
     fireEvent.change(screen.getByRole("combobox", { name: "Search chats" }), { target: { value: "sweep" } });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(SEARCH_AFTER_MS);

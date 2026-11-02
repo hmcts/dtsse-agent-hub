@@ -22,9 +22,9 @@ export type HubEvent =
    */
   | { type: "tagged_post"; message_id: string; agent_id: string }
   /**
-   * `owner_oid`'s agent changed status. `local_conversation_id` is the chat it is the session of when it is a session
-   * on the person's own computer, so the sidebar can recolour that chat's mark without a read per event; null for a
-   * pod's agent and for a session in no chat (`localConversationSql`).
+   * `owner_oid`'s agent changed status. `local_conversation_id` is the listed chat with no pod whose current session
+   * it is, so the sidebar can recolour that chat's mark without a read per event; null for every other agent
+   * (`localConversationSql`).
    */
   | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus; local_conversation_id: string | null }
   /** The skills `owner_oid`'s agent reported changed. Never carries the list, which only some viewers may see. */

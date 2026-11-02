@@ -106,6 +106,7 @@ describe("/api/ui/stream", () => {
 
   it("should send the owner the status of each of their laptop sessions' chats whatever the tab watches, and nobody else", async () => {
     const chat = await linkLocalSession(prisma, { ownerOid: ALICE.oid, agentId: alicesAgent, name: "alices-agent" });
+    await prisma.assistantConversation.update({ where: { id: chat!.id }, data: { firstContentAt: new Date() } });
     const alice = await watch("alice", "topics=pcs-api");
     const bob = await watch("bob", "topics=pcs-api");
 

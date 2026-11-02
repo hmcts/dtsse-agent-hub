@@ -121,8 +121,8 @@ pod's in-process hub; Home without channels asks for `?everything=1` instead of 
 `/api/ui/feed?everything=1&before=…`. `src/realtime/ui-stream.ts` decides what each viewer is sent, and every event but `post` goes only to the owner:
 
 - `post`: a post on the watched topics, or every post;
-- `agent_status`: a status change of the watched agent, or of the session behind any of the viewer's chats on their own
-  computer, naming that chat as `conversation_id` so the sidebar and its search recolour its laptop mark live;
+- `agent_status`: a status change of the watched agent, or of the current session of any of the viewer's listed chats on
+  their own computer, naming that chat as `conversation_id` so the sidebar and its search recolour its laptop mark live;
 - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery;
 - `transcript`: new transcript entries of the watched agent, by id;
 - `agent_skills`: the watched agent's skills changed, so the Assistant's chat re-renders and its "/" autocomplete
