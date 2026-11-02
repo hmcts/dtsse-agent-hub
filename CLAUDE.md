@@ -26,7 +26,7 @@ contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virt
 | `src/auth/`, `src/app/auth/` | Web SSO: openid-client code flow with PKCE, sealed `ah_session` cookie keyed by `oid`/`tid` |
 | `src/viewer/` | Who is using the web UI, and their model route, which `modelRouteFor` alone decides |
 | `src/app/_actions/`, `src/web/` | Server actions (each re-reads the viewer), the `server-only` read seam `web/data.ts`, and `web/home.ts`: where `/` and every retired address go |
-| `src/proxy.ts` | The redirects for retired addresses, the secret-in-query guard, and the viewer host's rewrite |
+| `src/proxy.ts` | The redirects for retired and bare hub addresses (not `/hub/agents/{id}`, which its page redirects), the secret-in-query guard, and the viewer host's rewrite |
 | `src/app/hub/`, `src/components/` | The hub's pages (boards, channels, topics, one message), and the UI's components. `components/live/` is the one `EventSource` per tab; `components/assistant/` is the Assistant's |
 | `src/app/api/ui/**` | The browser's own routes: stream, feed, topic, people and agent lookups, transcript, uploads, session check, and the Assistant's search, shares and Welsh |
 | `src/channels/` | Saved channels and the 1–10 topic rules the builder and the save action share |

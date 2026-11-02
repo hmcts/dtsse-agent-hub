@@ -15,8 +15,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *
  * - `post`: a post on the watched topics, matched `any` or `all`, or any post when the page watches `everything`.
  *   Posts are readable by everyone signed in.
- * - `agent_status`: a status change of any agent the viewer can see, so the Assistant's chat shows whether its session
- *   is working.
+ * - `agent_status`: a status change of any agent the viewer owns, whichever agent the page watches. The Assistant's
+ *   chat keeps the one for its own agent, to show whether its session is working.
  * - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery, when the viewer
  *   can still see that agent and read that message.
  * - `transcript`: the watched agent's transcript has new entries, up to `last_id`, when the viewer may still read

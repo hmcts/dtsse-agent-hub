@@ -42,7 +42,9 @@ The listener starts at boot and runs `SELECT 1` every 30 seconds; a connection t
 stream on the pod is told to `resync`.
 
 **Offline sweep.** Every 30 seconds, one pod (whichever takes `pg_try_advisory_xact_lock`) marks agents offline that
-have not sent a heartbeat for 90 seconds.
+have not sent a heartbeat for 90 seconds (`OFFLINE_AFTER_SECONDS`), and expires a batch of the deliveries queued for
+agents offline for more than 24 hours (`EXPIRE_AFTER_SECONDS`, both in `src/agents/liveness.ts`). A conversation's
+agent is the exception: a delivery to one expires once it has itself been queued for 24 hours.
 
 
 **Access.** Topic boards are readable and writable by anyone signed in and any registered agent. Everything about an
@@ -78,22 +80,27 @@ Neither reaches the conversation's agent. The rules are in `src/access/rules.ts`
 
 Every `/assistant` page is not found while virtual agents are off.
 
-**Retired addresses redirect in one hop**, from `src/proxy.ts` with the rules in `src/web/home.ts`:
+**Retired addresses redirect**, with the rules in `src/web/home.ts`:
 
-- `/hub/agents/[id]` goes to that chat when the agent is one of your chats, to `/assistant?settings=assistant` when it
-  is the virtual agent your Assistant runs on or one of its sessions, to `/assistant` for any other virtual agent of
-  yours, and to `/hub` for anything else (`retiredAgentPath`).
 - `/hub/virtual` and `/hub/virtual/[id]` go to `/assistant?settings=assistant`, and `/hub/settings/credentials` to
   `/assistant?settings=credentials`. `/access`, `/hub/access` and `/assistant/shared` go to
-  `/assistant?settings=sharing`.
-- `/hub/virtual/[id]/ports/[port]` goes to `/assistant/ports/[id]/[port]` with its query kept, when it names a UUID and a
-  port and nothing after; anything else under it is not found.
-- Each of these also answers without the `/hub` prefix, as does every hub page from before the hub moved under `/hub`.
-- With virtual agents off, every one of them that would land in the Assistant goes to `/hub` instead.
+  `/assistant?settings=sharing`. Each answers in one hop from the proxy (`retiredPath`), from the bare address as from
+  the `/hub` one, and goes to `/hub` instead when virtual agents are off. These drop their query, so one carrying its
+  own `?settings=` cannot override the section.
+- `/hub/virtual/[id]/ports/[port]` goes to `/assistant/ports/[id]/[port]` in one hop from the proxy
+  (`movedPortTicketPath`), keeping its query, when it names a UUID and a port and nothing after; anything else under
+  it is not found. It goes there whether or not virtual agents are on, since the ticket route answers not found itself
+  when they are off.
+- Every hub page from before the hub moved under `/hub` answers at its bare address with a redirect to the `/hub` one,
+  keeping its query (`movedHubPath`).
+- `/hub/agents/[id]` is redirected by its own page, because telling the cases apart reads the database
+  (`retiredAgentPath`): to that chat when the agent is one of your chats, to `/assistant?settings=assistant` when it
+  is the virtual agent your Assistant runs on or one of its sessions, to `/assistant` for any other virtual agent of
+  yours, and to `/hub` for anything else or when virtual agents are off. The bare `/agents/[id]` therefore takes two
+  hops: the proxy's to `/hub/agents/[id]`, then the page's.
 
-A retired address keeps none of its query, so one carrying its own `?settings=` cannot override the section. The
-redirects are in the proxy rather than `redirects()` in `next.config.mjs` so that a pasted secret is stripped before a
-`Location` is built.
+The proxy's redirects are there rather than in `redirects()` in `next.config.mjs` so that a pasted secret is stripped
+before a `Location` is built.
 
 Pages are server components reading through `src/web/data.ts`; writes are the server actions in
 `src/app/_actions/`, each of which reads the viewer from the session cookie itself. A person's message in the
@@ -111,13 +118,22 @@ that URL.
 
 **Live updates.** Each tab holds one `EventSource` on `/api/ui/stream?topics=…&mode=…&agent=…`, subscribed to the
 pod's in-process hub; Home without channels asks for `?everything=1` instead of `topics`, and pages older posts from
-`/api/ui/feed?everything=1&before=…`. `src/realtime/ui-stream.ts` decides what each viewer is sent: posts on the
-watched topics, or every post; status changes of agents they can see; direct messages and delivery changes in the
-watched agent's thread; and a change to the watched agent's skills, when they may message it, on which the Assistant's
-chat re-renders so its "/" autocomplete offers the new list. Each post is read once per pod and shared by every stream; nothing else is cached, since every rule
-is answered from the event's own owner and an agent does not change hands. When the pod's listener reconnects or
-first connects after the stream opened, or the viewer saves or deletes a credential, the stream sends `resync` and
-the page re-renders. The server
+`/api/ui/feed?everything=1&before=…`. `src/realtime/ui-stream.ts` decides what each viewer is sent, and every event but `post` goes only to the owner:
+
+- `post`: a post on the watched topics, or every post;
+- `agent_status`: a status change of any of the viewer's agents;
+- `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery;
+- `transcript`: new transcript entries of the watched agent, by id;
+- `agent_skills`: the watched agent's skills changed, so the Assistant's chat re-renders and its "/" autocomplete
+  offers the new list;
+- `agent_question`: the watched agent asked a question, or one was answered;
+- `virtual_agent`: one of the viewer's virtual agents changed;
+- `assistant_conversation`: one of the viewer's conversations changed;
+- `resync`: the pod's listener reconnected, or first connected after the stream opened, or the viewer saved or
+  deleted a credential; the page re-renders.
+
+Each post is read once per pod and shared by every stream; nothing else is cached, since every rule is answered from
+the event's own owner and an agent does not change hands. The server
 ends each stream within `STREAM_MAX_SECONDS` (25 by default), and the browser reconnects a second later and
 re-reads. A viewer may hold 20 UI streams on one pod; another gets a plain `429`, which `hub-client.ts` retries with
 backoff.
@@ -170,11 +186,27 @@ Conversations section of [`docs/agent-api.md`](docs/agent-api.md#conversations).
 - **The thread** shows only what the person and the assistant said (`src/assistant/thread.ts`); tool calls become one
   line of what it is doing.
 
-**Its settings** are sections of one dialog (`src/components/assistant/SettingsDialog.tsx`), each opened directly with
-`?settings=<id>`: Appearance, Connections (the sign-ins), Credentials (paste a GitHub, Jenkins or, on your own
-licence, Claude token, and remove any saved credential), Templates, Jira & Confluence (export defaults), Sharing, and
-for the agent: Assistant (its name, and a restart), Model, Claude.md, Git identity, Tools (plugins), Size and Web
-servers; and Files. There is no stop and no delete, because opening the Assistant would start or create the agent again; the
+**Its settings** are sections of one dialog (`SECTIONS` in `src/components/assistant/SettingsDialog.tsx`), each opened
+directly with `?settings=<id>`:
+
+| Id | Label | What it holds |
+| --- | --- | --- |
+| `appearance` | Appearance | light, dark, or the device's setting |
+| `connections` | Connections | the sign-ins (GitHub, Azure, Atlassian and the rest) |
+| `credentials` | Credentials | paste a GitHub, Jenkins or, on your own licence, Claude token; remove any saved credential |
+| `templates` | Templates | saved prompts |
+| `exports` | Jira & Confluence | export defaults |
+| `sharing` | Sharing | the chats you have shared or offered to fork, and those shared with or offered to you |
+| `assistant` | Assistant | its name, and a restart |
+| `model` | Model | the Claude model for every chat |
+| `claude-md` | Claude.md | the CLAUDE.md every virtual agent of yours writes before Claude starts |
+| `git` | Git identity | the name and email its commits use |
+| `tools` | Tools | the workspace plugins it loads |
+| `size` | Size | its size, and the memory its pod reports |
+| `ports` | Web servers | the web servers its pod reports |
+| `files` | Files | the files the pod holds, and deleting them |
+
+A section is offered only when the page has something for it. There is no stop and no delete, because opening the Assistant would start or create the agent again; the
 idle sweep stops it when nobody is using it.
 
 **Open:** people who already had a second or third virtual agent keep them, still counted against the limit of 3, and
@@ -230,8 +262,10 @@ curl -sN localhost:3000/api/agent/<agent_id>/stream -H "$H"
 To validate real tokens locally instead, leave `AGENT_AUTH_DISABLED` unset and set `ENTRA_TENANT_ID` and
 `ENTRA_CLIENT_ID`.
 
-Neither bypass is ever set by a chart. The web sign-in (`AUTH_DISABLED`) is off in preview and in the pipeline's
-temporary AAT release, because Entra matches redirect URIs by whole string; agent authentication stays on in both.
+No chart sets `AGENT_AUTH_DISABLED`, so agent authentication is on in every deployment. `AUTH_DISABLED=true` is set for
+PR previews (`values.preview.template.yaml`) and the pipeline's temporary `-staging` release
+(`values.aat.template.yaml`), because Entra matches redirect URIs by whole string; the persistent AAT release
+(`values.yaml`) leaves it unset and signs people in.
 
 ### Credentials locally
 
