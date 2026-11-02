@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assistantSettingsPath, defaultUi, homeFor, movedHubPath, NO_AGENT, retiredAgentPath, retiredHubPath } from "./home.ts";
+import { assistantSettingsPath, defaultUi, homeFor, movedHubPath, movedPortTicketPath, NO_AGENT, retiredAgentPath, retiredHubPath } from "./home.ts";
 
 describe("homeFor", () => {
   it.each(["/hub", "/hub/topics", "/hub/agents/0f8a", "/hub/nonsense"])("should send someone back into the hub from %s", (pathname) => {
@@ -88,7 +88,7 @@ describe("retiredHubPath", () => {
   });
 
   it.each(["/hub/virtual/0f8a/ports/3000", "/virtual/0f8a/ports/3000", "/hub/settings", "/hub/virtualfoo"])(
-    "should leave %s alone when it is not a retired page, the viewer's ticket route among them",
+    "should leave %s alone when it is not a retired page, the viewer's old ticket route among them",
     (pathname) => {
       expect(retiredHubPath(pathname, true)).toBeUndefined();
     }
@@ -109,6 +109,28 @@ describe("retiredHubPath", () => {
       expect(retiredHubPath(pathname, true)).toBeUndefined();
     }
   );
+});
+
+describe("movedPortTicketPath", () => {
+  it.each([
+    ["/hub/virtual/0f8a/ports/3000", "/assistant/ports/0f8a/3000"],
+    ["/virtual/0f8a/ports/3000", "/assistant/ports/0f8a/3000"],
+    ["/hub/virtual/0f8a/ports/3000/docs/index.html", "/assistant/ports/0f8a/3000/docs/index.html"],
+    ["/hub/virtual/0f8a/ports", "/assistant/ports/0f8a"]
+  ])("should send %s to %s when it is the viewer's old ticket address", (pathname, to) => {
+    expect(movedPortTicketPath(pathname)).toBe(to);
+  });
+
+  it.each([
+    "/hub/virtual",
+    "/hub/virtual/0f8a",
+    "/hub/virtual/0f8a/portsfoo/3000",
+    "/hub/virtual/0f8a/x/ports/3000",
+    "/assistant/ports/0f8a/3000",
+    "/hubx/virtual/0f8a/ports/3000"
+  ])("should leave %s alone when it is not the old ticket address", (pathname) => {
+    expect(movedPortTicketPath(pathname)).toBeUndefined();
+  });
 });
 
 describe("retiredAgentPath", () => {

@@ -9,6 +9,12 @@ const HUB = "/hub";
 
 const ASSISTANT = "/assistant";
 
+/**
+ * The viewer's ticket route, `/assistant/ports/{virtual agent id}/{port}`: the id then the port, as in the port's own
+ * prefix on the viewer's host. Under the Assistant, whose settings are where a person opens their web servers.
+ */
+export const PORT_TICKETS = `${ASSISTANT}/ports`;
+
 /** Where a person manages who may read or fork their conversations, the only access one person gives another. */
 const SHARED_CHATS = `${ASSISTANT}/shared`;
 
@@ -45,8 +51,23 @@ export function assistantSettingsPath(section: string): string {
   return `${ASSISTANT}?${new URLSearchParams({ [SETTINGS_PARAMETER]: section })}`;
 }
 
-/** `/virtual/{id}` with nothing after the id; the port ticket route under it is still served. */
+/** `/virtual/{id}` with nothing after the id. */
 const VIRTUAL_AGENT_PAGE = /^\/virtual\/[^/]+$/;
+
+/** The viewer's ticket route as it was, `/virtual/{id}/ports/{port}` and whatever follows, under `/hub` or bare. */
+const OLD_PORT_TICKET = /^(?:\/hub)?\/virtual\/([^/]+)\/ports(\/.*)?$/;
+
+/**
+ * Where the viewer's old ticket address goes now: `PORT_TICKETS`, keeping the id, the port and anything after them, or
+ * `undefined` when the path is not one. Unlike a retired page's, its query is kept, since `path=` is where the person
+ * lands, so the proxy appends it. It goes there whether or not virtual agents are on: the route answers not found
+ * itself when they are off. Bookmarks, pasted links and a viewer tab still open from before the move send
+ * people to the old address. One hop from the bare address as from the `/hub` one, so checked ahead of `movedHubPath`.
+ */
+export function movedPortTicketPath(pathname: string): string | undefined {
+  const match = OLD_PORT_TICKET.exec(pathname);
+  return match === null ? undefined : `${PORT_TICKETS}/${match[1]}${match[2] ?? ""}`;
+}
 
 /**
  * Where a retired hub address goes now, or `undefined` when the path is not one. Each goes where virtual agents are
@@ -56,7 +77,8 @@ const VIRTUAL_AGENT_PAGE = /^\/virtual\/[^/]+$/;
  *   the only access one person gives another is a share or fork of one conversation at a time, which is managed there.
  * - `/virtual` and `/virtual/{id}` go to the Assistant section of its settings: the Assistant's agent is the one
  *   virtual agent a person has, and its settings are where it is renamed, restarted and its web servers opened.
- *   `/virtual/{id}/ports/{port}` is not one of these: it is the viewer's ticket route, and is still served.
+ *   `/virtual/{id}/ports/{port}` is not one of these: it is the viewer's old ticket route, which `movedPortTicketPath`
+ *   sends on with its query.
  * - `/settings/credentials` goes to Credentials, where a token is pasted: the published client's pod boot messages still
  *   send people there to paste their GitHub token.
  *

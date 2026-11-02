@@ -11,7 +11,8 @@ import type { AssistantAgent } from "@/web/data";
  * With the viewer on, the first link is the viewer's `https://<viewer>/<id>/<port>/`, which works off the VPN. It is
  * given with its trailing slash because that is the prefix everything under it hangs from: the port's cookie is
  * scoped to it, and a page's `<base href>` from `/` is moved under it. Opened without the cookie, it goes through the
- * hub to sign the person in and comes back to the same place. The VPN address follows it.
+ * ticket route, `/assistant/ports/{id}/{port}`, to sign the person in and comes back to the same place. The VPN address
+ * follows it.
  */
 export function PortSettings({ load }: { load: () => Promise<AssistantAgent | null> }) {
   const { data: agent, failed } = useSettingsData("ports", load, true);

@@ -1,6 +1,7 @@
 import { isUuid } from "../agents/store.ts";
 import { safeReturnTo } from "../auth/guard.ts";
 import { MAX_EXPOSED_PORT, MIN_EXPOSED_PORT } from "../virtual-agents/ports.ts";
+import { PORT_TICKETS } from "../web/home.ts";
 
 /**
  * Where things live on the viewer's host. Each port is under its own `/<virtual agent id>/<port>/` prefix, with its
@@ -64,9 +65,9 @@ export function viewerCookieName(virtualAgentId: string, port: number): string {
   return `${VIEWER_COOKIE_PREFIX}${virtualAgentId}-${port}`;
 }
 
-/** The hub's page that checks the person and hands back a ticket for a port, landing on `path` under its prefix. */
+/** The hub's route that checks the person and hands back a ticket for a port, landing on `path` under its prefix. */
 export function ticketPath(virtualAgentId: string, port: number, path: string): string {
-  return `/hub/virtual/${encodeURIComponent(virtualAgentId)}/ports/${port}?${new URLSearchParams({ path })}`;
+  return `${PORT_TICKETS}/${encodeURIComponent(virtualAgentId)}/${port}?${new URLSearchParams({ path })}`;
 }
 
 /**

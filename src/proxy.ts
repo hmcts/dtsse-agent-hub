@@ -4,7 +4,7 @@ import { readSession, SESSION_COOKIE } from "@/auth/session";
 import { authRequired, sessionSecret } from "@/auth/settings";
 import { requestHost, VIEWER_ROUTE, VIEWER_URL_HEADER, viewerRouteHost, viewerSettings } from "@/port-viewer/settings";
 import { virtualAgentsEnabled } from "@/virtual-agents/settings";
-import { movedHubPath, retiredHubPath } from "@/web/home";
+import { movedHubPath, movedPortTicketPath, retiredHubPath } from "@/web/home";
 
 /**
  * Sends a person with no session to sign in, before anything renders. Named `proxy`: Next 16 replaced the
@@ -59,6 +59,11 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const retired = retiredHubPath(request.nextUrl.pathname, virtualAgentsEnabled());
   if (retired !== undefined) {
     return NextResponse.redirect(new URL(retired, request.nextUrl.origin), 308);
+  }
+  // The viewer's old ticket address keeps its query, the `path=` it lands on, which `carriesSecret` has already seen.
+  const ticket = movedPortTicketPath(request.nextUrl.pathname);
+  if (ticket !== undefined) {
+    return NextResponse.redirect(new URL(`${ticket}${request.nextUrl.search}`, request.nextUrl.origin), 308);
   }
   const moved = movedHubPath(request.nextUrl.pathname);
   if (moved !== undefined) {

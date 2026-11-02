@@ -196,8 +196,7 @@ describe("proxy hub address redirect", () => {
     ["/channels/new", "/hub/channels/new"],
     ["/m/42", "/hub/m/42"],
     ["/topics", "/hub/topics"],
-    ["/topics/pcs-api", "/hub/topics/pcs-api"],
-    ["/virtual/0f8a/ports/3000", "/hub/virtual/0f8a/ports/3000"]
+    ["/topics/pcs-api", "/hub/topics/pcs-api"]
   ])("should redirect the bare address %s to %s", async (from, to) => {
     const response = await proxy(askWith("GET", from));
 
@@ -249,11 +248,30 @@ describe("proxy hub address redirect", () => {
     expect((await proxy(askWith("GET", from))).headers.get("location")).toBe("https://agent-hub.example/hub");
   });
 
-  // The viewer's ticket route is under `/hub/virtual/{id}`, and is still served.
+  it.each([
+    ["/hub/virtual/0f8a/ports/3000", true],
+    ["/virtual/0f8a/ports/3000", true],
+    ["/hub/virtual/0f8a/ports/3000", false]
+  ])("should redirect the viewer's old ticket address %s to the new one in one hop, keeping its path, when virtual agents are %s", async (from, on) => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", on ? "true" : "");
+
+    const response = await proxy(askWith("GET", `${from}?path=%2Fdocs%3Fpage%3D2`));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant/ports/0f8a/3000?path=%2Fdocs%3Fpage%3D2");
+  });
+
+  it("should strip a secret from the viewer's old ticket address before the redirect copies its query", async () => {
+    const response = await proxy(askWith("GET", "/hub/virtual/0f8a/ports/3000?path=%2F&token=11a2b3c4d5e6f708192a3b4c5d"));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/hub/virtual/0f8a/ports/3000");
+  });
+
   it("should leave the viewer's ticket route alone when virtual agents are on", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
 
-    expect((await proxy(askWith("GET", "/hub/virtual/0f8a/ports/3000"))).status).toBe(200);
+    expect((await proxy(askWith("GET", "/assistant/ports/0f8a/3000?path=%2F"))).status).toBe(200);
   });
 
   it("should redirect before the sign-in check, so the login's redirect= carries the new address", async () => {

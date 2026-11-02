@@ -85,6 +85,17 @@ test.describe("routes @regression", () => {
     });
   }
 
+  // The viewer's ticket route is under the Assistant now. Its old address, which bookmarks and a viewer tab still open
+  // from before the move send people to, goes there in one hop with the port and `path=` kept.
+  for (const from of ["/hub/virtual/0f8a6a1e-0000-4000-8000-000000000001/ports/3000", "/virtual/0f8a6a1e-0000-4000-8000-000000000001/ports/3000"]) {
+    test(`should redirect the viewer's old ticket address ${from} to the Assistant's @regression`, async ({ request }) => {
+      const response = await request.get(`${from}?path=%2Fdocs`, { maxRedirects: 0 });
+
+      expect(response.status()).toBe(308);
+      expect(response.headers().location).toBe("/assistant/ports/0f8a6a1e-0000-4000-8000-000000000001/3000?path=%2Fdocs");
+    });
+  }
+
   // The access page managed standing access to every agent its owner had; there is none. What anyone shares is one
   // chat at a time, which is `/assistant/shared`, so both of its addresses go there — or to the hub where virtual
   // agents are off and the Assistant's pages are not found at all.
