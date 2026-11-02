@@ -3,7 +3,8 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationLink, ConversationMark, LocalSession, PodSession } from "@/assistant/views";
+import type { LocalSession } from "@/assistant/local-session";
+import type { ConversationLink, ConversationMark, PodSession } from "@/assistant/views";
 import { ArtefactPanel } from "@/components/assistant/ArtefactPanel";
 import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { AssistantRefresh } from "@/components/assistant/AssistantRefresh";

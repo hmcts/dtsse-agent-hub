@@ -15,9 +15,11 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *
  * - `post`: a post on the watched topics, matched `any` or `all`, or any post when the page watches `everything`.
  *   Posts are readable by everyone signed in.
- * - `agent_status`: a status change of the watched agent, when the viewer owns it. The Assistant's chat shows from it
- *   whether its session is working. The sidebar's marks are not drawn from it: they come from the server render, so a
- *   status change reaches them on the page's next re-read rather than live.
+ * - `agent_status`: a status change of the watched agent, or of the current session of any of the viewer's listed
+ *   chats on their own computer, when the viewer owns it. `conversation_id` names that chat, or is null for any other
+ *   agent. The Assistant's chat shows from it whether its session is working, and the sidebar and its search recolour
+ *   a local chat's laptop mark from it. One frame serves both, so a local chat that is also the open one is sent one
+ *   frame, and the chat is named from the NOTIFY itself rather than read per event.
  * - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery, when the viewer
  *   can still see that agent and read that message.
  * - `transcript`: the watched agent's transcript has new entries, up to `last_id`, when the viewer may still read
@@ -96,10 +98,15 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     }
     case "agent_status": {
       const agent = watch.agent;
-      if (agent?.id !== event.agent_id || !isOwner(sources.viewerOid, agent)) {
+      const watched = agent?.id === event.agent_id && isOwner(sources.viewerOid, agent);
+      const localChat = event.local_conversation_id !== null && isOwner(sources.viewerOid, { ownerOid: event.owner_oid });
+      if (!watched && !localChat) {
         return undefined;
       }
-      return sseEvent({ event: "agent_status", data: JSON.stringify({ agent_id: event.agent_id, status: event.status }) });
+      return sseEvent({
+        event: "agent_status",
+        data: JSON.stringify({ agent_id: event.agent_id, status: event.status, conversation_id: event.local_conversation_id })
+      });
     }
     case "direct": {
       const agent = watch.agent;

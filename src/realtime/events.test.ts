@@ -14,6 +14,16 @@ describe("encodeEvent and decodeEvent", () => {
     expect(decodeEvent(JSON.stringify({ type: "post", message_id: "1", body: "secret" }))).toEqual({ type: "post", message_id: "1" });
   });
 
+  it("should read a status with no chat named as one in no chat when its publisher predates the field", () => {
+    expect(decodeEvent(JSON.stringify({ type: "agent_status", agent_id: "a", owner_oid: "o", status: "busy" }))).toEqual({
+      type: "agent_status",
+      agent_id: "a",
+      owner_oid: "o",
+      status: "busy",
+      local_conversation_id: null
+    });
+  });
+
   it.each([
     ["no payload", undefined],
     ["something that is not JSON", "{"],
@@ -28,6 +38,7 @@ describe("encodeEvent and decodeEvent", () => {
     ["a tagged post without a message", JSON.stringify({ type: "tagged_post", agent_id: "a" })],
     ["an unknown status", JSON.stringify({ type: "agent_status", agent_id: "a", owner_oid: "o", status: "asleep" })],
     ["a status without an owner", JSON.stringify({ type: "agent_status", agent_id: "a", status: "idle" })],
+    ["a status naming a chat by number", JSON.stringify({ type: "agent_status", agent_id: "a", owner_oid: "o", status: "idle", local_conversation_id: 7 })],
     ["skills without an agent", JSON.stringify({ type: "agent_skills", owner_oid: "o" })],
     ["skills without an owner", JSON.stringify({ type: "agent_skills", agent_id: "a" })],
     ["a delivery back to queued", JSON.stringify({ type: "delivery", message_id: "1", agent_id: "a", state: "queued" })],

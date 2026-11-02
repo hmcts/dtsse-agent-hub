@@ -120,9 +120,13 @@ describe("selectFrame", () => {
   });
 
   it("should send the status of the watched agent when the viewer owns it", async () => {
-    const frame = await selectFrame({ type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "busy" }, THREAD, sources());
+    const frame = await selectFrame(
+      { type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "busy", local_conversation_id: null },
+      THREAD,
+      sources()
+    );
 
-    expect(frame).toBe(`event: agent_status\ndata: ${JSON.stringify({ agent_id: AGENT.id, status: "busy" })}\n\n`);
+    expect(frame).toBe(`event: agent_status\ndata: ${JSON.stringify({ agent_id: AGENT.id, status: "busy", conversation_id: null })}\n\n`);
   });
 
   it.each<[string, UiWatch]>([
@@ -130,7 +134,33 @@ describe("selectFrame", () => {
     ["another of the viewer's agents is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: VIEWER } }],
     ["the watched agent is somebody else's", { ...THEIR_THREAD, agent: { ...THEIR_AGENT, id: AGENT.id } }]
   ])("should not send a status change when %s", async (_label, watch) => {
-    expect(await selectFrame({ type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "busy" }, watch, sources())).toBeUndefined();
+    expect(
+      await selectFrame({ type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "busy", local_conversation_id: null }, watch, sources())
+    ).toBeUndefined();
+  });
+
+  it.each<[string, UiWatch]>([
+    ["no agent is watched", TOPICS],
+    ["another of the viewer's agents is watched", { ...THREAD, agent: { id: "agent-other", ownerOid: VIEWER } }],
+    ["the agent itself is watched", THREAD]
+  ])("should send the status of the session behind one of the viewer's local chats, naming the chat, when %s", async (_label, watch) => {
+    const frame = await selectFrame(
+      { type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "idle", local_conversation_id: "chat-1" },
+      watch,
+      sources()
+    );
+
+    expect(frame).toBe(`event: agent_status\ndata: ${JSON.stringify({ agent_id: AGENT.id, status: "idle", conversation_id: "chat-1" })}\n\n`);
+  });
+
+  it("should not send the status of the session behind a local chat when the chat is somebody else's", async () => {
+    expect(
+      await selectFrame(
+        { type: "agent_status", agent_id: THEIR_AGENT.id, owner_oid: OTHER, status: "idle", local_conversation_id: "chat-2" },
+        TOPICS,
+        sources()
+      )
+    ).toBeUndefined();
   });
 
   it("should send a direct message in the watched agent's thread when the viewer owns the agent", async () => {
@@ -338,15 +368,15 @@ describe("uiStream", () => {
 
   // Nothing is cached or re-read per connection: an agent does not change hands, so each status event is answered
   // from the agent the stream opened on and the frames just keep coming.
-  it("should send a frame for every status event of the watched agent and none for the viewer's other agents", async () => {
+  it("should send a frame for every status event of the watched agent and none for the viewer's other agents when they are in no local chat", async () => {
     const hub = createEventHub();
     const frames: string[] = [];
     const close = uiStream(THREAD, { hub, listener: LISTENING, ...sources() })((frame) => frames.push(frame), vi.fn()) as () => void;
 
-    hub.publish({ type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "busy" });
-    hub.publish({ type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "idle" });
-    hub.publish({ type: "agent_status", agent_id: "agent-other", owner_oid: VIEWER, status: "busy" });
-    hub.publish({ type: "agent_status", agent_id: "agent-2", owner_oid: OTHER, status: "busy" });
+    hub.publish({ type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "busy", local_conversation_id: null });
+    hub.publish({ type: "agent_status", agent_id: AGENT.id, owner_oid: VIEWER, status: "idle", local_conversation_id: null });
+    hub.publish({ type: "agent_status", agent_id: "agent-other", owner_oid: VIEWER, status: "busy", local_conversation_id: null });
+    hub.publish({ type: "agent_status", agent_id: "agent-2", owner_oid: OTHER, status: "busy", local_conversation_id: null });
     await settle();
     await settle();
 

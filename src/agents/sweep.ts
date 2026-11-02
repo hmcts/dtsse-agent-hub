@@ -1,3 +1,4 @@
+import { localConversationSql } from "../assistant/local-chat-store.ts";
 import { expireDeliveries } from "../messages/store.ts";
 import { notify } from "../realtime/notify.ts";
 import type { PrismaClient } from "../store/prisma.ts";
@@ -40,13 +41,19 @@ export async function sweepOffline(prisma: PrismaClient, options: SweepOptions =
     if (lock?.locked !== true) {
       return undefined;
     }
-    const swept = await tx.$queryRaw<{ id: string; owner_oid: string }[]>`
+    const swept = await tx.$queryRaw<{ id: string; owner_oid: string; local_conversation_id: string | null }[]>`
       UPDATE agent SET status = 'offline'
        WHERE status <> 'offline' AND last_heartbeat_at < now() - make_interval(secs => ${OFFLINE_AFTER_SECONDS}::double precision)
-      RETURNING id::text AS id, owner_oid
+      RETURNING id::text AS id, owner_oid, ${localConversationSql("agent")} AS local_conversation_id
     `;
     for (const agent of swept) {
-      await notify(tx, { type: "agent_status", agent_id: agent.id, owner_oid: agent.owner_oid, status: "offline" });
+      await notify(tx, {
+        type: "agent_status",
+        agent_id: agent.id,
+        owner_oid: agent.owner_oid,
+        status: "offline",
+        local_conversation_id: agent.local_conversation_id
+      });
     }
     const expired = await expireDeliveries(tx, expireAfterSeconds, expireBatch);
     return { offline: swept.map((agent) => agent.id), expired };

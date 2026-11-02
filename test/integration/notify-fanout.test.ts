@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { heartbeat, markOffline } from "../../src/agents/store.ts";
+import { heartbeat, markOffline, registerAgent } from "../../src/agents/store.ts";
+import { sweepOffline } from "../../src/agents/sweep.ts";
 import { linkLocalSession } from "../../src/assistant/local-chat-store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import type { HubEvent } from "../../src/realtime/events.ts";
@@ -63,6 +64,18 @@ async function settled(agentId: string, ownerOid: string, name: string): Promise
   return agentId;
 }
 
+async function chatOf(agentId: string): Promise<string | null> {
+  const row = await prisma.agent.findUniqueOrThrow({ where: { id: agentId }, select: { assistantConversationId: true } });
+  return row.assistantConversationId;
+}
+
+/** Puts the agent's chat in the sidebar, as its first words would (`announceFirstContent`), and answers its id. */
+async function listed(agentId: string): Promise<string> {
+  const chat = (await chatOf(agentId))!;
+  await prisma.assistantConversation.update({ where: { id: chat }, data: { firstContentAt: new Date() } });
+  return chat;
+}
+
 describe("NOTIFY fan-out between pods", () => {
   it("should deliver a direct message, a post and status changes to every pod's hub", async () => {
     const alicesAgent = await insertAgent(ALICE, "alice");
@@ -78,8 +91,8 @@ describe("NOTIFY fan-out between pods", () => {
       // The direct is the first thing said in Bob's session's chat, which puts it in his sidebar.
       { type: "assistant_conversation", conversation_id: expect.any(String), virtual_agent_id: null, owner_oid: BOB.oid },
       { type: "post", message_id: post.id },
-      { type: "agent_status", agent_id: bobsAgent, owner_oid: BOB.oid, status: "busy" },
-      { type: "agent_status", agent_id: alicesAgent, owner_oid: ALICE.oid, status: "offline" }
+      { type: "agent_status", agent_id: bobsAgent, owner_oid: BOB.oid, status: "busy", local_conversation_id: await chatOf(bobsAgent) },
+      { type: "agent_status", agent_id: alicesAgent, owner_oid: ALICE.oid, status: "offline", local_conversation_id: null }
     ];
     for (const running of pods) {
       await until(() => running.events.length >= expected.length);
@@ -96,7 +109,48 @@ describe("NOTIFY fan-out between pods", () => {
 
     await until(() => pods[0]!.events.length >= 1);
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy" }]);
+    expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy", local_conversation_id: null }]);
+  });
+
+  it("should name a listed laptop chat on every status its current session announces, and no chat for any other agent", async () => {
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    const laptop = await settled(await insertAgent(ALICE, "laptop"), ALICE.oid, "laptop");
+    const laptopChat = await listed(laptop);
+    const stale = await settled(await insertAgent(ALICE, "stale", { status: "busy", lastHeartbeatAt: hourAgo }), ALICE.oid, "stale");
+    const staleChat = await listed(stale);
+    // Still linked to the laptop's chat, but the chat's current agent is the laptop, so this one's mark is not drawn.
+    const movedOn = await insertAgent(ALICE, "moved-on", { status: "busy", lastHeartbeatAt: hourAgo });
+    await prisma.agent.update({ where: { id: movedOn }, data: { assistantConversationId: laptopChat } });
+    const unlisted = await settled(await insertAgent(ALICE, "unlisted"), ALICE.oid, "unlisted");
+    const pod = await insertAgent(ALICE, "pod");
+    const assistant = await prisma.virtualAgent.create({ data: { ownerOid: ALICE.oid, name: "assistant", modelRoute: "gateway" }, select: { id: true } });
+    const chat = await prisma.assistantConversation.create({
+      data: { ownerOid: ALICE.oid, virtualAgentId: assistant.id, agentId: pod, firstContentAt: new Date() },
+      select: { id: true }
+    });
+    await prisma.agent.update({ where: { id: pod }, data: { assistantConversationId: chat.id, virtualAgentId: assistant.id } });
+
+    await heartbeat(prisma, laptop, "busy", null);
+    await heartbeat(prisma, unlisted, "busy", null);
+    await heartbeat(prisma, pod, "busy", null);
+    await markOffline(prisma, laptop);
+    await sweepOffline(prisma);
+
+    const expected: HubEvent[] = [
+      { type: "agent_status", agent_id: laptop, owner_oid: ALICE.oid, status: "busy", local_conversation_id: laptopChat },
+      { type: "agent_status", agent_id: unlisted, owner_oid: ALICE.oid, status: "busy", local_conversation_id: null },
+      { type: "agent_status", agent_id: pod, owner_oid: ALICE.oid, status: "busy", local_conversation_id: null },
+      { type: "agent_status", agent_id: laptop, owner_oid: ALICE.oid, status: "offline", local_conversation_id: laptopChat }
+    ];
+    // The sweep's order is the UPDATE's, which is not defined, so its two are compared as a set.
+    const swept: HubEvent[] = [
+      { type: "agent_status", agent_id: stale, owner_oid: ALICE.oid, status: "offline", local_conversation_id: staleChat },
+      { type: "agent_status", agent_id: movedOn, owner_oid: ALICE.oid, status: "offline", local_conversation_id: null }
+    ];
+    await until(() => pods[0]!.events.length >= expected.length + swept.length);
+    expect(pods[0]!.events.slice(0, expected.length)).toEqual(expected);
+    expect(pods[0]!.events.slice(expected.length)).toEqual(expect.arrayContaining(swept));
+    expect(pods[0]!.events).toHaveLength(expected.length + swept.length);
   });
 
   it("should not notify for a write that rolled back", async () => {
@@ -114,7 +168,7 @@ describe("NOTIFY fan-out between pods", () => {
     await heartbeat(prisma, agent, "busy", null);
 
     await until(() => pods[0]!.events.length >= 1);
-    expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy" }]);
+    expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy", local_conversation_id: null }]);
   });
 
   it("should reconnect after its connection is killed and ask every stream to resync", async () => {
@@ -141,5 +195,42 @@ describe("NOTIFY fan-out between pods", () => {
     } finally {
       await admin.end();
     }
+  });
+});
+
+// The status a registration or heartbeat announces is read before it links a new chat, and is the same read after:
+// the chat it links is empty, so it is not in the sidebar yet and is named on the first status after it is listed.
+describe("a status announced with a newly linked chat", () => {
+  it("should name no chat for a registration that links one, and the chat once it is listed", async () => {
+    const caller = { oid: ALICE.oid, tid: "dev", name: ALICE.name, email: ALICE.email };
+    const registration = { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null };
+
+    const { id } = await registerAgent(prisma, caller, registration);
+    expect(await chatOf(id)).not.toBeNull();
+    const chat = await listed(id);
+    await registerAgent(prisma, caller, registration);
+
+    const expected: HubEvent[] = [
+      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: null },
+      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: chat }
+    ];
+    await until(() => pods[0]!.events.length >= expected.length);
+    expect(pods[0]!.events).toEqual(expected);
+  });
+
+  it("should name no chat for a heartbeat that links one, and the chat once it is listed", async () => {
+    const agent = await insertAgent(ALICE, "laptop");
+
+    await heartbeat(prisma, agent, "busy", null);
+    expect(await chatOf(agent)).not.toBeNull();
+    const chat = await listed(agent);
+    await heartbeat(prisma, agent, "idle", null);
+
+    const expected: HubEvent[] = [
+      { type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy", local_conversation_id: null },
+      { type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "idle", local_conversation_id: chat }
+    ];
+    await until(() => pods[0]!.events.length >= expected.length);
+    expect(pods[0]!.events).toEqual(expected);
   });
 });
