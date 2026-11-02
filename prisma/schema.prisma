@@ -204,7 +204,7 @@ model Agent {
   /// session and no post may tag it; with none, it is a session on its owner's own computer.
   assistantConversationId String? @map("assistant_conversation_id") @db.Uuid
   /// When the person removed this laptop session's chat. Such a session is never linked another one: see
-  /// deleteConversation in src/assistant/store.ts.
+  /// deleteConversation in src/assistant/conversation-store.ts.
   chatRemovedAt   DateTime?   @map("chat_removed_at") @db.Timestamptz(6)
 
   owner         User              @relation(fields: [ownerOid], references: [oid])
@@ -559,7 +559,7 @@ model AssistantConversation {
   /// When the copied words went to the copy's session, with the first message sent in it.
   forkContextSentAt     DateTime? @map("fork_context_sent_at") @db.Timestamptz(6)
   /// When something was first said or written in the conversation; null while it is empty, which leaves it out of the
-  /// sidebar and the search. Set once and never cleared: see announceFirstContent in src/assistant/store.ts.
+  /// sidebar and the search. Set once and never cleared: see announceFirstContent in src/assistant/first-content.ts.
   firstContentAt        DateTime? @map("first_content_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)

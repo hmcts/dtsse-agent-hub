@@ -6,7 +6,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as ticketRoute from "../../src/app/assistant/ports/[id]/[port]/route.ts";
-import { ensureAssistant } from "../../src/assistant/store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { openTicket } from "../../src/port-viewer/tickets.ts";
 import { reportPorts, setDesired } from "../../src/virtual-agents/store.ts";
 import { ALICE, BOB, viewer } from "./assistant-pod.ts";

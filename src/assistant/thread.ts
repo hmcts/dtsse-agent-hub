@@ -5,6 +5,7 @@ import { byCodePoint } from "../topics/slug.ts";
 import { type ConversationItem, toolSummary } from "../transcripts/conversation.ts";
 import { withoutIdeContext } from "../transcripts/harness-turn.ts";
 import { taskFailed, taskNotifications } from "../transcripts/task-notification.ts";
+import type { ProductChange, SessionState, StopMark } from "./conversation-row.ts";
 import { productLabel } from "./products.ts";
 import type { MessageAttachment } from "./upload-store.ts";
 
@@ -50,15 +51,6 @@ export type ThreadItem =
    * quiet line, because the raw text is XML nobody typed.
    */
   | { type: "notice"; key: string; at: string; text: string; failed: boolean };
-
-export interface ProductMark {
-  product: string;
-  at: string;
-}
-
-export interface StopMark {
-  at: string;
-}
 
 function textOf(content: unknown): string | undefined {
   if (typeof content === "object" && content !== null && "text" in content && typeof content.text === "string") {
@@ -263,7 +255,7 @@ function awaitingAnswer(thread: readonly ThreadItem[]): boolean {
  */
 export function threadItems(
   items: readonly ConversationItem[],
-  products: readonly ProductMark[] = [],
+  products: readonly ProductChange[] = [],
   stops: readonly StopMark[] = [],
   local = false
 ): ThreadItem[] {
@@ -321,8 +313,6 @@ const ACTIVITIES: Readonly<Record<string, string>> = {
 export function activityLabel(toolName: string | undefined): string {
   return (toolName === undefined ? undefined : ACTIVITIES[toolName]) ?? "Thinking";
 }
-
-export type SessionState = "starting" | "live" | "queued" | null;
 
 export type Progress =
   | { state: "idle" }
@@ -433,7 +423,7 @@ const QUEUED = "Waiting for a free assistant…";
  * that it is not connected, and `local` is checked first because `sessionState` is only ever written by a pod's
  * supervisor and so is null for every local chat — leaving the `queued` arm unreachable there rather than wrong.
  */
-function wakingLabel(session: SessionState, local: boolean): string {
+function wakingLabel(session: SessionState | null, local: boolean): string {
   if (local) {
     return "Waiting for your session to reconnect…";
   }
@@ -454,7 +444,7 @@ export function progress(
   items: readonly ConversationItem[],
   thread: readonly ThreadItem[],
   agentStatus: AgentStatus,
-  session: SessionState,
+  session: SessionState | null,
   local = false
 ): Progress {
   // The words and the marks on them. A product change is not something either of them said, and nor is a tool row:
@@ -584,7 +574,7 @@ export interface SessionNotice {
  * is also the agent the composer's wake leaves alone. And anything `progress` is already saying is left to it: the
  * line under the thread and this one would otherwise both word the same wait, directly above and below each other.
  */
-export function sessionNotice(session: SessionState, agentStatus: AgentStatus, doing: Progress, local = false): SessionNotice | null {
+export function sessionNotice(session: SessionState | null, agentStatus: AgentStatus, doing: Progress, local = false): SessionNotice | null {
   if (local || agentStatus !== "offline" || doing.state !== "idle" || session === "live") {
     return null;
   }

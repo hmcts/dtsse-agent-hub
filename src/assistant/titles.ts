@@ -5,7 +5,8 @@ import { typedText } from "../transcripts/harness-turn.ts";
  * What a conversation is called: the lengths a title may be, the three things that can name one, and the rules for
  * reading a name out of what was said in a chat.
  *
- * Pure, so every rule here is unit-tested; `store.ts` holds the reads and writes that apply them.
+ * Pure, so every rule here is unit-tested; `conversation-store.ts` and `local-chat-store.ts` hold the reads and writes
+ * that apply them.
  */
 
 /** A new conversation's title is the start of its first message, until the person renames it. */
