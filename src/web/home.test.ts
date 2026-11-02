@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultUi, homeFor, movedHubPath, retiredHubPath } from "./home.ts";
+import { defaultUi, homeFor, movedHubPath, NO_AGENT, retiredAgentPath, retiredHubPath } from "./home.ts";
 
 describe("homeFor", () => {
   it.each(["/hub", "/hub/topics", "/hub/agents/0f8a", "/hub/nonsense"])("should send someone back into the hub from %s", (pathname) => {
@@ -88,4 +88,32 @@ describe("retiredHubPath", () => {
       expect(retiredHubPath(pathname, true)).toBeUndefined();
     }
   );
+});
+
+describe("retiredAgentPath", () => {
+  const CONVERSATION = "22222222-2222-2222-2222-222222222222";
+
+  it("should send a chat's agent to that chat in the Assistant when virtual agents are on", () => {
+    expect(retiredAgentPath({ kind: "chat", conversationId: CONVERSATION }, true)).toBe(`/assistant/${CONVERSATION}`);
+  });
+
+  it("should send a virtual agent to the Assistant when virtual agents are on", () => {
+    expect(retiredAgentPath({ kind: "virtual" }, true)).toBe("/assistant");
+  });
+
+  it("should send anything else to the hub's home when virtual agents are on", () => {
+    expect(retiredAgentPath(NO_AGENT, true)).toBe("/hub");
+  });
+
+  // The Assistant's pages are not found with virtual agents off, so no address may be sent there.
+  it.each([{ kind: "chat", conversationId: CONVERSATION } as const, { kind: "virtual" } as const, NO_AGENT])(
+    "should send every agent's address to the hub's home when virtual agents are off",
+    (address) => {
+      expect(retiredAgentPath(address, false)).toBe("/hub");
+    }
+  );
+
+  it("should keep a conversation id from reaching past its own path segment", () => {
+    expect(retiredAgentPath({ kind: "chat", conversationId: "../shared" }, true)).toBe("/assistant/..%2Fshared");
+  });
 });

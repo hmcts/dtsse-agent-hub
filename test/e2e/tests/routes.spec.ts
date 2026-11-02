@@ -3,7 +3,8 @@ import { expect, test } from "@playwright/test";
 /**
  * Where the two UIs live. The HMCTS Assistant is the default UI, so `/` is it wherever it runs and the hub keeps its
  * own pages under `/hub`. Every address the hub used to answer on still redirects, because `/hub/agents/{id}` and
- * `/hub/topics/{slug}` are pasted into chats and tickets.
+ * `/hub/topics/{slug}` are pasted into chats and tickets — and `/hub/agents/{id}` itself only sends people on, since
+ * the hub shows no agents.
  */
 
 /** Each old hub address, and where it now lives. */
@@ -48,6 +49,15 @@ test.describe("routes @regression", () => {
 
     expect(response?.status()).toBe(404);
     await expect(page.getByRole("link", { name: "Back to home" })).toHaveAttribute("href", "/");
+  });
+
+  // An id that is none of the viewer's: their own chats' agents go to the chat, which needs a registered agent, and
+  // that is `local-chats.spec.ts`'s to set up.
+  test("should send an agent's page to the hub's home when the agent is none of the viewer's @regression", async ({ page }) => {
+    const response = await page.goto("/hub/agents/00000000-0000-0000-0000-000000000000");
+
+    expect(response?.status()).toBe(200);
+    expect(new URL(page.url()).pathname).toBe("/hub");
   });
 
   for (const [from, to] of MOVED) {

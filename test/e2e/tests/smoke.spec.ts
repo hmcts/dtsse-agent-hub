@@ -6,7 +6,7 @@ test.describe("smoke @smoke", () => {
 
     expect(response?.status()).toBe(200);
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
-    await expect(page.getByRole("complementary", { name: "Sidebar" }).getByRole("heading", { name: "Agents" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Sidebar" }).getByRole("heading", { name: "Topics" })).toBeVisible();
   });
 
   test("should say sign-in is disabled when the deployment runs without it @smoke", async ({ page }) => {

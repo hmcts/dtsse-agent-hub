@@ -22,8 +22,7 @@ export function defaultUi(virtualAgents: boolean): string {
 
 /**
  * Every first segment the hub answers on besides `/hub` itself. These are the addresses people paste into chats and
- * tickets — `/agents/{id}` is the one URL for any agent, local or virtual — so a 404 on one is a regression even
- * though no code links to them.
+ * tickets, so a 404 on one is a regression even though no code links to them.
  */
 const MOVED_SEGMENTS = new Set(["agents", "c", "channels", "m", "settings", "topics", "virtual"]);
 
@@ -52,6 +51,27 @@ export function retiredHubPath(pathname: string, virtualAgents: boolean): string
     return undefined;
   }
   return virtualAgents ? SHARED_CHATS : HUB;
+}
+
+/**
+ * What an agent's address names, as far as where it goes now: one of the viewer's own chats in the Assistant, one of
+ * their virtual agents or a session of one, or anything else. Somebody else's agent is anything else, so where the
+ * address goes says nothing about whether it exists.
+ */
+export type AgentAddress = { kind: "chat"; conversationId: string } | { kind: "virtual" } | { kind: "none" };
+
+export const NO_AGENT: AgentAddress = { kind: "none" };
+
+/**
+ * Where `/hub/agents/{id}` goes. The hub shows no agents: a chat's agent is that chat in the Assistant, and a virtual
+ * agent is what the Assistant runs on. Anything else goes to the hub's home, and so does everything where virtual
+ * agents are off, since the Assistant's pages are not found there.
+ */
+export function retiredAgentPath(address: AgentAddress, virtualAgents: boolean): string {
+  if (!virtualAgents || address.kind === "none") {
+    return HUB;
+  }
+  return address.kind === "chat" ? `${ASSISTANT}/${encodeURIComponent(address.conversationId)}` : ASSISTANT;
 }
 
 /**

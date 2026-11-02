@@ -14,7 +14,7 @@ const MODEL_ROUTE_WORDS: Record<ModelRoute, string> = {
   "own-licence": "your own Claude licence, so it will also need your Claude token"
 };
 
-export function ModelRouteLine({ route }: { route: ModelRoute }) {
+function ModelRouteLine({ route }: { route: ModelRoute }) {
   return <p className="text-sm text-hub-text">Model: {MODEL_ROUTE_WORDS[route]}</p>;
 }
 
@@ -46,9 +46,7 @@ function Row({ agent, now }: { agent: VirtualAgentCard; now: number }) {
   return (
     <li className="space-y-1 border-b border-hub-line px-4 py-3 last:border-b-0">
       <div className="flex flex-wrap items-baseline gap-x-3">
-        <a href={`/hub/agents/${agent.id}`} className="font-bold text-hub-link hover:underline">
-          {agent.name}
-        </a>
+        <span className="font-bold text-white">{agent.name}</span>
         <span className="text-xs text-hub-muted">{statusLabel(agent.status, agent.desired)}</span>
         {running && agent.lastActivityAt ? <span className="text-xs text-hub-muted">idle for {idleFor(agent.lastActivityAt, now)}</span> : null}
       </div>

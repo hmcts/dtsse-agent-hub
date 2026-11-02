@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { directAsAgent } from "../../src/messages/send.ts";
+import { directAsAgent, directAsPerson } from "../../src/messages/send.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { insertAgent, type Person, prisma, resetDatabase } from "./database.ts";
 
@@ -14,7 +14,6 @@ vi.mock("next/cache", async () => {
 
 const { actAs, revalidated } = await import("./web-session.ts");
 const { postToTopics } = await import("../../src/app/_actions/posts.ts");
-const { sendDirect } = await import("../../src/app/_actions/direct.ts");
 const { createChannel, removeChannel } = await import("../../src/app/_actions/channels.ts");
 
 function persona(name: string): Person {
@@ -108,13 +107,17 @@ describe("postToTopics", () => {
   });
 });
 
-describe("sendDirect", () => {
-  it("should queue a delivery to the agent and notify, the same as the agent API path, when the sender owns it", async () => {
+/**
+ * A person's direct message to one of their agents, which every chat in the Assistant is sent as. The action that
+ * calls it there is `sendAssistantMessage`; these are about the message itself.
+ */
+describe("directAsPerson", () => {
+  it("should queue a delivery to the agent when the sender owns it", async () => {
     const agent = await insertAgent(ALICE, "alices-agent");
 
-    const result = await sendDirect({ agentId: agent, body: "wake up" });
+    const sent = await directAsPerson(prisma, ALICE.oid, agent, "wake up");
 
-    expect(result).toMatchObject({ ok: true, message: { kind: "direct", target_agent_id: agent, delivery: "queued", author: { type: "user" } } });
+    expect(sent).toMatchObject({ kind: "direct", target_agent_id: agent, author: { type: "user" } });
     expect(await prisma.delivery.findMany({ select: { agentId: true, state: true } })).toEqual([{ agentId: agent, state: "queued" }]);
   });
 
@@ -125,25 +128,17 @@ describe("sendDirect", () => {
     ["an id that is not an agent", async () => "00000000-0000-0000-0000-000000000000"],
     ["something that is not an id", async () => "bobs-agent"]
   ])("should report %s as missing, and write nothing", async (_label, target) => {
-    expect(await sendDirect({ agentId: await target(), body: "hi" })).toEqual({ ok: false, error: "no such agent" });
+    await expect(directAsPerson(prisma, ALICE.oid, await target(), "hi")).rejects.toMatchObject({ status: 404, message: "no such agent" });
     expect(await prisma.message.count()).toBe(0);
-  });
-
-  it("should refuse an empty or oversized message", async () => {
-    const agent = await insertAgent(ALICE, "alices-agent");
-
-    expect((await sendDirect({ agentId: agent, body: " " })).ok).toBe(false);
-    expect((await sendDirect({ agentId: agent, body: "x".repeat(32_001) })).ok).toBe(false);
   });
 
   it("should show an agent's reply to the person in the thread they sent from", async () => {
     const agent = await insertAgent(ALICE, "alices-agent");
-    const sent = await sendDirect({ agentId: agent, body: "question" });
-    const message = sent.ok ? sent.message : undefined;
+    const sent = await directAsPerson(prisma, ALICE.oid, agent, "question");
 
-    const reply = await directAsAgent(prisma, { id: agent, ownerOid: ALICE.oid }, { replyTo: BigInt(message!.id), body: "answer" });
+    const reply = await directAsAgent(prisma, { id: agent, ownerOid: ALICE.oid }, { replyTo: BigInt(sent.id), body: "answer" });
 
-    expect(reply).toMatchObject({ target_agent_id: null, in_reply_to: message!.id });
+    expect(reply).toMatchObject({ target_agent_id: null, in_reply_to: sent.id });
   });
 });
 

@@ -1,4 +1,4 @@
-import { canManageVirtualAgent, canViewVirtualAgent } from "../access/rules.ts";
+import { canManageVirtualAgent } from "../access/rules.ts";
 import { isUuid } from "../agents/store.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import { viewerUrl } from "../port-viewer/paths.ts";
@@ -15,8 +15,7 @@ import type { StopReason } from "./stop.ts";
 import { findVirtualAgent, listVirtualAgents, type VirtualAgentRow } from "./store.ts";
 
 /**
- * Virtual agents as the pages show them: the summary anyone who may see one gets, and the cards and detail only its
- * owner does.
+ * Virtual agents as the pages show them: the cards and the detail, which only their owner gets.
  */
 
 export interface VirtualAgentCard {
@@ -166,30 +165,4 @@ export async function virtualAgentDetail(db: Database, viewerOid: string, id: st
   }
   const [newest, logins] = await Promise.all([newestEntries(db, row.agentId === null ? [] : [row.agentId]), loginViews(db, id)]);
   return { card: toCard(row, newest), logins, needed: neededCredentials(row.modelRoute), optional: optionalCredentials(row.modelRoute) };
-}
-
-/** What anyone who may see a virtual agent sees of it, which leaves out its sign-ins, credentials and ports. */
-export interface VirtualAgentSummary {
-  id: string;
-  name: string;
-  desired: VirtualAgentDesired;
-  status: VirtualAgentStatus;
-  /** The agent its current session registered, or `null` before one has. */
-  agentId: string | null;
-  owner: { oid: string; name: string; tid: string };
-}
-
-/** The virtual agent, or `undefined` when there is no such virtual agent or the viewer may not see it. */
-export async function virtualAgentSummary(db: Database, viewerOid: string, id: string): Promise<VirtualAgentSummary | undefined> {
-  if (!isUuid(id)) {
-    return undefined;
-  }
-  const row = await db.virtualAgent.findUnique({
-    where: { id },
-    select: { id: true, ownerOid: true, name: true, desired: true, status: true, agentId: true, owner: { select: { oid: true, name: true, tid: true } } }
-  });
-  if (row === null || !canViewVirtualAgent(viewerOid, row)) {
-    return undefined;
-  }
-  return { id: row.id, name: row.name, desired: row.desired, status: row.status, agentId: row.agentId, owner: row.owner };
 }

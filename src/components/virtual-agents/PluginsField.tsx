@@ -12,7 +12,7 @@ export function pluginChoices(available: readonly PluginOption[], checked: reado
  * the fix is a change to the hub's configuration and the reader is who makes it; the surrounding page is unaffected,
  * so it says that too rather than leave the reader wondering what else to distrust.
  */
-export function PluginConfigurationFault({ error }: { error: string }) {
+function PluginConfigurationFault({ error }: { error: string }) {
   return (
     <div role="alert" className="block basis-full rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-amber-200">
       <p className="font-semibold">Plugins cannot be offered</p>
