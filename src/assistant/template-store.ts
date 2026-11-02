@@ -1,13 +1,13 @@
-import { canManageTemplate } from "../access/rules.ts";
+import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/store.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { checkTemplate, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL, templateNameTaken } from "./templates.ts";
 
 /**
- * Each person's own saved prompts. `canManageTemplate` is asked on every call, so the one rule covers reading and
- * writing and nothing here decides for itself; the `owner_oid` in every query is what makes a refusal unreachable
- * rather than merely unoffered.
+ * Each person's own saved prompts. `isOwner` is asked on every call, so the one rule covers reading and writing and
+ * nothing here decides for itself; the `owner_oid` in every query is what makes a refusal unreachable rather than
+ * merely unoffered.
  *
  * No caller passes an owner a browser named: the actions hand both ids from the viewer they re-read, so `actorOid`
  * and `ownerOid` being the same pair is the normal case and the parameter exists to keep the rule honest.
@@ -22,7 +22,7 @@ export interface TemplateTarget {
 }
 
 function allow({ actorOid, ownerOid }: TemplateTarget): void {
-  if (!canManageTemplate(actorOid, ownerOid)) {
+  if (!isOwner(actorOid, { ownerOid })) {
     throw new HttpError(403, "you can only change your own templates");
   }
 }

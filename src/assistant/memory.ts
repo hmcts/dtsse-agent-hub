@@ -1,4 +1,4 @@
-import { canSeeAssistantMemory } from "../access/rules.ts";
+import { isOwner } from "../access/rules.ts";
 import { clientSupports } from "../agents/client-features.ts";
 import type { PrismaClient } from "../store/prisma.ts";
 import { DEFAULT_SIZE, isVirtualAgentSize, sizeChangeRefusal, sizeChangeRollsPod, type VirtualAgentSize } from "../virtual-agents/size.ts";
@@ -74,7 +74,7 @@ export async function assistantMemory(prisma: PrismaClient, viewerOid: string, v
       agent: { select: { clientFeatures: true } }
     }
   });
-  if (agent === null || !canSeeAssistantMemory(viewerOid, agent.ownerOid)) {
+  if (agent === null || !isOwner(viewerOid, agent)) {
     return undefined;
   }
   const size = isVirtualAgentSize(agent.size) ? agent.size : DEFAULT_SIZE;
