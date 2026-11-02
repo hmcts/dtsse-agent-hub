@@ -1,6 +1,8 @@
 import "server-only";
 import { canManageVirtualAgent, canOwnerReadCredential, canReadMessage, isOwner } from "../access/rules.ts";
 import { isUuid } from "../agents/store.ts";
+import { ensureAssistant, findAssistant } from "../assistant/assistant-store.ts";
+import { conversationAgent, findConversation } from "../assistant/conversation-store.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
 import { conversationsForkableBy, conversationsOfferedBy, forkChoice, forkRecipients } from "../assistant/fork-store.ts";
@@ -18,7 +20,6 @@ import {
   shareRecipients
 } from "../assistant/shares.ts";
 import { type SharedConversationView, sharedConversation } from "../assistant/sharing.ts";
-import { conversationAgent, ensureAssistant, findAssistant, findConversation } from "../assistant/store.ts";
 import { listTemplates } from "../assistant/template-store.ts";
 import type { SavedTemplate } from "../assistant/templates.ts";
 import { type UploadsOnDisk, uploadsOnDisk } from "../assistant/upload-disk.ts";
@@ -416,9 +417,14 @@ export async function chatForks(viewer: Identity, id: string): Promise<SharePers
  * Both sides of the viewer's shares and fork offers: their own chats they have shared or offered, and the chats
  * shared with or offered to them.
  */
-export async function sharedChats(
-  viewer: Identity
-): Promise<{ given: SharedChatLink[]; received: SharedChatLink[]; offered: SharedChatLink[]; forkable: SharedChatLink[] }> {
+export interface SharedChats {
+  given: SharedChatLink[];
+  received: SharedChatLink[];
+  offered: SharedChatLink[];
+  forkable: SharedChatLink[];
+}
+
+export async function sharedChats(viewer: Identity): Promise<SharedChats> {
   const [given, received, offered, forkable] = await Promise.all([
     conversationsSharedBy(prisma, viewer.oid),
     conversationsSharedWith(prisma, viewer.oid),

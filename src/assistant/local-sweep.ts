@@ -1,5 +1,6 @@
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { announce, detachLocalSessions } from "./store.ts";
+import { announce } from "./conversation-row.ts";
+import { detachLocalSessions } from "./local-chat-store.ts";
 
 /**
  * The one thing that bounds how many conversations a person's own Claude Code sessions leave in their Assistant.

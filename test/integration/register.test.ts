@@ -4,7 +4,9 @@ import { registerAgent, SessionOwnedElsewhere } from "../../src/agents/store.ts"
 import { POST as heartbeat } from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
 import { POST as offline } from "../../src/app/api/agent/[agentId]/offline/route.ts";
 import { POST as register } from "../../src/app/api/agent/register/route.ts";
-import { createConversation, ensureAssistant, linkLocalSession, listConversations } from "../../src/assistant/store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { createConversation, listConversations } from "../../src/assistant/conversation-store.ts";
+import { linkLocalSession } from "../../src/assistant/local-chat-store.ts";
 import { appendEntries } from "../../src/transcripts/store.ts";
 import { devUser, insertAgent, insertUser, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";

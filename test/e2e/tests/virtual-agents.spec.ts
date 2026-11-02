@@ -21,7 +21,8 @@ test.describe("virtual agents @regression", () => {
         await page.goto(old);
         test.skip(new URL(page.url()).pathname === "/hub", ASSISTANT_OFF);
         await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Your assistant" })).toBeVisible();
-        expect(`${new URL(page.url()).pathname}${new URL(page.url()).search}`).toBe("/assistant");
+        await page.keyboard.press("Escape");
+        await expect(page).toHaveURL((url) => `${url.pathname}${url.search}` === "/assistant");
       }
     } finally {
       await context.close();

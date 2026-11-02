@@ -5,12 +5,14 @@ import type { Database, PrismaClient } from "../store/prisma.ts";
 import { conversationItems, mergeEntries, type TranscriptEntryView } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
+import { ensureAssistant } from "./assistant-store.ts";
+import { announce, ConversationNotFound, storedHistory, storedStops } from "./conversation-row.ts";
+import { createConversationAgent } from "./conversation-store.ts";
 import { FORK_CONTEXT_FILE_NAME, FORK_CONTEXT_MEDIA_TYPE, FORKED_SELECT, forkContextMarkdown, forkedView, forkThread } from "./forks.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { conversationRef, forksOf, type SharedChatLink, type SharedConversationRow, type SharePerson } from "./shares.ts";
-import { productMarks, type SharedThreadItem, sharedThreadItems, stopMarks } from "./sharing.ts";
-import { announce, ConversationNotFound, createConversationAgent, ensureAssistant } from "./store.ts";
+import { type SharedThreadItem, sharedThreadItems } from "./sharing.ts";
 import { threadItems } from "./thread.ts";
 import { PART_BYTES, partCount, storedNameOf } from "./uploads.ts";
 import { UNTITLED } from "./views.ts";
@@ -145,7 +147,7 @@ async function sourceThread(
   return {
     // `local` for the same reason `sharedConversation` passes it: on a laptop chat the person's prompts are transcript
     // entries rather than hub messages, so a copy taken without it would carry the answers and not the questions.
-    thread: sharedThreadItems(threadItems(items, productMarks(row.productHistory), stopMarks(row.stopHistory), !hasPod(conversation))),
+    thread: sharedThreadItems(threadItems(items, storedHistory(row.productHistory), storedStops(row.stopHistory), !hasPod(conversation))),
     earlierHidden: page.olderBefore !== null
   };
 }

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { findAssistant } from "@/assistant/store";
+import { findAssistant } from "@/assistant/assistant-store";
 import { type RemoveResult, reportedUploadIds, requestUploadRemoval } from "@/assistant/upload-disk";
 import { prisma } from "@/store/prisma";
 import { requireViewer } from "@/viewer/current";

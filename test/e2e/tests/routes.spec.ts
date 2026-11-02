@@ -105,14 +105,14 @@ test.describe("routes @regression", () => {
   });
 
   // The access page managed standing access to every agent its owner had; there is none. What anyone shares is one
-  // chat at a time, which is `/assistant/shared`, so both of its addresses go there — or to the hub where virtual
-  // agents are off and the Assistant's pages are not found at all.
-  for (const from of ["/access", "/hub/access"]) {
+  // chat at a time, managed in the settings' Sharing section, so both of its addresses go there, as does
+  // `/assistant/shared` — or to the hub where virtual agents are off and the Assistant's pages are not found at all.
+  for (const from of ["/access", "/hub/access", "/assistant/shared"]) {
     test(`should redirect the retired ${from} to the shared chats @regression`, async ({ request }) => {
       const response = await request.get(from, { maxRedirects: 0 });
 
       expect(response.status()).toBe(307);
-      expect(response.headers().location).toMatch(/^(\/assistant\/shared|\/hub)$/);
+      expect(response.headers().location).toMatch(/^(\/assistant\?settings=sharing|\/hub)$/);
     });
   }
 

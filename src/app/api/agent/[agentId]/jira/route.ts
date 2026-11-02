@@ -1,8 +1,8 @@
 import { HttpError, noContent, parse, readJson } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
+import { conversationOfAgent } from "@/assistant/conversation-store";
 import { recordJiraExport } from "@/assistant/jira-store";
 import { jiraExportReportBody } from "@/assistant/schemas";
-import { conversationOfAgent } from "@/assistant/store";
 import { prisma } from "@/store/prisma";
 
 export const runtime = "nodejs";

@@ -15,6 +15,9 @@ import { assistantChatGate } from "@/web/data";
  * offer; and, for the person offered it, taking their own copy. The owner and the recipient are both the session's
  * identity rather than anything in the argument, so nobody can offer another owner's chat or take a copy offered to
  * someone else; the store reports either as a conversation that is missing.
+ *
+ * The offer and the withdrawal revalidate `/assistant` as a layout, because the settings dialog on every Assistant
+ * page lists the chats offered, and the share page of the chat itself is under it.
  */
 
 const OFF: { ok: false; error: string } = { ok: false, error: "the HMCTS Assistant is not available on this deployment" };
@@ -31,8 +34,7 @@ export async function offerChatFork(input: { conversationId: unknown; recipientO
     }
     const conversationId = text(input.conversationId);
     const people = await offerFork(prisma, viewer.oid, conversationId, recipientOid);
-    revalidatePath("/assistant/shared");
-    revalidatePath(`/assistant/${conversationId}`);
+    revalidatePath("/assistant", "layout");
     return { ok: true, people };
   });
 }
@@ -49,8 +51,7 @@ export async function withdrawChatFork(input: { conversationId: unknown; recipie
     }
     const conversationId = text(input.conversationId);
     const people = await withdrawFork(prisma, viewer.oid, conversationId, recipientOid);
-    revalidatePath("/assistant/shared");
-    revalidatePath(`/assistant/${conversationId}`);
+    revalidatePath("/assistant", "layout");
     return { ok: true, people };
   });
 }
