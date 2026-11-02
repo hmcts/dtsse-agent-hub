@@ -398,7 +398,7 @@ describe("runBridge", () => {
       await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
 
       // Act
-      const msg = bridge.hub.sendDirectFromUser(bridge.agentId, "only once please");
+      const msg = bridge.hub.sendDirectFromOwner(bridge.agentId, "only once please");
       await waitUntil(() => bridge.streamOpens().length >= 3 && bridge.acks(msg.id).length >= 3, "two replays and their acks");
 
       // Assert
@@ -417,7 +417,7 @@ describe("runBridge", () => {
       bridge.hub.failNextAcks(1);
 
       // Act
-      const msg = bridge.hub.sendDirectFromUser(bridge.agentId, "ack me eventually");
+      const msg = bridge.hub.sendDirectFromOwner(bridge.agentId, "ack me eventually");
       await waitUntil(() => bridge.hub.deliveries.get(`${msg.id}:${bridge.agentId}`)?.state === "delivered", "the ack to succeed");
 
       // Assert
@@ -746,8 +746,8 @@ describe("runBridge", () => {
         await bridge.hub.waitFor((c) => c.method === "GET" && c.path === `/api/agent/${bridge.agentId}/stream`);
 
         // Act
-        const first = bridge.hub.sendDirectFromUser(bridge.agentId, "first while held");
-        const second = bridge.hub.sendDirectFromUser(bridge.agentId, "second while held");
+        const first = bridge.hub.sendDirectFromOwner(bridge.agentId, "first while held");
+        const second = bridge.hub.sendDirectFromOwner(bridge.agentId, "second while held");
         await waitUntil(() => bridge.logText().includes(`holding direct #${first.id}`), "the hold to be logged");
         await new Promise((r) => setTimeout(r, 500));
 
@@ -798,7 +798,7 @@ describe("runBridge", () => {
         await hub.waitFor((c) => c.method === "GET" && c.path === `/api/agent/${agentId}/stream`);
 
         // Act
-        const msg = hub.sendDirectFromUser(agentId, "no pid known");
+        const msg = hub.sendDirectFromOwner(agentId, "no pid known");
         await waitUntil(() => hub.deliveries.get(`${msg.id}:${agentId}`)?.state === "delivered", "the ack");
 
         // Assert
@@ -1056,7 +1056,7 @@ describe("runBridge", () => {
         await bridge.hub.waitFor((c) => c.method === "GET" && c.path === `/api/agent/${bridge.agentId}/stream`);
 
         // Act
-        const msg = bridge.hub.sendDirectFromUser(bridge.agentId, "default mode");
+        const msg = bridge.hub.sendDirectFromOwner(bridge.agentId, "default mode");
         await waitUntil(() => bridge.hub.deliveries.get(`${msg.id}:${bridge.agentId}`)?.state === "delivered", "the ack");
 
         // Assert

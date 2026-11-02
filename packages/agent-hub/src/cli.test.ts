@@ -474,6 +474,21 @@ describe("the commands, in process against the mock hub", () => {
     expect([...since.text().matchAll(/Busy (\d+)/g)].map((m) => Number(m[1]))).toEqual([22, 23, 24]);
   });
 
+  it("should show each agent author's id and whether it is one of the caller's own when read prints messages", async () => {
+    // Arrange
+    const theirs = hub.addPost({ topics: ["zz-whose"], title: "Bob's", bodyText: "x", fromAgent: "bob-whose" });
+    const mine = await cli(["post", "--topics", "zz-whose", "--title", "Mine", "--body", "y"]);
+    const mineId = /^posted #(\d+)/.exec(mine.lines[0] as string)?.[1];
+
+    // Act
+    const r = await cli(["read", theirs.id, `#${mineId}`]);
+
+    // Assert
+    expect(r.code).toBe(0);
+    expect(r.text()).toContain(`[agent id ${theirs.author.agent_id}, another owner's agent]`);
+    expect(r.text()).toContain(`[agent id ${agentId}, one of your own agents]`);
+  });
+
   it("should say so when a read finds no messages", async () => {
     // Act
     const r = await cli(["read", "zz-silent"]);
@@ -484,7 +499,7 @@ describe("the commands, in process against the mock hub", () => {
 
   it("should send a direct message, keep a local copy of it and reply to a message's author", async () => {
     // Arrange
-    const incoming = hub.sendDirectFromUser(agentId, "ping");
+    const incoming = hub.sendDirectFromOwner(agentId, "ping");
 
     // Act
     const sent = await cli(["send", `@${agentId}`, "hello", "there"]);
@@ -517,28 +532,46 @@ describe("the commands, in process against the mock hub", () => {
       for (const id of twins) {
         hub.agents.delete(id);
       }
+      // Their posts go with them, or the mock would read them as a person's posts on every later board read.
+      for (let i = hub.messages.length - 1; i >= 0; i--) {
+        if (twins.includes(hub.messages[i]?.author_agent_id as string)) {
+          hub.messages.splice(i, 1);
+        }
+      }
     }
   });
 
-  it("should name the tagged post and exit 1 when send names another owner's agent", async () => {
+  it("should name the tagged post by id and exit 1 when send names another owner's agent by its id", async () => {
     // Arrange
     const bobs = hub.addPost({ topics: ["zz-dup"], bodyText: "x", title: "x", fromAgent: "bob-send-target" }).author.agent_id as string;
 
     // Act
-    const byName = await cli(["send", "@bob-send-target", "hello"]);
-    const byId = await cli(["send", bobs, "hello"]);
+    const r = await cli(["send", bobs, "hello"]);
 
     // Assert
-    expect(byName.code).toBe(1);
-    expect(byName.errors).toEqual([
-      'agent-hub send: no agent you may message is called "bob-send-target"',
-      "A direct message only reaches your own agents. To reach someone else's, post on a topic and tag it:",
-      '  agent-hub post --topics <topic> --title "<title>" --tag @bob-send-target'
+    expect(r.code).toBe(1);
+    expect(r.errors).toEqual([
+      "agent-hub send: a direct message is between your own sessions; post on a topic and tag that agent instead",
+      "A direct message only reaches your own agents. To reach someone else's, post on a topic and tag it by its id:",
+      `  agent-hub post --topics <topic> --title "<title>" --tag @${bobs}`
     ]);
-    expect(byId.code).toBe(1);
-    expect(byId.errors[0]).toBe("agent-hub send: a direct message is between your own sessions; post on a topic and tag that agent instead");
-    expect(byId.errors[2]).toBe(`  agent-hub post --topics <topic> --title "<title>" --tag @${bobs}`);
     expect(hub.messages.some((m) => m.kind === "direct" && m.target_agent_id === bobs)).toBe(false);
+  });
+
+  it("should point at the agents list and print no sending command when send names no agent of the caller's", async () => {
+    // Arrange: a name only another owner's agent has, which the hub answers exactly as it answers a typo.
+    hub.addPost({ topics: ["zz-dup"], bodyText: "x", title: "x", fromAgent: "bob-by-name" });
+
+    // Act
+    const r = await cli(["send", "@bob-by-name", "hello"]);
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.errors).toEqual([
+      'agent-hub send: no agent of yours is called "bob-by-name"; `agent-hub agents` lists the ones that are.',
+      "To reach someone else's agent, tag it by its id in a post on a topic, as `post --tag` describes in the help."
+    ]);
+    expect(r.errors.join("\n")).not.toMatch(/agent-hub post /);
   });
 
   it("should print only the hub's refusal and exit 1 when send names an id that is no agent at all", async () => {
@@ -582,7 +615,7 @@ describe("the commands, in process against the mock hub", () => {
   it("should print only the hub's refusal, without reading the message, and exit 1 when reply names a direct message the agent did not receive", async () => {
     // Arrange: a direct between two of Bob's agents, which this session can neither answer nor read.
     const bobs = hub.addPost({ topics: ["zz-dup"], bodyText: "x", title: "x", fromAgent: "bob-direct-elsewhere" }).author.agent_id as string;
-    const theirs = hub.sendDirectFromUser(bobs, "for bob");
+    const theirs = hub.sendDirectFromOwner(bobs, "for bob");
 
     // Act
     const r = await cli(["reply", theirs.id, "not mine"]);
@@ -1925,7 +1958,7 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
 
   it("should write the owner's direct message from the UI to the inbox socket as their own, then ack it", async () => {
     // Act
-    const msg = hub.sendDirectFromUser(agentId, "Please check the claim migration.");
+    const msg = hub.sendDirectFromOwner(agentId, "Please check the claim migration.");
     const lines = await waitForInbox(1);
 
     // Assert
@@ -1957,7 +1990,7 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
 
   it("should send a reply to the message author via reply_to_message", async () => {
     // Arrange
-    const original = hub.sendDirectFromUser(agentId, "ping");
+    const original = hub.sendDirectFromOwner(agentId, "ping");
     await waitForInbox(2);
 
     // Act
@@ -2172,7 +2205,7 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
 
   it("should restart the bridge on SessionStart, redeliver unacked messages and exit when Claude dies", async () => {
     // Arrange
-    const queued = hub.sendDirectFromUser(agentId, "sent while offline");
+    const queued = hub.sendDirectFromOwner(agentId, "sent while offline");
     const before = received.length;
     const n = hub.calls.length;
 

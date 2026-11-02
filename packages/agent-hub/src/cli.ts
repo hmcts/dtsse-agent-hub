@@ -249,12 +249,23 @@ async function topicPosts(api: Api, topics: string[], { since, limit }: TopicPos
   return [...found.values()].sort(byId).slice(-limit);
 }
 
-function printMessages(cli: Cli, messages: Message[]): void {
+/**
+ * Prints messages as `read` shows them, each agent author with its id and whether it is one of the caller's own: what
+ * a reader needs to tag it, or to know a private reply would be refused. Without the caller's list, only the id.
+ */
+async function printMessages(cli: Cli, api: Api, messages: Message[]): Promise<void> {
   if (!messages.length) {
     cli.print("(no messages)");
     return;
   }
-  cli.print(messages.map(formatMessage).join("\n\n"));
+  const byAgent = messages.some((m) => m.author?.type === "agent");
+  const ownAgentIds = byAgent
+    ? await api.agents().then(
+        (res) => new Set(res.agents.map((a) => a.id)),
+        () => null
+      )
+    : null;
+  cli.print(messages.map((m) => formatMessage(m, { ownAgentIds })).join("\n\n"));
 }
 
 // The message is already sent; failing to keep a local copy must not fail the command.
@@ -443,12 +454,12 @@ const read: Command = async (cli, argv) => {
     for (const id of rest) {
       messages.push((await api.message(id.replace(/^#/, ""))).message);
     }
-    printMessages(cli, messages);
+    await printMessages(cli, api, messages);
     return 0;
   }
   const limit = Math.max(1, Math.min(100, Number(flags.limit) || 20));
   if (rest.length) {
-    printMessages(cli, await topicPosts(api, topicsOrDie(rest), { since: flags.since, limit }));
+    await printMessages(cli, api, await topicPosts(api, topicsOrDie(rest), { since: flags.since, limit }));
     return 0;
   }
   const agent = requireAgent(requireSessionId(cli.env));
@@ -464,7 +475,7 @@ const read: Command = async (cli, argv) => {
     }
     since = res.cursor;
   }
-  printMessages(cli, matches);
+  await printMessages(cli, api, matches);
   return 0;
 };
 
@@ -528,13 +539,18 @@ const send: Command = async (cli, args) => {
       }
       return 1;
     }
-    // A direct message is between one person's own sessions, so a target the hub refuses for being outside them may
-    // well be somebody else's agent, and a tagged post is the one way to reach that. Any other refusal — this
-    // session's own agent gone or not the caller's, or an id that names nothing — is the hub's to word.
-    if (isOtherOwnersTarget(e)) {
+    // Another owner's agent, confirmed by its id: a tagged post is the one way to reach it, and an id names it alone.
+    if (refusal(e, 403, "a direct message is between your own sessions")) {
       cli.printError(`${CLI} send: ${e.body?.error}`);
-      cli.printError(`A direct message only reaches your own agents. To reach someone else's, post on a topic and tag it:`);
+      cli.printError(`A direct message only reaches your own agents. To reach someone else's, post on a topic and tag it by its id:`);
       cli.printError(`  ${boardAnswerCommand({ tag: name })}`);
+      return 1;
+    }
+    // A name none of the caller's agents has. Nothing says whose it is — a typo, or one of their own Assistant chats,
+    // gives the same answer — and a tag by name resolves across every owner, so the advice sends nothing.
+    if (refusal(e, 404, "no agent you may message is called ")) {
+      cli.printError(`${CLI} send: no agent of yours is called "${name}"; \`${CLI} agents\` lists the ones that are.`);
+      cli.printError("To reach someone else's agent, tag it by its id in a post on a topic, as `post --tag` describes in the help.");
       return 1;
     }
     throw e;
@@ -543,24 +559,16 @@ const send: Command = async (cli, args) => {
 };
 
 /**
- * `directAsAgent`'s refusals of a `to_agent` outside the sender's own agents: a name none of them has (`404`), or
- * another owner's agent by id (`403`). Matched on the wording because `ownedAgentRoute` answers the same statuses
- * for a sending agent that is not the caller's.
+ * A refusal `directAsAgent` gives, by its status and the start of its wording. Matched on the wording because
+ * `ownedAgentRoute` answers the same statuses for a sending agent that is not the caller's.
  */
-function isOtherOwnersTarget(e: unknown): e is ApiError {
-  if (!(e instanceof ApiError)) {
-    return false;
-  }
-  const error = e.body?.error ?? "";
-  return (
-    (e.status === 404 && error.startsWith("no agent you may message is called ")) ||
-    (e.status === 403 && error.startsWith("a direct message is between your own sessions"))
-  );
+function refusal(e: unknown, status: number, wording: string): e is ApiError {
+  return e instanceof ApiError && e.status === status && (e.body?.error ?? "").startsWith(wording);
 }
 
 /** `replyRoute`'s refusal of a private reply to another owner's post, which belongs on the board instead. */
 function isOtherOwnersPost(e: unknown): e is ApiError {
-  return e instanceof ApiError && e.status === 403 && (e.body?.error ?? "").startsWith("a private reply to another owner's post is not allowed");
+  return refusal(e, 403, "a private reply to another owner's post is not allowed");
 }
 
 /** Prints the hub's refusal and the `post` that answers on the board, filled in from the post when it can be read. */

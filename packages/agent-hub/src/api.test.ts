@@ -408,7 +408,7 @@ describe("createApi requests", () => {
 
   it("should send a direct message, fetch it back by id and ack its delivery", async () => {
     // Arrange
-    const incoming = hub.sendDirectFromUser(agentId, "can you rerun the migration?");
+    const incoming = hub.sendDirectFromOwner(agentId, "can you rerun the migration?");
 
     // Act
     const fetched = await api.message(incoming.id);
@@ -419,7 +419,7 @@ describe("createApi requests", () => {
     expect(hub.deliveries.get(`${incoming.id}:${agentId}`)?.state).toBe("delivered");
   });
 
-  it("should publish a post and send a direct reply to it from another of the same owner's agents", async () => {
+  it("should accept a direct reply to a post when the replying agent has the same owner as the post's author", async () => {
     // Arrange
     const sibling = await api.register({ ...registration("sid-api-sibling"), name: "alice-ccd" });
 
@@ -461,7 +461,7 @@ describe("createApi requests", () => {
   it("should refuse with 403 when an agent replies to a direct message it did not receive", async () => {
     // Arrange
     const sibling = await api.register({ ...registration("sid-api-not-received"), name: "alice-elsewhere" });
-    const toSibling = hub.sendDirectFromUser(sibling.agent_id, "for the sibling");
+    const toSibling = hub.sendDirectFromOwner(sibling.agent_id, "for the sibling");
 
     // Act
     const error = await api.direct(agentId, { reply_to_message: toSibling.id, body: "not mine to answer" }).catch((e) => e);
@@ -492,7 +492,7 @@ describe("createApi requests", () => {
     // Arrange
     const bobApi = createApi({ env: {}, baseUrl: url, devUser: "oid-bob|Bob Jones|bob@example.com" });
     const bob = await bobApi.register({ ...registration("sid-api-bob-read"), name: "bob-read-target" });
-    const theirs = hub.sendDirectFromUser(bob.agent_id, "private to bob");
+    const theirs = hub.sendDirectFromOwner(bob.agent_id, "private to bob");
 
     // Act
     const error = await api.message(theirs.id).catch((e) => e);
@@ -503,7 +503,7 @@ describe("createApi requests", () => {
     expect(own.message.body).toBe("private to bob");
   });
 
-  it("should let a person's agent read another owner's agent's private reply to that person's post", async () => {
+  it("should let the person replied to read an agent's private reply when the agent answered their post", async () => {
     // Arrange: Alice posts as a person; Bob's agent answers her privately, into its own thread.
     const post = hub.addPost({
       topics: ["pcs-api"],
@@ -534,9 +534,19 @@ describe("createApi requests", () => {
     expect([error.status, error.body.error]).toEqual([400, "send exactly one of to_agent and reply_to_message"]);
   });
 
+  it("should refuse with 400 rather than read null as a name when a direct message sends a field as null", async () => {
+    // Act
+    const nullTarget = await api.direct(agentId, { to_agent: null, body: "x" } as unknown as Parameters<Api["direct"]>[1]).catch((e) => e);
+    const nullReply = await api.direct(agentId, { reply_to_message: null, body: "x" } as unknown as Parameters<Api["direct"]>[1]).catch((e) => e);
+
+    // Assert
+    expect([nullTarget.status, nullTarget.body.error]).toEqual([400, "to_agent: Invalid input: expected string, received null"]);
+    expect([nullReply.status, nullReply.body.error]).toEqual([400, "reply_to_message: Invalid input"]);
+  });
+
   it("should throw from the fixture when a test sends a direct message to an agent that does not exist", () => {
     // Act & Assert
-    expect(() => hub.sendDirectFromUser("no-such-agent", "x")).toThrow("no agent no-such-agent to send a direct message to");
+    expect(() => hub.sendDirectFromOwner("no-such-agent", "x")).toThrow("no agent no-such-agent to send a direct message to");
   });
 
   it("should tag agents in a post, which queues each of them a delivery of it", async () => {
@@ -882,7 +892,7 @@ describe("createApi conversations", () => {
 
   it("should answer 404 when a launch token reads a direct message none of its sessions sent or received", async () => {
     // Arrange: a direct to the owner's laptop session, which their pod's token may not read.
-    const laptop = hub.sendDirectFromUser(agentId, "for the laptop only");
+    const laptop = hub.sendDirectFromOwner(agentId, "for the laptop only");
 
     // Act
     const asPod = await pod.message(laptop.id).catch((e) => e);

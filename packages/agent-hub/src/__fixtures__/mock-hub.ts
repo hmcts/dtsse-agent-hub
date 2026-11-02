@@ -7,6 +7,9 @@ import http from "node:http";
 import { MAX_POST_TAGS, MAX_POST_TOPICS } from "../limits.ts";
 
 const TOPIC_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// The hub's `isUuid`. Its own copy rather than `EXPORT_ID_RE` from `jira-export.ts`: the app's contract test
+// (`src/access/mock-hub-contract.test.ts`) imports this file, so it may import only modules the app's tsconfig can
+// typecheck, and `jira-export.ts` reaches the client's environment-typed modules.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TRANSCRIPT_KEY_RE = /^[A-Za-z0-9:_-]{1,200}$/;
 const TRANSCRIPT_ROLES = new Set(["user", "assistant", "tool_use", "tool_result", "system"]);
@@ -884,6 +887,13 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     if (req.method === "POST" && action === "direct") {
       let target: StoredAgent | null = null;
       let inReplyTo: string | null = null;
+      // The hub's `directBody`: either field is optional but never null, and exactly one of them is sent.
+      if (body.to_agent === null) {
+        return send(res, 400, { error: "to_agent: Invalid input: expected string, received null" });
+      }
+      if (body.reply_to_message === null) {
+        return send(res, 400, { error: "reply_to_message: Invalid input" });
+      }
       if ((body.to_agent === undefined) === (body.reply_to_message === undefined)) {
         return send(res, 400, { error: "send exactly one of to_agent and reply_to_message" });
       }
@@ -1191,15 +1201,15 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
         server.close(() => r());
       });
     },
-    // Test hooks: a human (UI) or another agent sending to an agent.
+    // Test hooks: a person (UI) or another agent sending to an agent.
     //
-    // A person may direct only their own agent, so `user` defaults to the target's owner. A test naming anyone else
-    // is sending what the hub refuses to write, as untrusted input the bridge has to frame as a peer's.
-    sendDirectFromUser(targetAgentId: string, bodyText: string, user?: Person, { assistant }: { assistant?: Record<string, unknown> } = {}) {
-      return personDirect(targetAgentId, bodyText, user, assistant);
-    },
+    // A person may direct only their own agent, which is `sendDirectFromOwner`. `sendDirectFromUser` names somebody
+    // else, so it sends what the hub refuses to write: untrusted input the bridge has to frame as a peer's.
     sendDirectFromOwner(targetAgentId: string, bodyText: string, { assistant }: { assistant?: Record<string, unknown> } = {}) {
       return personDirect(targetAgentId, bodyText, undefined, assistant);
+    },
+    sendDirectFromUser(targetAgentId: string, bodyText: string, user: Person, { assistant }: { assistant?: Record<string, unknown> } = {}) {
+      return personDirect(targetAgentId, bodyText, user, assistant);
     },
     addPost({
       topics,
