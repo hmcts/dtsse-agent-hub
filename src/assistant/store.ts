@@ -703,10 +703,8 @@ export async function linkSession(
  * theirs stands; the registration itself is unaffected either way.
  *
  * The chat starts empty, whatever the session has said before, and nothing announces it: only content arriving after
- * the link puts it in the sidebar (`announceFirstContent`). That is what makes deleting a local chat stick. A
- * session whose chat the person deleted is linked a new one on its next heartbeat, and that one stays out of the list
- * until the session says something new. Every session with content from before local chats existed is already
- * linked, and its chat dated by the backfill, so no session needs its history read here.
+ * the link puts it in the sidebar (`announceFirstContent`). A session whose chat the person deleted is linked a new
+ * one on its next heartbeat, which stays out of the list until the session next says something.
  */
 export async function linkLocalSession(db: Database, session: { ownerOid: string; agentId: string; name: string }): Promise<ConversationRow | undefined> {
   const created = await createLocalConversation(db, { ownerOid: session.ownerOid, agentId: session.agentId, title: localTitle(session.name) });
@@ -756,10 +754,9 @@ async function nameLocalChat(
  * transcript upload inside its transaction — the moment the hub learns what the person typed — and does nothing at
  * all for a chat with a pod, or for one whose owner has renamed it in the hub.
  *
- * The upload only calls it for an agent whose row it has already read as a local chat's, and only for a batch
- * carrying a prompt that could name one, so the read below is not paid by the board sessions and pod chats this
- * can do nothing for. Both conditions are checked again here: the caller's are what make this cheap, and these are
- * what make it right.
+ * The upload calls it for every batch carrying a prompt that could name a chat, whatever session sent it, so every
+ * condition is checked here: the agent's conversation is read in this transaction, and a board session with no chat,
+ * a chat on a pod, or one the person renamed in the hub ends the call after that one read.
  *
  * Two derivations, strongest first:
  *

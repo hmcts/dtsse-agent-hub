@@ -4,15 +4,15 @@ import { announce } from "./store.ts";
 /**
  * The one thing that bounds how many conversations a person's own Claude Code sessions leave in their Assistant.
  *
- * Every ordinary registration that is nobody's pod and names no conversation gets one (`linkLocalSession`), and a new
- * session id is a new agent and so a new conversation — including every `/clear`, which mints one, at a measured
+ * Every session that is nobody's pod and has no conversation gets one (`linkLocalSession`), when it registers or on
+ * its next heartbeat, and a new session id is a new agent and so a new conversation — including every `/clear`, which mints one, at a measured
  * 500 sessions a week. The sidebar and the search leave out the ones nothing was said in (`first_content_at`), so they
  * do not crowd out the chats that matter, but nothing else removes the rows: `dropAbandoned` in
  * `upload-sweep.ts` requires a pod, because the cascade there would take the live session's agent row with the chat.
  * Left alone they would only accumulate, each with its agent's link to it.
  *
- * This collects the local conversations nothing ever happened in. The conversation is made when the session registers
- * rather than when it first says something, because a laptop session the person wants to open a chat *with* needs
+ * This collects the local conversations nothing ever happened in. The conversation is made when the hub first hears
+ * from the session rather than when it first says something, because a laptop session the person wants to open a chat *with* needs
  * one before it has spoken, which is the one thing the conversation is for.
  *
  * What it must never do is cascade. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the agent's own
@@ -35,9 +35,9 @@ export const LOCAL_SWEEP_INTERVAL_MS = 10 * 60_000;
  * typed into the chat could still be delivered (`EXPIRE_AFTER_SECONDS` in `src/agents/liveness.ts`, which also
  * reasons about a laptop asleep overnight): while the hub would still hand a message over, the chat stays.
  *
- * Nothing is lost at the far end. A session that comes back after longer than this heartbeats rather than registers,
- * and only a registration links a conversation — so its chat does not return until the session next starts. That
- * chat held no words, no transcript, no question and no document, which is what made it collectable.
+ * Nothing is lost at the far end. A session that comes back after longer than this is linked a new, empty chat by its
+ * next heartbeat, as any session with no conversation is. The one collected held no words, no transcript, no question
+ * and no document, which is what made it collectable.
  */
 export const LOCAL_CONVERSATION_RETENTION_HOURS = 24;
 

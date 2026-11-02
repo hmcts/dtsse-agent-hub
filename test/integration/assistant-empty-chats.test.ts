@@ -262,7 +262,7 @@ describe("a chat linked to a session that has already said something", () => {
     expect(await listed()).toEqual([assistantConversationId]);
   });
 
-  it("should keep a deleted chat out of the list when its session heartbeats, until the session says something new", async () => {
+  it("should list the chat a heartbeat relinks after a delete, titled after the session's earliest prompt, when the session speaks again", async () => {
     const { conversationId, agentId } = await laptopChat();
     await uploaded(agentId, [entry("1", "user", "look at the possession claim")]);
     await deleteConversation(prisma, ALICE.oid, conversationId);
@@ -270,11 +270,13 @@ describe("a chat linked to a session that has already said something", () => {
     await heartbeat(prisma, agentId, "idle", "possession-work");
 
     const { assistantConversationId } = await prisma.agent.findUniqueOrThrow({ where: { id: agentId } });
+    // A new chat for the same session, empty until the session next says something.
     expect(assistantConversationId).not.toBe(conversationId);
     expect(await listed()).toEqual([]);
 
     expect(await announcements(assistantConversationId!, () => uploaded(agentId, [entry("2", "user", "and the next claim")]))).toBe(1);
 
+    // Listed again, and named after the session's earliest prompt, which is the one the deleted chat had shown.
     expect(await listed()).toEqual([assistantConversationId]);
     expect((await prisma.assistantConversation.findUniqueOrThrow({ where: { id: assistantConversationId! } })).title).toBe("look at the possession claim");
   });

@@ -6,9 +6,6 @@ import { notify } from "../realtime/notify.ts";
 import type { PrismaClient } from "../store/prisma.ts";
 import type { NewTranscriptEntry } from "./schema.ts";
 
-/** What storing a batch needs of the agent it belongs to, all of it already read by `ownedAgentRoute`. */
-type UploadAgent = AgentRef;
-
 /**
  * What a batch holds that a local chat cares about.
  *
@@ -60,11 +57,10 @@ function whatItCarries(entries: readonly NewTranscriptEntry[]): { prompt: boolea
  *
  * What that costs every upload, whoever sent it: one indexed update for a batch that carries content, which writes
  * nothing for a board session with no chat or a chat that already has content, and `refreshLocalTitle`'s read of the
- * agent for a batch that carries a prompt, which does nothing for a chat on a pod or one the person renamed. Neither
- * is skipped on what the route read of the agent, because a heartbeat can link the session's chat between that read
- * and this transaction, and a skipped write is a chat that stays out of the sidebar or keeps the session's name.
+ * agent for a batch that carries a prompt, which does nothing for a chat on a pod or one the person renamed. Both read
+ * the session's chat inside this transaction, because a heartbeat may link one at any time.
  */
-export async function appendEntries(prisma: PrismaClient, agent: UploadAgent, sessionId: string, entries: readonly NewTranscriptEntry[]): Promise<number> {
+export async function appendEntries(prisma: PrismaClient, agent: AgentRef, sessionId: string, entries: readonly NewTranscriptEntry[]): Promise<number> {
   return await prisma.$transaction(async (tx) => {
     const [inserted] = await tx.$queryRaw<{ accepted: number; last_id: string | null }[]>`
       WITH batch AS (
