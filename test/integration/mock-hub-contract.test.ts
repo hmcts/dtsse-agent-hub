@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub, type StoredAgent, type StoredMessage } from "../../packages/agent-hub/src/__fixtures__/mock-hub.ts";
-import { type AgentRef, canAgentMessageAgent, canReadMessage, type MessageRef, replyRoute, tagRefusal } from "./rules.ts";
+import { type AgentRef, canAgentMessageAgent, canReadMessage, type MessageRef, replyRoute, tagRefusal } from "../../src/access/rules.ts";
 
 /**
  * The published client tests against an in-memory hub, `packages/agent-hub/src/__fixtures__/mock-hub.ts`, which
