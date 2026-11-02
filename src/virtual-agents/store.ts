@@ -1,5 +1,7 @@
 import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
+import { viewerSettings } from "../port-viewer/settings.ts";
+import { clientPrisma } from "../store/client-namespace.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { Identity } from "../users/identity.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
@@ -40,10 +42,7 @@ export interface VirtualAgentRow {
   podGeneration: number;
   startedAt: Date;
   lastActiveAt: Date | null;
-  stoppedAt: Date | null;
   stopReason: StopReason | null;
-  /** Why it failed, kept when the stop that stopped it found it failed; `null` for every other stop. */
-  stopDetail: string | null;
   diskExpiresAt: Date | null;
   diskDeletedAt: Date | null;
   createdAt: Date;
@@ -71,37 +70,20 @@ const SELECT = {
   podGeneration: true,
   startedAt: true,
   lastActiveAt: true,
-  stoppedAt: true,
   stopReason: true,
-  stopDetail: true,
   diskExpiresAt: true,
   diskDeletedAt: true,
   createdAt: true
 } as const;
 
-/**
- * What the column can hold, which is wider than what the application writes. Postgres enum labels cannot hold a
- * hyphen, so `own_licence` is spelled differently in the row; and `bedrock` is still a label on the type, because
- * `20261107090000_bedrock_gone` moves every row off it without dropping it — the previous release has to keep
- * reading the column while it is still serving. So this is the read boundary, and `toRoute` is where the wider
- * type becomes the two routes the rest of the code knows about.
- */
-type StoredRoute = "gateway" | "own_licence" | "bedrock";
+/** The route as the column spells it: Postgres enum labels cannot hold a hyphen, so `own_licence` differs in the row. */
+type StoredRoute = "gateway" | "own_licence";
 
-/**
- * `bedrock` reads as `gateway` because that is where the migration moved every row carrying it. Nothing should ever
- * answer it — the label outlives the rows by one release — and a row that somehow did is better read as the route
- * it was migrated to than as a value the rest of the code has no arm for.
- */
 function toRoute(stored: StoredRoute): ModelRoute {
-  if (stored === "own_licence") {
-    return "own-licence";
-  }
-  return stored === "bedrock" ? "gateway" : stored;
+  return stored === "own_licence" ? "own-licence" : stored;
 }
 
-/** Only the two live routes are ever written, so this needs no arm for the label the migration left behind. */
-function fromRoute(route: ModelRoute): Exclude<StoredRoute, "bedrock"> {
+function fromRoute(route: ModelRoute): StoredRoute {
   return route === "own-licence" ? "own_licence" : route;
 }
 
@@ -228,6 +210,15 @@ const NO_MEMORY_REPORT = {
   memoryReportedAt: null
 } as const;
 
+/**
+ * The pod's client-features claim goes wherever the memory report does, and on every stop: a new boot may run another
+ * client, so it reads as having claimed nothing of its own until it reports, and `podSupports` falls back to its
+ * main-session agent meanwhile.
+ */
+function noClientClaim() {
+  return { clientFeatures: clientPrisma().DbNull };
+}
+
 function statusChange(status: VirtualAgentStatus, now: Date) {
   return { status, statusDetail: null, statusChangedAt: now };
 }
@@ -266,20 +257,17 @@ export async function setDesired(
     if (desired === "running") {
       data = {
         startedAt: now,
-        stoppedAt: null,
         stopReason: null,
-        stopDetail: null,
         diskExpiresAt: null,
         diskDeletedAt: null,
         ...NO_MEMORY_REPORT,
+        ...noClientClaim(),
         ...statusChange("requested", now)
       };
     } else {
       const settled = desired === "stopped" && row.status === "stopped";
-      // Why a failed agent failed is kept as the sweep's stop keeps it, so someone who stops their own failed agent
-      // can still read it; `statusChange` is about to clear the detail it came from.
-      const stop = desired === "stopped" ? { stopReason: "user" as const, stopDetail: row.status === "failed" ? row.statusDetail : null } : {};
-      data = { ...NO_TOKEN, ...NO_PORTS, ...stop, ...(settled ? {} : statusChange("stopping", now)) };
+      const stop = desired === "stopped" ? { stopReason: "user" as const } : {};
+      data = { ...NO_TOKEN, ...NO_PORTS, ...noClientClaim(), ...stop, ...(settled ? {} : statusChange("stopping", now)) };
     }
     const updated = toRow(
       await tx.virtualAgent.update({
@@ -362,7 +350,7 @@ export async function setVirtualAgentSize(prisma: PrismaClient, actorOid: string
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
-        data: { size: checked.size, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now },
+        data: { size: checked.size, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...noClientClaim(), updatedAt: now },
         select: SELECT
       })
     );
@@ -405,7 +393,7 @@ export async function setVirtualAgentPlugins(
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },
-        data: { plugins: checked.plugins, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, updatedAt: now },
+        data: { plugins: checked.plugins, ...NO_TOKEN, ...POD_CHANGE, ...NO_MEMORY_REPORT, ...noClientClaim(), updatedAt: now },
         select: SELECT
       })
     );
@@ -479,6 +467,7 @@ export async function restartVirtualAgent(
           ...NO_PORTS,
           ...POD_CHANGE,
           ...NO_MEMORY_REPORT,
+          ...noClientClaim(),
           applyFailures: 0,
           status: "provisioning",
           statusDetail: detail,
@@ -525,8 +514,19 @@ export async function callerForLaunchToken(db: Database, token: string): Promise
  * nothing about the report itself gives it away: only the phase does. Counting those as activity is what let such a
  * pod hold a node for as long as it kept asking. What moves the agent on is its owner, and the status change that
  * follows is activity the sweep does see.
+ *
+ * A report that carries `clientFeatures` replaces the pod's claim with it; one that does not leaves the claim alone.
+ * The pod's boot script reports before the client is upgraded and sends none, so only the client that goes on to run
+ * makes the claim. Every path that brings a pod up clears it (`noClientClaim`), so a pod on a client that never
+ * reports one is read through its main-session agent's claim instead (`podSupports`).
  */
-export async function reportStatus(prisma: PrismaClient, id: string, phase: PodPhase, detail: string | null, now: Date = new Date()): Promise<VirtualAgentRow> {
+export async function reportStatus(
+  prisma: PrismaClient,
+  id: string,
+  phase: PodPhase,
+  detail: string | null,
+  { now = new Date(), clientFeatures }: { now?: Date; clientFeatures?: readonly string[] } = {}
+): Promise<VirtualAgentRow> {
   return await prisma.$transaction(async (tx) => {
     const row = await lockVirtualAgent(tx, id);
     if (row === undefined) {
@@ -547,6 +547,7 @@ export async function reportStatus(prisma: PrismaClient, id: string, phase: PodP
           statusDetail: outcome.detail ?? null,
           ...(outcome.status === row.status ? {} : { statusChangedAt: now }),
           ...(awaitsOwner(phase) ? {} : { lastActiveAt: now }),
+          ...(clientFeatures === undefined ? {} : { clientFeatures: [...clientFeatures] }),
           updatedAt: now
         },
         select: SELECT
@@ -596,6 +597,12 @@ export interface ClaimedVirtualAgent {
    * is in cnp-flux-config. The launch token takes the same path into the same pod template for the same reason.
    */
   gateway?: GatewaySettings;
+  /**
+   * The host the hub serves each port at off the VPN, for the pod to tell its agent about: the viewer's, when it is
+   * on. Absent when it is off. It travels in the claim for the reason the gateway key does, that the hub is what is
+   * configured and the orchestrator's Deployment is in cnp-flux-config.
+   */
+  viewer_host?: string;
 }
 
 const CLAIM_LIMIT = 20;
@@ -774,11 +781,12 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         // ones and any warning computed from them.
         await tx.virtualAgent.update({
           where: { id: row.id },
-          data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now, ...NO_MEMORY_REPORT }
+          data: { launchTokenHash: minted.hash, launchTokenIssuedAt: now, ...NO_MEMORY_REPORT, ...noClientClaim() }
         });
         launchToken = minted.token;
       }
       const gateway = row.model_route === "gateway" && row.desired === "running" ? gatewaySettings() : undefined;
+      const viewerHost = viewerSettings()?.host;
       claimed.push({
         id: row.id,
         generation: row.generation,
@@ -793,7 +801,8 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         plugins: storedPlugins(row.plugins),
         owner: { oid: row.owner_oid },
         ...(launchToken === undefined ? {} : { launch_token: launchToken }),
-        ...(gateway === undefined ? {} : { gateway })
+        ...(gateway === undefined ? {} : { gateway }),
+        ...(viewerHost === undefined ? {} : { viewer_host: viewerHost })
       });
     }
     return { active: true, virtual_agents: claimed };
@@ -843,7 +852,7 @@ export async function observeVirtualAgent(prisma: PrismaClient, id: string, repo
           status: outcome.status,
           ...(outcome.detail === undefined ? {} : { statusDetail: outcome.detail }),
           ...(outcome.status === row.status ? {} : { statusChangedAt: now }),
-          ...(nowStopped ? { stoppedAt: now, ...(row.diskDeletedAt === null ? { diskExpiresAt: diskExpiresAt(now, diskTtlDays()) } : {}) } : {}),
+          ...(nowStopped && row.diskDeletedAt === null ? { diskExpiresAt: diskExpiresAt(now, diskTtlDays()) } : {}),
           ...(diskDeleted ? { diskDeletedAt: now } : {}),
           updatedAt: now
         },

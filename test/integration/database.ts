@@ -1,12 +1,61 @@
 import pg from "pg";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
 import { prisma } from "../../src/store/prisma.ts";
+import { byCodePoint } from "../../src/topics/slug.ts";
 
-/** Empties every table the schema defines, leaving the migration ledger alone. */
+const LEDGER = "_prisma_migrations";
+
+export function quoted(name: string): string {
+  return `"${name.replaceAll('"', '""')}"`;
+}
+
+/** The schema's own tables, read from the catalogue so a table a migration adds is emptied without being listed. */
+export async function schemaTables(): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ name: string }[]>`
+    SELECT relname AS name FROM pg_class
+    WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p') AND relname <> ${LEDGER}`;
+  return rows.map(({ name }) => name).sort(byCodePoint);
+}
+
+/**
+ * One `DO` block that empties every table and restarts every sequence at its own start value, built from the
+ * catalogue as it stands when called.
+ *
+ * `DELETE` rather than `TRUNCATE`: a truncate swaps in new files for every table, index and TOAST table whether
+ * or not it held a row, which costs about a quarter of a second per reset, while a delete of a table a test never
+ * touched costs nothing. The `ACCESS EXCLUSIVE` lock first is the one `TRUNCATE` takes, so the reset still waits
+ * for any transaction a previous test left running and then removes what it wrote, rather than leaving it behind.
+ *
+ * `session_replication_role = replica`, local to the block, turns off the foreign-key triggers and every other
+ * trigger, so the deletes need no order: the schema's keys form cycles, and a cascade can empty a parent before a
+ * table that refuses that delete, so no order is safe in general. Every table is deleted from explicitly, so nothing
+ * relies on a cascade. Setting it needs a superuser, which the compose server's and the pipeline's `hmcts` both are.
+ * With the triggers off nothing here can fire a `NOTIFY`.
+ */
+export async function resetStatement(): Promise<string> {
+  const tables = await schemaTables();
+  const sequences = await prisma.$queryRaw<{ name: string; start: bigint }[]>`
+    SELECT sequencename AS name, start_value AS start FROM pg_sequences WHERE schemaname = 'public'`;
+  const statements = [
+    "PERFORM set_config('session_replication_role', 'replica', true);",
+    `LOCK TABLE ${tables.map(quoted).join(", ")} IN ACCESS EXCLUSIVE MODE;`,
+    ...tables.map((table) => `DELETE FROM ${quoted(table)};`),
+    ...sequences
+      .sort((left, right) => byCodePoint(left.name, right.name))
+      .map(({ name, start }) => `PERFORM setval('${quoted(name).replaceAll("'", "''")}', ${start}, false);`)
+  ];
+  return `DO $reset$ BEGIN ${statements.join(" ")} END $reset$`;
+}
+
+let reset: Promise<string> | undefined;
+
+/** Empties every table the schema defines and restarts its sequences, leaving the migration ledger alone. */
 export async function resetDatabase(): Promise<void> {
-  await prisma.$executeRawUnsafe(
-    `TRUNCATE "orchestrator_lease", "assistant_upload_part", "assistant_upload", "assistant_conversation_share", "assistant_template", "assistant_conversation", "virtual_agent_login", "virtual_agent", "dev_credential_value", "credential", "transcript_entry", "delivery", "subscription", "message_topic", "message_tag", "message", "topic", "channel", "agent_question", "agent", "user" RESTART IDENTITY CASCADE`
-  );
+  reset ??= resetStatement().catch((error: unknown) => {
+    reset = undefined;
+    throw error;
+  });
+  await prisma.$executeRawUnsafe(await reset);
 }
 
 /** A connection of its own, for tests that need to hold a transaction or a lock open. */

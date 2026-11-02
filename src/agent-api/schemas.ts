@@ -59,7 +59,7 @@ const skills = listOrAbsent(
  * newer client claiming a field a later hub will send, and `normaliseClientFeatures` drops it rather than fail the
  * registration. Only a list over the cap is refused, which bounds the column.
  */
-const clientFeatures = listOrAbsent(
+export const clientFeatures = listOrAbsent(
   boundedArray(z.unknown(), MAX_CLIENT_FEATURES, { message: `at most ${MAX_CLIENT_FEATURES} client features` }).transform(normaliseClientFeatures)
 );
 

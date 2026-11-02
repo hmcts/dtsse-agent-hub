@@ -12,7 +12,7 @@ export const MAX_SKILL_NAME = 100;
 export const MAX_SKILL_DESCRIPTION = 300;
 export const SKILL_NAME_RE = /^[a-z0-9][a-z0-9:_-]*$/;
 
-// What this session can offer. `api.ts` has the wire shape, whose description is optional; everything collected here
+// What this session can offer. `wire.ts` has the wire shape, whose description is optional; everything collected here
 // carries one, empty when the frontmatter gave none.
 export type SkillListing = {
   name: string;

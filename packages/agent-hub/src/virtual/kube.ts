@@ -11,7 +11,7 @@
 // person gets their own config, so anyone who can use `kubectl` at all can make the call.
 import type { Env } from "../env.ts";
 import { say } from "./phases.ts";
-import { run } from "./sign-in.ts";
+import { run } from "./process.ts";
 
 /** `az aks get-credentials` reaches a cluster in another subscription only when it is named. */
 export const PREVIEW_SUBSCRIPTION = "DCD-CFTAPPS-DEV";

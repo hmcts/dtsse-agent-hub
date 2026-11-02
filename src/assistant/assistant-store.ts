@@ -1,3 +1,4 @@
+import type { PodClaims } from "../agents/client-features.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
@@ -9,12 +10,18 @@ const ASSISTANT_NAME = "assistant";
  * hold conversations; the Assistant always uses the same one, so a person's chats are in one place.
  */
 export async function findAssistant(db: Database, ownerOid: string): Promise<VirtualAgentRow | undefined> {
+  return (await findAssistantWithClaims(db, ownerOid))?.assistant;
+}
+
+/** `findAssistant`, with the pod's client-features claims read in the same lookup, for a gate on `podGate`. */
+export async function findAssistantWithClaims(db: Database, ownerOid: string): Promise<{ assistant: VirtualAgentRow; claims: PodClaims } | undefined> {
   const row = await db.virtualAgent.findFirst({
     where: { ownerOid, desired: { not: "deleted" } },
-    select: { id: true },
+    select: { id: true, clientFeatures: true, agent: { select: { clientFeatures: true } } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }]
   });
-  return row === null ? undefined : await findVirtualAgent(db, row.id);
+  const assistant = row === null ? undefined : await findVirtualAgent(db, row.id);
+  return row === null || assistant === undefined ? undefined : { assistant, claims: { clientFeatures: row.clientFeatures, agent: row.agent } };
 }
 
 /** `assistant`, or `assistant-2` and on when an earlier one of that name is still being deleted. */

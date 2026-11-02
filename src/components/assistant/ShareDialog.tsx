@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { type Ref, useEffect, useId, useRef, useState } from "react";
 import { MIN_PEOPLE_QUERY } from "@/access/rules";
 import type { SharePerson } from "@/assistant/shares";
 import { useSuggestions } from "@/components/useSuggestions";
 import type { ActionResult } from "@/web/action";
+import { SHARED_CHATS } from "@/web/home";
 
 /**
  * Sharing one chat, read-only, with people the owner names.
@@ -58,20 +59,31 @@ interface Candidate {
   email: string | null;
 }
 
-export function ShareDialog({
+/**
+ * The body both surfaces share: what a recipient will see, the name box, the list with its removals, and the link to
+ * copy. The modal over a chat and the inline editor in the settings' Sharing section each put their own frame round
+ * it, which is where focusing it as it opens and closing it belong.
+ *
+ * What a recipient will see is said here rather than in either frame, because both are places a person is named from.
+ */
+export function ShareEditor({
   conversationId,
   people: initial,
   share,
   unshare,
-  onClose,
-  mode = "read"
+  mode = "read",
+  boxRef,
+  onChange
 }: {
   mode?: ShareMode;
   conversationId: string;
   people: readonly SharePerson[];
   share: ShareAction;
   unshare: ShareAction;
-  onClose: () => void;
+  /** The name box, for a frame that puts focus in it as it opens. */
+  boxRef?: Ref<HTMLInputElement>;
+  /** Called once a change is saved, for a frame that shows something the change alters. */
+  onChange?: () => void;
 }) {
   const router = useRouter();
   const words = WORDS[mode];
@@ -82,33 +94,20 @@ export function ShareDialog({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const box = useRef<HTMLInputElement>(null);
   const path = `/assistant/shared/${conversationId}`;
   // The whole address, once there is a browser to ask for the origin: the server has no origin to render, and a first
   // render that disagreed with the server's would be a hydration mismatch on the box's value.
   const [link, setLink] = useState(path);
 
-  // The list is held here as well as read from the page, because sharing answers with the new one and the dialog shows
+  // The list is held here as well as read from the page, because sharing answers with the new one and the editor shows
   // it at once rather than waiting for the page to be read again. A page that has been read again wins: the server's
-  // list is the real one, and without this the dialog would keep its first answer for as long as it stayed open.
+  // list is the real one, and without this the editor would keep its first answer for as long as it stayed open.
   if (fromPage !== initial) {
     setFromPage(initial);
     setPeople(initial);
   }
 
-  useEffect(() => box.current?.focus(), []);
-
   useEffect(() => setLink(`${window.location.origin}${path}`), [path]);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const suggestions = useSuggestions<Candidate>({
     path: "/api/ui/people",
@@ -128,8 +127,9 @@ export function ShareDialog({
       if (result.ok) {
         setPeople(result.people);
         suggestions.clear();
-        // The chat's own page shows nothing about its shares, but the sidebar and the shared list do.
+        // The chat's own page shows nothing about its shares, but the sidebar does.
         router.refresh();
+        onChange?.();
       } else {
         setError(result.error);
       }
@@ -154,6 +154,175 @@ export function ShareDialog({
   }
 
   return (
+    <>
+      {mode === "fork" ? (
+        <p className="text-pretty text-[13px] text-asst-body">
+          The people you name can read this chat and its document, and can take <strong className="font-semibold text-asst-text">their own copy</strong> of it
+          to carry on in their own Assistant.
+        </p>
+      ) : (
+        <p className="text-pretty text-[13px] text-asst-body">
+          The people you name can <strong className="font-semibold text-asst-text">read</strong> this chat and its document. They cannot reply, rename or delete
+          it, change the document, or open the files you attached — a message you attached files to says only how many, although a message you sent with a file
+          and no words of your own may name it, and so may the chat's own name. They see the most recent part of the chat as it stood when they opened it, not
+          as you carry on.
+        </p>
+      )}
+
+      <form
+        method="post"
+        className="flex flex-col gap-1.5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const chosen = shown[current];
+          if (chosen !== undefined) {
+            void run(share, chosen.oid);
+          }
+        }}
+      >
+        <label htmlFor={`${ids}-who`} className="text-xs text-asst-faint">
+          {words.who}
+        </label>
+        <div className="relative">
+          <input
+            ref={boxRef}
+            id={`${ids}-who`}
+            value={suggestions.query}
+            disabled={pending}
+            autoComplete="off"
+            placeholder="Start typing a name"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={open}
+            aria-controls={listId}
+            aria-activedescendant={open ? optionId(current) : undefined}
+            onChange={(event) => suggestions.setQuery(event.target.value)}
+            onKeyDown={suggestions.onKeyDown}
+            className="w-full rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-hidden focus:border-asst-accent-line"
+          />
+          <div
+            id={listId}
+            role="listbox"
+            aria-label="People"
+            hidden={!open}
+            // `flex` would override the `hidden` attribute and leave its border and padding as an empty box under the
+            // name box, so the display class itself switches as well.
+            className={`${open ? "flex" : "hidden"} absolute left-0 right-0 top-[calc(100%+4px)] z-10 max-h-56 flex-col overflow-y-auto rounded-xl border border-asst-strong bg-asst-raised p-1 shadow-2xl`}
+          >
+            {open
+              ? shown.map((candidate, index) => (
+                  <div
+                    key={candidate.oid}
+                    id={optionId(index)}
+                    role="option"
+                    tabIndex={-1}
+                    aria-selected={index === current}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => void run(share, candidate.oid)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        void run(share, candidate.oid);
+                      }
+                    }}
+                    className={`flex cursor-pointer flex-col rounded-lg px-2.5 py-1.5 text-left text-sm ${index === current ? "bg-asst-active" : ""}`}
+                  >
+                    <span>{candidate.name}</span>
+                    {candidate.email === null ? null : <span className="text-xs text-asst-faint">{candidate.email}</span>}
+                  </div>
+                ))
+              : null}
+          </div>
+        </div>
+        <p className="text-xs text-asst-faint">Only people who have used the hub can be named.</p>
+      </form>
+
+      {people.length === 0 ? (
+        <p className="text-[13px] text-asst-muted">{words.nobody}</p>
+      ) : (
+        <ul aria-label={words.list} className="flex flex-col gap-1">
+          {people.map((person) => (
+            <li key={person.oid} className="flex items-center gap-2 rounded-lg border border-asst-line px-2.5 py-1.5 text-sm">
+              <span className="min-w-0 flex-1 truncate">
+                {person.name}
+                {person.email === null ? null : <span className="ml-2 text-xs text-asst-faint">{person.email}</span>}
+              </span>
+              <span className="shrink-0 text-xs text-asst-faint">{words.can}</span>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => void run(unshare, person.oid)}
+                className="shrink-0 rounded-md px-1.5 text-xs text-asst-error hover:bg-asst-field"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${ids}-link`} className="text-xs text-asst-faint">
+          Their link
+        </label>
+        <div className="flex gap-2">
+          <input
+            id={`${ids}-link`}
+            readOnly
+            value={link}
+            className="min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-xs text-asst-muted outline-hidden"
+          />
+          <button type="button" onClick={() => void copy()} className="shrink-0 rounded-lg border border-asst-strong px-3 py-1.5 text-sm hover:bg-asst-field">
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+        <p className="text-xs text-asst-faint">{words.link}</p>
+      </div>
+
+      {error === null ? null : (
+        <p role="alert" className="text-[13px] text-asst-error">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * The editor as a modal over the chat, for the chat's own menu and the sidebar's `?share=1` and `?fork=1`. Focus goes
+ * to the name box as it opens, and Escape closes it once the box has no list of its own to shut.
+ */
+export function ShareDialog({
+  conversationId,
+  people,
+  share,
+  unshare,
+  onClose,
+  mode = "read"
+}: {
+  mode?: ShareMode;
+  conversationId: string;
+  people: readonly SharePerson[];
+  share: ShareAction;
+  unshare: ShareAction;
+  onClose: () => void;
+}) {
+  const ids = useId();
+  const box = useRef<HTMLInputElement>(null);
+
+  useEffect(() => box.current?.focus(), []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-5">
       <div
         role="dialog"
@@ -162,141 +331,12 @@ export function ShareDialog({
         className="flex max-h-full w-full max-w-[520px] flex-col gap-4 overflow-y-auto rounded-2xl border border-asst-line bg-asst-hover p-[22px] shadow-2xl"
       >
         <h2 id={`${ids}-title`} className="text-lg font-semibold">
-          {words.title}
+          {WORDS[mode].title}
         </h2>
-        {mode === "fork" ? (
-          <p className="text-pretty text-[13px] text-asst-body">
-            The people you name can read this chat and its document, and can take <strong className="font-semibold text-asst-text">their own copy</strong> of it
-            to carry on in their own Assistant.
-          </p>
-        ) : (
-          <p className="text-pretty text-[13px] text-asst-body">
-            The people you name can <strong className="font-semibold text-asst-text">read</strong> this chat and its document. They cannot reply, rename or
-            delete it, change the document, or open the files you attached — a message you attached files to says only how many, although a message you sent
-            with a file and no words of your own may name it, and so may the chat's own name. They see the most recent part of the chat as it stood when they
-            opened it, not as you carry on.
-          </p>
-        )}
-
-        <form
-          method="post"
-          className="flex flex-col gap-1.5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const chosen = shown[current];
-            if (chosen !== undefined) {
-              void run(share, chosen.oid);
-            }
-          }}
-        >
-          <label htmlFor={`${ids}-who`} className="text-xs text-asst-faint">
-            {words.who}
-          </label>
-          <div className="relative">
-            <input
-              ref={box}
-              id={`${ids}-who`}
-              value={suggestions.query}
-              disabled={pending}
-              autoComplete="off"
-              placeholder="Start typing a name"
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded={open}
-              aria-controls={listId}
-              aria-activedescendant={open ? optionId(current) : undefined}
-              onChange={(event) => suggestions.setQuery(event.target.value)}
-              onKeyDown={suggestions.onKeyDown}
-              className="w-full rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-sm outline-hidden focus:border-asst-accent-line"
-            />
-            <div
-              id={listId}
-              role="listbox"
-              aria-label="People"
-              hidden={!open}
-              // `flex` would override the `hidden` attribute and leave its border and padding as an empty box under the
-              // name box, so the display class itself switches as well.
-              className={`${open ? "flex" : "hidden"} absolute left-0 right-0 top-[calc(100%+4px)] z-10 max-h-56 flex-col overflow-y-auto rounded-xl border border-asst-strong bg-asst-raised p-1 shadow-2xl`}
-            >
-              {open
-                ? shown.map((candidate, index) => (
-                    <div
-                      key={candidate.oid}
-                      id={optionId(index)}
-                      role="option"
-                      tabIndex={-1}
-                      aria-selected={index === current}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => void run(share, candidate.oid)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          void run(share, candidate.oid);
-                        }
-                      }}
-                      className={`flex cursor-pointer flex-col rounded-lg px-2.5 py-1.5 text-left text-sm ${index === current ? "bg-asst-active" : ""}`}
-                    >
-                      <span>{candidate.name}</span>
-                      {candidate.email === null ? null : <span className="text-xs text-asst-faint">{candidate.email}</span>}
-                    </div>
-                  ))
-                : null}
-            </div>
-          </div>
-          <p className="text-xs text-asst-faint">Only people who have used the hub can be named.</p>
-        </form>
-
-        {people.length === 0 ? (
-          <p className="text-[13px] text-asst-muted">{words.nobody}</p>
-        ) : (
-          <ul aria-label={words.list} className="flex flex-col gap-1">
-            {people.map((person) => (
-              <li key={person.oid} className="flex items-center gap-2 rounded-lg border border-asst-line px-2.5 py-1.5 text-sm">
-                <span className="min-w-0 flex-1 truncate">
-                  {person.name}
-                  {person.email === null ? null : <span className="ml-2 text-xs text-asst-faint">{person.email}</span>}
-                </span>
-                <span className="shrink-0 text-xs text-asst-faint">{words.can}</span>
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() => void run(unshare, person.oid)}
-                  className="shrink-0 rounded-md px-1.5 text-xs text-asst-error hover:bg-asst-field"
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={`${ids}-link`} className="text-xs text-asst-faint">
-            Their link
-          </label>
-          <div className="flex gap-2">
-            <input
-              id={`${ids}-link`}
-              readOnly
-              value={link}
-              className="min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 text-xs text-asst-muted outline-hidden"
-            />
-            <button type="button" onClick={() => void copy()} className="shrink-0 rounded-lg border border-asst-strong px-3 py-1.5 text-sm hover:bg-asst-field">
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-          <p className="text-xs text-asst-faint">{words.link}</p>
-        </div>
-
-        {error === null ? null : (
-          <p role="alert" className="text-[13px] text-asst-error">
-            {error}
-          </p>
-        )}
-
+        <ShareEditor mode={mode} conversationId={conversationId} people={people} share={share} unshare={unshare} boxRef={box} />
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* Every chat the person has shared or offered, and every one shared with them, in one place. */}
-          <Link href="/assistant/shared" className="text-[13px] text-asst-accent underline hover:text-asst-accent-hover">
+          <Link href={SHARED_CHATS} className="text-[13px] text-asst-accent underline hover:text-asst-accent-hover">
             See all your shared chats
           </Link>
           <button type="button" onClick={onClose} className="rounded-[10px] border border-asst-strong px-4 py-2.5 text-sm hover:bg-asst-active">

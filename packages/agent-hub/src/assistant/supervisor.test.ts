@@ -6,9 +6,9 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home.ts";
 import { conversation, fakeTmux } from "../__fixtures__/fake-tmux.ts";
-import type { SessionsBody } from "../api.ts";
 import { ensureStateDir, hubHome, projectTranscriptPath, readText, statePath } from "../session.ts";
 import { BUNDLED_DIRS_VAR } from "../virtual/bundled-plugins.ts";
+import type { SessionsBody } from "../wire.ts";
 import { launcherModel, modelPath } from "./models.ts";
 import {
   BUSY_STALE_MS,

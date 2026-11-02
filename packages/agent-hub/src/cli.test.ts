@@ -22,12 +22,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
 import { captureStderr } from "./__fixtures__/pod-shims.ts";
-import { createApi, type RegisterBody } from "./api.ts";
-import { parseFlags, readStdinText, runCli, USAGE, UsageError } from "./cli.ts";
+import { createApi } from "./api.ts";
+import { parseFlags, readStdinText, UsageError } from "./cli/command.ts";
+import { runCli, USAGE } from "./cli.ts";
 import type { Env } from "./env.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 import { denyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { VIRTUAL_USAGE } from "./virtual/index.ts";
+import type { RegisterBody } from "./wire.ts";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const BIN = path.join(PACKAGE_ROOT, "bin", "agent-hub");
@@ -1315,7 +1317,7 @@ printf '{"accessToken": "%s", "expires_on": "%s"}\\n' "${AZ_TOKEN}" "$(( $(date 
       expect(virtual().credentials.get("github")).toBe(GH_TOKEN);
       expect(credHub.personCredentials.size).toBe(0);
       expect(del.code).toBe(2);
-      expect(del.errors.join("\n")).toMatch(/a virtual agent cannot delete its credentials; its owner removes them on agent-hub/);
+      expect(del.errors.join("\n")).toMatch(/a virtual agent cannot delete its credentials; its owner removes them in the HMCTS Assistant's settings/);
       expect(virtual().credentials.get("jenkins")).toBe(JENKINS_TOKEN);
       assertNoSecrets(missing, got, set, del);
       virtual().credentials.clear();
@@ -1966,7 +1968,7 @@ process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: J
     expect(lines[1]?.type).toBe("user");
     const message = lines[1]?.message as { role: string; content: string };
     expect(message.role).toBe("user");
-    expect(message.content).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${msg.id} from your user, Me Tester, typed into agent-hub`));
+    expect(message.content).toMatch(new RegExp(`^\\[agent-hub\\] Direct message #${msg.id} from your user, Me Tester, typed into the HMCTS Assistant`));
     expect(message.content).toMatch(/This IS your user/);
     expect(message.content.endsWith("Please check the claim migration.")).toBe(true);
     await hub.waitFor((c) => c.method === "POST" && c.path === `/api/agent/${agentId}/deliveries/${msg.id}/ack`);

@@ -4,11 +4,13 @@
 // Conversations in dtsse-agent-hub's docs/agent-api.md.
 import fs from "node:fs";
 import path from "node:path";
-import type { Api, Artefact, ConfluenceExportReport } from "./api.ts";
+import type { Api } from "./api.ts";
 import type { Env } from "./env.ts";
 import { withRetry } from "./retry.ts";
 import { hubHome, readJson, writeJson } from "./session.ts";
 import { claimExport, releaseExport, twgFailureLine, twgSignInProblem } from "./twg-export.ts";
+import type { RunResult } from "./virtual/process.ts";
+import type { Artefact, ConfluenceExportReport } from "./wire.ts";
 
 export const CONFLUENCE_EXPORT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const CONFLUENCE_ID_RE = /^[0-9]{1,20}$/;
@@ -17,10 +19,6 @@ export const MAX_CONFLUENCE_ERROR = 300;
 export const MAX_PAGE_TITLE = 255;
 const FALLBACK_TITLE = "HMCTS Assistant document";
 const CREATE_TIMEOUT_MS = 120000;
-
-export type { RunResult } from "./virtual/sign-in.ts";
-
-import type { RunResult } from "./virtual/sign-in.ts";
 
 export type ConfluenceExportRequest = {
   exportId: string;

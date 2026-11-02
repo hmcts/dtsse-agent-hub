@@ -400,18 +400,21 @@ export function modelAccessAfter(index: number): boolean {
 }
 
 /**
- * The sign-ins the assistant makes only when the person asks for one, from the Connections section of its settings.
+ * The sign-ins the assistant makes only when the person asks for one, from the Connections section of its settings or
+ * the getting-ready screen's Connect, except on the route below where one is also made at boot.
  * Azure lets it act as them with `az`, which nothing in a chat waits for, so it is in the background as a Jenkins token
  * is: nothing prompts for it, and a sign-in of it is raised as an ask only while the code they asked for is live. One
  * that lapsed is left to that section, where it says so and offers to connect again, rather than being put back in
  * front of somebody who may have changed their mind.
  *
- * On the `gateway` route it is also the model credential, so `neededCredentials` names it and the connections banner
- * asks for it — but it is still signed in to on request, because the sign-in is the same device code either way.
+ * On the `gateway` route it is also the model credential, so `neededCredentials` names it, the connections banner
+ * asks for it, and its pod relays a code at boot whenever it has none that works without anybody asking. It stays in
+ * this list for the way back: a pod relays one code per boot, and once that code is over, or never reached the
+ * person, a fresh one comes only from asking, which is what Connect does.
  */
 export const ON_REQUEST: readonly CredentialKind[] = ["azure"];
 
-/** Whether the assistant signs in to `kind` only when the person asks it to. */
+/** Whether the assistant signs in to `kind` again only when the person asks it to. */
 export function signsInOnRequest(kind: CredentialKind): boolean {
   return ON_REQUEST.includes(kind);
 }
@@ -423,9 +426,9 @@ export function signsInOnRequest(kind: CredentialKind): boolean {
  *
  * The route's model credential never is, however it is signed in to. Being stored is what silences every other
  * surface — `onboarded` is true, `connectionsAsk` answers `done` and `chatGate` opens — while a pod that cannot use
- * it has no model at all and fails every turn, and no pod re-relays this by itself. So leaving it to settings is
- * leaving it to a row inside a dialog nobody has a reason to open, which is the invisibility the model-access row
- * exists to end rather than to inherit.
+ * it has no model at all and fails every turn, and no pod re-relays this before it next starts. So leaving it to
+ * settings is leaving it to a row inside a dialog nobody has a reason to open, which is the invisibility the
+ * model-access row exists to end rather than to inherit.
  */
 function leftToSettings(row: Pick<Connection, "kind" | "modelCredential">): boolean {
   return signsInOnRequest(row.kind) && !row.modelCredential;

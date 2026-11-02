@@ -15,6 +15,7 @@ import * as uiTranscriptRoute from "../../src/app/api/ui/agents/[id]/transcript/
 import * as lookupsRoute from "../../src/app/api/ui/assistant/lookups/route.ts";
 import * as lookupAnswerRoute from "../../src/app/api/virtual/[virtualAgentId]/lookups/[lookupId]/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
+import * as statusRoute from "../../src/app/api/virtual/[virtualAgentId]/status/route.ts";
 import { writeArtefact } from "../../src/assistant/artefact-store.ts";
 import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
@@ -1525,6 +1526,34 @@ describe("atlassian lookups", () => {
     await answeringAssistant(["files"]);
 
     expect(await jsonOf(await ask({ kind: "jira_project", query: "vibe" }))).toEqual({ status: "unsupported" });
+  });
+
+  it("should send the lookup when the pod claims lookups on its status and no main session has registered", async () => {
+    const { id, token } = await startedAssistant();
+    const reported = await pod(statusRoute.POST, token, `/api/virtual/${id}/status`, { virtualAgentId: id }, "POST", {
+      phase: "running",
+      client_features: ["lookups"]
+    });
+    expect(reported.status).toBe(204);
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { agentId: true } })).agentId).toBeNull();
+
+    const asked = await askLookup(prisma, { viewerOid: ALICE.oid, kind: "jira_project", query: "vibe", space: null, signIn: false });
+
+    expect(asked).toEqual({ lookupId: expect.any(String), virtualAgentId: id });
+  });
+
+  it("should read the pod's own claim over its main session's when the pod reported one", async () => {
+    const { id, token } = await answeringAssistant(["lookups"]);
+    await pod(statusRoute.POST, token, `/api/virtual/${id}/status`, { virtualAgentId: id }, "POST", { phase: "running", client_features: ["files"] });
+
+    expect(await jsonOf(await ask({ kind: "jira_project", query: "vibe" }))).toEqual({ status: "unsupported" });
+  });
+
+  it("should say the assistant is waking when it runs with neither a claim of its own nor a main session", async () => {
+    const { id } = await startedAssistant();
+    await prisma.virtualAgent.update({ where: { id }, data: { status: "running" } });
+
+    expect(await jsonOf(await ask({ kind: "jira_project", query: "vibe" }))).toEqual({ status: "waking" });
   });
 
   it("should answer a query too short to search, or a bad request, without asking the pod", async () => {

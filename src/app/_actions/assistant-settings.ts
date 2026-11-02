@@ -1,7 +1,7 @@
 "use server";
 
 import { requireViewer } from "@/viewer/current";
-import { type AssistantAgent, assistantAgent, type GitIdentitySettings, gitIdentitySettings } from "@/web/data";
+import { type AssistantAgent, assistantAgent, type GitIdentitySettings, gitIdentitySettings, type SharedChats, sharedChats } from "@/web/data";
 
 /**
  * Reads for sections of the Assistant's settings that are only needed once the dialog is open at them, so no page
@@ -15,4 +15,9 @@ export async function readAssistantAgent(): Promise<AssistantAgent | null> {
 
 export async function readGitIdentity(): Promise<GitIdentitySettings> {
   return await gitIdentitySettings(await requireViewer());
+}
+
+/** The four lists of the Sharing section: four queries, which is why no page reads them for a dialog that is shut. */
+export async function readSharedChats(): Promise<SharedChats> {
+  return await sharedChats(await requireViewer());
 }

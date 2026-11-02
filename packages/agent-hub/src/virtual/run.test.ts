@@ -12,8 +12,8 @@ import { captureStderr, createPodShims, type PodShims, podSecrets, usePodEnv } f
 import { createApi } from "../api.ts";
 import { ATLASSIAN_SIGN_IN_CODES } from "./atlassian.ts";
 import { EXIT_FATAL, EXIT_NO_CREDENTIAL } from "./phases.ts";
+import { run } from "./process.ts";
 import { runVirtual, VIRTUAL_USAGE } from "./run.ts";
-import { run } from "./sign-in.ts";
 
 const PROC_NET = fileURLToPath(new URL("../__fixtures__/proc-net", import.meta.url));
 const VID = "va-run";

@@ -1,4 +1,3 @@
-import { gzipSync } from "node:zlib";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as credentialRoute from "../../src/app/api/agent/credentials/[kind]/route.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
@@ -8,6 +7,7 @@ import { devIdentity } from "../../src/viewer/identity.ts";
 import { createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { connect, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
+import { azureCacheFor, TENANT } from "./virtual-agent-suite.ts";
 
 vi.mock("next/headers", async () => {
   const { jar } = await import("./web-session.ts");
@@ -35,19 +35,8 @@ const CLAUDE = `sk-ant-oat01-${"Qw_-".repeat(12)}`;
 const BEDROCK = `ABSK${"QmVkcm9ja0FQSUtleS1leGFtcGxl".repeat(4)}`;
 const JENKINS = "11a2b3c4d5e6f708192a3b4c5d6e7f8091";
 const ATLASSIAN = "user=alice@justice.gov.uk\ntoken=oauth-managed\noauth-refresh-token=refresh-0123456789abcdef";
-const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
-
-function azureCacheFor(oid: string): string {
-  return gzipSync(
-    Buffer.from(
-      JSON.stringify({
-        Account: { a: { username: "alice@example.com", home_account_id: `${oid}.${TENANT}` } },
-        RefreshToken: { r: { secret: "refresh-secret" } }
-      })
-    )
-  ).toString("base64");
-}
-
+const OTHER_TENANT = "99999999-9999-9999-9999-999999999999";
+const GUEST_HOME = `c1b2c3d4-0000-4000-8000-000000000003.${OTHER_TENANT}`;
 const AZURE = azureCacheFor(ALICE.oid);
 
 function put(as: Person, kind: string, body: unknown): Promise<Response> {
@@ -110,8 +99,24 @@ describe("PUT /api/agent/credentials/{kind}", () => {
     expect(response.status).toBe(204);
     expect(await response.text()).toBe("");
     const row = await prisma.credential.findUniqueOrThrow({ where: { ownerOid_kind: { ownerOid: ALICE.oid, kind: "github" } } });
-    expect(row).toMatchObject({ secretName: "u-dev-alice-github", updatedVia: "cli", accountLabel: null });
+    expect(row).toMatchObject({ secretName: "u-dev-alice-github", accountLabel: null });
     expect(await readCredential(prisma, localStore(), ALICE.oid, "github")).toBe(GITHUB);
+  });
+
+  it("should tag the stored value and its row with where it was saved from when it saves one", async () => {
+    await insertUser(ALICE);
+    const tags: Record<string, string>[] = [];
+    const store: SecretStore = {
+      acceptsDevIdentities: true,
+      put: async (_name, _value, tag) => void tags.push(tag),
+      get: async () => undefined,
+      remove: async () => undefined
+    };
+
+    await putCredential(prisma, store, { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "github", value: GITHUB, via: "pod" });
+
+    expect(tags).toEqual([{ owner: ALICE.oid, kind: "github", via: "pod" }]);
+    expect(await prisma.credential.findFirstOrThrow({ select: { updatedVia: true } })).toEqual({ updatedVia: "pod" });
   });
 
   it("should keep the value out of every column the hub stores when it saves one", async () => {
@@ -130,13 +135,47 @@ describe("PUT /api/agent/credentials/{kind}", () => {
 
     expect((await credentialStatus(prisma, ALICE.oid)).find((status) => status.kind === "azure")).toMatchObject({
       stored: true,
-      accountLabel: "alice@example.com",
-      updatedVia: "cli"
+      accountLabel: "alice@example.com"
     });
   });
 
   it("should refuse an Azure token cache with 400 when it is signed in as someone else", async () => {
     const response = await put(ALICE, "azure", { value: azureCacheFor(BOB.oid) });
+
+    expect(response.status).toBe(400);
+    expect((await jsonOf<{ error: string }>(response)).error).toContain("someone other than you");
+    expect(await prisma.credential.count()).toBe(0);
+    expect(await prisma.devCredentialValue.count()).toBe(0);
+  });
+
+  it("should store an Azure token cache when the owner signed in to this tenant as a guest", async () => {
+    const guest = azureCacheFor(ALICE.oid, { home: GUEST_HOME });
+
+    expect((await put(ALICE, "azure", { value: guest })).status).toBe(204);
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBe(guest);
+  });
+
+  it("should store an Azure token cache when the owner signed in with az login and no tenant", async () => {
+    const laptop = azureCacheFor(ALICE.oid, { realms: ["organizations", TENANT, OTHER_TENANT] });
+
+    expect((await put(ALICE, "azure", { value: laptop })).status).toBe(204);
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBe(laptop);
+  });
+
+  it("should refuse an Azure token cache with 400 when a guest owner signed in to another tenant", async () => {
+    const response = await put(ALICE, "azure", { value: azureCacheFor(ALICE.oid, { realms: [OTHER_TENANT], home: GUEST_HOME }) });
+
+    expect(response.status).toBe(400);
+    const { error } = await jsonOf<{ error: string }>(response);
+    expect(error).toContain("signed in to another tenant");
+    expect(error).toContain(`az login --tenant ${TENANT}`);
+    expect(error).not.toContain(OTHER_TENANT);
+    expect(await prisma.credential.count()).toBe(0);
+    expect(await prisma.devCredentialValue.count()).toBe(0);
+  });
+
+  it("should refuse an Azure token cache with 400 when it holds a refresh token for no account in it", async () => {
+    const response = await put(ALICE, "azure", { value: azureCacheFor(ALICE.oid, { refreshTokens: [`${ALICE.oid}.${TENANT}`, `${BOB.oid}.${TENANT}`] }) });
 
     expect(response.status).toBe(400);
     expect((await jsonOf<{ error: string }>(response)).error).toContain("someone other than you");
@@ -380,7 +419,7 @@ describe("saveCredential and removeCredential", () => {
 
     expect(result).toEqual({ ok: true, confirmation: "Your GitHub token is stored" });
     const row = await prisma.credential.findFirstOrThrow();
-    expect(row).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "github", updatedVia: "web" });
+    expect(row).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "github" });
     expect(revalidated).toContain("/assistant");
     expect(JSON.stringify(result)).not.toContain(GITHUB);
   });
@@ -497,8 +536,7 @@ describe("a Jenkins API token", () => {
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
       ownerOid: ALICE.oid,
       kind: "jenkins",
-      secretName: "u-dev-alice-jenkins",
-      updatedVia: "cli"
+      secretName: "u-dev-alice-jenkins"
     });
     expect(await readCredential(prisma, localStore(), ALICE.oid, "jenkins")).toBe(JENKINS);
     expect(await everythingStored()).not.toContain(JENKINS);
@@ -538,8 +576,7 @@ describe("a CLAUDE.md", () => {
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
       ownerOid: ALICE.oid,
       kind: "claude_md",
-      secretName: "u-dev-alice-claude-md",
-      updatedVia: "cli"
+      secretName: "u-dev-alice-claude-md"
     });
     expect(await everythingStored()).not.toContain("payments outage");
   });
@@ -592,7 +629,7 @@ describe("a CLAUDE.md", () => {
 
     expect(result).toEqual({ ok: true, confirmation: "Your CLAUDE.md is saved. Each agent uses it from its next Claude start" });
     expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "claude_md")).toBe("# Me\n\nBe brief.\n");
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "claude_md", updatedVia: "web" });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "claude_md" });
     expect(revalidated).toContain("/assistant");
   });
 
@@ -680,8 +717,7 @@ describe("a git identity", () => {
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
       ownerOid: ALICE.oid,
       kind: "git_identity",
-      secretName: "u-dev-alice-git-identity",
-      updatedVia: "cli"
+      secretName: "u-dev-alice-git-identity"
     });
   });
 
@@ -717,7 +753,7 @@ describe("a git identity", () => {
 
     expect(result).toEqual({ ok: true, confirmation: "Your git identity is saved. Each agent uses it from its next Claude start" });
     expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "git_identity")).toBe('{"email":"alice@example.com"}');
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "git_identity", updatedVia: "web" });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "git_identity" });
     expect(revalidated).toContain("/assistant");
   });
 

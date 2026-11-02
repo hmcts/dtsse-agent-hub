@@ -23,7 +23,9 @@ test.describe("credentials @smoke", () => {
       expect(response?.status()).toBe(200);
 
       await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Credentials" })).toBeVisible();
-      expect(new URL(page.url()).search).toBe("");
+      expect(new URL(page.url()).search).toBe("?settings=credentials");
+      await page.keyboard.press("Escape");
+      await expect(page).toHaveURL((url) => url.search === "");
     } finally {
       await context.close();
     }

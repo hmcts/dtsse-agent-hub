@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { WelshAnswer } from "../api.ts";
+import type { WelshAnswer } from "../wire.ts";
 import {
   createWelshRunner,
   failureDetail,

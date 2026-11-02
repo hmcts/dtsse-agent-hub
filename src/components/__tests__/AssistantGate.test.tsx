@@ -79,7 +79,7 @@ function assistant(overrides: Partial<AssistantSummary> = {}): AssistantSummary 
 }
 
 function statuses(...stored: CredentialKind[]): CredentialStatus[] {
-  return stored.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: new Date().toISOString(), updatedVia: null }));
+  return stored.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: new Date().toISOString() }));
 }
 
 /**

@@ -1,6 +1,7 @@
 /**
- * What this build of the client understands of the hub's optional wire fields, reported on every register so the hub
- * can leave out a field this build would ignore. See the Client features section of `docs/agent-api.md`.
+ * What this build of the client understands of the hub's optional wire fields, reported on every register, and on every
+ * pod status report, so the hub can leave out a field this build would ignore. See the
+ * Client features section of `docs/agent-api.md`.
  *
  * The hub and the clients talking to it are released separately, and a field a client has never heard of is not an
  * error it reports: it is dropped on the floor, and the person who caused the hub to send it reads that as success.
@@ -13,7 +14,7 @@
  * `ClientFeature` in the service's `src/agents/client-features.ts`, which gates on the same names and cannot import
  * from here; keep the two in step, so a name only one side knows is a type error on that side.
  */
-export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "memory-anon" | "model" | "model-alias" | "stop" | "welsh";
+export type ClientFeature = "attachments" | "files" | "lookups" | "memory-anon" | "model-alias" | "stop" | "welsh";
 
 /**
  * What this build claims. A name belongs here only once this client reads the field it names, and in the same change
@@ -49,22 +50,10 @@ export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "me
  * warning from. This is the name the current hub gates the Size section on, so that it can tell a pod that cannot
  * report apart from one that has not reported yet rather than showing either as using none.
  *
- * `model` is claimed because the assistant supervisor starts a session with `--model` from the wake's `model`, and the
- * bridge types `/model` into the pane when a message's frame names another. No hub gates on it yet; it is what tells a
- * conversation whose owner's model choice is honoured apart from one on an older session that runs hai's default
- * whatever was picked.
- *
- * `model-alias` is claimed because `parseModel` here takes the hub's bare family alias, `sonnet` or `opus`, and hands
- * it to `--model` and to `/model` unchanged. It is narrower than `model`, which a build claimed while it would only
- * take `claude-<family>-<version>` and so dropped an alias on the floor, leaving the session on hai's default for the
- * route. No write is gated on it: the person's model setting is theirs to save whenever they like. What reads it is
- * the settings' Model section, which says their choice waits for the assistant's next start when its pod's own
- * session did not claim it.
- *
- * `memory` is claimed **for hubs older than `memory-anon`**, and for nothing else. No gate in the current hub reads
- * it. It is here because this list travels in the other direction too: the client is published on merge and a pod
- * installs the current one when it boots, so a build can be talking to a hub that has not deployed yet, and that
- * hub's Size section gates on `memory`. Dropping it would make such a pod read as an older client to the one hub
- * that still cares. It can go once no hub predating `anon_bytes` is running anywhere.
+ * `model-alias` is claimed because the assistant supervisor starts a session with `--model` from the wake's `model`,
+ * the bridge types `/model` into the pane when a message's frame names another, and `parseModel` here takes the hub's
+ * bare family alias, `sonnet` or `opus`, and hands it to both unchanged. No write is gated on it: the person's model
+ * setting is theirs to save whenever they like. What reads it is the settings' Model section, which says their choice
+ * waits for the assistant's next start when its pod's own session did not claim it.
  */
-export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory", "memory-anon", "model", "model-alias", "stop", "welsh"];
+export const CLIENT_FEATURES: readonly ClientFeature[] = ["attachments", "files", "lookups", "memory-anon", "model-alias", "stop", "welsh"];

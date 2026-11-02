@@ -255,9 +255,11 @@ retry "the hai install" install_hai
 cd "$WS" || fatal "cannot cd to $WS"
 mkdir -p "$STATE"
 
-# Azure is optional: it lets Claude run az as the owner, and gives Jenkins their Entra object id. A stored sign-in
-# is restored before Claude starts, so the first session has it, and nothing else waits for one. With none that
-# works, a device code is relayed only when the owner has asked for one from their settings, and in the background
+# Azure lets Claude run az as the owner, which on the gateway route is where its model token comes from, and gives
+# Jenkins their Entra object id. A stored sign-in is restored before Claude starts, so the first session has it, and
+# nothing else waits for one. With none that
+# works, a device code is relayed only when the hub says one is wanted (always on the gateway route, where Azure is
+# the model credential, and otherwise once the owner has asked for one from their settings), and in the background
 # as Atlassian's is; otherwise the pod carries on without Azure, which they can connect at any time. cache-sync
 # below stores a sign-in whenever one appears.
 AZURE_TRIES=3

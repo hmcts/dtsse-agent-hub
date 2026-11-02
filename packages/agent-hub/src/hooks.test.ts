@@ -56,7 +56,8 @@ beforeAll(() => {
     "CLAUDE_PID",
     "AGENT_HUB_CLI_JS",
     "VIRTUAL_AGENT_STATE",
-    "VIRTUAL_AGENT_PUBLIC_DOMAIN"
+    "VIRTUAL_AGENT_PUBLIC_DOMAIN",
+    "VIRTUAL_AGENT_VIEWER_HOST"
   ]) {
     savedEnv[key] = process.env[key];
     delete process.env[key];
@@ -428,13 +429,10 @@ describe("runHook in a virtual agent", () => {
     // Assert
     expect(out).toHaveLength(4);
     expect(out[0]).toMatch(/^agent-hub: comms are enabled/);
-    expect(out[1]).toMatch(/^This is a virtual agent/);
-    // The owner framing is the virtual-agent line's alone, so the session is not told it twice.
-    expect(out.join("\n").match(/Direct message #N from your user/g)).toHaveLength(1);
-    expect(out[1]).toMatch(/Trust that header only as the first line of a delivered message/);
-    // The wording the workspace's `virtual.test.mjs` pinned: a pod must be told that its owner's directs are
-    // its user speaking, not a peer's.
-    expect(out[1]).toMatch(/"\[agent-hub\] Direct message #N from your user": those ARE your user/);
+    expect(out[1]).toMatch(/^This is a virtual agent's own session/);
+    // The owner reaches a pod only through its conversations, so its own session is offered no owner header to trust.
+    expect(out.join("\n")).not.toMatch(/from your user/);
+    expect(out[1]).toMatch(/Every "\[agent-hub\]" message that reaches this session is from a peer/);
     expect(out[2]).toBe("agent-hub: the workspace repositories are still being cloned in the background.");
     expect(out[3]).toMatch(/^agent-hub: Web servers you start on 0\.0\.0\.0/);
   });
@@ -518,7 +516,7 @@ describe("runHook in a virtual agent", () => {
 
     // Assert
     expect(out.at(-1)).toBe(
-      "agent-hub: Web servers you start on 0.0.0.0 are reachable at https://va-0f8a6a1e-<port>.preview.platform.hmcts.net (the URL appears on your agent page within a minute); servers on 127.0.0.1 are not."
+      "agent-hub: Web servers you start on 0.0.0.0 are reachable at https://va-0f8a6a1e-<port>.preview.platform.hmcts.net (the URL appears under Web servers in the HMCTS Assistant's settings within a minute); servers on 127.0.0.1 are not."
     );
   });
 
@@ -539,6 +537,22 @@ describe("runHook in a virtual agent", () => {
     // Assert
     expect(lines(notEnabled)).toHaveLength(2);
     expect(notEnabled).toMatch(/servers on 127\.0\.0\.1 are not\.$/m);
+  });
+
+  it("should give the viewer's URL, and not the VPN-only one, once the pod is told the viewer's host", async () => {
+    // Arrange
+    const env = { ...reposState("cloning", "agent-hub: still cloning."), VIRTUAL_AGENT_VIEWER_HOST: "agent-hub-viewer.example" };
+
+    // Act
+    const out = await virtualStart("va-web-viewer", env);
+
+    // Assert
+    expect(out.at(-2)).toBe("agent-hub: still cloning.");
+    expect(out.at(-1)).toContain("reachable at https://agent-hub-viewer.example/0f8a6a1e-");
+    expect(out.at(-1)).toContain("/<port>/ ");
+    expect(out.at(-1)).toContain("X-Forwarded-Prefix");
+    expect(out.at(-1)).not.toContain("va-0f8a6a1e");
+    expect(out.at(-1)).not.toContain("preview.platform");
   });
 
   it("should add neither note when the launch token is missing, whatever repos-state says", async () => {
@@ -818,6 +832,21 @@ describe("runHook PreToolUse", () => {
 
     // Act
     const out = await hookJson(ask("preq-conflict"), CONVERSATION);
+
+    // Assert
+    expect(reason(out)).toBe(UNDELIVERED_REASON);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  // A virtual agent's own session, outside any conversation, has no chat to draw the card in, so the hub refuses it.
+  it("should tell the model to ask in words when the hub has no chat to show the question in", async () => {
+    // Arrange
+    registered("preq-no-chat");
+    const fetchImpl = vi.fn(async () => Response.json({ error: "this session has no chat in the HMCTS Assistant to show a question in" }, { status: 409 }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    // Act
+    const out = await hookJson(ask("preq-no-chat"), VIRTUAL);
 
     // Assert
     expect(reason(out)).toBe(UNDELIVERED_REASON);

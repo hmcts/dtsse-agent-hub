@@ -14,6 +14,7 @@ import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCr
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
 import { reconnectSignIn, renameVirtualAgent, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
+import { SHARING_SETTINGS } from "@/app/assistant/sharing";
 import { connectionsData } from "@/assistant/connections";
 import { savedCredentialsData } from "@/assistant/saved-credentials";
 import { assistantPluginsData } from "@/assistant/settings";
@@ -89,6 +90,7 @@ export default async function AssistantPage() {
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
+      sharing={SHARING_SETTINGS}
       agent={{ load: readAssistantAgent, rename: renameVirtualAgent, restart: restartVirtualAgent }}
       git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
       tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
