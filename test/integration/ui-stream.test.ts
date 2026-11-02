@@ -9,10 +9,16 @@ import { GET as topicSuggestions } from "../../src/app/api/ui/topics/route.ts";
 import { conversationAgent, createConversation, ensureAssistant } from "../../src/assistant/store.ts";
 import { ackDelivery, createDirect, createPost } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
-import { MIN_STREAM_MAX_SECONDS, RECONNECT_AFTER_MS } from "../../src/realtime/sse.ts";
+import { RECONNECT_AFTER_MS } from "../../src/realtime/sse.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { insertAgent, insertUser, type Person, prisma, resetDatabase } from "./database.ts";
 import { frames } from "./sse-reader.ts";
+import { SHORT_LIFETIME_MS, streamLifetime } from "./stream-lifetime.ts";
+
+vi.mock("../../src/realtime/sse.ts", async (importOriginal) => {
+  const { withStreamLifetime } = await import("./stream-lifetime.ts");
+  return withStreamLifetime(await importOriginal());
+});
 
 function persona(name: string): Person {
   const identity = devIdentity(name);
@@ -142,7 +148,7 @@ describe("/api/ui/stream", () => {
   });
 
   it("should tell the browser to reconnect after a second, then end cleanly at the lifetime", async () => {
-    vi.stubEnv("STREAM_MAX_SECONDS", String(MIN_STREAM_MAX_SECONDS));
+    streamLifetime.ms = SHORT_LIFETIME_MS;
     try {
       const response = await stream(request("bob", "/api/ui/stream"));
       const ended = await frames(response).end();
@@ -150,7 +156,7 @@ describe("/api/ui/stream", () => {
       expect(ended.slice(0, 2)).toEqual([{ comment: "connected" }, { retry: String(RECONNECT_AFTER_MS) }]);
       expect(ended.at(-1)).toEqual({ comment: "lifetime reached" });
     } finally {
-      vi.unstubAllEnvs();
+      streamLifetime.ms = undefined;
     }
   });
 

@@ -59,9 +59,11 @@ export default defineConfig({
           // this suite or by anything else sharing it. On its own it takes 3s; sharing a server with the rest of
           // this suite it has taken 80s and more. It gets a project of its own so that wait can have a timeout
           // measured against a checkpoint rather than against a route call, and one worker because dropping and
-          // creating databases is server-wide rather than per database.
+          // creating databases is server-wide rather than per database. The hooks get the same timeout, because they
+          // are where the databases are created and dropped.
           maxWorkers: 1,
-          testTimeout: 120_000
+          testTimeout: 120_000,
+          hookTimeout: 120_000
         }
       }
     ],

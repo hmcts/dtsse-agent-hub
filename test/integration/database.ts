@@ -2,11 +2,90 @@ import pg from "pg";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
 import { prisma } from "../../src/store/prisma.ts";
 
-/** Empties every table the schema defines, leaving the migration ledger alone. */
-export async function resetDatabase(): Promise<void> {
-  await prisma.$executeRawUnsafe(
-    `TRUNCATE "orchestrator_lease", "assistant_upload_part", "assistant_upload", "assistant_conversation_share", "assistant_template", "assistant_conversation", "virtual_agent_login", "virtual_agent", "dev_credential_value", "credential", "transcript_entry", "delivery", "subscription", "message_topic", "message_tag", "message", "topic", "channel", "agent_question", "agent", "user" RESTART IDENTITY CASCADE`
+const LEDGER = "_prisma_migrations";
+
+function quoted(name: string): string {
+  return `"${name.replaceAll('"', '""')}"`;
+}
+
+function byCodePoint(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Orders the tables so each comes after every table that references it through a foreign key refusing the delete
+ * (`NO ACTION` or `RESTRICT`). Keys that cascade or set null need no order, and they are where the schema's cycles
+ * are, so a cycle here is a schema this reset cannot empty and is an error.
+ */
+export function deleteOrder(tables: readonly string[], blocking: readonly { child: string; parent: string }[]): string[] {
+  const children = new Map(tables.map((table) => [table, new Set<string>()]));
+  for (const { child, parent } of blocking) {
+    if (child !== parent) {
+      children.get(parent)?.add(child);
+    }
+  }
+  const ordered: string[] = [];
+  const visiting = new Set<string>();
+  const done = new Set<string>();
+  function visit(table: string): void {
+    if (done.has(table)) {
+      return;
+    }
+    if (visiting.has(table)) {
+      throw new Error(`the foreign keys that refuse a delete form a cycle through ${table}`);
+    }
+    visiting.add(table);
+    for (const child of [...(children.get(table) ?? [])].sort(byCodePoint)) {
+      visit(child);
+    }
+    visiting.delete(table);
+    done.add(table);
+    ordered.push(table);
+  }
+  for (const table of [...tables].sort(byCodePoint)) {
+    visit(table);
+  }
+  return ordered;
+}
+
+/**
+ * One `DO` block that empties every table and restarts every sequence, built from the catalogue once per test file.
+ *
+ * `DELETE` rather than `TRUNCATE`: a truncate swaps in new files for every table, index and TOAST table whether
+ * or not it held a row, which costs about a quarter of a second per reset, while a delete of a table a test never
+ * touched costs nothing. The `ACCESS EXCLUSIVE` lock first is the one `TRUNCATE` takes, so the reset still waits
+ * for any transaction a previous test left running and then removes what it wrote, rather than leaving it behind.
+ * Nothing here fires a `NOTIFY`: the schema's only trigger is the topic-count check, and `notify` is called by
+ * the application, never by a trigger.
+ */
+async function buildReset(): Promise<string> {
+  const tables = (
+    await prisma.$queryRaw<{ name: string }[]>`
+      SELECT c.relname AS name FROM pg_class c
+      WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND c.relname <> ${LEDGER}`
+  ).map(({ name }) => name);
+  const blocking = await prisma.$queryRaw<{ child: string; parent: string }[]>`
+    SELECT child.relname AS child, parent.relname AS parent FROM pg_constraint k
+    JOIN pg_class child ON child.oid = k.conrelid
+    JOIN pg_class parent ON parent.oid = k.confrelid
+    WHERE k.contype = 'f' AND k.confdeltype IN ('a', 'r') AND child.relnamespace = 'public'::regnamespace`;
+  const sequences = (await prisma.$queryRaw<{ name: string }[]>`SELECT sequencename AS name FROM pg_sequences WHERE schemaname = 'public'`).map(
+    ({ name }) => name
   );
+  const statements = [
+    `LOCK TABLE ${[...tables].sort(byCodePoint).map(quoted).join(", ")} IN ACCESS EXCLUSIVE MODE;`,
+    ...deleteOrder(tables, blocking).map((table) => `DELETE FROM ${quoted(table)};`),
+    ...[...sequences].sort(byCodePoint).map((sequence) => `PERFORM setval('${quoted(sequence).replaceAll("'", "''")}', 1, false);`)
+  ];
+  return `DO $reset$ BEGIN ${statements.join(" ")} END $reset$`;
+}
+
+let reset: Promise<string> | undefined;
+
+/** Empties every table the schema defines and restarts its sequences, leaving the migration ledger alone. */
+export async function resetDatabase(): Promise<void> {
+  reset ??= buildReset();
+  await prisma.$executeRawUnsafe(await reset);
 }
 
 /** A connection of its own, for tests that need to hold a transaction or a lock open. */

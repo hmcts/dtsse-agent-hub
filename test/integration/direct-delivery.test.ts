@@ -7,12 +7,18 @@ import { GET as agents } from "../../src/app/api/agent/agents/route.ts";
 import { GET as messages } from "../../src/app/api/agent/messages/[id]/route.ts";
 import { createDirect } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
-import { MIN_STREAM_MAX_SECONDS, RECONNECT_AFTER_MS } from "../../src/realtime/sse.ts";
+import { RECONNECT_AFTER_MS } from "../../src/realtime/sse.ts";
 import { streamLimits } from "../../src/realtime/stream-slots.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
 import { insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
+import { SHORT_LIFETIME_MS, streamLifetime } from "./stream-lifetime.ts";
+
+vi.mock("../../src/realtime/sse.ts", async (importOriginal) => {
+  const { withStreamLifetime } = await import("./stream-lifetime.ts");
+  return withStreamLifetime(await importOriginal());
+});
 
 const ALICE = person("alice");
 const BOB = person("bob");
@@ -215,11 +221,11 @@ describe("the agent stream", () => {
 
   describe("at its lifetime", () => {
     afterEach(() => {
-      vi.unstubAllEnvs();
+      streamLifetime.ms = undefined;
     });
 
     it("should end with a reconnect event and give its slot back, and the next connection should replay a message sent in between", async () => {
-      vi.stubEnv("STREAM_MAX_SECONDS", String(MIN_STREAM_MAX_SECONDS));
+      streamLifetime.ms = SHORT_LIFETIME_MS;
       const opened = Date.now();
       const first = openStream(ALICE, alicesOther);
       const ended = await frames(await first.response).end();
@@ -228,8 +234,8 @@ describe("the agent stream", () => {
       expect(ended[0]).toEqual({ comment: "connected" });
       expect(ended[1]).toEqual({ retry: String(RECONNECT_AFTER_MS) });
       expect(ended.at(-1)).toEqual({ event: "reconnect", data: "{}" });
-      expect(lastedMs).toBeGreaterThanOrEqual(MIN_STREAM_MAX_SECONDS * 900);
-      expect(lastedMs).toBeLessThan(MIN_STREAM_MAX_SECONDS * 1000 + 2000);
+      expect(lastedMs).toBeGreaterThanOrEqual(SHORT_LIFETIME_MS);
+      expect(lastedMs).toBeLessThan(SHORT_LIFETIME_MS + 2000);
       expect(streamLimits().agent.held(ALICE.oid)).toBe(0);
 
       const { message: between } = await jsonOf(await send(ALICE, alicesAgent, { to_agent: alicesOther, body: "sent between streams" }));

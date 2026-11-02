@@ -74,7 +74,7 @@ change it first when the contract changes.
 | `yarn typecheck` | the app, `tsconfig.cli.json` and `tsconfig.e2e.json` |
 | `yarn test:e2e` | Playwright and axe against `TEST_URL`; see the README for a full local run |
 | `yarn test` | unit suite |
-| `yarn test:integration` | needs `yarn deps:up`; a database per worker, migrated on use. `INTEGRATION_WORKERS` sets how many (default 6) |
+| `yarn test:integration` | needs `yarn deps:up`; a database per worker, migrated on use. `INTEGRATION_WORKERS` sets how many (default 6). Always collects coverage for the pipeline's Sonar scan; add `--coverage.enabled=false` locally to skip it |
 | `yarn build` | `next build` plus the CLIs, `dist/cli/migrate.js` and `dist/cli/orchestrator.js` |
 
 `yarn lint` checks nothing inside a worktree under `.claude/worktrees/`, because `biome.json` excludes that path. Run
