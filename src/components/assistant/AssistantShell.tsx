@@ -18,6 +18,7 @@ import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySet
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
+import type { AssistantSharing } from "@/components/assistant/SharingSettings";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
 import type { AssistantTokens } from "@/components/assistant/TokenSettings";
@@ -110,6 +111,7 @@ export function AssistantShell({
   files,
   size,
   exports,
+  sharing,
   agent,
   git,
   tokens,
@@ -140,6 +142,8 @@ export function AssistantShell({
   size?: AssistantSize;
   /** Where the person's documents go by default, which the footer's settings shows and edits. */
   exports?: AssistantExportDefaults;
+  /** How the footer's settings reads the person's shared chats once its Sharing section opens, and changes who each is shared with. */
+  sharing?: AssistantSharing;
   /** The virtual agent the Assistant runs on, which the footer's settings renames and restarts and lists the web servers of. */
   agent?: AssistantAgentSettings;
   /** The git identity the person's agents commit as, which the footer's settings shows and changes. */
@@ -351,6 +355,7 @@ export function AssistantShell({
               files={files}
               size={size}
               exports={exports}
+              sharing={sharing}
               agent={agent}
               git={git}
               tokens={tokens}

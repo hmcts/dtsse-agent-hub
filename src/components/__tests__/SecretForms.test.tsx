@@ -26,11 +26,11 @@ function ok() {
 }
 
 function stored(kind: CredentialStatus["kind"]): CredentialStatus {
-  return { kind, stored: true, accountLabel: null, updatedAt: "2026-10-05T11:00:00.000Z", updatedVia: "web" };
+  return { kind, stored: true, accountLabel: null, updatedAt: "2026-10-05T11:00:00.000Z" };
 }
 
 function missing(kind: CredentialStatus["kind"]): CredentialStatus {
-  return { kind, stored: false, accountLabel: null, updatedAt: null, updatedVia: null };
+  return { kind, stored: false, accountLabel: null, updatedAt: null };
 }
 
 /** Where a browser goes when the form is submitted natively, with no script to intercept it. */

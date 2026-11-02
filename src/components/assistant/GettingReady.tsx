@@ -16,7 +16,8 @@ import {
   modelAccessAfter,
   offeredConnections,
   screenDetail,
-  signInPrompt
+  signInPrompt,
+  signsInOnRequest
 } from "@/assistant/connections";
 import { type ConnectionsAsk, chatGate, connectionsAsk } from "@/assistant/onboarding";
 import type { Theme } from "@/assistant/theme";
@@ -45,6 +46,8 @@ import type { LoginView } from "@/virtual-agents/logins";
 const INPUT =
   "min-w-0 flex-1 rounded-lg border border-asst-strong bg-asst-field px-2.5 py-1.5 font-plex-mono text-sm text-asst-text outline-hidden focus:border-asst-accent-line";
 const PRIMARY = "shrink-0 rounded-[9px] bg-asst-accent px-3.5 py-1.5 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover";
+const CONNECT =
+  "h-[34px] shrink-0 rounded-[9px] border border-asst-accent-line px-3.5 text-[13px] font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink";
 const FOOTER = "h-[42px] rounded-[10px] px-5 text-sm";
 const FOOTER_PRIMARY = `${FOOTER} bg-asst-accent font-semibold text-asst-ink disabled:opacity-40`;
 const FOOTER_QUIET = `${FOOTER} border border-asst-strong font-medium text-asst-body hover:bg-asst-active`;
@@ -337,13 +340,26 @@ function ConnectionRow({
   // word one credential two ways. `null` is a row with a control to press instead of anything to read.
   const words = screenDetail(state, pasted, connecting || starting);
   let right: React.ReactNode;
-  if (words === null) {
+  if (words === null && signsInOnRequest(kind)) {
+    // Its pod relays this one only once asked, so Connect is `reconnectSignIn`: record the ask and restart. Nothing is
+    // stored for a row offering Connect, so there is nothing for it to delete and no question to ask first.
     right = (
-      <button
-        type="button"
-        onClick={() => setConnecting(true)}
-        className="h-[34px] shrink-0 rounded-[9px] border border-asst-accent-line px-3.5 text-[13px] font-medium text-asst-accent-soft hover:bg-asst-accent hover:text-asst-ink"
+      <ActionForm
+        action={reconnect}
+        label={`Connect ${connector.name}`}
+        className="flex shrink-0 flex-col items-end gap-1"
+        onSuccess={() => setConnecting(true)}
       >
+        <input type="hidden" name="id" value={assistantId} />
+        <input type="hidden" name="kind" value={kind} />
+        <button type="submit" className={CONNECT}>
+          Connect
+        </button>
+      </ActionForm>
+    );
+  } else if (words === null) {
+    right = (
+      <button type="button" onClick={() => setConnecting(true)} className={CONNECT}>
         Connect
       </button>
     );

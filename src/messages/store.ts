@@ -1,4 +1,4 @@
-import { announceFirstContent } from "../assistant/store.ts";
+import { announceFirstContent } from "../assistant/first-content.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { type ApiMessage, type StreamedDirect, toApiMessage, toStreamedDirect } from "./shape.ts";
@@ -191,7 +191,7 @@ export async function ackDelivery(prisma: PrismaClient, agentId: string, message
   const acked = await prisma.$transaction(async (tx) => {
     const { count } = await tx.delivery.updateMany({
       where: { messageId, agentId, state: "queued" },
-      data: { state: "delivered", deliveredAt: new Date() }
+      data: { state: "delivered" }
     });
     if (count > 0) {
       await notify(tx, { type: "delivery", message_id: messageId.toString(), agent_id: agentId, state: "delivered" });

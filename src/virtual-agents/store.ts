@@ -41,10 +41,7 @@ export interface VirtualAgentRow {
   podGeneration: number;
   startedAt: Date;
   lastActiveAt: Date | null;
-  stoppedAt: Date | null;
   stopReason: StopReason | null;
-  /** Why it failed, kept when the stop that stopped it found it failed; `null` for every other stop. */
-  stopDetail: string | null;
   diskExpiresAt: Date | null;
   diskDeletedAt: Date | null;
   createdAt: Date;
@@ -72,37 +69,20 @@ const SELECT = {
   podGeneration: true,
   startedAt: true,
   lastActiveAt: true,
-  stoppedAt: true,
   stopReason: true,
-  stopDetail: true,
   diskExpiresAt: true,
   diskDeletedAt: true,
   createdAt: true
 } as const;
 
-/**
- * What the column can hold, which is wider than what the application writes. Postgres enum labels cannot hold a
- * hyphen, so `own_licence` is spelled differently in the row; and `bedrock` is still a label on the type, because
- * `20261107090000_bedrock_gone` moves every row off it without dropping it — the previous release has to keep
- * reading the column while it is still serving. So this is the read boundary, and `toRoute` is where the wider
- * type becomes the two routes the rest of the code knows about.
- */
-type StoredRoute = "gateway" | "own_licence" | "bedrock";
+/** The route as the column spells it: Postgres enum labels cannot hold a hyphen, so `own_licence` differs in the row. */
+type StoredRoute = "gateway" | "own_licence";
 
-/**
- * `bedrock` reads as `gateway` because that is where the migration moved every row carrying it. Nothing should ever
- * answer it — the label outlives the rows by one release — and a row that somehow did is better read as the route
- * it was migrated to than as a value the rest of the code has no arm for.
- */
 function toRoute(stored: StoredRoute): ModelRoute {
-  if (stored === "own_licence") {
-    return "own-licence";
-  }
-  return stored === "bedrock" ? "gateway" : stored;
+  return stored === "own_licence" ? "own-licence" : stored;
 }
 
-/** Only the two live routes are ever written, so this needs no arm for the label the migration left behind. */
-function fromRoute(route: ModelRoute): Exclude<StoredRoute, "bedrock"> {
+function fromRoute(route: ModelRoute): StoredRoute {
   return route === "own-licence" ? "own_licence" : route;
 }
 
@@ -267,9 +247,7 @@ export async function setDesired(
     if (desired === "running") {
       data = {
         startedAt: now,
-        stoppedAt: null,
         stopReason: null,
-        stopDetail: null,
         diskExpiresAt: null,
         diskDeletedAt: null,
         ...NO_MEMORY_REPORT,
@@ -277,9 +255,7 @@ export async function setDesired(
       };
     } else {
       const settled = desired === "stopped" && row.status === "stopped";
-      // Why a failed agent failed is kept as the sweep's stop keeps it, so someone who stops their own failed agent
-      // can still read it; `statusChange` is about to clear the detail it came from.
-      const stop = desired === "stopped" ? { stopReason: "user" as const, stopDetail: row.status === "failed" ? row.statusDetail : null } : {};
+      const stop = desired === "stopped" ? { stopReason: "user" as const } : {};
       data = { ...NO_TOKEN, ...NO_PORTS, ...stop, ...(settled ? {} : statusChange("stopping", now)) };
     }
     const updated = toRow(
@@ -852,7 +828,7 @@ export async function observeVirtualAgent(prisma: PrismaClient, id: string, repo
           status: outcome.status,
           ...(outcome.detail === undefined ? {} : { statusDetail: outcome.detail }),
           ...(outcome.status === row.status ? {} : { statusChangedAt: now }),
-          ...(nowStopped ? { stoppedAt: now, ...(row.diskDeletedAt === null ? { diskExpiresAt: diskExpiresAt(now, diskTtlDays()) } : {}) } : {}),
+          ...(nowStopped && row.diskDeletedAt === null ? { diskExpiresAt: diskExpiresAt(now, diskTtlDays()) } : {}),
           ...(diskDeleted ? { diskDeletedAt: now } : {}),
           updatedAt: now
         },

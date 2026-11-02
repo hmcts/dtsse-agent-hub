@@ -9,8 +9,8 @@ import {
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/store.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { announce, ConversationNotFound } from "./conversation-row.ts";
 import { productLabel } from "./products.ts";
-import { announce, ConversationNotFound } from "./store.ts";
 
 /**
  * Who, besides its owner, may read an HMCTS Assistant conversation.

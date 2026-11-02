@@ -1,9 +1,8 @@
 "use server";
 
 import { isOwner } from "@/access/rules";
+import { findConversation } from "@/assistant/conversation-store";
 import { sendToConversation } from "@/assistant/send";
-import { findConversation } from "@/assistant/store";
-import { directAsPerson } from "@/messages/send";
 import { answerMessage, checkAnswer, offerExpired, storedQuestions } from "@/questions/questions";
 import { findQuestion, recordAnswer } from "@/questions/store";
 import { prisma } from "@/store/prisma";
@@ -53,16 +52,15 @@ export async function answerAgentQuestion(input: { questionId: unknown; answers:
       return checked;
     }
     const body = answerMessage(questions, checked.answer);
-    const record = async (tx: Parameters<typeof recordAnswer>[0], messageId: bigint) => {
-      await recordAnswer(tx, question, checked.answer, messageId);
-    };
+    const record = (tx: Parameters<typeof recordAnswer>[0]) => recordAnswer(tx, question, checked.answer);
+    // A card is drawn only in its agent's conversation, so a question with none to send the answer into is one nobody
+    // was offered.
     const conversation = agent.assistantConversationId === null ? undefined : await findConversation(prisma, viewer.oid, agent.assistantConversationId);
-    if (conversation !== undefined) {
-      // The same path the composer's send takes, so the conversation is touched and a stopped assistant is woken.
-      await sendToConversation(prisma, viewer.oid, conversation, { body, title: body, alongside: record });
-    } else {
-      await directAsPerson(prisma, viewer.oid, agent.id, body, record);
+    if (conversation === undefined) {
+      return MISSING;
     }
+    // The same path the composer's send takes, so the conversation is touched and a stopped assistant is woken.
+    await sendToConversation(prisma, viewer.oid, conversation, { body, title: body, alongside: record });
     return { ok: true };
   });
 }

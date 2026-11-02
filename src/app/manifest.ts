@@ -15,6 +15,12 @@ export default function manifest(): MetadataRoute.Manifest {
     display: "standalone",
     background_color: "#0b0c0c",
     theme_color: "#0b0c0c",
-    icons: [{ src: "/assistant/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }]
+    // PNGs on a solid background: the tab's SVG is transparent and changes colour with the browser's theme, which on a
+    // launcher is a blank square. The maskable one keeps its mark inside the safe zone the system crops to.
+    icons: [
+      { src: "/pwa-icon/192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/pwa-icon/512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/pwa-icon/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+    ]
   };
 }

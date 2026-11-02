@@ -6,7 +6,8 @@ import { GET as stream } from "../../src/app/api/agent/[agentId]/stream/route.ts
 import { PUT as subscribe } from "../../src/app/api/agent/[agentId]/subscriptions/route.ts";
 import { GET as messages } from "../../src/app/api/agent/messages/[id]/route.ts";
 import { GET as topicMessages } from "../../src/app/api/agent/topics/[slug]/messages/route.ts";
-import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { createConversation } from "../../src/assistant/conversation-store.ts";
 import { MAX_POST_TAGS } from "../../src/messages/tags.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";

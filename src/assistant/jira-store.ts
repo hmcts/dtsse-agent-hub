@@ -1,9 +1,9 @@
 import { HttpError } from "../agent-api/http.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { announce, type ConversationRow } from "./conversation-row.ts";
 import { isJiraProject, JIRA_EXPORT_TIMEOUT_MS, JIRA_SELECT, type JiraExportView, jiraExportView } from "./jira.ts";
 import { hasPod } from "./pods.ts";
 import { MAX_JIRA_ERROR } from "./schemas.ts";
-import { announce, type ConversationRow } from "./store.ts";
 
 /**
  * A conversation's Jira export as the hub keeps it: claimed when its owner asks, carried to the conversation's
@@ -82,7 +82,7 @@ export async function recordJiraExport(
   const where = { id: conversation.id, jiraExportId: result.export_id, jiraKey: null };
   const data =
     "key" in result
-      ? { jiraStatus: "done", jiraKey: result.key, jiraError: null, jiraExportedAt: now, updatedAt: now }
+      ? { jiraStatus: "done", jiraKey: result.key, jiraError: null, updatedAt: now }
       : { jiraStatus: "failed", jiraError: result.error.slice(0, MAX_JIRA_ERROR), updatedAt: now };
   await prisma.$transaction(async (tx) => {
     const { count } = await tx.assistantConversation.updateMany({ where, data });

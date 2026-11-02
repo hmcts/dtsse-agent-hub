@@ -8,9 +8,9 @@ import {
   checkParent,
   confluenceExportView
 } from "./confluence.ts";
+import { announce, type ConversationRow } from "./conversation-row.ts";
 import { hasPod } from "./pods.ts";
 import { MAX_CONFLUENCE_ERROR } from "./schemas.ts";
-import { announce, type ConversationRow } from "./store.ts";
 
 /**
  * A conversation's Confluence export as the hub keeps it: claimed when its owner asks, carried to the conversation's
@@ -95,7 +95,6 @@ export async function recordConfluenceExport(
           confluencePageId: result.page_id,
           confluencePageTitle: result.title ?? null,
           confluenceError: null,
-          confluenceExportedAt: now,
           updatedAt: now
         }
       : { confluenceStatus: "failed", confluenceError: result.error.slice(0, MAX_CONFLUENCE_ERROR), updatedAt: now };

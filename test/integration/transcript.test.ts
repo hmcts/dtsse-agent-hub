@@ -4,7 +4,7 @@ import { findAgent, heartbeat, listMessageableAgents, registerAgent } from "../.
 import { POST as upload } from "../../src/app/api/agent/[agentId]/transcript/route.ts";
 import { GET as conversation } from "../../src/app/api/ui/agents/[id]/transcript/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
-import { renameConversation } from "../../src/assistant/store.ts";
+import { renameConversation } from "../../src/assistant/conversation-store.ts";
 import { directAsAgent } from "../../src/messages/send.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";

@@ -77,7 +77,7 @@ function warming(status: VirtualAgentStatus = "stopped", overrides: Partial<Assi
 }
 
 function stored(...kinds: CredentialKind[]): CredentialStatus[] {
-  return kinds.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: null, updatedVia: null }));
+  return kinds.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: null }));
 }
 
 /** A sign-in the pod has relayed and is waiting on, as one does when a returning person's Azure token has expired. */

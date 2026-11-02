@@ -15,7 +15,8 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *
  * - `post`: a post on the watched topics, matched `any` or `all`, or any post when the page watches `everything`.
  *   Posts are readable by everyone signed in.
- * - `agent_status`: a status change of any agent the viewer can see, for the sidebar's dots.
+ * - `agent_status`: a status change of any agent the viewer owns, whichever agent the page watches. The Assistant's
+ *   chat keeps the one for its own agent, to show whether its session is working.
  * - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery, when the viewer
  *   can still see that agent and read that message.
  * - `transcript`: the watched agent's transcript has new entries, up to `last_id`, when the viewer may still read
@@ -24,9 +25,9 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *   sent; the page re-reads, which hands its composer the new list.
  * - `agent_question`: the watched agent asked a question, or one of its questions was answered, when the viewer can
  *   still see that agent. Only the id is sent; the page re-reads, which hands the thread the cards.
- * - `virtual_agent`: one of the viewer's own virtual agents changed, so the live view keeps up with the page rather
- *   than quietly going stale. Only the id is sent, which is no more than the page already shows them: its login codes
- *   and settings are read under their own rule when the page re-reads.
+ * - `virtual_agent`: one of the viewer's own virtual agents changed, so the Assistant re-reads its page, its sign-in
+ *   codes included, and any settings section that is open re-reads its data. Only the id is sent; what is re-read is
+ *   read under its own rule.
  * - `assistant_conversation`: one of the viewer's own assistant conversations changed. Only the id is sent, and only
  *   to its owner; the page re-reads it.
  * - `resync`: the pod's listener reconnected and NOTIFYs may have been missed, or the viewer saved or deleted a
