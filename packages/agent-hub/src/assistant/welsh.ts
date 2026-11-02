@@ -1,5 +1,5 @@
-// The supervisor's half of a Welsh translation job for the HMCTS Assistant's Welsh page: one run of cft-workspace's
-// `scripts/welsh`, as the owner, with their own GitHub and twg sign-ins. Fixed: every value in the frame is checked
+// The supervisor's half of a Welsh translation job for the CFT Workspace's Welsh page: one run of the welsh plugin's
+// `scripts/welsh`, the plugin this package carries in `plugins/welsh`, from the pod's copy of it, as the owner, with their own GitHub and twg sign-ins. Fixed: every value in the frame is checked
 // again here and passed as its own argument, never through a shell, and the only program run is that script. No job
 // goes through a model, and none generates Welsh — the script takes it from the catalogue or a Welsh Language Unit
 // return and refuses anything else. See "Welsh translation jobs" in dtsse-agent-hub's docs/agent-api.md.
@@ -9,6 +9,7 @@ import { join } from "node:path";
 import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
+import { installBundled, tickedBundled } from "../virtual/bundled-plugins.ts";
 import type { WelshAnswer } from "../wire.ts";
 import type { Run } from "./lookups.ts";
 
@@ -287,10 +288,41 @@ export function signInNeeded(output: string): string | null {
   return null;
 }
 
+/** The plugin that carries the Welsh tools, and the name the owner ticks. */
+export const WELSH_PLUGIN = "welsh";
+
+/** What a job answers when its owner has not ticked the plugin, which is the only way a pod has the tools. */
+export const NOT_LOADED =
+  "Welsh translations is not turned on for your assistant. Tick it in Settings, under Tools. If you have just ticked it, your assistant is restarting to load it: try again in a minute or two.";
+
+/** What a job answers when the tools' first install has taken so long that the job could not finish in time. */
+export const STILL_PREPARING = "Your assistant is still setting up the Welsh tools. Try again in a few minutes.";
+
+/**
+ * How long a job has from the moment its frame arrives: under the hub's 15-minute limit for a job, so the hub never
+ * gives up on one that goes on to finish (an apply that then opens its pull request, say, and is run again). Waiting
+ * for the tools' first install comes out of it, and each kind's own limit is cut to what is left.
+ */
+export const JOB_BUDGET_MS = 14 * 60_000;
+
+/** Least time worth starting a job with, once the wait for the install is over. */
+const MIN_RUN_MS = 30_000;
+
+/**
+ * The Welsh tools: the pod's copy of the welsh plugin's `scripts/welsh`, made on first use. Null when the owner has not
+ * ticked the plugin, so a pod runs them only for someone who asked for them.
+ */
+export function welshScript(workspace: string, env: Env, install: (name: string, workspace: string) => string = installBundled): string | null {
+  if (!tickedBundled(env).includes(WELSH_PLUGIN)) {
+    return null;
+  }
+  return join(install(WELSH_PLUGIN, workspace), "scripts", "welsh");
+}
+
 /** Why the script failed, in at most `MAX_DETAIL` characters: its own message, without the usage line or a stack. */
 export function failureDetail(stderr: string, code: number): string {
   if (code === 127) {
-    return "Your assistant's copy of cft-workspace does not have the Welsh tools yet. Restart your assistant to update it.";
+    return "Your assistant could not start the Welsh tools. Restart your assistant, then try again.";
   }
   const lines = stderr
     .split("\n")
@@ -310,17 +342,49 @@ export type WelshDeps = {
   env: Env;
   /** The cft-workspace checkout; `$VIRTUAL_AGENT_WORKSPACE` in a pod. */
   workspace: string;
+  /** Settles once the tools' dependencies are installed, or the attempt has failed; see `prepareWelsh`. */
+  ready?: Promise<void>;
+  /** Makes the pod's copy of a bundled plugin; a test passes one that makes it somewhere of its own. */
+  install?: (name: string, workspace: string) => string;
   say?: (message: string) => void;
   now?: () => Date;
+  /** Milliseconds since the epoch, for the job's budget; a test passes its own. */
+  clock?: () => number;
+  /** How long a job has from when it arrives; `JOB_BUDGET_MS` unless a test says otherwise. */
+  budgetMs?: number;
 };
+
+/** Settles true once `ready` does, or false at `ms`, whichever is first. */
+async function readyWithin(ready: Promise<void> | undefined, ms: number): Promise<boolean> {
+  if (ready === undefined) {
+    return true;
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), Math.max(0, ms));
+  });
+  try {
+    return await Promise.race([ready.then(() => true), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Runs one job and answers it, uploading the spreadsheets it made first. Never throws. */
 export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void> {
   const say = deps.say ?? (() => {});
+  const clock = deps.clock ?? Date.now;
+  const deadline = clock() + (deps.budgetMs ?? JOB_BUDGET_MS);
   const dir = mkdtempSync(join(tmpdir(), "welsh-job-"));
   let answer: WelshAnswer;
   try {
-    answer = await runIn(deps, frame, welshPaths(dir, frame));
+    // The wait for the tools' first install comes out of the job's budget, so job and wait end inside the hub's limit.
+    const ready = await readyWithin(deps.ready, deadline - clock() - MIN_RUN_MS);
+    const left = deadline - clock();
+    answer =
+      ready && left >= MIN_RUN_MS
+        ? await runIn(deps, frame, welshPaths(dir, frame), Math.min(TIMEOUT_MS[frame.kind], left))
+        : { error: "failed", detail: STILL_PREPARING };
   } catch (e) {
     answer = { error: "failed", detail: `That did not work: ${(e as Error).message}`.slice(0, MAX_DETAIL) };
   } finally {
@@ -333,18 +397,20 @@ export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void
   }
 }
 
-async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths): Promise<WelshAnswer> {
-  const script = join(deps.workspace, "scripts", "welsh");
-  if (!existsSync(script)) {
-    return { error: "failed", detail: failureDetail("", 127) };
+async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths, timeoutMs: number): Promise<WelshAnswer> {
+  const script = welshScript(deps.workspace, deps.env, deps.install);
+  if (script === null) {
+    return { error: "failed", detail: NOT_LOADED };
   }
+  // The copy is outside the workspace, so the script is told which workspace's catalogues and clones it works on.
+  const env: NodeJS.ProcessEnv = { ...deps.env, CFT_WELSH_WORKSPACE: deps.workspace };
   if (frame.file_id) {
     writeFileSync(paths.input, await deps.api.welshFile(deps.id, frame.file_id));
   }
   if (frame.strings) {
     writeFileSync(paths.strings, `${frame.strings.join("\n")}\n`);
   }
-  const result = await deps.run(script, welshArgs(frame, deps.workspace, paths), { env: deps.env, timeoutMs: TIMEOUT_MS[frame.kind] });
+  const result = await deps.run(script, welshArgs(frame, deps.workspace, paths), { env, timeoutMs });
   const signIn = signInNeeded(`${result.stderr}\n${result.stdout}`);
   if (result.code !== 0) {
     return signIn ? { error: "signed_out", detail: signIn } : { error: "failed", detail: failureDetail(result.stderr, result.code) };
@@ -375,6 +441,32 @@ export type WelshRunner = {
   /** Resolves once nothing is running or waiting; for a test, and for the supervisor's shutdown. */
   idle: () => Promise<void>;
 };
+
+/** Long enough for the first install of the tools' dependencies, which no job's own limit is. */
+const PREPARE_TIMEOUT_MS = 15 * 60_000;
+
+/**
+ * Installs the Welsh tools' dependencies as the pod starts, when the owner ticked the plugin, so the first job does
+ * not spend its own time limit on the install. Jobs wait for this before they start (`ready` on their deps), so none
+ * is cut off by its own limit while the install runs. Never throws: a failure is said, and the next job tries the
+ * install again.
+ */
+export async function prepareWelsh(deps: Pick<WelshDeps, "run" | "env" | "workspace" | "install" | "say">): Promise<void> {
+  const say = deps.say ?? (() => {});
+  try {
+    const script = welshScript(deps.workspace, deps.env, deps.install);
+    if (script === null) {
+      return;
+    }
+    const env: NodeJS.ProcessEnv = { ...deps.env, CFT_WELSH_WORKSPACE: deps.workspace };
+    const result = await deps.run(script, ["deps"], { env, timeoutMs: PREPARE_TIMEOUT_MS });
+    if (result.code !== 0) {
+      say(`welsh: could not install the tools' dependencies (exit ${result.code}): ${result.stderr.trim().slice(-300)}`);
+    }
+  } catch (e) {
+    say(`welsh: could not prepare the tools: ${(e as Error).message}`);
+  }
+}
 
 /**
  * Runs jobs beside the supervisor rather than behind it. Quick ones (`info`, `search`) run at most two at once,

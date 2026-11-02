@@ -17,6 +17,10 @@
   "files": [
     "bin",
     "dist",
+    "plugins",
+    "!plugins/**/node_modules",
+    "!plugins/**/test",
+    "!plugins/**/.install.lock",
     "secret-patterns",
     "virtual-agent"
   ],
@@ -31,8 +35,9 @@
     "build": "yarn run -T tsc -p tsconfig.json",
     "clean": "rm -rf dist coverage",
     "typecheck": "yarn run -T tsc -p tsconfig.json --noEmit && yarn run -T tsc -p tsconfig.test.json",
-    "test": "yarn run -T vitest run",
+    "test": "yarn run -T vitest run && yarn test:plugins",
     "test:watch": "yarn run -T vitest watch",
-    "test:coverage": "yarn run -T vitest run --coverage"
+    "test:coverage": "yarn run -T vitest run --coverage && yarn test:plugins",
+    "test:plugins": "cd plugins/welsh/scripts/welsh-lib && npm ci --no-audit --no-fund --silent && npm test && npx tsc -p ."
   }
 }

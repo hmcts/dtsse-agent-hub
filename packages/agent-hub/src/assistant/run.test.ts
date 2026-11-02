@@ -94,7 +94,7 @@ describe("runAssistantSupervisor", () => {
     }
   });
 
-  it("should run a Welsh job on the sessions stream with scripts/welsh and answer what it printed", async () => {
+  it("should run a Welsh job on the sessions stream with the welsh plugin's script and answer what it printed", async () => {
     // Arrange
     fs.rmSync(path.join(hubHome(), "virtual"), { recursive: true, force: true });
     const hub = createMockHub({ pingMs: 5000, launchTokens: { [LAUNCH]: { virtualId: VID, owner: OWNER } } });
@@ -102,13 +102,12 @@ describe("runAssistantSupervisor", () => {
     const stop = new AbortController();
     const jobId = "6c1f8d2b-1111-4222-8333-444455556666";
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "welsh-ws-"));
-    fs.mkdirSync(path.join(workspace, "scripts"));
-    fs.writeFileSync(path.join(workspace, "scripts", "welsh"), "#!/bin/sh\n");
+    const plugin = path.join(workspace, "..", "welsh-copy");
     const ran: { cmd: string; args: string[] }[] = [];
     const running = runAssistantSupervisor({
       api: createApi({ baseUrl: url, launchToken: LAUNCH }),
       id: VID,
-      env: {},
+      env: { AGENT_HUB_PLUGINS: "welsh" },
       tmux: fakeTmux(),
       canRun: () => true,
       cwd: CWD,
@@ -116,6 +115,7 @@ describe("runAssistantSupervisor", () => {
       tickMs: 50,
       welsh: {
         workspace,
+        install: () => plugin,
         run: async (cmd, args) => {
           ran.push({ cmd, args });
           return { code: 0, stdout: JSON.stringify({ total: 0, hits: [] }), stderr: "0 match(es)" };
@@ -132,8 +132,10 @@ describe("runAssistantSupervisor", () => {
       // Assert
       await waitUntil(() => hub.welshAnswers.length === 1, "the Welsh job to be answered");
       expect(hub.welshAnswers[0]).toEqual({ virtual_id: VID, job_id: jobId, body: { result: { total: 0, hits: [], message: "0 match(es)" } } });
-      expect(ran[0]?.cmd).toBe(path.join(workspace, "scripts", "welsh"));
-      expect(ran[0]?.args.at(-1)).toBe("back");
+      // The tools' dependencies are installed as the supervisor starts, ahead of the job.
+      expect(ran[0]).toEqual({ cmd: path.join(plugin, "scripts", "welsh"), args: ["deps"] });
+      expect(ran[1]?.cmd).toBe(path.join(plugin, "scripts", "welsh"));
+      expect(ran[1]?.args.at(-1)).toBe("back");
     } finally {
       stop.abort();
       await running;

@@ -6,6 +6,8 @@
 // reverse does not hold, which is why the child environment a process is spawned with stays `NodeJS.ProcessEnv`.
 export const ENV_KEYS = [
   "AGENT_HUB_AUTO_ENABLE",
+  // The copies of the bundled plugins a conversation session was started with; see virtual/bundled-plugins.ts.
+  "AGENT_HUB_BUNDLED_PLUGIN_DIRS",
   "AGENT_HUB_CACHE_SYNC_MS",
   "AGENT_HUB_CHILD",
   "AGENT_HUB_CLAUDE_BIN",

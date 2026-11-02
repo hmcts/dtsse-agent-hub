@@ -9,9 +9,11 @@ import { setDesired } from "../virtual-agents/store.ts";
 import { findAssistant, findAssistantWithClaims } from "./assistant-store.ts";
 import {
   fileIdsOf,
+  hasWelshPlugin,
   MAX_WELSH_FILE_BYTES,
   MAX_WELSH_FILES_PER_JOB,
   resultFits,
+  WELSH_NOT_TURNED_ON,
   WELSH_RATE_LIMIT,
   WELSH_RATE_WINDOW_MS,
   WELSH_RETENTION_MS,
@@ -49,6 +51,9 @@ export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, no
     throw new HttpError(404, "you have no assistant to run that with yet");
   }
   const { assistant, claims } = found;
+  if (!hasWelshPlugin(assistant)) {
+    throw new HttpError(409, WELSH_NOT_TURNED_ON);
+  }
   const files = await Promise.all(
     fileIdsOf(question.args).map((id) => prisma.assistantWelshFile.findUnique({ where: { id }, select: { ownerOid: true, jobId: true } }))
   );
@@ -62,6 +67,11 @@ export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, no
   const gate = podGate({ status: assistant.status, ...claims }, "welsh");
   if (gate !== "ok") {
     return { answer: { status: gate } };
+  }
+  // A change the orchestrator has not applied yet, such as the plugin just ticked, means the pod running now is the old
+  // one and is about to be replaced: asked now, it would say Welsh is not turned on. It is starting again instead.
+  if (assistant.generation > assistant.observedGeneration) {
+    return { answer: { status: "waking" } };
   }
   const id = await prisma.$transaction(async (tx) => {
     // The assistant's rows are taken one job at a time, so two tabs cannot both find room under the limit.
@@ -242,6 +252,9 @@ export async function saveUpload(prisma: PrismaClient, viewerOid: string, name: 
   const assistant = await findAssistant(prisma, viewerOid);
   if (assistant === undefined || !isOwner(viewerOid, assistant)) {
     throw new HttpError(404, "you have no assistant to run that with yet");
+  }
+  if (!hasWelshPlugin(assistant)) {
+    throw new HttpError(409, WELSH_NOT_TURNED_ON);
   }
   if (bytes.length === 0 || bytes.length > MAX_WELSH_FILE_BYTES) {
     throw new HttpError(413, "that spreadsheet is over 5 MB");

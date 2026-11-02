@@ -1,5 +1,5 @@
 /**
- * What the Welsh page shows of a job's result. Pure. The result is whatever cft-workspace's `scripts/welsh` printed,
+ * What the Welsh page shows of a job's result. Pure. The result is whatever the welsh plugin's `scripts/welsh` printed,
  * which is released separately from this app, so every field is read defensively: a missing or mistyped one shows as
  * nothing rather than breaking the page. Welsh is only ever displayed here, exactly as the result carries it.
  */
@@ -43,7 +43,6 @@ export interface CatalogueHit {
   context: string;
   status: string;
   source: string;
-  catalogue: string;
 }
 
 export function searchView(result: Json): { total: number; hits: CatalogueHit[] } {
@@ -55,8 +54,7 @@ export function searchView(result: Json): { total: number; hits: CatalogueHit[] 
       welsh: str(h.welsh),
       context: str(h.context),
       status: str(h.status),
-      source: str(h.source),
-      catalogue: str(h.catalogue)
+      source: str(h.source)
     }))
   };
 }
@@ -168,7 +166,7 @@ function fromOf(source: string): string {
   if (source.startsWith("WLU:")) {
     return "Welsh unit return";
   }
-  return source.includes("catalogue:shared") ? "Shared catalogue" : "Catalogue";
+  return "Catalogue";
 }
 
 /** The same English on one page appears once per place it is used; a BA checks the words, so it is shown once. */

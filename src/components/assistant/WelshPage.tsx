@@ -82,7 +82,8 @@ export function WelshPage({ products, initialProduct = null, initialTask = null,
           <p className="font-semibold text-asst-text">Before you start</p>
           <p className="text-asst-body">
             The service needs to be set up for Welsh first: a Welsh catalogue of the translations the Welsh Language Unit has approved for it, and a list of its
-            repos. A developer sets this up in cft-workspace. You will see in the first step whether the service you pick is ready.
+            repos, kept in a welsh folder in the service's own repo. A developer sets this up. You will see in the first step whether the service you pick is
+            ready.
           </p>
         </div>
         <ul className="grid gap-3 sm:grid-cols-2">
@@ -164,7 +165,7 @@ function ServiceFacts({ info }: Readonly<{ info: WelshInfo }>) {
     return (
       <span className="text-asst-warn">
         This service is not set up for Welsh yet: it has no Welsh catalogue, so there is nothing approved to search or fill from. Ask a developer to set it up
-        in cft-workspace.
+        in the service's own repo.
       </span>
     );
   }

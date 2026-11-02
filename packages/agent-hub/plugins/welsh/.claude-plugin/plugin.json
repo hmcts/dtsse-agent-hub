@@ -1,0 +1,6 @@
+{
+  "name": "welsh",
+  "description": "Welsh translations for any CFT service, with no machine translation: search a service's catalogue, find missing Welsh, build and import Welsh Language Unit spreadsheets, PR approved Welsh into a repo, add Welsh to a Jira story",
+  "version": "0.1.0",
+  "author": { "name": "DTSSE team" }
+}

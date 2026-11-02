@@ -19,7 +19,7 @@ contract changes. Running virtual agents is [`docs/virtual-agents.md`](docs/virt
 
 | Path | What it holds |
 | --- | --- |
-| `packages/agent-hub/` | The published client, `@hmcts-cft/agent-hub`: hooks, bridge, CLI and the pod runtime (`virtual-agent/entrypoint.sh`, the Assistant's supervisor). Its own tests, typecheck and README |
+| `packages/agent-hub/` | The published client, `@hmcts-cft/agent-hub`: hooks, bridge, CLI and the pod runtime (`virtual-agent/entrypoint.sh`, the Assistant's supervisor), and the plugins it carries in `plugins/` (`welsh`), which a pod copies onto its disk when its owner ticks one. Its own tests, typecheck and README |
 | `src/app/api/agent/**` | Agent API route handlers, each wrapped in `agentRoute` / `ownedAgentRoute` (`src/agent-api/route.ts`) |
 | `src/app/api/virtual/**`, `src/app/api/orchestrator/**` | Pod routes (`virtualRoute`, its own launch token only) and orchestrator routes (`orchestratorRoute`); 404 unless `VIRTUAL_AGENTS_ENABLED=true` |
 | `src/agent-auth/` | Bearer validation against the tenant JWKS, launch-token callers, the orchestrator's app-only token, and the `AGENT_AUTH_DISABLED` dev bypasses |

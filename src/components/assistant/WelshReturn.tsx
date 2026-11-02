@@ -23,7 +23,7 @@ import type { WelshClient } from "@/components/assistant/welshClient";
 
 /**
  * "The Welsh unit sent translations back", from step 2: upload their spreadsheet, see it checked, add it to the
- * service's catalogue through a draft pull request in cft-workspace, then put the Welsh into the code.
+ * service's catalogue through a draft pull request in the service's own repo, then put the Welsh into the code.
  */
 export function WelshReturn({ product, repos, client }: Readonly<{ product: string; repos: readonly string[]; client: WelshClient }>) {
   const input = useRef<HTMLInputElement>(null);
@@ -205,7 +205,9 @@ function AddStep({
           <button type="button" className={PRIMARY} disabled={busy} onClick={onAdd}>
             Add to the catalogue
           </button>
-          <p className="mt-1 text-xs text-asst-muted">This opens a draft pull request in cft-workspace, as you, so the change to the catalogue is reviewed.</p>
+          <p className="mt-1 text-xs text-asst-muted">
+            This opens a draft pull request in the service's own repo, as you, so the change to the catalogue is reviewed.
+          </p>
         </div>
       ) : null}
       <JobStatus state={state} working="Adding it to the catalogue…" />

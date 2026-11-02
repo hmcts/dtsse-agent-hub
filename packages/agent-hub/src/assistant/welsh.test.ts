@@ -1,9 +1,21 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { WelshAnswer } from "../wire.ts";
-import { createWelshRunner, failureDetail, parseWelshFrame, runWelsh, signInNeeded, type WelshDeps, welshArgs, welshOutputs, welshPaths } from "./welsh.ts";
+import {
+  createWelshRunner,
+  failureDetail,
+  NOT_LOADED,
+  parseWelshFrame,
+  prepareWelsh,
+  runWelsh,
+  STILL_PREPARING,
+  signInNeeded,
+  type WelshDeps,
+  welshArgs,
+  welshOutputs,
+  welshPaths
+} from "./welsh.ts";
 
 const JOB = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const FILE = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
@@ -155,17 +167,16 @@ describe("failures", () => {
     expect(failureDetail("welsh scan: no product apps/zzz in this workspace\n  usage: scripts/welsh scan …", 2)).toBe("no product apps/zzz in this workspace");
     expect(failureDetail("Error: could not clone hmcts/x\n    at ensureClone (clones.ts:20)", 1)).toBe("could not clone hmcts/x");
     expect(failureDetail("", 1)).toBe("That did not work. Try again.");
-    expect(failureDetail("", 127)).toMatch(/does not have the Welsh tools yet/);
+    expect(failureDetail("", 127)).toMatch(/could not start the Welsh tools/);
     expect(failureDetail(`welsh x: ${"y".repeat(600)}`, 2)).toHaveLength(500);
   });
 });
 
-function workspace(): string {
-  const dir = mkdtempSync(join(tmpdir(), "welsh-ws-"));
-  mkdirSync(join(dir, "scripts"));
-  writeFileSync(join(dir, "scripts", "welsh"), "#!/bin/sh\n");
-  return dir;
-}
+/** Where the test's stand-in for the pod's copy of the plugin is, and the install that hands it out. */
+const COPY = "/workspace/.agent-hub-plugins/welsh-abc";
+const install = vi.fn(() => COPY);
+
+const TICKED = { AGENT_HUB_PLUGINS: "pcs,welsh" };
 
 function deps(over: Partial<WelshDeps> = {}) {
   const answers: { id: string; body: WelshAnswer }[] = [];
@@ -181,7 +192,7 @@ function deps(over: Partial<WelshDeps> = {}) {
     }),
     welshFile: vi.fn(async () => new TextEncoder().encode("PK-return"))
   };
-  const d: WelshDeps = { api, id: "va", env: {}, workspace: workspace(), now: () => new Date("2026-10-29T09:00:00Z"), run: vi.fn(), ...over };
+  const d: WelshDeps = { api, id: "va", env: TICKED, workspace: WS, install, now: () => new Date("2026-10-29T09:00:00Z"), run: vi.fn(), ...over };
   return { d, api, answers, files };
 }
 
@@ -238,11 +249,76 @@ describe("runWelsh", () => {
     expect(junk.answers[0]?.body).toMatchObject({ error: "failed" });
   });
 
-  it("should say the tools are missing when the workspace has no scripts/welsh, without running anything", async () => {
-    const { d, answers } = deps({ workspace: mkdtempSync(join(tmpdir(), "welsh-empty-")) });
+  it("should run the pod's copy of the welsh plugin, told which workspace to work on, when the owner ticked it", async () => {
+    const { d } = deps({ run: vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" })) });
+    await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+    expect(install).toHaveBeenCalledWith("welsh", WS);
+    expect(d.run).toHaveBeenCalledWith(join(COPY, "scripts", "welsh"), expect.any(Array), {
+      env: expect.objectContaining({ CFT_WELSH_WORKSPACE: WS, AGENT_HUB_PLUGINS: "pcs,welsh" }),
+      timeoutMs: expect.any(Number)
+    });
+  });
+
+  it("should say Welsh is not turned on, without running anything, when the owner has not ticked the plugin", async () => {
+    const { d, answers } = deps({ env: { AGENT_HUB_PLUGINS: "pcs" } });
     await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
     expect(d.run).not.toHaveBeenCalled();
-    expect(answers[0]?.body).toMatchObject({ error: "failed", detail: expect.stringMatching(/does not have the Welsh tools/) });
+    expect(answers[0]?.body).toEqual({ error: "failed", detail: NOT_LOADED });
+  });
+
+  it("should not start a job, or its time limit, until the tools' first install has finished", async () => {
+    // Arrange
+    let installed: () => void = () => {};
+    const ready = new Promise<void>((resolve) => {
+      installed = resolve;
+    });
+    const { d, answers } = deps({ ready, run: vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" })) });
+
+    // Act
+    const job = runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const before = (d.run as ReturnType<typeof vi.fn>).mock.calls.length;
+    installed();
+    await job;
+
+    // Assert
+    expect(before).toBe(0);
+    expect(d.run).toHaveBeenCalledTimes(1);
+    expect(answers).toHaveLength(1);
+  });
+
+  it("should take the wait for the install out of the job's budget, and cut its own limit to what is left", async () => {
+    // Arrange: the install finishes 13 minutes and 10 seconds into a 14-minute budget.
+    let t = 0;
+    const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+    const ready = Promise.resolve().then(() => {
+      t = 13 * 60_000 + 10_000;
+    });
+    const { d } = deps({ ready, run, clock: () => t });
+
+    // Act
+    await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "apply", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+
+    // Assert: 50 seconds left, not apply's own 14 minutes.
+    expect(run).toHaveBeenCalledWith(expect.any(String), expect.any(Array), expect.objectContaining({ timeoutMs: 50_000 }));
+  });
+
+  it("should answer that the tools are still being set up, running nothing, when the install leaves no time for the job", async () => {
+    const { d, answers } = deps({ ready: new Promise<void>(() => {}), budgetMs: 40_000 });
+    await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+    expect(d.run).not.toHaveBeenCalled();
+    expect(answers[0]?.body).toEqual({ error: "failed", detail: STILL_PREPARING });
+  });
+
+  it("should answer failed with the reason rather than throw when the plugin cannot be copied onto the pod", async () => {
+    const { d, answers } = deps({
+      install: () => {
+        throw new Error("ENOSPC: no space left on device");
+      }
+    });
+    await runWelsh(d, parseWelshFrame({ job_id: JOB, kind: "info", product: "cath", args: {} }) as NonNullable<ReturnType<typeof parseWelshFrame>>);
+    expect(d.run).not.toHaveBeenCalled();
+    expect(answers[0]?.body).toEqual({ error: "failed", detail: "That did not work: ENOSPC: no space left on device" });
   });
 
   it("should answer failed rather than throw when fetching the return fails", async () => {
@@ -253,6 +329,28 @@ describe("runWelsh", () => {
       parseWelshFrame({ job_id: JOB, kind: "import", product: "cath", args: { file_id: FILE } }) as NonNullable<ReturnType<typeof parseWelshFrame>>
     );
     expect(answers[0]?.body).toEqual({ error: "failed", detail: "That did not work: 404 no such file" });
+  });
+});
+
+describe("prepareWelsh", () => {
+  it("should install the tools' dependencies ahead of any job when the owner ticked the plugin", async () => {
+    const run = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+    await prepareWelsh({ run, env: TICKED, workspace: WS, install });
+    expect(run).toHaveBeenCalledWith(join(COPY, "scripts", "welsh"), ["deps"], {
+      env: expect.objectContaining({ CFT_WELSH_WORKSPACE: WS }),
+      timeoutMs: 15 * 60_000
+    });
+  });
+
+  it("should do nothing when the plugin is not ticked, and say rather than throw when the install fails", async () => {
+    const idle = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+    await prepareWelsh({ run: idle, env: { AGENT_HUB_PLUGINS: "pcs" }, workspace: WS, install });
+    expect(idle).not.toHaveBeenCalled();
+
+    const said: string[] = [];
+    const failing = vi.fn(async () => ({ code: 1, stdout: "", stderr: "npm ERR! network" }));
+    await prepareWelsh({ run: failing, env: TICKED, workspace: WS, install, say: (m) => said.push(m) });
+    expect(said).toEqual(["welsh: could not install the tools' dependencies (exit 1): npm ERR! network"]);
   });
 });
 

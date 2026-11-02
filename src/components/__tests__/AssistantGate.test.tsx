@@ -93,6 +93,7 @@ function home(chat: AssistantHome["chat"], stored: CredentialStatus[] = [], over
     credentials: { modelRoute: "own-licence", claudeTokenUsable: true, available: true, statuses: stored },
     conversations: [],
     plugins: null,
+    welsh: false,
     chat
   };
 }
