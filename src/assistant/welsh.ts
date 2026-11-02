@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
 import { PRODUCTS } from "./products.ts";
-import { JIRA_KEY_RE } from "./schemas.ts";
 
 /**
  * Welsh translation jobs for the Assistant's Welsh page: the kinds, what each takes, the limits, what the pod may
@@ -46,6 +45,8 @@ const MAX_WELSH_CHOICES = 200;
 
 const WELSH_REF_RE = /^CY-[\dA-F]{8}$/;
 const WELSH_ROW_ID_RE = /^[\da-f]{10}$/;
+/** Must agree with the pod's `KEY_RE` (`packages/agent-hub/src/assistant/welsh.ts`), which re-checks every job. */
+export const JIRA_KEY_RE = /^[A-Z][A-Z\d_]{1,9}-\d{1,7}$/;
 const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const REPO_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 

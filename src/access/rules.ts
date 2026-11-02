@@ -75,15 +75,6 @@ export function isPodConversationAgent(agent: AgentConversationColumns): boolean
 }
 
 /**
- * Whether a post may tag the agent at all: every agent but a pod conversation's, which is the HMCTS Assistant, a
- * private chat rather than a session on the board. `tagRefusal` reads the same fact as `ownerOnly`; this is the form
- * for a row that carries the columns rather than the flag, which the post composer's tag suggestions are.
- */
-export function isTaggableAgent(agent: AgentConversationColumns): boolean {
-  return !isPodConversationAgent(agent);
-}
-
-/**
  * Whether an agent row is the agent of a chat on somebody's own computer: a conversation of its own, and no virtual
  * agent behind it for the reason `isPodConversationAgent` gives.
  *

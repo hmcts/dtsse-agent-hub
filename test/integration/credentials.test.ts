@@ -248,8 +248,25 @@ describe("DELETE /api/agent/credentials/{kind}", () => {
 // Agents reach Claude through the gateway or their owner's own licence, so there is no key to store under any name.
 describe("an Amazon Bedrock API key", () => {
   it("should answer 404 and store nothing when one is sent from the command line", async () => {
-    expect((await put(ALICE, "bedrock", { value: BEDROCK })).status).toBe(404);
+    const response = await put(ALICE, "bedrock", { value: BEDROCK });
 
+    expect(response.status).toBe(404);
+    expect(await response.text()).not.toContain(BEDROCK);
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
+  it("should answer 404 when one is read back or deleted", async () => {
+    expect((await read(ALICE, "bedrock")).status).toBe(404);
+    expect((await remove(ALICE, "bedrock")).status).toBe(404);
+  });
+
+  it("should refuse one and never echo it when it is pasted from the web", async () => {
+    actAs("alice");
+
+    const result = await saveCredential(form({ kind: "bedrock", value: BEDROCK }));
+
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("can be pasted here") });
+    expect(JSON.stringify(result)).not.toContain(BEDROCK);
     expect(await prisma.credential.count()).toBe(0);
   });
 });

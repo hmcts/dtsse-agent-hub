@@ -95,14 +95,14 @@ export async function postAsAgent(prisma: PrismaClient, sender: AgentRef, post: 
   return await postAs(prisma, { oid: sender.ownerOid, agentId: sender.id }, post);
 }
 
-/** `original` is the message `replyTo` names, when the caller has already loaded it. */
-export type DirectRequest = { toAgent: string; body: string } | { replyTo: bigint; body: string; original?: LoadedMessageRef };
+/** `loaded` is the caller's own lookup of `replyTo`, found or not, so it is not looked up twice. */
+export type DirectRequest = { toAgent: string; body: string } | { replyTo: bigint; body: string; loaded?: { ref: LoadedMessageRef | undefined } };
 
 export async function directAsAgent(prisma: PrismaClient, sender: AgentRef, request: DirectRequest): Promise<ApiMessage> {
   const author = { oid: sender.ownerOid, agentId: sender.id };
 
   if ("replyTo" in request) {
-    const original = request.original ?? (await loadMessageRef(prisma, request.replyTo));
+    const original = request.loaded === undefined ? await loadMessageRef(prisma, request.replyTo) : request.loaded.ref;
     if (original === undefined) {
       throw new HttpError(404, "no such message");
     }

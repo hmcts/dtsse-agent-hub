@@ -1003,7 +1003,9 @@ export async function writeArtefact(
  * What a direct frame to a conversation's agent carries, or `undefined` for any other agent.
  *
  * No field is gated on a `client_features` claim (`src/agents/client-features.ts`): `attachments`, `jira_export`
- * and `confluence_export` go to every session, and a client too old to read one ignores it.
+ * and `confluence_export` go to every session. A client too old to read `attachments` drops that message's files
+ * and nobody is told; one too old to read `jira_export` or `confluence_export` is handed the request in words, and
+ * the export fails on its 15-minute timeout.
  */
 export interface AssistantFrame {
   conversation_id: string;

@@ -14,17 +14,17 @@ export const POST = ownedAgentRoute<{ agentId: string }>(async ({ caller, agent,
   const replyTo = body.reply_to_message;
   // A launch token replying to a message its sessions could not see is told it does not exist, as GET messages/{id}
   // tells it, rather than 403, which would confirm the owner's other agents were sent it.
-  let original: LoadedMessageRef | undefined;
+  let loaded: { ref: LoadedMessageRef | undefined } | undefined;
   if (replyTo !== undefined && caller.virtualAgentId !== undefined) {
-    original = await loadMessageRef(prisma, replyTo);
-    if (original !== undefined && !canLaunchTokenReadMessage(await virtualAgentSessions(prisma, caller.virtualAgentId), original)) {
+    loaded = { ref: await loadMessageRef(prisma, replyTo) };
+    if (loaded.ref !== undefined && !canLaunchTokenReadMessage(await virtualAgentSessions(prisma, caller.virtualAgentId), loaded.ref)) {
       throw new HttpError(404, "no such message");
     }
   }
   const message = await directAsAgent(
     prisma,
     agent,
-    replyTo === undefined ? { toAgent: body.to_agent!, body: body.body } : { replyTo, body: body.body, original }
+    replyTo === undefined ? { toAgent: body.to_agent!, body: body.body } : { replyTo, body: body.body, loaded }
   );
   return json({ message }, 201);
 });

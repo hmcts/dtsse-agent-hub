@@ -40,7 +40,6 @@ import {
   conversationAccess,
   isLocalConversationAgent,
   isPodConversationAgent,
-  isTaggableAgent,
   MAX_PEOPLE_SUGGESTIONS,
   type MessageRef,
   MIN_PEOPLE_QUERY,
@@ -345,30 +344,6 @@ describe("isLocalConversationAgent", () => {
     ["a local conversation's agent", "chat-1", null, true]
   ])("should answer for %s from the row alone", (_label, assistantConversationId, virtualAgentId, expected) => {
     expect(isLocalConversationAgent({ assistantConversationId, virtualAgentId })).toBe(expected);
-  });
-});
-
-describe("isTaggableAgent", () => {
-  it.each<[string, string | null, string | null, boolean]>([
-    ["a session on a laptop", null, null, true],
-    ["a virtual agent's own pod session", null, "va-1", true],
-    ["a pod conversation's agent", "chat-1", "va-1", false],
-    ["a local conversation's agent", "chat-1", null, true]
-  ])("should answer for %s from the row alone", (_label, assistantConversationId, virtualAgentId, expected) => {
-    expect(isTaggableAgent({ assistantConversationId, virtualAgentId })).toBe(expected);
-  });
-
-  it("should agree with tagRefusal about which agents are not taggable", () => {
-    for (const [assistantConversationId, virtualAgentId] of [
-      [null, null],
-      [null, "va-1"],
-      ["chat-1", "va-1"],
-      ["chat-1", null]
-    ] as const) {
-      const row = { assistantConversationId, virtualAgentId };
-      const ref: AgentRef = { id: "agent-x", ownerOid: OWNER, ownerOnly: isPodConversationAgent(row) };
-      expect(isTaggableAgent(row)).toBe(tagRefusal(null, ref) !== "not_taggable");
-    }
   });
 });
 

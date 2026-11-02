@@ -204,8 +204,8 @@ describe("/api/ui/feed", () => {
   });
 });
 
-describe("/api/ui/topics", () => {
-  it("should suggest anyone's agents to tag, and never a pod conversation's", async () => {
+describe("/api/ui/agents", () => {
+  it("should suggest another owner's agent to tag and leave out their pod conversation's when both match the query", async () => {
     const bobsAgent = await insertAgent(BOB, "bob-pcs");
     await ensureAssistant(prisma, { oid: BOB.oid, modelRoute: "own-licence" });
     const podAgent = await conversationAgent(prisma, await createConversation(prisma, BOB.oid, {}));
@@ -215,7 +215,9 @@ describe("/api/ui/topics", () => {
 
     expect(body.agents).toEqual([{ id: bobsAgent, name: "bob-pcs", owner_name: BOB.name }]);
   });
+});
 
+describe("/api/ui/topics", () => {
   it("should suggest topics by prefix", async () => {
     await createPost(prisma, { author: { oid: ALICE.oid, agentId: null }, topics: ["pcs-api", "ccd"], title: null, body: "x", inReplyTo: null });
 

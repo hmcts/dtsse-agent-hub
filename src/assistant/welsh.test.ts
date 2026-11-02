@@ -39,9 +39,9 @@ describe("welshArgs", () => {
     expect(welshArgs("story_candidates", "cath", { key: "pub 1234" })).toEqual({ error: "that is not a Jira key, like PUB-1234" });
   });
 
-  it("should take a Jira key when its number has as many digits as an exported key may", () => {
-    expect(welshArgs("story_candidates", "cath", { key: "PUB-123456789" })).toEqual({ args: { key: "PUB-123456789" } });
-    expect(welshArgs("story_candidates", "cath", { key: "PUB-1234567890" })).toEqual({ error: "that is not a Jira key, like PUB-1234" });
+  it("should refuse a Jira key when its number has more digits than the pod accepts", () => {
+    expect(welshArgs("story_candidates", "cath", { key: "PUB-1234567" })).toEqual({ args: { key: "PUB-1234567" } });
+    expect(welshArgs("story_candidates", "cath", { key: "PUB-12345678" })).toEqual({ error: "that is not a Jira key, like PUB-1234" });
   });
 
   it("should need at least one English string for a story preview, and check each choice's shape", () => {

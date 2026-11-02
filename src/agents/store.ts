@@ -1,4 +1,4 @@
-import { agentsMessageableBy, POD_CONVERSATION_AGENT } from "../access/load.ts";
+import { agentsMessageableBy, POD_CONVERSATION_AGENT, podConversationAgentSql } from "../access/load.ts";
 import { isLocalConversationAgent, isPodConversationAgent } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
 import { linkLocalSession, linkSession } from "../assistant/store.ts";
@@ -324,45 +324,28 @@ export interface SuggestedAgent {
   ownerName: string;
 }
 
-/** A matched row, with the conversation columns `isTaggableAgent` reads. */
-export interface MatchedAgent extends SuggestedAgent {
-  assistantConversationId: string | null;
-  virtualAgentId: string | null;
-}
-
 /**
  * Agents whose name starts with `query`, or carries it after a hyphen, live ones first and then most recently heard
  * from. A search, never a list: `agentLookup` in `src/access/rules.ts` decides that a query is specific enough to
  * answer at all and how many agents one answer may carry.
  *
  * A hyphen rather than any substring, so "pcs" finds `alice-pcs-api` without "api" finding every agent that has one
- * in its name. Every owner's, because tagging reaches every owner's. Which of them may be offered is
- * `isTaggableAgent`'s, which the caller applies to these rows. The pod conversations' agents it refuses are left out
- * here as well, so that a person with a dozen chats, each an agent named after their assistant, does not spend the
- * whole `LIMIT` on rows the rule then drops.
+ * in its name. Every owner's, because tagging reaches every owner's, less the pod conversations' agents, which
+ * nobody may tag (`tagRefusal`): left out in the query, by `podConversationAgentSql`, so that a person with a dozen
+ * chats, each an agent named after their assistant, does not spend the whole `LIMIT` on rows nobody may be offered.
  */
-export async function searchTaggableAgents(db: Database, query: string, limit: number): Promise<MatchedAgent[]> {
+export async function searchTaggableAgents(db: Database, query: string, limit: number): Promise<SuggestedAgent[]> {
   const starts = `${likeLiteral(query)}%`;
   const afterHyphen = `%-${likeLiteral(query)}%`;
-  const rows = await db.$queryRaw<
-    { id: string; owner_oid: string; name: string; owner_name: string; conversation_id: string | null; virtual_agent_id: string | null }[]
-  >`
-    SELECT a.id::text AS id, a.owner_oid, a.name, u.name AS owner_name,
-           a.assistant_conversation_id::text AS conversation_id, a.virtual_agent_id::text AS virtual_agent_id
+  const rows = await db.$queryRaw<{ id: string; owner_oid: string; name: string; owner_name: string }[]>`
+    SELECT a.id::text AS id, a.owner_oid, a.name, u.name AS owner_name
       FROM agent a JOIN "user" u ON u.oid = a.owner_oid
      WHERE (lower(a.name) LIKE ${starts} OR lower(a.name) LIKE ${afterHyphen})
-       AND NOT (a.assistant_conversation_id IS NOT NULL AND a.virtual_agent_id IS NOT NULL)
+       AND NOT ${podConversationAgentSql("a")}
      ORDER BY (a.status = 'offline'), a.last_heartbeat_at DESC, a.id
      LIMIT ${limit}
   `;
-  return rows.map((row) => ({
-    id: row.id,
-    ownerOid: row.owner_oid,
-    name: row.name,
-    ownerName: row.owner_name,
-    assistantConversationId: row.conversation_id,
-    virtualAgentId: row.virtual_agent_id
-  }));
+  return rows.map((row) => ({ id: row.id, ownerOid: row.owner_oid, name: row.name, ownerName: row.owner_name }));
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
