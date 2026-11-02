@@ -96,7 +96,7 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     }
     case "agent_status": {
       const agent = watch.agent;
-      if (agent === null || event.agent_id !== agent.id || !isOwner(sources.viewerOid, agent)) {
+      if (agent?.id !== event.agent_id || !isOwner(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "agent_status", data: JSON.stringify({ agent_id: event.agent_id, status: event.status }) });
