@@ -101,7 +101,7 @@ async function localChat(title: string, entries: readonly { role: "user" | "assi
   // Through the upload, which is what records a chat's first content; a pod chat's title is left alone by it.
   await appendEntries(
     prisma,
-    { id: agentId, ownerOid: ALICE.oid, localConversation: true },
+    { id: agentId, ownerOid: ALICE.oid },
     "s",
     entries.map((entry, index) => ({
       key: `k${index}`,

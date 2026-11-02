@@ -94,7 +94,7 @@ function entry(key: string, role: "user" | "assistant", text: string): NewTransc
 }
 
 async function uploaded(agentId: string, entries: readonly NewTranscriptEntry[]): Promise<void> {
-  await appendEntries(prisma, { id: agentId, ownerOid: ALICE.oid, localConversation: true }, "s-1", entries);
+  await appendEntries(prisma, { id: agentId, ownerOid: ALICE.oid }, "s-1", entries);
 }
 
 /** How many `assistant_conversation` events for the conversation `act` sent, heard on the hub's channel. */
@@ -227,14 +227,6 @@ describe("a chat on the person's own computer whose thread shows nothing but not
     expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(true);
   });
 
-  it("should be listed when the upload read the session as having no chat before a heartbeat linked one", async () => {
-    const { conversationId, agentId } = await laptopChat();
-
-    await appendEntries(prisma, { id: agentId, ownerOid: ALICE.oid, localConversation: false }, "s-1", [entry("1", "assistant", "Hello.")]);
-
-    expect(await listed()).toEqual([conversationId]);
-  });
-
   it("should be listed when its only content is a tool call", async () => {
     const { conversationId, agentId } = await laptopChat();
 
@@ -255,17 +247,22 @@ describe("a chat on the person's own computer whose thread shows nothing but not
 });
 
 describe("a chat linked to a session that has already said something", () => {
-  it("should be listed from the moment a heartbeat links it when the session answered before it had a chat", async () => {
+  it("should stay unlisted when a heartbeat links it, and be listed when the session next says something", async () => {
     const agentId = await insertAgent(ALICE, "running-all-along");
-    await appendEntries(prisma, { id: agentId, ownerOid: ALICE.oid, localConversation: false }, "s-1", [entry("1", "assistant", "Hello.")]);
+    await appendEntries(prisma, { id: agentId, ownerOid: ALICE.oid }, "s-1", [entry("1", "assistant", "Hello.")]);
 
     await heartbeat(prisma, agentId, "idle", "running-all-along");
 
     const { assistantConversationId } = await prisma.agent.findUniqueOrThrow({ where: { id: agentId } });
+    expect(assistantConversationId).not.toBeNull();
+    expect(await listed()).toEqual([]);
+
+    await appendEntries(prisma, { id: agentId, ownerOid: ALICE.oid }, "s-1", [entry("2", "assistant", "Anything else?")]);
+
     expect(await listed()).toEqual([assistantConversationId]);
   });
 
-  it("should be listed again when the session whose chat was deleted heartbeats and is linked a new one", async () => {
+  it("should keep a deleted chat out of the list when its session heartbeats, until the session says something new", async () => {
     const { conversationId, agentId } = await laptopChat();
     await uploaded(agentId, [entry("1", "user", "look at the possession claim")]);
     await deleteConversation(prisma, ALICE.oid, conversationId);
@@ -274,16 +271,12 @@ describe("a chat linked to a session that has already said something", () => {
 
     const { assistantConversationId } = await prisma.agent.findUniqueOrThrow({ where: { id: agentId } });
     expect(assistantConversationId).not.toBe(conversationId);
-    expect(await listed()).toEqual([assistantConversationId]);
-  });
-
-  it("should start empty when all the session has written is the harness's own turns", async () => {
-    const agentId = await insertAgent(ALICE, "cleared");
-    await appendEntries(prisma, { id: agentId, ownerOid: ALICE.oid, localConversation: false }, "s-1", [entry("1", "user", CLEAR)]);
-
-    await heartbeat(prisma, agentId, "idle", "cleared");
-
     expect(await listed()).toEqual([]);
+
+    expect(await announcements(assistantConversationId!, () => uploaded(agentId, [entry("2", "user", "and the next claim")]))).toBe(1);
+
+    expect(await listed()).toEqual([assistantConversationId]);
+    expect((await prisma.assistantConversation.findUniqueOrThrow({ where: { id: assistantConversationId! } })).title).toBe("look at the possession claim");
   });
 });
 

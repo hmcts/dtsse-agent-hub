@@ -13,7 +13,6 @@ import { hasPod } from "./pods.ts";
 import { DEFAULT_PRODUCT, isProduct, productLabel, storedProduct } from "./products.ts";
 import type { SessionsReport } from "./schemas.ts";
 import { SEARCH_LIMIT, SNIPPET_MAX_WORDS, SNIPPET_MIN_WORDS, searchTerms, visibleMatches } from "./search.ts";
-import { shownInThread } from "./thread.ts";
 import { firstPromptTitle, localTitle, messageTitle, PROMPT_CANDIDATES, TITLE_MAX, type TitleSource } from "./titles.ts";
 import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
 
@@ -232,17 +231,16 @@ export interface ConversationListRow extends ConversationRow {
  * Called in the transaction of every write by an agent that can be a chat's first content: a transcript batch with an
  * answer, a tool call or a prompt the person typed in it (`appendEntries`); a direct message to or from any of its
  * agents (`createDirect`), which is also a pod chat's first message; a question its session asked (`recordQuestion`).
- * The document write and the fork copy set the column in their own statement instead (`writeArtefact`, `acceptFork`),
- * and a chat made for a session that has already said something starts with it set (`linkLocalSession`).
+ * The document write and the fork copy set the column in their own statement instead (`writeArtefact`, `acceptFork`).
  * An announcement the same transaction also makes for another reason, such as the rename a first prompt brings, goes
  * out once: Postgres folds identical notifications in one transaction into one.
  *
  * The conversations are resolved from the agents in the same statement, so a write by an agent in no conversation, or
  * in one that already has content, is one indexed read that writes nothing. They are locked in id order before they
  * are written: one direct reaches two conversations, its sender's and its recipient's, and two first directs crossing
- * between the same two sessions would otherwise each lock one row and wait on the other's. `FOR UPDATE` tests
- * `first_content_at IS NULL` again against each row's newest version once its lock is granted, so a row another
- * transaction set while this one waited drops out there, and the update needs no test of its own.
+ * between the same two sessions would otherwise each lock one row and wait on the other's. The CTE's `FOR UPDATE`,
+ * which tests `first_content_at IS NULL` again once each lock is granted, is what serialises concurrent writers;
+ * the same test in the update makes it safe on its own.
  */
 export async function announceFirstContent(db: Database, agentIds: readonly string[]): Promise<void> {
   if (agentIds.length === 0) {
@@ -260,7 +258,7 @@ export async function announceFirstContent(db: Database, agentIds: readonly stri
     UPDATE assistant_conversation c
        SET first_content_at = now()
       FROM reached r
-     WHERE c.id = r.id
+     WHERE c.id = r.id AND c.first_content_at IS NULL
     RETURNING c.id::text AS id, c.virtual_agent_id::text AS "virtualAgentId", c.owner_oid AS "ownerOid"
   `;
   for (const conversation of first) {
@@ -542,13 +540,10 @@ export async function createConversation(
  * needs the person's assistant and creates an agent for the pod to start a session as; here the agent is the session
  * that is already running on somebody's laptop, so there is no pod to find and nothing to create.
  *
- * `firstContentAt` is set when the session already has something in it (`linkLocalSession`). Not announced here:
- * the sidebar is the only listener for a chat with no pod, and it lists the chat only once something is in it.
+ * Not announced: the sidebar is the only listener for a chat with no pod, and it lists the chat only once something
+ * is in it, which this has not.
  */
-async function createLocalConversation(
-  db: Database,
-  session: { ownerOid: string; agentId: string; title: string | null; firstContentAt: Date | null }
-): Promise<ConversationRow> {
+async function createLocalConversation(db: Database, session: { ownerOid: string; agentId: string; title: string | null }): Promise<ConversationRow> {
   const created = await db.assistantConversation.create({
     data: {
       ownerOid: session.ownerOid,
@@ -558,8 +553,7 @@ async function createLocalConversation(
       title: session.title,
       // Whatever the session's client reported, which is as weak as a title gets: `refreshLocalTitle` replaces
       // it with the chat's first prompt as soon as the session uploads one.
-      titleSource: "agent" satisfies TitleSource,
-      firstContentAt: session.firstContentAt
+      titleSource: "agent" satisfies TitleSource
     },
     select: SELECT
   });
@@ -708,19 +702,14 @@ export async function linkSession(
  * conversation of any kind. Zero rows means another transaction linked the agent first, so this conversation goes and
  * theirs stands; the registration itself is unaffected either way.
  *
- * Usually the session has said nothing yet and the chat starts empty. Not always: a heartbeat links a chat to a
- * session that has been running all along, and a session whose chat the person deleted is linked a new one on its
- * next heartbeat. Such a chat starts with its first content recorded (`sessionHasContent`), and is announced, so an
- * open sidebar lists it at once instead of waiting for the session's next answer.
+ * The chat starts empty, whatever the session has said before, and nothing announces it: only content arriving after
+ * the link puts it in the sidebar (`announceFirstContent`). That is what makes deleting a local chat stick. A
+ * session whose chat the person deleted is linked a new one on its next heartbeat, and that one stays out of the list
+ * until the session says something new. Every session with content from before local chats existed is already
+ * linked, and its chat dated by the backfill, so no session needs its history read here.
  */
 export async function linkLocalSession(db: Database, session: { ownerOid: string; agentId: string; name: string }): Promise<ConversationRow | undefined> {
-  const firstContentAt = (await sessionHasContent(db, session.agentId)) ? new Date() : null;
-  const created = await createLocalConversation(db, {
-    ownerOid: session.ownerOid,
-    agentId: session.agentId,
-    title: localTitle(session.name),
-    firstContentAt
-  });
+  const created = await createLocalConversation(db, { ownerOid: session.ownerOid, agentId: session.agentId, title: localTitle(session.name) });
   const linked = await db.$executeRaw`
     UPDATE agent
        SET assistant_conversation_id = ${created.id}::uuid
@@ -730,42 +719,7 @@ export async function linkLocalSession(db: Database, session: { ownerOid: string
     await db.assistantConversation.delete({ where: { id: created.id } });
     return undefined;
   }
-  if (firstContentAt !== null) {
-    await announce(db, created);
-  }
   return created;
-}
-
-/**
- * How many of a session's earliest answers and user turns `sessionHasContent` reads. A bound because this is read
- * in the heartbeat's transaction; generous because a session can open with a run of the harness's own turns. One
- * whose first content is further in than this starts its chat empty, and its next answer lists it.
- */
-const LINK_CANDIDATES = 50;
-
-/**
- * Whether the session has already put something in a chat, by the rule its writes apply when they arrive: a tool
- * call, a direct message to or from it, a question it asked, or an entry its thread would show other than as a notice
- * (`shownInThread`). The first four are indexed probes that stop at their first row; the last is the thread's own
- * rule in TypeScript, over the earliest `LINK_CANDIDATES` entries, because it is not one SQL can say.
- */
-async function sessionHasContent(db: Database, agentId: string): Promise<boolean> {
-  const [probe] = await db.$queryRaw<{ found: boolean }[]>`
-    SELECT EXISTS (SELECT 1 FROM transcript_entry WHERE agent_id = ${agentId}::uuid AND role = 'tool_use')
-        OR EXISTS (SELECT 1 FROM message WHERE kind = 'direct' AND target_agent_id = ${agentId}::uuid)
-        OR EXISTS (SELECT 1 FROM message WHERE kind = 'direct' AND author_agent_id = ${agentId}::uuid)
-        OR EXISTS (SELECT 1 FROM agent_question WHERE agent_id = ${agentId}::uuid) AS found
-  `;
-  if (probe?.found === true) {
-    return true;
-  }
-  const entries = await db.transcriptEntry.findMany({
-    where: { agentId, role: { in: ["user", "assistant"] } },
-    select: { role: true, content: true, truncated: true },
-    orderBy: { id: "asc" },
-    take: LINK_CANDIDATES
-  });
-  return entries.some(shownInThread);
 }
 
 /**

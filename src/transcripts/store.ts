@@ -1,5 +1,4 @@
 import type { AgentRef } from "../access/rules.ts";
-import type { AgentRow } from "../agents/store.ts";
 import { announceFirstContent, refreshLocalTitle } from "../assistant/store.ts";
 import { shownInThread } from "../assistant/thread.ts";
 import { firstPromptTitle, type PromptEntry } from "../assistant/titles.ts";
@@ -8,7 +7,7 @@ import type { PrismaClient } from "../store/prisma.ts";
 import type { NewTranscriptEntry } from "./schema.ts";
 
 /** What storing a batch needs of the agent it belongs to, all of it already read by `ownedAgentRoute`. */
-type UploadAgent = AgentRef & Pick<AgentRow, "localConversation">;
+type UploadAgent = AgentRef;
 
 /**
  * What a batch holds that a local chat cares about.
@@ -54,17 +53,16 @@ function whatItCarries(entries: readonly NewTranscriptEntry[]): { prompt: boolea
  * one moment the hub learns what the person typed. Nothing for a batch with no prompt in it, and nothing for one
  * that was all resent: whatever a resend carried was judged when it first arrived.
  *
- * That it is such a chat is asked of `localConversation`, which costs nothing because the route has already read
- * it. Most uploads are neither: a board session has no chat at all, and a pod's chat is named after the person's
- * first message rather than after what its session read that message back as. Asking the chat instead would charge
- * every one of them a read of the agent row to be told there was nothing to do.
- *
  * The same batch can be what puts a chat in its owner's sidebar, which leaves out a chat with nothing in it: a batch
  * that brought content records its agent's conversation's first content, and the chat is announced when that is the
  * first time, so an open sidebar redraws and lists it; naming the chat in the same transaction announces it again,
- * which Postgres delivers once. Asked whatever `localConversation` said, because that was read before this
- * transaction and a heartbeat may have linked the session's chat since. For a board session with no chat, or a chat
- * that already has content, as a pod's has from its first message, it is one indexed update that writes nothing.
+ * which Postgres delivers once.
+ *
+ * What that costs every upload, whoever sent it: one indexed update for a batch that carries content, which writes
+ * nothing for a board session with no chat or a chat that already has content, and `refreshLocalTitle`'s read of the
+ * agent for a batch that carries a prompt, which does nothing for a chat on a pod or one the person renamed. Neither
+ * is skipped on what the route read of the agent, because a heartbeat can link the session's chat between that read
+ * and this transaction, and a skipped write is a chat that stays out of the sidebar or keeps the session's name.
  */
 export async function appendEntries(prisma: PrismaClient, agent: UploadAgent, sessionId: string, entries: readonly NewTranscriptEntry[]): Promise<number> {
   return await prisma.$transaction(async (tx) => {
@@ -104,7 +102,7 @@ export async function appendEntries(prisma: PrismaClient, agent: UploadAgent, se
     if (carried.content) {
       await announceFirstContent(tx, [agent.id]);
     }
-    if (carried.prompt && agent.localConversation) {
+    if (carried.prompt) {
       await refreshLocalTitle(tx, agent.id);
     }
     return accepted;

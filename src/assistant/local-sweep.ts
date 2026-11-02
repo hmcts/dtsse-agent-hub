@@ -11,9 +11,9 @@ import { announce } from "./store.ts";
  * `upload-sweep.ts` requires a pod, because the cascade there would take the live session's agent row with the chat.
  * Left alone they would only accumulate, each with its agent's link to it.
  *
- * This collects the local conversations nothing ever happened in. Not creating the conversation until the session has
- * said something was the other answer, and is worse: a laptop session the person wants to open a chat *with* would
- * not have one until it had spoken, which is the one thing the conversation is for.
+ * This collects the local conversations nothing ever happened in. The conversation is made when the session registers
+ * rather than when it first says something, because a laptop session the person wants to open a chat *with* needs
+ * one before it has spoken, which is the one thing the conversation is for.
  *
  * What it must never do is cascade. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the agent's own
  * dependants cascade from there, so deleting the row under a live session would take its transcript, its deliveries,

@@ -137,7 +137,7 @@ async function laptopChat(sessionId = "alices-laptop"): Promise<string> {
 /** A prompt typed at the laptop: a chat with nothing said in it is left out of the list, so a test that lists one needs this. */
 async function typedAtLaptop(conversationId: string): Promise<void> {
   const agent = await prisma.agent.findFirstOrThrow({ where: { assistantConversationId: conversationId } });
-  await appendEntries(prisma, { id: agent.id, ownerOid: agent.ownerOid, localConversation: true }, agent.sessionId, [
+  await appendEntries(prisma, { id: agent.id, ownerOid: agent.ownerOid }, agent.sessionId, [
     { key: "typed", role: "user", content: { text: "look at the claim" }, truncated: false, redacted: false, message_id: null, occurred_at: new Date() }
   ]);
 }

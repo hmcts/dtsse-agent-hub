@@ -99,9 +99,8 @@ export function typedText(text: string): string | null {
 /**
  * Whether a user turn is something the person said: `typedText` has words for it.
  *
- * Nothing in the app asks this any more. It is kept because the backfill in
- * `20261117090000_conversation_first_content` decided which chats already had content by this rule, as a frozen SQL
- * copy, and `test/integration/migrate.test.ts` holds that copy to it.
+ * The rule the backfill in `20261117090000_conversation_first_content` applied, as a SQL copy of these patterns, to
+ * decide which chats already had content; `test/integration/migrate.test.ts` holds that frozen migration to it.
  */
 export function isTypedPrompt(text: string): boolean {
   return typedText(text) !== null;

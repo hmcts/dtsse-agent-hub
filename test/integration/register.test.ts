@@ -237,7 +237,7 @@ describe("a laptop session's conversation", () => {
     // Nothing has been said in it yet, so it is not in the sidebar until the session has a prompt or an answer.
     expect(await listConversations(prisma, ALICE.oid)).toEqual([]);
     // An answer rather than a prompt, so the chat keeps the session's name: a first prompt would rename it.
-    await appendEntries(prisma, { id: agent_id, ownerOid: ALICE.oid, localConversation: true }, "s-1", [
+    await appendEntries(prisma, { id: agent_id, ownerOid: ALICE.oid }, "s-1", [
       { key: "e1", role: "assistant", content: { text: "looking at the claim" }, truncated: false, redacted: false, message_id: null, occurred_at: new Date() }
     ]);
     expect((await listConversations(prisma, ALICE.oid)).map((chat) => [chat.id, chat.title])).toEqual([[conversation.id, "alice-pcs-api"]]);
