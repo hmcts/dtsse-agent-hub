@@ -337,14 +337,13 @@ describe("POST /api/orchestrator/claim", () => {
     vi.stubEnv("ENTRA_REDIRECT_URI", "https://agent-hub.example/auth/callback");
     vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
 
-    const [on] = await claim();
+    const [on] = await claimedBy("cluster-a");
 
     expect(on?.viewer_host).toBe("agent-hub-viewer.example");
 
+    // The claim has to lapse before the same agent can be claimed again.
     vi.stubEnv("AGENT_HUB_VIEWER_HOST", "");
-    await prisma.virtualAgent.updateMany({ data: { claimedUntil: null } });
-
-    const [off] = await claim();
+    const [off] = await claimedBy("cluster-a", LATER());
 
     expect(off?.viewer_host).toBeUndefined();
   });
