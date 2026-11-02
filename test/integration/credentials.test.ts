@@ -114,7 +114,7 @@ describe("PUT /api/agent/credentials/{kind}", () => {
     expect(await readCredential(prisma, localStore(), ALICE.oid, "github")).toBe(GITHUB);
   });
 
-  it("should tag the stored value with where it was saved from, and leave updated_via empty, when it saves one", async () => {
+  it("should tag the stored value and its row with where it was saved from when it saves one", async () => {
     await insertUser(ALICE);
     const tags: Record<string, string>[] = [];
     const store: SecretStore = {
@@ -127,7 +127,7 @@ describe("PUT /api/agent/credentials/{kind}", () => {
     await putCredential(prisma, store, { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "github", value: GITHUB, via: "pod" });
 
     expect(tags).toEqual([{ owner: ALICE.oid, kind: "github", via: "pod" }]);
-    expect(await prisma.$queryRaw`SELECT updated_via::text FROM credential`).toEqual([{ updated_via: null }]);
+    expect(await prisma.credential.findFirstOrThrow({ select: { updatedVia: true } })).toEqual({ updatedVia: "pod" });
   });
 
   it("should keep the value out of every column the hub stores when it saves one", async () => {

@@ -5,7 +5,7 @@ import path from "node:path";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
-import { migrate, migrationsDirectory, NO_TRANSACTION } from "../../src/store/migrate.ts";
+import { migrate, migrationsDirectory } from "../../src/store/migrate.ts";
 import { isTypedPrompt, withoutIdeContext } from "../../src/transcripts/harness-turn.ts";
 
 const BASE = resolveDatabaseUrl();
@@ -338,7 +338,8 @@ describe("the bedrock migration", () => {
 
     // `migrate()` applies every migration from this one on, so what is asserted is the state at head rather than the
     // one this migration left: `20261107090000_bedrock_gone` moves the renamed row back to `gateway`, and
-    // `20261120090000_retired_enum_labels` takes the value out of both enums again.
+    // `20261120090000_credential_kind_rebuilt` and `20261121090000_virtual_agent_enums_rebuilt` take the value out of both
+    // enums again.
     const agents = await query<{ name: string; model_route: string }>(RENAME, `SELECT name, model_route::text FROM "virtual_agent" ORDER BY name`);
     expect(agents).toEqual([
       { name: "on-gateway", model_route: "gateway" },
@@ -817,139 +818,84 @@ describe("the index tidy migration", () => {
   });
 });
 
-describe("the transcript message index migration", () => {
-  const MIGRATION = "20261122090000_transcript_message_index";
-  const { database: INDEXED, earlier } = migrationFixture("migrate_transcript_message", MIGRATION);
-  const DEFINITION = "CREATE INDEX transcript_entry_message_id_idx ON public.transcript_entry USING btree (message_id) WHERE (message_id IS NOT NULL)";
+describe("the credential kind rebuild migration", () => {
+  const MIGRATION = "20261120090000_credential_kind_rebuilt";
+  const { database: KINDS, earlier } = migrationFixture("migrate_credential_kind", MIGRATION);
 
-  async function index(): Promise<{ indexdef: string; valid: boolean }[]> {
-    return await query(
-      INDEXED,
-      `SELECT pg_get_indexdef(i.indexrelid) AS indexdef, i.indisvalid AS valid
-         FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'transcript_entry_message_id_idx'`
-    );
-  }
-
-  it("should rebuild the index a failed concurrent build left INVALID when it is applied", async () => {
+  it("should fail within its lock timeout and record nothing when another transaction holds a table it rewrites", async () => {
     await migrate(earlier());
-    await query(INDEXED, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
-    await query(INDEXED, `INSERT INTO "agent" (owner_oid, session_id, name) VALUES ('dev-alice', 'laptop', 'laptop')`);
-    await query(
-      INDEXED,
-      `INSERT INTO "transcript_entry" (agent_id, session_id, entry_key, role, content, occurred_at)
-        SELECT id, 's', k, 'user', '{}', now() FROM "agent", (VALUES ('one'), ('two')) AS e (k)`
-    );
-    // A unique build over two rows with the same role fails, and a concurrent build that fails leaves its index behind.
-    await expect(query(INDEXED, `CREATE UNIQUE INDEX CONCURRENTLY "transcript_entry_message_id_idx" ON "transcript_entry" ("role")`)).rejects.toThrow();
-    expect(await index()).toMatchObject([{ valid: false }]);
-
-    expect((await migrate())[0]).toBe(MIGRATION);
-
-    expect(await index()).toEqual([{ indexdef: DEFINITION, valid: true }]);
-  });
-
-  it("should answer the foreign key's set-null lookup from the index when the migration has been applied", async () => {
-    await migrate();
-    // The statement Postgres runs for `ON DELETE SET NULL`. Sequential scans are switched off because a small table
-    // is cheapest to scan, and the question is whether the partial index can answer it at all.
-    const client = new pg.Client({ connectionString: urlFor(INDEXED) });
-    await client.connect();
+    const holder = new pg.Client({ connectionString: urlFor(KINDS) });
+    await holder.connect();
     try {
-      await client.query("SET enable_seqscan = off");
-      const plan = await client.query<{ "QUERY PLAN": string }>(
-        `EXPLAIN UPDATE ONLY "public"."transcript_entry" SET "message_id" = NULL WHERE $1 OPERATOR(pg_catalog.=) "message_id"`,
-        ["42"]
-      );
-      expect(plan.rows.map((row) => row["QUERY PLAN"]).join("\n")).toContain("transcript_entry_message_id_idx");
+      await holder.query("BEGIN");
+      await holder.query('LOCK TABLE "virtual_agent_login" IN ACCESS SHARE MODE');
+      const started = Date.now();
+
+      await expect(migrate()).rejects.toThrow(/migration 20261120090000_credential_kind_rebuilt failed: canceling statement due to lock timeout/);
+
+      expect(Date.now() - started).toBeLessThan(15_000);
     } finally {
-      await client.end();
+      await holder.query("ROLLBACK");
+      await holder.end();
     }
-  });
-});
-
-describe("a migration marked to run outside a transaction", () => {
-  const database = scratchDatabase("migrate_no_transaction");
-  const original = process.env.DATABASE_URL;
-  let directory: string;
-
-  beforeAll(async () => {
-    await query("postgres", `DROP DATABASE IF EXISTS "${database}"`);
-    await query("postgres", `CREATE DATABASE "${database}"`);
-    process.env.DATABASE_URL = urlFor(database);
-    directory = await mkdtemp(path.join(tmpdir(), "agent-hub-migrations-"));
+    expect(await query(KINDS, `SELECT 1 FROM "_prisma_migrations" WHERE migration_name = '${MIGRATION}'`)).toEqual([]);
   });
 
-  afterAll(async () => {
-    if (original === undefined) {
-      delete process.env.DATABASE_URL;
-    } else {
-      process.env.DATABASE_URL = original;
-    }
-    await rm(directory, { recursive: true, force: true });
-    await query("postgres", `DROP DATABASE IF EXISTS "${database}"`);
-  });
-
-  async function write(name: string, sql: string): Promise<void> {
-    await mkdir(path.join(directory, name));
-    await writeFile(path.join(directory, name, "migration.sql"), sql);
-  }
-
-  it("should build an index CONCURRENTLY and record the migration when its first line is the marker", async () => {
-    await write("00000000000001_table", 'CREATE TABLE "thing" ("id" INTEGER);\n');
-    await write("00000000000002_index", `${NO_TRANSACTION}\n-- An index.\nCREATE INDEX CONCURRENTLY "thing_id_idx" ON "thing" ("id");\n`);
-
-    expect(await migrate(directory)).toEqual(["00000000000001_table", "00000000000002_index"]);
-
-    expect(await query(database, `SELECT indexname FROM pg_indexes WHERE tablename = 'thing'`)).toEqual([{ indexname: "thing_id_idx" }]);
-  });
-
-  it("should leave the migration unrecorded, so the next run tries it again, when one of its statements fails", async () => {
-    await write("00000000000003_fails", `${NO_TRANSACTION}\nCREATE TABLE "kept" ("id" INTEGER);\nSELECT 1 FROM "missing";\n`);
-
-    await expect(migrate(directory)).rejects.toThrow(/migration 00000000000003_fails failed/);
-
-    expect(await query(database, `SELECT 1 FROM "_prisma_migrations" WHERE migration_name = '00000000000003_fails'`)).toEqual([]);
-    expect(await query(database, `SELECT table_name FROM information_schema.tables WHERE table_name = 'kept'`)).toEqual([{ table_name: "kept" }]);
-  });
-
-  it("should refuse CREATE INDEX CONCURRENTLY when the migration carries no marker", async () => {
-    await rm(path.join(directory, "00000000000003_fails"), { recursive: true });
-    await write("00000000000004_unmarked", 'CREATE INDEX CONCURRENTLY "kept_id_idx" ON "kept" ("id");\n');
-
-    await expect(migrate(directory)).rejects.toThrow(/cannot run inside a transaction block/);
-  });
-});
-
-describe("the retired enum labels migration", () => {
-  const MIGRATION = "20261120090000_retired_enum_labels";
-  const { database: LABELS, earlier } = migrationFixture("migrate_retired_labels", MIGRATION);
-
-  it("should move every row off the retired labels and rebuild the types without them when it is applied", async () => {
+  it("should delete every bedrock credential and sign-in and rebuild the type without the label when it is applied", async () => {
     await migrate(earlier());
-    await query(LABELS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(KINDS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(KINDS, `INSERT INTO "virtual_agent" (owner_oid, name, model_route) VALUES ('dev-alice', 'assistant', 'gateway')`);
     await query(
-      LABELS,
-      `INSERT INTO "virtual_agent" (owner_oid, name, model_route, desired, stop_reason)
-        VALUES ('dev-alice', 'bedrock', 'bedrock', 'running', NULL), ('dev-alice', 'quota', 'gateway', 'stopped', 'quota'),
-               ('dev-alice', 'expired', 'gateway', 'stopped', 'expired'), ('dev-alice', 'evening', 'own_licence', 'stopped', 'evening')`
-    );
-    await query(
-      LABELS,
+      KINDS,
       `INSERT INTO "credential" (owner_oid, kind, secret_name, updated_via)
         VALUES ('dev-alice', 'bedrock', 'u-dev-alice-bedrock', 'web'), ('dev-alice', 'github', 'u-dev-alice-github', 'web')`
     );
     await query(
-      LABELS,
+      KINDS,
       `INSERT INTO "virtual_agent_login" (virtual_agent_id, kind, prompt, verification_uri, expires_at)
         SELECT id, kind, 'paste_code', 'https://example.invalid', now() + interval '1 hour'
-          FROM "virtual_agent", (VALUES ('bedrock'::credential_kind), ('github'::credential_kind)) AS k (kind) WHERE name = 'bedrock'`
+          FROM "virtual_agent", (VALUES ('bedrock'::credential_kind), ('github'::credential_kind)) AS k (kind)`
     );
-    const [before] = await query<{ generation: number }>(LABELS, `SELECT generation FROM "virtual_agent" WHERE name = 'bedrock'`);
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    expect(await query(KINDS, `SELECT kind::text FROM "credential"`)).toEqual([{ kind: "github" }]);
+    expect(await query(KINDS, `SELECT kind::text FROM "virtual_agent_login"`)).toEqual([{ kind: "github" }]);
+    expect(await enumLabels(KINDS, "credential_kind")).toEqual([
+      { type: "credential_kind", labels: "github,azure,claude,jenkins,claude_md,git_identity,atlassian" }
+    ]);
+  });
+});
+
+/** Every type whose name starts with `prefix`, with its labels in order, so a type left behind by a rebuild shows. */
+async function enumLabels(database: string, prefix: string): Promise<{ type: string; labels: string }[]> {
+  return await query(
+    database,
+    `SELECT t.typname AS type, string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) AS labels
+       FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname LIKE '${prefix}%' GROUP BY t.typname ORDER BY t.typname`
+  );
+}
+
+describe("the virtual agent enums rebuild migration", () => {
+  const MIGRATION = "20261121090000_virtual_agent_enums_rebuilt";
+  const { database: AGENTS, earlier } = migrationFixture("migrate_agent_enums", MIGRATION);
+
+  it("should move every agent off the retired route and stop reasons and rebuild both types without them when it is applied", async () => {
+    await migrate(earlier());
+    await query(AGENTS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      AGENTS,
+      `INSERT INTO "virtual_agent" (owner_oid, name, model_route, desired, stop_reason)
+        VALUES ('dev-alice', 'bedrock', 'bedrock', 'running', NULL), ('dev-alice', 'quota', 'gateway', 'stopped', 'quota'),
+               ('dev-alice', 'expired', 'gateway', 'stopped', 'expired'), ('dev-alice', 'evening', 'own_licence', 'stopped', 'evening')`
+    );
+    const [before] = await query<{ generation: number }>(AGENTS, `SELECT generation FROM "virtual_agent" WHERE name = 'bedrock'`);
 
     expect((await migrate())[0]).toBe(MIGRATION);
 
     const agents = await query<{ name: string; model_route: string; stop_reason: string | null; generation: number }>(
-      LABELS,
+      AGENTS,
       `SELECT name, model_route::text, stop_reason::text, generation FROM "virtual_agent" ORDER BY name`
     );
     expect(agents.map(({ generation: _, ...agent }) => agent)).toEqual([
@@ -959,18 +905,7 @@ describe("the retired enum labels migration", () => {
       { name: "quota", model_route: "gateway", stop_reason: null }
     ]);
     expect(Number(agents[0]?.generation)).toBe(Number(before?.generation) + 1);
-    expect(await query(LABELS, `SELECT kind::text FROM "credential"`)).toEqual([{ kind: "github" }]);
-    expect(await query(LABELS, `SELECT kind::text FROM "virtual_agent_login"`)).toEqual([{ kind: "github" }]);
-
-    const labels = await query<{ type: string; labels: string }>(
-      LABELS,
-      `SELECT t.typname AS type, string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) AS labels
-         FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-        WHERE t.typname LIKE 'credential_kind%' OR t.typname LIKE 'model_route%' OR t.typname LIKE 'virtual_agent_stop_reason%'
-        GROUP BY t.typname ORDER BY t.typname`
-    );
-    expect(labels).toEqual([
-      { type: "credential_kind", labels: "github,azure,claude,jenkins,claude_md,git_identity,atlassian" },
+    expect([...(await enumLabels(AGENTS, "model_route")), ...(await enumLabels(AGENTS, "virtual_agent_stop_reason"))]).toEqual([
       { type: "model_route", labels: "gateway,own_licence" },
       { type: "virtual_agent_stop_reason", labels: "user,idle,evening,failed,awaiting_owner" }
     ]);
@@ -978,21 +913,19 @@ describe("the retired enum labels migration", () => {
 });
 
 describe("the unread columns migration", () => {
-  const MIGRATION = "20261121090000_unread_columns_released";
+  const MIGRATION = "20261122090000_unread_columns_released";
   const { database: UNREAD, earlier } = migrationFixture("migrate_unread_columns", MIGRATION);
 
-  it("should accept a credential with no updated_via and a delivered delivery with no delivered_at, and drop the answer message key, when it is applied", async () => {
+  it("should accept a delivered delivery with no delivered_at, and drop the answer message key, when it is applied", async () => {
     await migrate(earlier());
 
     expect((await migrate())[0]).toBe(MIGRATION);
 
     await query(UNREAD, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
-    await query(UNREAD, `INSERT INTO "credential" (owner_oid, kind, secret_name) VALUES ('dev-alice', 'github', 'u-dev-alice-github')`);
     await query(UNREAD, `INSERT INTO "agent" (owner_oid, session_id, name) VALUES ('dev-alice', 'laptop', 'laptop')`);
     await query(UNREAD, `INSERT INTO "message" (kind, author_oid, target_agent_id, body) SELECT 'direct', 'dev-alice', id, 'hello' FROM "agent"`);
     await query(UNREAD, `INSERT INTO "delivery" (message_id, agent_id, state) SELECT m.id, a.id, 'delivered' FROM "message" m, "agent" a`);
 
-    expect(await query(UNREAD, `SELECT updated_via FROM "credential"`)).toEqual([{ updated_via: null }]);
     expect(await query(UNREAD, `SELECT state::text, delivered_at FROM "delivery"`)).toEqual([{ state: "delivered", delivered_at: null }]);
     expect(await query(UNREAD, `SELECT conname FROM pg_constraint WHERE conname = 'agent_question_answer_message_id_fkey'`)).toEqual([]);
   });
