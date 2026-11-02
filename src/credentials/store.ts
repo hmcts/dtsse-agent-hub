@@ -29,7 +29,6 @@ export interface CredentialStatus {
   stored: boolean;
   accountLabel: string | null;
   updatedAt: string | null;
-  updatedVia: CredentialVia | null;
 }
 
 export interface CredentialTarget {
@@ -77,6 +76,7 @@ export async function putCredential(prisma: PrismaClient, store: SecretStore, wr
   const name = secretName(write.ownerOid, write.kind);
   await store.put(name, checked.value, { owner: write.ownerOid, kind: write.kind, via: write.via });
   await prisma.$transaction(async (tx) => {
+    // `updated_via` is written for compatibility and never read.
     const row = { secretName: name, accountLabel: checked.accountLabel, updatedAt: new Date(), updatedVia: write.via };
     await tx.credential.upsert({
       where: { ownerOid_kind: { ownerOid: write.ownerOid, kind: write.kind } },
@@ -106,13 +106,13 @@ export async function deleteCredential(prisma: PrismaClient, store: SecretStore,
 export async function credentialStatus(db: Database, ownerOid: string): Promise<CredentialStatus[]> {
   const rows = await db.credential.findMany({
     where: { ownerOid },
-    select: { kind: true, accountLabel: true, updatedAt: true, updatedVia: true }
+    select: { kind: true, accountLabel: true, updatedAt: true }
   });
   return CREDENTIAL_KINDS.map((kind) => {
     const row = rows.find((candidate) => candidate.kind === kind);
     return row === undefined
-      ? { kind, stored: false, accountLabel: null, updatedAt: null, updatedVia: null }
-      : { kind, stored: true, accountLabel: row.accountLabel, updatedAt: row.updatedAt.toISOString(), updatedVia: row.updatedVia };
+      ? { kind, stored: false, accountLabel: null, updatedAt: null }
+      : { kind, stored: true, accountLabel: row.accountLabel, updatedAt: row.updatedAt.toISOString() };
   });
 }
 

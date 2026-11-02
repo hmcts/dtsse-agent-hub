@@ -95,7 +95,6 @@ export async function recordConfluenceExport(
           confluencePageId: result.page_id,
           confluencePageTitle: result.title ?? null,
           confluenceError: null,
-          confluenceExportedAt: now,
           updatedAt: now
         }
       : { confluenceStatus: "failed", confluenceError: result.error.slice(0, MAX_CONFLUENCE_ERROR), updatedAt: now };

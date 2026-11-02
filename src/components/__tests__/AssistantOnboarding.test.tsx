@@ -57,7 +57,7 @@ function assistant(status: VirtualAgentStatus = "provisioning", overrides: Parti
 const STORED_AT = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
 
 function statuses(...stored: CredentialKind[]): CredentialStatus[] {
-  return stored.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: STORED_AT, updatedVia: null }));
+  return stored.map((kind) => ({ kind, stored: true, accountLabel: null, updatedAt: STORED_AT }));
 }
 
 function login(kind: CredentialKind, overrides: Partial<LoginView> = {}): LoginView {

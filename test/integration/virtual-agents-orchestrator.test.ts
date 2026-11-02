@@ -311,7 +311,7 @@ describe("the launch token across stop and start", () => {
     expect(restarting?.launch_token).not.toBe(token);
     expect((await status(id, token, { phase: "provisioning" })).status).toBe(401);
     expect((await status(id, restarting!.launch_token!, { phase: "provisioning" })).status).toBe(204);
-    expect(await row(id)).toMatchObject({ status: "provisioning", stopReason: null, stoppedAt: null, diskExpiresAt: null });
+    expect(await row(id)).toMatchObject({ status: "provisioning", stopReason: null, diskExpiresAt: null });
   });
 });
 
@@ -341,11 +341,13 @@ describe("POST /api/orchestrator/virtual-agents/{id}/observed", () => {
     await setDesired(prisma, ALICE.oid, id, "stopped");
     const [claimed] = await claim();
 
+    const before = Date.now();
     await observe(id, { generation: claimed!.generation, replicas_ready: 0 });
+    const after = Date.now();
 
-    const stored = await row(id);
-    expect(stored.stoppedAt).not.toBeNull();
-    expect(stored.diskExpiresAt!.getTime() - stored.stoppedAt!.getTime()).toBe(14 * 24 * 60 * 60_000);
+    const expires = (await row(id)).diskExpiresAt!.getTime();
+    expect(expires).toBeGreaterThanOrEqual(before + 14 * 24 * 60 * 60_000);
+    expect(expires).toBeLessThanOrEqual(after + 14 * 24 * 60 * 60_000);
   });
 
   it("should hand an expired disk to the orchestrator for deletion until it reports the disk gone", async () => {

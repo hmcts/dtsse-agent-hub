@@ -61,7 +61,7 @@ const BEFORE_STORED = "2026-10-23T09:00:00.000Z";
 const AFTER_STORED = "2026-10-24T15:00:00.000Z";
 
 function status(kind: CredentialKind, accountLabel: string | null = null): CredentialStatus {
-  return { kind, stored: true, accountLabel, updatedAt: STORED_AT, updatedVia: "pod" };
+  return { kind, stored: true, accountLabel, updatedAt: STORED_AT };
 }
 
 function login(kind: CredentialKind, state: LoginState, expiresAt = new Date(Date.now() + 600_000).toISOString(), updatedAt = BEFORE_STORED): LoginView {
@@ -254,7 +254,7 @@ describe("the Assistant's settings cog", () => {
   it("should read the sign-ins against the clock the page was built with", () => {
     const built = Date.now() - 4 * 60_000;
     const relayed = login("github", "pending", new Date(built + 1000).toISOString(), new Date(built - 60_000).toISOString());
-    const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString(), updatedVia: "pod" };
+    const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString() };
     const connections: ConnectionsData = {
       route: "own-licence",
       kinds: KINDS,
@@ -272,7 +272,7 @@ describe("the Assistant's settings cog", () => {
   it("should read the sign-ins again once the browser has taken the page over", () => {
     const built = Date.now() - 4 * 60_000;
     const relayed = login("github", "pending", new Date(built + 1000).toISOString(), new Date(built - 60_000).toISOString());
-    const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString(), updatedVia: "pod" };
+    const stored: CredentialStatus = { kind: "github", stored: true, accountLabel: null, updatedAt: new Date(built - 30_000).toISOString() };
 
     render(
       <AssistantSettings

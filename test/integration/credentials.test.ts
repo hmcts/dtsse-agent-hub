@@ -110,8 +110,24 @@ describe("PUT /api/agent/credentials/{kind}", () => {
     expect(response.status).toBe(204);
     expect(await response.text()).toBe("");
     const row = await prisma.credential.findUniqueOrThrow({ where: { ownerOid_kind: { ownerOid: ALICE.oid, kind: "github" } } });
-    expect(row).toMatchObject({ secretName: "u-dev-alice-github", updatedVia: "cli", accountLabel: null });
+    expect(row).toMatchObject({ secretName: "u-dev-alice-github", accountLabel: null });
     expect(await readCredential(prisma, localStore(), ALICE.oid, "github")).toBe(GITHUB);
+  });
+
+  it("should tag the stored value and its row with where it was saved from when it saves one", async () => {
+    await insertUser(ALICE);
+    const tags: Record<string, string>[] = [];
+    const store: SecretStore = {
+      acceptsDevIdentities: true,
+      put: async (_name, _value, tag) => void tags.push(tag),
+      get: async () => undefined,
+      remove: async () => undefined
+    };
+
+    await putCredential(prisma, store, { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "github", value: GITHUB, via: "pod" });
+
+    expect(tags).toEqual([{ owner: ALICE.oid, kind: "github", via: "pod" }]);
+    expect(await prisma.credential.findFirstOrThrow({ select: { updatedVia: true } })).toEqual({ updatedVia: "pod" });
   });
 
   it("should keep the value out of every column the hub stores when it saves one", async () => {
@@ -130,8 +146,7 @@ describe("PUT /api/agent/credentials/{kind}", () => {
 
     expect((await credentialStatus(prisma, ALICE.oid)).find((status) => status.kind === "azure")).toMatchObject({
       stored: true,
-      accountLabel: "alice@example.com",
-      updatedVia: "cli"
+      accountLabel: "alice@example.com"
     });
   });
 
@@ -380,7 +395,7 @@ describe("saveCredential and removeCredential", () => {
 
     expect(result).toEqual({ ok: true, confirmation: "Your GitHub token is stored" });
     const row = await prisma.credential.findFirstOrThrow();
-    expect(row).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "github", updatedVia: "web" });
+    expect(row).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "github" });
     expect(revalidated).toContain("/assistant");
     expect(JSON.stringify(result)).not.toContain(GITHUB);
   });
@@ -497,8 +512,7 @@ describe("a Jenkins API token", () => {
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
       ownerOid: ALICE.oid,
       kind: "jenkins",
-      secretName: "u-dev-alice-jenkins",
-      updatedVia: "cli"
+      secretName: "u-dev-alice-jenkins"
     });
     expect(await readCredential(prisma, localStore(), ALICE.oid, "jenkins")).toBe(JENKINS);
     expect(await everythingStored()).not.toContain(JENKINS);
@@ -538,8 +552,7 @@ describe("a CLAUDE.md", () => {
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
       ownerOid: ALICE.oid,
       kind: "claude_md",
-      secretName: "u-dev-alice-claude-md",
-      updatedVia: "cli"
+      secretName: "u-dev-alice-claude-md"
     });
     expect(await everythingStored()).not.toContain("payments outage");
   });
@@ -592,7 +605,7 @@ describe("a CLAUDE.md", () => {
 
     expect(result).toEqual({ ok: true, confirmation: "Your CLAUDE.md is saved. Each agent uses it from its next Claude start" });
     expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "claude_md")).toBe("# Me\n\nBe brief.\n");
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "claude_md", updatedVia: "web" });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "claude_md" });
     expect(revalidated).toContain("/assistant");
   });
 
@@ -680,8 +693,7 @@ describe("a git identity", () => {
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({
       ownerOid: ALICE.oid,
       kind: "git_identity",
-      secretName: "u-dev-alice-git-identity",
-      updatedVia: "cli"
+      secretName: "u-dev-alice-git-identity"
     });
   });
 
@@ -717,7 +729,7 @@ describe("a git identity", () => {
 
     expect(result).toEqual({ ok: true, confirmation: "Your git identity is saved. Each agent uses it from its next Claude start" });
     expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "git_identity")).toBe('{"email":"alice@example.com"}');
-    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "git_identity", updatedVia: "web" });
+    expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "git_identity" });
     expect(revalidated).toContain("/assistant");
   });
 
