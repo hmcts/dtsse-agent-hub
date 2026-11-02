@@ -63,10 +63,10 @@ function toCard(row: CardRow): AgentCard {
   };
 }
 
-export const MAX_SIDEBAR_AGENTS = 100;
+const MAX_SIDEBAR_AGENTS = 100;
 
 /** Live agents first, then the most recently heard from. */
-export function byLiveness<A extends { status: AgentStatus; lastHeartbeatAt: string }>(agents: readonly A[]): A[] {
+function byLiveness<A extends { status: AgentStatus; lastHeartbeatAt: string }>(agents: readonly A[]): A[] {
   const rank = (agent: A) => (agent.status === "offline" ? 1 : 0);
   return [...agents].sort((left, right) => rank(left) - rank(right) || byCodePoint(right.lastHeartbeatAt, left.lastHeartbeatAt));
 }

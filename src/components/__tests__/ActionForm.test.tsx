@@ -16,7 +16,7 @@ afterEach(() => {
 
 async function submit(): Promise<void> {
   await act(async () => {
-    fireEvent.submit(screen.getByRole("form", { name: "Grant" }));
+    fireEvent.submit(screen.getByRole("form", { name: "Rename" }));
   });
 }
 
@@ -24,7 +24,7 @@ describe("ActionForm", () => {
   it("should send the form's fields, confirm, and re-render the page when the action succeeds", async () => {
     const action = vi.fn(async (_form: FormData) => ({ ok: true as const, confirmation: "Bob now has read access" }));
     render(
-      <ActionForm action={action} label="Grant">
+      <ActionForm action={action} label="Rename">
         <input name="email" defaultValue="bob@example.com" />
       </ActionForm>
     );
@@ -38,7 +38,7 @@ describe("ActionForm", () => {
 
   it("should show nothing on a success with nothing to say", async () => {
     render(
-      <ActionForm action={vi.fn(async () => ({ ok: true as const }))} label="Grant">
+      <ActionForm action={vi.fn(async () => ({ ok: true as const }))} label="Rename">
         <span />
       </ActionForm>
     );
@@ -50,14 +50,14 @@ describe("ActionForm", () => {
 
   it("should show the refusal when the action refuses", async () => {
     render(
-      <ActionForm action={vi.fn(async () => ({ ok: false as const, error: "nobody at x has used the hub" }))} label="Grant">
+      <ActionForm action={vi.fn(async () => ({ ok: false as const, error: "that name is taken" }))} label="Rename">
         <span />
       </ActionForm>
     );
 
     await submit();
 
-    expect(screen.getByRole("alert").textContent).toContain("nobody at x");
+    expect(screen.getByRole("alert").textContent).toContain("that name is taken");
     expect(refresh).not.toHaveBeenCalled();
   });
 
@@ -65,9 +65,9 @@ describe("ActionForm", () => {
   // no other way to hear that the value it is showing never came into force.
   it("should tell the parent when the action refuses, and not when it succeeds", async () => {
     const onRefused = vi.fn();
-    const action = vi.fn(async () => ({ ok: false as const, error: "nobody at x has used the hub" }));
+    const action = vi.fn(async () => ({ ok: false as const, error: "that name is taken" }));
     render(
-      <ActionForm action={action} label="Grant" onRefused={onRefused}>
+      <ActionForm action={action} label="Rename" onRefused={onRefused}>
         <span />
       </ActionForm>
     );
@@ -87,7 +87,7 @@ describe("ActionForm", () => {
         action={vi.fn(async () => {
           throw new Error("offline");
         })}
-        label="Grant"
+        label="Rename"
       >
         <span />
       </ActionForm>
@@ -108,7 +108,7 @@ describe("ActionForm", () => {
         action={vi.fn(async () => {
           throw new Error("An unexpected response was received from the server.");
         })}
-        label="Grant"
+        label="Rename"
       >
         <span />
       </ActionForm>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useId, useState } from "react";
-import { JIRA_KEY_RE, MAX_WELSH_STRINGS, type WelshFileView } from "@/assistant/welsh";
+import { JIRA_KEY_RE } from "@/assistant/schemas";
+import { MAX_WELSH_STRINGS, type WelshFileView } from "@/assistant/welsh";
 import { type StoryCandidates, type StoryRow, storyCandidatesView, storyPreviewView, storyWriteView } from "@/assistant/welsh-views";
 import {
   Confirm,

@@ -1,4 +1,4 @@
-export const JENKINS_TOKEN_URL = "https://build.hmcts.net/me/configure";
+const JENKINS_TOKEN_URL = "https://build.hmcts.net/me/configure";
 
 /** A Jenkins API token is optional: without one a virtual agent starts as usual, with no Jenkins tools. */
 export function JenkinsHint() {

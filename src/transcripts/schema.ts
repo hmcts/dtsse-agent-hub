@@ -5,7 +5,7 @@ import { contentBytes, ENTRY_KEY_PATTERN, MAX_BATCH_ENTRIES, MAX_ENTRY_CONTENT_B
 
 /** The body of `POST /api/agent/{agent_id}/transcript` and the `Transcript entry` type of `docs/agent-api.md`. */
 
-export const TRANSCRIPT_ROLES = ["user", "assistant", "tool_use", "tool_result", "system"] as const;
+const TRANSCRIPT_ROLES = ["user", "assistant", "tool_use", "tool_result", "system"] as const;
 
 export type TranscriptRole = (typeof TRANSCRIPT_ROLES)[number];
 

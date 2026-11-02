@@ -238,11 +238,9 @@ export async function heartbeat(
     if (skills !== undefined && skillsChanged(before.skills, normaliseSkills(skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agentId, owner_oid: before.ownerOid });
     }
-    // A laptop session with no conversation gets one here as well as at registration, because registration is not
-    // where most of them arrive. The client registers only while it holds no agent id and heartbeats ever after, so
-    // every session already running when conversations were introduced — and every agent row written before then —
-    // would otherwise never have had one, with nothing to create it later. Under the same row lock the heartbeat
-    // already takes, so two heartbeats cannot both make one.
+    // A laptop session with no conversation gets one here as well as at registration: the client registers only while
+    // it holds no agent id and heartbeats ever after, so a session whose agent row has no conversation would otherwise
+    // never get one. Under the same row lock the heartbeat already takes, so two heartbeats cannot both make one.
     if (before.local) {
       // The name this heartbeat reported, not the one the row held before it: the two differ exactly when the
       // client has just worked out a better one, and the chat made here would otherwise be named the worse of them.
@@ -283,7 +281,7 @@ export interface ListedAgent {
   owner: { name: string; email: string | null };
 }
 
-export const MAX_LISTED_AGENTS = 200;
+const MAX_LISTED_AGENTS = 200;
 
 /**
  * The agents `oid` may message, live ones first and then most recently heard from: their own sessions, which is what
@@ -324,8 +322,12 @@ export interface SuggestedAgent {
   ownerOid: string;
   name: string;
   ownerName: string;
-  /** Read by `canSuggestAgent`, so the rule and not this query is the last word on what may be offered. */
-  ownerOnly: boolean;
+}
+
+/** A matched row, with the conversation columns `isTaggableAgent` reads. */
+export interface MatchedAgent extends SuggestedAgent {
+  assistantConversationId: string | null;
+  virtualAgentId: string | null;
 }
 
 /**
@@ -334,15 +336,14 @@ export interface SuggestedAgent {
  * answer at all and how many agents one answer may carry.
  *
  * A hyphen rather than any substring, so "pcs" finds `alice-pcs-api` without "api" finding every agent that has one
- * in its name. Every owner's, because tagging reaches every owner's; the pod conversation's agents it leaves out are
- * the ones nobody may tag.
+ * in its name. Every owner's, because tagging reaches every owner's. Which of them may be offered is
+ * `isTaggableAgent`'s, which the caller applies to these rows. The pod conversations' agents it refuses are left out
+ * here as well, so that a person with a dozen chats, each an agent named after their assistant, does not spend the
+ * whole `LIMIT` on rows the rule then drops.
  */
-export async function searchTaggableAgents(db: Database, query: string, limit: number): Promise<SuggestedAgent[]> {
+export async function searchTaggableAgents(db: Database, query: string, limit: number): Promise<MatchedAgent[]> {
   const starts = `${likeLiteral(query)}%`;
   const afterHyphen = `%-${likeLiteral(query)}%`;
-  // The pod conversations are left out here as well as by the rule, rather than only by it: a person with a dozen
-  // chats has a dozen agents all named after their assistant, and a query matching that name would otherwise spend
-  // the whole limit on rows the rule then drops and answer with nothing.
   const rows = await db.$queryRaw<
     { id: string; owner_oid: string; name: string; owner_name: string; conversation_id: string | null; virtual_agent_id: string | null }[]
   >`
@@ -359,7 +360,8 @@ export async function searchTaggableAgents(db: Database, query: string, limit: n
     ownerOid: row.owner_oid,
     name: row.name,
     ownerName: row.owner_name,
-    ownerOnly: isPodConversationAgent({ assistantConversationId: row.conversation_id, virtualAgentId: row.virtual_agent_id })
+    assistantConversationId: row.conversation_id,
+    virtualAgentId: row.virtual_agent_id
   }));
 }
 

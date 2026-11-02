@@ -15,7 +15,7 @@ import type { SharedThreadItem } from "./sharing.ts";
  */
 
 /** The copied words are kept to this many characters, the latest of them, so the copy and its context stay bounded. */
-export const MAX_FORK_CHARACTERS = 1_000_000;
+const MAX_FORK_CHARACTERS = 1_000_000;
 
 /** What the attached context is called in the thread. */
 export const FORK_CONTEXT_FILE_NAME = "Earlier conversation.md";

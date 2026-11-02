@@ -232,7 +232,7 @@ function againWords(name: string, stored: boolean, running: boolean): { question
  * value stored `reconnectSignIn` deletes the one every virtual agent they own uses, and what marks this row lapsed is
  * one agent's login row — the others may be using that value perfectly well. So the question names that, and is
  * asked in the destructive style, only when there is a value to lose; with none, the same control restarts and says
- * so. The hub's own card asks the same two questions the same way.
+ * so.
  */
 function SignInAgain({
   assistantId,

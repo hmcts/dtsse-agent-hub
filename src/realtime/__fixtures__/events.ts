@@ -8,7 +8,7 @@ import type { NotifiedEvent } from "../events.ts";
  *
  * Several samples per type where the shape has variants worth decoding separately.
  */
-export const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Extract<NotifiedEvent, { type: T }>[] } = {
+const NOTIFIED_EVENT_SAMPLES: { [T in NotifiedEvent["type"]]: readonly Extract<NotifiedEvent, { type: T }>[] } = {
   post: [{ type: "post", message_id: "12" }],
   direct: [
     { type: "direct", message_id: "13", target_agent_id: "agent-b", author_agent_id: "agent-a" },

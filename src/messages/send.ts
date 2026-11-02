@@ -1,4 +1,4 @@
-import { loadMessageRef } from "../access/load.ts";
+import { type LoadedMessageRef, loadMessageRef } from "../access/load.ts";
 import { type AgentRef, canAgentMessageAgent, canPersonMessageAgent, replyRoute, tagRefusal } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { type Candidate, findAgent, isUuid, resolveTargets } from "../agents/store.ts";
@@ -63,12 +63,13 @@ async function taggedAgents(prisma: PrismaClient, author: Author, tags: readonly
       throw new HttpError(409, `more than one agent is called "${tag}"; tag its id instead`, { candidates: candidates.map(tagCandidateView) });
     }
     const target = candidates[0];
+    const refusal = target === undefined ? undefined : tagRefusal(author.agentId, target);
     // A pod conversation's agent is reported as missing rather than forbidden, so the refusal does not confirm it
     // exists, which is how every other rule answers for one.
-    if (target === undefined || tagRefusal(author.agentId, target) === "not_taggable") {
+    if (target === undefined || refusal === "not_taggable") {
       throw new HttpError(404, isUuid(tag) ? "no such agent" : `no agent is called "${tag}"`);
     }
-    if (tagRefusal(author.agentId, target) === "itself") {
+    if (refusal === "itself") {
       throw new HttpError(400, "an agent cannot tag itself in its own post");
     }
     if (!ids.includes(target.id)) {
@@ -94,13 +95,14 @@ export async function postAsAgent(prisma: PrismaClient, sender: AgentRef, post: 
   return await postAs(prisma, { oid: sender.ownerOid, agentId: sender.id }, post);
 }
 
-export type DirectRequest = { toAgent: string; body: string } | { replyTo: bigint; body: string };
+/** `original` is the message `replyTo` names, when the caller has already loaded it. */
+export type DirectRequest = { toAgent: string; body: string } | { replyTo: bigint; body: string; original?: LoadedMessageRef };
 
 export async function directAsAgent(prisma: PrismaClient, sender: AgentRef, request: DirectRequest): Promise<ApiMessage> {
   const author = { oid: sender.ownerOid, agentId: sender.id };
 
   if ("replyTo" in request) {
-    const original = await loadMessageRef(prisma, request.replyTo);
+    const original = request.original ?? (await loadMessageRef(prisma, request.replyTo));
     if (original === undefined) {
       throw new HttpError(404, "no such message");
     }

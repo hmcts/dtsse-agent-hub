@@ -2,10 +2,10 @@ import type { PrismaClient } from "../store/prisma.ts";
 import { MAX_ENTRIES_PER_AGENT, RETENTION_DAYS } from "./limits.ts";
 
 /** Transcripts only need trimming at about the rate they grow, so this runs far less often than the offline sweep. */
-export const TRANSCRIPT_SWEEP_INTERVAL_MS = 10 * 60_000;
+const TRANSCRIPT_SWEEP_INTERVAL_MS = 10 * 60_000;
 
 /** Entries deleted per rule per sweep, so a backlog drains over a few ticks rather than in one long transaction. */
-export const TRANSCRIPT_SWEEP_BATCH = 5_000;
+const TRANSCRIPT_SWEEP_BATCH = 5_000;
 
 /**
  * How recently an agent must have been written to for the per-agent cap to be applied to it.
@@ -29,7 +29,7 @@ export const TRANSCRIPT_SWEEP_BATCH = 5_000;
  * passes the cap and is then never written to again keeps whatever it was over by until `RETENTION_DAYS` ages those
  * entries out, retention being the backstop for exactly that.
  */
-export const TRIM_ACTIVE_WITHIN_DAYS = 1;
+const TRIM_ACTIVE_WITHIN_DAYS = 1;
 
 /** "trnsswep". Distinct from the migration and offline-sweep locks. */
 const TRANSCRIPT_SWEEP_LOCK_KEY = 0x74726e73_73776570n;

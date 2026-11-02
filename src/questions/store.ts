@@ -37,7 +37,7 @@ async function announce(db: Database, agent: Pick<AgentRow, "id" | "ownerOid">):
  */
 export type QuestionRecorded = "asked" | "already-asked";
 
-export class QuestionNotRecorded extends HttpError {
+class QuestionNotRecorded extends HttpError {
   constructor() {
     // Literal first, as every refusal here is: the rule in `docs/agent-api.md` is that no caller value leads a
     // message, so nothing a client sends can put a `<` at the front of one.

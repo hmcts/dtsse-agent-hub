@@ -9,10 +9,10 @@ import { withoutTrailingSlashes } from "./settings.ts";
  * ever logged or put in an error.
  */
 
-export type Desired = "running" | "stopped" | "deleted";
+type Desired = "running" | "stopped" | "deleted";
 
 /** The stored labels, which is what the claim sends and the pod is given as `AGENT_HUB_MODEL_ROUTE`. */
-export type ModelRoute = "gateway" | "own_licence";
+type ModelRoute = "gateway" | "own_licence";
 
 export interface ClaimedAgent {
   id: string;

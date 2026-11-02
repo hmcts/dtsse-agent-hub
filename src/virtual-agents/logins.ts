@@ -15,7 +15,7 @@ import { findVirtualAgent, moveTo, restartVirtualAgent, type VirtualAgentRow } f
  * pasted code once, and the hub forgets it.
  */
 
-export type LoginPrompt = "device_code" | "paste_code";
+type LoginPrompt = "device_code" | "paste_code";
 
 export type LoginState = "pending" | "completed" | "expired" | "failed";
 
@@ -293,7 +293,7 @@ export async function completeLogin(
 }
 
 /** The kinds a virtual agent signs in to itself, relaying a device code to its owner, rather than being pasted. */
-export const SIGN_IN_KINDS = ["github", "azure", "atlassian"] as const satisfies readonly CredentialKind[];
+const SIGN_IN_KINDS = ["github", "azure", "atlassian"] as const satisfies readonly CredentialKind[];
 
 export type SignInKind = (typeof SIGN_IN_KINDS)[number];
 

@@ -6,11 +6,11 @@ import { MAX_DELETED_PER_FRAME, MAX_REPORTED_FILES } from "./upload-report.ts";
 
 export const MAX_ARTEFACT_MARKDOWN = 100_000;
 export const MAX_ARTEFACT_TITLE = 200;
-export const MAX_SESSION_DETAIL = 200;
-export const MAX_SESSIONS_REPORTED = 50;
-export const MAX_SESSIONS_AT_ONCE = 20;
+const MAX_SESSION_DETAIL = 200;
+const MAX_SESSIONS_REPORTED = 50;
+const MAX_SESSIONS_AT_ONCE = 20;
 
-export const artefactTitle = z.string().trim().min(1).max(MAX_ARTEFACT_TITLE);
+const artefactTitle = z.string().trim().min(1).max(MAX_ARTEFACT_TITLE);
 
 export const artefactPutBody = z.object({
   title: artefactTitle.nullish(),

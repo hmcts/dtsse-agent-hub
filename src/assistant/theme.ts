@@ -10,7 +10,7 @@ export const THEMES: readonly Theme[] = ["system", "light", "dark"];
 export const THEME_COOKIE = "asst_theme";
 
 /** A year: the choice is a preference, not a session. */
-export const THEME_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
+const THEME_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
 export function themeOf(value: string | undefined): Theme {
   return value === "light" || value === "dark" ? value : "system";

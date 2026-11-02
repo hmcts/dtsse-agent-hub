@@ -19,7 +19,7 @@ export interface ChannelDraft {
   shared: boolean;
 }
 
-export interface ChannelErrors {
+interface ChannelErrors {
   name?: string;
   topics?: string;
 }

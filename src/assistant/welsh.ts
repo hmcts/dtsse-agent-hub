@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { boundedArray } from "../agent-api/bounded-array.ts";
 import { PRODUCTS } from "./products.ts";
+import { JIRA_KEY_RE } from "./schemas.ts";
 
 /**
  * Welsh translation jobs for the Assistant's Welsh page: the kinds, what each takes, the limits, what the pod may
@@ -11,22 +12,11 @@ import { PRODUCTS } from "./products.ts";
  * translation jobs" in docs/agent-api.md.
  */
 
-export const WELSH_KINDS = [
-  "info",
-  "search",
-  "scan",
-  "import_check",
-  "import",
-  "apply_preview",
-  "apply",
-  "story_candidates",
-  "story_preview",
-  "story_write"
-] as const;
+const WELSH_KINDS = ["info", "search", "scan", "import_check", "import", "apply_preview", "apply", "story_candidates", "story_preview", "story_write"] as const;
 export type WelshKind = (typeof WELSH_KINDS)[number];
 
 /** The Welsh page's tasks, which `?task=` can open directly. */
-export const WELSH_TASK_IDS = ["search", "scan", "return", "story"] as const;
+const WELSH_TASK_IDS = ["search", "scan", "return", "story"] as const;
 export type WelshTask = (typeof WELSH_TASK_IDS)[number];
 
 export function isWelshTask(value: unknown): value is WelshTask {
@@ -48,16 +38,15 @@ export const WELSH_RATE_LIMIT = 30;
 export const MAX_WELSH_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_WELSH_FILES_PER_JOB = 4;
 export const MAX_WELSH_RESULT_BYTES = 512 * 1024;
-export const MAX_WELSH_DETAIL = 500;
+const MAX_WELSH_DETAIL = 500;
 export const MAX_WELSH_QUERY = 100;
 export const MAX_WELSH_STRINGS = 200;
-export const MAX_WELSH_STRING = 2000;
-export const MAX_WELSH_CHOICES = 200;
+const MAX_WELSH_STRING = 2000;
+const MAX_WELSH_CHOICES = 200;
 
-export const WELSH_REF_RE = /^CY-[\dA-F]{8}$/;
-export const WELSH_ROW_ID_RE = /^[\da-f]{10}$/;
-export const JIRA_KEY_RE = /^[A-Z][A-Z\d_]{1,9}-\d{1,7}$/;
-export const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+const WELSH_REF_RE = /^CY-[\dA-F]{8}$/;
+const WELSH_ROW_ID_RE = /^[\da-f]{10}$/;
+const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const REPO_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 /**

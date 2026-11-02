@@ -243,10 +243,6 @@ describe("DELETE /api/agent/credentials/{kind}", () => {
   it("should answer 404 when the kind is unknown", async () => {
     expect((await remove(ALICE, "ssh")).status).toBe(404);
   });
-
-  it("should answer 404 when the kind is the Amazon Bedrock API key, which is no longer one", async () => {
-    expect((await remove(ALICE, "bedrock")).status).toBe(404);
-  });
 });
 
 // Agents reach Claude through the gateway or their owner's own licence, so there is no key to store under any name.
@@ -259,10 +255,6 @@ describe("an Amazon Bedrock API key", () => {
 });
 
 describe("reading credentials back", () => {
-  it("should answer 404 when the owner asks for an Amazon Bedrock API key, which is not a kind", async () => {
-    expect((await read(ALICE, "bedrock")).status).toBe(404);
-  });
-
   it.each(["github", "azure", "claude", "jenkins", "atlassian"])(
     "should answer 405 and never the value when the owner asks for their stored %s",
     async (kind) => {
@@ -393,19 +385,16 @@ describe("saveCredential and removeCredential", () => {
     expect(await readCredential(prisma, localStore(), devIdentity("own-licence").oid, "claude")).toBe(CLAUDE);
   });
 
-  it.each([["own-licence", "own-licence", true]] as const)(
-    "should leave a Claude token as it was when the viewer is on %s and so is their agent",
-    async (persona, route, stored) => {
-      const who = person(persona);
-      await insertUser(who);
-      await createVirtualAgent(prisma, { owner: who, modelRoute: route, name: "assistant" });
-      actAs(persona);
+  it("should save a Claude token when the viewer and their agent are both on their own licence", async () => {
+    const who = person("own-licence");
+    await insertUser(who);
+    await createVirtualAgent(prisma, { owner: who, modelRoute: "own-licence", name: "assistant" });
+    actAs("own-licence");
 
-      await saveCredential(form({ kind: "claude", value: CLAUDE }));
+    await saveCredential(form({ kind: "claude", value: CLAUDE }));
 
-      expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(stored ? CLAUDE : undefined);
-    }
-  );
+    expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(CLAUDE);
+  });
 
   // The agent's route is fixed on its row when it is created, and its pod boots on that; the viewer's follows their
   // `AIGateway.User` app role. Someone granted that role afterwards is on the gateway while an agent of theirs is
@@ -449,21 +438,10 @@ describe("saveCredential and removeCredential", () => {
     expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" })).toMatchObject({ modelRoute: "gateway", claudeTokenUsable: true });
   });
 
-  it.each(["alice", "own-licence"])("should refuse a pasted Amazon Bedrock API key from the web when the viewer is the %s persona", async (persona) => {
-    actAs(persona);
-
-    const result = await saveCredential(form({ kind: "bedrock", value: BEDROCK }));
-
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("can be pasted here") });
-    expect(await prisma.credential.count()).toBe(0);
-    expect(JSON.stringify(result)).not.toContain(BEDROCK);
-  });
-
   it.each([
     ["an Azure cache, which comes from the virtual agent", { kind: "azure", value: AZURE }, "can be pasted here"],
     ["an unknown kind", { kind: "ssh", value: GITHUB }, "can be pasted here"],
     ["a property every object has", { kind: "toString", value: GITHUB }, "can be pasted here"],
-    ["an Amazon Bedrock API key, which is no longer a kind", { kind: "bedrock", value: BEDROCK }, "can be pasted here"],
     ["a malformed token", { kind: "github", value: "nope" }, "GitHub token"]
   ])("should refuse %s when it is pasted", async (_label, values, error) => {
     actAs("alice");

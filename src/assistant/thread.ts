@@ -527,10 +527,9 @@ export interface SessionNotice {
 /**
  * Whether to say anything above the composer about the session behind this chat, and what.
  *
- * The gap this fills: a pod runs a bounded number of sessions and `/exit`s one after twenty idle minutes, so an old
- * conversation on a running pod has no session behind it, and until this nothing said so. The wake fires on the
- * composer being focused, which asked for a session silently; the person learnt that one was starting only when they
- * sent. So four states, worded for what each is:
+ * A pod runs a bounded number of sessions and `/exit`s one after twenty idle minutes, so an old conversation on a
+ * running pod can have no session behind it, and the wake that focusing the composer fires asks for one silently. So
+ * four states, worded for what each is:
  *
  * - `live` — nothing. There is a session and it will answer.
  * - `starting` — the quips, which is the one wait that is only ever a few seconds and nobody's fault.

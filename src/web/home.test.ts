@@ -73,7 +73,7 @@ describe("movedHubPath", () => {
 });
 
 describe("retiredHubPath", () => {
-  it.each(["/access", "/hub/access"])("should send %s to the shared chats, which is the only access anyone grants", (pathname) => {
+  it.each(["/access", "/hub/access"])("should send %s to the shared chats", (pathname) => {
     expect(retiredHubPath(pathname, true)).toBe("/assistant/shared");
   });
 

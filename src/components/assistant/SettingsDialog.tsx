@@ -81,7 +81,7 @@ export const FOCUSABLE = ["a[href]", "button:not([disabled])", "input:not([disab
  * and the document panel's queries: a fractional viewport in between — a zoomed page, a scaled display — would
  * otherwise lay out one pane inside a box the CSS had already widened for two.
  */
-export const SETTINGS_TWO_PANE = `(min-width: ${SETTINGS_TWO_PANE_MIN_WIDTH}px)`;
+const SETTINGS_TWO_PANE = `(min-width: ${SETTINGS_TWO_PANE_MIN_WIDTH}px)`;
 
 const STATE_CLASS: Record<Connection["state"], string> = {
   connected: "text-asst-ok",

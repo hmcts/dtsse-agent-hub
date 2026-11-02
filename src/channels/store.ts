@@ -26,7 +26,7 @@ export async function saveChannel(db: Database, ownerOid: string, draft: Channel
   return row.id;
 }
 
-export const MAX_LISTED_CHANNELS = 100;
+const MAX_LISTED_CHANNELS = 100;
 
 /** The viewer's own channels, then the ones others share, each by name. */
 export async function listChannels(db: Database, oid: string): Promise<{ mine: ChannelSummary[]; shared: ChannelSummary[] }> {

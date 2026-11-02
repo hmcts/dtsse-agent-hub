@@ -15,16 +15,16 @@ import { boundedArray } from "../agent-api/bounded-array.ts";
  */
 
 export const MAX_QUESTIONS = 4;
-export const MIN_OPTIONS = 2;
-export const MAX_OPTIONS = 4;
+const MIN_OPTIONS = 2;
+const MAX_OPTIONS = 4;
 export const MAX_QUESTION = 1000;
 export const MAX_HEADER = 40;
-export const MAX_OPTION_LABEL = 200;
-export const MAX_OPTION_DESCRIPTION = 500;
+const MAX_OPTION_LABEL = 200;
+const MAX_OPTION_DESCRIPTION = 500;
 /** A person's own words, in place of an option. Bounded well under `MAX_BODY`, since several answers share a message. */
 export const MAX_ANSWER_TEXT = 2000;
-export const MAX_TOOL_USE_ID = 200;
-export const MAX_SESSION_ID = 200;
+const MAX_TOOL_USE_ID = 200;
+const MAX_SESSION_ID = 200;
 
 /**
  * How many of an agent's questions a page reads. The thread is paginated and these are not, so without a bound a
@@ -65,9 +65,9 @@ export function offerExpired(askedAt: Date, now: Date): boolean {
 
 const label = z.string().trim().min(1).max(MAX_OPTION_LABEL);
 
-export const questionOption = z.strictObject({ label, description: z.string().trim().max(MAX_OPTION_DESCRIPTION) });
+const questionOption = z.strictObject({ label, description: z.string().trim().max(MAX_OPTION_DESCRIPTION) });
 
-export const question = z.strictObject({
+const question = z.strictObject({
   question: z.string().trim().min(1).max(MAX_QUESTION),
   header: z.string().trim().min(1).max(MAX_HEADER),
   // Distinct labels, because the label is the whole of what an answer names: the card keys a press by it and the
@@ -89,7 +89,6 @@ export const questionPostBody = z.strictObject({
   questions: boundedArray(question, MAX_QUESTIONS, { min: 1 })
 });
 
-export type QuestionOption = z.infer<typeof questionOption>;
 export type Question = z.infer<typeof question>;
 export type QuestionPost = z.infer<typeof questionPostBody>;
 

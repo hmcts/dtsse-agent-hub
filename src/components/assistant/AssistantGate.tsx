@@ -19,7 +19,7 @@ import type { AssistantHome } from "@/web/data";
  * the actions would take a message that no page offered a composer for.
  *
  * It is per page and not per viewer, which is why it is a prop rather than a field of `home`: the new-chat screen
- * leaves it false because it is about to start a pod, and a pod chat is held exactly as it is today. Someone with
+ * leaves it false because it is about to start a pod, and a pod chat is held by `chatGate`. Someone with
  * nothing connected still gets the connections banner here, and it is the only route to the screen that connects
  * GitHub and Claude — the settings dialog lists those two but can only connect a sign-in made on request.
  */

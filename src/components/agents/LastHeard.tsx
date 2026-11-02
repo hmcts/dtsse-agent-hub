@@ -9,7 +9,7 @@ import type { AgentStatus } from "@/realtime/events";
 import { age } from "@/web/format";
 
 /** Tracks when an agent was last heard from as its status follows the stream. */
-export function useLastHeard(agentId: string, status: AgentStatus, lastHeartbeatAt: string): Heard {
+function useLastHeard(agentId: string, status: AgentStatus, lastHeartbeatAt: string): Heard {
   const [heard, setHeard] = useState<Heard>(() => ({ status, at: new Date(lastHeartbeatAt).getTime() }));
   useHubEvent<{ agent_id: string; status: AgentStatus }>("agent_status", (event) => {
     if (event.agent_id === agentId) {

@@ -4,7 +4,7 @@
  * line can be forged by what it quotes — nor carry a secret it quotes, which is `redacting`.
  */
 
-export type Level = "info" | "warn" | "error";
+type Level = "info" | "warn" | "error";
 export type Log = (level: Level, message: string, fields?: Record<string, unknown>) => void;
 
 const LINE_BREAKS = /[\r\n\u2028\u2029]/g;
@@ -37,7 +37,7 @@ export function createLogger(write: (line: string) => void = (line) => process.s
   };
 }
 
-export const REDACTED = "[redacted]";
+const REDACTED = "[redacted]";
 
 /**
  * `text` with every one of `secrets` replaced wherever it appears.

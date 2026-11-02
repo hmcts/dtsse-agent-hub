@@ -3,10 +3,10 @@ import { notify } from "../realtime/notify.ts";
 import type { PrismaClient } from "../store/prisma.ts";
 import { EXPIRE_AFTER_SECONDS, OFFLINE_AFTER_SECONDS } from "./liveness.ts";
 
-export const SWEEP_INTERVAL_MS = 30_000;
+const SWEEP_INTERVAL_MS = 30_000;
 
 /** Deliveries expired per sweep, so a backlog drains over a few ticks rather than in one long transaction. */
-export const EXPIRE_BATCH = 200;
+const EXPIRE_BATCH = 200;
 
 /** "agntswep". Distinct from the migration lock. */
 const SWEEP_LOCK_KEY = 0x61676e74_73776570n;

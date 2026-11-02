@@ -25,7 +25,7 @@ export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
  */
 export const MAX_CONVERSATION_BYTES = 200 * 1024 * 1024;
 
-export const MAX_FILE_NAME = 255;
+const MAX_FILE_NAME = 255;
 
 /** As long as the `stored_name` CHECK in the `assistant_upload` migration allows. */
 export const MAX_STORED_NAME = 100;

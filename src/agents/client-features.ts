@@ -24,7 +24,7 @@ export type ClientFeature = "attachments" | "files" | "lookups" | "memory" | "me
 
 export const MAX_CLIENT_FEATURES = 50;
 export const MAX_CLIENT_FEATURE_NAME = 50;
-export const CLIENT_FEATURE_NAME = /^[a-z0-9][a-z0-9:_-]*$/;
+const CLIENT_FEATURE_NAME = /^[a-z0-9][a-z0-9:_-]*$/;
 
 /**
  * Sorted and de-duplicated, with anything that is not a valid name dropped.
