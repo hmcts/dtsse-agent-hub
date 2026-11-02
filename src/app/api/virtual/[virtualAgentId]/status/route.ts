@@ -9,6 +9,6 @@ export const dynamic = "force-dynamic";
 
 export const POST = virtualRoute<{ virtualAgentId: string }>(async ({ virtualAgent, request }) => {
   const body = parse(statusBody, await readJson(request));
-  await reportStatus(prisma, virtualAgent.id, body.phase, body.detail);
+  await reportStatus(prisma, virtualAgent.id, body.phase, body.detail, new Date(), body.client_features ?? null);
   return noContent();
 });

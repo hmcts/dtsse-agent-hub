@@ -1,6 +1,6 @@
 import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
-import { clientSupports } from "../agents/client-features.ts";
+import { podClaimed, podSupports } from "../agents/client-features.ts";
 import { isUuid } from "../agents/store.ts";
 import type { EventHub } from "../realtime/hub.ts";
 import { notify } from "../realtime/notify.ts";
@@ -48,11 +48,14 @@ export async function askLookup(prisma: PrismaClient, question: LookupQuestion, 
     await setDesired(prisma, question.viewerOid, assistant.id, "running", now);
     return { answer: { status: "waking" } };
   }
-  if (assistant.status !== "running" || assistant.agentId === null) {
+  const claims = await prisma.virtualAgent.findUnique({
+    where: { id: assistant.id },
+    select: { clientFeatures: true, agent: { select: { clientFeatures: true } } }
+  });
+  if (assistant.status !== "running" || claims === null || !podClaimed(claims)) {
     return { answer: { status: "waking" } };
   }
-  const current = await prisma.agent.findUnique({ where: { id: assistant.agentId }, select: { clientFeatures: true } });
-  if (!clientSupports(current?.clientFeatures, "lookups")) {
+  if (!podSupports(claims, "lookups")) {
     return { answer: { status: "unsupported" } };
   }
   const id = await prisma.$transaction(async (tx) => {

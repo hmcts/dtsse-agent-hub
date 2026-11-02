@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { clientSupports, MAX_CLIENT_FEATURE_NAME, MAX_CLIENT_FEATURES, normaliseClientFeatures, storedClientFeatures } from "./client-features.ts";
+import {
+  clientSupports,
+  MAX_CLIENT_FEATURE_NAME,
+  MAX_CLIENT_FEATURES,
+  normaliseClientFeatures,
+  podClaimed,
+  podSupports,
+  storedClientFeatures
+} from "./client-features.ts";
 
 describe("normaliseClientFeatures", () => {
   it("should sort and de-duplicate the names when a client reports a list", () => {
@@ -53,5 +61,41 @@ describe("clientSupports", () => {
     expect(clientSupports(null, "attachments")).toBe(false);
     expect(clientSupports(undefined, "attachments")).toBe(false);
     expect(clientSupports("attachments", "attachments")).toBe(false);
+  });
+});
+
+describe("podSupports", () => {
+  it("should read the pod's own claim when it reported one", () => {
+    expect(podSupports({ clientFeatures: ["files"], agent: { clientFeatures: [] } }, "files")).toBe(true);
+    expect(podSupports({ clientFeatures: ["files"] }, "lookups")).toBe(false);
+  });
+
+  it("should not fall back when the pod reported an empty claim", () => {
+    expect(podSupports({ clientFeatures: [], agent: { clientFeatures: ["files"] } }, "files")).toBe(false);
+  });
+
+  it("should read the main-session agent's claim when the pod reported none", () => {
+    expect(podSupports({ clientFeatures: null, agent: { clientFeatures: ["welsh"] } }, "welsh")).toBe(true);
+    expect(podSupports({ clientFeatures: null, agent: { clientFeatures: ["files"] } }, "welsh")).toBe(false);
+  });
+
+  it("should be false when neither the pod nor a main-session agent claims anything", () => {
+    expect(podSupports({ clientFeatures: null, agent: null }, "files")).toBe(false);
+    expect(podSupports({ clientFeatures: undefined }, "files")).toBe(false);
+  });
+});
+
+describe("podClaimed", () => {
+  it("should be true when the pod reported its own claim, even before a main-session agent registers", () => {
+    expect(podClaimed({ clientFeatures: [], agent: null })).toBe(true);
+  });
+
+  it("should be true when the pod reported no claim but its main-session agent has registered", () => {
+    expect(podClaimed({ clientFeatures: null, agent: { clientFeatures: null } })).toBe(true);
+  });
+
+  it("should be false when the pod reported no claim and no main-session agent has registered", () => {
+    expect(podClaimed({ clientFeatures: null, agent: null })).toBe(false);
+    expect(podClaimed({ clientFeatures: "files" })).toBe(false);
   });
 });

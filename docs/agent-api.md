@@ -611,6 +611,23 @@ field out and the UI can say that the feature is not available on that session y
 - It is not sent on heartbeat. What a build understands is fixed for the life of the process, and a session that has
   been upgraded re-registers.
 
+### A pod's claim
+
+The features a pod's supervisor acts on — `files`, `lookups`, `welsh`, `memory-anon` and `model-alias` — are gated
+on the **pod's** claim, not on any conversation session's. A pod makes it with `client_features` on
+`POST /api/virtual/{id}/status`, which the client sends on every phase report, from the first one at boot. The hub
+reads it as follows:
+
+- When the virtual agent's stored claim is a list, an empty one included, that list decides.
+- When it holds nothing — the pod's client predates the field, or the hub has had no report from this boot — the hub
+  reads the claim of the pod's main-session agent instead: the virtual agent's current agent, which the pod's main
+  Claude session registers without a `conversation_id`. That is the same client build, so the answer is the same.
+- A running pod with neither is still booting: a lookup or a Welsh job is answered `waking` rather than
+  `unsupported`.
+
+An older hub ignores `client_features` on the status route, and an older pod omits it and is read through its
+main-session agent, so either half can be the older one.
+
 The names in use are below, and the clients published from this repo claim every one of them. Deliberately not
 counted here: this sentence has carried a wrong number twice, once for a name added in this repo and once for one
 added in another, because `ClientFeature` and `CLIENT_FEATURES` are each a single line that two changes land on at
@@ -625,8 +642,8 @@ the same time and a count is a third place to remember. The list is the record.
   on a session started by an older build has no stop until that session is next started.
 - `model-alias`, because their supervisor starts a conversation's session with `--model` from the wake's `model`,
   their bridge switches the session with `/model` when a `direct` frame's `model` names another, and the id in `model`
-  is a bare family alias — `sonnet` or `opus` — that this client hands to both unchanged. Claimed by the pod's **own** session, which is the virtual agent's current agent,
-  as `files` and `memory-anon` are, since the supervisor is what starts a session. **No write is gated on it**: a
+  is a bare family alias — `sonnet` or `opus` — that this client hands to both unchanged. Read from the pod's claim
+  (see A pod's claim), as `files` and `memory-anon` are, since the supervisor is what starts a session. **No write is gated on it**: a
   person's model setting is theirs to save whenever they like, and the hub sends `model` to every session either way.
   What it gates is one sentence in the settings' Model section, which says the choice is picked up at the assistant's
   next start when its pod did not claim it — so the confirmation of a save says the choice is stored and not that it
@@ -634,21 +651,21 @@ the same time and a count is a third place to remember. The list is the record.
   client that predates the aliases refuses one, and this client refuses the versioned id a hub that predates them
   sends. Both leave the session on hai's default for the route.
 - `files`, because their supervisor reports what the uploads directory holds (`PUT /api/virtual/{id}/uploads`) and
-  acts on the sessions stream's `delete_uploads` frame. Claimed by the pod's **own** session, which is the virtual
-  agent's current agent, since the supervisor is what does both — not by a conversation's session. Gated on both
+  acts on the sessions stream's `delete_uploads` frame. Read from the pod's claim (see A pod's claim), since the
+  supervisor is what does both — not from a conversation's session. Gated on both
   sides: the hub refuses a deletion request for a pod that has not claimed it, and the settings' Files section says
   the figures cannot be reported yet rather than showing an empty disk.
-- `lookups`, because their supervisor answers the sessions stream's `lookup` frame (see Atlassian lookups). Claimed by
-  the pod's own session, as `files` is. Gated: the hub answers a lookup for a pod that has not claimed it with
+- `lookups`, because their supervisor answers the sessions stream's `lookup` frame (see Atlassian lookups). Read from
+  the pod's claim, as `files` is. Gated: the hub answers a lookup for a pod that has not claimed it with
   `unsupported`, and sends it no frame.
-- `welsh`, because their supervisor answers the sessions stream's `welsh` frame (see Welsh translation jobs). Claimed by
-  the pod's own session, as `lookups` is. Gated: the hub answers a job for a pod that has not claimed it with
+- `welsh`, because their supervisor answers the sessions stream's `welsh` frame (see Welsh translation jobs). Read from
+  the pod's claim, as `lookups` is. Gated: the hub answers a job for a pod that has not claimed it with
   `unsupported`, and sends it no frame.
 - `memory-anon`, because their supervisor reads its own container cgroup and reports it
   (`PUT /api/virtual/{id}/memory`), including `memory.stat`'s `anon` line as `anon_bytes`, which that route requires.
   **This is the name the Size section gates on**, so that it can word a pod that cannot report as an older version
-  rather than as a pod that has gone quiet. Claimed by
-  the pod's **own** session, which is the virtual agent's current agent, since the supervisor is what reports.
+  rather than as a pod that has gone quiet. Read from
+  the pod's claim, since the supervisor is what reports.
 
 ## Replies
 
@@ -793,7 +810,7 @@ Every `/api/virtual/{virtual_agent_id}/…` route needs that virtual agent's own
 
 | Method and path | Body | Response |
 |---|---|---|
-| `POST /api/virtual/{id}/status` | `{phase, detail?}` | `204`. `phase` is `provisioning`, `awaiting_credentials`, `awaiting_login`, `cloning`, `running` or `failed`; `detail` is at most 500 characters. A report the lifecycle refuses gives `409`. A report counts as activity, except `awaiting_credentials` and `awaiting_login`: in those the pod is waiting on its owner rather than getting anywhere, and a pod relaying a sign-in nobody finishes reports a fresh code every few minutes. |
+| `POST /api/virtual/{id}/status` | `{phase, detail?, client_features?}` | `204`. `phase` is `provisioning`, `awaiting_credentials`, `awaiting_login`, `cloning`, `running` or `failed`; `detail` is at most 500 characters. `client_features` is the pod's own claim, validated as a registration's is and stored on the virtual agent; every report replaces it, with nothing when a report omits it (see A pod's claim, under Client features). A report the lifecycle refuses gives `409` and leaves the stored claim as it was. A report counts as activity, except `awaiting_credentials` and `awaiting_login`: in those the pod is waiting on its owner rather than getting anywhere, and a pod relaying a sign-in nobody finishes reports a fresh code every few minutes. |
 | `PUT /api/virtual/{id}/ports` | `{ports, local_only?}` | `204`. What the pod finds listening (see Web ports below): `ports` those the Service can reach, `local_only` those bound to loopback only. Each is at most 10 distinct whole numbers from 1024 to 65535, in any order; a port in both counts as reachable. Stores both ascending and notifies the owner's UI; a change to `ports` bumps `generation` but not `pod_generation`. Reporting what is already stored changes nothing. Out of range, repeated or more than 10 gives `400`. |
 | `GET /api/virtual/{id}/credentials/{kind}` | — | `200 {value}`, the owner's stored credential, or `404` when none is stored. A `claude_md` the owner has not stored answers `200` with the default text instead (see Credentials). The only route that returns every kind's value. |
 | `PUT /api/virtual/{id}/credentials/{kind}` | `{value}` | `204`. Stores the owner's credential as saved by the pod (`updated_via: pod`), with the checks of Credentials above, except that an Azure token cache signed in as anyone but the owner gives `409`: it is not stored, and the agent is `failed`, as `complete` with another account does. A `claude_md` or `git_identity` gives `403`: only its owner changes them. |

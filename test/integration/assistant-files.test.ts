@@ -304,6 +304,17 @@ describe("asking an assistant to delete its files", () => {
     expect(await pendingUploadDeletions(prisma, assistant)).toEqual([]);
   });
 
+  it("should take the pod's own claim when it has no main session, and over the main session's when it has one", async () => {
+    const solo = await assistantOf(ALICE, null, "running", { session: false });
+    await prisma.virtualAgent.update({ where: { id: solo }, data: { clientFeatures: ["files"] } });
+    const theirs = await assistantOf(BOB, ["files"]);
+    await prisma.virtualAgent.update({ where: { id: theirs }, data: { clientFeatures: ["stop"] } });
+    const upload = await sentUpload(BOB, await chat(BOB, "Possession claim"), "bundle.pdf", 2048);
+
+    expect((await uploadsOnDisk(prisma, ALICE.oid, solo))?.disk).toEqual({ reported: false, reason: "waiting" });
+    expect(await requestUploadRemoval(prisma, BOB.oid, theirs, [upload])).toEqual({ outcome: "unsupported_client", count: 0 });
+  });
+
   // No pod ever fetched it, so there is no copy of it on any disk to ask about.
   it("should refuse an upload that never reached a message", async () => {
     const assistant = await assistantOf(ALICE);

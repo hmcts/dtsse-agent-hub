@@ -4,6 +4,7 @@
 // hook path must not pay for loading a validation library.
 import { execFile } from "node:child_process";
 import type { Env } from "./env.ts";
+import { CLIENT_FEATURES } from "./features.ts";
 import type { PortsReport } from "./ports.ts";
 import type { QuestionBody } from "./questions.ts";
 import type { NameSource } from "./session.ts";
@@ -616,7 +617,10 @@ export function createApi({
       request<MessagesResponse>("GET", `/api/agent/topics/${encodeURIComponent(slug)}/messages${qs({ since, before, limit })}`),
     agents: () => request<AgentsResponse>("GET", "/api/agent/agents"),
     message: (messageId) => request<MessageResponse>("GET", `/api/agent/messages/${encodeURIComponent(messageId)}`),
-    virtualStatus: (id, phase, detail) => request<null>("POST", v(id, "status"), detail ? { phase, detail } : { phase }),
+    // Every report carries the claim, so the hub's copy is always the running build's; a hub that predates the field
+    // ignores it.
+    virtualStatus: (id, phase, detail) =>
+      request<null>("POST", v(id, "status"), { phase, ...(detail ? { detail } : {}), client_features: [...CLIENT_FEATURES] }),
     getCredential: async (id, kind) => (await nullOn404(request<CredentialResponse>("GET", v(id, `credentials/${k(kind)}`))))?.value ?? null,
     putCredential: (id, kind, value) => request<null>("PUT", v(id, `credentials/${k(kind)}`), { value }),
     putPorts: (id, body) => request<null>("PUT", v(id, "ports"), body),

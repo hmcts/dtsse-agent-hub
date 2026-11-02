@@ -1,5 +1,5 @@
 import { canRemoveUploadFromDisk, isOwner, type UploadState } from "../access/rules.ts";
-import { clientSupports } from "../agents/client-features.ts";
+import { podSupports } from "../agents/client-features.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { MAX_DELETED_PER_FRAME, type PodFile, readAcknowledged, readReportedFiles, type UploadsDisk, uploadsDisk } from "./upload-report.ts";
@@ -96,9 +96,8 @@ function storedFiles(value: unknown): StoredFile[] {
  * What the viewer's assistant holds, for the settings dialog.
  *
  * The figures are the pod's and are always dated; `uploadsDisk` decides which of the "we have not heard" states to
- * say instead when there are none. `reports` comes from the pod's *own* session — the virtual agent's current agent,
- * which is the supervisor's registration — because the supervisor is what reports and what acts on a deletion, not a
- * conversation's session.
+ * say instead when there are none. `reports` is the pod's claim (`podSupports`), not a conversation session's, because
+ * the supervisor is what reports and what acts on a deletion.
  */
 export async function uploadsOnDisk(prisma: PrismaClient, viewerOid: string, virtualAgentId: string): Promise<UploadsOnDisk | undefined> {
   const agent = await prisma.virtualAgent.findUnique({
@@ -112,6 +111,7 @@ export async function uploadsOnDisk(prisma: PrismaClient, viewerOid: string, vir
       uploadsFiles: true,
       uploadsFilesTotal: true,
       uploadsReportedAt: true,
+      clientFeatures: true,
       agent: { select: { clientFeatures: true } }
     }
   });
@@ -125,7 +125,7 @@ export async function uploadsOnDisk(prisma: PrismaClient, viewerOid: string, vir
     volumeTotalBytes: agent.volumeTotalBytes,
     uploadsReportedAt: agent.uploadsReportedAt,
     running: agent.status === "running",
-    reports: clientSupports(agent.agent?.clientFeatures, "files")
+    reports: podSupports(agent, "files")
   });
   const rows =
     reported.length === 0
@@ -200,12 +200,12 @@ export async function requestUploadRemoval(
   }
   const agent = await prisma.virtualAgent.findUnique({
     where: { id: virtualAgentId },
-    select: { ownerOid: true, agent: { select: { clientFeatures: true } } }
+    select: { ownerOid: true, clientFeatures: true, agent: { select: { clientFeatures: true } } }
   });
   if (agent === null || !isOwner(viewerOid, agent)) {
     return refused;
   }
-  if (!clientSupports(agent.agent?.clientFeatures, "files")) {
+  if (!podSupports(agent, "files")) {
     return { outcome: "unsupported_client", count: 0 };
   }
   // One read for the whole set, since "delete everything" names as many as a report does, and constrained to this

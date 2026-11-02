@@ -525,8 +525,19 @@ export async function callerForLaunchToken(db: Database, token: string): Promise
  * nothing about the report itself gives it away: only the phase does. Counting those as activity is what let such a
  * pod hold a node for as long as it kept asking. What moves the agent on is its owner, and the status change that
  * follows is activity the sweep does see.
+ *
+ * Every report replaces the pod's client-features claim, with `null` when it sent none: what a report carries is what
+ * the client running now claims, and a pod on a client that reports none is read through its main-session agent's
+ * claim instead (`podSupports`).
  */
-export async function reportStatus(prisma: PrismaClient, id: string, phase: PodPhase, detail: string | null, now: Date = new Date()): Promise<VirtualAgentRow> {
+export async function reportStatus(
+  prisma: PrismaClient,
+  id: string,
+  phase: PodPhase,
+  detail: string | null,
+  now: Date = new Date(),
+  clientFeatures: readonly string[] | null = null
+): Promise<VirtualAgentRow> {
   return await prisma.$transaction(async (tx) => {
     const row = await lockVirtualAgent(tx, id);
     if (row === undefined) {
@@ -539,6 +550,8 @@ export async function reportStatus(prisma: PrismaClient, id: string, phase: PodP
     if ("remove" in outcome) {
       throw new Error("a pod report never removes an agent");
     }
+    const claim = clientFeatures === null ? null : JSON.stringify(clientFeatures);
+    await tx.$executeRaw`UPDATE virtual_agent SET client_features = ${claim}::jsonb WHERE id = ${id}::uuid`;
     const updated = toRow(
       await tx.virtualAgent.update({
         where: { id },

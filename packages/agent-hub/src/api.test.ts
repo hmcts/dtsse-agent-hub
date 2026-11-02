@@ -750,6 +750,15 @@ describe("createApi credentials", () => {
     expect(hub.virtuals.get(VID)?.status).toEqual([{ phase: "provisioning" }, { phase: "awaiting_login", detail: "github: the owner must enter a code" }]);
   });
 
+  it("should claim this build's client features on every phase report", async () => {
+    // Act
+    await pod.virtualStatus(VID, "provisioning");
+    await pod.virtualStatus(VID, "running", "Claude is ready");
+
+    // Assert
+    expect(hub.virtuals.get(VID)?.statusClaims.slice(-2)).toEqual([[...CLIENT_FEATURES], [...CLIENT_FEATURES]]);
+  });
+
   it("should report listening ports through the pod's ports route", async () => {
     // Act
     await pod.putPorts(VID, { ports: [3000], local_only: [5173] });

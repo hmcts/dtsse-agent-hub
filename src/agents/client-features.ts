@@ -61,3 +61,27 @@ export function storedClientFeatures(value: unknown): string[] | null {
 export function clientSupports(stored: unknown, feature: ClientFeature): boolean {
   return storedClientFeatures(stored)?.includes(feature) === true;
 }
+
+/** A virtual agent's own claim and its main-session agent's, as `podSupports` reads them. */
+export interface PodClaims {
+  clientFeatures: unknown;
+  agent?: { clientFeatures: unknown } | null;
+}
+
+/**
+ * Whether the client a virtual agent's pod booted on claimed `feature`. The pod's own claim, reported with its status,
+ * decides whenever it holds a list, an empty one included. A pod whose client reports no claim falls back to the
+ * claim its main-session agent registered with, which is the same client build.
+ */
+export function podSupports(pod: PodClaims, feature: ClientFeature): boolean {
+  const own = storedClientFeatures(pod.clientFeatures);
+  return own === null ? clientSupports(pod.agent?.clientFeatures, feature) : own.includes(feature);
+}
+
+/**
+ * Whether the pod has made a claim `podSupports` can read: its own, or its main-session agent's once that has
+ * registered. A running pod with neither is still booting, which a gate answers as waking rather than unsupported.
+ */
+export function podClaimed(pod: PodClaims): boolean {
+  return storedClientFeatures(pod.clientFeatures) !== null || (pod.agent !== undefined && pod.agent !== null);
+}

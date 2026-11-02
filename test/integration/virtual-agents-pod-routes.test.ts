@@ -213,6 +213,25 @@ describe("/api/virtual/{id}/status", () => {
     expect(stored.lastActiveAt).not.toBeNull();
   });
 
+  it("should store the client features the pod claims and clear them when a report carries none", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    const claimOf = async () => (await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { clientFeatures: true } })).clientFeatures;
+
+    expect((await status(id, token, { phase: "cloning", client_features: ["welsh", "files", "Not Valid"] })).status).toBe(204);
+    expect(await claimOf()).toEqual(["files", "welsh"]);
+
+    expect((await status(id, token, { phase: "running" })).status).toBe(204);
+    expect(await claimOf()).toBeNull();
+  });
+
+  it("should keep the stored claim when the lifecycle refuses the report", async () => {
+    const { id, token } = await started(ALICE, "pcs-api");
+    await status(id, token, { phase: "failed", detail: "git clone failed", client_features: ["files"] });
+
+    expect((await status(id, token, { phase: "running", client_features: ["lookups"] })).status).toBe(409);
+    expect((await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { clientFeatures: true } })).clientFeatures).toEqual(["files"]);
+  });
+
   it("should not count a pod's wait on its owner as activity, however often it re-announces it", async () => {
     const agent = await create(ALICE, "pcs-api");
     const base = Date.now();
