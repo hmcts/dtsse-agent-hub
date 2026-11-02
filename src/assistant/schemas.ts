@@ -41,6 +41,14 @@ export const jiraExportReportBody = z.union([
   z.strictObject({ export_id: z.uuid(), error: z.string().trim().min(1).max(MAX_JIRA_ERROR) })
 ]);
 
+/** The longest error a pod may report for a GitHub export; the migration checks the same. */
+export const MAX_GITHUB_ERROR = 300;
+
+export const githubExportReportBody = z.union([
+  z.strictObject({ export_id: z.uuid(), number: z.number().int().min(1).max(2_147_483_647) }),
+  z.strictObject({ export_id: z.uuid(), error: z.string().trim().min(1).max(MAX_GITHUB_ERROR) })
+]);
+
 /** The longest error a pod may report for a Confluence export; the migration checks the same. */
 export const MAX_CONFLUENCE_ERROR = 300;
 

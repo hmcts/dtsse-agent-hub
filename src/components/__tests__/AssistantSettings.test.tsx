@@ -2042,13 +2042,16 @@ describe("the Assistant's files", () => {
   }, 20_000);
 });
 
-describe("the Assistant's Jira and Confluence defaults", () => {
+describe("the Assistant's ticket and Confluence defaults", () => {
   const PROJECT = { key: "PCS", name: "Possession claims", url: "https://hmcts.atlassian.net/browse/PCS" };
 
   function exportsSettings(overrides: Partial<AssistantExportDefaults> = {}): AssistantExportDefaults {
     return {
-      defaults: { jira: null, confluence: null },
-      save: vi.fn(async (input: { jira: unknown; confluence: unknown }) => ({ ok: true as const, defaults: input as AssistantExportDefaults["defaults"] })),
+      defaults: { ticketTool: "jira", jira: null, github: null, confluence: null },
+      save: vi.fn(async (input: { ticketTool: unknown; jira: unknown; github: unknown; confluence: unknown }) => ({
+        ok: true as const,
+        defaults: input as AssistantExportDefaults["defaults"]
+      })),
       access: { connected: true, login: null },
       lookUp: vi.fn(async () => ({ status: "done" as const, results: [PROJECT] })),
       ...overrides
@@ -2058,13 +2061,13 @@ describe("the Assistant's Jira and Confluence defaults", () => {
   it("should offer the section only when the page passes the defaults", () => {
     open({ exports: exportsSettings() });
 
-    expect(sections()).toContain("Jira & Confluence");
+    expect(sections()).toContain("Tickets & Confluence");
   });
 
   it("should save a Jira project the person found by searching their own Jira", async () => {
     vi.useFakeTimers();
     const exports = exportsSettings();
-    open({ exports }, "Jira & Confluence");
+    open({ exports }, "Tickets & Confluence");
 
     fireEvent.click(within(screen.getByRole("group", { name: "Jira backlog" })).getByRole("button", { name: "Change" }));
     fireEvent.change(screen.getByRole("combobox", { name: /default backlog/ }), { target: { value: "possess" } });
@@ -2077,14 +2080,14 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     });
     vi.useRealTimers();
 
-    expect(exports.save).toHaveBeenCalledWith({ jira: { key: "PCS", name: "Possession claims" }, confluence: null });
+    expect(exports.save).toHaveBeenCalledWith({ ticketTool: "jira", jira: { key: "PCS", name: "Possession claims" }, github: null, confluence: null });
     expect(screen.getByText("Your defaults are saved")).toBeTruthy();
     expect(refresh).toHaveBeenCalled();
   });
 
   it("should clear a default and save nothing until something has changed", async () => {
-    const exports = exportsSettings({ defaults: { jira: { key: "VIBE", name: "Vibe" }, confluence: null } });
-    open({ exports }, "Jira & Confluence");
+    const exports = exportsSettings({ defaults: { ticketTool: "jira", jira: { key: "VIBE", name: "Vibe" }, github: null, confluence: null } });
+    open({ exports }, "Tickets & Confluence");
 
     expect((screen.getByRole("button", { name: "Save defaults" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
@@ -2092,7 +2095,7 @@ describe("the Assistant's Jira and Confluence defaults", () => {
       fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
     });
 
-    expect(exports.save).toHaveBeenCalledWith({ jira: null, confluence: null });
+    expect(exports.save).toHaveBeenCalledWith({ ticketTool: "jira", jira: null, github: null, confluence: null });
     const jira = within(screen.getByRole("group", { name: "Jira backlog" }));
     const confluence = within(screen.getByRole("group", { name: "Confluence page" }));
     expect(jira.getByText("VIBE")).toBeTruthy();
@@ -2103,13 +2106,89 @@ describe("the Assistant's Jira and Confluence defaults", () => {
     expect(confluence.queryByRole("button", { name: "Clear" })).toBeNull();
   });
 
+  it("should offer Jira as the ticket tool, with its backlog, when the person has not chosen", () => {
+    open({ exports: exportsSettings() }, "Tickets & Confluence");
+
+    expect((screen.getByRole("radio", { name: "Jira" }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("group", { name: "Jira backlog" })).toBeTruthy();
+    expect(screen.queryByLabelText("GitHub repository")).toBeNull();
+  });
+
+  it("should save GitHub as the ticket tool with the repository the person typed", async () => {
+    // Arrange
+    const exports = exportsSettings();
+    open({ exports }, "Tickets & Confluence");
+
+    // Act
+    fireEvent.click(screen.getByRole("radio", { name: "GitHub" }));
+    fireEvent.change(screen.getByLabelText("GitHub repository"), { target: { value: "https://github.com/hmcts/cft-workspace" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    });
+
+    // Assert
+    expect(screen.queryByRole("group", { name: "Jira backlog" })).toBeNull();
+    expect(exports.save).toHaveBeenCalledWith({ ticketTool: "github", jira: null, github: "hmcts/cft-workspace", confluence: null });
+    expect(screen.getByText("Your defaults are saved")).toBeTruthy();
+  });
+
+  it("should not save a repository that is not owner/name, and say why", () => {
+    // Arrange
+    open({ exports: exportsSettings({ defaults: { ticketTool: "github", jira: null, github: null, confluence: null } }) }, "Tickets & Confluence");
+
+    // Act
+    fireEvent.change(screen.getByLabelText("GitHub repository"), { target: { value: "cft-workspace" } });
+
+    // Assert
+    expect((screen.getByRole("button", { name: "Save defaults" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("That is not a repository: write it as owner/name.")).toBeTruthy();
+    expect(screen.getByLabelText("GitHub repository").getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("should keep the Jira project when the person switches to GitHub and back", async () => {
+    // Arrange
+    const exports = exportsSettings({
+      defaults: { ticketTool: "github", jira: { key: "VIBE", name: "Vibe" }, github: "hmcts/cft-workspace", confluence: null }
+    });
+    open({ exports }, "Tickets & Confluence");
+
+    // Act
+    fireEvent.click(screen.getByRole("radio", { name: "Jira" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    });
+
+    // Assert
+    expect(within(screen.getByRole("group", { name: "Jira backlog" })).getByText("VIBE")).toBeTruthy();
+    expect(exports.save).toHaveBeenCalledWith({ ticketTool: "jira", jira: { key: "VIBE", name: "Vibe" }, github: "hmcts/cft-workspace", confluence: null });
+  });
+
+  it("should raise no WCAG A or AA violations with GitHub chosen and a bad repository typed", async () => {
+    const root = document.createElement("div");
+    root.className = "asst-theme";
+    document.body.append(root);
+    render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} exports={exportsSettings()} />, { container: root });
+    fireEvent.click(cog());
+    go("Tickets & Confluence");
+    fireEvent.click(screen.getByRole("radio", { name: "GitHub" }));
+    fireEvent.change(screen.getByLabelText("GitHub repository"), { target: { value: "nope" } });
+
+    const results = await axe.run(root, {
+      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
+      rules: { "color-contrast": { enabled: false } }
+    });
+
+    expect(results.violations.map((violation) => violation.id)).toEqual([]);
+    root.remove();
+  }, 20_000);
+
   it("should raise no WCAG A or AA violations with the section open", async () => {
     const root = document.createElement("div");
     root.className = "asst-theme";
     document.body.append(root);
     render(<AssistantSettings now={Date.now()} connections={data(ALL_SIGNED_IN)} exports={exportsSettings()} />, { container: root });
     fireEvent.click(cog());
-    go("Jira & Confluence");
+    go("Tickets & Confluence");
     fireEvent.click(within(screen.getByRole("group", { name: "Confluence page" })).getByRole("button", { name: "Change" }));
 
     const results = await axe.run(root, {

@@ -15,6 +15,7 @@ import {
   setProduct
 } from "@/assistant/conversation-store";
 import { attachForkContext, forkContextPending } from "@/assistant/fork-store";
+import { requestGithubExport } from "@/assistant/github-store";
 import { requestJiraExport } from "@/assistant/jira-store";
 import { saveAssistantModel as saveModel } from "@/assistant/model-store";
 import { modelLabel } from "@/assistant/models";
@@ -377,6 +378,27 @@ export async function exportArtefactToJira(input: { conversationId: unknown; pro
     }
     await requestJiraExport(prisma, conversation, input.project);
     await send(viewer.oid, conversation, `Please export this document to the ${String(input.project)} backlog in Jira.`);
+    return { ok: true };
+  });
+}
+
+/**
+ * Asks the person's assistant to create the conversation's saved document as an issue in the GitHub repository
+ * `repo`, which it makes with `gh` and their own GitHub token. As with Jira, the request is an ordinary message in the
+ * chat and how to carry it out goes to the session in the message's frame.
+ */
+export async function exportArtefactToGithub(input: { conversationId: unknown; repo: unknown }): Promise<ActionResult> {
+  return await runAction("export artefact to github", async () => {
+    if (!virtualAgentsEnabled()) {
+      return OFF;
+    }
+    const viewer = await requireViewer();
+    const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
+    if (conversation === undefined) {
+      return MISSING;
+    }
+    const repo = await requestGithubExport(prisma, conversation, input.repo);
+    await send(viewer.oid, conversation, `Please create a GitHub issue for this document in ${repo}.`);
     return { ok: true };
   });
 }

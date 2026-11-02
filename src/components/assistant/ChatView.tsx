@@ -28,6 +28,7 @@ import { ChatMenu } from "@/components/assistant/ChatMenu";
 import { Composer } from "@/components/assistant/Composer";
 import type { ExportToConfluenceAction } from "@/components/assistant/ConfluenceExport";
 import { ForkedThread } from "@/components/assistant/ForkedThread";
+import type { ExportToGithubAction } from "@/components/assistant/GithubExport";
 import type { ExportToJiraAction, JiraAccess } from "@/components/assistant/JiraExport";
 import { ARTEFACT_OVERLAY_MAX_WIDTH } from "@/components/assistant/layout";
 import { MessageAttachments } from "@/components/assistant/MessageAttachments";
@@ -52,6 +53,8 @@ export interface ChatActions {
   answerQuestion: AnswerQuestionAction;
   saveArtefact: SaveArtefactAction;
   exportToJira: ExportToJiraAction;
+  /** Left out, a person whose ticket tool is GitHub is offered no ticket export. */
+  exportToGithub?: ExportToGithubAction;
   exportToConfluence?: ExportToConfluenceAction;
 }
 
@@ -620,7 +623,17 @@ export function ChatView({
            * The panel keeps copy, download and print, which are the ways a document leaves a local chat.
            * `requestJiraExport` and `requestConfluenceExport` refuse it as well, so this is the convenience half.
            */
-          jira={pod ? { exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira } : undefined}
+          // One ticket tool at a time, the person's choice in the settings: a Jira backlog or a GitHub repository.
+          jira={
+            pod && defaults.ticketTool === "jira"
+              ? { exported: view.jira, access: jira, exportTo: actions.exportToJira, defaultProject: defaults.jira }
+              : undefined
+          }
+          github={
+            pod && defaults.ticketTool === "github" && actions.exportToGithub !== undefined
+              ? { exported: view.github, exportTo: actions.exportToGithub, defaultRepo: defaults.github }
+              : undefined
+          }
           confluence={
             !pod || actions.exportToConfluence === undefined
               ? undefined

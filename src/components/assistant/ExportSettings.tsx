@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DEFAULT_CONFLUENCE_PARENT } from "@/assistant/confluence";
 import type { DefaultConfluencePage, DefaultJiraProject, ExportDefaults } from "@/assistant/export-defaults";
+import { readGithubRepo, TICKET_TOOLS, type TicketTool } from "@/assistant/github";
 import { DEFAULT_JIRA_PROJECT } from "@/assistant/jira";
 import { breadcrumb, type ConfluencePageResult, type JiraProjectResult } from "@/assistant/lookups";
 import { AtlassianSearch } from "@/components/assistant/AtlassianSearch";
@@ -11,7 +12,12 @@ import type { JiraAccess } from "@/components/assistant/JiraExport";
 import type { LookUp } from "@/components/assistant/lookupClient";
 import type { ActionResult } from "@/web/action";
 
-type SaveExportDefaultsAction = (input: { jira: unknown; confluence: unknown }) => Promise<ActionResult<{ defaults: ExportDefaults }>>;
+type SaveExportDefaultsAction = (input: {
+  ticketTool: unknown;
+  jira: unknown;
+  github: unknown;
+  confluence: unknown;
+}) => Promise<ActionResult<{ defaults: ExportDefaults }>>;
 
 /** The export defaults as the settings edit them: what is stored, the action that replaces it, and the sign-in searches need. */
 export interface AssistantExportDefaults {
@@ -77,25 +83,100 @@ function Choice({
   );
 }
 
+const TOOL_LABELS: Record<TicketTool, string> = { jira: "Jira", github: "GitHub" };
+
 /**
- * Where the person's documents go by default: a Jira backlog and a Confluence page to put new pages under. The
- * document panel starts from these and can be changed there for one document; a Confluence search in the panel starts
- * in this page's space. Both are found by searching the person's own Jira and Confluence, as them.
+ * Which tool the person's tickets go to. Choosing one changes what the document panel offers beside Confluence: a
+ * Jira backlog to export to, or a GitHub repository to open an issue in.
+ */
+function TicketToolChoice({ tool, onChange }: { tool: TicketTool; onChange: (tool: TicketTool) => void }) {
+  return (
+    <fieldset className="flex flex-col gap-1.5">
+      <legend className="text-[13px] font-medium">Ticket tool</legend>
+      <p className="text-pretty text-xs text-asst-muted">Where tickets for your documents are created.</p>
+      <div className="flex w-fit rounded-[9px] border border-asst-strong p-0.5">
+        {TICKET_TOOLS.map((option) => (
+          <label
+            key={option}
+            className={`cursor-pointer rounded-[7px] px-3 py-1 text-xs font-medium focus-within:outline focus-within:outline-1 focus-within:outline-asst-accent-line ${
+              tool === option ? "bg-asst-active text-asst-text" : "text-asst-muted hover:text-asst-text"
+            }`}
+          >
+            <input
+              type="radio"
+              name="assistant-settings-ticket-tool"
+              value={option}
+              checked={tool === option}
+              onChange={() => onChange(option)}
+              className="sr-only"
+            />
+            {TOOL_LABELS[option]}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+/** The repository GitHub issues go to by default, typed as `owner/name` or pasted as a link. */
+function GithubRepoField({ value, onChange, invalid }: { value: string; onChange: (value: string) => void; invalid: boolean }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor="assistant-settings-github-default" className="text-[13px] font-medium">
+        GitHub repository
+      </label>
+      <p id="assistant-settings-github-hint" className="text-pretty text-xs text-asst-muted">
+        Issues are created here, as you. Write it as owner/name, such as hmcts/cft-workspace, or paste its link.
+      </p>
+      <input
+        id="assistant-settings-github-default"
+        type="text"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="owner/name"
+        spellCheck={false}
+        autoComplete="off"
+        aria-invalid={invalid}
+        aria-describedby={invalid ? "assistant-settings-github-hint assistant-settings-github-error" : "assistant-settings-github-hint"}
+        className="rounded-[10px] border border-asst-line bg-transparent px-3.5 py-2.5 font-plex-mono text-[13px] outline-hidden focus:border-asst-accent-line"
+      />
+      {invalid ? (
+        <p id="assistant-settings-github-error" className="text-xs text-asst-error">
+          That is not a repository: write it as owner/name.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Where the person's documents go by default: the tool their tickets go to, and in it a Jira backlog or a GitHub
+ * repository; and a Confluence page to put new pages under. The document panel starts from these and can be changed
+ * there for one document; a Confluence search in the panel starts in this page's space. Jira projects and Confluence
+ * pages are found by searching the person's own Jira and Confluence, as them; a GitHub repository is typed.
  */
 export function ExportSettings({ exports }: { exports: AssistantExportDefaults }) {
   const router = useRouter();
+  const [tool, setTool] = useState<TicketTool>(exports.defaults.ticketTool);
   const [jira, setJira] = useState<DefaultJiraProject | null>(exports.defaults.jira);
+  const [github, setGithub] = useState(exports.defaults.github ?? "");
   const [confluence, setConfluence] = useState<DefaultConfluencePage | null>(exports.defaults.confluence);
   const [searching, setSearching] = useState<"jira" | "confluence" | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const changed = jira?.key !== exports.defaults.jira?.key || confluence?.id !== exports.defaults.confluence?.id;
+  // Blank is no default; anything else has to read as a repository before it can be saved.
+  const repo = github.trim() === "" ? null : (readGithubRepo(github) ?? undefined);
+  const changed =
+    tool !== exports.defaults.ticketTool ||
+    jira?.key !== exports.defaults.jira?.key ||
+    repo !== exports.defaults.github ||
+    confluence?.id !== exports.defaults.confluence?.id;
 
   async function save(): Promise<void> {
     setSaving(true);
     setMessage(null);
     try {
-      const result = await exports.save({ jira, confluence });
+      const result = await exports.save({ ticketTool: tool, jira, github: repo, confluence });
       setMessage(result.ok ? { ok: true, text: "Your defaults are saved" } : { ok: false, text: result.error });
       if (result.ok) {
         router.refresh();
@@ -111,48 +192,53 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
     <section aria-labelledby="assistant-settings-exports" className="flex flex-col gap-3.5">
       <div className="flex flex-col gap-1">
         <h3 id="assistant-settings-exports" className="text-sm font-semibold">
-          Jira and Confluence
+          Tickets and Confluence
         </h3>
         <p className="text-pretty text-[13px] text-asst-muted">
           Where your documents go when you send them on. You can still pick somewhere else for one document in its panel.
         </p>
       </div>
-      <Choice
-        id="assistant-settings-jira-default"
-        label="Jira backlog"
-        hint="Any Jira project you can create tickets in."
-        builtIn={
-          <span className="flex min-w-0 items-baseline gap-2 text-[13px]">
-            <span className="font-plex-mono font-medium">{DEFAULT_JIRA_PROJECT}</span>
-            <BuiltIn />
-          </span>
-        }
-        current={
-          jira === null ? null : (
+      <TicketToolChoice tool={tool} onChange={setTool} />
+      {tool === "github" ? (
+        <GithubRepoField value={github} onChange={setGithub} invalid={repo === undefined} />
+      ) : (
+        <Choice
+          id="assistant-settings-jira-default"
+          label="Jira backlog"
+          hint="Any Jira project you can create tickets in."
+          builtIn={
             <span className="flex min-w-0 items-baseline gap-2 text-[13px]">
-              <span className="font-plex-mono font-medium">{jira.key}</span>
-              <span className="truncate text-asst-body">{jira.name}</span>
+              <span className="font-plex-mono font-medium">{DEFAULT_JIRA_PROJECT}</span>
+              <BuiltIn />
             </span>
-          )
-        }
-        searching={searching === "jira"}
-        onSearch={() => setSearching("jira")}
-        onClear={() => setJira(null)}
-      >
-        <AtlassianSearch
-          kind="jira_project"
-          label="Search your Jira projects for your default backlog"
-          placeholder="Type a project's name or key"
-          access={exports.access}
-          lookUp={exports.lookUp}
-          onCancel={() => setSearching(null)}
-          onPick={(result) => {
-            const project = result as JiraProjectResult;
-            setJira({ key: project.key, name: project.name });
-            setSearching(null);
-          }}
-        />
-      </Choice>
+          }
+          current={
+            jira === null ? null : (
+              <span className="flex min-w-0 items-baseline gap-2 text-[13px]">
+                <span className="font-plex-mono font-medium">{jira.key}</span>
+                <span className="truncate text-asst-body">{jira.name}</span>
+              </span>
+            )
+          }
+          searching={searching === "jira"}
+          onSearch={() => setSearching("jira")}
+          onClear={() => setJira(null)}
+        >
+          <AtlassianSearch
+            kind="jira_project"
+            label="Search your Jira projects for your default backlog"
+            placeholder="Type a project's name or key"
+            access={exports.access}
+            lookUp={exports.lookUp}
+            onCancel={() => setSearching(null)}
+            onPick={(result) => {
+              const project = result as JiraProjectResult;
+              setJira({ key: project.key, name: project.name });
+              setSearching(null);
+            }}
+          />
+        </Choice>
+      )}
       <Choice
         id="assistant-settings-confluence-default"
         label="Confluence page"
@@ -201,7 +287,7 @@ export function ExportSettings({ exports }: { exports: AssistantExportDefaults }
         <button
           type="button"
           onClick={() => void save()}
-          disabled={!changed || saving}
+          disabled={!changed || saving || repo === undefined}
           className="rounded-[10px] bg-asst-accent px-3.5 py-2 text-[13px] font-semibold text-asst-ink hover:bg-asst-accent-hover disabled:opacity-40"
         >
           {saving ? "Saving…" : "Save defaults"}

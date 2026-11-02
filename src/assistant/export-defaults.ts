@@ -1,10 +1,12 @@
 import { type ConfluencePageChoice, checkParent } from "./confluence.ts";
+import { DEFAULT_TICKET_TOOL, isTicketTool, readGithubRepo, type TicketTool } from "./github.ts";
 import type { JiraProjectChoice } from "./jira.ts";
 import { JIRA_PROJECT_RE, MAX_LOOKUP_ANCESTORS } from "./lookups.ts";
 
 /**
- * Where a person's documents go by default: a Jira project and a Confluence parent page, each optional. The document
- * panel starts from them, and the person can change either for one document there. Pure; the store is
+ * Where a person's documents go by default: which tool their tickets go to, Jira or GitHub, and in it a Jira project
+ * or a GitHub repository; and a Confluence parent page. The project, repository and page are each optional. The
+ * document panel starts from them, and the person can change any of them for one document there. Pure; the store is
  * `export-default-store.ts`.
  */
 
@@ -13,11 +15,15 @@ export type DefaultJiraProject = JiraProjectChoice;
 export type DefaultConfluencePage = ConfluencePageChoice;
 
 export interface ExportDefaults {
+  /** Where tickets go: the document panel offers this tool's export beside Confluence. */
+  ticketTool: TicketTool;
   jira: DefaultJiraProject | null;
+  /** A repository as `owner/name`. */
+  github: string | null;
   confluence: DefaultConfluencePage | null;
 }
 
-export const NO_DEFAULTS: ExportDefaults = { jira: null, confluence: null };
+export const NO_DEFAULTS: ExportDefaults = { ticketTool: DEFAULT_TICKET_TOOL, jira: null, github: null, confluence: null };
 
 const MAX_NAME = 200;
 const MAX_ANCESTOR = 255;
@@ -33,6 +39,19 @@ export function checkJiraDefault(value: unknown): DefaultJiraProject | null | un
     return undefined;
   }
   return { key: raw.key, name };
+}
+
+/** A ticket tool as the browser sent it, or `undefined` when it is not one. */
+export function checkTicketTool(value: unknown): TicketTool | undefined {
+  return isTicketTool(value) ? value : undefined;
+}
+
+/** A GitHub repository as the browser sent it, or `undefined` when it is not one. `null` or blank is no default. */
+export function checkGithubDefault(value: unknown): string | null | undefined {
+  if (value === null || (typeof value === "string" && value.trim() === "")) {
+    return null;
+  }
+  return readGithubRepo(value);
 }
 
 /** A Confluence page as the browser sent it, with the titles above it, or `undefined` when it is not one. */
@@ -62,6 +81,9 @@ export interface ExportDefaultRow {
   confluenceSpaceKey: string | null;
   confluenceSpaceName: string | null;
   confluenceAncestors: unknown;
+  /** Absent from a row read before the ticket tool was a choice, which is Jira. */
+  ticketTool?: string | null;
+  githubRepo?: string | null;
 }
 
 /** The stored row as the settings and the panel read it, each half dropped when it is not whole. */
@@ -81,5 +103,6 @@ export function exportDefaultsOf(row: ExportDefaultRow | null): ExportDefaults {
           space_name: row.confluenceSpaceName ?? row.confluenceSpaceKey,
           ancestors: row.confluenceAncestors
         }) ?? null);
-  return { jira, confluence };
+  const ticketTool = isTicketTool(row.ticketTool) ? row.ticketTool : DEFAULT_TICKET_TOOL;
+  return { ticketTool, jira, github: readGithubRepo(row.githubRepo) ?? null, confluence };
 }

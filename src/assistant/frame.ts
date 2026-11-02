@@ -1,6 +1,7 @@
 import type { Database } from "../store/prisma.ts";
 import { ARTEFACT_SELECT, toArtefact } from "./artefact-store.ts";
 import { CONFLUENCE_SELECT, type ConfluenceExportFrame, pendingConfluenceExport } from "./confluence.ts";
+import { GITHUB_SELECT, type GithubExportFrame, pendingGithubExport } from "./github.ts";
 import { JIRA_SELECT, type JiraExportFrame, pendingJiraExport } from "./jira.ts";
 import { readAssistantModel } from "./model-store.ts";
 import { productLabel } from "./products.ts";
@@ -9,9 +10,9 @@ import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
 /**
  * What a direct frame to a conversation's agent carries, or `undefined` for any other agent.
  *
- * No field is gated on a `client_features` claim (`src/agents/client-features.ts`): `attachments`, `jira_export`
- * and `confluence_export` go to every session. A client too old to read `attachments` drops that message's files
- * and nobody is told; one too old to read `jira_export` or `confluence_export` is handed the request in words, and
+ * No field is gated on a `client_features` claim (`src/agents/client-features.ts`): `attachments`, `jira_export`,
+ * `github_export` and `confluence_export` go to every session. A client too old to read `attachments` drops that message's files
+ * and nobody is told; one too old to read an export field is handed the request in words, and
  * the export fails on its 15-minute timeout.
  */
 export interface AssistantFrame {
@@ -28,6 +29,8 @@ export interface AssistantFrame {
   artefact_updated_by: "user" | "agent" | null;
   /** While an export to Jira is pending: what to create, which the session carries out with `twg`. */
   jira_export?: JiraExportFrame;
+  /** While an export to GitHub is pending: the repository to create the issue in, which the session does with `gh`. */
+  github_export?: GithubExportFrame;
   /** While an export to Confluence is pending: where to create the page, which the session carries out with `twg`. */
   confluence_export?: ConfluenceExportFrame;
   /**
@@ -46,7 +49,7 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     where: { id: agentId },
     select: {
       assistantConversation: {
-        select: { id: true, ownerOid: true, product: true, ...ARTEFACT_SELECT, ...JIRA_SELECT, ...CONFLUENCE_SELECT }
+        select: { id: true, ownerOid: true, product: true, ...ARTEFACT_SELECT, ...JIRA_SELECT, ...GITHUB_SELECT, ...CONFLUENCE_SELECT }
       }
     }
   });
@@ -56,6 +59,7 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
   }
   const artefact = toArtefact(conversation);
   const jira = pendingJiraExport(conversation);
+  const github = pendingGithubExport(conversation);
   const confluence = pendingConfluenceExport(conversation);
   return {
     conversation_id: conversation.id,
@@ -67,6 +71,7 @@ export async function assistantFrame(db: Database, agentId: string, messageId?: 
     artefact_version: artefact.version,
     artefact_updated_by: artefact.updatedBy,
     ...(jira === undefined ? {} : { jira_export: jira }),
+    ...(github === undefined ? {} : { github_export: github }),
     ...(confluence === undefined ? {} : { confluence_export: confluence }),
     ...(messageId === undefined ? {} : { attachments: await frameAttachments(db, messageId) })
   };

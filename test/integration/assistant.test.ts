@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { heartbeat, registerAgent } from "../../src/agents/store.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
+import * as githubRoute from "../../src/app/api/agent/[agentId]/github/route.ts";
 import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
 import * as jiraRoute from "../../src/app/api/agent/[agentId]/jira/route.ts";
 import * as streamRoute from "../../src/app/api/agent/[agentId]/stream/route.ts";
@@ -22,6 +23,7 @@ import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts"
 import { createConversation, findConversation, hasLocalConversation, listConversations } from "../../src/assistant/conversation-store.ts";
 import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
 import { assistantFrame } from "../../src/assistant/frame.ts";
+import { GITHUB_EXPORT_TIMEOUT_MS } from "../../src/assistant/github.ts";
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
 import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
@@ -1354,6 +1356,140 @@ describe("jira export", () => {
   });
 });
 
+describe("github export", () => {
+  async function written(): Promise<{ token: string; id: string; agentId: string }> {
+    const { token } = await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "write a story" })) as { id: string }).id;
+    const { agentId, sessionId } = await sessionOf(id);
+    await register(token, sessionId, id);
+    await actions.saveArtefact({ conversationId: id, title: "Flags for caseworkers", markdown: "# Problem\n\nFlags are hidden.", baseVersion: 0 });
+    return { token, id, agentId };
+  }
+
+  function report(token: string, agentId: string, body: unknown): Promise<Response> {
+    return pod(githubRoute.PUT, token, `/api/agent/${agentId}/github`, { agentId }, "PUT", body);
+  }
+
+  async function currentExport(id: string): Promise<string> {
+    return (await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { githubExportId: true } })).githubExportId!;
+  }
+
+  it("should ask the session in the chat, with the export in the message's frame, and show the issue once it reports the number", async () => {
+    const { token, id, agentId } = await written();
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: " https://github.com/hmcts/cft-workspace " })).toEqual({ ok: true });
+    const exportId = await currentExport(id);
+    const abort = new AbortController();
+    const stream = frames(await pod(streamRoute.GET, token, `/api/agent/${agentId}/stream`, { agentId }, "GET", undefined, abort.signal));
+    const sent = await stream.named("direct", 2);
+    abort.abort();
+    await stream.cancel();
+    const request = JSON.parse(sent[1]!.data!);
+
+    expect(request).toMatchObject({
+      message: { body: "Please create a GitHub issue for this document in hmcts/cft-workspace." },
+      assistant: { conversation_id: id, github_export: { export_id: exportId, repo: "hmcts/cft-workspace" } }
+    });
+    expect(request.assistant.jira_export).toBeUndefined();
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({
+      status: "pending",
+      repo: "hmcts/cft-workspace",
+      requestedAt: expect.any(String)
+    });
+
+    expect((await report(token, agentId, { export_id: exportId, number: 42 })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.github).toEqual({
+      status: "done",
+      repo: "hmcts/cft-workspace",
+      number: 42,
+      url: "https://github.com/hmcts/cft-workspace/issues/42"
+    });
+    expect((await assistantFrame(prisma, agentId))?.github_export).toBeUndefined();
+  });
+
+  it("should refuse a second export while one is pending, and any once the document is an issue", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already being exported"
+    });
+
+    await report(token, agentId, { export_id: await currentExport(id), number: 42 });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this document is already on GitHub as hmcts/cft-workspace#42"
+    });
+  });
+
+  it("should let the person try again under a new export id, and ignore the old one's late report, when the export failed", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/nope" });
+    const first = await currentExport(id);
+    await report(token, agentId, { export_id: first, error: "GitHub refused the issue: no such repository" });
+    expect((await assistantConversation(VIEWER, id))?.github).toEqual({
+      status: "failed",
+      repo: "hmcts/nope",
+      error: "GitHub refused the issue: no such repository"
+    });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({ ok: true });
+    expect(await currentExport(id)).not.toBe(first);
+
+    expect((await report(token, agentId, { export_id: first, number: 1 })).status).toBe(204);
+    expect((await assistantConversation(VIEWER, id))?.github).toMatchObject({ status: "pending", repo: "hmcts/cft-workspace" });
+  });
+
+  it("should allow a new export once the session has not answered in time", async () => {
+    const { id } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+    await prisma.assistantConversation.update({ where: { id }, data: { githubRequestedAt: new Date(Date.now() - GITHUB_EXPORT_TIMEOUT_MS - 1000) } });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({ ok: true });
+  });
+
+  it("should refuse an export of a document nobody has written, or to something that is not a repository", async () => {
+    await startedAssistant();
+    const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "write the document before exporting it"
+    });
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "cft-workspace" })).toEqual({
+      ok: false,
+      error: "name the GitHub repository as owner/name, such as hmcts/cft-workspace"
+    });
+  });
+
+  it("should refuse an export from a chat that is a session on the person's own computer, and claim nothing", async () => {
+    const id = await laptopChat();
+    await actions.saveArtefact({ conversationId: id, title: "Notes", markdown: "# What I found", baseVersion: 0 });
+
+    expect(await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" })).toEqual({
+      ok: false,
+      error: "this chat is a session on your own computer, which cannot export to GitHub; download the document and attach it yourself"
+    });
+    expect(await prisma.assistantConversation.findUniqueOrThrow({ where: { id }, select: { githubStatus: true, githubExportId: true } })).toEqual({
+      githubStatus: null,
+      githubExportId: null
+    });
+  });
+
+  it("should refuse a report from an agent that is not a conversation's, and one that breaks the contract", async () => {
+    const { token, id, agentId } = await written();
+    await actions.exportArtefactToGithub({ conversationId: id, repo: "hmcts/cft-workspace" });
+    const exportId = await currentExport(id);
+    const { agent_id: plain } = await jsonOf<{ agent_id: string }>(await register(token, "plain-session"));
+
+    expect((await report(token, plain, { export_id: exportId, number: 1 })).status).toBe(404);
+    expect((await report(token, agentId, { export_id: exportId, number: 0 })).status).toBe(400);
+    expect((await report(token, agentId, { export_id: exportId, number: "42" })).status).toBe(400);
+  });
+});
+
 describe("confluence export", () => {
   const PARENT = { id: "280959611", title: "Guides", space_id: "280952876", space_key: "CCD", space_name: "Core Case Data" };
 
@@ -1626,13 +1762,23 @@ describe("export defaults", () => {
     await insertUser(BOB);
     const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
 
-    expect(await readExportDefaults(prisma, alice)).toEqual({ jira: null, confluence: null });
+    expect(await readExportDefaults(prisma, alice)).toEqual({ ticketTool: "jira", jira: null, github: null, confluence: null });
     await saveExportDefaults(prisma, alice, { jira: { key: "CCD", name: "Core Case Data" }, confluence: PAGE });
-    expect(await readExportDefaults(prisma, alice)).toEqual({ jira: { key: "CCD", name: "Core Case Data" }, confluence: PAGE });
+    expect(await readExportDefaults(prisma, alice)).toEqual({
+      ticketTool: "jira",
+      jira: { key: "CCD", name: "Core Case Data" },
+      github: null,
+      confluence: PAGE
+    });
     await saveExportDefaults(prisma, alice, { jira: null, confluence: PAGE });
 
     expect((await readExportDefaults(prisma, alice)).jira).toBeNull();
-    expect(await readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: BOB.oid })).toEqual({ jira: null, confluence: null });
+    expect(await readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: BOB.oid })).toEqual({
+      ticketTool: "jira",
+      jira: null,
+      github: null,
+      confluence: null
+    });
     await expect(readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: ALICE.oid })).rejects.toMatchObject({ status: 403 });
   });
 
@@ -1642,5 +1788,37 @@ describe("export defaults", () => {
 
     await expect(saveExportDefaults(prisma, alice, { jira: { key: "ccd", name: "x" }, confluence: null })).rejects.toMatchObject({ status: 400 });
     await expect(saveExportDefaults(prisma, alice, { jira: null, confluence: { ...PAGE, space_id: "x" } })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("should keep GitHub as the person's ticket tool, with its repository, beside their Jira project", async () => {
+    await insertUser(ALICE);
+    const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
+
+    await saveExportDefaults(prisma, alice, {
+      ticketTool: "github",
+      jira: { key: "CCD", name: "Core Case Data" },
+      github: "https://github.com/hmcts/cft-workspace",
+      confluence: null
+    });
+
+    expect(await readExportDefaults(prisma, alice)).toEqual({
+      ticketTool: "github",
+      jira: { key: "CCD", name: "Core Case Data" },
+      github: "hmcts/cft-workspace",
+      confluence: null
+    });
+    // A caller that sends no ticket tool is one that knows nothing of GitHub, so it puts the person back on Jira.
+    await saveExportDefaults(prisma, alice, { jira: null, confluence: null });
+    expect(await readExportDefaults(prisma, alice)).toEqual({ ticketTool: "jira", jira: null, github: null, confluence: null });
+  });
+
+  it("should refuse a ticket tool or a repository that is not one", async () => {
+    await insertUser(ALICE);
+    const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
+
+    await expect(saveExportDefaults(prisma, alice, { ticketTool: "trello", jira: null, confluence: null })).rejects.toMatchObject({ status: 400 });
+    await expect(saveExportDefaults(prisma, alice, { ticketTool: "github", jira: null, github: "cft-workspace", confluence: null })).rejects.toMatchObject({
+      status: 400
+    });
   });
 });

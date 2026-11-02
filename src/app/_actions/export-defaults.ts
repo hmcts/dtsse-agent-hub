@@ -12,7 +12,12 @@ import { type ActionResult, runAction } from "@/web/action";
  * owner, so the only defaults a request can reach are its sender's own. Revalidates `/assistant` as a layout, because
  * the settings dialog and the document panel both read them.
  */
-export async function saveExportDefaults(input: { jira: unknown; confluence: unknown }): Promise<ActionResult<{ defaults: ExportDefaults }>> {
+export async function saveExportDefaults(input: {
+  ticketTool?: unknown;
+  jira: unknown;
+  github?: unknown;
+  confluence: unknown;
+}): Promise<ActionResult<{ defaults: ExportDefaults }>> {
   return await runAction<{ defaults: ExportDefaults }>("save export defaults", async () => {
     const viewer = await requireViewer();
     const defaults = await save(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, input);

@@ -120,6 +120,7 @@ function conversation(overrides: Partial<ConversationView> = {}): ConversationVi
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
     jira: { status: "none" },
+    github: { status: "none" },
     confluence: { status: "none" },
     page: page(),
     forked: null,
@@ -1070,6 +1071,27 @@ describe("ChatView document", () => {
     // The footer shows one destination at a time, so Confluence's control is reached by choosing it.
     fireEvent.click(screen.getByRole("radio", { name: /Confluence page/ }));
     expect(screen.getByRole("button", { name: /Publish to Confluence/ })).toBeTruthy();
+  });
+
+  it("should offer a GitHub issue in the Jira backlog's place when the person's ticket tool is GitHub", () => {
+    const written = conversation({ artefact: { title: "Notes", markdown: "# Notes", version: 1, updatedBy: "user", updatedAt: "2026-10-21T09:00:00.000Z" } });
+    render(
+      <ChatView
+        jira={JIRA}
+        viewerOid={VIEWER}
+        view={written}
+        templates={TEMPLATES}
+        actions={actions({ exportToConfluence: ok(), exportToGithub: ok() })}
+        defaults={{ ticketTool: "github", jira: null, github: "hmcts/cft-workspace", confluence: null }}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Open document/ }));
+
+    expect(screen.getByRole("radio", { name: /GitHub issue/ })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: /Jira backlog/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Export to Jira backlog/ })).toBeNull();
+    expect((screen.getByLabelText("Repository") as HTMLInputElement).value).toBe("hmcts/cft-workspace");
+    expect(screen.getByRole("button", { name: "Create GitHub issue" })).toBeTruthy();
   });
 
   it("should offer to open the document when one has been written", () => {

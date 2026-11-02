@@ -542,6 +542,14 @@ model AssistantConversation {
   confluenceRequestedAt DateTime? @map("confluence_requested_at") @db.Timestamptz(6)
   /// Not read or written by the app.
   confluenceExportedAt  DateTime? @map("confluence_exported_at") @db.Timestamptz(6) @ignore
+  githubExportId        String?   @map("github_export_id") @db.Uuid
+  /// owner/name of the repository the issue goes to.
+  githubRepo            String?   @map("github_repo")
+  /// pending, done or failed; null before the first export.
+  githubStatus          String?   @map("github_status")
+  githubNumber          Int?      @map("github_number")
+  githubError           String?   @map("github_error")
+  githubRequestedAt     DateTime? @map("github_requested_at") @db.Timestamptz(6)
   /// Where a copy was forked from; null once the source is deleted, and for a conversation that is not a copy.
   forkedFromId          String?   @map("forked_from_id") @db.Uuid
   forkedFromOwnerName   String?   @map("forked_from_owner_name")
@@ -664,6 +672,9 @@ model AssistantExportDefault {
   confluenceSpaceName   String?  @map("confluence_space_name")
   /// The titles above the parent page, from the space's top: at most 8 strings.
   confluenceAncestors   Json     @default("[]") @map("confluence_ancestors")
+  /// jira or github: where the person's tickets go.
+  ticketTool            String   @default("jira") @map("ticket_tool")
+  githubRepo            String?  @map("github_repo")
   updatedAt             DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   owner User @relation(fields: [ownerOid], references: [oid], onDelete: Cascade)

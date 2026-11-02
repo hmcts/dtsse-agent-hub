@@ -368,7 +368,7 @@ const SECTIONS: readonly SettingsSection[] = [
   },
   {
     id: "exports",
-    label: "Jira & Confluence",
+    label: "Tickets & Confluence",
     group: "General",
     shown: (view) => view.exports !== undefined,
     panel: (view) => (view.exports === undefined ? null : <ExportSettings exports={view.exports} />)

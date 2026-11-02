@@ -7,6 +7,7 @@ import { AssistantMarkdown } from "@/components/assistant/AssistantMarkdown";
 import { useSidebarWidth } from "@/components/assistant/AssistantShell";
 import { ConfluenceBanner, type ConfluenceExportProps } from "@/components/assistant/ConfluenceExport";
 import { ExportFooter } from "@/components/assistant/ExportFooter";
+import { GithubBanner, type GithubExportProps } from "@/components/assistant/GithubExport";
 import { JiraBanner, type JiraExportProps } from "@/components/assistant/JiraExport";
 import { ARTEFACT_MIN_WIDTH, ARTEFACT_WIDTH, CHAT_MIN_WIDTH } from "@/components/assistant/layout";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
@@ -205,6 +206,7 @@ export function ArtefactPanel({
   onClose,
   narrow,
   jira,
+  github,
   confluence
 }: {
   conversationId: string;
@@ -215,6 +217,8 @@ export function ArtefactPanel({
   narrow: boolean;
   /** The export to Jira, below the document; left out, the panel has none. */
   jira?: JiraExportProps;
+  /** The export to GitHub, in place of the Jira one for a person whose ticket tool is GitHub. */
+  github?: GithubExportProps;
   /** The publish to Confluence, beside the Jira export; left out, the panel has none. */
   confluence?: ConfluenceExportProps;
 }) {
@@ -490,6 +494,7 @@ export function ArtefactPanel({
         </div>
       )}
       {jira === undefined ? null : <JiraBanner exported={jira.exported} />}
+      {github === undefined ? null : <GithubBanner exported={github.exported} />}
       {confluence === undefined ? null : <ConfluenceBanner exported={confluence.exported} />}
       {mode === "edit" ? (
         // The textarea fills the scroller and scrolls itself, so the tab stop a keyboard user needs is the box.
@@ -511,8 +516,15 @@ export function ArtefactPanel({
           {markdown.trim() === "" ? <p className="text-asst-faint">This document is empty.</p> : <AssistantMarkdown source={markdown} document />}
         </ScrollPane>
       )}
-      {jira === undefined && confluence === undefined ? null : (
-        <ExportFooter conversationId={conversationId} jira={jira} confluence={confluence} saved={state === "saved" && conflict === null} written={base > 0} />
+      {jira === undefined && github === undefined && confluence === undefined ? null : (
+        <ExportFooter
+          conversationId={conversationId}
+          jira={jira}
+          github={github}
+          confluence={confluence}
+          saved={state === "saved" && conflict === null}
+          written={base > 0}
+        />
       )}
       {printing ? <PrintSheet title={title} markdown={markdown} /> : null}
     </section>

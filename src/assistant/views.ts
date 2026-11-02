@@ -18,6 +18,8 @@ import { readConfluenceExport } from "./confluence-store.ts";
 import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
 import { type ConversationListRow, hasLocalConversation, listConversations, unsentConversation } from "./conversation-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
+import type { GithubExportView } from "./github.ts";
+import { readGithubExport } from "./github-store.ts";
 import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
@@ -254,6 +256,7 @@ export interface ConversationView {
   sessionDetail: string | null;
   artefact: { title: string | null; markdown: string; version: number; updatedBy: Artefact["updatedBy"]; updatedAt: string | null };
   jira: JiraExportView;
+  github: GithubExportView;
   confluence: ConfluenceExportView;
   page: ConversationPage;
   /** Where the chat was forked from and the words copied from it, shown above its own; `null` unless it is a copy. */
@@ -274,10 +277,11 @@ export async function conversationView(db: Database, conversation: ConversationR
   // The ref carries the agent's id and its owner and nothing else, because that is all either read asks of it: the
   // literals are not a claim about the agent that some rule elsewhere has to keep agreeing with.
   const agent = { id: agentId, ownerOid: conversation.ownerOid };
-  const [current, artefact, jira, confluence, page, questions, fork] = await Promise.all([
+  const [current, artefact, jira, github, confluence, page, questions, fork] = await Promise.all([
     db.agent.findUnique({ where: { id: agentId }, select: { status: true, skills: true, clientFeatures: true, repo: true, branch: true } }),
     readArtefact(db, conversation.id),
     readJiraExport(db, conversation.id),
+    readGithubExport(db, conversation.id),
     readConfluenceExport(db, conversation.id),
     agentConversation(db, conversation.ownerOid, agent),
     agentQuestions(db, conversation.ownerOid, agent),
@@ -300,6 +304,7 @@ export async function conversationView(db: Database, conversation: ConversationR
     sessionDetail: conversation.sessionDetail,
     artefact: { ...artefact, updatedAt: artefact.updatedAt?.toISOString() ?? null },
     jira,
+    github,
     confluence,
     page,
     forked: fork === null ? null : forkedView(fork),

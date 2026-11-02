@@ -116,6 +116,7 @@ function conversation(local: boolean): ConversationView {
     sessionDetail: null,
     artefact: { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null },
     jira: { status: "none" },
+    github: { status: "none" },
     confluence: { status: "none" },
     page: { messages: [], entries: [], olderBefore: null, lastId: null, more: false },
     forked: null,
@@ -164,7 +165,7 @@ function chatPage(chat: AssistantHome["chat"], local: boolean, stored: Credentia
         viewerOid={VIEWER}
         actions={actions()}
         jira={{ connected: false, login: null }}
-        defaults={{ jira: null, confluence: null }}
+        defaults={{ ticketTool: "jira", jira: null, github: null, confluence: null }}
       />
     </AssistantGate>
   );
