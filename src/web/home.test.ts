@@ -77,8 +77,8 @@ describe("retiredHubPath", () => {
     ["/virtual", "/assistant?settings=assistant"],
     ["/hub/virtual", "/assistant?settings=assistant"],
     ["/hub/virtual/0f8a", "/assistant?settings=assistant"],
-    ["/settings/credentials", "/assistant?settings=connections"],
-    ["/hub/settings/credentials", "/assistant?settings=connections"]
+    ["/settings/credentials", "/assistant?settings=credentials"],
+    ["/hub/settings/credentials", "/assistant?settings=credentials"]
   ])("should send %s to %s when virtual agents are on", (pathname, to) => {
     expect(retiredHubPath(pathname, true)).toBe(to);
   });
@@ -118,8 +118,8 @@ describe("retiredAgentPath", () => {
     expect(retiredAgentPath({ kind: "chat", conversationId: CONVERSATION }, true)).toBe(`/assistant/${CONVERSATION}`);
   });
 
-  it("should send a virtual agent to the Assistant when virtual agents are on", () => {
-    expect(retiredAgentPath({ kind: "virtual" }, true)).toBe("/assistant");
+  it("should send a virtual agent to the Assistant section of the Assistant's settings when virtual agents are on", () => {
+    expect(retiredAgentPath({ kind: "virtual" }, true)).toBe("/assistant?settings=assistant");
   });
 
   it("should send anything else to the hub's home when virtual agents are on", () => {

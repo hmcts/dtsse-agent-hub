@@ -198,7 +198,7 @@ export async function liveModelRoutes(db: Database, ownerOid: string): Promise<M
 const NO_TOKEN = { launchTokenHash: null, launchTokenIssuedAt: null } as const;
 
 /** A pod that is shut down listens on nothing, so what it last reported would only list dead URLs. */
-const NO_PORTS = { exposedPorts: [], localOnlyPorts: [] } as const;
+const NO_PORTS: { exposedPorts: number[]; localOnlyPorts: number[] } = { exposedPorts: [], localOnlyPorts: [] };
 
 /** A change the pod template carries, so the orchestrator applies the StatefulSet again. */
 const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1 } } as const;
@@ -476,8 +476,7 @@ export async function restartVirtualAgent(
         where: { id },
         data: {
           ...NO_TOKEN,
-          exposedPorts: [],
-          localOnlyPorts: [],
+          ...NO_PORTS,
           ...POD_CHANGE,
           ...NO_MEMORY_REPORT,
           applyFailures: 0,

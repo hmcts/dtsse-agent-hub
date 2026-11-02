@@ -1,3 +1,6 @@
+"use client";
+
+import { useSettingsData } from "@/components/assistant/useSettingsData";
 import type { AssistantAgent } from "@/web/data";
 
 /**
@@ -10,16 +13,33 @@ import type { AssistantAgent } from "@/web/data";
  * scoped to it, and a page's `<base href>` from `/` is moved under it. Opened without the cookie, it goes through the
  * hub to sign the person in and comes back to the same place. The VPN address follows it.
  */
-export function PortSettings({ agent }: { agent: AssistantAgent }) {
-  const ports = agent.exposedPorts;
+export function PortSettings({ load }: { load: () => Promise<AssistantAgent | null> }) {
+  const { data: agent, failed } = useSettingsData(load, true);
   return (
-    <section aria-labelledby="assistant-settings-ports" className="flex flex-col gap-2.5">
+    <section aria-labelledby="assistant-settings-ports" aria-busy={agent === undefined && !failed} className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-ports" className="text-sm font-semibold">
         Web servers
       </h3>
       <p className="text-pretty text-[13px] text-asst-muted">
         Servers your assistant starts on 0.0.0.0 can be opened here. Only you can open them through these links.
       </p>
+      {failed ? (
+        <p className="text-[13px] text-asst-error">Your web servers could not be read. Close settings and open them again.</p>
+      ) : agent === undefined ? (
+        <p className="text-[13px] text-asst-muted">Reading your web servers…</p>
+      ) : agent === null ? (
+        <p className="text-[13px] text-asst-muted">You have no assistant yet, so nothing is running.</p>
+      ) : (
+        <Ports agent={agent} />
+      )}
+    </section>
+  );
+}
+
+function Ports({ agent }: { agent: AssistantAgent }) {
+  const ports = agent.exposedPorts;
+  return (
+    <>
       {ports.length === 0 ? (
         <p className="text-[13px] text-asst-body">{agent.desired === "running" ? "No web servers running." : "None while your assistant is stopped."}</p>
       ) : (
@@ -49,6 +69,6 @@ export function PortSettings({ agent }: { agent: AssistantAgent }) {
           ))}
         </ul>
       )}
-    </section>
+    </>
   );
 }

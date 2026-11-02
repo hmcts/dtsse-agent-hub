@@ -89,7 +89,7 @@ test.describe("virtual agents @regression", () => {
         await restart.click();
         await expect(page.getByText(/Anything a chat is working on right now stops/)).toBeVisible();
         await page.getByRole("button", { name: "Restart", exact: true }).click();
-        await expect(page.getByRole("form", { name: "Restart your assistant" }).getByRole("status")).toHaveText("Restarting. Your chats are kept.");
+        await expect(page.getByRole("dialog", { name: "Settings" }).getByText("Restarting. Your chats are kept.")).toBeVisible();
       }
     } finally {
       await context.close();

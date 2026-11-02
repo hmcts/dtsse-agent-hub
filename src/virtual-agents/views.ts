@@ -1,71 +1,16 @@
-import { canManageVirtualAgent } from "../access/rules.ts";
-import { isUuid } from "../agents/store.ts";
 import type { CredentialKind } from "../credentials/names.ts";
 import { viewerUrl } from "../port-viewer/paths.ts";
 import { viewerSettings } from "../port-viewer/settings.ts";
-import type { Database } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
-import { lastActivity } from "./cleanup.ts";
-import type { VirtualAgentDesired, VirtualAgentStatus } from "./lifecycle.ts";
-import { type LoginView, loginViews } from "./logins.ts";
 import { publicUrl } from "./ports.ts";
 import { publicDomain } from "./settings.ts";
-import type { VirtualAgentSize } from "./size.ts";
-import type { StopReason } from "./stop.ts";
-import { findVirtualAgent, type VirtualAgentRow } from "./store.ts";
+import type { VirtualAgentRow } from "./store.ts";
 
-/**
- * Virtual agents as the pages show them: the cards and the detail, which only their owner gets.
- */
-
-export interface VirtualAgentCard {
-  id: string;
-  name: string;
-  desired: VirtualAgentDesired;
-  status: VirtualAgentStatus;
-  statusDetail: string | null;
-  modelRoute: ModelRoute;
-  size: VirtualAgentSize;
-  /**
-   * Each port the pod reports listening on beyond loopback, with the URL it is served at on the VPN and, when the
-   * viewer is on, the one it is served at off it.
-   */
-  exposedPorts: { port: number; url: string; viewerUrl?: string }[];
-  /** The ports the pod reports listening on loopback only, which no URL can reach. */
-  localOnlyPorts: number[];
-  /** The workspace plugins its pod loads, in code-point order. */
-  plugins: string[];
-  stopReason: StopReason | null;
-  /** Why it failed, for an agent stopped after failing; `null` for every other stop. */
-  stopDetail: string | null;
-  /** The latest pod report or transcript entry, or `null` before there has been either. */
-  lastActivityAt: string | null;
-  stoppedAt: string | null;
-  diskExpiresAt: string | null;
-  diskDeletedAt: string | null;
-  agentId: string | null;
-  createdAt: string;
-}
-
-export interface VirtualAgentDetail {
-  card: VirtualAgentCard;
-  logins: LoginView[];
-  /** What this agent needs stored, which is its route's: `neededCredentials`. */
-  needed: CredentialKind[];
-  /** What it can use if stored, but starts without. */
-  optional: CredentialKind[];
-}
-
-function iso(date: Date | null | undefined): string | null {
-  return date === null || date === undefined ? null : date.toISOString();
-}
-
-async function newestEntries(db: Database, agentIds: readonly string[]): Promise<Map<string, Date>> {
-  if (agentIds.length === 0) {
-    return new Map();
-  }
-  const rows = await db.transcriptEntry.groupBy({ by: ["agentId"], where: { agentId: { in: [...agentIds] } }, _max: { createdAt: true } });
-  return new Map(rows.flatMap((row) => (row._max.createdAt === null ? [] : [[row.agentId, row._max.createdAt] as const])));
+/** A port the pod reports listening on beyond loopback, with the URL it is served at on the VPN and, with the viewer on, the one it is served at off it. */
+export interface PortLink {
+  port: number;
+  url: string;
+  viewerUrl?: string;
 }
 
 function viewerLink(id: string, port: number, host: string | undefined): { viewerUrl?: string } {
@@ -73,9 +18,10 @@ function viewerLink(id: string, port: number, host: string | undefined): { viewe
 }
 
 /** Where each port the pod reports can be opened: its VPN URL, and with the viewer on, the viewer's too. */
-export function portLinks(
-  row: Pick<VirtualAgentRow, "id" | "statefulsetName" | "exposedPorts" | "localOnlyPorts">
-): Pick<VirtualAgentCard, "exposedPorts" | "localOnlyPorts"> {
+export function portLinks(row: Pick<VirtualAgentRow, "id" | "statefulsetName" | "exposedPorts" | "localOnlyPorts">): {
+  exposedPorts: PortLink[];
+  localOnlyPorts: number[];
+} {
   const viewerHost = viewerSettings()?.host;
   return {
     exposedPorts: row.exposedPorts.map((port) => ({
@@ -87,33 +33,10 @@ export function portLinks(
   };
 }
 
-function toCard(row: VirtualAgentRow, newest: Map<string, Date>): VirtualAgentCard {
-  return {
-    id: row.id,
-    name: row.name,
-    desired: row.desired,
-    status: row.status,
-    statusDetail: row.statusDetail,
-    modelRoute: row.modelRoute,
-    size: row.size,
-    ...portLinks(row),
-    plugins: row.plugins,
-    stopReason: row.stopReason,
-    stopDetail: row.stopDetail,
-    lastActivityAt: iso(lastActivity(row.lastActiveAt, row.agentId === null ? undefined : newest.get(row.agentId))),
-    stoppedAt: iso(row.stoppedAt),
-    diskExpiresAt: iso(row.diskExpiresAt),
-    diskDeletedAt: iso(row.diskDeletedAt),
-    agentId: row.agentId,
-    createdAt: row.createdAt.toISOString()
-  };
-}
-
 /**
  * An Azure sign-in only lets the agent run `az` as its owner (and gives Jenkins their object id), a Jenkins API token
  * only adds the Jenkins tools, and an Atlassian sign-in only the `twg` CLI for Jira and Confluence, so the pod never
- * waits for any of them. Azure is signed in to only when the owner asks, from the Assistant's settings or the agent's
- * page.
+ * waits for any of them. Azure is signed in to only when the owner asks, from the Assistant's settings.
  *
  * On the `gateway` route Azure is not one of these: `az` is where that route's model credential comes from, so it is
  * needed rather than optional there, and `optionalCredentials` is what keeps it out of both lists at once.
@@ -152,17 +75,4 @@ export function optionalCredentials(route: ModelRoute): CredentialKind[] {
  */
 export function claudeTokenUsable(viewerRoute: ModelRoute, agentRoutes: readonly ModelRoute[]): boolean {
   return viewerRoute === "own-licence" || agentRoutes.includes("own-licence");
-}
-
-/** The agent, its logins and what it needs, or `undefined` when there is no such agent or it is not the viewer's. */
-export async function virtualAgentDetail(db: Database, viewerOid: string, id: string): Promise<VirtualAgentDetail | undefined> {
-  if (!isUuid(id)) {
-    return undefined;
-  }
-  const row = await findVirtualAgent(db, id);
-  if (row === undefined || !canManageVirtualAgent(viewerOid, row)) {
-    return undefined;
-  }
-  const [newest, logins] = await Promise.all([newestEntries(db, row.agentId === null ? [] : [row.agentId]), loginViews(db, id)]);
-  return { card: toCard(row, newest), logins, needed: neededCredentials(row.modelRoute), optional: optionalCredentials(row.modelRoute) };
 }

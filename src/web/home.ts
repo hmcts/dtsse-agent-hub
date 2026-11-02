@@ -57,7 +57,8 @@ const VIRTUAL_AGENT_PAGE = /^\/virtual\/[^/]+$/;
  * - `/virtual` and `/virtual/{id}` go to the Assistant section of its settings: the Assistant's agent is the one
  *   virtual agent a person has, and its settings are where it is renamed, restarted and its web servers opened.
  *   `/virtual/{id}/ports/{port}` is not one of these: it is the viewer's ticket route, and is still served.
- * - `/settings/credentials` goes to Connections, which the published client's pod boot messages still send people to.
+ * - `/settings/credentials` goes to Credentials, where a token is pasted: the published client's pod boot messages still
+ *   send people there to paste their GitHub token.
  *
  * Both the bare address and the `/hub` one, because each page existed under both and both were pasted into tickets.
  * Checked ahead of `movedHubPath`, which would otherwise send the bare one to a page that is no longer there.
@@ -70,7 +71,7 @@ export function retiredHubPath(pathname: string, virtualAgents: boolean): string
       : path === "/virtual" || VIRTUAL_AGENT_PAGE.test(path)
         ? assistantSettingsPath("assistant")
         : path === "/settings/credentials"
-          ? assistantSettingsPath("connections")
+          ? assistantSettingsPath("credentials")
           : undefined;
   return to === undefined ? undefined : virtualAgents ? to : HUB;
 }
@@ -86,14 +87,14 @@ export const NO_AGENT: AgentAddress = { kind: "none" };
 
 /**
  * Where `/hub/agents/{id}` goes. The hub shows no agents: a chat's agent is that chat in the Assistant, and a virtual
- * agent is what the Assistant runs on. Anything else goes to the hub's home, and so does everything where virtual
- * agents are off, since the Assistant's pages are not found there.
+ * agent, or a session of one, is managed in the Assistant section of the Assistant's settings. Anything else goes to
+ * the hub's home, and so does everything where virtual agents are off, since the Assistant's pages are not found there.
  */
 export function retiredAgentPath(address: AgentAddress, virtualAgents: boolean): string {
   if (!virtualAgents || address.kind === "none") {
     return HUB;
   }
-  return address.kind === "chat" ? `${ASSISTANT}/${encodeURIComponent(address.conversationId)}` : ASSISTANT;
+  return address.kind === "chat" ? `${ASSISTANT}/${encodeURIComponent(address.conversationId)}` : assistantSettingsPath("assistant");
 }
 
 /**

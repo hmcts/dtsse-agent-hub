@@ -8,8 +8,8 @@ import type { ClaudeMdSettings } from "@/web/data";
 
 /**
  * The person's own CLAUDE.md as the Assistant's settings show it: the one stored value `claudeMdSettings` reads, and
- * the one pair of actions the hub's virtual agents page posts to, in the Assistant's own colours. Nothing here is a
- * second place the value lives, and the length and content rules are `credentials/claude-md.ts`'s throughout.
+ * the one pair of actions that write it, `saveClaudeMd` and `resetClaudeMd`. Nothing here is a second place the value
+ * lives, and the length and content rules are `credentials/claude-md.ts`'s throughout.
  */
 export interface AssistantClaudeMd {
   settings: ClaudeMdSettings;

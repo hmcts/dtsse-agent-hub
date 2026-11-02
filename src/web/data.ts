@@ -57,7 +57,7 @@ import type { Identity } from "../users/identity.ts";
 import type { ModelRoute, Viewer } from "../viewer/identity.ts";
 import { availablePlugins, PluginConfigurationError, type PluginOffer, type PluginOption } from "../virtual-agents/plugins.ts";
 import { liveModelRoutes, type VirtualAgentRow } from "../virtual-agents/store.ts";
-import { claudeTokenUsable, neededCredentials, portLinks, type VirtualAgentCard } from "../virtual-agents/views.ts";
+import { claudeTokenUsable, neededCredentials, type PortLink, portLinks } from "../virtual-agents/views.ts";
 import { type AgentAddress, NO_AGENT } from "./home.ts";
 
 /**
@@ -339,8 +339,10 @@ export async function assistantTemplates(viewer: Identity): Promise<SavedTemplat
 }
 
 /** What the settings show and manage of the virtual agent the viewer's Assistant runs on. */
-export type AssistantAgent = Pick<VirtualAgentRow, "id" | "name" | "desired" | "status" | "statusDetail"> &
-  Pick<VirtualAgentCard, "exposedPorts" | "localOnlyPorts">;
+export type AssistantAgent = Pick<VirtualAgentRow, "id" | "name" | "desired" | "status" | "statusDetail"> & {
+  exposedPorts: PortLink[];
+  localOnlyPorts: number[];
+};
 
 /**
  * The viewer's assistant as its settings manage it: its name and where it stands, and the web servers its pod

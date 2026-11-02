@@ -9,11 +9,13 @@ import {
   startConversation
 } from "@/app/_actions/assistant";
 import { deleteAllAssistantFiles, deleteAssistantFile } from "@/app/_actions/assistant-files";
+import { readAssistantAgent, readGitIdentity } from "@/app/_actions/assistant-settings";
 import { clearGitIdentity, removeCredential, resetClaudeMd, saveClaudeMd, saveCredential, saveGitIdentity } from "@/app/_actions/credentials";
 import { saveExportDefaults } from "@/app/_actions/export-defaults";
 import { deleteTemplate, saveTemplate } from "@/app/_actions/templates";
 import { reconnectSignIn, renameVirtualAgent, resizeVirtualAgent, restartVirtualAgent, setVirtualAgentPlugins } from "@/app/_actions/virtual-agents";
 import { connectionsData } from "@/assistant/connections";
+import { savedCredentialsData } from "@/assistant/saved-credentials";
 import { assistantPluginsData } from "@/assistant/settings";
 import { STARTERS } from "@/assistant/starters";
 import { offeredTemplates } from "@/assistant/templates";
@@ -24,14 +26,12 @@ import { AssistantShell, type ConversationActions } from "@/components/assistant
 import { EmptyChat, type EmptyChatActions } from "@/components/assistant/EmptyChat";
 import { requireViewer } from "@/viewer/current";
 import {
-  assistantAgent,
   assistantExportDefaults,
   assistantFiles,
   assistantModel,
   assistantSize,
   assistantTemplates,
   claudeMdSettings,
-  gitIdentitySettings,
   openAssistant,
   unsentNewChat
 } from "@/web/data";
@@ -54,7 +54,7 @@ export default async function AssistantPage() {
   const viewer = await requireViewer();
   const jar = await cookies();
   const theme = themeOf(jar.get(THEME_COOKIE)?.value);
-  const [home, unsent, claudeMd, mine, files, size, defaults, model, agent, git] = await Promise.all([
+  const [home, unsent, claudeMd, mine, files, size, defaults, model] = await Promise.all([
     openAssistant(viewer),
     unsentNewChat(viewer),
     claudeMdSettings(viewer),
@@ -62,9 +62,7 @@ export default async function AssistantPage() {
     assistantFiles(viewer),
     assistantSize(viewer),
     assistantExportDefaults(viewer),
-    assistantModel(viewer),
-    assistantAgent(viewer),
-    gitIdentitySettings(viewer)
+    assistantModel(viewer)
   ]);
   // The same sign-in the conversation page gives the document panel, for the settings' searches.
   const atlassian = {
@@ -90,9 +88,9 @@ export default async function AssistantPage() {
       size={size === undefined ? undefined : { view: size, assistantId: home.assistant.id, save: resizeVirtualAgent }}
       model={model === undefined ? undefined : { ...model, save: saveAssistantModel }}
       exports={{ defaults, save: saveExportDefaults, access: atlassian }}
-      agent={agent === undefined ? undefined : { agent, rename: renameVirtualAgent, restart: restartVirtualAgent }}
-      git={{ settings: git, save: saveGitIdentity, clear: clearGitIdentity }}
-      tokens={{ save: saveCredential, remove: removeCredential }}
+      agent={{ load: readAssistantAgent, rename: renameVirtualAgent, restart: restartVirtualAgent }}
+      git={{ load: readGitIdentity, save: saveGitIdentity, clear: clearGitIdentity }}
+      tokens={{ ...savedCredentialsData(home.credentials, home.assistant.modelRoute), save: saveCredential, remove: removeCredential }}
     >
       {/* No `local` here: this screen is about to start a chat on a pod, so it needs what a pod needs. */}
       <AssistantGate home={home} waiting={jar.get(WAITING_COOKIE)?.value} theme={theme}>

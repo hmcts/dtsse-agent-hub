@@ -25,7 +25,7 @@ import { byCodePoint } from "../../src/topics/slug.ts";
 import { dueEveningStop } from "../../src/virtual-agents/cleanup.ts";
 import { APPLY_FAILURES_BEFORE_FAILED } from "../../src/virtual-agents/lifecycle.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
-import { completeLogin, startLogin, storePastedCode } from "../../src/virtual-agents/logins.ts";
+import { completeLogin, loginViews, startLogin, storePastedCode } from "../../src/virtual-agents/logins.ts";
 import { stopVirtualAgents } from "../../src/virtual-agents/stop.ts";
 import {
   type ClaimedVirtualAgent,
@@ -44,7 +44,7 @@ import {
   type VirtualAgentRow
 } from "../../src/virtual-agents/store.ts";
 import { startVirtualAgentSweep, sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
-import { virtualAgentDetail } from "../../src/virtual-agents/views.ts";
+import { neededCredentials, optionalCredentials } from "../../src/virtual-agents/views.ts";
 import { connect, insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 
@@ -902,7 +902,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     const found = await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/jenkins`, { virtualAgentId: id, kind: "jenkins" });
 
     expect(await jsonOf(found)).toEqual({ value: jenkins });
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.optional).toEqual(["azure", "jenkins", "atlassian"]);
+    expect(optionalCredentials((await row(id)).modelRoute)).toEqual(["azure", "jenkins", "atlassian"]);
   });
 
   it("should give the pod its owner's stored credential, and 404 when there is none", async () => {
@@ -1202,10 +1202,9 @@ describe("logins", () => {
       await listener.end();
     }
     expect((await row(id)).status).toBe("awaiting_login");
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.logins).toEqual([
+    expect(await loginViews(prisma, id)).toEqual([
       expect.objectContaining({ kind: "github", prompt: "device_code", userCode: "ABCD-1234", state: "pending", codeWaitingUntil: null })
     ]);
-    expect(await virtualAgentDetail(prisma, BOB.oid, id)).toBeUndefined();
   });
 
   it("should hand a pasted code to the pod exactly once, keeping it sealed until then", async () => {
@@ -1220,7 +1219,7 @@ describe("logins", () => {
     });
     const sealed = await prisma.virtualAgentLogin.findFirstOrThrow();
     expect(Buffer.from(sealed.pastedCodeCiphertext!).toString("utf8")).not.toContain("pasted#code-123");
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.logins[0]?.codeWaitingUntil).not.toBeNull();
+    expect((await loginViews(prisma, id))[0]?.codeWaitingUntil).not.toBeNull();
 
     const first = await fetchCode(id, token, "claude");
     expect(first.status).toBe(200);
@@ -1422,7 +1421,7 @@ describe("logins", () => {
     await relayAtlassian(id, token);
     await failed(id, token, "atlassian", { state: "expired", detail: "atlassian: the sign-in code ran out before it was used" });
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.logins).toEqual([expect.objectContaining({ kind: "atlassian", state: "expired" })]);
+    expect(await loginViews(prisma, id)).toEqual([expect.objectContaining({ kind: "atlassian", state: "expired" })]);
   });
 
   it("should tell the owner's UI about a sign-in the pod gave up on", async () => {
@@ -1770,7 +1769,6 @@ describe("sweepVirtualAgents", () => {
     // The stop clears status_detail and the orchestrator's observation of the stopped set would too, so the owner
     // reads the failure off stop_detail from here on.
     expect(stopped.statusDetail).toBeNull();
-    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.card).toMatchObject({ stopDetail: detail });
   });
 
   it("should leave a failed agent alone while its owner still has time to read the failure", async () => {
@@ -1876,25 +1874,16 @@ describe("the web UI's reads and actions", () => {
     await expect(create(ALICE, "one-more")).rejects.toMatchObject({ message: expect.stringContaining(`${MAX_VIRTUAL_AGENTS_PER_USER} virtual agents`) });
   });
 
-  it("should give the owner alone what their virtual agent needs and can use", async () => {
-    const { id } = await started(ALICE, "pcs-api");
-    await create(BOB, "bobs");
-
-    expect(await virtualAgentDetail(prisma, ALICE.oid, id)).toMatchObject({ needed: ["github", "azure"], optional: ["jenkins", "atlassian"] });
-    expect(await virtualAgentDetail(prisma, BOB.oid, id)).toBeUndefined();
-    expect(await virtualAgentDetail(prisma, ALICE.oid, "not-a-uuid")).toBeUndefined();
-  });
-
   it("should need the owner's Azure sign-in and no Claude token when the agent is on the gateway route", async () => {
     const agent = await create(ALICE, "pcs-api", "gateway");
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "azure"]);
+    expect(neededCredentials(agent.modelRoute)).toEqual(["github", "azure"]);
   });
 
   it("should need a Claude token and no Azure sign-in when the agent is on its owner's own licence", async () => {
     const agent = await create(ALICE, "pcs-api", "own-licence");
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, agent.id))?.needed).toEqual(["github", "claude"]);
+    expect(neededCredentials(agent.modelRoute)).toEqual(["github", "claude"]);
   });
 });
 
@@ -2466,11 +2455,12 @@ describe("PUT /api/virtual/{id}/ports", () => {
     const agent = await row(id);
     expect((await ports(id, token, { ports: [5173], local_only: [9229] })).status).toBe(204);
 
-    expect((await virtualAgentDetail(prisma, ALICE.oid, id))?.card).toMatchObject({
+    expect(await assistantAgent({ ...ALICE, tid: "dev", modelRoute: "gateway" })).toMatchObject({
       exposedPorts: [{ port: 5173, url: `https://${agent.statefulsetName}-5173.example.net` }],
       localOnlyPorts: [9229]
     });
-    expect(await virtualAgentDetail(prisma, BOB.oid, id)).toBeUndefined();
+    await insertUser(BOB);
+    expect(await assistantAgent({ ...BOB, tid: "dev", modelRoute: "gateway" })).toBeUndefined();
   });
 
   it("should refuse an unservable port list in the database too, whatever writes it", async () => {
@@ -2512,23 +2502,23 @@ describe("/hub/agents/{id}", () => {
     return { digest: expect.stringContaining(`;${path};`) };
   }
 
-  it("should send the owner to the Assistant when a virtual agent's id is visited, before or after a session registers", async () => {
+  it("should send the owner to the Assistant's settings when a virtual agent's id is visited, before or after a session registers", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
     actAs("alice");
 
-    await expect(visit(id)).rejects.toMatchObject(redirectedTo("/assistant"));
+    await expect(visit(id)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
     await jsonOf(await register(token, "va-session-1"));
-    await expect(visit(id)).rejects.toMatchObject(redirectedTo("/assistant"));
+    await expect(visit(id)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
   });
 
-  it("should send the owner to the Assistant when a session a virtual agent registered is visited, including one a /clear superseded", async () => {
+  it("should send the owner to the Assistant's settings when a session a virtual agent registered is visited, including one a /clear superseded", async () => {
     const { token } = await started(ALICE, "pcs-api");
     const first = (await jsonOf(await register(token, "va-session-1"))).agent_id;
     const second = (await jsonOf(await register(token, "va-session-2"))).agent_id;
     actAs("alice");
 
-    await expect(visit(first)).rejects.toMatchObject(redirectedTo("/assistant"));
-    await expect(visit(second)).rejects.toMatchObject(redirectedTo("/assistant"));
+    await expect(visit(first)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
+    await expect(visit(second)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
   });
 
   it("should send the owner to the hub's home when a laptop agent with no chat is visited", async () => {

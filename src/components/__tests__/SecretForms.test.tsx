@@ -6,7 +6,7 @@ import { join, relative } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { checklistState, connections } from "@/assistant/connections";
+import { savedCredentials } from "@/assistant/saved-credentials";
 import { ActionForm } from "@/components/ActionForm";
 import { ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { TokenSettings } from "@/components/assistant/TokenSettings";
@@ -19,7 +19,6 @@ afterEach(() => {
   cleanup();
 });
 
-const NOW = Date.parse("2026-10-05T12:00:00.000Z");
 const SECRET_NAMES = new Set(["value", "code", "token", "password", "secret"]);
 
 function ok() {
@@ -89,24 +88,16 @@ describe("a form carrying a credential", () => {
     expect(nativeSubmitUrl(form)).toBe("https://agent-hub.example/assistant");
   });
 
-  it("should post the token forms in the Assistant's settings, with the value hidden, when each is opened", () => {
-    const list = connections(
-      {
-        route: "own-licence",
-        kinds: ["github", "claude", "jenkins"],
-        statuses: [stored("github"), stored("claude"), missing("jenkins")],
-        logins: [],
-        unavailable: null
-      },
-      checklistState,
-      NOW
-    );
-    const { container } = render(<TokenSettings list={list} tokens={{ save: ok(), remove: ok() }} />);
+  it("should post every paste form in the Assistant's settings, with the value hidden, when each is opened", () => {
+    const rows = savedCredentials([stored("github"), stored("claude"), missing("jenkins")], "own-licence", true);
+    const { container } = render(<TokenSettings tokens={{ rows, unavailable: null, save: ok(), remove: ok() }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Replace your GitHub token" }));
     fireEvent.click(screen.getByRole("button", { name: "Replace your Claude token" }));
     fireEvent.click(screen.getByRole("button", { name: "Add your Jenkins API token" }));
     fill(container);
 
     expect([...container.querySelectorAll("form")].filter(carriesSecret).map((form) => form.getAttribute("aria-label"))).toEqual([
+      "Save your GitHub token",
       "Save your Claude token",
       "Save your Jenkins API token"
     ]);
@@ -118,8 +109,8 @@ describe("a form carrying a credential", () => {
   });
 
   it("should post the remove form in the Assistant's settings", () => {
-    const list = connections({ route: "own-licence", kinds: ["claude"], statuses: [stored("claude")], logins: [], unavailable: null }, checklistState, NOW);
-    const { container } = render(<TokenSettings list={list} tokens={{ save: ok(), remove: ok() }} />);
+    const rows = savedCredentials([stored("claude")], "own-licence", true);
+    const { container } = render(<TokenSettings tokens={{ rows, unavailable: null, save: ok(), remove: ok() }} />);
     fireEvent.click(screen.getByRole("button", { name: "Remove your Claude token" }));
 
     expect(screen.getByRole("form", { name: "Remove your Claude token" })).toBeTruthy();

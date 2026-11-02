@@ -4,11 +4,11 @@ import { asPersona, chatPersona, connectForChat } from "./hub";
 const ASSISTANT_OFF = "the Assistant runs on a virtual agent, which is off on this deployment";
 
 /**
- * A person's credentials, in the Assistant's settings. `/hub/settings/credentials`, which the published client's pod
- * boot messages still print, lands on the Connections section; `routes.spec.ts` checks the redirect itself.
+ * A person's credentials, in the Assistant's settings. `/hub/settings/credentials`, where the published client's pod
+ * boot messages send people to paste a GitHub token, lands on the Credentials section; `routes.spec.ts` checks the redirect itself.
  */
 test.describe("credentials @smoke", () => {
-  test("should open the Assistant's settings at Connections from the old credentials address @smoke @regression", async ({ browser, baseURL, request }) => {
+  test("should open the Assistant's settings at Credentials from the old credentials address @smoke @regression", async ({ browser, baseURL, request }) => {
     const persona = chatPersona("credentials");
     await connectForChat(request, persona);
     const context = await asPersona(browser, persona, baseURL!);
@@ -18,7 +18,7 @@ test.describe("credentials @smoke", () => {
       test.skip(new URL(page.url()).pathname === "/hub", ASSISTANT_OFF);
       expect(response?.status()).toBe(200);
 
-      await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Connections" })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("heading", { name: "Credentials" })).toBeVisible();
       expect(new URL(page.url()).search).toBe("");
     } finally {
       await context.close();
@@ -31,11 +31,11 @@ test.describe("credentials @smoke", () => {
     const context = await asPersona(browser, persona, baseURL!);
     try {
       const page = await context.newPage();
-      const response = await page.goto("/assistant?settings=tokens");
+      const response = await page.goto("/assistant?settings=credentials");
       test.skip(response?.status() === 404, ASSISTANT_OFF);
       const dialog = page.getByRole("dialog", { name: "Settings" });
       // Previews and the -staging release have sign-in off, so credentials are unavailable there.
-      test.skip((await dialog.getByRole("heading", { name: "Tokens" }).count()) === 0, "this deployment cannot store a development identity's credentials");
+      test.skip(await dialog.getByText(/Your credentials cannot be shown/).isVisible(), "this deployment cannot store a development identity's credentials");
 
       const token = `sk-ant-oat-${persona.replaceAll("-", "")}${"a".repeat(24)}`;
       await dialog.getByRole("button", { name: "Replace your Claude token" }).click();

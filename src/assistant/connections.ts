@@ -124,9 +124,7 @@ export function checklistState(stored: boolean, login: LoginView | undefined, no
 }
 
 /**
- * Each state in the Assistant's words, for its connection rows and its settings dialog. The hub's own agent page
- * words the same states differently, in `SIGN_IN_DETAIL`, because its cards are the owner's view of one agent's
- * credentials rather than a person's view of their sign-ins: there "waiting" means waiting for the agent to ask.
+ * Each state in the Assistant's words, for its connection rows and its settings dialog: the only wording of them.
  */
 export const CONNECTION_DETAILS: Record<ConnectionState, string> = {
   connected: "Connected",

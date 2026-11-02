@@ -30,7 +30,7 @@ import { PortSettings } from "@/components/assistant/PortSettings";
 import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
-import { type AssistantTokens, pastedTokens, TokenSettings } from "@/components/assistant/TokenSettings";
+import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
 import { SETTINGS_PARAMETER } from "@/web/home";
 
 /**
@@ -365,11 +365,11 @@ const SECTIONS: readonly SettingsSection[] = [
     panel: (view) => <Connections list={view.list} access={view.access} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
   },
   {
-    id: "tokens",
-    label: "Tokens",
+    id: "credentials",
+    label: "Credentials",
     group: "General",
-    shown: (view) => view.tokens !== undefined && pastedTokens(view.list).length > 0,
-    panel: (view) => (view.tokens === undefined ? null : <TokenSettings list={view.list} tokens={view.tokens} />)
+    shown: (view) => view.tokens !== undefined && (view.tokens.rows.length > 0 || view.tokens.unavailable !== null),
+    panel: (view) => (view.tokens === undefined ? null : <TokenSettings tokens={view.tokens} />)
   },
   {
     id: "templates",
@@ -438,7 +438,7 @@ const SECTIONS: readonly SettingsSection[] = [
     label: "Web servers",
     group: "Agent",
     shown: (view) => view.agent !== undefined,
-    panel: (view) => (view.agent === undefined ? null : <PortSettings agent={view.agent.agent} />)
+    panel: (view) => (view.agent === undefined ? null : <PortSettings load={view.agent.load} />)
   },
   {
     id: "files",
