@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { LookupAnswer } from "../api.ts";
+import type { LookupAnswer } from "../wire.ts";
 import {
   confluenceCql,
   createLookupRunner,

@@ -52,7 +52,7 @@ export const MIN_INTERVAL_S = 1;
 
 /**
  * The hub's own bounds on a relayed sign-in, from `src/virtual-agents/schemas.ts` — written out again here,
- * as `api.ts` writes out every other shape, because this package is published on its own and may not reach
+ * as `wire.ts` writes out every other shape, because this package is published on its own and may not reach
  * into the service's module graph.
  *
  * They are applied to the answer before any of it is sent, because the hub **rejects** rather than truncates

@@ -10,7 +10,8 @@ import fs from "node:fs";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
 import { podSecrets } from "../__fixtures__/pod-shims.ts";
-import { ApiError, CREDENTIAL_KINDS, createApi } from "../api.ts";
+import { ApiError, createApi } from "../api.ts";
+import { CREDENTIAL_KINDS } from "../wire.ts";
 import { isCredentialKind, OWNER_READABLE, readStdinText, requireCredentialKind, runCredentialCommand } from "./credentials.ts";
 import { EXIT_NO_CREDENTIAL } from "./phases.ts";
 

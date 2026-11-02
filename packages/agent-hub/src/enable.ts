@@ -4,7 +4,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { autoTopics, ensureBridge, type RegisteredAgent, registerAgent } from "./agent.ts";
-import { type Api, createApi, requireAzureLogin } from "./api.ts";
+import { type Api, createApi } from "./api.ts";
+import { requireAzureLogin } from "./az-token.ts";
 import type { Env } from "./env.ts";
 import {
   acquirePidFile,

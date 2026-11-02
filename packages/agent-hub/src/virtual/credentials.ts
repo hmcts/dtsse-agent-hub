@@ -1,9 +1,10 @@
 // The credential store as a pod sees it. A virtual agent reads and writes its owner's credentials through the
 // `/api/virtual/{id}/credentials/{kind}` routes, which its launch token may use for its own agent alone.
 import fs from "node:fs";
-import type { Api, CredentialKind } from "../api.ts";
-import { CREDENTIAL_KINDS } from "../api.ts";
+import type { Api } from "../api.ts";
 import { withRetry } from "../retry.ts";
+import type { CredentialKind } from "../wire.ts";
+import { CREDENTIAL_KINDS } from "../wire.ts";
 import { EXIT_NO_CREDENTIAL } from "./phases.ts";
 
 /** The kinds agent-hub gives back to their owner, not only to the owner's virtual agents. */

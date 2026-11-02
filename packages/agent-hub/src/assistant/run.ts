@@ -2,10 +2,10 @@
 // supervisor, and tick it so idle sessions stop and queued ones start. Reconnects as the bridge does, because the
 // stream is framed as the agent stream and ends the same way.
 import type { Api } from "../api.ts";
-import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../bridge.ts";
+import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../reconnect.ts";
 import { createSseParser, type SseEvent } from "../sse.ts";
 import { atlassianLogin } from "../virtual/atlassian.ts";
-import { run } from "../virtual/sign-in.ts";
+import { run } from "../virtual/process.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
 import { createLookupRunner, type LookupDeps, type Run } from "./lookups.ts";

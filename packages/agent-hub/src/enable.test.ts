@@ -11,7 +11,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub } from "./__fixtures__/mock-hub.ts";
-import type { Api, TopicListResponse } from "./api.ts";
+import type { Api } from "./api.ts";
 import { createApi } from "./api.ts";
 import {
   AUTO_ENABLE_RETRY_MS,
@@ -26,6 +26,7 @@ import {
 } from "./enable.ts";
 import type { Env } from "./env.ts";
 import { NO_MESSAGING_TOKEN } from "./socket.ts";
+import type { TopicListResponse } from "./wire.ts";
 
 const DEAD_PID = 999999999;
 const ON: Env = { AGENT_HUB_AUTO_ENABLE: "true" };

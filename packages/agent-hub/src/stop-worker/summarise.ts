@@ -1,9 +1,9 @@
 // What the summariser asks Haiku for, and what it will accept back. The topic taxonomy in the prompt is
 // cft-workspace's layout, the same one `agent.ts` reads paths against; the two are changed together.
 import { TOPIC_RE } from "../agent.ts";
-import type { Message } from "../api.ts";
 import { CLI } from "../envelope.ts";
 import { MAX_POST_TOPICS } from "../limits.ts";
+import type { Message } from "../wire.ts";
 import type { CandidateTopics } from "./candidates.ts";
 
 const FEED_BODY_CHARS = 1500;

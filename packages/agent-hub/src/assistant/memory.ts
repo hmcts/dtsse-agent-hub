@@ -5,7 +5,7 @@
 // the part of the charge that cannot be reclaimed to stay under it, are only in the cgroup.
 import nodeFs from "node:fs";
 import path from "node:path";
-import type { MemoryReportBody } from "../api.ts";
+import type { MemoryReportBody } from "../wire.ts";
 
 /** Where cgroup v2 mounts in a pod. The container's own files are at the root of it: it is namespaced. */
 export const CGROUP_ROOT = "/sys/fs/cgroup";

@@ -3,18 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
-import {
-  type Api,
-  ApiError,
-  createApi,
-  createTokenProvider,
-  DEFAULT_SCOPE,
-  DEFAULT_URL,
-  isMissingRoute,
-  parseAzToken,
-  type RunAz,
-  requireAzureLogin
-} from "./api.ts";
+import { type Api, ApiError, createApi, DEFAULT_URL, isMissingRoute } from "./api.ts";
+import { createTokenProvider, DEFAULT_SCOPE, parseAzToken, type RunAz, requireAzureLogin } from "./az-token.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 
 const VID = "0f8a6a1e-1234-4000-8000-00000000000a";

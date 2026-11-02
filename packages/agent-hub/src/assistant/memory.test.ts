@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { MemoryReportBody } from "../api.ts";
+import type { MemoryReportBody } from "../wire.ts";
 import { CGROUP_ROOT, type MemoryFs, measureMemory, reportMemory } from "./memory.ts";
 
 const roots: string[] = [];

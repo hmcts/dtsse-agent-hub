@@ -25,7 +25,7 @@ export type Listening = {
   local: number[];
 };
 
-// The body of `PUT /api/virtual/{id}/ports`. It lives here rather than in `api.ts` because this is the
+// The body of `PUT /api/virtual/{id}/ports`. It lives here rather than in `wire.ts` because this is the
 // feature that decides what goes in it.
 export type PortsReport = {
   ports: number[];

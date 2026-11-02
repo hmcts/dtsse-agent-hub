@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { WelshAnswer } from "../api.ts";
+import type { WelshAnswer } from "../wire.ts";
 import { createWelshRunner, failureDetail, parseWelshFrame, runWelsh, signInNeeded, type WelshDeps, welshArgs, welshOutputs, welshPaths } from "./welsh.ts";
 
 const JOB = "0f8fad5b-d9cb-469f-a165-70867728950e";

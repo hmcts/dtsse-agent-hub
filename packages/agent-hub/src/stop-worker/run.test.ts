@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "../__fixtures__/claude-home.ts";
-import type { FeedResponse, Message, RegisterResponse, TopicListResponse, TopicsResponse } from "../api.ts";
 import { CLIENT_FEATURES } from "../features.ts";
 import { HELD_NOTES, type HeldNote } from "../held-notes.ts";
 import { DEFAULT_CONFIG, readJson, statePath, writeJson } from "../session.ts";
+import type { FeedResponse, Message, RegisterResponse, TopicListResponse, TopicsResponse } from "../wire.ts";
 import { decide, parseCursors, type RunStopWorkerOptions, runStopWorker, type StopWorkerApi } from "./run.ts";
 
 const SID = "sess-stop-worker";

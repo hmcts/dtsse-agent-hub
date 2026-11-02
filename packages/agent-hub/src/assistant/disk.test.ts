@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { UploadsReportBody } from "../api.ts";
+import type { UploadsReportBody } from "../wire.ts";
 import { attachmentPath } from "./attachments.ts";
 import { type DiskFs, MAX_REPORTED_FILES, measureUploads, reportUploads, uploadIdOf } from "./disk.ts";
 

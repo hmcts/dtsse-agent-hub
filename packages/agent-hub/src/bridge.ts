@@ -6,21 +6,14 @@ import fs from "node:fs";
 import { loadAgent, registerAgent, type StoredAgent } from "./agent.ts";
 import { type Api, ApiError, createApi } from "./api.ts";
 import { fetchAttachments, readAttachments, unfetchedAttachments } from "./assistant/attachments.ts";
-import { parseModel, switchModel } from "./assistant/models.ts";
+import { switchModel } from "./assistant/models.ts";
 import { createTmux, type Tmux } from "./assistant/tmux.ts";
 import { peerOf, recordDirect } from "./directs.ts";
 import type { Env } from "./env.ts";
-import {
-  type AssistantFrame,
-  type AssistantProduct,
-  type AttachmentOutcome,
-  type ConfluenceExportFrame,
-  chooseEnvelope,
-  type JiraExportFrame,
-  routeDelivery,
-  type SessionKind
-} from "./envelope.ts";
+import { type AssistantFrame, type AttachmentOutcome, chooseEnvelope, routeDelivery, type SessionKind } from "./envelope.ts";
+import { asRecord, parseAssistantFrame, parseAssistantProduct, parseDirectEventMessage } from "./frames.ts";
 import { describeInbound, type InboundOptions, type InboundResult, inboundAccepted, inboundFix } from "./inbound.ts";
+import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "./reconnect.ts";
 import { acquirePidFile, conversationId, isEnabled, log, pidAlive, readJson, readText, releasePidFile, sessionInfo, statePath, writeJson } from "./session.ts";
 import { collectSkills, type SkillListing, skillsHash } from "./skills.ts";
 import { deliverToSocket, NO_MESSAGING_TOKEN } from "./socket.ts";
@@ -28,53 +21,8 @@ import { createSseParser, type SseEvent } from "./sse.ts";
 import { createTranscriptSync, type TranscriptSync, transcriptOff } from "./transcript-sync.ts";
 import { virtualAgent } from "./virtual-agent.ts";
 
-const MIN_BACKOFF_MS = 1000;
-const MAX_BACKOFF_MS = 60000;
-// The service ends every stream within about 25s and the client reconnects at once. A stream that
-// ends this soon after opening, this many times running, is a server that cannot hold one, so back off.
-export const RAPID_CLOSE_MS = 2000;
-export const RAPID_CLOSES_BEFORE_BACKOFF = 3;
 // Acked ids are remembered so a replay that races the ack is not written to the inbox twice.
 const DELIVERED_MEMORY = 1000;
-
-export function nextBackoff(current: number): number {
-  return Math.min(MAX_BACKOFF_MS, current ? current * 2 : MIN_BACKOFF_MS);
-}
-
-/** How the last stream ended, as `reconnectDelay` reads it. */
-export type StreamEnd = {
-  clean: boolean;
-  lastedMs: number;
-};
-
-export type RetryState = {
-  backoff?: number;
-  rapidCloses?: number;
-};
-
-export type ReconnectDecision = {
-  delay: number;
-  backoff: number;
-  rapidCloses: number;
-};
-
-// How long to wait before the next connection. `clean` is a stream that ended without an error,
-// with or without a `reconnect` event; `lastedMs` is how long it was open.
-export function reconnectDelay({ backoff = 0, rapidCloses = 0 }: RetryState = {}, { clean, lastedMs }: StreamEnd): ReconnectDecision {
-  if (!clean) {
-    const next = nextBackoff(lastedMs > 60000 ? 0 : backoff);
-    return { delay: next, backoff: next, rapidCloses: 0 };
-  }
-  if (lastedMs >= RAPID_CLOSE_MS) {
-    return { delay: 0, backoff: 0, rapidCloses: 0 };
-  }
-  const rapid = rapidCloses + 1;
-  if (rapid < RAPID_CLOSES_BEFORE_BACKOFF) {
-    return { delay: 0, backoff: 0, rapidCloses: rapid };
-  }
-  const next = nextBackoff(backoff);
-  return { delay: next, backoff: next, rapidCloses: rapid };
-}
 
 export function readStatus(sid: string): "busy" | "idle" {
   return readText(statePath(sid, "status")) === "busy" ? "busy" : "idle";
@@ -83,176 +31,12 @@ export function readStatus(sid: string): "busy" | "idle" {
 // The product area of the last message delivered to an assistant conversation, to tell the session when it changes.
 const productPath = (sid: string) => statePath(sid, "assistant-product.json");
 
-// Structural, and every field optional: it is the shape both `directs` and `envelope` read, so a message
-// narrowed here fits either without this module choosing one of their author types over the other.
-export type DirectEventAuthor = {
-  type?: string;
-  agent_id?: string | null;
-  agent_name?: string | null;
-  owner_name?: string | null;
-  owner_email?: string | null;
-};
-
-/** Exactly the fields of a `direct` event's message that the bridge, the envelopes and `directs` read. */
-export type DirectEventMessage = {
-  id: string;
-  /**
-   * `direct` for a message written to this agent, `post` for a board post that tagged it. The two arrive in the same
-   * frame, so this is what tells them apart and picks the envelope; absent from no hub that has ever sent one, but
-   * optional because the stream is untrusted input.
-   */
-  kind?: string;
-  title?: string | null;
-  topics?: string[];
-  body: string;
-  in_reply_to?: string | null;
-  created_at?: string;
-  author?: DirectEventAuthor;
-};
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function asOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function asNullableString(value: unknown): string | null | undefined {
-  return typeof value === "string" ? value : value === null ? null : undefined;
-}
-
-function parseAuthor(value: unknown): DirectEventAuthor | undefined {
-  const raw = asRecord(value);
-  if (!raw) {
-    return undefined;
-  }
-  return {
-    type: asOptionalString(raw.type),
-    agent_id: asNullableString(raw.agent_id),
-    agent_name: asNullableString(raw.agent_name),
-    owner_name: asNullableString(raw.owner_name),
-    owner_email: asNullableString(raw.owner_email)
-  };
-}
-
-/**
- * The message on a `direct` stream event, or null when there is none to deliver. The stream is untrusted
- * input and may come from a hub older or newer than this client, so a missing body is delivered as an empty
- * one rather than dropped: a message the bridge drops is never acked, and the hub replays it for ever.
- */
-export function parseDirectEventMessage(value: unknown): DirectEventMessage | null {
-  const raw = asRecord(value);
-  if (!raw) {
-    return null;
-  }
-  const id = typeof raw.id === "string" ? raw.id : typeof raw.id === "number" ? String(raw.id) : "";
-  if (!id) {
-    return null;
-  }
-  return {
-    id,
-    kind: asOptionalString(raw.kind),
-    title: asNullableString(raw.title),
-    topics: Array.isArray(raw.topics) ? raw.topics.filter((topic): topic is string => typeof topic === "string") : undefined,
-    body: typeof raw.body === "string" ? raw.body : "",
-    in_reply_to: asNullableString(raw.in_reply_to),
-    created_at: asOptionalString(raw.created_at),
-    author: parseAuthor(raw.author)
-  };
-}
-
 /** Where this session runs, for `routeDelivery`: a conversation's id is set only by a pod's supervisor. */
 export function sessionKind(env: Env): SessionKind {
   if (conversationId(env) !== null) {
     return "conversation";
   }
   return virtualAgent(env) !== null ? "pod" : "laptop";
-}
-
-/**
- * The `assistant` object on a `direct` frame, or null when the frame carries none. Every field the envelope and
- * the recorded product read is listed here, so a hub that sends one this client does not know about is the only
- * way a field goes missing.
- */
-export function parseAssistantFrame(value: unknown): AssistantFrame | null {
-  const raw = asRecord(value);
-  if (!raw) {
-    return null;
-  }
-  return {
-    conversation_id: asOptionalString(raw.conversation_id),
-    product: asNullableString(raw.product),
-    product_label: asNullableString(raw.product_label),
-    model: parseModel(raw.model),
-    artefact_version: typeof raw.artefact_version === "number" ? raw.artefact_version : null,
-    artefact_updated_by: asNullableString(raw.artefact_updated_by),
-    jira_export: parseJiraExportFrame(raw.jira_export),
-    confluence_export: parseConfluenceExportFrame(raw.confluence_export),
-    // Left as it came: `readAttachments`, at the point of delivery, is what decides which entries this client will
-    // fetch and what the envelope says about the rest, so checking them here would only do it twice.
-    attachments: raw.attachments
-  };
-}
-
-const EXPORT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
-const WORD_RE = /^[A-Za-z0-9_-]{1,64}$/;
-
-/**
- * A pending Jira export on the frame, or null. Its values go into the `jira export` command the session is told to run, so
- * anything but an id, a project key and plain words is dropped rather than passed on.
- */
-export function parseJiraExportFrame(value: unknown): JiraExportFrame | null {
-  const raw = asRecord(value);
-  if (
-    !raw ||
-    typeof raw.export_id !== "string" ||
-    !EXPORT_ID_RE.test(raw.export_id) ||
-    typeof raw.project !== "string" ||
-    !PROJECT_RE.test(raw.project) ||
-    typeof raw.issue_type !== "string" ||
-    !WORD_RE.test(raw.issue_type) ||
-    !Array.isArray(raw.labels) ||
-    !raw.labels.every((label) => typeof label === "string" && WORD_RE.test(label))
-  ) {
-    return null;
-  }
-  return { export_id: raw.export_id, project: raw.project, issue_type: raw.issue_type, labels: raw.labels as string[] };
-}
-
-const NUMERIC_ID_RE = /^[0-9]{1,20}$/;
-
-/**
- * A pending Confluence export on the frame, or null. Its values go into the `confluence export` command the session is
- * told to run, so anything but an id and two numeric ids is dropped rather than passed on.
- */
-export function parseConfluenceExportFrame(value: unknown): ConfluenceExportFrame | null {
-  const raw = asRecord(value);
-  if (
-    !raw ||
-    typeof raw.export_id !== "string" ||
-    !EXPORT_ID_RE.test(raw.export_id) ||
-    typeof raw.space_id !== "string" ||
-    !NUMERIC_ID_RE.test(raw.space_id) ||
-    typeof raw.parent_id !== "string" ||
-    !NUMERIC_ID_RE.test(raw.parent_id)
-  ) {
-    return null;
-  }
-  return { export_id: raw.export_id, space_id: raw.space_id, parent_id: raw.parent_id };
-}
-
-/** The recorded product of the last delivery, which only this module writes; null for anything else. */
-export function parseAssistantProduct(value: unknown): AssistantProduct | null {
-  const raw = asRecord(value);
-  if (!raw) {
-    return null;
-  }
-  return {
-    product: typeof raw.product === "string" ? raw.product : null,
-    product_label: typeof raw.product_label === "string" ? raw.product_label : null
-  };
 }
 
 /** `deliverToSocket`, or a test's stand-in for it. */

@@ -5,13 +5,14 @@
 // "Jira export" under Conversations in dtsse-agent-hub's docs/agent-api.md.
 import fs from "node:fs";
 import path from "node:path";
-import type { Api, Artefact, JiraExportReport } from "./api.ts";
+import type { Api } from "./api.ts";
 import type { Env } from "./env.ts";
 import { withRetry } from "./retry.ts";
 import { hubHome, readJson, writeJson } from "./session.ts";
 import { claimExport, releaseExport, twgFailureLine, twgSignInProblem } from "./twg-export.ts";
 import type { AtlassianLoginResult } from "./virtual/atlassian.ts";
-import type { RunResult } from "./virtual/sign-in.ts";
+import type { RunResult } from "./virtual/process.ts";
+import type { Artefact, JiraExportReport } from "./wire.ts";
 
 export const EXPORT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]{1,9}-\d{1,9}$/;

@@ -2,7 +2,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Artefact, JiraExportReport } from "./api.ts";
 import {
   type JiraExportDeps,
   type JiraExportRequest,
@@ -14,7 +13,8 @@ import {
   twgFailure
 } from "./jira-export.ts";
 import type { AtlassianLoginResult } from "./virtual/atlassian.ts";
-import type { RunResult } from "./virtual/sign-in.ts";
+import type { RunResult } from "./virtual/process.ts";
+import type { Artefact, JiraExportReport } from "./wire.ts";
 
 const EXPORT = "5b0e7c1a-1111-4222-8333-444455556666";
 const REQUEST: JiraExportRequest = { exportId: EXPORT, project: "VIBE", issueType: "Story", labels: ["hmcts-assistant"] };

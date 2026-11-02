@@ -20,31 +20,13 @@ import {
 import { type Api, ApiError, createApi } from "../api.ts";
 import { jiraExportSignInBudget } from "./atlassian.ts";
 import { packAzureCache, pruneMsalCache, unpackAzureCache } from "./azure-cache.ts";
+import { azureLogin, parseAzDeviceCode } from "./azure-login.ts";
+import { claudeLogin, findClaudeToken, parseClaudeAuthorizeUrl } from "./claude-login.ts";
+import { EXPIRY_TOLERANCE_S, type RelayDeviceLoginResult, relayDeviceLogin } from "./device-relay.ts";
 import { MAX_DETAIL_CHARS, MAX_URI_CHARS, MAX_USER_CODE_CHARS, RELAY_WORDING_CHARS } from "./github-device-flow.ts";
+import { GITHUB_SIGN_IN_CODES, GITHUB_SIGN_IN_GAP_MS, type GithubLoginOptions, githubLogin, githubLoginStatus, githubSignInGapMs } from "./github-login.ts";
 import { FatalError } from "./phases.ts";
-import {
-  azureLogin,
-  claudeLogin,
-  EXPIRY_TOLERANCE_S,
-  findClaudeToken,
-  GITHUB_SIGN_IN_CODES,
-  GITHUB_SIGN_IN_GAP_MS,
-  type GithubLoginOptions,
-  githubLogin,
-  githubLoginStatus,
-  githubSignInGapMs,
-  OUTPUT_TAIL_CHARS,
-  outputTail,
-  parseAzDeviceCode,
-  parseClaudeAuthorizeUrl,
-  REDACTED,
-  type RelayDeviceLoginResult,
-  redactTokens,
-  relayDeviceLogin,
-  run,
-  SIGKILL_AFTER_MS,
-  stripAnsi
-} from "./sign-in.ts";
+import { OUTPUT_TAIL_CHARS, outputTail, REDACTED, redactTokens, run, SIGKILL_AFTER_MS, stripAnsi } from "./process.ts";
 
 const VID = "va-sign-in";
 const OWNER = { oid: "oid-owner", name: "Olive Owner", email: "olive@example.com" };

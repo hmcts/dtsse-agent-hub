@@ -6,9 +6,10 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Api, WelshAnswer } from "../api.ts";
+import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
+import type { WelshAnswer } from "../wire.ts";
 import type { Run } from "./lookups.ts";
 
 export const WELSH_KINDS = [

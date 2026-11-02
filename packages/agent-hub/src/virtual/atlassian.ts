@@ -14,8 +14,9 @@ import type { RetryOptions } from "../retry.ts";
 import { withRetry } from "../retry.ts";
 import { readText, sha256 } from "../session.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
+import { type Respond, relayDeviceLogin } from "./device-relay.ts";
 import { say, virtualStateDir } from "./phases.ts";
-import { childEnv, type Respond, type RunResult, relayDeviceLogin, run, SIGKILL_AFTER_MS, stripAnsi } from "./sign-in.ts";
+import { childEnv, type RunResult, run, SIGKILL_AFTER_MS, stripAnsi } from "./process.ts";
 
 export const ATLASSIAN_AUTH_MAX_CHARS = 24000;
 /**
