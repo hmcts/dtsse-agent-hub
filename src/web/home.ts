@@ -4,18 +4,13 @@
  * the secret-in-query guard decides whether a pasted secret reaches a `Location` header.
  */
 
-import { MAX_EXPOSED_PORT, MIN_EXPOSED_PORT } from "../virtual-agents/ports.ts";
+import { isUuid } from "../agents/ids.ts";
+import { PORT_TICKETS, portOf } from "../port-viewer/paths.ts";
 
 /** The hub's own pages all sit under this prefix, so `/` is free for the default UI. */
 const HUB = "/hub";
 
 const ASSISTANT = "/assistant";
-
-/**
- * The viewer's ticket route, `/assistant/ports/{virtual agent id}/{port}`: the id then the port, as in the port's own
- * prefix on the viewer's host. Under the Assistant, whose settings are where a person opens their web servers.
- */
-export const PORT_TICKETS = `${ASSISTANT}/ports`;
 
 /** Where a person manages who may read or fork their conversations, the only access one person gives another. */
 const SHARED_CHATS = `${ASSISTANT}/shared`;
@@ -56,8 +51,8 @@ export function assistantSettingsPath(section: string): string {
 /** Anything under the viewer's ticket route as it was, `/virtual/{id}/ports`, under `/hub` or bare. */
 const OLD_PORT_TICKET = /^(?:\/hub)?\/virtual\/[^/]+\/ports(?:\/|$)/;
 
-/** The one shape of it that named a ticket: a virtual agent's id and a port a pod can report, and nothing after. */
-const OLD_PORT_TICKET_EXACT = /^(?:\/hub)?\/virtual\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/ports\/([1-9]\d{3,4})$/i;
+/** The one shape of it that named a ticket: an id and a port, and nothing after. */
+const OLD_PORT_TICKET_EXACT = /^(?:\/hub)?\/virtual\/([^/]+)\/ports\/([^/]+)$/;
 
 export type MovedPortTicket = { kind: "moved"; to: string } | { kind: "not-found" };
 
@@ -74,12 +69,14 @@ export function movedPortTicketPath(pathname: string): MovedPortTicket | undefin
   if (!OLD_PORT_TICKET.test(pathname)) {
     return undefined;
   }
+  // The same id and port rules as the ticket route and the viewer apply.
   const match = OLD_PORT_TICKET_EXACT.exec(pathname);
-  const port = match === null ? Number.NaN : Number(match[2]);
-  if (match === null || port < MIN_EXPOSED_PORT || port > MAX_EXPOSED_PORT) {
+  const id = match?.[1];
+  const port = match?.[2] === undefined ? undefined : portOf(match[2]);
+  if (id === undefined || !isUuid(id) || port === undefined) {
     return { kind: "not-found" };
   }
-  return { kind: "moved", to: `${PORT_TICKETS}/${match[1]!.toLowerCase()}/${port}` };
+  return { kind: "moved", to: `${PORT_TICKETS}/${id.toLowerCase()}/${port}` };
 }
 
 /** `/virtual` and `/virtual/{id}` with nothing after the id, the virtual agents pages. */

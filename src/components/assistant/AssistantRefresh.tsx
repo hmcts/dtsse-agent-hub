@@ -15,7 +15,7 @@ import { useSettled } from "@/components/live/useSettled";
  */
 export function AssistantRefresh() {
   const router = useRouter();
-  const refresh = useSettled(() => router.refresh());
+  const { settle: refresh } = useSettled(() => router.refresh());
   useHubEvent("assistant_conversation", refresh);
   useHubEvent("virtual_agent", refresh);
   // Unfiltered: the stream only carries skills for the agent the tab watches, which is the open conversation's.

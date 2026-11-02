@@ -13,21 +13,7 @@ import type { ActionResult } from "@/web/action";
 
 export type AnswerQuestionAction = (input: { questionId: unknown; answers: unknown }) => Promise<ActionResult>;
 
-interface Palette {
-  card: string;
-  header: string;
-  question: string;
-  option: string;
-  chosen: string;
-  description: string;
-  field: string;
-  submit: string;
-  quiet: string;
-  muted: string;
-  error: string;
-}
-
-const PALETTE: Palette = {
+const CLASSES = {
   card: "rounded-2xl border border-asst-accent-line bg-asst-raised p-4",
   header: "font-plex-mono text-[11px] uppercase tracking-wider text-asst-accent-soft",
   question: "text-asst-text",
@@ -39,7 +25,7 @@ const PALETTE: Palette = {
   quiet: "rounded-[10px] border border-asst-strong px-4 py-2 text-sm hover:bg-asst-active disabled:opacity-60",
   muted: "text-[13px] text-asst-muted",
   error: "text-[13px] text-asst-error"
-};
+} as const;
 
 /** Nothing chosen for any question yet. */
 function emptyAnswers(questions: readonly Question[]): QuestionAnswer[] {
@@ -77,27 +63,25 @@ function Options({
   question,
   index,
   answer,
-  palette,
   onChange,
   disabled
 }: {
   question: Question;
   index: number;
   answer: QuestionAnswer;
-  palette: Palette;
   onChange: (answer: QuestionAnswer) => void;
   disabled: boolean;
 }) {
   const group = useId();
   return (
     <fieldset className="flex flex-col gap-2" disabled={disabled}>
-      <legend className={palette.question}>{question.question}</legend>
+      <legend className={CLASSES.question}>{question.question}</legend>
       {question.options.map((option, at) => {
         const chosen = answer.labels.includes(option.label);
         // Built from the positions rather than the label, which is the model's own words and may hold a space.
         const id = `${group}-${index}-${at}`;
         return (
-          <label key={at} htmlFor={id} className={`flex cursor-pointer gap-2.5 ${palette.option} ${chosen ? palette.chosen : ""}`}>
+          <label key={at} htmlFor={id} className={`flex cursor-pointer gap-2.5 ${CLASSES.option} ${chosen ? CLASSES.chosen : ""}`}>
             <input
               id={id}
               type={question.multiSelect ? "checkbox" : "radio"}
@@ -115,7 +99,7 @@ function Options({
             />
             <span className="min-w-0">
               <span className="block font-medium">{option.label}</span>
-              {option.description === "" ? null : <span className={`block ${palette.description}`}>{option.description}</span>}
+              {option.description === "" ? null : <span className={`block ${CLASSES.description}`}>{option.description}</span>}
             </span>
           </label>
         );
@@ -138,29 +122,27 @@ type QuietReason = "answered" | "not-yours" | "expired";
 function Quiet({
   questions,
   answers,
-  reason,
-  palette
+  reason
 }: {
   questions: readonly Question[];
   /** `null` for a question with no answer at all, which is what the options below stand in for. */
   answers: readonly QuestionAnswer[] | null;
   reason: QuietReason;
-  palette: Palette;
 }) {
   return (
     <ol className="flex flex-col gap-3">
       {questions.map((question, index) => (
         <li key={index} className="flex flex-col gap-1">
-          <span className={palette.header}>{question.header}</span>
-          <span className={palette.question}>{question.question}</span>
+          <span className={CLASSES.header}>{question.header}</span>
+          <span className={CLASSES.question}>{question.question}</span>
           {answers === null ? (
             <>
-              <ul className={`list-inside list-disc ${palette.description}`}>
+              <ul className={`list-inside list-disc ${CLASSES.description}`}>
                 {question.options.map((option, at) => (
                   <li key={at}>{option.label}</li>
                 ))}
               </ul>
-              <span className={palette.muted}>
+              <span className={CLASSES.muted}>
                 {reason === "expired" ? "This question was not answered, and the assistant is no longer waiting." : "Waiting for an answer from the owner."}
               </span>
             </>
@@ -168,7 +150,7 @@ function Quiet({
             // The answer sits in an element of its own rather than as a bare text node beside the screen-reader
             // label, so that what was chosen is addressable: anything matching on an element's whole text — a
             // Playwright locator, or a reader skimming the DOM — would otherwise only ever see "Answer: Red".
-            <span className={palette.muted}>
+            <span className={CLASSES.muted}>
               <span className="sr-only">Answer: </span>
               <span>{said(answers[index])}</span>
             </span>
@@ -185,7 +167,6 @@ function Quiet({
  * a `readOnly` flag beside a live action is a state the caller can get wrong.
  */
 export function QuestionCard({ view, answer: send }: { view: QuestionView; answer?: AnswerQuestionAction }) {
-  const palette = PALETTE;
   const [answers, setAnswers] = useState<QuestionAnswer[]>(() => emptyAnswers(view.questions));
   const [own, setOwn] = useState(false);
   const [sending, setSending] = useState(false);
@@ -208,8 +189,8 @@ export function QuestionCard({ view, answer: send }: { view: QuestionView; answe
   if (ask === undefined) {
     const reason: QuietReason = stored !== null ? "answered" : view.offered ? "not-yours" : "expired";
     return (
-      <section aria-label={plural ? "Questions the assistant asked" : "A question the assistant asked"} className={palette.card}>
-        <Quiet questions={view.questions} answers={stored} reason={reason} palette={palette} />
+      <section aria-label={plural ? "Questions the assistant asked" : "A question the assistant asked"} className={CLASSES.card}>
+        <Quiet questions={view.questions} answers={stored} reason={reason} />
       </section>
     );
   }
@@ -241,15 +222,14 @@ export function QuestionCard({ view, answer: send }: { view: QuestionView; answe
   const immediate = view.questions.length === 1 && !view.questions[0]?.multiSelect && !own;
 
   return (
-    <section aria-label={label} className={`flex flex-col gap-3.5 ${palette.card}`}>
+    <section aria-label={label} className={`flex flex-col gap-3.5 ${CLASSES.card}`}>
       {view.questions.map((question, index) => (
         <div key={index} className="flex flex-col gap-2">
-          <span className={palette.header}>{question.header}</span>
+          <span className={CLASSES.header}>{question.header}</span>
           <Options
             question={question}
             index={index}
             answer={answers[index] ?? { labels: [], text: null }}
-            palette={palette}
             disabled={sending}
             onChange={(next) => {
               const updated = replace(answers, index, next);
@@ -263,12 +243,12 @@ export function QuestionCard({ view, answer: send }: { view: QuestionView; answe
           />
           {own ? (
             <label className="flex flex-col gap-1">
-              <span className={palette.muted}>Your own answer to "{question.header}"</span>
+              <span className={CLASSES.muted}>Your own answer to "{question.header}"</span>
               <textarea
                 rows={2}
                 maxLength={MAX_ANSWER_TEXT}
                 disabled={sending}
-                className={palette.field}
+                className={CLASSES.field}
                 value={answers[index]?.text ?? ""}
                 onChange={(event) => setAnswers((current) => replace(current, index, { ...(current[index] as QuestionAnswer), text: event.target.value }))}
               />
@@ -277,18 +257,18 @@ export function QuestionCard({ view, answer: send }: { view: QuestionView; answe
         </div>
       ))}
       {error === null ? null : (
-        <p role="alert" className={palette.error}>
+        <p role="alert" className={CLASSES.error}>
           {error}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
         {own ? null : (
-          <button type="button" disabled={sending} className={palette.quiet} onClick={() => setOwn(true)}>
+          <button type="button" disabled={sending} className={CLASSES.quiet} onClick={() => setOwn(true)}>
             Something else
           </button>
         )}
         {immediate ? null : (
-          <button type="button" disabled={sending || !complete(answers)} className={palette.submit} onClick={() => void submit()}>
+          <button type="button" disabled={sending || !complete(answers)} className={CLASSES.submit} onClick={() => void submit()}>
             {sending ? "Sending" : "Send answer"}
           </button>
         )}

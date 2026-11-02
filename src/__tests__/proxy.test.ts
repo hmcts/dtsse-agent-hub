@@ -268,15 +268,27 @@ describe("proxy hub address redirect", () => {
     expect(response.headers.get("location")).toBe(`https://agent-hub.example/assistant/ports/${TICKET_AGENT}/3000?path=%2Fdocs%3Fpage%3D2`);
   });
 
-  it.each(["/hub/virtual/0f8a/ports/3000", `/hub/virtual/${TICKET_AGENT}/ports/3000/..%2F..%2F..%2Fhub`, `/hub/virtual/${TICKET_AGENT}/ports/80`])(
-    "should answer not found, and redirect nowhere, for %s when it does not name an agent's id and a port",
-    async (from) => {
-      const response = await proxy(askWith("GET", from));
+  it.each([
+    "/hub/virtual/0f8a/ports/3000",
+    "/virtual/0f8a/ports/3000",
+    `/hub/virtual/${TICKET_AGENT}/ports/3000/..%2F..%2F..%2Fhub`,
+    `/hub/virtual/${TICKET_AGENT}/ports/80`
+  ])("should pass %s on to the not-found page, redirecting nowhere, when it does not name an agent's id and a port", async (from) => {
+    const response = await proxy(askWith("GET", from));
 
-      expect(response.status).toBe(404);
-      expect(response.headers.get("location")).toBeNull();
-    }
-  );
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("should send a person with no session to sign in first when an address under the old ticket route names no port", async () => {
+    vi.stubEnv("AUTH_DISABLED", "");
+    vi.stubEnv("SESSION_SECRET", SECRET);
+
+    const response = await proxy(askWith("GET", "/hub/virtual/0f8a/ports/3000"));
+
+    expect(response.status).toBe(307);
+    expect(new URL(response.headers.get("location")!).searchParams.get("redirect")).toBe("/hub/virtual/0f8a/ports/3000");
+  });
 
   it("should strip a secret from an address under the old ticket route before the redirect copies its query", async () => {
     const response = await proxy(askWith("GET", `/hub/virtual/${TICKET_AGENT}/ports/3000?path=%2F&token=11a2b3c4d5e6f708192a3b4c5d`));

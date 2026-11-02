@@ -64,14 +64,13 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(new URL(retired, request.nextUrl.origin), 307);
   }
   // The viewer's old ticket address keeps its query, the `path=` it lands on, which `carriesSecret` has already seen.
+  // One naming no agent's port is left to the routes, which have none for it, so the person gets the not-found page and
+  // its way home rather than a bare 404, signing in first as for any other page.
   const ticket = movedPortTicketPath(request.nextUrl.pathname);
-  if (ticket?.kind === "not-found") {
-    return new NextResponse(null, { status: 404 });
-  }
-  if (ticket !== undefined) {
+  if (ticket?.kind === "moved") {
     return NextResponse.redirect(new URL(`${ticket.to}${request.nextUrl.search}`, request.nextUrl.origin), 308);
   }
-  const moved = movedHubPath(request.nextUrl.pathname);
+  const moved = ticket === undefined ? movedHubPath(request.nextUrl.pathname) : undefined;
   if (moved !== undefined) {
     return NextResponse.redirect(new URL(`${moved}${request.nextUrl.search}`, request.nextUrl.origin), 308);
   }

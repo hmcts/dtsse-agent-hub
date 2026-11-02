@@ -23,33 +23,39 @@ export function useSettingsData<T>(section: string, load: () => Promise<T>, live
   const loader = useRef(load);
   loader.current = load;
 
-  const reload = useCallback(() => {
-    const read = ++latest.current;
+  const read = useCallback(() => {
+    const at = ++latest.current;
     loader.current().then(
       (value) => {
-        if (read === latest.current) {
+        if (at === latest.current) {
           setData(value);
           setFailed(false);
         }
       },
       () => {
-        if (read === latest.current) {
+        if (at === latest.current) {
           setFailed(true);
         }
       }
     );
   }, []);
 
+  // A pod booting is a burst of `virtual_agent` events, which the same settle as the page's own refresh makes one read.
+  // A read asked for directly, after a save, is that read already, so it drops one still settling.
+  const settled = useSettled(read);
+  const reload = useCallback(() => {
+    settled.cancel();
+    read();
+  }, [settled, read]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: read again only when the section changes, as the comment above says
   useEffect(() => {
     reload();
   }, [section, reload]);
 
-  // A pod booting is a burst of `virtual_agent` events, which the same settle as the page's own refresh makes one read.
-  const settled = useSettled(reload);
   useHubEvent("virtual_agent", () => {
     if (live) {
-      settled();
+      settled.settle();
     }
   });
 

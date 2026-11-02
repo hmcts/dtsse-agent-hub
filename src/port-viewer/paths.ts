@@ -1,7 +1,12 @@
-import { isUuid } from "../agents/store.ts";
+import { isUuid } from "../agents/ids.ts";
 import { safeReturnTo } from "../auth/guard.ts";
 import { MAX_EXPOSED_PORT, MIN_EXPOSED_PORT } from "../virtual-agents/ports.ts";
-import { PORT_TICKETS } from "../web/home.ts";
+
+/**
+ * The hub's ticket route, `/assistant/ports/{virtual agent id}/{port}`: the id then the port, as in the port's own
+ * prefix on the viewer's host. Under the Assistant, whose settings are where a person opens their web servers.
+ */
+export const PORT_TICKETS = "/assistant/ports";
 
 /**
  * Where things live on the viewer's host. Each port is under its own `/<virtual agent id>/<port>/` prefix, with its

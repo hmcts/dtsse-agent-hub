@@ -96,11 +96,12 @@ test.describe("routes @regression", () => {
     });
   }
 
-  test("should answer not found, and redirect nowhere, when an address under the old ticket route names no port @regression", async ({ request }) => {
+  test("should show the not-found page, and redirect nowhere, when an address under the old ticket route names no port @regression", async ({ request }) => {
     const response = await request.get("/hub/virtual/not-an-id/ports/3000", { maxRedirects: 0 });
 
     expect(response.status()).toBe(404);
     expect(response.headers().location).toBeUndefined();
+    expect(response.headers()["content-type"]).toContain("text/html");
   });
 
   // The access page managed standing access to every agent its owner had; there is none. What anyone shares is one

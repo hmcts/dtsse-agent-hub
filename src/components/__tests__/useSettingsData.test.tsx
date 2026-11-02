@@ -81,6 +81,20 @@ describe("useSettingsData", () => {
     onLine.mockRestore();
   });
 
+  it("should read once, not twice, when a save asks for a read while a burst is settling", async () => {
+    const load = vi.fn().mockResolvedValue("agent");
+    const { result } = renderHook(() => useSettingsData("assistant", load, true));
+    await advance(0);
+
+    burst(3);
+    await act(async () => {
+      result.current.reload();
+    });
+    await advance(250);
+
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
   it("should not read again for a virtual agent event when the section is not live", async () => {
     const load = vi.fn().mockResolvedValue("identity");
     renderHook(() => useSettingsData("git-identity", load));
