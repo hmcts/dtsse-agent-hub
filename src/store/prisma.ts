@@ -1,7 +1,8 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
+import { globalForPrisma as globalForNamespace } from "./client-namespace.ts";
 import { applyDatabaseUrl } from "./database-url.ts";
-import { PrismaClient } from "./generated/client.js";
+import { PrismaClient, Prisma as PrismaNamespace } from "./generated/client.js";
 
 /**
  * Resolved at module load, which is why `instrumentation-node.ts` and `cli/migrate.ts` import this only after the
@@ -26,15 +27,19 @@ const TRANSACTION = {
 
 /**
  * On `globalThis` in every environment. Next bundles `instrumentation.ts` and the route modules as separate module
- * graphs, so a module-scoped client would be one pool per graph per pod.
+ * graphs, so a module-scoped client would be one pool per graph per pod. The namespace of the same copy goes beside it,
+ * for `clientPrisma`.
  */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-globalForPrisma.prisma ??= new PrismaClient({
-  adapter: new PrismaPg(new pg.Pool({ connectionString, ...POOL })),
-  transactionOptions: TRANSACTION,
-  log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"]
-});
+if (globalForPrisma.prisma === undefined) {
+  globalForPrisma.prisma = new PrismaClient({
+    adapter: new PrismaPg(new pg.Pool({ connectionString, ...POOL })),
+    transactionOptions: TRANSACTION,
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"]
+  });
+  globalForNamespace.prismaNamespace = PrismaNamespace;
+}
 
 export const prisma: PrismaClient = globalForPrisma.prisma;
 
