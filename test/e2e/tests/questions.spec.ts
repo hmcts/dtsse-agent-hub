@@ -24,7 +24,7 @@ const asking = (page: Page) => page.getByRole("region", { name: "A question for 
 const asked = (page: Page) => page.getByRole("region", { name: "A question the assistant asked" });
 
 test.describe("questions @regression", () => {
-  test("should offer the options in the session's chat and send the choice as a message @regression", async ({ browser, baseURL, request }) => {
+  test("should send the choice as a message when the owner picks an option in the session's chat @regression", async ({ browser, baseURL, request }) => {
     // The agent's stream is read to its end: see `readAgentStream`.
     test.setTimeout(150_000);
     const persona = chatPersona("question");
@@ -70,7 +70,7 @@ test.describe("questions @regression", () => {
     }
   });
 
-  test("should let the owner answer in their own words instead @regression", async ({ browser, baseURL, request }) => {
+  test("should send the owner's own words when they answer something else @regression", async ({ browser, baseURL, request }) => {
     const persona = chatPersona("question-words");
     const name = unique("laptop");
     const agent = await registerAgent(request, persona, name);

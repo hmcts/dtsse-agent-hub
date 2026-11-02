@@ -126,7 +126,7 @@ function Rename({ agent, rename }: { agent: AssistantAgent; rename: FormAction }
 }
 
 export function AgentSettings({ settings }: { settings: AssistantAgentSettings }) {
-  const { data: agent, failed } = useSettingsData(settings.load, true);
+  const { data: agent, failed } = useSettingsData("assistant", settings.load, true);
   return (
     <section aria-labelledby="assistant-settings-agent" aria-busy={agent === undefined && !failed} className="flex flex-col gap-3">
       <h3 id="assistant-settings-agent" className="text-sm font-semibold">

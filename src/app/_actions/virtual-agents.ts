@@ -19,10 +19,12 @@ import {
 import { type ActionResult, runAction, text } from "@/web/action";
 
 /**
- * Renaming, restarting and resizing the signed-in person's own virtual agents, choosing their plugins, pasting
- * a login code back to one, and having one sign in again. The owner is always the session's identity; an id from the
- * form names an agent, and `renameVirtualAgent`, `restartVirtualAgent`, `setVirtualAgentSize`, `setVirtualAgentPlugins`,
- * `storePastedCode` and `reconnectSignIn` refuse one that is not the viewer's.
+ * Renaming, restarting and resizing the signed-in person's own virtual agents and choosing their plugins, which the
+ * Assistant's settings post to; having one sign in again, which they and the getting-ready screen (`AssistantGate`)
+ * post to; and pasting a login code back to one, which only the getting-ready screen does. The owner is always the
+ * session's identity; an id from the form names an agent, and `renameVirtualAgent`, `restartVirtualAgent`,
+ * `setVirtualAgentSize`, `setVirtualAgentPlugins`, `storePastedCode` and `reconnectSignIn` refuse one that is not the
+ * viewer's.
  */
 
 const OFF: { ok: false; error: string } = { ok: false, error: "virtual agents are not available on this deployment" };

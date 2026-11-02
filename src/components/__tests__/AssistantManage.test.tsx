@@ -9,7 +9,7 @@ import type { FormAction } from "@/components/ActionForm";
 import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
 import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { AssistantSettings } from "@/components/assistant/SettingsDialog";
-import type { AssistantTokens } from "@/components/assistant/TokenSettings";
+import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { AssistantAgent, GitIdentitySettings } from "@/web/data";
@@ -125,7 +125,7 @@ describe("the Assistant's settings for managing its agent", () => {
   });
 
   // Nothing is read for a dialog the person has not opened, nor for a section they have not opened in it.
-  it("should read the agent and the git identity only once their sections are opened", async () => {
+  it("should read the agent and the git identity only when their sections are opened", async () => {
     const agentLoad = agentSettings();
     const gitLoad = git();
     render(<AssistantSettings now={Date.now()} connections={connections(["github"])} agent={agentLoad} git={gitLoad} />);
@@ -144,7 +144,7 @@ describe("the Assistant's settings for managing its agent", () => {
 });
 
 describe("the Assistant's own agent", () => {
-  it("should name the agent and say where it stands once it has been read", async () => {
+  it("should name the agent and say where it stands when it has been read", async () => {
     await open({ agent: agentSettings({ statusDetail: "Claude is ready; cloning repositories (12/241)" }) }, "Assistant");
 
     expect(screen.getByText("assistant")).toBeTruthy();
@@ -175,7 +175,7 @@ describe("the Assistant's own agent", () => {
     expect(screen.getByText(/could not be read/)).toBeTruthy();
   });
 
-  it("should say what a restart ends before it is sent, and show the server's own confirmation once it is", async () => {
+  it("should say what a restart ends before it is sent, and show the server's own confirmation when it has been", async () => {
     const restart = ok("It is not running, so it starts afresh next time anyway.");
     await open({ agent: agentSettings({}, { restart }) }, "Assistant");
 
@@ -202,7 +202,7 @@ describe("the Assistant's own agent", () => {
   });
 
   // Opening the Assistant starts its agent, so a stop would be undone by the refresh that follows it.
-  it("should offer no stop, no delete, and no restart of an agent that is not running", async () => {
+  it("should offer no stop, no delete and no restart when the agent is not running", async () => {
     await open({ agent: agentSettings({ desired: "stopped", status: "stopped" }) }, "Assistant");
 
     expect(screen.queryByRole("button", { name: /Restart/ })).toBeNull();
@@ -210,7 +210,7 @@ describe("the Assistant's own agent", () => {
     expect(screen.getByText(/nothing to restart/)).toBeTruthy();
   });
 
-  it("should say an agent being deleted is replaced on the next chat, and offer no restart", async () => {
+  it("should say the agent is replaced on the next chat, and offer no restart, when it is being deleted", async () => {
     await open({ agent: agentSettings({ desired: "deleted" }) }, "Assistant");
 
     expect(screen.getByText("It is being deleted. Opening a chat sets up a new assistant for you.")).toBeTruthy();
@@ -233,7 +233,7 @@ describe("the Assistant's own agent", () => {
 });
 
 describe("the Assistant's web servers", () => {
-  it("should link each port on the viewer first, under its prefix with the trailing slash, and on the VPN after it", async () => {
+  it("should link each port on the viewer first, under its prefix with the trailing slash, and on the VPN after it when the viewer is on", async () => {
     await open({ agent: agentSettings({ exposedPorts: [{ port: 3000, url: VPN_3000, viewerUrl: VIEWER_3000 }] }) }, "Web servers");
 
     const links = within(screen.getByRole("list", { name: "Web server URLs" })).getAllByRole("link");
@@ -259,7 +259,7 @@ describe("the Assistant's web servers", () => {
     expect(within(screen.getByRole("list", { name: "Ports listening on 127.0.0.1 only" })).getByText(/Port 5173.*0\.0\.0\.0/)).toBeTruthy();
   });
 
-  it("should say there are none while the agent is stopped", async () => {
+  it("should say there are none when the agent is stopped", async () => {
     await open({ agent: agentSettings({ desired: "stopped", status: "stopped" }) }, "Web servers");
 
     expect(screen.getByText("None while your assistant is stopped.")).toBeTruthy();
@@ -305,7 +305,7 @@ describe("the Assistant's git identity", () => {
 });
 
 describe("the Assistant's saved credentials", () => {
-  it("should offer to paste a GitHub token and remove every stored credential, sign-ins among them", async () => {
+  it("should offer to paste a GitHub token and remove every stored credential, sign-ins among them, when all are stored", async () => {
     await open({ tokens: tokens([status("github"), status("azure", "alice@hmcts.net"), status("atlassian")], {}, "gateway") }, "Credentials");
 
     const rows = within(screen.getByRole("list", { name: "Credentials" })).getAllByRole("listitem");
@@ -336,7 +336,7 @@ describe("the Assistant's saved credentials", () => {
     expect(screen.getByRole("status").textContent).toBe("Your GitHub token is saved");
   });
 
-  it("should say the assistant cannot answer without it before removing the model's token, and send the kind once confirmed", async () => {
+  it("should say the assistant cannot answer without it, and send the kind once confirmed, when the model's token is removed", async () => {
     const remove = ok();
     await open({ tokens: tokens([status("claude")], { remove }) }, "Credentials");
 
@@ -384,5 +384,53 @@ describe("the Assistant's settings deep link", () => {
     render(<AssistantSettings now={Date.now()} connections={connections(["github"])} />);
 
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("how often the settings read", () => {
+  // Every save ends in `router.refresh()`, which hands the dialog a fresh server-action reference.
+  it("should not read again when a server render hands the section a new loader", async () => {
+    const first = agentSettings();
+    const { rerender } = render(<AssistantSettings now={Date.now()} connections={connections(["github"])} agent={first} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    await act(async () => {
+      fireEvent.click(within(nav()).getByRole("tab", { name: "Assistant" }));
+    });
+    const next = { ...first, load: vi.fn(async () => agent()) };
+
+    await act(async () => {
+      rerender(<AssistantSettings now={Date.now()} connections={connections(["github"])} agent={next} />);
+    });
+
+    expect(first.load).toHaveBeenCalledTimes(1);
+    expect(next.load).not.toHaveBeenCalled();
+  });
+
+  it("should read once more, and only once, when a restart has been sent and the stream says the agent changed", async () => {
+    const settings = agentSettings();
+    await open({ agent: settings }, "Assistant");
+    fireEvent.click(screen.getByRole("button", { name: "Restart your assistant" }));
+
+    await submit("Restart your assistant");
+    await act(async () => {
+      hubHandlers.get("virtual_agent")?.();
+    });
+
+    expect(settings.load).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a removed credential's confirmation", () => {
+  it("should still say an Atlassian sign-in was removed when its row has gone", async () => {
+    const remove = ok();
+    const statuses = [status("github"), status("atlassian")];
+    const { rerender } = render(<TokenSettings tokens={tokens(statuses, { remove }, "gateway")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove your Atlassian sign-in" }));
+    await submit("Remove your Atlassian sign-in");
+    rerender(<TokenSettings tokens={tokens([status("github")], { remove }, "gateway")} />);
+
+    expect(screen.queryByText("Atlassian sign-in")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Your Atlassian sign-in is removed");
   });
 });

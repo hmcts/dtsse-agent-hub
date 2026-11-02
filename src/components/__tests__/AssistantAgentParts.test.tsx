@@ -30,7 +30,7 @@ function login(overrides: Partial<LoginView> = {}): LoginView {
 }
 
 describe("statusLabel", () => {
-  it("should say an agent is being deleted whatever its pod last reported", () => {
+  it("should say an agent is being deleted when it is, whatever its pod last reported", () => {
     expect(statusLabel("running", "deleted")).toBe("Deleting");
     expect(statusLabel("awaiting_login", "running")).toBe("Waiting for you to sign in");
   });
@@ -52,7 +52,7 @@ describe("statusLabel", () => {
 });
 
 describe("checklistState", () => {
-  it("should put a pending login first, even over a stored credential", () => {
+  it("should put a pending login first when a credential is stored as well", () => {
     expect(checklistState(true, login(), NOW)).toBe("login");
   });
 

@@ -8,7 +8,11 @@ const ASSISTANT_OFF = "the Assistant runs on a virtual agent, which is off on th
  * boot messages send people to paste a GitHub token, lands on the Credentials section; `routes.spec.ts` checks the redirect itself.
  */
 test.describe("credentials @smoke", () => {
-  test("should open the Assistant's settings at Credentials from the old credentials address @smoke @regression", async ({ browser, baseURL, request }) => {
+  test("should open the Assistant's settings at Credentials when the old credentials address is visited @smoke @regression", async ({
+    browser,
+    baseURL,
+    request
+  }) => {
     const persona = chatPersona("credentials");
     await connectForChat(request, persona);
     const context = await asPersona(browser, persona, baseURL!);
@@ -25,7 +29,7 @@ test.describe("credentials @smoke", () => {
     }
   });
 
-  test("should replace and remove a pasted token without ever showing it @regression", async ({ browser, baseURL, request }) => {
+  test("should never show a pasted token when it is replaced and then removed @regression", async ({ browser, baseURL, request }) => {
     const persona = chatPersona("tokens");
     await connectForChat(request, persona);
     const context = await asPersona(browser, persona, baseURL!);

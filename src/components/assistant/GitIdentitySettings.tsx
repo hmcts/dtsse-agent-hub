@@ -92,7 +92,7 @@ function Form({
 }
 
 export function GitIdentity({ git }: { git: AssistantGitIdentity }) {
-  const { data: settings, failed, reload } = useSettingsData(git.load);
+  const { data: settings, failed, reload } = useSettingsData("git", git.load);
   // The clear's confirmation is said here, since its form goes once nothing is stored.
   const [said, setSaid] = useState<string | null>(null);
   return (

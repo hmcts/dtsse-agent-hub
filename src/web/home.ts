@@ -81,20 +81,25 @@ export function retiredHubPath(pathname: string, virtualAgents: boolean): string
  * their virtual agents or a session of one, or anything else. Somebody else's agent is anything else, so where the
  * address goes says nothing about whether it exists.
  */
-export type AgentAddress = { kind: "chat"; conversationId: string } | { kind: "virtual" } | { kind: "none" };
+export type AgentAddress = { kind: "chat"; conversationId: string } | { kind: "virtual"; assistant: boolean } | { kind: "none" };
 
 export const NO_AGENT: AgentAddress = { kind: "none" };
 
 /**
  * Where `/hub/agents/{id}` goes. The hub shows no agents: a chat's agent is that chat in the Assistant, and a virtual
- * agent, or a session of one, is managed in the Assistant section of the Assistant's settings. Anything else goes to
- * the hub's home, and so does everything where virtual agents are off, since the Assistant's pages are not found there.
+ * agent, or a session of one, goes to the Assistant: to the Assistant section of its settings when it is the agent the
+ * Assistant runs on, which is the one that section shows and restarts, and to the Assistant itself for any other, which
+ * nothing there manages. Anything else goes to the hub's home, and so does everything where virtual agents are off,
+ * since the Assistant's pages are not found there.
  */
 export function retiredAgentPath(address: AgentAddress, virtualAgents: boolean): string {
   if (!virtualAgents || address.kind === "none") {
     return HUB;
   }
-  return address.kind === "chat" ? `${ASSISTANT}/${encodeURIComponent(address.conversationId)}` : assistantSettingsPath("assistant");
+  if (address.kind === "chat") {
+    return `${ASSISTANT}/${encodeURIComponent(address.conversationId)}`;
+  }
+  return address.assistant ? assistantSettingsPath("assistant") : ASSISTANT;
 }
 
 /**

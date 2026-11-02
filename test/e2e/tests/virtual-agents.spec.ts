@@ -11,7 +11,7 @@ async function settings(page: Page, section: string): Promise<void> {
 }
 
 test.describe("virtual agents @regression", () => {
-  test("should open the Assistant section of its settings from the old virtual agents addresses @regression", async ({ browser, baseURL, request }) => {
+  test("should open the Assistant section of its settings when an old virtual agents address is visited @regression", async ({ browser, baseURL, request }) => {
     const persona = chatPersona("va-old");
     await connectForChat(request, persona);
     const context = await asPersona(browser, persona, baseURL!);
@@ -33,7 +33,7 @@ test.describe("virtual agents @regression", () => {
    * servers it reports, a rename and a restart. The pod is stood in for with the orchestrator's development header,
    * which only a development build accepts; anywhere else the parts that need a pod are left out.
    */
-  test("should show the Assistant's agent in its settings, a sign-in and web servers its pod relays, and rename and restart it @regression", async ({
+  test("should show the Assistant's agent, a sign-in and web servers its pod relays, and rename and restart it, when its settings are opened @regression", async ({
     browser,
     baseURL,
     request
@@ -96,7 +96,7 @@ test.describe("virtual agents @regression", () => {
     }
   });
 
-  test("should keep one person's assistant and chats from another @regression", async ({ browser, baseURL, request }) => {
+  test("should keep one person's assistant and chats from another when both use the Assistant @regression", async ({ browser, baseURL, request }) => {
     const ownerPersona = chatPersona("va-owner");
     const name = unique("laptop");
     const agent = await registerAgent(request, ownerPersona, name);

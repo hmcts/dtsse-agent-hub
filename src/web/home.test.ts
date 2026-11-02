@@ -118,8 +118,13 @@ describe("retiredAgentPath", () => {
     expect(retiredAgentPath({ kind: "chat", conversationId: CONVERSATION }, true)).toBe(`/assistant/${CONVERSATION}`);
   });
 
-  it("should send a virtual agent to the Assistant section of the Assistant's settings when virtual agents are on", () => {
-    expect(retiredAgentPath({ kind: "virtual" }, true)).toBe("/assistant?settings=assistant");
+  it("should send the Assistant's own virtual agent to the Assistant section of its settings when virtual agents are on", () => {
+    expect(retiredAgentPath({ kind: "virtual", assistant: true }, true)).toBe("/assistant?settings=assistant");
+  });
+
+  // The settings show and restart the Assistant's agent alone, so another agent's address must not open them.
+  it("should send any other virtual agent to the Assistant itself when it is not the one the Assistant runs on", () => {
+    expect(retiredAgentPath({ kind: "virtual", assistant: false }, true)).toBe("/assistant");
   });
 
   it("should send anything else to the hub's home when virtual agents are on", () => {
@@ -127,7 +132,7 @@ describe("retiredAgentPath", () => {
   });
 
   // The Assistant's pages are not found with virtual agents off, so no address may be sent there.
-  it.each([{ kind: "chat", conversationId: CONVERSATION } as const, { kind: "virtual" } as const, NO_AGENT])(
+  it.each([{ kind: "chat", conversationId: CONVERSATION } as const, { kind: "virtual", assistant: true } as const, NO_AGENT])(
     "should send every agent's address to the hub's home when virtual agents are off",
     (address) => {
       expect(retiredAgentPath(address, false)).toBe("/hub");

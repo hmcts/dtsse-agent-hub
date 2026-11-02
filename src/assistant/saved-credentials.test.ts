@@ -33,7 +33,7 @@ describe("savedCredentials", () => {
     ]);
   });
 
-  it("should leave out the CLAUDE.md and the git identity, which have sections of their own", () => {
+  it("should leave out the CLAUDE.md and the git identity when they are stored, since they have sections of their own", () => {
     expect(savedCredentials([stored("claude_md"), stored("git_identity")], "gateway", false).map((row) => row.kind)).toEqual(["github", "jenkins"]);
   });
 

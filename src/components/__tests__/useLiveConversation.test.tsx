@@ -178,7 +178,7 @@ describe("useLiveConversation live transcript", () => {
     expect(screen.getByText("second")).toBeTruthy();
   });
 
-  it("should read once at a time and carry on to a newer entry announced during a read", async () => {
+  it("should read once at a time and carry on to the newer entry when one is announced during a read", async () => {
     let answer: (response: Response) => void = () => undefined;
     const first = new Promise<Response>((resolve) => {
       answer = resolve;

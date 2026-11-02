@@ -14,7 +14,7 @@ import type { AssistantAgent } from "@/web/data";
  * hub to sign the person in and comes back to the same place. The VPN address follows it.
  */
 export function PortSettings({ load }: { load: () => Promise<AssistantAgent | null> }) {
-  const { data: agent, failed } = useSettingsData(load, true);
+  const { data: agent, failed } = useSettingsData("ports", load, true);
   return (
     <section aria-labelledby="assistant-settings-ports" aria-busy={agent === undefined && !failed} className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-ports" className="text-sm font-semibold">

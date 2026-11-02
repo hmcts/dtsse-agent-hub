@@ -2511,6 +2511,21 @@ describe("/hub/agents/{id}", () => {
     await expect(visit(id)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
   });
 
+  // The settings show and restart `findAssistant`'s agent, the person's oldest. Sending a later agent's address there
+  // would put the oldest agent's Restart under it, and pressing it would replace the wrong pod.
+  it("should send the owner to the Assistant itself, not its settings, when a later virtual agent of theirs or its session is visited", async () => {
+    const first = await started(ALICE, "assistant");
+    const later = await started(ALICE, "other");
+    const session = (await jsonOf(await register(later.token, "va-session-later"))).agent_id;
+    actAs("alice");
+
+    await expect(visit(later.id)).rejects.toMatchObject(redirectedTo("/assistant"));
+    await expect(visit(session)).rejects.toMatchObject(redirectedTo("/assistant"));
+    await expect(visit(first.id)).rejects.toMatchObject(redirectedTo("/assistant?settings=assistant"));
+    expect(await agentAddress({ ...ALICE, tid: "dev" }, later.id)).toEqual({ kind: "virtual", assistant: false });
+    expect((await assistantAgent({ ...ALICE, tid: "dev", modelRoute: "gateway" }))?.id).toBe(first.id);
+  });
+
   it("should send the owner to the Assistant's settings when a session a virtual agent registered is visited, including one a /clear superseded", async () => {
     const { token } = await started(ALICE, "pcs-api");
     const first = (await jsonOf(await register(token, "va-session-1"))).agent_id;

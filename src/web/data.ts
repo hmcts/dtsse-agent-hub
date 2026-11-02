@@ -208,7 +208,7 @@ export async function agentAddress(viewer: Identity, id: string): Promise<AgentA
     prisma.agent.findUnique({ where: { id }, select: { id: true, ownerOid: true, virtualAgentId: true, assistantConversationId: true } })
   ]);
   if (virtualAgent !== null && canViewVirtualAgent(viewer.oid, virtualAgent)) {
-    return { kind: "virtual" };
+    return await virtualAddress(viewer, virtualAgent.id);
   }
   if (agent === null || !canViewAgent(viewer.oid, { id: agent.id, ownerOid: agent.ownerOid, ownerOnly: isPodConversationAgent(agent) })) {
     return NO_AGENT;
@@ -216,7 +216,15 @@ export async function agentAddress(viewer: Identity, id: string): Promise<AgentA
   if (agent.assistantConversationId !== null) {
     return { kind: "chat", conversationId: agent.assistantConversationId };
   }
-  return agent.virtualAgentId === null ? NO_AGENT : { kind: "virtual" };
+  return agent.virtualAgentId === null ? NO_AGENT : await virtualAddress(viewer, agent.virtualAgentId);
+}
+
+/**
+ * A virtual agent of the viewer's, and whether it is the one their Assistant runs on: only that one is what the
+ * Assistant's settings show and restart, so only its address may be sent there.
+ */
+async function virtualAddress(viewer: Identity, virtualAgentId: string): Promise<AgentAddress> {
+  return { kind: "virtual", assistant: (await findAssistant(prisma, viewer.oid))?.id === virtualAgentId };
 }
 
 export interface AssistantHome {

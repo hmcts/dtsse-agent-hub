@@ -71,16 +71,14 @@ function Remove({ row, remove, onDone, onRemoved }: { row: SavedCredential; remo
   );
 }
 
-function Row({ row, tokens }: { row: SavedCredential; tokens: AssistantTokens }) {
+function Row({ row, tokens, onDone }: { row: SavedCredential; tokens: AssistantTokens; onDone: (said: string | null) => void }) {
   const [doing, setDoing] = useState<"replace" | "remove" | null>(null);
-  // Said in the row rather than in the form, which closes on success.
-  const [done, setDone] = useState<string | null>(null);
   const finish = (said: string) => () => {
     setDoing(null);
-    setDone(said);
+    onDone(said);
   };
   const start = (what: "replace" | "remove") => () => {
-    setDone(null);
+    onDone(null);
     setDoing(what);
   };
   return (
@@ -91,11 +89,6 @@ function Row({ row, tokens }: { row: SavedCredential; tokens: AssistantTokens })
           {row.stored ? "Saved" : "Not saved"}
           {row.accountLabel === null ? null : ` · ${row.accountLabel}`}
         </span>
-        {done === null ? null : (
-          <span role="status" className="text-xs text-asst-ok">
-            {done}
-          </span>
-        )}
       </div>
       {doing === null ? (
         <div className="flex shrink-0 gap-2">
@@ -120,6 +113,8 @@ function Row({ row, tokens }: { row: SavedCredential; tokens: AssistantTokens })
 }
 
 export function TokenSettings({ tokens }: { tokens: AssistantTokens }) {
+  // Said by the section rather than the row: a removed credential that cannot be pasted has no row once it is gone.
+  const [said, setSaid] = useState<string | null>(null);
   return (
     <section aria-labelledby="assistant-settings-tokens" className="flex flex-col gap-2.5">
       <h3 id="assistant-settings-tokens" className="text-sm font-semibold">
@@ -129,10 +124,15 @@ export function TokenSettings({ tokens }: { tokens: AssistantTokens }) {
         Paste a token your assistant asked for, or remove one it has saved. A saved value is never shown again. Sign-ins your assistant makes for itself can
         only be removed here, not pasted.
       </p>
+      {said === null ? null : (
+        <p role="status" className="text-[13px] text-asst-ok">
+          {said}
+        </p>
+      )}
       {tokens.unavailable === null ? (
         <ul aria-label="Credentials" className="flex flex-col overflow-hidden rounded-[10px] border border-asst-line">
           {tokens.rows.map((row) => (
-            <Row key={row.kind} row={row} tokens={tokens} />
+            <Row key={row.kind} row={row} tokens={tokens} onDone={setSaid} />
           ))}
         </ul>
       ) : (
