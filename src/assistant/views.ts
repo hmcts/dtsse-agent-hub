@@ -69,10 +69,10 @@ export type LocalSession = "ready" | "working" | "disconnected";
 /**
  * The three states the laptop mark shows, named for what they mean to a person reading the list.
  *
- * Coloured `idle` green, `busy` amber and `offline` grey. That makes `idle` the welcoming state:
+ * Coloured `idle` green, `busy` the same green with a badge and `offline` grey. That makes `idle` the welcoming state:
  * `offline` is a heartbeat gone for 90 seconds and so the only one that is really "not connected", while `idle` is a
- * live session with nothing in hand, which is when it will answer you fastest. `busy` is mid-turn, which is worth a
- * different colour precisely because a message sent then waits.
+ * live session with nothing in hand, which is when it will answer you fastest. `busy` is mid-turn: still connected, so
+ * still green, but badged because a message sent then waits.
  */
 const LOCAL_SESSION: Record<AgentStatus, LocalSession> = { idle: "ready", busy: "working", offline: "disconnected" };
 
