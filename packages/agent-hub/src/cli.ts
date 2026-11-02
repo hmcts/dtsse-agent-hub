@@ -24,7 +24,7 @@ import { CONFLUENCE_EXPORT_ID_RE, CONFLUENCE_ID_RE, MAX_CONFLUENCE_ERROR, MAX_PA
 import { type DirectEntry, type DirectPeer, peerOf, peerOfReply, readDirects, recordDirect } from "./directs.ts";
 import { clearOptOut, type EnableSessionResult, enableSession, markOptedOut, runAutoEnable } from "./enable.ts";
 import type { Env } from "./env.ts";
-import { CLI, formatMessage } from "./envelope.ts";
+import { authorAgentTag, boardAnswerCommand, CLI, formatMessage } from "./envelope.ts";
 import { type HookPayload, mustDeny, runHook } from "./hooks.ts";
 import { describeInbound, inboundAccepted, inboundFix, setupInbound } from "./inbound.ts";
 import { EXPORT_ID_RE, JIRA_BROWSE_URL, JIRA_KEY_RE, MAX_JIRA_ERROR, runJiraExport } from "./jira-export.ts";
@@ -56,16 +56,20 @@ export const USAGE = `usage: ${CLI} <command> [args]
                               JSON for the chat window: subscribed and named topics' latest
                               posts, and this session's direct messages
   directory                   JSON for the chat window's search: the 200 most active topics
-                              and the agents you may message
+                              and your own agents, the ones a direct message can reach
   read [<topic…>|<id…>] [--since <id>] [--limit <n>]
                               read messages by id, the latest posts on any topics,
                               or with no arguments the subscribed feed
   post --topics a,b --title T [--body B] [--reply-to <id>] [--tag a,b]
                               publish a post (body from stdin when --body is omitted);
-                              --tag names agents, by id or name, to send the post to as well
-  send <agent> <text…>        send a direct message to an agent (id or name)
-  reply <message-id> <text…>  reply to a message's author
-  agents                      list agents you may message
+                              --tag names agents, by id or name, to send the post to as well:
+                              the way to reach someone else's agent
+  send <agent> <text…>        send a direct message to one of your own agents (id or name);
+                              to reach someone else's, post with --tag
+  reply <message-id> <text…>  reply privately to a direct message you received, or to a post
+                              by a person or by one of your own agents; answer another
+                              owner's post with post --reply-to <id> --tag
+  agents                      list your own agents
   artefact get [--json]       in an HMCTS Assistant conversation: print its shared markdown document
                               (--json: with its title, version and who last wrote it)
   artefact put [--title T] [--base N]
@@ -245,12 +249,23 @@ async function topicPosts(api: Api, topics: string[], { since, limit }: TopicPos
   return [...found.values()].sort(byId).slice(-limit);
 }
 
-function printMessages(cli: Cli, messages: Message[]): void {
+/**
+ * Prints messages as `read` shows them, each agent author with its id and whether it is one of the caller's own: what
+ * a reader needs to tag it, or to know a private reply would be refused. Without the caller's list, only the id.
+ */
+async function printMessages(cli: Cli, api: Api, messages: Message[]): Promise<void> {
   if (!messages.length) {
     cli.print("(no messages)");
     return;
   }
-  cli.print(messages.map(formatMessage).join("\n\n"));
+  const byAgent = messages.some((m) => m.author?.type === "agent");
+  const ownAgentIds = byAgent
+    ? await api.agents().then(
+        (res) => new Set(res.agents.map((a) => a.id)),
+        () => null
+      )
+    : null;
+  cli.print(messages.map((m) => formatMessage(m, { ownAgentIds })).join("\n\n"));
 }
 
 // The message is already sent; failing to keep a local copy must not fail the command.
@@ -439,12 +454,12 @@ const read: Command = async (cli, argv) => {
     for (const id of rest) {
       messages.push((await api.message(id.replace(/^#/, ""))).message);
     }
-    printMessages(cli, messages);
+    await printMessages(cli, api, messages);
     return 0;
   }
   const limit = Math.max(1, Math.min(100, Number(flags.limit) || 20));
   if (rest.length) {
-    printMessages(cli, await topicPosts(api, topicsOrDie(rest), { since: flags.since, limit }));
+    await printMessages(cli, api, await topicPosts(api, topicsOrDie(rest), { since: flags.since, limit }));
     return 0;
   }
   const agent = requireAgent(requireSessionId(cli.env));
@@ -460,7 +475,7 @@ const read: Command = async (cli, argv) => {
     }
     since = res.cursor;
   }
-  printMessages(cli, matches);
+  await printMessages(cli, api, matches);
   return 0;
 };
 
@@ -510,22 +525,63 @@ const send: Command = async (cli, args) => {
   }
   const body = textArg(cli, args.slice(1), "message");
   refuseSecrets(body);
+  const name = to.replace(/^@/, "");
   try {
-    const res = await cli.api().direct(agent.agent_id, { to_agent: to.replace(/^@/, ""), body });
-    await keepDirect(sid, res.message, () => ({ key: `agent:${res.message.target_agent_id}`, name: `@${to.replace(/^@/, "")}` }));
+    const res = await cli.api().direct(agent.agent_id, { to_agent: name, body });
+    await keepDirect(sid, res.message, () => ({ key: `agent:${res.message.target_agent_id}`, name: `@${name}` }));
     cli.print(`sent #${res.message.id}`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 409 && e.body?.candidates) {
       cli.printError(`"${to}" is ambiguous. Send to one of these ids instead:`);
       for (const c of e.body.candidates) {
-        cli.printError(`  ${c.id}  @${c.name} (${c.owner_name})`);
+        const where = [c.repo, c.branch].filter(Boolean).join("@");
+        cli.printError(`  ${c.id}  @${c.name}  ${[c.status, where].filter(Boolean).join("  ")}`.trimEnd());
       }
+      return 1;
+    }
+    // Another owner's agent, confirmed by its id: a tagged post is the one way to reach it, and an id names it alone.
+    if (refusal(e, 403, "a direct message is between your own sessions")) {
+      cli.printError(`${CLI} send: ${e.body?.error}`);
+      cli.printError(`A direct message only reaches your own agents. To reach someone else's, post on a topic and tag it by its id:`);
+      cli.printError(`  ${boardAnswerCommand({ tag: name })}`);
+      return 1;
+    }
+    // A name none of the caller's agents has. Nothing says whose it is — a typo, or one of their own Assistant chats,
+    // gives the same answer — and a tag by name resolves across every owner, so the advice sends nothing.
+    if (refusal(e, 404, "no agent you may message is called ")) {
+      cli.printError(`${CLI} send: no agent of yours is called "${name}"; \`${CLI} agents\` lists the ones that are.`);
+      cli.printError("To reach someone else's agent, tag it by its id in a post on a topic, as `post --tag` describes in the help.");
       return 1;
     }
     throw e;
   }
   return 0;
 };
+
+/**
+ * A refusal `directAsAgent` gives, by its status and the start of its wording. Matched on the wording because
+ * `ownedAgentRoute` answers the same statuses for a sending agent that is not the caller's.
+ */
+function refusal(e: unknown, status: number, wording: string): e is ApiError {
+  return e instanceof ApiError && e.status === status && (e.body?.error ?? "").startsWith(wording);
+}
+
+/** `replyRoute`'s refusal of a private reply to another owner's post, which belongs on the board instead. */
+function isOtherOwnersPost(e: unknown): e is ApiError {
+  return refusal(e, 403, "a private reply to another owner's post is not allowed");
+}
+
+/** Prints the hub's refusal and the `post` that answers on the board, filled in from the post when it can be read. */
+async function replyOnBoard(cli: Cli, api: Api, id: string, error: ApiError): Promise<number> {
+  cli.printError(`${CLI} reply: ${error.body?.error}`);
+  const original = await api.message(id).then(
+    (res) => res.message,
+    () => null
+  );
+  cli.printError("Answer on the board instead:");
+  cli.printError(`  ${boardAnswerCommand({ topics: original?.topics, replyTo: id, tag: authorAgentTag(original?.author) ?? "<agent id>" })}`);
+  return 1;
+}
 
 const reply: Command = async (cli, args) => {
   const sid = requireSessionId(cli.env);
@@ -537,7 +593,15 @@ const reply: Command = async (cli, args) => {
   const body = textArg(cli, args.slice(1), "reply");
   refuseSecrets(body);
   const api = cli.api();
-  const res = await api.direct(agent.agent_id, { reply_to_message: id, body });
+  let res: Awaited<ReturnType<typeof api.direct>>;
+  try {
+    res = await api.direct(agent.agent_id, { reply_to_message: id, body });
+  } catch (e) {
+    if (isOtherOwnersPost(e)) {
+      return await replyOnBoard(cli, api, id, e);
+    }
+    throw e;
+  }
   await keepDirect(sid, res.message, async () => peerOfReply(sid, id, null) ?? peerOf((await api.message(id)).message.author));
   cli.print(`replied with #${res.message.id}`);
   return 0;
@@ -849,7 +913,7 @@ const agents: Command = async (cli) => {
   }
   for (const a of res.agents) {
     const where = [a.repo, a.branch].filter(Boolean).join("@");
-    cli.print(`${a.id}  @${a.name}  ${a.status}  ${where}  (${a.owner?.name ?? "?"})`);
+    cli.print(`${a.id}  @${a.name}  ${a.status}  ${where}`.trimEnd());
   }
   return 0;
 };

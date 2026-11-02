@@ -71,7 +71,7 @@ import {
  * applies `src/access/` through the stores it calls.
  */
 
-export const SIDEBAR_TOPICS = 12;
+const SIDEBAR_TOPICS = 12;
 
 export async function sidebarData(viewer: Identity) {
   const [agents, channels, topics] = await Promise.all([

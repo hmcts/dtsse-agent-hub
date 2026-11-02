@@ -43,7 +43,7 @@ const DROPPED_FROM_RESPONSE = new Set(["content-encoding", "content-length", "st
  * In place of whatever the pod asks for, as helmet's `no-referrer` default: the viewer finds the port a root-relative
  * request came from by its `Referer`, which `same-origin` still sends to the viewer and never to anywhere else.
  */
-export const VIEWER_REFERRER_POLICY = "same-origin";
+const VIEWER_REFERRER_POLICY = "same-origin";
 
 /** A `Connection` header can name further hop-by-hop headers. */
 function connectionTokens(headers: Headers): Set<string> {

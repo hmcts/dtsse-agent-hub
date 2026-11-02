@@ -1,4 +1,4 @@
-import { agentsMessageableBy, POD_CONVERSATION_AGENT } from "../access/load.ts";
+import { agentsMessageableBy, POD_CONVERSATION_AGENT, podConversationAgentSql } from "../access/load.ts";
 import { isPodConversationAgent } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
 import { linkLocalSession, linkSession } from "../assistant/store.ts";
@@ -236,11 +236,9 @@ export async function heartbeat(
     if (skills !== undefined && skillsChanged(before.skills, normaliseSkills(skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agentId, owner_oid: before.ownerOid });
     }
-    // A laptop session with no conversation gets one here as well as at registration, because registration is not
-    // where most of them arrive. The client registers only while it holds no agent id and heartbeats ever after, so
-    // every session already running when conversations were introduced — and every agent row written before then —
-    // would otherwise never have had one, with nothing to create it later. Under the same row lock the heartbeat
-    // already takes, so two heartbeats cannot both make one.
+    // A laptop session with no conversation gets one here as well as at registration: the client registers only while
+    // it holds no agent id and heartbeats ever after, so a session whose agent row has no conversation would otherwise
+    // never get one. Under the same row lock the heartbeat already takes, so two heartbeats cannot both make one.
     if (before.local) {
       // The name this heartbeat reported, not the one the row held before it: the two differ exactly when the
       // client has just worked out a better one, and the chat made here would otherwise be named the worse of them.
@@ -281,7 +279,7 @@ export interface ListedAgent {
   owner: { name: string; email: string | null };
 }
 
-export const MAX_LISTED_AGENTS = 200;
+const MAX_LISTED_AGENTS = 200;
 
 /**
  * The agents `oid` may message, live ones first and then most recently heard from: their own sessions, which is what
@@ -322,8 +320,6 @@ export interface SuggestedAgent {
   ownerOid: string;
   name: string;
   ownerName: string;
-  /** Read by `canSuggestAgent`, so the rule and not this query is the last word on what may be offered. */
-  ownerOnly: boolean;
 }
 
 /**
@@ -332,33 +328,22 @@ export interface SuggestedAgent {
  * answer at all and how many agents one answer may carry.
  *
  * A hyphen rather than any substring, so "pcs" finds `alice-pcs-api` without "api" finding every agent that has one
- * in its name. Every owner's, because tagging reaches every owner's; the pod conversation's agents it leaves out are
- * the ones nobody may tag.
+ * in its name. Every owner's, because tagging reaches every owner's, less the pod conversations' agents, which
+ * nobody may tag (`tagRefusal`): left out in the query, by `podConversationAgentSql`, so that a person with a dozen
+ * chats, each an agent named after their assistant, does not spend the whole `LIMIT` on rows nobody may be offered.
  */
 export async function searchTaggableAgents(db: Database, query: string, limit: number): Promise<SuggestedAgent[]> {
   const starts = `${likeLiteral(query)}%`;
   const afterHyphen = `%-${likeLiteral(query)}%`;
-  // The pod conversations are left out here as well as by the rule, rather than only by it: a person with a dozen
-  // chats has a dozen agents all named after their assistant, and a query matching that name would otherwise spend
-  // the whole limit on rows the rule then drops and answer with nothing.
-  const rows = await db.$queryRaw<
-    { id: string; owner_oid: string; name: string; owner_name: string; conversation_id: string | null; virtual_agent_id: string | null }[]
-  >`
-    SELECT a.id::text AS id, a.owner_oid, a.name, u.name AS owner_name,
-           a.assistant_conversation_id::text AS conversation_id, a.virtual_agent_id::text AS virtual_agent_id
+  const rows = await db.$queryRaw<{ id: string; owner_oid: string; name: string; owner_name: string }[]>`
+    SELECT a.id::text AS id, a.owner_oid, a.name, u.name AS owner_name
       FROM agent a JOIN "user" u ON u.oid = a.owner_oid
      WHERE (lower(a.name) LIKE ${starts} OR lower(a.name) LIKE ${afterHyphen})
-       AND NOT (a.assistant_conversation_id IS NOT NULL AND a.virtual_agent_id IS NOT NULL)
+       AND NOT ${podConversationAgentSql("a")}
      ORDER BY (a.status = 'offline'), a.last_heartbeat_at DESC, a.id
      LIMIT ${limit}
   `;
-  return rows.map((row) => ({
-    id: row.id,
-    ownerOid: row.owner_oid,
-    name: row.name,
-    ownerName: row.owner_name,
-    ownerOnly: isPodConversationAgent({ assistantConversationId: row.conversation_id, virtualAgentId: row.virtual_agent_id })
-  }));
+  return rows.map((row) => ({ id: row.id, ownerOid: row.owner_oid, name: row.name, ownerName: row.owner_name }));
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

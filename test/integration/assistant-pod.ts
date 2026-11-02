@@ -12,7 +12,7 @@ import { insertUser, type Person, prisma } from "./database.ts";
  */
 
 /** A development persona, as the `X-Dev-User` header and the persona cookie name one. */
-export function persona(name: string): Person {
+function persona(name: string): Person {
   const identity = devIdentity(name);
   return { oid: identity.oid, name: identity.name, email: identity.email! };
 }
@@ -25,7 +25,7 @@ export function viewer(who: Person): Viewer {
   return { ...who, tid: "dev", modelRoute: "own-licence" };
 }
 
-export interface PodSession {
+interface PodSession {
   /** Whether a supervisor session has ever registered. Without one nothing has claimed anything either way. */
   session?: boolean;
 }
@@ -38,7 +38,7 @@ export interface PodSession {
  * `features` is explicit rather than defaulted: which feature a suite is about is the whole point of the fixture,
  * and `null` is a client from before client features existed, which is a different state from claiming none.
  */
-export async function assistantOf(
+async function assistantOf(
   who: Person,
   features: string[] | null,
   status: "running" | "stopped" = "running",

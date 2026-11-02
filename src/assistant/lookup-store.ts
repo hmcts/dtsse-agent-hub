@@ -76,7 +76,7 @@ export async function askLookup(prisma: PrismaClient, question: LookupQuestion, 
 }
 
 /** What a stored lookup answers, or `undefined` while the pod has not. A lookup that has gone answers `timeout`. */
-export async function readLookup(db: Database, lookupId: string): Promise<LookupResponse | undefined> {
+async function readLookup(db: Database, lookupId: string): Promise<LookupResponse | undefined> {
   const row = await db.assistantLookup.findUnique({ where: { id: lookupId }, select: { kind: true, status: true, results: true, error: true, detail: true } });
   return row === null ? { status: "timeout" } : lookupResponse(row);
 }

@@ -9,10 +9,6 @@ import type { LookUp } from "@/components/assistant/lookupClient";
 import type { LoginView } from "@/virtual-agents/logins";
 import type { ActionResult } from "@/web/action";
 
-// Kept importable from here, where the Jira export first had them; they live with the prompt so the Confluence export
-// and the search can read a sign-in the same way without importing this file.
-export { type SignInStage, signInNote, signInStage } from "@/components/assistant/AtlassianSignIn";
-
 export type ExportToJiraAction = (input: { conversationId: unknown; project: unknown }) => Promise<ActionResult>;
 
 /** Whether the person's assistant can reach Jira as them, and the Atlassian sign-in it is waiting on, if any. */
@@ -84,7 +80,7 @@ function startingProject(exported: JiraExportView, chosen: JiraProjectChoice | n
  * The backlog the ticket goes to: the one chosen, with a way to search the person's own Jira for another. Any project
  * they can reach can be picked, and the change is for this document only; their default is in the settings.
  */
-export function ProjectPicker({
+function ProjectPicker({
   project,
   onChange,
   disabled,

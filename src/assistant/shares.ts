@@ -51,7 +51,7 @@ export async function conversationRef(db: Database, id: string): Promise<SharedC
 }
 
 /** Every share of one conversation, as the rules take them. */
-export async function sharesOf(db: Database, conversationId: string): Promise<ConversationShare[]> {
+async function sharesOf(db: Database, conversationId: string): Promise<ConversationShare[]> {
   const rows = await db.assistantConversationShare.findMany({
     where: { conversationId },
     select: { conversationId: true, recipientOid: true },

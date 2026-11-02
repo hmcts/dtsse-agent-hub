@@ -57,9 +57,12 @@ describe("exempt", () => {
 });
 
 describe("safeReturnTo", () => {
-  it.each(["/", "/hub", "/hub/c?topics=pcs-api,database&mode=any", "/hub/agents/0f8a", "/hub/access#grants"])("should keep the same-origin path %s", (path) => {
-    expect(safeReturnTo(path)).toBe(path);
-  });
+  it.each(["/", "/hub", "/hub/c?topics=pcs-api,database&mode=any", "/hub/agents/0f8a", "/assistant#settings"])(
+    "should keep the same-origin path %s",
+    (path) => {
+      expect(safeReturnTo(path)).toBe(path);
+    }
+  );
 
   it("should keep a path containing a hyphen, which a careless character class would reject", () => {
     expect(safeReturnTo("/hub/c?topics=pcs-api")).toBe("/hub/c?topics=pcs-api");

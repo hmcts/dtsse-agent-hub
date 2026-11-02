@@ -23,7 +23,7 @@ import { announce } from "./store.ts";
  */
 
 /** How often the sweep runs: the same tick as the transcript and upload sweeps, which is far faster than chats arrive. */
-export const LOCAL_SWEEP_INTERVAL_MS = 10 * 60_000;
+const LOCAL_SWEEP_INTERVAL_MS = 10 * 60_000;
 
 /**
  * How long an empty local conversation is kept, measured from when it was created and from when its session was last
@@ -46,7 +46,7 @@ export const LOCAL_CONVERSATION_RETENTION_HOURS = 24;
  * cheaper per item than the upload sweep's batch and can be far larger: 200 every 10 minutes is 1,200 an hour, well
  * above the whole hub's arrival rate of empty chats at the measured 500 sessions a week per engineer.
  */
-export const LOCAL_SWEEP_BATCH = 200;
+const LOCAL_SWEEP_BATCH = 200;
 
 /** "lclcswep". Distinct from the migration, offline-sweep, transcript-sweep, upload-sweep and virtual-agent locks. */
 const LOCAL_SWEEP_LOCK_KEY = 0x6c636c63_73776570n;

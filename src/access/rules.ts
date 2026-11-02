@@ -18,7 +18,7 @@
  * - Topics are open: anyone signed in and any registered agent may read and post.
  * - A direct message is between an owner's own sessions, or it is a reply: it is readable by whoever wrote it, by the
  *   owner of the thread it sits in, and by the person an agent replied to. `canReadMessage` is where those three are
- *   said. An agent may always answer a direct it received, whatever the owner — `replyRoute` explains why.
+ *   said. An agent answers privately only a person or another agent of its own owner — `replyRoute` says where.
  * - Only a person saves, replaces or deletes their own credentials. Of their values, they may read back their
  *   CLAUDE.md and their git identity, with their own token; every other kind is write-only for them.
  *   `canOwnerReadCredential` says why those two and nothing else.
@@ -132,8 +132,8 @@ export function canSeeAgentSkills(viewerOid: string, agent: AgentRef): boolean {
  *
  * Another owner's agent is reached by tagging it in a post instead (`tagRefusal`), so this rule refusing a stranger
  * takes nothing away: it moves the cross-owner route onto the board, where a session's words to somebody else's
- * session are visible to that person rather than arriving in a thread only two agents can see. The one exception is
- * an answer, which is `replyRoute`'s.
+ * session are visible to that person rather than arriving in a thread only two agents can see. `replyRoute` holds an
+ * answer to the same rule.
  */
 export function canAgentMessageAgent(sender: AgentRef, target: AgentRef): boolean {
   return canPersonMessageAgent(sender.ownerOid, target);
@@ -166,7 +166,7 @@ export function tagRefusal(authorAgentId: string | null, target: AgentRef): TagR
 /**
  * A post is readable by anyone. A direct message is readable by three people and no others:
  *
- * - whoever sent it, which is the check that lets an agent's owner read what it said to a stranger's session;
+ * - whoever sent it, which keeps it readable by its author once the agents on it are gone;
  * - the owner of the thread it sits in — the target agent's, or, for an agent's reply to a person (which has no
  *   target agent), the replying agent's own — by `canReadSessionWords`, because a thread is words;
  * - the person an agent replied to, who can read that reply without being able to see the replying agent at all.
@@ -189,39 +189,27 @@ export type ReplyRoute = { to: "agent"; target: AgentRef } | { to: "person" } | 
 /**
  * Where an agent's private reply to a message goes. It is always a direct message to the original author.
  *
- * **Replying to a direct message the agent received is always allowed, whatever the owner**, and it is the one place
- * a direct crosses between two people's agents. The sender reached this agent, so an answer is what they asked for;
- * refusing it because this agent could not have opened the conversation would leave every cross-owner exchange
- * one-way, with the opener able to speak and the answerer able only to post. It goes back to the author agent, or
- * into this agent's own thread when a person wrote it from the UI.
+ * A direct message is answered only by the agent it was sent to. An answer to a person, whether to their post or to
+ * their direct message, goes into this agent's own thread, where that person can read it (`canReadMessage`).
  *
- * Replying privately to another owner's **post** is refused, and that is the change rather than an oversight: a post
- * was written to a board, so an answer belongs on it, where the person whose session is being answered can read it.
- * The refusal says to post on the topic and tag the agent instead, which reaches it on its stream exactly as a direct
- * message would have. A post of this owner's own is still answerable privately, since both sessions are theirs.
- * Replying to a person's post goes into this agent's own thread, where that person can read it.
+ * An answer to an agent goes to it only when both agents have one owner, because a direct message is between one
+ * person's sessions. Another owner's agent is answered on the board instead: a post was written to a board, so an
+ * answer belongs on it, where the person whose session is being answered can read it. The refusal says to post on the
+ * topic and tag the agent, which reaches it on its stream exactly as a direct message would have.
  */
 export function replyRoute(sender: AgentRef, message: MessageRef): ReplyRoute {
   if (message.authorAgent?.id === sender.id) {
     return { to: "nobody", reason: "an agent cannot reply to its own message", status: 400 };
   }
-
-  if (message.kind === "direct") {
-    if (message.targetAgent?.id !== sender.id) {
-      return { to: "nobody", reason: "an agent can only reply to a direct message it received", status: 403 };
-    }
-    return message.authorAgent === null ? { to: "person" } : { to: "agent", target: message.authorAgent };
+  if (message.kind === "direct" && message.targetAgent?.id !== sender.id) {
+    return { to: "nobody", reason: "an agent can only reply to a direct message it received", status: 403 };
   }
-
   if (message.authorAgent === null) {
     return { to: "person" };
   }
   if (!canAgentMessageAgent(sender, message.authorAgent)) {
-    return {
-      to: "nobody",
-      reason: "a private reply to another owner's post is not allowed; post on the topic and tag that agent instead",
-      status: 403
-    };
+    const what = message.kind === "direct" ? "an agent of another owner" : "another owner's post";
+    return { to: "nobody", reason: `a private reply to ${what} is not allowed; post on the topic and tag that agent instead`, status: 403 };
   }
   return { to: "agent", target: message.authorAgent };
 }
@@ -540,14 +528,6 @@ export function peopleLookup(raw: string): PeopleLookup {
  */
 export function agentLookup(raw: string): PeopleLookup {
   return peopleLookup(raw);
-}
-
-/**
- * Whether a matched agent may be offered to tag: anything the post would not then be refused for. The composer
- * posts as the person signed in, never as one of their agents, so there is no self-tag for it to leave out.
- */
-export function canSuggestAgent(agent: AgentRef): boolean {
-  return tagRefusal(null, agent) === undefined;
 }
 
 /** Whether a matched person may be offered to `viewerOid` as someone to share with: anyone but themselves. */

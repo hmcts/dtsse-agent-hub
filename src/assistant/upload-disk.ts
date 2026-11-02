@@ -163,7 +163,7 @@ export async function uploadsOnDisk(prisma: PrismaClient, viewerOid: string, vir
 }
 
 /** Why a deletion was not asked for. The pod's client is the one refusal a person can do something about. */
-export type RemoveOutcome = "requested" | "no_such_upload" | "unsupported_client";
+type RemoveOutcome = "requested" | "no_such_upload" | "unsupported_client";
 
 /**
  * What was asked for: the outcome, and how many files it covered. The count is what a confirmation may claim, and is

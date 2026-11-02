@@ -9,7 +9,7 @@ const HUB = "/hub";
 
 const ASSISTANT = "/assistant";
 
-/** Where a person manages the only access anyone grants anyone: a read of one of their conversations. */
+/** Where a person manages who may read or fork their conversations, the only access one person gives another. */
 const SHARED_CHATS = `${ASSISTANT}/shared`;
 
 /**
@@ -39,11 +39,10 @@ export function movedHubPath(pathname: string): string | undefined {
 /**
  * Where a retired hub address goes now, or `undefined` when the path is not one.
  *
- * `/hub/access` managed one person's standing grants over every agent they own. There are none to manage: an agent is
- * its owner's, somebody else's is reached by tagging it in a post, and the only access anyone grants anyone is a read
- * of one conversation at a time — which that page already linked to and which is managed at `SHARED_CHATS`. So that
- * is where it goes, except where virtual agents are off: there are no conversations to share there either, and the
- * Assistant's pages are not found at all, so it gets the hub's home instead.
+ * `/hub/access` goes to `SHARED_CHATS`: an agent is its owner's, somebody else's is reached by tagging it in a post,
+ * and the only access one person gives another is a share or fork of one conversation at a time, which is managed
+ * there. Where virtual agents are off there are no conversations to share and the Assistant's pages are not found, so
+ * it goes to the hub's home instead.
  *
  * Both the bare address and the `/hub` one, because the page existed under both and both were pasted into tickets.
  * Checked ahead of `movedHubPath`, which would otherwise send the bare one to a page that is no longer there.

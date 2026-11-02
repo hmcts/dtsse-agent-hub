@@ -2,7 +2,7 @@
  * The bones of a page for each route's `loading.tsx`. One `role="status"` says loading in words; the bars are
  * hidden from screen readers.
  */
-export function SkeletonPage({ children }: { children: React.ReactNode }) {
+function SkeletonPage({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <p role="status" className="sr-only">
@@ -15,7 +15,7 @@ export function SkeletonPage({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function SkeletonBar({ className }: { className: string }) {
+function SkeletonBar({ className }: { className: string }) {
   return <div className={`animate-pulse rounded-sm bg-hub-raised ${className}`} />;
 }
 

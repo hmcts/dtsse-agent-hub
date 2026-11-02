@@ -12,8 +12,8 @@ export interface WelshJobRequest {
 }
 
 /** How often a running job is read back, and how often a job is tried again while the assistant starts. */
-export const WELSH_POLL_MS = 2000;
-export const WELSH_WAKING_RETRY_MS = 5000;
+const WELSH_POLL_MS = 2000;
+const WELSH_WAKING_RETRY_MS = 5000;
 const WAKING_RETRIES = 36;
 
 export interface WelshClient {

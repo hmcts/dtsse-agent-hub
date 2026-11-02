@@ -2,7 +2,7 @@ import { byCodePoint } from "../topics/slug.ts";
 
 /** The `Message` type of the agent API contract (`docs/agent-api.md`), and the one place it is built. */
 
-export interface TaggedAgent {
+interface TaggedAgent {
   id: string;
   name: string;
 }

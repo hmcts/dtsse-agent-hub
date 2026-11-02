@@ -19,7 +19,7 @@ export type Inline =
   /** A `#1234` reference to another message, which the UI links to that message's page. */
   | { type: "message"; id: string };
 
-export interface ListItem {
+interface ListItem {
   children: Inline[];
   lists: ListBlock[];
 }

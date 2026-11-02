@@ -24,7 +24,7 @@ export const RUNNING_WATCH_MS = 15 * 60_000;
 /** A pod waits this long for a node before it is reported unschedulable, so a cluster scaling up does not fail it. */
 export const SCHEDULING_GRACE_MS = 5 * 60_000;
 
-export type { Level, Log } from "./log.ts";
+export type { Log } from "./log.ts";
 
 export interface ReconcileDeps {
   kube: Kube;
@@ -106,7 +106,7 @@ export function settled(agent: ClaimedAgent, seen: ObservedBody): boolean {
  * The namespace is shared with other workloads (in preview, `dtsse`'s PR previews), so nothing is changed or deleted
  * by name alone: it must carry the orchestrator's label and, where the agent is known, that agent's id.
  */
-export function owned(resource: Resource, id?: string): boolean {
+function owned(resource: Resource, id?: string): boolean {
   const tags = resource.metadata.labels ?? {};
   return tags["app.kubernetes.io/managed-by"] === MANAGED_BY && (id === undefined || tags[ID_LABEL] === id);
 }

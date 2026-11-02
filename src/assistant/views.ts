@@ -245,7 +245,7 @@ export interface ConversationView {
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
   stopHistory: { at: string }[];
   /**
-   * Where the chat runs, as `ConversationLink.local`. The one thing the chat's own screen reads it for is which of
+   * Whether the chat has no pod (`!hasPod`). The one thing the chat's own screen reads it for is which of
    * its controls make sense: everything a pod does for a conversation — carrying a file to its session, interrupting
    * a turn, starting one on demand — there is nobody to do for a session on somebody's laptop.
    */

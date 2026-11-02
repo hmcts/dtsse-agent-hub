@@ -21,9 +21,8 @@ export const TITLE_MAX = 200;
  *   the transcript's own title and falls back to the session registry's handle, `hmcts-25`, while it has nothing
  *   better, which it has not when the session registers and its chat is made.
  * - `message` — the first thing said in the chat. The person's first message for a chat on a pod, their first prompt
- *   for one on their own computer, which is what that chat is about. It is also what a title from before this column
- *   existed is read as when the one-off that added it could not attribute the title, because the rules for the two
- *   are the same: nothing automatic replaces either, and a `/rename` replaces both.
+ *   for one on their own computer, which is what that chat is about. A title whose source could not be told is stored
+ *   as this one, because the rules are the same: nothing automatic replaces it, and a `/rename` does.
  * - `user` — the person named it themselves, in the hub. Nothing overwrites it.
  *
  * Kept on the row rather than worked out from the title, because a refresh that could not tell an automatic title
@@ -32,8 +31,8 @@ export const TITLE_MAX = 200;
 export type TitleSource = "agent" | "message" | "user";
 
 /**
- * The title to store for a name a local session's client reported: normalised exactly as a rename is, so the two
- * cannot disagree about what a title may be.
+ * The title to store for a name a local session's client reported, with its whitespace collapsed as a rename's is.
+ * Unlike a rename, which refuses a title over `TITLE_MAX`, this cuts it there.
  *
  * Kept even when the client had nothing better and sent the first characters of the session id. That reads as
  * nothing, but it is what the hub calls the same session everywhere else, and the alternative is a sidebar in which

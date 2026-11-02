@@ -600,7 +600,7 @@ export interface ClaimedVirtualAgent {
   gateway?: GatewaySettings;
 }
 
-export const CLAIM_LIMIT = 20;
+const CLAIM_LIMIT = 20;
 
 /** Statuses from which `running` means a new pod, which needs a token of its own. */
 const STARTING_FROM: readonly VirtualAgentStatus[] = ["requested", "stopping", "stopped"];
@@ -631,7 +631,7 @@ function failedToApply(row: ClaimRow): boolean {
   return row.status === "failed" && row.apply_failures > 0;
 }
 
-export interface OrchestratorLease {
+interface OrchestratorLease {
   cluster: string;
   renewed_at: string;
 }

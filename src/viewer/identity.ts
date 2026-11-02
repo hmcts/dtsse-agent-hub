@@ -20,7 +20,7 @@ export const DEV_PERSONA_COOKIE = "ah_dev_persona";
 
 const PERSONA = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
-export const ANONYMOUS_PERSONA = "anonymous";
+const ANONYMOUS_PERSONA = "anonymous";
 
 /**
  * A development identity. `persona` lets a second browser act as someone else while sign-in is off, which is what
@@ -33,14 +33,9 @@ export function devIdentity(persona: string | undefined = ANONYMOUS_PERSONA): Id
     oid: `${DEV_OID_PREFIX}${name}`,
     tid: DEV_TENANT,
     name: name === ANONYMOUS_PERSONA ? "Anonymous (sign-in disabled)" : `Dev ${name} (sign-in disabled)`,
-    // `.invalid` is reserved and resolves nowhere, so the access page can find a development identity by address
-    // without that address ever belonging to anybody.
+    // `.invalid` is reserved and resolves nowhere, so a development identity's address never belongs to anybody.
     email: `${name}@dev.invalid`
   };
-}
-
-export function isDevIdentity(identity: { tid: string }): boolean {
-  return identity.tid === DEV_TENANT;
 }
 
 export type CookieReader = (name: string) => string | undefined;
@@ -50,7 +45,7 @@ export type CookieReader = (name: string) => string | undefined;
  * shows the agents their `az` token registered. The tenant is `ENTRA_TENANT_ID` when set, so it matches the `user`
  * row that registration wrote.
  */
-export function configuredDevUser(env: Environment = process.env): Identity | undefined {
+function configuredDevUser(env: Environment = process.env): Identity | undefined {
   const value = env.AUTH_DEV_USER;
   if (value === undefined || value === "") {
     return undefined;
@@ -76,7 +71,7 @@ export interface Viewer extends Identity {
 }
 
 /** A persona named `own-licence` or `own-licence-…` is on the own-licence route; every other one is on the gateway. */
-export const OWN_LICENCE_PERSONA = "own-licence";
+const OWN_LICENCE_PERSONA = "own-licence";
 
 /**
  * The one place a person's route is decided. Today the signal is the hub's own `AIGateway.User` app role, which is
