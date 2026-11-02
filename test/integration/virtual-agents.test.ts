@@ -333,6 +333,25 @@ describe("POST /api/orchestrator/claim", () => {
     expect(claimed?.gateway).toEqual({ apim_key: GATEWAY_APIM_KEY });
   });
 
+  // The pod gives its agent this host's URLs to hand out, in place of the VPN-only ones.
+  it("should tell the orchestrator the viewer's host when the viewer is on, and nothing when it is off", async () => {
+    await create(ALICE, "pcs-api", "gateway");
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", "agent-hub-viewer.example");
+    vi.stubEnv("ENTRA_REDIRECT_URI", "https://agent-hub.example/auth/callback");
+    vi.stubEnv("SESSION_SECRET", "a-test-session-secret-long-enough-to-be-plausible");
+
+    const [on] = await claim();
+
+    expect(on?.viewer_host).toBe("agent-hub-viewer.example");
+
+    vi.stubEnv("AGENT_HUB_VIEWER_HOST", "");
+    await prisma.virtualAgent.updateMany({ data: { claimedUntil: null } });
+
+    const [off] = await claim();
+
+    expect(off?.viewer_host).toBeUndefined();
+  });
+
   // One service's key rather than one agent's, so a pod that cannot use it must never be handed it.
   it("should send the gateway's APIM key to no agent on another route", async () => {
     await create(ALICE, "pcs-api", "own-licence");
