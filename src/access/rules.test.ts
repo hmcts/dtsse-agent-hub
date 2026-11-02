@@ -10,36 +10,20 @@ import {
   canForkConversation,
   canLaunchTokenActForAgent,
   canLaunchTokenReadMessage,
-  canLookUpAtlassian,
-  canManageConversationShares,
-  canManageCredential,
-  canManageExportDefaults,
-  canManageTemplate,
-  canManageUploadsOnDisk,
   canManageVirtualAgent,
   canOpenVirtualAgentPort,
   canOwnerReadCredential,
-  canPersonMessageAgent,
   canReadMessage,
   canRemoveUploadFromDisk,
-  canSeeAgentSkills,
-  canSeeAssistantMemory,
   canSessionUseAttachment,
   canShareConversationWith,
-  canStopAssistantAnswer,
-  canSuggestAgent,
   canSuggestPerson,
   canUseCredentialRoutes,
-  canUseWelsh,
-  canViewAgent,
-  canViewConversation,
-  canViewSharedConversation,
   canViewTranscript,
-  canViewVirtualAgent,
   canVirtualAgentStoreCredential,
   canWriteUpload,
   conversationAccess,
-  isLocalConversationAgent,
+  isOwner,
   isPodConversationAgent,
   MAX_PEOPLE_SUGGESTIONS,
   type MessageRef,
@@ -66,74 +50,68 @@ type Role = "owner" | "colleague";
 
 const ROLES: Record<Role, string> = { owner: OWNER, colleague: COLLEAGUE };
 
-/** Every refusal a colleague gets. Each one is the same single fact: the agent is somebody else's. */
+/** Every refusal a colleague gets. Each one is the same single fact: the thing is somebody else's. */
 const EVERYONE_ELSE: readonly [string, string][] = [
   ["a colleague", COLLEAGUE],
-  ["someone with agents of their own", ELSEWHERE]
+  ["another owner", ELSEWHERE]
 ];
 
-interface Expectation {
-  viewAgent: boolean;
-  viewTranscript: boolean;
-  messageAsPerson: boolean;
-  seeSkills: boolean;
-  messageAsAgent: boolean;
-  readDirect: boolean;
-}
-
-/**
- * One row, not four. Seeing an agent, reading its transcript, messaging it, offering its skills and reading its
- * thread are the same single answer — whether the viewer owns it — so the matrix that used to say how each of those
- * differed between an owner and the three kinds of non-owner now says only that none of them differ.
- */
-const MATRIX: Record<Role, Expectation> = {
-  owner: { viewAgent: true, viewTranscript: true, messageAsPerson: true, seeSkills: true, messageAsAgent: true, readDirect: true },
-  colleague: { viewAgent: false, viewTranscript: false, messageAsPerson: false, seeSkills: false, messageAsAgent: false, readDirect: false }
+/** A direct message from the owner's other agent to the owner's agent. */
+const DIRECT_TO_TARGET: MessageRef = {
+  kind: "direct",
+  authorOid: OWNER,
+  authorAgent: { id: "agent-other", ownerOid: OWNER },
+  targetAgent: TARGET,
+  parentAuthorOid: null
 };
 
-/** A direct message from a third party's agent to the owner's agent. */
-const DIRECT_TO_TARGET: MessageRef = { kind: "direct", authorOid: ELSEWHERE, authorAgent: agentOf(ELSEWHERE), targetAgent: TARGET, parentAuthorOid: null };
+describe("isOwner", () => {
+  it("should allow the owner when the row is their own", () => {
+    expect(isOwner(OWNER, TARGET)).toBe(true);
+    expect(isOwner(OWNER, { ownerOid: OWNER })).toBe(true);
+  });
 
-describe.each(Object.entries(MATRIX) as [Role, Expectation][])("access for the %s", (role, expected) => {
+  it.each(EVERYONE_ELSE)("should refuse %s when the row is the owner's", (_label, oid) => {
+    expect(isOwner(oid, TARGET)).toBe(false);
+    expect(isOwner(oid, { ownerOid: OWNER })).toBe(false);
+  });
+});
+
+/**
+ * Seeing an agent, reading its transcript, messaging it and reading its thread are one answer: whether the viewer owns
+ * it.
+ */
+describe.each<[Role, boolean]>([
+  ["owner", true],
+  ["colleague", false]
+])("access for the %s", (role, expected) => {
   const oid = ROLES[role];
 
-  it(`should ${expected.viewAgent ? "" : "not "}show the agent when the viewer is the ${role}`, () => {
-    expect(canViewAgent(oid, TARGET)).toBe(expected.viewAgent);
+  it(`should ${expected ? "" : "not "}show the agent's transcript when the viewer is the ${role}`, () => {
+    expect(canViewTranscript(oid, TARGET)).toBe(expected);
   });
 
-  it(`should ${expected.viewTranscript ? "" : "not "}show the agent's transcript when the viewer is the ${role}`, () => {
-    expect(canViewTranscript(oid, TARGET)).toBe(expected.viewTranscript);
+  it(`should ${expected ? "" : "not "}let an agent message the agent when its owner is the ${role}`, () => {
+    expect(canAgentMessageAgent(agentOf(oid), TARGET)).toBe(expected);
   });
 
-  it(`should ${expected.messageAsPerson ? "" : "not "}let a person message the agent when they are the ${role}`, () => {
-    expect(canPersonMessageAgent(oid, TARGET)).toBe(expected.messageAsPerson);
-  });
-
-  it(`should ${expected.seeSkills ? "" : "not "}offer the agent's skills when the viewer is the ${role}`, () => {
-    expect(canSeeAgentSkills(oid, TARGET)).toBe(expected.seeSkills);
-  });
-
-  it(`should ${expected.messageAsAgent ? "" : "not "}let an agent message the agent when its owner is the ${role}`, () => {
-    expect(canAgentMessageAgent(agentOf(oid), TARGET)).toBe(expected.messageAsAgent);
-  });
-
-  it(`should ${expected.readDirect ? "" : "not "}let the ${role} read a direct message to the agent`, () => {
-    expect(canReadMessage(oid, DIRECT_TO_TARGET)).toBe(expected.readDirect);
+  it(`should ${expected ? "" : "not "}let the ${role} read a direct message to the agent`, () => {
+    expect(canReadMessage(oid, DIRECT_TO_TARGET)).toBe(expected);
   });
 
   it(`should let the ${role} read any post`, () => {
     expect(canReadMessage(oid, { kind: "post", authorOid: ELSEWHERE, authorAgent: agentOf(ELSEWHERE), targetAgent: null, parentAuthorOid: null })).toBe(true);
   });
 
-  it(`should ${expected.messageAsAgent ? "" : "not "}route a private reply to the owner's post when the replying agent's owner is the ${role}`, () => {
+  it(`should ${expected ? "" : "not "}route a private reply to the owner's post when the replying agent's owner is the ${role}`, () => {
     const post: MessageRef = { kind: "post", authorOid: OWNER, authorAgent: TARGET, targetAgent: null, parentAuthorOid: null };
     const route = replyRoute(agentOf(oid), post);
-    expect(route.to).toBe(expected.messageAsAgent ? "agent" : "nobody");
+    expect(route.to).toBe(expected ? "agent" : "nobody");
   });
 });
 
 /**
- * What a colleague has instead, which is the whole reason the matrix above may be this narrow: they tag the agent in
+ * What a colleague has instead, which is the whole reason the rules above may be this narrow: they tag the agent in
  * a post, which needs nothing of them and reaches the agent on the stream it already holds.
  */
 describe("reaching somebody else's agent", () => {
@@ -143,17 +121,13 @@ describe("reaching somebody else's agent", () => {
 
   it("should let a colleague tag the owner's agent from the web UI, where they post as themselves", () => {
     expect(tagRefusal(null, TARGET)).toBeUndefined();
-    expect(canSuggestAgent(TARGET)).toBe(true);
   });
 
   it("should still refuse the colleague everything the tag does not carry", () => {
-    expect(canViewAgent(COLLEAGUE, TARGET)).toBe(false);
+    expect(isOwner(COLLEAGUE, TARGET)).toBe(false);
     expect(canViewTranscript(COLLEAGUE, TARGET)).toBe(false);
-    expect(canPersonMessageAgent(COLLEAGUE, TARGET)).toBe(false);
-    expect(canSeeAgentSkills(COLLEAGUE, TARGET)).toBe(false);
   });
 });
-
 describe("canAgentMessageAgent", () => {
   // The case that has to keep working: a person's own sessions talking to each other, which is what a direct
   // message now is.
@@ -167,10 +141,6 @@ describe("canAgentMessageAgent", () => {
 });
 
 describe("canReadMessage", () => {
-  it("should let the sender read their own direct message when they cannot see the target", () => {
-    expect(canReadMessage(ELSEWHERE, DIRECT_TO_TARGET)).toBe(true);
-  });
-
   it("should put a reply to a person in the replying agent's thread when it has no target", () => {
     const reply: MessageRef = { kind: "direct", authorOid: OWNER, authorAgent: TARGET, targetAgent: null, parentAuthorOid: null };
 
@@ -195,7 +165,13 @@ describe("canReadMessage", () => {
   });
 
   it("should not widen a targeted direct message to the author of the message it replies to", () => {
-    const reply: MessageRef = { kind: "direct", authorOid: ELSEWHERE, authorAgent: agentOf(ELSEWHERE), targetAgent: TARGET, parentAuthorOid: COLLEAGUE };
+    const reply: MessageRef = {
+      kind: "direct",
+      authorOid: OWNER,
+      authorAgent: { id: "agent-other", ownerOid: OWNER },
+      targetAgent: TARGET,
+      parentAuthorOid: COLLEAGUE
+    };
 
     expect(canReadMessage(COLLEAGUE, reply)).toBe(false);
   });
@@ -207,11 +183,11 @@ describe("canReadMessage", () => {
     expect(canReadMessage(COLLEAGUE, orphan)).toBe(false);
   });
 
-  it("should not let the author's own other reader read what its agent sent to someone else's agent", () => {
+  // Nothing sends a direct between two owners' agents, but rows that do are still stored.
+  it("should not let anyone but its author read what an agent sent to another owner's agent", () => {
     const sent: MessageRef = { kind: "direct", authorOid: OWNER, authorAgent: TARGET, targetAgent: agentOf(ELSEWHERE), parentAuthorOid: null };
 
     expect(canReadMessage(COLLEAGUE, sent)).toBe(false);
-    // Its author still reads it, from the author check rather than from the thread it is in.
     expect(canReadMessage(OWNER, sent)).toBe(true);
   });
 });
@@ -219,12 +195,21 @@ describe("canReadMessage", () => {
 describe("replyRoute", () => {
   const replier = TARGET;
 
-  // The other case that has to keep working. The sender reached this agent, so the answer is allowed whoever owns
-  // the sender; a refusal here would leave every cross-owner exchange one-way.
-  it("should route a reply to the agent that sent the direct message, whatever the owner", () => {
+  it("should route a reply to the agent that sent the direct message when it has the same owner", () => {
+    const sender: AgentRef = { id: "agent-other", ownerOid: OWNER };
+    const received: MessageRef = { kind: "direct", authorOid: OWNER, authorAgent: sender, targetAgent: replier, parentAuthorOid: null };
+
+    expect(replyRoute(replier, received)).toEqual({ to: "agent", target: sender });
+  });
+
+  it("should refuse a reply to a direct message when another owner's agent sent it", () => {
     const received: MessageRef = { kind: "direct", authorOid: ELSEWHERE, authorAgent: agentOf(ELSEWHERE), targetAgent: replier, parentAuthorOid: null };
 
-    expect(replyRoute(replier, received)).toEqual({ to: "agent", target: agentOf(ELSEWHERE) });
+    expect(replyRoute(replier, received)).toEqual({
+      to: "nobody",
+      reason: "a private reply to an agent of another owner is not allowed; post on the topic and tag that agent instead",
+      status: 403
+    });
   });
 
   it("should route a reply to a person's direct message into the replying agent's own thread", () => {
@@ -285,10 +270,8 @@ describe("an assistant conversation's agent", () => {
     ["owner", true],
     ["colleague", false]
   ])("should answer %s for the %s on every rule about a pod conversation's agent", (role, expected) => {
-    expect(canViewAgent(ROLES[role], POD_CHAT_AGENT)).toBe(expected);
+    expect(isOwner(ROLES[role], POD_CHAT_AGENT)).toBe(expected);
     expect(canViewTranscript(ROLES[role], POD_CHAT_AGENT)).toBe(expected);
-    expect(canPersonMessageAgent(ROLES[role], POD_CHAT_AGENT)).toBe(expected);
-    expect(canSeeAgentSkills(ROLES[role], POD_CHAT_AGENT)).toBe(expected);
     expect(canAgentMessageAgent(agentOf(ROLES[role]), POD_CHAT_AGENT)).toBe(expected);
   });
 
@@ -297,10 +280,8 @@ describe("an assistant conversation's agent", () => {
     ["owner", true],
     ["colleague", false]
   ])("should answer %s for the %s on every rule about a local conversation's agent", (role, expected) => {
-    expect(canViewAgent(ROLES[role], LOCAL_CHAT_AGENT)).toBe(expected);
+    expect(isOwner(ROLES[role], LOCAL_CHAT_AGENT)).toBe(expected);
     expect(canViewTranscript(ROLES[role], LOCAL_CHAT_AGENT)).toBe(expected);
-    expect(canPersonMessageAgent(ROLES[role], LOCAL_CHAT_AGENT)).toBe(expected);
-    expect(canSeeAgentSkills(ROLES[role], LOCAL_CHAT_AGENT)).toBe(expected);
   });
 
   it("should separate the two kinds only in what a post may tag", () => {
@@ -320,47 +301,15 @@ describe("isPodConversationAgent", () => {
   });
 });
 
-// The same four rows as above, so the two rules are seen to split them between them: a local chat's agent is the one row
-// the pod rule refuses that this one takes, and neither takes a session that belongs to no conversation.
-describe("isLocalConversationAgent", () => {
-  it.each<[string, string | null, string | null, boolean]>([
-    ["a session on a laptop", null, null, false],
-    ["a virtual agent's own pod session", null, "va-1", false],
-    ["a pod conversation's agent", "chat-1", "va-1", false],
-    ["a local conversation's agent", "chat-1", null, true]
-  ])("should answer for %s from the row alone", (_label, assistantConversationId, virtualAgentId, expected) => {
-    expect(isLocalConversationAgent({ assistantConversationId, virtualAgentId })).toBe(expected);
-  });
-});
-
-describe("canManageCredential", () => {
-  it("should let a person manage their own credentials", () => {
-    expect(canManageCredential(OWNER, OWNER)).toBe(true);
-  });
-
-  it.each(EVERYONE_ELSE)("should refuse %s managing the owner's credentials", (_label, actorOid) => {
-    expect(canManageCredential(actorOid, OWNER)).toBe(false);
-  });
-});
-
-describe("canManageTemplate", () => {
-  // Reading is the same decision as writing: a prompt somebody wrote for themselves is not part of any session.
-  it("should let a person read and change their own templates", () => {
-    expect(canManageTemplate(OWNER, OWNER)).toBe(true);
-  });
-
-  it.each(EVERYONE_ELSE)("should refuse %s reading or changing the owner's templates", (_label, actorOid) => {
-    expect(canManageTemplate(actorOid, OWNER)).toBe(false);
-  });
-});
-
 describe("canManageVirtualAgent", () => {
-  it("should let a person manage their own virtual agent", () => {
-    expect(canManageVirtualAgent(OWNER, { id: "va-1", ownerOid: OWNER })).toBe(true);
+  // It acts with the owner's own GitHub, Azure and Atlassian sign-ins — managing it, searching Atlassian through it and
+  // running a Welsh job on it alike — so nobody else may, and no share of a chat of theirs reaches it.
+  it("should let a person make a virtual agent act as them when it is their own", () => {
+    expect(canManageVirtualAgent(OWNER, { ownerOid: OWNER })).toBe(true);
   });
 
-  it.each(EVERYONE_ELSE)("should refuse %s managing the owner's virtual agent", (_label, actorOid) => {
-    expect(canManageVirtualAgent(actorOid, { id: "va-1", ownerOid: OWNER })).toBe(false);
+  it.each(EVERYONE_ELSE)("should refuse %s when they would make the owner's virtual agent act as the owner", (_label, actorOid) => {
+    expect(canManageVirtualAgent(actorOid, { ownerOid: OWNER })).toBe(false);
   });
 });
 
@@ -369,18 +318,7 @@ describe("canOpenVirtualAgentPort", () => {
     [true, "owner"],
     [false, "colleague"]
   ])("should answer %s when the %s opens a web server on the owner's virtual agent", (expected, role) => {
-    expect(canOpenVirtualAgentPort(ROLES[role], { id: "va-1", ownerOid: OWNER })).toBe(expected);
-  });
-});
-
-describe("canViewVirtualAgent", () => {
-  // Its sessions are the owner's agents, so it answers as they do: nobody else sees one at all.
-  it("should let a person see their own virtual agent", () => {
-    expect(canViewVirtualAgent(OWNER, { id: "va-1", ownerOid: OWNER })).toBe(true);
-  });
-
-  it.each(EVERYONE_ELSE)("should refuse %s the owner's virtual agent", (_label, viewerOid) => {
-    expect(canViewVirtualAgent(viewerOid, { id: "va-1", ownerOid: OWNER })).toBe(false);
+    expect(canOpenVirtualAgentPort(ROLES[role], { ownerOid: OWNER })).toBe(expected);
   });
 });
 
@@ -472,18 +410,20 @@ describe("canLaunchTokenReadMessage", () => {
 
   it.each([
     ["sent to one of its sessions by a person", direct(null, session)],
-    ["sent to one of its sessions by another agent", direct(elsewhere, session)],
-    ["sent by one of its sessions to another agent", direct(session, elsewhere)],
-    ["a reply by one of its sessions into its own UI thread", direct(session, null)]
+    ["sent to one of its sessions by the owner's other agent", direct(laptop, session)],
+    ["sent by one of its sessions to the owner's other agent", direct(session, laptop)],
+    ["a reply by one of its sessions into its own UI thread", direct(session, null)],
+    ["sent to one of its sessions by another owner's agent", direct(elsewhere, session)],
+    ["sent by one of its sessions to another owner's agent", direct(session, elsewhere)]
   ])("should allow a direct when it is %s", (_label, message) => {
     expect(canLaunchTokenReadMessage(SESSIONS, message)).toBe(true);
   });
 
   it.each([
     ["sent by the owner to their other agent", direct(null, laptop)],
-    ["sent by the owner's other agent to someone else's", direct(laptop, elsewhere)],
     ["a reply by the owner's other agent into its own UI thread", direct(laptop, null)],
-    ["sent to someone else's agent by a person", direct(null, elsewhere)]
+    ["sent by the owner's other agent to another owner's", direct(laptop, elsewhere)],
+    ["sent to another owner's agent by a person", direct(null, elsewhere)]
   ])("should refuse a direct when it is %s", (_label, message) => {
     expect(canLaunchTokenReadMessage(SESSIONS, message)).toBe(false);
   });
@@ -612,17 +552,6 @@ describe("the upload rules", () => {
     });
   });
 
-  describe("canManageUploadsOnDisk", () => {
-    it("should let a person see and clear what is on their own assistant's disk", () => {
-      expect(canManageUploadsOnDisk(OWNER, OWNER)).toBe(true);
-    });
-
-    // What is on a person's assistant's volume is not a session, so no rule about an agent should reach it.
-    it.each(EVERYONE_ELSE)("should refuse %s", (_label, oid) => {
-      expect(canManageUploadsOnDisk(oid, OWNER)).toBe(false);
-    });
-  });
-
   describe("canRemoveUploadFromDisk", () => {
     it.each([["stored"], ["fetched"], ["expired"]] as const)("should let the owner clear a %s upload that reached a message", (state) => {
       expect(canRemoveUploadFromDisk(OWNER, upload({ state, messageId: "41" }))).toBe(true);
@@ -635,34 +564,6 @@ describe("the upload rules", () => {
 
     it.each(EVERYONE_ELSE)("should refuse %s clearing the owner's file", (_label, oid) => {
       expect(canRemoveUploadFromDisk(oid, upload({ state: "fetched", messageId: "41" }))).toBe(false);
-    });
-  });
-
-  describe("canSeeAssistantMemory", () => {
-    it("should let a person see what their own assistant reports about its memory", () => {
-      expect(canSeeAssistantMemory(OWNER, OWNER)).toBe(true);
-    });
-
-    it.each(EVERYONE_ELSE)("should refuse %s", (_label, oid) => {
-      expect(canSeeAssistantMemory(oid, OWNER)).toBe(false);
-    });
-  });
-
-  describe("conversations", () => {
-    it("should let a person see their own chat", () => {
-      expect(canViewConversation("alice", { ownerOid: "alice" })).toBe(true);
-    });
-
-    it("should refuse someone else's chat", () => {
-      expect(canViewConversation("bob", { ownerOid: "alice" })).toBe(false);
-    });
-
-    // Interrupting a turn is an act on the session, not a read of the chat, so a share of the chat must not carry it.
-    it("should let only the owner stop the answer their chat is working on", () => {
-      expect(canStopAssistantAnswer(OWNER, { ownerOid: OWNER })).toBe(true);
-      for (const [, oid] of EVERYONE_ELSE) {
-        expect(canStopAssistantAnswer(oid, { ownerOid: OWNER })).toBe(false);
-      }
     });
   });
 });
@@ -702,24 +603,24 @@ describe("the conversation share rules", () => {
     });
   });
 
-  describe("canViewSharedConversation", () => {
+  describe("a share page", () => {
     it.each([
       ["its owner", OWNER],
       ["someone named in a share of it", RECIPIENT]
-    ])("should allow %s", (_label, viewerOid) => {
-      expect(canViewSharedConversation(viewerOid, CONVERSATION, SHARES)).toBe(true);
+    ])("should let %s read the share page when they own or were named in it", (_label, viewerOid) => {
+      expect(conversationAccess(viewerOid, CONVERSATION, SHARES)).not.toBe("none");
     });
 
     // The one that matters: holding the link is not being on the list, so anyone handed it reads nothing. The rule
     // takes no link, token or secret at all, which is why there is nothing a link alone could satisfy.
     it.each(EVERYONE_ELSE)("should refuse %s, however they came by the address", (_label, viewerOid) => {
-      expect(canViewSharedConversation(viewerOid, CONVERSATION, SHARES)).toBe(false);
+      expect(conversationAccess(viewerOid, CONVERSATION, SHARES)).toBe("none");
     });
 
     it("should refuse everyone but the owner while the conversation is shared with nobody", () => {
-      expect(canViewSharedConversation(OWNER, CONVERSATION, [])).toBe(true);
+      expect(conversationAccess(OWNER, CONVERSATION, [])).toBe("owner");
       for (const viewerOid of [RECIPIENT, COLLEAGUE, ELSEWHERE]) {
-        expect(canViewSharedConversation(viewerOid, CONVERSATION, [])).toBe(false);
+        expect(conversationAccess(viewerOid, CONVERSATION, [])).toBe("none");
       }
     });
   });
@@ -730,32 +631,24 @@ describe("the conversation share rules", () => {
     const agent: AgentRef = { id: "conversation-agent", ownerOid: OWNER, ownerOnly: true };
 
     it.each([
-      ["see the conversation's agent", canViewAgent],
-      ["read its transcript", canViewTranscript],
-      ["message it", canPersonMessageAgent],
-      ["see the skills it offers", canSeeAgentSkills]
+      ["see, message or be offered the skills of the conversation's agent", isOwner],
+      ["read its transcript", canViewTranscript]
     ])("should not let a share recipient %s", (_label, rule) => {
       expect(rule(RECIPIENT, agent)).toBe(false);
     });
 
     it("should still let the owner do all of it", () => {
-      for (const rule of [canViewAgent, canViewTranscript, canPersonMessageAgent, canSeeAgentSkills]) {
+      for (const rule of [isOwner, canViewTranscript]) {
         expect(rule(OWNER, agent)).toBe(true);
       }
-    });
-  });
-
-  describe("canManageConversationShares", () => {
-    it("should allow the owner", () => {
-      expect(canManageConversationShares(OWNER, CONVERSATION)).toBe(true);
     });
 
     it.each([
       ["a recipient of it", RECIPIENT],
       ["a colleague", COLLEAGUE],
-      ["someone with agents of their own", ELSEWHERE]
-    ])("should refuse %s", (_label, actorOid) => {
-      expect(canManageConversationShares(actorOid, CONVERSATION)).toBe(false);
+      ["another owner", ELSEWHERE]
+    ])("should not let %s see or change who the conversation is shared with when they do not own it", (_label, actorOid) => {
+      expect(isOwner(actorOid, CONVERSATION)).toBe(false);
     });
   });
 
@@ -813,13 +706,12 @@ describe("the conversation share rules", () => {
     });
 
     it("should let the person offered read the share page when their fork row is read beside the shares", () => {
-      expect(canViewSharedConversation(FORKER, CONVERSATION, [...SHARES, ...FORKS])).toBe(true);
       expect(conversationAccess(FORKER, CONVERSATION, [...SHARES, ...FORKS])).toBe("reader");
     });
 
     it("should not let the person offered reach the conversation's agent when they hold a fork of it", () => {
       const agent: AgentRef = { id: "conversation-agent", ownerOid: OWNER, ownerOnly: true };
-      for (const rule of [canViewAgent, canViewTranscript, canPersonMessageAgent, canSeeAgentSkills]) {
+      for (const rule of [isOwner, canViewTranscript]) {
         expect(rule(FORKER, agent)).toBe(false);
       }
     });
@@ -849,6 +741,13 @@ describe("the people lookup rules", () => {
     });
   });
 
+  describe("agentLookup", () => {
+    it("should take the same bounds as the people lookup when the agent picker is searched", () => {
+      expect(agentLookup("  pcs  ")).toEqual({ ok: true, query: "pcs", limit: MAX_PEOPLE_SUGGESTIONS });
+      expect(agentLookup("p")).toEqual({ ok: false });
+    });
+  });
+
   describe("canSuggestPerson", () => {
     it("should offer anyone else the hub knows", () => {
       expect(canSuggestPerson(OWNER, { oid: COLLEAGUE })).toBe(true);
@@ -856,25 +755,6 @@ describe("the people lookup rules", () => {
 
     it("should not offer the viewer themselves", () => {
       expect(canSuggestPerson(OWNER, { oid: OWNER })).toBe(false);
-    });
-  });
-
-  describe("agentLookup", () => {
-    it("should take the same bounds as the people lookup, since the reasoning is the same", () => {
-      expect(agentLookup("  pcs  ")).toEqual({ ok: true, query: "pcs", limit: MAX_PEOPLE_SUGGESTIONS });
-      expect(agentLookup("p")).toEqual({ ok: false });
-    });
-  });
-
-  describe("canSuggestAgent", () => {
-    it("should offer an agent of anyone's, since anyone may tag anyone's", () => {
-      expect(canSuggestAgent(TARGET)).toBe(true);
-      expect(canSuggestAgent(agentOf(ELSEWHERE))).toBe(true);
-      expect(canSuggestAgent(LOCAL_CHAT_AGENT)).toBe(true);
-    });
-
-    it("should not offer a pod conversation's agent, which nobody may tag", () => {
-      expect(canSuggestAgent(POD_CHAT_AGENT)).toBe(false);
     });
   });
 });
@@ -898,35 +778,5 @@ describe("tagRefusal", () => {
   it("should refuse an agent tagging itself, and not the same agent in a person's post", () => {
     expect(tagRefusal(TARGET.id, TARGET)).toBe("itself");
     expect(tagRefusal(null, TARGET)).toBeUndefined();
-  });
-});
-
-describe("the Welsh rule", () => {
-  // A job opens pull requests and edits Jira stories with the owner's own sign-ins, so nobody else may run one, and no
-  // share of a chat of theirs reaches it.
-  it("should let only the owner run a Welsh job through their own assistant", () => {
-    expect(canUseWelsh(OWNER, { ownerOid: OWNER })).toBe(true);
-  });
-
-  it.each(EVERYONE_ELSE)("should refuse %s a Welsh job through somebody else's assistant", (_who, oid) => {
-    expect(canUseWelsh(oid, { ownerOid: OWNER })).toBe(false);
-  });
-});
-
-describe("the Atlassian rules", () => {
-  // The search and the defaults are both about the owner's own Atlassian account, so nothing about their agents, and
-  // no share of a chat of theirs, may reach either.
-  it("should let only the owner search Atlassian through their own assistant", () => {
-    expect(canLookUpAtlassian(OWNER, { ownerOid: OWNER })).toBe(true);
-    for (const [, oid] of EVERYONE_ELSE) {
-      expect(canLookUpAtlassian(oid, { ownerOid: OWNER })).toBe(false);
-    }
-  });
-
-  it("should let only the owner change their export defaults", () => {
-    expect(canManageExportDefaults(OWNER, OWNER)).toBe(true);
-    for (const [, oid] of EVERYONE_ELSE) {
-      expect(canManageExportDefaults(oid, OWNER)).toBe(false);
-    }
   });
 });

@@ -1,5 +1,5 @@
-import { loadMessageRef } from "../access/load.ts";
-import { type AgentRef, canAgentMessageAgent, canPersonMessageAgent, replyRoute, tagRefusal } from "../access/rules.ts";
+import { type LoadedMessageRef, loadMessageRef } from "../access/load.ts";
+import { type AgentRef, canAgentMessageAgent, isOwner, replyRoute, tagRefusal } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { type Candidate, findAgent, isUuid, resolveTargets } from "../agents/store.ts";
 import type { PrismaClient } from "../store/prisma.ts";
@@ -40,9 +40,8 @@ function candidateView(candidate: Candidate): Record<string, unknown> {
  * candidates are only ever the caller's own agents, so telling them apart by repo and branch costs nothing. A tag
  * resolves across every owner, so the same fields would answer what somebody else's session is working on — and
  * repeatably, since the refusal writes nothing. `agentLookup` already draws this line for the composer's own
- * search: a name and its owner, "no status, heartbeat or repo: those are the agent's page, which is its owner's
- * alone". The owner's name is what makes two same-named agents tellable apart, and a post of that agent's already
- * shows it to anyone signed in.
+ * search: a name and its owner, and no status, heartbeat or repo, which are its owner's alone. The owner's name is
+ * what makes two same-named agents tellable apart, and a post of that agent's already shows it to anyone signed in.
  */
 function tagCandidateView(candidate: Candidate): Record<string, unknown> {
   return { id: candidate.id, name: candidate.name, owner_name: candidate.ownerName };
@@ -63,12 +62,13 @@ async function taggedAgents(prisma: PrismaClient, author: Author, tags: readonly
       throw new HttpError(409, `more than one agent is called "${tag}"; tag its id instead`, { candidates: candidates.map(tagCandidateView) });
     }
     const target = candidates[0];
+    const refusal = target === undefined ? undefined : tagRefusal(author.agentId, target);
     // A pod conversation's agent is reported as missing rather than forbidden, so the refusal does not confirm it
     // exists, which is how every other rule answers for one.
-    if (target === undefined || tagRefusal(author.agentId, target) === "not_taggable") {
+    if (target === undefined || refusal === "not_taggable") {
       throw new HttpError(404, isUuid(tag) ? "no such agent" : `no agent is called "${tag}"`);
     }
-    if (tagRefusal(author.agentId, target) === "itself") {
+    if (refusal === "itself") {
       throw new HttpError(400, "an agent cannot tag itself in its own post");
     }
     if (!ids.includes(target.id)) {
@@ -94,13 +94,14 @@ export async function postAsAgent(prisma: PrismaClient, sender: AgentRef, post: 
   return await postAs(prisma, { oid: sender.ownerOid, agentId: sender.id }, post);
 }
 
-export type DirectRequest = { toAgent: string; body: string } | { replyTo: bigint; body: string };
+/** `loaded` is the caller's own lookup of `replyTo`, found or not, so it is not looked up twice. */
+export type DirectRequest = { toAgent: string; body: string } | { replyTo: bigint; body: string; loaded?: { ref: LoadedMessageRef | undefined } };
 
 export async function directAsAgent(prisma: PrismaClient, sender: AgentRef, request: DirectRequest): Promise<ApiMessage> {
   const author = { oid: sender.ownerOid, agentId: sender.id };
 
   if ("replyTo" in request) {
-    const original = await loadMessageRef(prisma, request.replyTo);
+    const original = request.loaded === undefined ? await loadMessageRef(prisma, request.replyTo) : request.loaded.ref;
     if (original === undefined) {
       throw new HttpError(404, "no such message");
     }
@@ -149,7 +150,7 @@ export async function directAsPerson(
   alongside?: NewDirect["alongside"]
 ): Promise<ApiMessage> {
   const target = isUuid(agentId) ? await findAgent(prisma, agentId) : undefined;
-  if (target === undefined || !canPersonMessageAgent(senderOid, target)) {
+  if (target === undefined || !isOwner(senderOid, target)) {
     throw new HttpError(404, "no such agent");
   }
   return await createDirect(prisma, { author: { oid: senderOid, agentId: null }, targetAgentId: target.id, inReplyTo: null, body, alongside });

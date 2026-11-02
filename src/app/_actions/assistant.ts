@@ -1,10 +1,19 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { canStopAssistantAnswer } from "@/access/rules";
 import { HttpError } from "@/agent-api/http";
+import { type Artefact, ArtefactConflict, writeArtefact } from "@/assistant/artefact-store";
 import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
+import type { ConversationRow } from "@/assistant/conversation-row";
+import {
+  conversationAgent,
+  createConversation,
+  findConversation,
+  deleteConversation as remove,
+  renameConversation as rename,
+  setProduct
+} from "@/assistant/conversation-store";
 import { attachForkContext, forkContextPending } from "@/assistant/fork-store";
 import { requestJiraExport } from "@/assistant/jira-store";
 import { saveAssistantModel as saveModel } from "@/assistant/model-store";
@@ -13,20 +22,7 @@ import { CHAT_BLOCKED } from "@/assistant/onboarding";
 import { hasPod } from "@/assistant/pods";
 import { MAX_ARTEFACT_MARKDOWN, MAX_ARTEFACT_TITLE } from "@/assistant/schemas";
 import { sendToConversation } from "@/assistant/send";
-import {
-  type Artefact,
-  ArtefactConflict,
-  type ConversationRow,
-  conversationAgent,
-  createConversation,
-  findConversation,
-  deleteConversation as remove,
-  renameConversation as rename,
-  requestWake,
-  setProduct,
-  stopAnswer,
-  writeArtefact
-} from "@/assistant/store";
+import { requestWake, stopAnswer } from "@/assistant/session-store";
 import { attachUploads, uploadNames } from "@/assistant/upload-store";
 import { attachedBody, MAX_ATTACHMENTS_PER_MESSAGE } from "@/assistant/uploads";
 import type { ThreadMessage } from "@/messages/direct-thread";
@@ -244,14 +240,9 @@ export async function stopAssistantAnswer(input: { conversationId: unknown }): P
       return OFF;
     }
     const viewer = await requireViewer();
+    // Only the owner interrupts a turn: `findConversation` reports anyone else's conversation as missing.
     const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
     if (conversation === undefined) {
-      return MISSING;
-    }
-    // The owner-scoped read above is the enforcement: it reports anyone else's conversation as missing. This names
-    // the rule, so that "only the owner may interrupt a turn" is written down and tested somewhere rather than
-    // living in one query's WHERE clause, and so a future unscoped read seam has something to fail against.
-    if (!canStopAssistantAnswer(viewer.oid, conversation)) {
       return MISSING;
     }
     const outcome = await stopAnswer(prisma, conversation);

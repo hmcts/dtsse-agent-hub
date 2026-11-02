@@ -25,14 +25,6 @@ export type ReportedFile = {
   bytes: number;
 };
 
-/** A pod's whole report. The two volume figures are of `/workspace`, which the repository clones share. */
-export interface UploadsReport {
-  uploads_bytes: number;
-  volume_used_bytes: number;
-  volume_total_bytes: number;
-  files: ReportedFile[];
-}
-
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** A whole number of bytes a disk figure could be. Zero is allowed: an empty uploads directory is a real answer. */
@@ -45,7 +37,7 @@ export function isDiskSize(value: unknown): value is number {
  *
  * An entry it cannot read is dropped rather than refusing the report: the whole report would otherwise be lost over
  * one file, and the totals — which are what the person is told — do not depend on the list. An `upload_id` with no
- * row of its own is kept here and left out of what the person sees, in `podFiles`, because they have nothing to call
+ * row of its own is kept here and left out of what the person sees, in `uploadsOnDisk`, because they have nothing to call
  * it; it still counts towards the totals the pod sent, which is the truth about the disk.
  */
 export function readReportedFiles(value: unknown): ReportedFile[] {
@@ -101,7 +93,7 @@ export function describeSize(bytes: number): string {
 }
 
 /** Why the hub has no figures to show, which is three different things and is told as three. */
-export type NoUploadsReport =
+type NoUploadsReport =
   /** The pod runs a client from before it could report, so it will not until it next boots onto a newer one. */
   | "older_client"
   /** The pod is not running, so nothing has been able to look. */

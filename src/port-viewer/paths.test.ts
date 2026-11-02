@@ -58,7 +58,7 @@ describe("the names a port is known by", () => {
     expect(viewerPrefix(ID, 8080)).toBe(`/${ID}/8080`);
     expect(viewerUrl("viewer.example", ID, 8080)).toBe(`https://viewer.example/${ID}/8080/`);
     expect(viewerCookieName(ID, 8080)).toBe(`ahv-${ID}-8080`);
-    expect(ticketPath(ID, 8080, "/docs?page=2")).toBe(`/hub/virtual/${ID}/ports/8080?path=%2Fdocs%3Fpage%3D2`);
+    expect(ticketPath(ID, 8080, "/docs?page=2")).toBe(`/assistant/ports/${ID}/8080?path=%2Fdocs%3Fpage%3D2`);
   });
 });
 

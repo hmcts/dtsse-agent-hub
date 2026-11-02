@@ -15,7 +15,7 @@ export const DEFAULT_STREAM_MAX_SECONDS = 25;
 export const MIN_STREAM_MAX_SECONDS = 5;
 
 /** The share of the lifetime a stream may end early by, so streams that opened together do not reconnect together. */
-export const STREAM_LIFETIME_JITTER = 0.1;
+const STREAM_LIFETIME_JITTER = 0.1;
 
 /** The reconnect delay a browser is told, at the start of every stream, to use once it ends. */
 export const RECONNECT_AFTER_MS = 1_000;
@@ -98,7 +98,7 @@ export interface StreamOptions {
   closingFrame?: string;
 }
 
-export const LIFETIME_REACHED = sseComment("lifetime reached");
+const LIFETIME_REACHED = sseComment("lifetime reached");
 
 /**
  * A byte stream that opens by telling the client to reconnect `RECONNECT_AFTER_MS` after it ends, then sends `: ping`

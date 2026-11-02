@@ -25,8 +25,8 @@ export interface JiraProjectChoice {
   key: string;
   name: string;
 }
-export const JIRA_ISSUE_TYPE = "Story";
-export const JIRA_LABELS: readonly string[] = ["hmcts-assistant"];
+const JIRA_ISSUE_TYPE = "Story";
+const JIRA_LABELS: readonly string[] = ["hmcts-assistant"];
 
 /** Long enough for a stopped assistant to start and its owner to sign in to Atlassian on the way. */
 export const JIRA_EXPORT_TIMEOUT_MS = 15 * 60_000;

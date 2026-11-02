@@ -1,8 +1,8 @@
 "use server";
 
-import { canPersonMessageAgent } from "@/access/rules";
+import { isOwner } from "@/access/rules";
+import { findConversation } from "@/assistant/conversation-store";
 import { sendToConversation } from "@/assistant/send";
-import { findConversation } from "@/assistant/store";
 import { directAsPerson } from "@/messages/send";
 import { answerMessage, checkAnswer, offerExpired, storedQuestions } from "@/questions/questions";
 import { findQuestion, recordAnswer } from "@/questions/store";
@@ -32,7 +32,7 @@ export async function answerAgentQuestion(input: { questionId: unknown; answers:
     const { agent } = question;
     // The rule, rather than a check of its own: answering is sending, so whoever may message the agent may answer
     // its question, which is its owner.
-    if (!canPersonMessageAgent(viewer.oid, agent)) {
+    if (!isOwner(viewer.oid, agent)) {
       return MISSING;
     }
     if (question.answeredAt !== null) {

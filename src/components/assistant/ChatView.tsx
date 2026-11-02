@@ -106,7 +106,7 @@ function StopButton({ onStop }: { onStop: () => Promise<void> }) {
  * the same constant. It is worded from the delivery's side rather than the session's because that is what the person
  * is deciding about: whether to type now or wait until their laptop is back.
  */
-export function localOfflineNote(): string {
+function localOfflineNote(): string {
   return `This chat is a Claude Code session on your own computer, and it is not connected. Your message is kept and delivered when it reconnects, for up to ${duration(EXPIRE_AFTER_SECONDS)} offline.`;
 }
 
@@ -128,7 +128,7 @@ function useReducedMotion(): boolean {
 
 /**
  * What is happening to the session behind this chat, above the composer, for the whole of the wait before the person
- * has sent anything — which until now said nothing at all, including while a session was being started for them.
+ * has sent anything, including while a session is being started for them.
  *
  * `aria-hidden`, all of it. The warming words rotate every few seconds and are a decoration over one unchanging
  * fact; a live region here would read a different joke out every few seconds and talk over the person for the length
@@ -172,7 +172,7 @@ function Item({ item, answerQuestion, repoBase }: { item: ThreadItem; answerQues
   if (item.type === "question") {
     return (
       <li>
-        <QuestionCard view={item.question} tone="assistant" answer={answerQuestion} />
+        <QuestionCard view={item.question} answer={answerQuestion} />
       </li>
     );
   }
@@ -491,6 +491,7 @@ export function ChatView({
             <ChatMenu
               title={view.title}
               shareHref={`/assistant/${view.id}?share=1`}
+              local={view.local}
               forkHref={`/assistant/${view.id}?fork=1`}
               onRename={async (title) => {
                 const result = await actions.rename({ conversationId: view.id, title });

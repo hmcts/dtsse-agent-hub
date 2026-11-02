@@ -398,7 +398,7 @@ describe("runBridge", () => {
       await waitUntil(() => bridge.streamOpens().length >= 1, "the first stream");
 
       // Act
-      const msg = bridge.hub.sendDirectFromUser(bridge.agentId, "only once please");
+      const msg = bridge.hub.sendDirectFromOwner(bridge.agentId, "only once please");
       await waitUntil(() => bridge.streamOpens().length >= 3 && bridge.acks(msg.id).length >= 3, "two replays and their acks");
 
       // Assert
@@ -417,7 +417,7 @@ describe("runBridge", () => {
       bridge.hub.failNextAcks(1);
 
       // Act
-      const msg = bridge.hub.sendDirectFromUser(bridge.agentId, "ack me eventually");
+      const msg = bridge.hub.sendDirectFromOwner(bridge.agentId, "ack me eventually");
       await waitUntil(() => bridge.hub.deliveries.get(`${msg.id}:${bridge.agentId}`)?.state === "delivered", "the ack to succeed");
 
       // Assert
@@ -429,8 +429,9 @@ describe("runBridge", () => {
     }
   });
 
-  it("should frame the owner of a laptop session as its user and keep the peer framing for anyone else when both write", async () => {
-    // Arrange
+  it("should frame the owner of a laptop session as its user and still frame anyone else as a peer when both write", async () => {
+    // Arrange: the hub writes no direct from a person to an agent they do not own, so the second is untrusted input
+    // the framing still has to hold against.
     const bridge = await startBridge({ pingMs: 5000 });
 
     try {
@@ -503,7 +504,7 @@ describe("runBridge", () => {
       expect(delivered).toMatch(new RegExp(`^\\[agent-hub\\] Post #${post.id} "flaky E2E" on pcs-api from agent @alice-pcs-api`));
       expect(delivered).toMatch(/which tagged you\./);
       expect(delivered).toMatch(/This is a public post on an agent-hub topic board/);
-      expect(delivered).toContain(`--topics pcs-api --title "<title>" --reply-to ${post.id} --tag @alice-pcs-api`);
+      expect(delivered).toContain(`--topics pcs-api --title "<title>" --reply-to ${post.id} --tag @${post.author.agent_id}`);
       expect(delivered).not.toMatch(/Direct message/);
       expect(bridge.acks(post.id).length).toBeGreaterThanOrEqual(1);
     } finally {
@@ -745,8 +746,8 @@ describe("runBridge", () => {
         await bridge.hub.waitFor((c) => c.method === "GET" && c.path === `/api/agent/${bridge.agentId}/stream`);
 
         // Act
-        const first = bridge.hub.sendDirectFromUser(bridge.agentId, "first while held");
-        const second = bridge.hub.sendDirectFromUser(bridge.agentId, "second while held");
+        const first = bridge.hub.sendDirectFromOwner(bridge.agentId, "first while held");
+        const second = bridge.hub.sendDirectFromOwner(bridge.agentId, "second while held");
         await waitUntil(() => bridge.logText().includes(`holding direct #${first.id}`), "the hold to be logged");
         await new Promise((r) => setTimeout(r, 500));
 
@@ -797,7 +798,7 @@ describe("runBridge", () => {
         await hub.waitFor((c) => c.method === "GET" && c.path === `/api/agent/${agentId}/stream`);
 
         // Act
-        const msg = hub.sendDirectFromUser(agentId, "no pid known");
+        const msg = hub.sendDirectFromOwner(agentId, "no pid known");
         await waitUntil(() => hub.deliveries.get(`${msg.id}:${agentId}`)?.state === "delivered", "the ack");
 
         // Assert
@@ -999,7 +1000,7 @@ describe("runBridge", () => {
   });
 
   it("should keep the peer framing when an assistant frame comes from someone other than the owner", async () => {
-    // Arrange
+    // Arrange: untrusted input, as above: the hub writes no such direct.
     const bridge = await startBridge({ pingMs: 5000 }, { env: VIRTUAL });
 
     try {
@@ -1055,7 +1056,7 @@ describe("runBridge", () => {
         await bridge.hub.waitFor((c) => c.method === "GET" && c.path === `/api/agent/${bridge.agentId}/stream`);
 
         // Act
-        const msg = bridge.hub.sendDirectFromUser(bridge.agentId, "default mode");
+        const msg = bridge.hub.sendDirectFromOwner(bridge.agentId, "default mode");
         await waitUntil(() => bridge.hub.deliveries.get(`${msg.id}:${bridge.agentId}`)?.state === "delivered", "the ack");
 
         // Assert

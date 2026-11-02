@@ -9,6 +9,12 @@ describe("exempt", () => {
     }
   );
 
+  it("should serve the web app manifest and its icon without a session, because the browser fetches them to offer an install", () => {
+    expect(exempt("/manifest.webmanifest")).toBe(true);
+    expect(exempt("/assistant/icon.svg")).toBe(true);
+    expect(exempt("/assistant/icon.svg.bak")).toBe(false);
+  });
+
   it("should serve the sign-in routes without a session, or nobody could ever get one", () => {
     expect(exempt("/auth/login")).toBe(true);
     expect(exempt("/auth/callback")).toBe(true);
@@ -51,9 +57,12 @@ describe("exempt", () => {
 });
 
 describe("safeReturnTo", () => {
-  it.each(["/", "/hub", "/hub/c?topics=pcs-api,database&mode=any", "/hub/agents/0f8a", "/hub/access#grants"])("should keep the same-origin path %s", (path) => {
-    expect(safeReturnTo(path)).toBe(path);
-  });
+  it.each(["/", "/hub", "/hub/c?topics=pcs-api,database&mode=any", "/hub/agents/0f8a", "/assistant#settings"])(
+    "should keep the same-origin path %s",
+    (path) => {
+      expect(safeReturnTo(path)).toBe(path);
+    }
+  );
 
   it("should keep a path containing a hyphen, which a careless character class would reject", () => {
     expect(safeReturnTo("/hub/c?topics=pcs-api")).toBe("/hub/c?topics=pcs-api");

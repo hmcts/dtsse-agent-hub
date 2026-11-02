@@ -243,26 +243,35 @@ describe("DELETE /api/agent/credentials/{kind}", () => {
   it("should answer 404 when the kind is unknown", async () => {
     expect((await remove(ALICE, "ssh")).status).toBe(404);
   });
-
-  it("should answer 404 when the kind is the Amazon Bedrock API key, which is no longer one", async () => {
-    expect((await remove(ALICE, "bedrock")).status).toBe(404);
-  });
 });
 
 // Agents reach Claude through the gateway or their owner's own licence, so there is no key to store under any name.
 describe("an Amazon Bedrock API key", () => {
   it("should answer 404 and store nothing when one is sent from the command line", async () => {
-    expect((await put(ALICE, "bedrock", { value: BEDROCK })).status).toBe(404);
+    const response = await put(ALICE, "bedrock", { value: BEDROCK });
 
+    expect(response.status).toBe(404);
+    expect(await response.text()).not.toContain(BEDROCK);
+    expect(await prisma.credential.count()).toBe(0);
+  });
+
+  it("should answer 404 when one is read back or deleted", async () => {
+    expect((await read(ALICE, "bedrock")).status).toBe(404);
+    expect((await remove(ALICE, "bedrock")).status).toBe(404);
+  });
+
+  it("should refuse one and never echo it when it is pasted from the web", async () => {
+    actAs("alice");
+
+    const result = await saveCredential(form({ kind: "bedrock", value: BEDROCK }));
+
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("can be pasted here") });
+    expect(JSON.stringify(result)).not.toContain(BEDROCK);
     expect(await prisma.credential.count()).toBe(0);
   });
 });
 
 describe("reading credentials back", () => {
-  it("should answer 404 when the owner asks for an Amazon Bedrock API key, which is not a kind", async () => {
-    expect((await read(ALICE, "bedrock")).status).toBe(404);
-  });
-
   it.each(["github", "azure", "claude", "jenkins", "atlassian"])(
     "should answer 405 and never the value when the owner asks for their stored %s",
     async (kind) => {
@@ -372,7 +381,7 @@ describe("saveCredential and removeCredential", () => {
     expect(result).toEqual({ ok: true, confirmation: "Your GitHub token is stored" });
     const row = await prisma.credential.findFirstOrThrow();
     expect(row).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "github", updatedVia: "web" });
-    expect(revalidated).toContain("/hub/settings/credentials");
+    expect(revalidated).toContain("/assistant");
     expect(JSON.stringify(result)).not.toContain(GITHUB);
   });
 
@@ -393,19 +402,16 @@ describe("saveCredential and removeCredential", () => {
     expect(await readCredential(prisma, localStore(), devIdentity("own-licence").oid, "claude")).toBe(CLAUDE);
   });
 
-  it.each([["own-licence", "own-licence", true]] as const)(
-    "should leave a Claude token as it was when the viewer is on %s and so is their agent",
-    async (persona, route, stored) => {
-      const who = person(persona);
-      await insertUser(who);
-      await createVirtualAgent(prisma, { owner: who, modelRoute: route, name: "assistant" });
-      actAs(persona);
+  it("should save a Claude token when the viewer and their agent are both on their own licence", async () => {
+    const who = person("own-licence");
+    await insertUser(who);
+    await createVirtualAgent(prisma, { owner: who, modelRoute: "own-licence", name: "assistant" });
+    actAs("own-licence");
 
-      await saveCredential(form({ kind: "claude", value: CLAUDE }));
+    await saveCredential(form({ kind: "claude", value: CLAUDE }));
 
-      expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(stored ? CLAUDE : undefined);
-    }
-  );
+    expect(await readCredential(prisma, localStore(), who.oid, "claude")).toBe(CLAUDE);
+  });
 
   // The agent's route is fixed on its row when it is created, and its pod boots on that; the viewer's follows their
   // `AIGateway.User` app role. Someone granted that role afterwards is on the gateway while an agent of theirs is
@@ -449,21 +455,10 @@ describe("saveCredential and removeCredential", () => {
     expect(await credentialSettings({ ...devIdentity("alice"), modelRoute: "gateway" })).toMatchObject({ modelRoute: "gateway", claudeTokenUsable: true });
   });
 
-  it.each(["alice", "own-licence"])("should refuse a pasted Amazon Bedrock API key from the web when the viewer is the %s persona", async (persona) => {
-    actAs(persona);
-
-    const result = await saveCredential(form({ kind: "bedrock", value: BEDROCK }));
-
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("can be pasted here") });
-    expect(await prisma.credential.count()).toBe(0);
-    expect(JSON.stringify(result)).not.toContain(BEDROCK);
-  });
-
   it.each([
     ["an Azure cache, which comes from the virtual agent", { kind: "azure", value: AZURE }, "can be pasted here"],
     ["an unknown kind", { kind: "ssh", value: GITHUB }, "can be pasted here"],
     ["a property every object has", { kind: "toString", value: GITHUB }, "can be pasted here"],
-    ["an Amazon Bedrock API key, which is no longer a kind", { kind: "bedrock", value: BEDROCK }, "can be pasted here"],
     ["a malformed token", { kind: "github", value: "nope" }, "GitHub token"]
   ])("should refuse %s when it is pasted", async (_label, values, error) => {
     actAs("alice");
@@ -526,7 +521,7 @@ describe("a Jenkins API token", () => {
 
     const statuses = await credentialStatus(prisma, devIdentity("alice").oid);
     expect(statuses.map((status) => [status.kind, status.stored])).toContainEqual(["jenkins", true]);
-    expect(revalidated).toEqual(expect.arrayContaining(["/hub/settings/credentials", "/hub/virtual"]));
+    expect(revalidated).toContain("/assistant");
   });
 });
 
@@ -589,7 +584,7 @@ describe("a CLAUDE.md", () => {
     expect((await read(ALICE, "claude_md")).status).toBe(404);
   });
 
-  it("should save the text from the web with LF line endings, as the viewer, and tell the virtual agents page", async () => {
+  it("should save the text from the web with LF line endings, as the viewer, and tell the Assistant's pages", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
     actAs("alice");
 
@@ -598,7 +593,7 @@ describe("a CLAUDE.md", () => {
     expect(result).toEqual({ ok: true, confirmation: "Your CLAUDE.md is saved. Each agent uses it from its next Claude start" });
     expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "claude_md")).toBe("# Me\n\nBe brief.\n");
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "claude_md", updatedVia: "web" });
-    expect(revalidated).toContain("/hub/virtual");
+    expect(revalidated).toContain("/assistant");
   });
 
   it("should say why and store nothing when the web save is refused", async () => {
@@ -714,7 +709,7 @@ describe("a git identity", () => {
     expect(await prisma.credential.count()).toBe(0);
   });
 
-  it("should save the fields from the web as the viewer, storing only those set, and tell the virtual agents page", async () => {
+  it("should save the fields from the web as the viewer, storing only those set, and tell the Assistant's pages", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
     actAs("alice");
 
@@ -723,7 +718,7 @@ describe("a git identity", () => {
     expect(result).toEqual({ ok: true, confirmation: "Your git identity is saved. Each agent uses it from its next Claude start" });
     expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "git_identity")).toBe('{"email":"alice@example.com"}');
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "git_identity", updatedVia: "web" });
-    expect(revalidated).toContain("/hub/virtual");
+    expect(revalidated).toContain("/assistant");
   });
 
   it("should say why and store nothing when the web save has neither field", async () => {

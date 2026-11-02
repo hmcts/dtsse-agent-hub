@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
-import { registerAgent } from "../../src/agents/store.ts";
+import { heartbeat, registerAgent } from "../../src/agents/store.ts";
 import * as artefactRoute from "../../src/app/api/agent/[agentId]/artefact/route.ts";
 import * as confluenceRoute from "../../src/app/api/agent/[agentId]/confluence/route.ts";
 import * as heartbeatRoute from "../../src/app/api/agent/[agentId]/heartbeat/route.ts";
@@ -15,17 +15,24 @@ import * as uiTranscriptRoute from "../../src/app/api/ui/agents/[id]/transcript/
 import * as lookupsRoute from "../../src/app/api/ui/assistant/lookups/route.ts";
 import * as lookupAnswerRoute from "../../src/app/api/virtual/[virtualAgentId]/lookups/[lookupId]/route.ts";
 import * as sessionsRoute from "../../src/app/api/virtual/[virtualAgentId]/sessions/route.ts";
+import { writeArtefact } from "../../src/assistant/artefact-store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
 import { CONFLUENCE_EXPORT_TIMEOUT_MS } from "../../src/assistant/confluence.ts";
+import { createConversation, findConversation, hasLocalConversation, listConversations } from "../../src/assistant/conversation-store.ts";
 import { readExportDefaults, saveExportDefaults } from "../../src/assistant/export-default-store.ts";
+import { assistantFrame } from "../../src/assistant/frame.ts";
 import { JIRA_EXPORT_TIMEOUT_MS } from "../../src/assistant/jira.ts";
 import { askLookup } from "../../src/assistant/lookup-store.ts";
 import { LOOKUP_RATE_LIMIT, LOOKUP_RETENTION_MS } from "../../src/assistant/lookups.ts";
-import { assistantFrame, createConversation, ensureAssistant, findConversation, linkSession, pendingWakes } from "../../src/assistant/store.ts";
+import { searchConversations } from "../../src/assistant/search-store.ts";
+import { linkSession, pendingWakes } from "../../src/assistant/session-store.ts";
+import { accessToConversation, conversationsSharedBy, conversationsSharedWith, shareConversation } from "../../src/assistant/shares.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
 import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { createDirect, expireDeliveries } from "../../src/messages/store.ts";
 import { subscribe, subscriptions } from "../../src/topics/store.ts";
+import { appendEntries } from "../../src/transcripts/store.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
@@ -46,7 +53,7 @@ vi.mock("next/cache", async () => {
 
 const { actAs } = await import("./web-session.ts");
 const actions = await import("../../src/app/_actions/assistant.ts");
-const { agentRoute, assistantConversation, assistantModel, openAssistant } = await import("../../src/web/data.ts");
+const { agentAddress, assistantConversation, assistantModel, openAssistant } = await import("../../src/web/data.ts");
 
 const ALICE: Person = { oid: "dev-alice", name: "Dev alice (sign-in disabled)", email: "alice@dev.invalid" };
 const BOB: Person = { oid: "dev-bob", name: "Dev bob (sign-in disabled)", email: "bob@dev.invalid" };
@@ -131,6 +138,14 @@ async function sessionOf(conversationId: string): Promise<{ agentId: string; ses
 async function laptopChat(sessionId = "alices-laptop"): Promise<string> {
   await registerAgent(prisma, { ...ALICE, tid: "dev" }, { sessionId, name: sessionId, cwd: null, repo: null, branch: null, host: null });
   return (await prisma.assistantConversation.findFirstOrThrow({ where: { virtualAgentId: null }, orderBy: { createdAt: "desc" } })).id;
+}
+
+/** A prompt typed at the laptop: a chat with nothing said in it is left out of the list, so a test that lists one needs this. */
+async function typedAtLaptop(conversationId: string): Promise<void> {
+  const agent = await prisma.agent.findFirstOrThrow({ where: { assistantConversationId: conversationId } });
+  await appendEntries(prisma, { id: agent.id, ownerOid: agent.ownerOid }, agent.sessionId, [
+    { key: "typed", role: "user", content: { text: "look at the claim" }, truncated: false, redacted: false, message_id: null, occurred_at: new Date() }
+  ]);
 }
 
 assistantSuite([ALICE, BOB]);
@@ -414,12 +429,13 @@ describe("conversations", () => {
     expect((await jsonOf(listed)).agents.map((agent: { id: string }) => agent.id)).not.toContain(agentId);
   });
 
-  it("should send the hub's agent page for a conversation's agent to the conversation", async () => {
+  it("should send the hub's agent page for a conversation's agent to the conversation when its owner opens it", async () => {
     await startedAssistant();
     const id = ((await actions.startConversation({ product: "general", body: "hi" })) as { id: string }).id;
     const { agentId } = await sessionOf(id);
 
-    expect(await agentRoute(VIEWER, agentId)).toEqual({ variant: "moved", to: `/assistant/${id}` });
+    expect(await agentAddress(VIEWER, agentId)).toEqual({ kind: "chat", conversationId: id });
+    expect(await agentAddress({ ...BOB, tid: "dev" }, agentId)).toEqual({ kind: "none" });
   });
 
   it("should show only the owner their conversation, and nobody else", async () => {
@@ -679,41 +695,38 @@ describe("conversations", () => {
 
   /**
    * A conversation with no pod is a session on the person's own computer, and removing the chat has to leave that
-   * session exactly as it was. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the agent's own
-   * dependants cascade from there, so deleting the row without clearing the column first would take the live
-   * session's agent, the transcript it uploaded, its subscriptions and every direct message to or from it — board
-   * messages with colleagues included — after which the session 404s, re-registers as a new agent and the chat
-   * comes back.
+   * session exactly as it was and keep the chat gone. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the
+   * agent's own dependants cascade from there, so the row is deleted only once the agent is detached. A detached
+   * laptop session is otherwise linked a fresh chat by its next heartbeat, so the detach also marks it
+   * (`chat_removed_at`) as one never to be given another.
    *
    * The rename is here too: every write to a conversation announces it inside its own transaction, so a write path
    * that could not announce one with no pod would roll back and leave a chat nobody can rename or get rid of.
    */
-  it("should detach a conversation with no pod and leave the session on the laptop standing", async () => {
+  it("should delete a conversation with no pod, keep it gone through its session's writes and heartbeats, and leave the session on the laptop standing", async () => {
     const laptop = await registerAgent(
       prisma,
       { ...ALICE, tid: "dev" },
       { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
     );
     const id = (await prisma.assistantConversation.findFirstOrThrow()).id;
+    await typedAtLaptop(id);
     await subscribe(prisma, laptop.id, ["pcs"]);
-    await prisma.transcriptEntry.create({
-      data: {
-        agentId: laptop.id,
-        sessionId: "alices-laptop",
-        entryKey: "e1",
-        role: "assistant",
-        content: { text: "read off my own disk" },
-        occurredAt: new Date()
-      }
-    });
     // Seeded rather than sent: nobody can direct another owner's session any more, so a cross-owner direct is a row
-    // written before that changed. It is here because the old delete took every message of the agent with it,
-    // including ones that had nothing to do with the chat being removed.
+    // written before that changed. It is here because a delete that cascaded would take every message of the agent
+    // with it, including ones that had nothing to do with the chat being removed.
     const board = await createDirect(prisma, {
       author: { oid: BOB.oid, agentId: null },
       targetAgentId: laptop.id,
       inReplyTo: null,
       body: "nothing to do with that chat"
+    });
+    await shareConversation(prisma, ALICE.oid, id, BOB.oid);
+    await writeArtefact(prisma, (await findConversation(prisma, ALICE.oid, id))!, {
+      title: "Notes",
+      markdown: "something sensitive",
+      baseVersion: 0,
+      by: "user"
     });
 
     expect(await actions.renameConversation({ conversationId: id, title: "On my laptop" })).toEqual({ ok: true });
@@ -721,11 +734,68 @@ describe("conversations", () => {
     expect(await actions.deleteConversation({ conversationId: id })).toEqual({ ok: true });
 
     expect(await prisma.assistantConversation.count()).toBe(0);
-    expect(await prisma.agent.findUniqueOrThrow({ where: { id: laptop.id } })).toMatchObject({ sessionId: "alices-laptop", assistantConversationId: null });
-    expect(await prisma.transcriptEntry.count({ where: { agentId: laptop.id } })).toBe(1);
+    expect(await prisma.assistantConversationShare.count()).toBe(0);
+
+    await heartbeat(prisma, laptop.id, "busy", "alices-laptop");
+    await appendEntries(prisma, { id: laptop.id, ownerOid: ALICE.oid }, "alices-laptop", [
+      {
+        key: "typed-again",
+        role: "user",
+        content: { text: "and the next claim" },
+        truncated: false,
+        redacted: false,
+        message_id: null,
+        occurred_at: new Date()
+      }
+    ]);
+    const artefact = await call(artefactRoute.PUT, {
+      as: ALICE,
+      path: `/api/agent/${laptop.id}/artefact`,
+      params: { agentId: laptop.id },
+      method: "PUT",
+      body: { markdown: "written after the chat went", base_version: 0 }
+    });
+    expect(artefact.status).toBe(404);
+    await heartbeat(prisma, laptop.id, "idle", "alices-laptop");
+    await registerAgent(
+      prisma,
+      { ...ALICE, tid: "dev" },
+      { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null }
+    );
+
+    expect(await prisma.assistantConversation.count()).toBe(0);
+    expect(await prisma.agent.findUniqueOrThrow({ where: { id: laptop.id } })).toMatchObject({
+      sessionId: "alices-laptop",
+      assistantConversationId: null,
+      chatRemovedAt: expect.any(Date)
+    });
+    expect(await assistantConversation(VIEWER, id)).toBeUndefined();
+    expect(await actions.deleteConversation({ conversationId: id })).toEqual({ ok: false, error: "no such conversation" });
+    expect((await openAssistant(VIEWER)).conversations).toEqual([]);
+    expect(await listConversations(prisma, ALICE.oid)).toEqual([]);
+    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(false);
+    expect(await searchConversations(prisma, ALICE.oid, "claim")).toEqual([]);
+    expect(await accessToConversation(prisma, BOB.oid, id)).toBeUndefined();
+    expect(await conversationsSharedWith(prisma, BOB.oid)).toEqual([]);
+    expect(await conversationsSharedBy(prisma, ALICE.oid)).toEqual([]);
+
+    expect(await prisma.transcriptEntry.count({ where: { agentId: laptop.id } })).toBe(2);
     expect(await subscriptions(prisma, laptop.id)).toEqual(["pcs"]);
     expect(await prisma.message.count({ where: { id: BigInt(board.id) } })).toBe(1);
     expect(await prisma.delivery.count({ where: { agentId: laptop.id } })).toBe(1);
+  });
+
+  it("should give a new session a chat of its own when the person removed the last one's", async () => {
+    const removed = await laptopChat("alices-laptop");
+    await typedAtLaptop(removed);
+    expect(await actions.deleteConversation({ conversationId: removed })).toEqual({ ok: true });
+
+    const fresh = await laptopChat("alices-laptop-after-clear");
+    await typedAtLaptop(fresh);
+
+    expect(fresh).not.toBe(removed);
+    expect((await listConversations(prisma, ALICE.oid)).map((chat) => chat.id)).toEqual([fresh]);
+    expect(await hasLocalConversation(prisma, ALICE.oid)).toBe(true);
   });
 
   /**
@@ -737,6 +807,7 @@ describe("conversations", () => {
     const onPod = ((await actions.startConversation({ product: "general", body: "on my assistant" })) as { id: string }).id;
     await register(token, (await sessionOf(onPod)).sessionId, onPod);
     const onLaptop = await laptopChat();
+    await typedAtLaptop(onLaptop);
 
     expect((await assistantConversation(VIEWER, onLaptop))!.local).toBe(true);
     expect((await assistantConversation(VIEWER, onPod))!.local).toBe(false);
@@ -761,6 +832,7 @@ describe("conversations", () => {
   ] as const)("should mark a listed local chat as %s with the state of its session", async (status, session) => {
     await startedAssistant();
     const onLaptop = await laptopChat();
+    await typedAtLaptop(onLaptop);
     await prisma.agent.updateMany({ where: { assistantConversationId: onLaptop }, data: { status } });
 
     const listed = (await openAssistant(VIEWER)).conversations.flatMap((group) => group.items);
@@ -1036,11 +1108,9 @@ describe("the sessions stream and report", () => {
     await register(token, sessionId, id, { clientFeatures: ["stop"] });
     await pod(heartbeatRoute.POST, token, `/api/agent/${agentId}/heartbeat`, { agentId }, "POST", { status: "busy" });
     await insertUser(BOB);
-    // The refusal comes from the owner-scoped read rather than from `canStopAssistantAnswer`, which the action names
-    // after it and `rules.test.ts` covers; this is the end of it that the person would meet.
     actAs("bob");
 
-    expect(await actions.stopAssistantAnswer({ conversationId: id })).toMatchObject({ ok: false });
+    expect(await actions.stopAssistantAnswer({ conversationId: id })).toEqual({ ok: false, error: "that conversation no longer exists" });
     actAs("alice");
     expect((await assistantConversation(VIEWER, id))?.stopHistory).toEqual([]);
   });

@@ -1,4 +1,4 @@
-import { canLookUpAtlassian } from "../access/rules.ts";
+import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { clientSupports } from "../agents/client-features.ts";
 import { isUuid } from "../agents/store.ts";
@@ -6,6 +6,7 @@ import type { EventHub } from "../realtime/hub.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { setDesired } from "../virtual-agents/store.ts";
+import { findAssistant } from "./assistant-store.ts";
 import {
   checkResults,
   LOOKUP_RATE_LIMIT,
@@ -16,7 +17,6 @@ import {
   type LookupResponse,
   lookupResponse
 } from "./lookups.ts";
-import { findAssistant } from "./store.ts";
 
 /**
  * A lookup as the hub keeps it: recorded when the owner asks, sent to their pod on its sessions stream, answered by
@@ -41,7 +41,7 @@ export type Asked = { lookupId: string; virtualAgentId: string } | { answer: Loo
  */
 export async function askLookup(prisma: PrismaClient, question: LookupQuestion, now: Date = new Date()): Promise<Asked> {
   const assistant = await findAssistant(prisma, question.viewerOid);
-  if (assistant === undefined || !canLookUpAtlassian(question.viewerOid, assistant)) {
+  if (assistant === undefined || !canManageVirtualAgent(question.viewerOid, assistant)) {
     throw new HttpError(404, "you have no assistant to search with yet");
   }
   if (assistant.desired === "stopped") {
@@ -76,7 +76,7 @@ export async function askLookup(prisma: PrismaClient, question: LookupQuestion, 
 }
 
 /** What a stored lookup answers, or `undefined` while the pod has not. A lookup that has gone answers `timeout`. */
-export async function readLookup(db: Database, lookupId: string): Promise<LookupResponse | undefined> {
+async function readLookup(db: Database, lookupId: string): Promise<LookupResponse | undefined> {
   const row = await db.assistantLookup.findUnique({ where: { id: lookupId }, select: { kind: true, status: true, results: true, error: true, detail: true } });
   return row === null ? { status: "timeout" } : lookupResponse(row);
 }

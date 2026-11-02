@@ -97,7 +97,7 @@ export const CONFLUENCE_SELECT = {
 } as const;
 
 /** Where the export went, or is going, as the panel names it. */
-export interface ConfluencePlace {
+interface ConfluencePlace {
   parentTitle: string;
   spaceName: string;
 }

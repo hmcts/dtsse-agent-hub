@@ -7,7 +7,7 @@
 export const HEALTH_INTERVAL_MS = 30_000;
 export const HEALTH_TIMEOUT_MS = 10_000;
 
-export interface Queryable {
+interface Queryable {
   query: (sql: string) => Promise<unknown>;
 }
 

@@ -79,7 +79,7 @@ export async function loadThreadMessage(db: Database, id: bigint): Promise<Loade
   return row === null ? undefined : toLoaded(row);
 }
 
-export const THREAD_LIMIT = 100;
+const THREAD_LIMIT = 100;
 
 /** Bounds on when a thread's messages were sent: from `since` inclusive, before `until`. */
 export interface ThreadWindow {
@@ -103,7 +103,7 @@ export async function agentThread(db: Database, viewerOid: string, agentId: stri
     .reverse();
 }
 
-export const REPLIES_LIMIT = 100;
+const REPLIES_LIMIT = 100;
 
 /** The oldest replies to a message, posts and direct messages alike, with the refs `canReadMessage` needs. */
 export async function loadReplies(db: Database, id: bigint): Promise<LoadedThreadMessage[]> {

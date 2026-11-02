@@ -1,6 +1,6 @@
 import { HttpError } from "@/agent-api/http";
 import { ownedAgentRoute } from "@/agent-api/route";
-import { conversationOfAgent } from "@/assistant/store";
+import { conversationOfAgent } from "@/assistant/conversation-store";
 import { readUploadPart, sessionAttachment } from "@/assistant/upload-store";
 import { partIndexOf } from "@/assistant/uploads";
 import { prisma } from "@/store/prisma";

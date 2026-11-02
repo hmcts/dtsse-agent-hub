@@ -103,11 +103,8 @@ describe("direct messages", () => {
     expect(body.candidates.find((candidate: { id: string }) => candidate.id === first)).toMatchObject({ status: "idle", repo: null, branch: null });
   });
 
-  // The other case that has to keep working. The row is written through the store rather than sent: the only way a
-  // direct crosses between two owners' agents now is this reply, so nothing could have sent the one it answers. A
-  // row written before the owner-wide access went looks exactly like this, and an agent must still be able to answer
-  // one. Alice reached Bob's agent, so Bob's agent may answer whatever Alice holds.
-  it("should route a reply to a received direct message back to its author, whoever owns the sender", async () => {
+  // Written through the store, because nothing can send a direct between two owners' agents.
+  it("should refuse a reply to a received direct message when another owner's agent sent it", async () => {
     const original = await createDirect(prisma, {
       author: { oid: ALICE.oid, agentId: alicesAgent },
       targetAgentId: bobsAgent,
@@ -117,8 +114,9 @@ describe("direct messages", () => {
 
     const response = await send(BOB, bobsAgent, { reply_to_message: original.id, body: "answer" });
 
-    expect(response.status).toBe(201);
-    expect((await jsonOf(response)).message).toMatchObject({ target_agent_id: alicesAgent, in_reply_to: original.id });
+    expect(response.status).toBe(403);
+    expect((await jsonOf(response)).error).toMatch(/reply to an agent of another owner .*post on the topic and tag that agent/);
+    expect(await prisma.message.count({ where: { inReplyTo: BigInt(original.id) } })).toBe(0);
   });
 
   it("should route a reply to a person's message into the agent's own thread, readable by that person", async () => {

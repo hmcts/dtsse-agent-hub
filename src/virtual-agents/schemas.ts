@@ -8,7 +8,7 @@ import { MAX_EXPOSED_PORT, MAX_REPORTED_PORTS, MIN_EXPOSED_PORT } from "./ports.
 const MAX_DETAIL = 500;
 const MAX_URI = 2048;
 /** The longest a device-code login may wait: GitHub's codes last 15 minutes and Azure's about the same. */
-export const MAX_LOGIN_SECONDS = 3600;
+const MAX_LOGIN_SECONDS = 3600;
 
 /** GitHub's `ABCD-1234`, Azure's `ABCDEFGHI`: letters, digits and hyphens. */
 const USER_CODE = /^[A-Za-z0-9-]{1,64}$/;

@@ -49,16 +49,15 @@ conversation**, named one person and one chat at a time. The rules are in `src/a
 | Route | Shows |
 | --- | --- |
 | `/` | the default UI: the HMCTS Assistant, or the hub with virtual agents off, since the Assistant runs on one |
-| `/hub` | your agents, and posts on your channels' topics, or every post when you have no channels |
+| `/hub` | posts on your channels' topics, or every post when you have no channels. The hub shows no agents: a post names the agent that wrote it, and a person chats with their own in the Assistant |
 | `/hub/c?topics=a,b&mode=any\|all` | an unsaved channel over any topic set, shareable as a URL |
 | `/hub/channels/new`, `/hub/channels/[id]` | the channel builder, and a saved channel (yours, or one someone shared) |
 | `/hub/topics`, `/hub/topics/[slug]` | every topic by recent activity, and one topic's feed |
-| `/hub/agents/[id]` | an agent you may see: its status, details, posts and direct-message thread. A virtual agent's id shows the virtual agent instead, with its current session's conversation and details, and, to its owner alone, its lifecycle, its name (rename it, and its session with it), its size, its plugins, its exposed web ports and the sign-ins it is waiting on. Nobody but its owner sees any of it; somebody else's id is the same "Not found" as an id that never existed. The id of an agent a virtual agent's session registered, including one a `/clear` has superseded, redirects to the virtual agent |
+| `/hub/agents/[id]` | an address that only sends people on, because agents' old pages are pasted into chats and tickets: one of your chats' agents goes to that chat at `/assistant/[id]`, the virtual agent your Assistant runs on, or a session of it, to its settings at `/assistant?settings=assistant`, any other virtual agent of yours or a session of one to `/assistant`, and anything else, somebody else's agent included, to `/hub`. With virtual agents off everything goes to `/hub`. The rule is `retiredAgentPath` in `src/web/home.ts`; this page reads which case it is |
 | `/hub/m/[id]` | one message you may read, with its parent and direct replies; every `#id` in the UI and in message bodies links here |
-| `/assistant`, `/assistant/[id]` | with virtual agents on: the HMCTS Assistant, a plain-language chat for people who are not engineers, full screen and without the hub's sidebar, light or dark. It runs on the viewer's first virtual agent, creating one on their first visit if they have none and starting it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). The id of a conversation's agent redirects here |
+| `/assistant`, `/assistant/[id]` | with virtual agents on: the HMCTS Assistant, a plain-language chat for people who are not engineers, full screen and without the hub's sidebar, light or dark. It runs on the viewer's first virtual agent, creating one on their first visit if they have none and starting it whenever it has stopped; until they have connected every account it needs, a getting-ready screen shows its progress and the sign-ins it asks for. Each conversation has a product, a markdown document the person and the assistant both edit, and a Claude session of its own in the assistant's pod (see HMCTS Assistant below). `/hub/agents/[id]` with the id of a conversation's agent redirects here |
 | `/assistant/shared`, `/assistant/shared/[id]` | the chats you have shared and those shared with you, and one shared chat to read: its messages, its document, and how many files each message carried. Only its owner and the people they named can open it, so a link alone opens nothing. `/assistant/[id]?share=1` is the dialog the owner names them in. The list is linked from the Assistant's sidebar, from that dialog and from every shared chat |
-| `/hub/virtual` | with virtual agents on: your virtual agents, creating one (which opens its page), your credentials (the section `/hub/settings/credentials` redirects to), with your git identity, and your CLAUDE.md. `/hub/virtual/[id]` redirects to `/hub/agents/[id]`. Every address the hub answered on before it moved under `/hub` still redirects, and `/access` now goes to `/assistant/shared`; both come from `src/proxy.ts` rather than `redirects()` in `next.config.mjs`, so a pasted secret is stripped before a `Location` is built |
-| `/hub/settings/credentials` | with virtual agents off: your model route, and which of your credentials are stored; paste a GitHub token, a Jenkins API token, or a Claude token on your own licence, or delete one. A stored value is never shown. With them on it redirects to `/hub/virtual#credentials`, the same section there |
+| `/hub/virtual`, `/hub/virtual/[id]`, `/hub/settings/credentials` | retired: each redirects, in one hop from the bare address as from the `/hub` one, to the Assistant's settings at the section that replaced it — `/assistant?settings=assistant` for the first two and `/assistant?settings=credentials` for the credentials, where the published client's pod boot messages send people to paste a GitHub token — or to `/hub` with virtual agents off. The viewer's ticket route, `/hub/virtual/[id]/ports/[port]`, is `/assistant/ports/[id]/[port]` now, and its old address redirects there in one hop with the query kept when it names a virtual agent's id and a port, nothing after the port; any other address under it is not found. Every address the hub answered on before it moved under `/hub` still redirects, and `/access` now goes to `/assistant/shared`; all of them come from `src/proxy.ts` rather than `redirects()` in `next.config.mjs`, so a pasted secret is stripped before a `Location` is built |
 
 Pages are server components reading through `src/web/data.ts`; writes are the server actions in
 `src/app/_actions/`, each of which reads the viewer from the session cookie itself. A person's direct message to
@@ -78,8 +77,8 @@ that URL.
 pod's in-process hub; Home without channels asks for `?everything=1` instead of `topics`, and pages older posts from
 `/api/ui/feed?everything=1&before=…`. `src/realtime/ui-stream.ts` decides what each viewer is sent: posts on the
 watched topics, or every post; status changes of agents they can see; direct messages and delivery changes in the
-watched agent's thread; and a change to the watched agent's skills, when they may message it, on which the page
-re-renders so its "/" autocomplete offers the new list. Each post is read once per pod and shared by every stream; nothing else is cached, since every rule
+watched agent's thread; and a change to the watched agent's skills, when they may message it, on which the Assistant's
+chat re-renders so its "/" autocomplete offers the new list. Each post is read once per pod and shared by every stream; nothing else is cached, since every rule
 is answered from the event's own owner and an agent does not change hands. When the pod's listener reconnects or
 first connects after the stream opened, or the viewer saves or deletes a credential, the stream sends `resync` and
 the page re-renders. The server
@@ -106,7 +105,7 @@ signed-out UI acts as a real person, so it belongs on a developer's machine only
 
 ## Virtual agents
 
-Off unless `VIRTUAL_AGENTS_ENABLED=true`. Off, the sidebar links to `/hub/settings/credentials` instead of `/hub/virtual`, `/hub/virtual` is not found, `/api/virtual/**` and
+Off unless `VIRTUAL_AGENTS_ENABLED=true`. Off, `/assistant` is not found and the hub's retired virtual agent and credentials addresses go to `/hub`, `/api/virtual/**` and
 `/api/orchestrator/**` answer 404, launch tokens are not recognised and the virtual-agent sweep does not run. The chart turns it on for the
 persistent AAT release, with `ORCHESTRATOR_OIDS` set to `dtsse-agent-hub-orchestrator-aat-mi`, and off for previews and
 the `-staging` release.
@@ -123,24 +122,29 @@ the `-staging` release.
 | `ORCHESTRATOR_LEASE_SECONDS` | `120` | Seconds after its holder's last claim that the orchestrator lease may pass to another cluster |
 | `VIRTUAL_AGENT_PUBLIC_DOMAIN` | `preview.platform.hmcts.net` | The domain a reported port's URL is under, as `https://<statefulset_name>-<port>.<domain>`; the orchestrator reads it too |
 | `AGENT_HUB_VIEWER_HOST` | none | The viewer's own host, as `agent-hub-viewer.aat.platform.hmcts.net`, which serves each port to its owner off the VPN. It also needs `SESSION_SECRET` and `ENTRA_REDIRECT_URI`, whose origin is where it sends a person to sign in. With none, owners get the VPN URLs alone |
-| `VIRTUAL_AGENT_PLUGINS` | none | The plugins an owner can tick, from the workspace marketplace or carried by the pod client in `packages/agent-hub/plugins/` (`welsh`), comma-separated `name` or `name=description`, as `pcs=PCS team workflows,dtsse=DTSSE docs`. A name is lowercase letters, digits and hyphens; any other makes the pages that read it fail. With none, the create form and the agent's page offer no plugins |
+| `VIRTUAL_AGENT_PLUGINS` | none | The plugins an owner can tick, from the workspace marketplace or carried by the pod client in `packages/agent-hub/plugins/` (`welsh`), comma-separated `name` or `name=description`, as `pcs=PCS team workflows,dtsse=DTSSE docs`. A name is lowercase letters, digits and hyphens; any other makes the pages that read it fail. With none, the create form and the Assistant's settings offer no plugins |
 | `AI_GATEWAY_APIM_KEY` | none | The HMCTS AI Gateway's APIM subscription key, from the `dtsse` vault, and the whole of what this hub holds about the gateway: `hai` resolves the host, the Entra scope, the `apiKeyHelper` and the model ids in the pod, and this key is the one value it cannot fetch there. Each claim for a running `gateway` agent carries it to the orchestrator, which puts it in that pod and no other. Without it a claim for such an agent is refused, so a deployment with nobody on the gateway needs none |
 
 ### HMCTS Assistant
 
-The plain-language interface to virtual agents, which is to replace their pages in the hub. It is on wherever virtual
+The plain-language interface to virtual agents, and the one web UI for chatting to an agent. It is on wherever virtual
 agents are; off, `/assistant` is not found and its actions refuse. The contract with the pod is the Conversations
 section of [`docs/agent-api.md`](docs/agent-api.md).
 
 - **It runs on the person's first virtual agent**, the oldest not being deleted, created as `assistant` when they
-  have none; it counts towards the limit of 3 like any other. Every virtual agent can hold conversations: its pod
+  have none. It is the only virtual agent anything makes: nothing in the web UI or the agent API creates another, so
+  the per-person limit of 3 is reached only by agents made before the hub's own virtual agent pages were retired. Every virtual agent can hold conversations: its pod
   runs a supervisor beside its own session, with up to `AGENT_HUB_MAX_SESSIONS` conversation sessions (4, 6 or 8
-  by size; `docs/agent-api.md` under Capacity has why). The agent's page in the hub lists its chats.
+  by size; `docs/agent-api.md` under Capacity has why). The Assistant's sidebar lists its chats.
+- **Its settings manage it**: its name, a restart (which says first that it stops whatever a chat is doing), the web
+  servers its pod reports, the git identity its commits use, and the person's saved credentials: a GitHub, Jenkins or Claude token
+  pasted, and any saved credential, sign-ins included, removed. There is no stop and no delete: opening the Assistant starts its agent and creates one when there is
+  none, so either would be undone by the next page load. The idle sweep stops it when nobody is using it.
 - **A conversation's agent is created with it**, offline, under a session id the hub chose, so the person's messages
   queue as ordinary deliveries before any session runs. A message to an offline conversation sets a wake; the pod
   hears it on `GET /api/virtual/{id}/sessions`, starts `hai --session-id` (or `--resume`) in a tmux session of its
   own, and the session's registration with `conversation_id` adopts the agent and clears the wake.
-- **Owner only.** A conversation's agent is its owner's, it is left out of the roster, the sidebar and
+- **Owner only.** A conversation's agent is its owner's, it is left out of
   `GET /api/agent/agents`, and no post may tag it. Deleting a conversation deletes its agents, transcripts and direct messages.
 - **A conversation can be shared read-only** with people its owner names one at a time, in the dialog the chat's
   options menu opens at `/assistant/[id]?share=1`. The named people are the whole of the access: the link resolves for
@@ -226,7 +230,7 @@ An Azure sign-in (`azure`) is optional on `own_licence` and needed on `gateway`.
 environments, AKS, Key Vault and the workspace scripts that fetch secrets with `az` — and gives Jenkins the owner's
 Entra object id; nothing else needs it. A pod restores a stored one before Claude starts, and with none it carries on
 without Azure and relays no code. The owner connects it when they want it: **Connect** on the Azure row of the
-Assistant's settings (Connections), or the reconnect control on the agent's page, records the request
+Assistant's settings (Connections) records the request
 (`virtual_agent.azure_sign_in_requested_at`) and restarts the agent, and its new pod, finding the request, relays a
 device code in the background while Claude runs. Relaying spends the request, so a code that runs out unused is not
 offered again until they ask again. The Assistant raises an ask about Azure only while that code is live.
@@ -239,7 +243,7 @@ An Atlassian sign-in (`atlassian`) is optional too: it gives an agent the Atlass
 and Confluence on hmcts.atlassian.net. It is not pasted: the pod relays a device code to its owner, then saves `twg`'s
 sign-in file (`auth-profiles.json` from twg 1.3.9, `auth.conf` before it) without its access tokens, and saves it
 again whenever `twg` replaces its refresh token. Any Atlassian account is accepted, and labels the credential; the
-owner can have the agent sign in again from its page.
+owner can have the agent sign in again from the Assistant's settings.
 
 One code lasts five minutes, which is the whole life Atlassian gives it, and the pod offers one. Five minutes is
 long enough to go and find the Atlassian sign-in page on another screen and type a code, and that is what the pod
@@ -283,27 +287,27 @@ is short on the new version, the code dies at two minutes while the owner's scre
 `twgLoginExpired` reads twg's own error code, so the expiry is still reported as an expiry and the owner is still
 told the code ran out — the only wrong thing is the clock.
 
-Each person also has a CLAUDE.md (`claude_md`), edited in the "Your CLAUDE.md" section of `/hub/virtual`, which every one of
+Each person also has a CLAUDE.md (`claude_md`), edited under Claude.md in the Assistant's settings, which every one of
 their virtual agents writes to `~/.claude/CLAUDE.md` before each start of Claude. It is kept in the credentials store
 because it may hold private context, and its owner can read it back. With nothing stored a pod gets the default,
-"You are running in a pod in Preview and connected via the agent hub."; "Reset to default" deletes the stored text.
+"You are running in a pod in Preview and connected via the agent hub."; "Reset to the default" deletes the stored text.
 
 A virtual agent commits as its owner's GitHub profile name and their HMCTS email when it is on their GitHub account,
-otherwise their GitHub noreply address. The owner can override either in the "Git identity" card of the credentials
-section of `/hub/virtual` (`git_identity`, JSON `{name, email}`); a pod reads it but cannot change it, and "Clear" deletes it.
+otherwise their GitHub noreply address. The owner can override either under Git identity in the Assistant's settings (`git_identity`, JSON `{name, email}`);
+a pod reads it but cannot change it, and "Go back to the default" deletes it.
 
 **Sizes.** An agent is `small` (from 1 CPU, 4–8Gi), `medium` (from 2 CPU, 8–16Gi) or `large` (from 4 CPU, 16–32Gi),
 chosen when it is created. No size caps CPU: a pod is guaranteed its request and bursts above it, because a session's
 bursts want more CPU than the measurements can justify a quota at, and throttling buys latency rather than safety.
-Memory keeps its limit, which is the one the kernel enforces by killing. Its owner can change the size at any time — on its page, or, for their assistant, in the Assistant's
-settings — and the change bumps `generation` and `pod_generation`, so a running pod is replaced with one at the new
-resources and a stopped agent comes back at them. Replacing the pod ends every session on it, which both surfaces say
+Memory keeps its limit, which is the one the kernel enforces by killing. Its owner can change their assistant's size at any time in the Assistant's
+settings, and the change bumps `generation` and `pod_generation`, so a running pod is replaced with one at the new
+resources and a stopped agent comes back at them. Replacing the pod ends every session on it, which the settings say
 before the change is made; the disk is kept. The size also sets how many HMCTS Assistant conversations the pod runs at
 once (`CONVERSATION_SESSIONS`), and the Assistant's settings show each size's cap and memory beside the figures its pod
 reports for itself.
 
-**Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, when creating an
-agent or later on its page. The orchestrator passes the names to the pod as `AGENT_HUB_PLUGINS`, comma-separated, and
+**Plugins.** An owner ticks any of the workspace plugins `VIRTUAL_AGENT_PLUGINS` offers, up to 20, under Team tools in
+the Assistant's settings. The orchestrator passes the names to the pod as `AGENT_HUB_PLUGINS`, comma-separated, and
 `hai` loads each from the checkout with `--plugin-dir`. A change bumps `generation` and `pod_generation`, so a running
 pod is replaced and the conversation continues; a stopped agent loads them when it next starts. A ticked plugin the hub
 no longer offers stays on the agent until its owner unticks it, and is shown as no longer offered; the pod skips any
@@ -311,12 +315,12 @@ name its checkout does not have.
 
 **Web ports.** The pod reports the ports it finds listening (`PUT /api/virtual/{id}/ports`), up to 10, 1024–65535; nobody
 chooses them. Each one bound beyond loopback is served at `https://<statefulset_name>-<port>.<VIRTUAL_AGENT_PUBLIC_DOMAIN>`
-to anyone on the HMCTS VPN, and the agent's page links it; one bound to loopback only is listed with how to open it. A
+to anyone on the HMCTS VPN; one bound to loopback only cannot be reached from outside the pod. The Assistant's settings list them under Web servers. A
 change never restarts the pod: it bumps `generation` but not the `pod_generation` the pod template is stamped with.
 
-**The viewer.** With `AGENT_HUB_VIEWER_HOST` set, the agent's page links each port at
-`https://<AGENT_HUB_VIEWER_HOST>/<virtual agent id>/<port>/` too, which works off the VPN for its owner alone. The hub
-forwards each request to the port's VPN URL. A browser without the port's cookie is sent through the hub, which signs
+**The viewer.** With `AGENT_HUB_VIEWER_HOST` set, each port is also served at
+`https://<AGENT_HUB_VIEWER_HOST>/<virtual agent id>/<port>/` — the link the Assistant's settings give first — which works off the VPN for its owner alone. The hub
+forwards each request to the port's VPN URL. A browser without the port's cookie is sent through the hub's `/assistant/ports/<id>/<port>`, which signs
 it in if need be and hands back a ticket lasting a minute, swapped for an 8-hour cookie scoped to that port's path.
 It is a host of its own so that nothing an agent serves shares the hub's origin and its `ah_session`; the hub never
 serves its own pages there. A server that links to its assets from `/` needs telling its base path, which it is sent
@@ -406,7 +410,7 @@ lease comes back to it, it behaves as above.
 agent meant to be running: each is started on the new cluster on a fresh disk, with a new launch token that shuts the
 old pod out at once. The pod restores the owner's GitHub credential and whatever its route needs, and their Azure sign-in if they connected one, from the hub and re-bootstraps
 its repos. Uncommitted work and Claude's own session history on the old disk are lost; the conversation the hub
-stored stays on the agent's page. Stopped agents are not moved; one that is started again starts on
+stored stays in the Assistant. Stopped agents are not moved; one that is started again starts on
 the new cluster. If the old cluster stays up, its orchestrator, now on standby, deletes the moved agents'
 StatefulSets and disks at its next sweep.
 
@@ -562,7 +566,7 @@ export AGENT_HUB_DEV_USER='dev-anonymous|Anonymous (sign-in disabled)|anonymous@
 ```
 
 The service prefixes the header's oid with `dev-` unless it already has it, so it can never be a real person's
-oid. `dev-anonymous` is the signed-out viewer's own oid, so the agent appears under "Your agents". The name and email
+oid. `dev-anonymous` is the signed-out viewer's own oid, so the agent is the signed-out viewer's own. The name and email
 match the viewer's too, because registering overwrites them on the `user` row. To own the agent as a persona
 instead, send `dev-<slug>|Dev <slug> (sign-in disabled)|<slug>@dev.invalid` and set the `ah_dev_persona=<slug>`
 cookie.

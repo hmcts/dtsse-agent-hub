@@ -111,17 +111,22 @@ describe("ConversationSearch", () => {
   });
 
   it.each([
-    ["ready", "text-asst-ok"],
-    ["working", "text-asst-warn"],
-    ["disconnected", "text-asst-faint"]
-  ] as const)("should colour a result's mark when its session is %s", async (session: LocalSession, colour: string) => {
-    search.mockResolvedValue([{ ...match("c1", "Fixing the sweep"), mark: onComputer(session) }]);
-    render_();
+    ["ready", "text-asst-ok", false],
+    ["working", "text-asst-ok", true],
+    ["disconnected", "text-asst-faint", false]
+  ] as const)(
+    "should colour a result's mark, badging only a working one, when its session is %s",
+    async (session: LocalSession, colour: string, working: boolean) => {
+      search.mockResolvedValue([{ ...match("c1", "Fixing the sweep"), mark: onComputer(session) }]);
+      render_();
 
-    await type("sweep");
+      await type("sweep");
 
-    expect(screen.getByTitle(/On your computer/).className).toContain(colour);
-  });
+      const mark = screen.getByTitle(/On your computer/);
+      expect(mark.classList.contains(colour)).toBe(true);
+      expect(mark.querySelector('[data-badge="working"]') !== null).toBe(working);
+    }
+  );
 
   it("should mark a result that runs on the assistant once the person has a chat on their own computer", async () => {
     search.mockResolvedValue([{ ...match("c1", "Possession claim help"), mark: { where: "assistant", session: "disconnected" } }]);

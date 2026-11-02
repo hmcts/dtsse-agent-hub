@@ -1,6 +1,6 @@
 import type { HubEvent } from "./events.ts";
 
-export type HubListener = (event: HubEvent) => void;
+type HubListener = (event: HubEvent) => void;
 
 /** One pod's fan-out: the NOTIFY listener publishes, and every open SSE stream subscribes. */
 export interface EventHub {

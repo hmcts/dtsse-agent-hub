@@ -1,21 +1,20 @@
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { announce } from "./store.ts";
+import { announce } from "./conversation-row.ts";
+import { detachLocalSessions } from "./local-chat-store.ts";
 
 /**
- * The one thing that bounds how many conversations a person's own Claude Code sessions can put in their Assistant.
+ * The one thing that bounds how many conversations a person's own Claude Code sessions leave in their Assistant.
  *
- * Every ordinary registration that is nobody's pod and names no conversation gets one (`linkLocalSession`), and a new
- * session id is a new agent and so a new conversation — including every `/clear`, which mints one. Nothing removed
- * them: `dropAbandoned` in `upload-sweep.ts` requires a pod, because the cascade there would have taken the live
- * session's agent row with the chat. So the rows only ever accumulated, and `listConversations` answers with the 200
- * most recently active — at a measured 500 sessions a week, a developer crossed 200 inside a fortnight and their
- * actual Assistant chats fell out of the sidebar and out of `searchConversations` behind the empty ones.
+ * Every session that is nobody's pod and has no conversation gets one (`linkLocalSession`), when it registers or on
+ * its next heartbeat, and a new session id is a new agent and so a new conversation — including every `/clear`, which mints one, at a measured
+ * 500 sessions a week. The sidebar and the search leave out the ones nothing was said in (`first_content_at`), so they
+ * do not crowd out the chats that matter, but nothing else removes the rows: `dropAbandoned` in
+ * `upload-sweep.ts` requires a pod, because the cascade there would take the live session's agent row with the chat.
+ * Left alone they would only accumulate, each with its agent's link to it.
  *
- * This collects the local conversations nothing ever happened in. Two other answers were available and are worse:
- * raising the 200 defers the same arithmetic rather than fixing it, and the limit is also what bounds one sidebar
- * render and the search's candidate set; and not creating the conversation until the session has said something would
- * mean a laptop session the person wants to open a chat *with* does not appear until it has spoken, which is the one
- * thing the conversation is for.
+ * This collects the local conversations nothing ever happened in. The conversation is made when the hub first hears
+ * from the session rather than when it first says something, because a laptop session the person wants to open a chat *with* needs
+ * one before it has spoken, which is the one thing the conversation is for.
  *
  * What it must never do is cascade. `agent.assistant_conversation_id` is `ON DELETE CASCADE` and the agent's own
  * dependants cascade from there, so deleting the row under a live session would take its transcript, its deliveries,
@@ -25,7 +24,7 @@ import { announce } from "./store.ts";
  */
 
 /** How often the sweep runs: the same tick as the transcript and upload sweeps, which is far faster than chats arrive. */
-export const LOCAL_SWEEP_INTERVAL_MS = 10 * 60_000;
+const LOCAL_SWEEP_INTERVAL_MS = 10 * 60_000;
 
 /**
  * How long an empty local conversation is kept, measured from when it was created and from when its session was last
@@ -37,9 +36,9 @@ export const LOCAL_SWEEP_INTERVAL_MS = 10 * 60_000;
  * typed into the chat could still be delivered (`EXPIRE_AFTER_SECONDS` in `src/agents/liveness.ts`, which also
  * reasons about a laptop asleep overnight): while the hub would still hand a message over, the chat stays.
  *
- * Nothing is lost at the far end. A session that comes back after longer than this heartbeats rather than registers,
- * and only a registration links a conversation — so its chat does not return until the session next starts. That
- * chat held no words, no transcript, no question and no document, which is what made it collectable.
+ * Nothing is lost at the far end. A session that comes back after longer than this is linked a new, empty chat by its
+ * next heartbeat, as any session with no conversation is. The one collected held no words, no transcript, no question
+ * and no document, which is what made it collectable.
  */
 export const LOCAL_CONVERSATION_RETENTION_HOURS = 24;
 
@@ -48,7 +47,7 @@ export const LOCAL_CONVERSATION_RETENTION_HOURS = 24;
  * cheaper per item than the upload sweep's batch and can be far larger: 200 every 10 minutes is 1,200 an hour, well
  * above the whole hub's arrival rate of empty chats at the measured 500 sessions a week per engineer.
  */
-export const LOCAL_SWEEP_BATCH = 200;
+const LOCAL_SWEEP_BATCH = 200;
 
 /** "lclcswep". Distinct from the migration, offline-sweep, transcript-sweep, upload-sweep and virtual-agent locks. */
 const LOCAL_SWEEP_LOCK_KEY = 0x6c636c63_73776570n;
@@ -82,22 +81,24 @@ export async function sweepLocalConversations(prisma: PrismaClient, options: Loc
 /**
  * Deletes the local conversations nothing ever happened in, detaching each one's session before the row goes.
  *
- * Every condition is load-bearing:
+ * `first_content_at` is what decides whether a chat is listed (`announceFirstContent`). It is not trusted alone to
+ * decide that one may be deleted, because a writer that does not set it — a pod still running the release before the
+ * column, during a rolling deploy — can have put words in a chat since the backfill ran, and deleting is the one
+ * mistake that cannot be put right. So the column is checked beside the data itself, and every condition must hold:
  *
+ * - **Nothing was ever recorded in it** (`first_content_at IS NULL`). This is also what keeps a chat whose transcript
+ *   has been swept after `RETENTION_DAYS`: the data checks below would find nothing left, and the column remembers.
+ * - **Its sessions uploaded no transcript at all.** Not only none the sidebar would count: a session that has written
+ *   anything is one this sweep cannot be sure has finished with its chat, and keeping such a chat costs a row where
+ *   collecting it wrongly would cost the person's work.
+ * - **No direct message to or from any of its agents.** `kind = 'direct'` and not every message, unlike
+ *   `dropAbandoned`'s condition: a local session's agent is an ordinary agent on the roster, and the posts it wrote to
+ *   the boards are not words in this chat, while a direct is — the local thread merges directs with the transcript.
+ * - **Its sessions asked no question**, which the thread shows as a card.
+ * - **No document**, which the person and the session can both write.
  * - **It has no pod.** A conversation with one is the Assistant's own chat on a virtual agent, whose agent exists
  *   only to be that chat's session; `dropAbandoned` is what collects those, and the two sweeps must not both own a
  *   row.
- * - **Nothing was said in it.** No direct message to or from any of its agents. `kind = 'direct'` and not every
- *   message, unlike `dropAbandoned`'s condition: a local session's agent is an ordinary agent on the roster, and the
- *   posts it wrote to the boards are not words in this chat, while a direct is — the local thread merges directs with
- *   the transcript, so one colleague's message is a chat the person can read.
- * - **Its sessions uploaded no transcript.** This is what a local chat's own half of the conversation is: the
- *   person's prompts are transcript entries there, not hub messages. It is also what keeps a `/clear` leftover,
- *   which is a superseded session's conversation and may hold the whole of a day's work.
- * - **Its sessions asked no question.** An `AskUserQuestion` the client's hook intercepted is shown in the thread as
- *   a card, so a chat holding one has something in it even with nothing else.
- * - **No document.** A person can write the conversation's artefact themselves, and a local chat's document is a hub
- *   row they and the session both edit.
  * - **It was created longer ago than the window, and no session of it has been heard from inside it.**
  *   `last_heartbeat_at` is the hub's own column, written on register and on every heartbeat, so it answers "is this
  *   session still running" whatever the client's clock says — the near miss `transcripts/sweep.ts` records for
@@ -109,6 +110,7 @@ async function collectEmpty(tx: Database, retentionHours: number, batch: number)
     SELECT c.id::text AS id, c.owner_oid
       FROM assistant_conversation c
      WHERE c.virtual_agent_id IS NULL
+       AND c.first_content_at IS NULL
        AND c.artefact_version = 0
        AND c.created_at < now() - make_interval(hours => ${retentionHours}::int)
        AND NOT EXISTS (
@@ -141,11 +143,16 @@ async function collectEmpty(tx: Database, retentionHours: number, batch: number)
            )
      ORDER BY c.created_at
      LIMIT ${batch}::int
+     -- Skipped while the person is deleting it: deleteConversation holds the row lock, and the chat is theirs to
+     -- finish. A delete that finds this sweep holding it waits, and marks the sessions this detached.
+       FOR UPDATE OF c SKIP LOCKED
   `;
   for (const row of empty) {
     // The detach, before the delete and inside the same transaction, is the whole of why this is safe to run
     // unattended: it clears the cascading column, so the row that goes next takes nothing of the session with it.
-    await tx.$executeRaw`UPDATE agent SET assistant_conversation_id = NULL WHERE assistant_conversation_id = ${row.id}::uuid`;
+    // Not as the person removing it: they removed nothing, so a session that comes back and says something is given
+    // a chat again.
+    await detachLocalSessions(tx, row.id, { removedByPerson: false });
     await tx.assistantConversation.delete({ where: { id: row.id } });
     // Announced like any other change to it, so a sidebar still open stops showing a chat that has gone. A local
     // conversation's `virtual_agent_id` is null by definition, which is what `ui-stream` selects this frame past.

@@ -1,19 +1,14 @@
 import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { GET as searchRoute } from "../../src/app/api/ui/assistant/search/route.ts";
-import {
-  type ConversationRow,
-  conversationAgent,
-  createConversation,
-  ensureAssistant,
-  listConversations,
-  renameConversation,
-  searchConversations,
-  touchConversation
-} from "../../src/assistant/store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import type { ConversationRow } from "../../src/assistant/conversation-row.ts";
+import { conversationAgent, createConversation, listConversations, renameConversation, touchConversation } from "../../src/assistant/conversation-store.ts";
+import { searchConversations } from "../../src/assistant/search-store.ts";
 import { type ConversationMark, type ConversationMatch, conversationGroups, conversationMatches } from "../../src/assistant/views.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
+import { appendEntries } from "../../src/transcripts/store.ts";
 import { setDesired } from "../../src/virtual-agents/store.ts";
 import { insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { jsonOf } from "./routes.ts";
@@ -90,6 +85,64 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await prisma.$disconnect();
+});
+
+/** A local chat with nothing said in it by anyone but, perhaps, the harness: the entries are its transcript's. */
+async function localChat(title: string, entries: readonly { role: "user" | "assistant"; text: string }[]): Promise<ConversationRow> {
+  const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
+  const agentId = await conversationAgent(prisma, conversation);
+  await renameConversation(prisma, ALICE.oid, conversation.id, title);
+  // Through the upload, which is what records a chat's first content; a pod chat's title is left alone by it.
+  await appendEntries(
+    prisma,
+    { id: agentId, ownerOid: ALICE.oid },
+    "s",
+    entries.map((entry, index) => ({
+      key: `k${index}`,
+      role: entry.role,
+      content: { text: entry.text },
+      truncated: false,
+      redacted: false,
+      message_id: null,
+      occurred_at: new Date(Date.UTC(2026, 9, 30, 10, 0, index))
+    }))
+  );
+  await withoutPod(conversation);
+  return conversation;
+}
+
+describe("a chat on the person's own computer with nothing in it", () => {
+  const CLEAR = "<command-name>/clear</command-name><command-message>clear</command-message><command-args></command-args>";
+
+  it("should be left out of the list and the search when it has no transcript and no message", async () => {
+    await localChat("Possession handle", []);
+
+    expect(await listed(ALICE)).toEqual([]);
+    expect(await found(ALICE, "possession")).toEqual([]);
+  });
+
+  it("should be left out when all it holds is the harness's record of a command", async () => {
+    await localChat("Possession handle", [{ role: "user", text: CLEAR }]);
+
+    expect(await listed(ALICE)).toEqual([]);
+    expect(await found(ALICE, "possession")).toEqual([]);
+  });
+
+  it("should be listed and found once the person has typed a prompt", async () => {
+    await localChat("Possession handle", [
+      { role: "user", text: CLEAR },
+      { role: "user", text: "look at the possession claim" }
+    ]);
+
+    expect(await listed(ALICE)).toEqual(["Possession handle"]);
+    expect(await found(ALICE, "possession")).toEqual(["Possession handle"]);
+  });
+
+  it("should be listed once the session has answered, whatever the person typed", async () => {
+    await localChat("Possession handle", [{ role: "assistant", text: "hello" }]);
+
+    expect(await listed(ALICE)).toEqual(["Possession handle"]);
+  });
 });
 
 describe("searching conversations", () => {

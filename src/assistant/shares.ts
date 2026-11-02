@@ -1,17 +1,16 @@
 import {
   type ConversationAccess,
   type ConversationShare,
-  canManageConversationShares,
   canShareConversationWith,
-  canViewSharedConversation,
   conversationAccess,
+  isOwner,
   type SharedConversationRef
 } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/store.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
+import { announce, ConversationNotFound } from "./conversation-row.ts";
 import { productLabel } from "./products.ts";
-import { announce, ConversationNotFound } from "./store.ts";
 
 /**
  * Who, besides its owner, may read an HMCTS Assistant conversation.
@@ -51,7 +50,7 @@ export async function conversationRef(db: Database, id: string): Promise<SharedC
 }
 
 /** Every share of one conversation, as the rules take them. */
-export async function sharesOf(db: Database, conversationId: string): Promise<ConversationShare[]> {
+async function sharesOf(db: Database, conversationId: string): Promise<ConversationShare[]> {
   const rows = await db.assistantConversationShare.findMany({
     where: { conversationId },
     select: { conversationId: true, recipientOid: true },
@@ -74,11 +73,8 @@ export async function accessToConversation(
     return undefined;
   }
   const [shares, forks] = await Promise.all([sharesOf(db, id), forksOf(db, id)]);
-  const readers = [...shares, ...forks];
-  if (!canViewSharedConversation(viewerOid, conversation, readers)) {
-    return undefined;
-  }
-  return { conversation, access: conversationAccess(viewerOid, conversation, readers), forks };
+  const access = conversationAccess(viewerOid, conversation, [...shares, ...forks]);
+  return access === "none" ? undefined : { conversation, access, forks };
 }
 
 export interface SharePerson {
@@ -88,7 +84,7 @@ export interface SharePerson {
   sharedAt: string;
 }
 
-/** Who the conversation is shared with, oldest first. Only its owner reads this: `canManageConversationShares`. */
+/** Who the conversation is shared with, oldest first. Only its owner reads this: `isOwner`. */
 export async function shareRecipients(db: Database, conversationId: string): Promise<SharePerson[]> {
   const rows = await db.assistantConversationShare.findMany({
     where: { conversationId },
@@ -115,7 +111,7 @@ async function announceShares(db: Database, conversation: SharedConversationRow)
 /** The owner's conversation, or the 404 anyone else's is reported as. */
 async function ownedConversation(db: Database, actorOid: string, id: string): Promise<SharedConversationRow> {
   const conversation = await conversationRef(db, id);
-  if (conversation === undefined || !canManageConversationShares(actorOid, conversation)) {
+  if (conversation === undefined || !isOwner(actorOid, conversation)) {
     throw new ConversationNotFound();
   }
   return conversation;

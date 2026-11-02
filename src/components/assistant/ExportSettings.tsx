@@ -11,7 +11,7 @@ import type { JiraAccess } from "@/components/assistant/JiraExport";
 import type { LookUp } from "@/components/assistant/lookupClient";
 import type { ActionResult } from "@/web/action";
 
-export type SaveExportDefaultsAction = (input: { jira: unknown; confluence: unknown }) => Promise<ActionResult<{ defaults: ExportDefaults }>>;
+type SaveExportDefaultsAction = (input: { jira: unknown; confluence: unknown }) => Promise<ActionResult<{ defaults: ExportDefaults }>>;
 
 /** The export defaults as the settings edit them: what is stored, the action that replaces it, and the sign-in searches need. */
 export interface AssistantExportDefaults {

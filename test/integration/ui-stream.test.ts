@@ -1,10 +1,13 @@
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { heartbeat } from "../../src/agents/store.ts";
+import { GET as agentSuggestions } from "../../src/app/api/ui/agents/route.ts";
 import { GET as feed } from "../../src/app/api/ui/feed/route.ts";
 import { GET as session } from "../../src/app/api/ui/session/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
 import { GET as topicSuggestions } from "../../src/app/api/ui/topics/route.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { conversationAgent, createConversation } from "../../src/assistant/conversation-store.ts";
 import { ackDelivery, createDirect, createPost } from "../../src/messages/store.ts";
 import { realtime } from "../../src/realtime/process.ts";
 import { MIN_STREAM_MAX_SECONDS, RECONNECT_AFTER_MS } from "../../src/realtime/sse.ts";
@@ -199,6 +202,19 @@ describe("/api/ui/feed", () => {
     expect((await feed(request("bob", "/api/ui/feed?everything=0"))).status).toBe(400);
     expect((await feed(request("bob", "/api/ui/feed?topics=a&before=x"))).status).toBe(400);
     expect((await feed(request("bob", "/api/ui/feed?topics=A%20B"))).status).toBe(400);
+  });
+});
+
+describe("/api/ui/agents", () => {
+  it("should suggest another owner's agent to tag and leave out their pod conversation's when both match the query", async () => {
+    const bobsAgent = await insertAgent(BOB, "bob-pcs");
+    await ensureAssistant(prisma, { oid: BOB.oid, modelRoute: "own-licence" });
+    const podAgent = await conversationAgent(prisma, await createConversation(prisma, BOB.oid, {}));
+    await prisma.agent.update({ where: { id: podAgent }, data: { name: "bob-chat" } });
+
+    const body = await (await agentSuggestions(request("alice", "/api/ui/agents?q=bob"))).json();
+
+    expect(body.agents).toEqual([{ id: bobsAgent, name: "bob-pcs", owner_name: BOB.name }]);
   });
 });
 

@@ -12,8 +12,11 @@ import type { VirtualAgentDesired, VirtualAgentStatus } from "../virtual-agents/
 import { type LoginView, loginViews } from "../virtual-agents/logins.ts";
 import type { VirtualAgentRow } from "../virtual-agents/store.ts";
 import { neededCredentials, optionalCredentials } from "../virtual-agents/views.ts";
+import { type Artefact, readArtefact } from "./artefact-store.ts";
 import type { ConfluenceExportView } from "./confluence.ts";
 import { readConfluenceExport } from "./confluence-store.ts";
+import type { ConversationRow, ProductChange, SessionState, StopMark } from "./conversation-row.ts";
+import { type ConversationListRow, hasLocalConversation, listConversations, unsentConversation } from "./conversation-store.ts";
 import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
@@ -22,17 +25,7 @@ import { chatCredentials, onboarded, type Readiness, readiness } from "./onboard
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { snippetOf } from "./search.ts";
-import {
-  type Artefact,
-  type ConversationListRow,
-  type ConversationRow,
-  hasLocalConversation,
-  listConversations,
-  readArtefact,
-  type SessionState,
-  searchConversations,
-  unsentConversation
-} from "./store.ts";
+import { searchConversations } from "./search-store.ts";
 import { type MessageAttachment, unsentAttachments } from "./upload-store.ts";
 
 /** The HMCTS Assistant as its pages show it. Only ever the viewer's own: nobody sees anyone else's assistant. */
@@ -69,11 +62,10 @@ export type LocalSession = "ready" | "working" | "disconnected";
 /**
  * The three states the laptop mark shows, named for what they mean to a person reading the list.
  *
- * Coloured as `StatusDot` colours the same three statuses on the hub — `idle` green, `busy` amber, `offline` grey —
- * so one session does not read as green in one place and amber in another. That makes `idle` the welcoming state:
+ * Coloured `idle` green, `busy` the same green with a badge and `offline` grey. That makes `idle` the welcoming state:
  * `offline` is a heartbeat gone for 90 seconds and so the only one that is really "not connected", while `idle` is a
- * live session with nothing in hand, which is when it will answer you fastest. `busy` is mid-turn, which is worth a
- * different colour precisely because a message sent then waits.
+ * live session with nothing in hand, which is when it will answer you fastest. `busy` is mid-turn: still connected, so
+ * still green, but badged because a message sent then waits.
  */
 const LOCAL_SESSION: Record<AgentStatus, LocalSession> = { idle: "ready", busy: "working", offline: "disconnected" };
 
@@ -241,11 +233,11 @@ export interface ConversationView {
   title: string;
   product: string;
   productLabel: string;
-  productHistory: { product: string; at: string }[];
+  productHistory: ProductChange[];
   /** Every answer the person stopped, so the thread shows where each one was cut off. */
-  stopHistory: { at: string }[];
+  stopHistory: StopMark[];
   /**
-   * Where the chat runs, as `ConversationLink.local`. The one thing the chat's own screen reads it for is which of
+   * Whether the chat has no pod (`!hasPod`). The one thing the chat's own screen reads it for is which of
    * its controls make sense: everything a pod does for a conversation — carrying a file to its session, interrupting
    * a turn, starting one on demand — there is nobody to do for a session on somebody's laptop.
    */

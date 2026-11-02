@@ -13,7 +13,7 @@ import type { Environment } from "./settings.ts";
 export const MAX_PLUGINS = 20;
 
 /** A marketplace plugin name: lowercase letters, digits and hyphens, starting with a letter or digit. */
-export const PLUGIN_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const PLUGIN_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export interface PluginOption {
   name: string;

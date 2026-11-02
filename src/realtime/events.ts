@@ -9,7 +9,7 @@ export const HUB_CHANNEL = "hub_events";
 
 export type AgentStatus = "busy" | "idle" | "offline";
 
-export type DeliveredState = "delivered" | "expired";
+type DeliveredState = "delivered" | "expired";
 
 export type HubEvent =
   | { type: "post"; message_id: string }

@@ -1,16 +1,18 @@
-import { type ConversationShare, canForkConversation, canManageConversationShares, canShareConversationWith } from "../access/rules.ts";
+import { type ConversationShare, canForkConversation, canShareConversationWith, isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import type { ThreadMessage } from "../messages/direct-thread.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { conversationItems, mergeEntries, type TranscriptEntryView } from "../transcripts/conversation.ts";
 import { agentConversation } from "../transcripts/views.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
+import { ensureAssistant } from "./assistant-store.ts";
+import { announce, ConversationNotFound, storedHistory, storedStops } from "./conversation-row.ts";
+import { createConversationAgent } from "./conversation-store.ts";
 import { FORK_CONTEXT_FILE_NAME, FORK_CONTEXT_MEDIA_TYPE, FORKED_SELECT, forkContextMarkdown, forkedView, forkThread } from "./forks.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
 import { conversationRef, forksOf, type SharedChatLink, type SharedConversationRow, type SharePerson } from "./shares.ts";
-import { productMarks, type SharedThreadItem, sharedThreadItems, stopMarks } from "./sharing.ts";
-import { announce, ConversationNotFound, createConversationAgent, ensureAssistant } from "./store.ts";
+import { type SharedThreadItem, sharedThreadItems } from "./sharing.ts";
 import { threadItems } from "./thread.ts";
 import { PART_BYTES, partCount, storedNameOf } from "./uploads.ts";
 import { UNTITLED } from "./views.ts";
@@ -43,7 +45,7 @@ export async function forkRecipients(db: Database, conversationId: string): Prom
 /** The owner's conversation, or the 404 anyone else's is reported as. */
 async function ownedConversation(db: Database, actorOid: string, id: string): Promise<SharedConversationRow> {
   const conversation = await conversationRef(db, id);
-  if (conversation === undefined || !canManageConversationShares(actorOid, conversation)) {
+  if (conversation === undefined || !isOwner(actorOid, conversation)) {
     throw new ConversationNotFound();
   }
   return conversation;
@@ -108,7 +110,7 @@ export async function forkChoice(
 }
 
 /** How many pages of the source's transcript a copy reads; past this, it starts part-way through and says so. */
-export const FORK_PAGE_LIMIT = 20;
+const FORK_PAGE_LIMIT = 20;
 
 /**
  * The source's whole thread in words, as its owner would read it page by page, rather than the one page a share
@@ -145,7 +147,7 @@ async function sourceThread(
   return {
     // `local` for the same reason `sharedConversation` passes it: on a laptop chat the person's prompts are transcript
     // entries rather than hub messages, so a copy taken without it would carry the answers and not the questions.
-    thread: sharedThreadItems(threadItems(items, productMarks(row.productHistory), stopMarks(row.stopHistory), !hasPod(conversation))),
+    thread: sharedThreadItems(threadItems(items, storedHistory(row.productHistory), storedStops(row.stopHistory), !hasPod(conversation))),
     earlierHidden: page.olderBefore !== null
   };
 }
@@ -223,13 +225,15 @@ export async function acceptFork(prisma: PrismaClient, viewer: { oid: string; mo
       select: { id: true, ownerOid: true, virtualAgentId: true }
     });
     // In one statement, because the row's CHECK holds the fork's columns to all or none. Written raw for the reason
-    // `stopAnswer` writes its history raw: Prisma's JSON input type takes no array of a named interface.
+    // `stopAnswer` writes its history raw: Prisma's JSON input type takes no array of a named interface. The copied
+    // words are the copy's first content (`announceFirstContent`), so it is listed from the moment it is taken.
     await tx.$executeRaw`
       UPDATE assistant_conversation
          SET forked_from_id = ${id}::uuid,
              forked_from_owner_name = ${source.owner.name},
              forked_from_title = ${source.title ?? UNTITLED},
              forked_at = ${now},
+             first_content_at = ${now},
              forked_thread = ${JSON.stringify(thread)}::jsonb,
              forked_earlier_hidden = ${earlierHidden}
        WHERE id = ${created.id}::uuid

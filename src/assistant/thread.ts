@@ -3,7 +3,9 @@ import type { QuestionView } from "../questions/views.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { byCodePoint } from "../topics/slug.ts";
 import { type ConversationItem, toolSummary } from "../transcripts/conversation.ts";
+import { withoutIdeContext } from "../transcripts/harness-turn.ts";
 import { taskFailed, taskNotifications } from "../transcripts/task-notification.ts";
+import type { ProductChange, SessionState, StopMark } from "./conversation-row.ts";
 import { productLabel } from "./products.ts";
 import type { MessageAttachment } from "./upload-store.ts";
 
@@ -49,15 +51,6 @@ export type ThreadItem =
    * quiet line, because the raw text is XML nobody typed.
    */
   | { type: "notice"; key: string; at: string; text: string; failed: boolean };
-
-export interface ProductMark {
-  product: string;
-  at: string;
-}
-
-export interface StopMark {
-  at: string;
-}
 
 function textOf(content: unknown): string | undefined {
   if (typeof content === "object" && content !== null && "text" in content && typeof content.text === "string") {
@@ -108,6 +101,51 @@ function harnessTurn(raw: string, truncated: boolean): { text: string; failed: b
     text: oneLine(task.summary ?? task.event ?? "A background task finished"),
     failed: taskFailed(task.status)
   }));
+}
+
+/**
+ * What a local chat shows for one of its user turns: the notices of a turn the harness wrote (none for a silent one),
+ * the words the person typed, or `undefined` for a turn that shows nothing at all — redacted, empty, or nothing but
+ * an IDE's editor context, which is put in front of a prompt and says nothing on its own.
+ */
+function localUserTurn(content: unknown, truncated: boolean): { notices: { text: string; failed: boolean }[] } | { said: string } | undefined {
+  // A prompt whose words were redacted is left out rather than shown as an empty bubble, as a wordless assistant
+  // entry is: `textOf` answers nothing for the `{redacted}` content such an entry keeps.
+  const typed = textOf(content);
+  if (typed === undefined) {
+    return undefined;
+  }
+  const text = withoutIdeContext(typed);
+  const notices = harnessTurn(text, truncated);
+  if (notices !== undefined) {
+    return { notices };
+  }
+  return text === "" ? undefined : { said: text };
+}
+
+/**
+ * Whether a transcript entry shows in a local chat's thread as something other than a notice: a bubble of the
+ * person's or the session's words, or a tool row. The one rule for "something is in this chat" as far as a
+ * transcript can say, which is what puts a chat on the person's own computer in their sidebar
+ * (`announceFirstContent` in first-content.ts) — so a chat is listed exactly when its thread would show more than the
+ * harness's own lines.
+ *
+ * A shell command run with `!`, a hook's output and an interrupted request are bubbles here and so count, although none
+ * of them can name a chat (`typedText` in harness-turn.ts): a chat is about what was typed, but it holds what it
+ * shows. A tool result shows nothing of its own; the call it answers is the row.
+ */
+export function shownInThread(entry: { role: string; content: unknown; truncated: boolean }): boolean {
+  if (entry.role === "tool_use") {
+    return true;
+  }
+  if (entry.role === "assistant") {
+    return textOf(entry.content) !== undefined;
+  }
+  if (entry.role === "user") {
+    const turn = localUserTurn(entry.content, entry.truncated);
+    return turn !== undefined && "said" in turn;
+  }
+  return false;
 }
 
 /** A tool call the session made, with what came back. */
@@ -217,7 +255,7 @@ function awaitingAnswer(thread: readonly ThreadItem[]): boolean {
  */
 export function threadItems(
   items: readonly ConversationItem[],
-  products: readonly ProductMark[] = [],
+  products: readonly ProductChange[] = [],
   stops: readonly StopMark[] = [],
   local = false
 ): ThreadItem[] {
@@ -238,17 +276,14 @@ export function threadItems(
         thread.push({ type: "assistant", key: item.key, at: item.at, text });
       }
     } else if (local && item.entry.role === "user") {
-      // A prompt whose words were redacted is left out rather than shown as an empty bubble, as a wordless assistant
-      // entry is: `textOf` answers nothing for the `{redacted}` content such an entry keeps.
-      const text = textOf(item.entry.content);
-      const harness = text === undefined ? undefined : harnessTurn(text, item.entry.truncated);
-      if (harness !== undefined) {
-        for (const [index, notice] of harness.entries()) {
+      const turn = localUserTurn(item.entry.content, item.entry.truncated);
+      if (turn !== undefined && "notices" in turn) {
+        for (const [index, notice] of turn.notices.entries()) {
           thread.push({ type: "notice", key: `${item.key}:${index}`, at: item.at, text: notice.text, failed: notice.failed });
         }
-      } else if (text !== undefined) {
+      } else if (turn !== undefined) {
         // No delivery and no attachments: this is what was typed at the laptop, not a message the hub carried there.
-        thread.push({ type: "user", key: item.key, at: item.at, text, delivery: null, attachments: [] });
+        thread.push({ type: "user", key: item.key, at: item.at, text: turn.said, delivery: null, attachments: [] });
       }
     }
   }
@@ -278,8 +313,6 @@ const ACTIVITIES: Readonly<Record<string, string>> = {
 export function activityLabel(toolName: string | undefined): string {
   return (toolName === undefined ? undefined : ACTIVITIES[toolName]) ?? "Thinking";
 }
-
-export type SessionState = "starting" | "live" | "queued" | null;
 
 export type Progress =
   | { state: "idle" }
@@ -390,7 +423,7 @@ const QUEUED = "Waiting for a free assistant…";
  * that it is not connected, and `local` is checked first because `sessionState` is only ever written by a pod's
  * supervisor and so is null for every local chat — leaving the `queued` arm unreachable there rather than wrong.
  */
-function wakingLabel(session: SessionState, local: boolean): string {
+function wakingLabel(session: SessionState | null, local: boolean): string {
   if (local) {
     return "Waiting for your session to reconnect…";
   }
@@ -411,7 +444,7 @@ export function progress(
   items: readonly ConversationItem[],
   thread: readonly ThreadItem[],
   agentStatus: AgentStatus,
-  session: SessionState,
+  session: SessionState | null,
   local = false
 ): Progress {
   // The words and the marks on them. A product change is not something either of them said, and nor is a tool row:
@@ -524,10 +557,9 @@ export interface SessionNotice {
 /**
  * Whether to say anything above the composer about the session behind this chat, and what.
  *
- * The gap this fills: a pod runs a bounded number of sessions and `/exit`s one after twenty idle minutes, so an old
- * conversation on a running pod has no session behind it, and until this nothing said so. The wake fires on the
- * composer being focused, which asked for a session silently; the person learnt that one was starting only when they
- * sent. So four states, worded for what each is:
+ * A pod runs a bounded number of sessions and `/exit`s one after twenty idle minutes, so an old conversation on a
+ * running pod can have no session behind it, and the wake that focusing the composer fires asks for one silently. So
+ * four states, worded for what each is:
  *
  * - `live` — nothing. There is a session and it will answer.
  * - `starting` — the quips, which is the one wait that is only ever a few seconds and nobody's fault.
@@ -542,7 +574,7 @@ export interface SessionNotice {
  * is also the agent the composer's wake leaves alone. And anything `progress` is already saying is left to it: the
  * line under the thread and this one would otherwise both word the same wait, directly above and below each other.
  */
-export function sessionNotice(session: SessionState, agentStatus: AgentStatus, doing: Progress, local = false): SessionNotice | null {
+export function sessionNotice(session: SessionState | null, agentStatus: AgentStatus, doing: Progress, local = false): SessionNotice | null {
   if (local || agentStatus !== "offline" || doing.state !== "idle" || session === "live") {
     return null;
   }

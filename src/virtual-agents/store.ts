@@ -185,12 +185,6 @@ export async function findVirtualAgent(db: Database, id: string): Promise<Virtua
   return row === null ? undefined : toRow(row);
 }
 
-/** The owner's virtual agents, oldest first. */
-export async function listVirtualAgents(db: Database, ownerOid: string): Promise<VirtualAgentRow[]> {
-  const rows = await db.virtualAgent.findMany({ where: { ownerOid }, select: SELECT, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
-  return rows.map(toRow);
-}
-
 /**
  * The model routes the owner's live virtual agents are on, without repeats and in no particular order: what decides
  * which credentials any pod of theirs will ask for, since each pod boots on its own row's route. Deleted agents are
@@ -204,7 +198,7 @@ export async function liveModelRoutes(db: Database, ownerOid: string): Promise<M
 const NO_TOKEN = { launchTokenHash: null, launchTokenIssuedAt: null } as const;
 
 /** A pod that is shut down listens on nothing, so what it last reported would only list dead URLs. */
-const NO_PORTS = { exposedPorts: [], localOnlyPorts: [] } as const;
+const NO_PORTS: { exposedPorts: number[]; localOnlyPorts: number[] } = { exposedPorts: [], localOnlyPorts: [] };
 
 /** A change the pod template carries, so the orchestrator applies the StatefulSet again. */
 const POD_CHANGE = { generation: { increment: 1 }, podGeneration: { increment: 1 } } as const;
@@ -457,7 +451,9 @@ export async function reportPorts(prisma: PrismaClient, id: string, report: Repo
 /**
  * Replaces a running agent's pod, so it boots again and fetches its owner's credentials afresh. The generation and
  * the pod generation the pod template carries are bumped, and the launch token dropped, so the old pod is shut out at
- * once and the next claim mints a token for the new one. An agent not meant to be running is left as it is: it boots
+ * once and the next claim mints a token for the new one. The old pod's reported ports go with it, so nothing links to
+ * a server that has gone, and its run of apply errors is cleared, as a start clears it: this is how an owner recovers
+ * an agent that failed, and it gets a fresh run of claims before another error can fail it. An agent not meant to be running is left as it is: it boots
  * afresh when it next starts. Someone other than the owner is told there is no such agent.
  */
 export async function restartVirtualAgent(
@@ -480,8 +476,10 @@ export async function restartVirtualAgent(
         where: { id },
         data: {
           ...NO_TOKEN,
+          ...NO_PORTS,
           ...POD_CHANGE,
           ...NO_MEMORY_REPORT,
+          applyFailures: 0,
           status: "provisioning",
           statusDetail: detail,
           ...(row.status === "provisioning" ? {} : { statusChangedAt: now }),
@@ -600,7 +598,7 @@ export interface ClaimedVirtualAgent {
   gateway?: GatewaySettings;
 }
 
-export const CLAIM_LIMIT = 20;
+const CLAIM_LIMIT = 20;
 
 /** Statuses from which `running` means a new pod, which needs a token of its own. */
 const STARTING_FROM: readonly VirtualAgentStatus[] = ["requested", "stopping", "stopped"];
@@ -631,7 +629,7 @@ function failedToApply(row: ClaimRow): boolean {
   return row.status === "failed" && row.apply_failures > 0;
 }
 
-export interface OrchestratorLease {
+interface OrchestratorLease {
   cluster: string;
   renewed_at: string;
 }

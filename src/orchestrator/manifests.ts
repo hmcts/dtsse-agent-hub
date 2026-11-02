@@ -14,8 +14,8 @@ import type { VirtualAgentSpec } from "./settings.ts";
 export const MANAGED_BY = "agent-hub-orchestrator";
 export const MANAGED_SELECTOR = `app.kubernetes.io/managed-by=${MANAGED_BY}`;
 export const ID_LABEL = "agent-hub.hmcts.net/virtual-agent-id";
-export const GENERATION_ANNOTATION = "agent-hub.hmcts.net/generation";
-export const LAUNCH_TOKEN_ENV = "AGENT_HUB_LAUNCH_TOKEN";
+const GENERATION_ANNOTATION = "agent-hub.hmcts.net/generation";
+const LAUNCH_TOKEN_ENV = "AGENT_HUB_LAUNCH_TOKEN";
 
 const CONTAINER = "agent";
 const CLAIM_TEMPLATE = "work";
@@ -31,7 +31,7 @@ export function labels(id: string): Record<string, string> {
 }
 
 /** A StatefulSet's claim template cannot change once created, so an existing agent keeps the disk it was made with. */
-export interface Disk {
+interface Disk {
   size: string;
   storageClass: string | null;
 }

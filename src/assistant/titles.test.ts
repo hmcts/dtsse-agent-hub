@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isHarnessTurn, withoutIdeContext } from "../transcripts/harness-turn.ts";
 import { firstPromptTitle, localTitle, messageTitle, type PromptEntry, TITLE_FROM_MESSAGE, TITLE_MAX } from "./titles.ts";
 
 function prompt(text: unknown, overrides: Partial<PromptEntry> = {}): PromptEntry {
@@ -65,5 +66,60 @@ describe("firstPromptTitle", () => {
 
   it("should cut the prompt it chose to the length a title takes from a message", () => {
     expect(firstPromptTitle([prompt("x".repeat(TITLE_FROM_MESSAGE + 20))])).toHaveLength(TITLE_FROM_MESSAGE);
+  });
+});
+
+describe("firstPromptTitle and the harness's own turns", () => {
+  const prompt = (text: string) => ({ content: { text }, redacted: false, messageId: null });
+
+  it("should skip a slash command's record and name the chat after what the person typed next", () => {
+    const entries = [
+      prompt("<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"),
+      prompt("<local-command-stdout></local-command-stdout>"),
+      prompt("fix the search page")
+    ];
+
+    expect(firstPromptTitle(entries)).toBe("fix the search page");
+  });
+
+  it("should name nothing when every prompt offered was written by the harness", () => {
+    expect(firstPromptTitle([prompt("<task-notification><status>completed</status></task-notification>")])).toBeNull();
+  });
+
+  it("should keep a prompt that only mentions a tag further in", () => {
+    expect(firstPromptTitle([prompt("why does <command-name> show up in titles?")])).toBe("why does <command-name> show up in titles?");
+  });
+});
+
+describe("isHarnessTurn", () => {
+  it.each([
+    "<command-name>/clear</command-name>",
+    "  \n<local-command-stdout></local-command-stdout>",
+    "<bash-input>ls</bash-input>",
+    "<user-prompt-submit-hook>x</user-prompt-submit-hook>",
+    "[Request interrupted by user]",
+    "<task-notification><status>completed</status></task-notification>"
+  ])("should recognise %s as written by the harness", (text) => {
+    expect(isHarnessTurn(text)).toBe(true);
+  });
+
+  it("should not recognise a prompt that only mentions a tag", () => {
+    expect(isHarnessTurn("why does <bash-input> appear?")).toBe(false);
+  });
+});
+
+describe("editor context in front of a prompt", () => {
+  const IDE = "<ide_opened_file>The user opened the file /a/b.ts in the IDE.</ide_opened_file>";
+
+  it("should strip the blocks and keep the words", () => {
+    expect(withoutIdeContext(`${IDE}\n<ide_selection>x = 1</ide_selection>\nfix this`)).toBe("fix this");
+  });
+
+  it("should name a chat after the words that follow the editor context", () => {
+    expect(firstPromptTitle([{ content: { text: `${IDE} fix this` }, redacted: false, messageId: null }])).toBe("fix this");
+  });
+
+  it("should name nothing from a prompt that is only editor context", () => {
+    expect(firstPromptTitle([{ content: { text: IDE }, redacted: false, messageId: null }])).toBeNull();
   });
 });

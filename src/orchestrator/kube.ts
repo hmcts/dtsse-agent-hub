@@ -11,7 +11,7 @@ export const FIELD_MANAGER = "agent-hub-orchestrator";
 
 export const SERVICE_ACCOUNT_DIR = "/var/run/secrets/kubernetes.io/serviceaccount";
 
-export interface ObjectMeta {
+interface ObjectMeta {
   name: string;
   namespace?: string;
   labels?: Record<string, string>;
@@ -31,20 +31,20 @@ export interface StatefulSet extends Resource {
   status?: { replicas?: number; readyReplicas?: number };
 }
 
-export interface ContainerState {
+interface ContainerState {
   waiting?: { reason?: string; message?: string };
   running?: { startedAt?: string };
   terminated?: { reason?: string; exitCode?: number };
 }
 
-export interface ContainerStatus {
+interface ContainerStatus {
   name: string;
   ready?: boolean;
   state?: ContainerState;
   lastState?: ContainerState;
 }
 
-export interface PodCondition {
+interface PodCondition {
   type: string;
   status: string;
   reason?: string;

@@ -1,11 +1,11 @@
-import { canViewConversation } from "../access/rules.ts";
+import { isOwner } from "../access/rules.ts";
 import { collapse, oneLine } from "../transcripts/conversation.ts";
 
 /**
  * Searching a person's own Assistant conversations: what counts as a term, what a result shows of the message it
  * matched, and the check that nothing but the searcher's own chats comes back.
  *
- * Pure, so what a person feels while typing is tested without a database and `store.ts` holds only the query.
+ * Pure, so what a person feels while typing is tested without a database and `search-store.ts` holds only the query.
  *
  * Each term is matched by Postgres full-text search — `to_tsquery('english', '<term>:*')` against a `tsvector` of the
  * title and of what was said — rather than by `ILIKE '%term%'`. Two reasons, one measured and one about the words:
@@ -23,7 +23,7 @@ import { collapse, oneLine } from "../transcripts/conversation.ts";
  */
 
 /** A term shorter than this is dropped: one letter is in nearly every chat, so it narrows nothing. */
-export const MIN_TERM = 2;
+const MIN_TERM = 2;
 
 /** Terms past this are ignored. A search is a few remembered words; more only costs the database another pass. */
 export const MAX_TERMS = 6;
@@ -40,7 +40,7 @@ export const SEARCH_LIMIT = 50;
 /** The words `ts_headline` keeps around a match, and how much of that a result shows. */
 export const SNIPPET_MAX_WORDS = 28;
 export const SNIPPET_MIN_WORDS = 12;
-export const SNIPPET_LENGTH = 160;
+const SNIPPET_LENGTH = 160;
 
 /**
  * `query` with every backslash turned into a space, which is the one character a term may not carry.
@@ -108,7 +108,7 @@ export class ForeignConversation extends Error {
  */
 export function visibleMatches<T extends { ownerOid: string }>(viewerOid: string, rows: readonly T[]): T[] {
   for (const row of rows) {
-    if (!canViewConversation(viewerOid, row)) {
+    if (!isOwner(viewerOid, row)) {
       throw new ForeignConversation();
     }
   }

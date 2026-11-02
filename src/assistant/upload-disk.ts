@@ -1,4 +1,4 @@
-import { canManageUploadsOnDisk, canRemoveUploadFromDisk, type UploadState } from "../access/rules.ts";
+import { canRemoveUploadFromDisk, isOwner, type UploadState } from "../access/rules.ts";
 import { clientSupports } from "../agents/client-features.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
@@ -115,7 +115,7 @@ export async function uploadsOnDisk(prisma: PrismaClient, viewerOid: string, vir
       agent: { select: { clientFeatures: true } }
     }
   });
-  if (agent === null || !canManageUploadsOnDisk(viewerOid, agent.ownerOid)) {
+  if (agent === null || !isOwner(viewerOid, agent)) {
     return undefined;
   }
   const reported = storedFiles(agent.uploadsFiles);
@@ -163,7 +163,7 @@ export async function uploadsOnDisk(prisma: PrismaClient, viewerOid: string, vir
 }
 
 /** Why a deletion was not asked for. The pod's client is the one refusal a person can do something about. */
-export type RemoveOutcome = "requested" | "no_such_upload" | "unsupported_client";
+type RemoveOutcome = "requested" | "no_such_upload" | "unsupported_client";
 
 /**
  * What was asked for: the outcome, and how many files it covered. The count is what a confirmation may claim, and is
@@ -202,7 +202,7 @@ export async function requestUploadRemoval(
     where: { id: virtualAgentId },
     select: { ownerOid: true, agent: { select: { clientFeatures: true } } }
   });
-  if (agent === null || !canManageUploadsOnDisk(viewerOid, agent.ownerOid)) {
+  if (agent === null || !isOwner(viewerOid, agent)) {
     return refused;
   }
   if (!clientSupports(agent.agent?.clientFeatures, "files")) {
@@ -244,7 +244,7 @@ export async function requestUploadRemoval(
 /** Every upload of the viewer's that the pod's last report named, for "delete everything". */
 export async function reportedUploadIds(db: Database, viewerOid: string, virtualAgentId: string): Promise<string[]> {
   const agent = await db.virtualAgent.findUnique({ where: { id: virtualAgentId }, select: { ownerOid: true, uploadsFiles: true } });
-  if (agent === null || !canManageUploadsOnDisk(viewerOid, agent.ownerOid)) {
+  if (agent === null || !isOwner(viewerOid, agent)) {
     return [];
   }
   return storedFiles(agent.uploadsFiles).map((file) => file.upload_id);

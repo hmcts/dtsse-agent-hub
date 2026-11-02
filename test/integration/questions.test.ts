@@ -3,7 +3,8 @@ import * as questionRoute from "../../src/app/api/agent/[agentId]/question/route
 import * as registerRoute from "../../src/app/api/agent/register/route.ts";
 import * as claimRoute from "../../src/app/api/orchestrator/claim/route.ts";
 import * as observedRoute from "../../src/app/api/orchestrator/virtual-agents/[id]/observed/route.ts";
-import { createConversation, ensureAssistant } from "../../src/assistant/store.ts";
+import { ensureAssistant } from "../../src/assistant/assistant-store.ts";
+import { createConversation } from "../../src/assistant/conversation-store.ts";
 import { MAX_SHOWN_QUESTIONS, QUESTION_OFFER_WINDOW_MS } from "../../src/questions/questions.ts";
 import { agentQuestions } from "../../src/questions/views.ts";
 import { realtime } from "../../src/realtime/process.ts";

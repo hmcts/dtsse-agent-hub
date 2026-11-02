@@ -1,10 +1,12 @@
 import { collapse } from "../transcripts/conversation.ts";
+import { typedText } from "../transcripts/harness-turn.ts";
 
 /**
  * What a conversation is called: the lengths a title may be, the three things that can name one, and the rules for
  * reading a name out of what was said in a chat.
  *
- * Pure, so every rule here is unit-tested; `store.ts` holds the reads and writes that apply them.
+ * Pure, so every rule here is unit-tested; `conversation-store.ts` and `local-chat-store.ts` hold the reads and writes
+ * that apply them.
  */
 
 /** A new conversation's title is the start of its first message, until the person renames it. */
@@ -20,9 +22,8 @@ export const TITLE_MAX = 200;
  *   the transcript's own title and falls back to the session registry's handle, `hmcts-25`, while it has nothing
  *   better, which it has not when the session registers and its chat is made.
  * - `message` — the first thing said in the chat. The person's first message for a chat on a pod, their first prompt
- *   for one on their own computer, which is what that chat is about. It is also what a title from before this column
- *   existed is read as when the one-off that added it could not attribute the title, because the rules for the two
- *   are the same: nothing automatic replaces either, and a `/rename` replaces both.
+ *   for one on their own computer, which is what that chat is about. A title whose source could not be told is stored
+ *   as this one, because the rules are the same: nothing automatic replaces it, and a `/rename` does.
  * - `user` — the person named it themselves, in the hub. Nothing overwrites it.
  *
  * Kept on the row rather than worked out from the title, because a refresh that could not tell an automatic title
@@ -31,8 +32,8 @@ export const TITLE_MAX = 200;
 export type TitleSource = "agent" | "message" | "user";
 
 /**
- * The title to store for a name a local session's client reported: normalised exactly as a rename is, so the two
- * cannot disagree about what a title may be.
+ * The title to store for a name a local session's client reported, with its whitespace collapsed as a rename's is.
+ * Unlike a rename, which refuses a title over `TITLE_MAX`, this cuts it there.
  *
  * Kept even when the client had nothing better and sent the first characters of the session id. That reads as
  * nothing, but it is what the hub calls the same session everywhere else, and the alternative is a sidebar in which
@@ -51,9 +52,10 @@ export function messageTitle(text: string): string | null {
  * How many of a chat's earliest prompts are read when looking for one to name it after. More than one, because the
  * first can be redacted or a relayed message; a handful rather than all of them, because this is read on the
  * transcript upload path and a chat whose opening prompts are all unusable keeps the name its session reported,
- * which is a title, rather than costing a scan of every prompt it has.
+ * which is a title, rather than costing a scan of every prompt it has. Ten, because a `/clear` alone writes three
+ * harness turns before the person has said anything.
  */
-export const PROMPT_CANDIDATES = 5;
+export const PROMPT_CANDIDATES = 10;
 
 /** One `role = 'user'` transcript entry, as much of it as naming a chat depends on. */
 export interface PromptEntry {
@@ -67,12 +69,14 @@ export interface PromptEntry {
  * The title a local chat takes from its own prompts: the first of them with words in it, cut as a pod chat's first
  * message is, or null when none of the entries offered can name a chat.
  *
- * Three kinds are passed over rather than used:
+ * Four kinds are passed over rather than used:
  *
  * - **A redacted prompt.** The secret scanner replaced its text with the pattern it matched, so there is nothing
  *   left to name the chat after — and "redacted" is not a title.
  * - **A prompt that is a relayed hub message** (`messageId`). It is a colleague's words, or an answer to a question
  *   the session asked, delivered into the session by the bridge; the chat is not about it.
+ * - **A turn the harness wrote** (`typedText`): a slash command's record, its output, or a background task's
+ *   notification. Nobody typed it, and it named half of a sidebar `<command-name>/clear</command-name>…`.
  * - **A prompt that is whitespace, or whose content is not the `{text}` of an ordinary entry.** The second cannot
  *   happen through `POST /api/agent/{agent_id}/transcript`, which checks the shape against the role, and is still
  *   read for: `content` is jsonb and this is the only thing that reads it as a title.
@@ -86,7 +90,8 @@ export function firstPromptTitle(entries: readonly PromptEntry[]): string | null
       continue;
     }
     const text = (entry.content as { text?: unknown } | null)?.text;
-    const title = typeof text === "string" ? messageTitle(text) : null;
+    const typed = typeof text === "string" ? typedText(text) : null;
+    const title = typed === null ? null : messageTitle(typed);
     if (title !== null) {
       return title;
     }

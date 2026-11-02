@@ -2,10 +2,9 @@
  * @vitest-environment jsdom
  */
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LiveStatus } from "@/components/agents/LiveStatus";
-import { NewAgentWatcher } from "@/components/agents/NewAgentWatcher";
-import { HubStreamProvider, useEndSession, useWatch } from "@/components/live/HubStream";
+import { HubStreamProvider, useEndSession, useHubEvent, useWatch } from "@/components/live/HubStream";
 import { SessionEndedBanner } from "@/components/live/SessionEnded";
 
 const refresh = vi.fn();
@@ -51,6 +50,17 @@ function Watching({ agent }: { agent: string }) {
   return null;
 }
 
+/** One agent's status as the stream reports it, starting from `initial`. */
+function Status({ agentId, initial }: { agentId: string; initial: string }) {
+  const [status, setStatus] = useState(initial);
+  useHubEvent<{ agent_id: string; status: string }>("agent_status", (event) => {
+    if (event.agent_id === agentId) {
+      setStatus(event.status);
+    }
+  });
+  return <p>{status}</p>;
+}
+
 beforeEach(() => {
   FakeSource.all = [];
   refresh.mockReset();
@@ -80,10 +90,10 @@ describe("HubStreamProvider", () => {
     expect(current().url).toBe("/api/ui/stream");
   });
 
-  it("should update an agent's dot when its status changes", async () => {
+  it("should hand each event to the components that listen for its type when it arrives", async () => {
     render(
       <HubStreamProvider>
-        <LiveStatus agentId="agent-1" initial="idle" labelled />
+        <Status agentId="agent-1" initial="idle" />
       </HubStreamProvider>
     );
 
@@ -160,23 +170,6 @@ describe("HubStreamProvider", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("should refresh once when an agent it does not list changes status", async () => {
-    render(
-      <HubStreamProvider>
-        <NewAgentWatcher known={["agent-1"]} />
-      </HubStreamProvider>
-    );
-
-    await act(async () => {
-      current().emit("agent_status", { agent_id: "agent-1", status: "busy" });
-      current().emit("agent_status", { agent_id: "agent-new", status: "idle" });
-      current().emit("agent_status", { agent_id: "agent-new", status: "busy" });
-      await vi.advanceTimersByTimeAsync(600);
-    });
-
-    expect(refresh).toHaveBeenCalledTimes(1);
-  });
-
   it("should stop the stream and show the signed-out banner when the stream fails because the session has ended", async () => {
     vi.stubGlobal(
       "fetch",
@@ -231,7 +224,7 @@ describe("HubStreamProvider", () => {
   });
 
   it("should do nothing when a live component is rendered outside the provider", () => {
-    render(<LiveStatus agentId="agent-1" initial="offline" labelled />);
+    render(<Status agentId="agent-1" initial="offline" />);
 
     expect(screen.getByText("offline")).toBeTruthy();
   });
