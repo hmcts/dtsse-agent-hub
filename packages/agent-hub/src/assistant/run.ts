@@ -5,6 +5,7 @@ import type { Api } from "../api.ts";
 import { RAPID_CLOSE_MS, type ReconnectDecision, reconnectDelay } from "../bridge.ts";
 import { createSseParser, type SseEvent } from "../sse.ts";
 import { atlassianLogin } from "../virtual/atlassian.ts";
+import { installBundled, installTicked } from "../virtual/bundled-plugins.ts";
 import { run } from "../virtual/sign-in.ts";
 import { deleteUploads, readDeleteUploads, reconcileUploads } from "./attachments.ts";
 import { type DiskFs, reportUploads } from "./disk.ts";
@@ -32,9 +33,12 @@ export type RunAssistantSupervisorOptions = Omit<CreateAssistantSupervisorOption
   cgroupRoot?: string;
   memoryFs?: MemoryFs;
   /** How lookups run twg and sign it in; a test passes its own rather than a twg on PATH. */
-  /** How Welsh jobs run the welsh plugin's scripts/welsh, and the cft-workspace checkout it is found in; a test passes its own. */
-  welsh?: { run?: Run; workspace?: string };
   lookups?: Partial<LookupDeps>;
+  /**
+   * How Welsh jobs run the welsh plugin's scripts/welsh, the cft-workspace checkout they work on, and how the pod's
+   * copy of a bundled plugin is made; a test passes its own.
+   */
+  welsh?: { run?: Run; workspace?: string; install?: (name: string, workspace: string) => string };
   /** Stops the supervisor, as SIGTERM and SIGINT do; a test owns neither signal. */
   signal?: AbortSignal;
   tickMs?: number;
@@ -62,7 +66,11 @@ export async function runAssistantSupervisor({
   memoryFs,
   ...options
 }: RunAssistantSupervisorOptions): Promise<void> {
-  const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, ...options });
+  const workspace = welshDeps.workspace ?? env.VIRTUAL_AGENT_WORKSPACE ?? "/workspace/cft-workspace";
+  // Each session loads the ticked plugins this package carries; copying one is quick once its version is on disk.
+  const install = welshDeps.install ?? installBundled;
+  const pluginDirs = installTicked(env, workspace, say, install);
+  const supervisor: AssistantSupervisor = createAssistantSupervisor({ api, id, env, say, pluginDirs, ...options });
   // Lookups run beside the supervisor rather than on its chain: see `createLookupRunner`.
   const lookups = createLookupRunner({
     api,
@@ -81,7 +89,8 @@ export async function runAssistantSupervisor({
     env,
     say,
     run: welshDeps.run ?? ((cmd, args, opts) => run(cmd, args, { env: opts.env as NodeJS.ProcessEnv, timeoutMs: opts.timeoutMs })),
-    workspace: welshDeps.workspace ?? env.VIRTUAL_AGENT_WORKSPACE ?? "/workspace/cft-workspace"
+    workspace,
+    install
   });
   const uploads = {
     api,

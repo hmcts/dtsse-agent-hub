@@ -102,13 +102,7 @@ describe("runAssistantSupervisor", () => {
     const stop = new AbortController();
     const jobId = "6c1f8d2b-1111-4222-8333-444455556666";
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "welsh-ws-"));
-    const plugin = path.join(workspace, "welsh", ".claude");
-    fs.mkdirSync(path.join(workspace, ".claude-plugin"));
-    fs.writeFileSync(path.join(workspace, ".claude-plugin", "marketplace.json"), JSON.stringify({ plugins: [{ name: "welsh", source: "./welsh/.claude" }] }));
-    fs.mkdirSync(path.join(plugin, ".claude-plugin"), { recursive: true });
-    fs.mkdirSync(path.join(plugin, "scripts"));
-    fs.writeFileSync(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "welsh" }));
-    fs.writeFileSync(path.join(plugin, "scripts", "welsh"), "#!/bin/sh\n");
+    const plugin = path.join(workspace, "..", "welsh-copy");
     const ran: { cmd: string; args: string[] }[] = [];
     const running = runAssistantSupervisor({
       api: createApi({ baseUrl: url, launchToken: LAUNCH }),
@@ -121,6 +115,7 @@ describe("runAssistantSupervisor", () => {
       tickMs: 50,
       welsh: {
         workspace,
+        install: () => plugin,
         run: async (cmd, args) => {
           ran.push({ cmd, args });
           return { code: 0, stdout: JSON.stringify({ total: 0, hits: [] }), stderr: "0 match(es)" };

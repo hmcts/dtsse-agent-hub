@@ -12,7 +12,8 @@ import { PRODUCTS } from "./products.ts";
  */
 
 /**
- * The cft-workspace marketplace plugin that carries the Welsh tools. The Welsh page is for people who ticked it for
+ * The plugin that carries the Welsh tools, which the pod client carries in `packages/agent-hub/plugins/welsh` and puts
+ * on the pods of people who tick it. The Welsh page is for people who ticked it for
  * their assistant: the pod loads only what is ticked, so for anyone else there would be nothing to run a job with.
  */
 export const WELSH_PLUGIN = "welsh";

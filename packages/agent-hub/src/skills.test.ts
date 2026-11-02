@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { collectSkills, enabledPlugins, hubPlugins, parseFrontmatter, pluginInstalls, skillFrom, skillsHash } from "./skills.ts";
+import { installBundled } from "./virtual/bundled-plugins.ts";
 
 let home: TempClaudeHome;
 const savedEnv: Record<string, string | undefined> = {};
@@ -273,6 +274,20 @@ describe("hubPlugins", () => {
     expect(hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "pcs" } })).toEqual([]);
     write(path.join(l.project, ".claude-plugin", "marketplace.json"), JSON.stringify({ plugins: "not a list" }));
     expect(hubPlugins({ project: l.project, env: { AGENT_HUB_PLUGINS: "pcs" } })).toEqual([]);
+  });
+
+  it("should give the pod's copy of a ticked plugin this package carries, once there is one, with no marketplace entry", () => {
+    // Arrange
+    const l = layout();
+    const env = { AGENT_HUB_PLUGINS: "welsh" };
+    const before = hubPlugins({ project: l.project, env });
+
+    // Act
+    const dir = installBundled("welsh", l.project);
+
+    // Assert
+    expect(before).toEqual([]);
+    expect(hubPlugins({ project: l.project, env })).toEqual([{ name: "welsh", dir }]);
   });
 
   it("should skip an entry whose source is missing when the marketplace is malformed", () => {

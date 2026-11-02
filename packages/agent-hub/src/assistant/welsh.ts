@@ -1,5 +1,5 @@
 // The supervisor's half of a Welsh translation job for the CFT Workspace's Welsh page: one run of the welsh plugin's
-// `scripts/welsh`, as the owner, with their own GitHub and twg sign-ins. Fixed: every value in the frame is checked
+// `scripts/welsh`, the plugin this package carries in `plugins/welsh`, from the pod's copy of it, as the owner, with their own GitHub and twg sign-ins. Fixed: every value in the frame is checked
 // again here and passed as its own argument, never through a shell, and the only program run is that script. No job
 // goes through a model, and none generates Welsh — the script takes it from the catalogue or a Welsh Language Unit
 // return and refuses anything else. See "Welsh translation jobs" in dtsse-agent-hub's docs/agent-api.md.
@@ -9,7 +9,7 @@ import { join } from "node:path";
 import type { Api, WelshAnswer } from "../api.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
-import { hubPlugins } from "../skills.ts";
+import { installBundled, tickedBundled } from "../virtual/bundled-plugins.ts";
 import type { Run } from "./lookups.ts";
 
 export const WELSH_KINDS = [
@@ -287,27 +287,27 @@ export function signInNeeded(output: string): string | null {
   return null;
 }
 
-/** The workspace marketplace plugin that carries the Welsh tools, and the name the owner ticks. */
+/** The plugin that carries the Welsh tools, and the name the owner ticks. */
 export const WELSH_PLUGIN = "welsh";
 
-/** What a job answers when this pod has no Welsh tools to run. */
-export const NOT_LOADED =
-  "Welsh translations is not turned on for your assistant. Tick it in Settings, under Tools. If it is ticked already, restart your assistant to update its copy of cft-workspace.";
+/** What a job answers when its owner has not ticked the plugin, which is the only way a pod has the tools. */
+export const NOT_LOADED = "Welsh translations is not turned on for your assistant. Tick it in Settings, under Tools; your assistant restarts to load it.";
 
 /**
- * The Welsh tools: the `scripts/welsh` of the `welsh` plugin, found the way hai loads plugins, so a pod runs them only
- * when its owner ticked the plugin and its checkout has it. Null when either is missing.
+ * The Welsh tools: the pod's copy of the welsh plugin's `scripts/welsh`, made on first use. Null when the owner has not
+ * ticked the plugin, so a pod runs them only for someone who asked for them.
  */
-export function welshScript(workspace: string, env: Env): string | null {
-  const plugin = hubPlugins({ project: workspace, env }).find((p) => p.name === WELSH_PLUGIN);
-  const script = plugin ? join(plugin.dir, "scripts", "welsh") : null;
-  return script !== null && existsSync(script) ? script : null;
+export function welshScript(workspace: string, env: Env, install: (name: string, workspace: string) => string = installBundled): string | null {
+  if (!tickedBundled(env).includes(WELSH_PLUGIN)) {
+    return null;
+  }
+  return join(install(WELSH_PLUGIN, workspace), "scripts", "welsh");
 }
 
 /** Why the script failed, in at most `MAX_DETAIL` characters: its own message, without the usage line or a stack. */
 export function failureDetail(stderr: string, code: number): string {
   if (code === 127) {
-    return NOT_LOADED;
+    return "Your assistant could not start the Welsh tools. Restart your assistant, then try again.";
   }
   const lines = stderr
     .split("\n")
@@ -327,6 +327,8 @@ export type WelshDeps = {
   env: Env;
   /** The cft-workspace checkout; `$VIRTUAL_AGENT_WORKSPACE` in a pod. */
   workspace: string;
+  /** Makes the pod's copy of a bundled plugin; a test passes one that makes it somewhere of its own. */
+  install?: (name: string, workspace: string) => string;
   say?: (message: string) => void;
   now?: () => Date;
 };
@@ -351,17 +353,19 @@ export async function runWelsh(deps: WelshDeps, frame: WelshFrame): Promise<void
 }
 
 async function runIn(deps: WelshDeps, frame: WelshFrame, paths: WelshPaths): Promise<WelshAnswer> {
-  const script = welshScript(deps.workspace, deps.env);
+  const script = welshScript(deps.workspace, deps.env, deps.install);
   if (script === null) {
     return { error: "failed", detail: NOT_LOADED };
   }
+  // The copy is outside the workspace, so the script is told which workspace's catalogues and clones it works on.
+  const env: NodeJS.ProcessEnv = { ...deps.env, CFT_WELSH_WORKSPACE: deps.workspace };
   if (frame.file_id) {
     writeFileSync(paths.input, await deps.api.welshFile(deps.id, frame.file_id));
   }
   if (frame.strings) {
     writeFileSync(paths.strings, `${frame.strings.join("\n")}\n`);
   }
-  const result = await deps.run(script, welshArgs(frame, deps.workspace, paths), { env: deps.env, timeoutMs: TIMEOUT_MS[frame.kind] });
+  const result = await deps.run(script, welshArgs(frame, deps.workspace, paths), { env, timeoutMs: TIMEOUT_MS[frame.kind] });
   const signIn = signInNeeded(`${result.stderr}\n${result.stdout}`);
   if (result.code !== 0) {
     return signIn ? { error: "signed_out", detail: signIn } : { error: "failed", detail: failureDetail(result.stderr, result.code) };

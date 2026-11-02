@@ -72,6 +72,12 @@ function shellWords(command: string): string[] {
 }
 
 describe("claudeCommand", () => {
+  it("should load each of the pod's bundled plugin copies with a quoted --plugin-dir, before the model", () => {
+    expect(claudeCommand("sess-1", false, "opus", ["/workspace/.agent-hub-plugins/welsh-abc"])).toBe(
+      `hai --dangerously-skip-permissions --session-id sess-1 --append-system-prompt-file '${PROMPT_FILE}' --plugin-dir '/workspace/.agent-hub-plugins/welsh-abc' --model 'opus'`
+    );
+  });
+
   it("should append the prompt file and choose --resume or --session-id when told whether to resume", () => {
     // Act & Assert
     expect(claudeCommand("sess-1", false)).toBe(`hai --dangerously-skip-permissions --session-id sess-1 --append-system-prompt-file '${PROMPT_FILE}'`);

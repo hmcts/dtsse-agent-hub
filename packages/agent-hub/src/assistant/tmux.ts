@@ -42,9 +42,14 @@ export function tmuxName(conversationId: string): string {
 //
 // `model` is what `launcherModel` gave — a bare family alias — quoted for the same shell, so whatever the hub sends
 // is one argument and nothing in it is read as a glob. Without one the session runs on hai's default for the route.
-export function claudeCommand(sessionId: string, resume: boolean, model: string | null = null): string {
+//
+// `pluginDirs` are the pod's copies of the plugins this package carries that the owner ticked, each a
+// `--plugin-dir`, quoted as the prompt file is. hai loads the workspace marketplace's itself, and skips these names,
+// which that marketplace does not list.
+export function claudeCommand(sessionId: string, resume: boolean, model: string | null = null, pluginDirs: readonly string[] = []): string {
   const base = `hai --dangerously-skip-permissions ${resume ? "--resume" : "--session-id"} ${sessionId} --append-system-prompt-file '${PROMPT_FILE}'`;
-  return model === null ? base : `${base} --model '${model}'`;
+  const plugins = pluginDirs.map((dir) => ` --plugin-dir '${dir}'`).join("");
+  return model === null ? `${base}${plugins}` : `${base}${plugins} --model '${model}'`;
 }
 
 /** The program a command line runs: its first word, which is always a bare `hai` and never quoted. */

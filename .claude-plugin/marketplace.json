@@ -1,0 +1,17 @@
+{
+  "name": "dtsse-agent-hub",
+  "owner": {
+    "name": "DTSSE team",
+    "email": "hmcts@justice.gov.uk"
+  },
+  "metadata": {
+    "description": "Plugins the agent hub puts on the virtual agents of people who tick them, and that anyone can install into Claude Code beside a cft-workspace checkout."
+  },
+  "plugins": [
+    {
+      "name": "welsh",
+      "source": "./packages/agent-hub/plugins/welsh",
+      "description": "Welsh translations for any CFT service, with no machine translation: catalogue search, missing-Welsh scans, Welsh Language Unit spreadsheets, PRs and Jira story sections"
+    }
+  ]
+}
