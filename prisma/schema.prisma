@@ -203,6 +203,9 @@ model Agent {
   /// The assistant conversation this agent is a session of, if any. With a virtual agent as well, it is a pod's chat
   /// session and no post may tag it; with none, it is a session on its owner's own computer.
   assistantConversationId String? @map("assistant_conversation_id") @db.Uuid
+  /// When the person removed this laptop session's chat. Such a session is never linked another one: see
+  /// deleteConversation in src/assistant/store.ts.
+  chatRemovedAt   DateTime?   @map("chat_removed_at") @db.Timestamptz(6)
 
   owner         User              @relation(fields: [ownerOid], references: [oid])
   authored      Message[]         @relation("authorAgent")

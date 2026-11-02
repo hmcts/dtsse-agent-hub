@@ -796,6 +796,23 @@ describe("the conversation first content migration on everything else a chat can
   });
 });
 
+describe("the agent chat removed migration", () => {
+  const MIGRATION = "20261118090000_agent_chat_removed";
+  const { database: REMOVED, earlier } = migrationFixture("migrate_chat_removed", MIGRATION);
+
+  it("should leave every existing session able to be given a chat when it is applied", async () => {
+    await migrate(earlier());
+    await query(REMOVED, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(REMOVED, `INSERT INTO "agent" (owner_oid, session_id, name) VALUES ('dev-alice', 'laptop', 'laptop')`);
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    expect(await query<{ session_id: string; chat_removed_at: Date | null }>(REMOVED, `SELECT session_id, chat_removed_at FROM "agent"`)).toEqual([
+      { session_id: "laptop", chat_removed_at: null }
+    ]);
+  });
+});
+
 /**
  * The sweep's pattern and the name generator have to agree, and nothing else in the suite would notice if they
  * stopped: an unswept name leaks silently, and `dropAbandonedScratchDatabases` swallows its own errors by design.
