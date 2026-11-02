@@ -1,5 +1,5 @@
 import type { Database, PrismaClient } from "../store/prisma.ts";
-import { announce } from "./store.ts";
+import { announce, detachLocalSessions } from "./store.ts";
 
 /**
  * The one thing that bounds how many conversations a person's own Claude Code sessions leave in their Assistant.
@@ -142,11 +142,16 @@ async function collectEmpty(tx: Database, retentionHours: number, batch: number)
            )
      ORDER BY c.created_at
      LIMIT ${batch}::int
+     -- Skipped while the person is deleting it: deleteConversation holds the row lock, and the chat is theirs to
+     -- finish. A delete that finds this sweep holding it waits, and marks the sessions this detached.
+       FOR UPDATE OF c SKIP LOCKED
   `;
   for (const row of empty) {
     // The detach, before the delete and inside the same transaction, is the whole of why this is safe to run
     // unattended: it clears the cascading column, so the row that goes next takes nothing of the session with it.
-    await tx.$executeRaw`UPDATE agent SET assistant_conversation_id = NULL WHERE assistant_conversation_id = ${row.id}::uuid`;
+    // Not as the person removing it: they removed nothing, so a session that comes back and says something is given
+    // a chat again.
+    await detachLocalSessions(tx, row.id, { removedByPerson: false });
     await tx.assistantConversation.delete({ where: { id: row.id } });
     // Announced like any other change to it, so a sidebar still open stops showing a chat that has gone. A local
     // conversation's `virtual_agent_id` is null by definition, which is what `ui-stream` selects this frame past.
