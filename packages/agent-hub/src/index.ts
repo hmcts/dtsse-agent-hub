@@ -99,6 +99,7 @@ export type { RunAz } from "./az-token.ts";
 export { createTokenProvider, DEFAULT_SCOPE, parseAzToken, requireAzureLogin } from "./az-token.ts";
 export type { Deliver, RunBridgeOptions } from "./bridge.ts";
 export { readStatus, runBridge } from "./bridge.ts";
+export { readStdinText } from "./cli/command.ts";
 export type { ConfluenceExportDeps, ConfluenceExportOutcome, ConfluenceExportRequest } from "./confluence-export.ts";
 export {
   CONFLUENCE_EXPORT_ID_RE,
@@ -434,7 +435,6 @@ export {
   pruneMsalCache,
   readAtlassianAuth,
   readAzureCache,
-  readStdinText,
   relayDeviceLogin,
   requireCredentialKind,
   restoreAtlassianAuth,

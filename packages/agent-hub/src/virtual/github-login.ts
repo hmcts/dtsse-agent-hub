@@ -2,14 +2,12 @@
 // and in gh.
 import { type Api, createApi } from "../api.ts";
 import type { Env } from "../env.ts";
-import { type RetryOptions, withRetry } from "../retry.ts";
+import { type RetryOptions, sleep, withRetry } from "../retry.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
 import { DeviceLoginError, type LoginOptions } from "./device-relay.ts";
 import { type DeviceCode, deviceFlowRetryable, oauthAppLabel, pollDeviceToken, requestDeviceCode } from "./github-device-flow.ts";
 import { say } from "./phases.ts";
 import { childEnv, outputTail, run } from "./process.ts";
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const GH_CLEAN = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"];
 
@@ -127,7 +125,7 @@ const storedGhToken = async (env: NodeJS.ProcessEnv): Promise<string> =>
 /**
  * What the agent's status says while a code is live. Its own length with nothing in it is what
  * `RELAY_WORDING_CHARS` measures and what `MAX_URI_CHARS` is derived from, so this wording and that constant
- * have to move together: `sign-in.test.ts` asserts the one against the other, because a derived figure nothing
+ * have to move together: `github-login.test.ts` asserts the one against the other, because a derived figure nothing
  * holds to the thing it measures goes stale the first time somebody rewords this line.
  */
 export const githubLoginStatus = (userCode: string, verificationUri: string): string => `github: the owner must enter code ${userCode} at ${verificationUri}`;

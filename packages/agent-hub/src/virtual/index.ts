@@ -37,7 +37,7 @@ export { CACHE_SYNC_MS, cacheSync } from "./cache-sync.ts";
 export type { ClaudeLoginOptions, ClaudeLoginResult } from "./claude-login.ts";
 export { claudeLogin, findClaudeToken, PASTE_CODE_EXPIRES_S, parseClaudeAuthorizeUrl } from "./claude-login.ts";
 export type { CredentialCommandOptions, CredentialStore } from "./credentials.ts";
-export { isCredentialKind, OWNER_READABLE, readStdinText, requireCredentialKind, runCredentialCommand } from "./credentials.ts";
+export { isCredentialKind, OWNER_READABLE, requireCredentialKind, runCredentialCommand } from "./credentials.ts";
 export type { DeviceCodePrompt, LoginOptions, RelayDeviceLoginOptions, RelayDeviceLoginResult, Respond } from "./device-relay.ts";
 export { DEVICE_CODE_EXPIRES_S, DeviceLoginError, EXPIRY_TOLERANCE_S, relayDeviceLogin } from "./device-relay.ts";
 export type { GithubLoginOptions, GithubLoginResult } from "./github-login.ts";

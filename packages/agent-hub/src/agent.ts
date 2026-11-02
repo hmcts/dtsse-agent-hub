@@ -11,6 +11,7 @@ import path from "node:path";
 import type { Api } from "./api.ts";
 import type { Env } from "./env.ts";
 import { CLIENT_FEATURES } from "./features.ts";
+import { sleep } from "./retry.ts";
 import {
   conversationId,
   ensureStateDir,
@@ -443,8 +444,6 @@ export async function ensureBridge(sid: string, { env = process.env }: { env?: N
   log(sid, `spawned bridge pid ${pid}`);
   return { pid, started: true };
 }
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Returns true if a running bridge exited (it posts offline itself on the way out).
 export async function stopBridge(sid: string, { waitMs = 3000 }: { waitMs?: number } = {}): Promise<boolean> {

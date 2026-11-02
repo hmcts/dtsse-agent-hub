@@ -1300,7 +1300,7 @@ describe("a file from the browser to the session's envelope", () => {
     const { agentId, sessionId } = await sessionOf(conversation.id);
     await register(token, sessionId, conversation.id);
 
-    // Act: exactly what `bridge.ts` does on a `direct` — parse the frame, fetch what it names, then build the envelope.
+    // Act: exactly what the bridge does on a `direct` — parse the frame (`frames.ts`), fetch what it names, then build the envelope.
     const frame = await frameFor(token, agentId);
     const assistant = parseAssistantFrame(frame.assistant);
     const attachments = parseAttachments(assistant?.attachments);

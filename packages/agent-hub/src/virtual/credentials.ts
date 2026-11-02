@@ -1,7 +1,7 @@
 // The credential store as a pod sees it. A virtual agent reads and writes its owner's credentials through the
 // `/api/virtual/{id}/credentials/{kind}` routes, which its launch token may use for its own agent alone.
-import fs from "node:fs";
 import type { Api } from "../api.ts";
+import { readStdinText } from "../cli/command.ts";
 import { withRetry } from "../retry.ts";
 import type { CredentialKind } from "../wire.ts";
 import { CREDENTIAL_KINDS } from "../wire.ts";
@@ -21,15 +21,6 @@ export function requireCredentialKind(value: unknown): CredentialKind {
     throw new Error(`credential kind must be one of ${CREDENTIAL_KINDS.join(", ")}`);
   }
   return value;
-}
-
-/** stdin as one string; an unreadable stdin is the same as an empty one, which the caller refuses. */
-export function readStdinText(): string {
-  try {
-    return fs.readFileSync(0, "utf8");
-  } catch {
-    return "";
-  }
 }
 
 export type CredentialStore = Pick<Api, "getCredential" | "putCredential">;

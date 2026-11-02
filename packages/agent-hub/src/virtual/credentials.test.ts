@@ -11,8 +11,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { createMockHub, type MockHub } from "../__fixtures__/mock-hub.ts";
 import { podSecrets } from "../__fixtures__/pod-shims.ts";
 import { ApiError, createApi } from "../api.ts";
+import { readStdinText } from "../cli/command.ts";
 import { CREDENTIAL_KINDS } from "../wire.ts";
-import { isCredentialKind, OWNER_READABLE, readStdinText, requireCredentialKind, runCredentialCommand } from "./credentials.ts";
+import { isCredentialKind, OWNER_READABLE, requireCredentialKind, runCredentialCommand } from "./credentials.ts";
 import { EXIT_NO_CREDENTIAL } from "./phases.ts";
 
 const VID = "va-cred";

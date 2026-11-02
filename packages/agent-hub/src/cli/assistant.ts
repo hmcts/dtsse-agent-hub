@@ -101,8 +101,6 @@ type ExportStep = (cli: Cli, exportId: string, flags: Record<string, string>) =>
 
 /** `jira` and `confluence`: each takes `export` or `report` and the export id, and each action has flags of its own. */
 type ExportSpec = {
-  /** The two actions, in the order the usage error names them. */
-  actions: string;
   exportIdRe: RegExp;
   exportFlags: readonly string[];
   reportFlags: readonly string[];
@@ -115,7 +113,7 @@ function exportCommand(kind: string, spec: ExportSpec): Command {
     const { flags, rest } = parseFlags(argv, [...spec.reportFlags, ...spec.exportFlags]);
     const [action, exportId, ...extra] = rest;
     if (action !== "report" && action !== "export") {
-      throw new UsageError(`${kind} takes ${spec.actions}`);
+      throw new UsageError(`${kind} takes export or report`);
     }
     if (!exportId || !spec.exportIdRe.test(exportId)) {
       throw new UsageError(`${kind} ${action} needs the export id it was asked under`);
@@ -249,7 +247,6 @@ const confluenceExport: ExportStep = async (cli, exportId, flags) => {
 };
 
 export const jira = exportCommand("jira", {
-  actions: "report or export",
   exportIdRe: EXPORT_ID_RE,
   exportFlags: ["project", "type", "labels"],
   reportFlags: ["key", "error"],
@@ -258,7 +255,6 @@ export const jira = exportCommand("jira", {
 });
 
 export const confluence = exportCommand("confluence", {
-  actions: "export or report",
   exportIdRe: CONFLUENCE_EXPORT_ID_RE,
   exportFlags: ["space-id", "parent-id"],
   reportFlags: ["page-id", "title", "error"],

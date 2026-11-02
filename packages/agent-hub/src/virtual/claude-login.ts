@@ -2,7 +2,7 @@
 // code they paste typed back in.
 import { spawn } from "node:child_process";
 import { type Api, createApi } from "../api.ts";
-import { withRetry } from "../retry.ts";
+import { sleep, withRetry } from "../retry.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
 import type { LoginOptions } from "./device-relay.ts";
 import { say } from "./phases.ts";
@@ -18,8 +18,6 @@ export type ClaudeLoginOptions = LoginOptions & {
 };
 
 export type ClaudeLoginResult = "stored" | "signed-in";
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // `claude setup-token` draws a TUI: the URL comes as an OSC 8 hyperlink and again as plain text.
 export function parseClaudeAuthorizeUrl(raw: string): string | null {
