@@ -1,5 +1,5 @@
 import type { ConversationMark } from "@/assistant/views";
-import { LocalMark } from "@/components/assistant/LocalMark";
+import { LiveLocalMark } from "@/components/assistant/LocalMark";
 import { PodMark } from "@/components/assistant/PodMark";
 
 /**
@@ -9,11 +9,11 @@ import { PodMark } from "@/components/assistant/PodMark";
  * One component for both, rather than the same choice written out twice, because the two lists showing the same
  * chat differently is the fault this is here to prevent — the search's results once carried no mark at all while
  * the rows below them did. What to mark is `ConversationMark`'s, decided on the server; all that is left here is
- * which component says it.
+ * which component says it. A local chat's mark follows its session live; see `LiveLocalMark`.
  */
-export function ChatMark({ mark }: { mark: ConversationMark }) {
+export function ChatMark({ conversationId, mark }: { conversationId: string; mark: ConversationMark }) {
   if (mark === null) {
     return null;
   }
-  return mark.where === "computer" ? <LocalMark session={mark.session} /> : <PodMark session={mark.session} />;
+  return mark.where === "computer" ? <LiveLocalMark conversationId={conversationId} session={mark.session} /> : <PodMark session={mark.session} />;
 }

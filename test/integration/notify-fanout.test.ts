@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { heartbeat, markOffline } from "../../src/agents/store.ts";
+import { heartbeat, markOffline, registerAgent } from "../../src/agents/store.ts";
+import { sweepOffline } from "../../src/agents/sweep.ts";
 import { linkLocalSession } from "../../src/assistant/local-chat-store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
 import type { HubEvent } from "../../src/realtime/events.ts";
@@ -63,6 +64,11 @@ async function settled(agentId: string, ownerOid: string, name: string): Promise
   return agentId;
 }
 
+async function chatOf(agentId: string): Promise<string | null> {
+  const row = await prisma.agent.findUniqueOrThrow({ where: { id: agentId }, select: { assistantConversationId: true } });
+  return row.assistantConversationId;
+}
+
 describe("NOTIFY fan-out between pods", () => {
   it("should deliver a direct message, a post and status changes to every pod's hub", async () => {
     const alicesAgent = await insertAgent(ALICE, "alice");
@@ -78,8 +84,8 @@ describe("NOTIFY fan-out between pods", () => {
       // The direct is the first thing said in Bob's session's chat, which puts it in his sidebar.
       { type: "assistant_conversation", conversation_id: expect.any(String), virtual_agent_id: null, owner_oid: BOB.oid },
       { type: "post", message_id: post.id },
-      { type: "agent_status", agent_id: bobsAgent, owner_oid: BOB.oid, status: "busy" },
-      { type: "agent_status", agent_id: alicesAgent, owner_oid: ALICE.oid, status: "offline" }
+      { type: "agent_status", agent_id: bobsAgent, owner_oid: BOB.oid, status: "busy", local_conversation_id: await chatOf(bobsAgent) },
+      { type: "agent_status", agent_id: alicesAgent, owner_oid: ALICE.oid, status: "offline", local_conversation_id: null }
     ];
     for (const running of pods) {
       await until(() => running.events.length >= expected.length);
@@ -96,7 +102,32 @@ describe("NOTIFY fan-out between pods", () => {
 
     await until(() => pods[0]!.events.length >= 1);
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy" }]);
+    expect(pods[0]!.events).toEqual([
+      { type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy", local_conversation_id: await chatOf(agent) }
+    ]);
+  });
+
+  it("should name a laptop session's chat on every status it announces, and no chat for a pod's agent", async () => {
+    const laptop = await settled(await insertAgent(ALICE, "laptop"), ALICE.oid, "laptop");
+    const stale = await settled(await insertAgent(ALICE, "stale", { status: "busy", lastHeartbeatAt: new Date(Date.now() - 600_000) }), ALICE.oid, "stale");
+    const pod = await insertAgent(ALICE, "pod");
+    const assistant = await prisma.virtualAgent.create({ data: { ownerOid: ALICE.oid, name: "assistant", modelRoute: "gateway" }, select: { id: true } });
+    const chat = await prisma.assistantConversation.create({ data: { ownerOid: ALICE.oid, virtualAgentId: assistant.id, agentId: pod }, select: { id: true } });
+    await prisma.agent.update({ where: { id: pod }, data: { assistantConversationId: chat.id, virtualAgentId: assistant.id } });
+
+    await heartbeat(prisma, laptop, "busy", null);
+    await heartbeat(prisma, pod, "busy", null);
+    await markOffline(prisma, laptop);
+    await sweepOffline(prisma);
+
+    const expected: HubEvent[] = [
+      { type: "agent_status", agent_id: laptop, owner_oid: ALICE.oid, status: "busy", local_conversation_id: await chatOf(laptop) },
+      { type: "agent_status", agent_id: pod, owner_oid: ALICE.oid, status: "busy", local_conversation_id: null },
+      { type: "agent_status", agent_id: laptop, owner_oid: ALICE.oid, status: "offline", local_conversation_id: await chatOf(laptop) },
+      { type: "agent_status", agent_id: stale, owner_oid: ALICE.oid, status: "offline", local_conversation_id: await chatOf(stale) }
+    ];
+    await until(() => pods[0]!.events.length >= expected.length);
+    expect(pods[0]!.events).toEqual(expected);
   });
 
   it("should not notify for a write that rolled back", async () => {
@@ -114,7 +145,9 @@ describe("NOTIFY fan-out between pods", () => {
     await heartbeat(prisma, agent, "busy", null);
 
     await until(() => pods[0]!.events.length >= 1);
-    expect(pods[0]!.events).toEqual([{ type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy" }]);
+    expect(pods[0]!.events).toEqual([
+      { type: "agent_status", agent_id: agent, owner_oid: ALICE.oid, status: "busy", local_conversation_id: await chatOf(agent) }
+    ]);
   });
 
   it("should reconnect after its connection is killed and ask every stream to resync", async () => {
@@ -141,5 +174,24 @@ describe("NOTIFY fan-out between pods", () => {
     } finally {
       await admin.end();
     }
+  });
+});
+
+describe("a laptop session's registration", () => {
+  it("should name the session's chat on the status it announces once the session has one", async () => {
+    const caller = { oid: ALICE.oid, tid: "dev", name: ALICE.name, email: ALICE.email };
+    const registration = { sessionId: "alices-laptop", name: "alices-laptop", cwd: null, repo: null, branch: null, host: null };
+
+    const { id } = await registerAgent(prisma, caller, registration);
+    await registerAgent(prisma, caller, registration);
+
+    // The first registration announces before it links the chat it makes, which nothing lists until the chat has
+    // something in it; the second finds the link.
+    const expected: HubEvent[] = [
+      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: null },
+      { type: "agent_status", agent_id: id, owner_oid: ALICE.oid, status: "idle", local_conversation_id: await chatOf(id) }
+    ];
+    await until(() => pods[0]!.events.length >= expected.length);
+    expect(pods[0]!.events).toEqual(expected);
   });
 });

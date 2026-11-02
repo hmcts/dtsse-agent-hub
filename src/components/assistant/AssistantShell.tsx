@@ -282,7 +282,7 @@ export function AssistantShell({
                           item.id === activeId ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
                         }`}
                       >
-                        <ChatMark mark={item.mark} />
+                        <ChatMark conversationId={item.id} mark={item.mark} />
                         {/* The title is what gives way, so the marker beside it stays whole at any sidebar width. */}
                         <span className="min-w-0 truncate">{item.title}</span>
                       </Link>

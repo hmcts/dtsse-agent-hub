@@ -53,6 +53,18 @@ export function needsLocalChatSql(alias: string): Prisma.Sql {
 }
 
 /**
+ * The chat an agent row, as `alias`, is the session of when it is a session on somebody's own computer, as text; null
+ * for a pod's agent, which has a virtual agent, and for a session in no chat. What an `agent_status` NOTIFY names as
+ * its `local_conversation_id`, so every site that announces a status says the same about the same row. `alias` is
+ * always a literal of the caller's.
+ */
+export function localConversationSql(alias: string): Prisma.Sql {
+  const { raw, sql } = clientPrisma();
+  const agent = raw(alias);
+  return sql`(CASE WHEN ${agent}.virtual_agent_id IS NULL THEN ${agent}.assistant_conversation_id::text END)`;
+}
+
+/**
  * A laptop session's conversation, created and linked to the session's own agent; called inside the registration's
  * or the heartbeat's transaction. Answers the conversation, or `undefined` when the agent needs none
  * (`needsLocalChatSql`): already in one, or a session whose chat the person removed, which is never given another.

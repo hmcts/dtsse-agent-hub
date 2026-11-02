@@ -21,7 +21,12 @@ export type HubEvent =
    * search it. The `post` event goes out beside these, since the post is on its topics for everyone as well.
    */
   | { type: "tagged_post"; message_id: string; agent_id: string }
-  | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus }
+  /**
+   * `owner_oid`'s agent changed status. `local_conversation_id` is the chat it is the session of when it is a session
+   * on the person's own computer, so the sidebar can recolour that chat's mark without a read per event; null for a
+   * pod's agent and for a session in no chat (`localConversationSql`).
+   */
+  | { type: "agent_status"; agent_id: string; owner_oid: string; status: AgentStatus; local_conversation_id: string | null }
   /** The skills `owner_oid`'s agent reported changed. Never carries the list, which only some viewers may see. */
   | { type: "agent_skills"; agent_id: string; owner_oid: string }
   /**
@@ -125,9 +130,20 @@ export function decodeEvent(payload: string | undefined): NotifiedEvent | undefi
         : undefined;
     case "tagged_post":
       return isId(event.message_id) && isId(event.agent_id) ? { type: "tagged_post", message_id: event.message_id, agent_id: event.agent_id } : undefined;
+    // A missing `local_conversation_id` reads as null, so a status from a pod still on the previous version is kept.
     case "agent_status":
-      return isId(event.agent_id) && isId(event.owner_oid) && typeof event.status === "string" && STATUSES.includes(event.status)
-        ? { type: "agent_status", agent_id: event.agent_id, owner_oid: event.owner_oid, status: event.status as AgentStatus }
+      return isId(event.agent_id) &&
+        isId(event.owner_oid) &&
+        typeof event.status === "string" &&
+        STATUSES.includes(event.status) &&
+        (event.local_conversation_id === undefined || isOptionalId(event.local_conversation_id))
+        ? {
+            type: "agent_status",
+            agent_id: event.agent_id,
+            owner_oid: event.owner_oid,
+            status: event.status as AgentStatus,
+            local_conversation_id: event.local_conversation_id ?? null
+          }
         : undefined;
     case "agent_skills":
     case "agent_question":
