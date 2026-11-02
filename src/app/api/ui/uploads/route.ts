@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { errorResponse, json, readJson } from "@/agent-api/http";
+import { findConversation } from "@/assistant/conversation-store";
 import { hasPod } from "@/assistant/pods";
-import { findConversation } from "@/assistant/store";
 import { createUpload } from "@/assistant/upload-store";
 import type { UploadRefusal } from "@/assistant/uploads";
 import { prisma } from "@/store/prisma";

@@ -5,9 +5,10 @@
 // and the three "we cannot tell" states are in `src/assistant/memory-report.test.ts`.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as memoryRoute from "../../src/app/api/virtual/[virtualAgentId]/memory/route.ts";
+import { createConversation } from "../../src/assistant/conversation-store.ts";
 import { assistantMemory, reportMemoryUse } from "../../src/assistant/memory.ts";
 import { CONVERSATION_MEMORY_BYTES, memoryPressure } from "../../src/assistant/memory-report.ts";
-import { createConversation, reportSessions } from "../../src/assistant/store.ts";
+import { reportSessions } from "../../src/assistant/session-store.ts";
 import { claimVirtualAgents, observeVirtualAgent, restartVirtualAgent, setDesired, setVirtualAgentPlugins } from "../../src/virtual-agents/store.ts";
 import { assistantSize } from "../../src/web/data.ts";
 import { ALICE, BOB, form, podFixture, viewer } from "./assistant-pod.ts";

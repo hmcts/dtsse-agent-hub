@@ -4,7 +4,7 @@
 // The pod's own half — measuring the volume and deleting the files — is in the client package's
 // `src/assistant/disk.test.ts` and `src/assistant/attachments.test.ts`.
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createConversation } from "../../src/assistant/store.ts";
+import { createConversation } from "../../src/assistant/conversation-store.ts";
 import { pendingUploadDeletions, reportedUploadIds, reportUploadsOnDisk, requestUploadRemoval, uploadsOnDisk } from "../../src/assistant/upload-disk.ts";
 import { createEventHub } from "../../src/realtime/hub.ts";
 import { startListener } from "../../src/realtime/listener.ts";

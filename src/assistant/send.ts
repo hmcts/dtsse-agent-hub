@@ -2,7 +2,9 @@ import { loadThreadMessage, type ThreadMessage } from "../messages/direct-thread
 import { directAsPerson } from "../messages/send.ts";
 import type { NewDirect } from "../messages/store.ts";
 import type { PrismaClient } from "../store/prisma.ts";
-import { type ConversationRow, conversationAgent, requestWake, touchConversation } from "./store.ts";
+import type { ConversationRow } from "./conversation-row.ts";
+import { conversationAgent, touchConversation } from "./conversation-store.ts";
+import { requestWake } from "./session-store.ts";
 
 /**
  * A message from the person into one of their own conversations, through the same `directAsPerson` as the hub's
