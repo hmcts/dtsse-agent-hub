@@ -38,3 +38,10 @@ export function assistantPluginsData(
     podRunning: assistant.desired === "running" && assistant.status !== "requested"
   };
 }
+
+/** What the hub offers, then any ticked name it no longer does, which can be kept or unticked but not ticked again. */
+export function pluginChoices(available: readonly PluginOption[], checked: readonly string[]): (PluginOption & { offered: boolean })[] {
+  const offered = available.map((option) => ({ ...option, offered: true }));
+  const dropped = checked.filter((name) => !available.some((option) => option.name === name));
+  return [...offered, ...dropped.map((name) => ({ name, description: "", offered: false }))];
+}

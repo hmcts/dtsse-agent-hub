@@ -6,6 +6,7 @@ import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDatabaseUrl } from "../../src/store/database-url.ts";
 import { migrate, migrationsDirectory } from "../../src/store/migrate.ts";
+import { isTypedPrompt, withoutIdeContext } from "../../src/transcripts/harness-turn.ts";
 
 const BASE = resolveDatabaseUrl();
 
@@ -565,6 +566,250 @@ describe("the conversation title source migration", () => {
     expect(await query(TITLES, `SELECT title_source FROM "assistant_conversation" WHERE title = 'made at head'`)).toEqual([{ title_source: "message" }]);
     await expect(query(TITLES, `UPDATE "assistant_conversation" SET title_source = 'guessed' WHERE title = 'made at head'`)).rejects.toThrow(/title_source/);
     await expect(query(TITLES, `UPDATE "agent" SET name_source = 'auto' WHERE session_id = 'stale'`)).rejects.toThrow(/name_source/);
+  });
+});
+
+/**
+ * The backfill of `first_content_at`, which decides which of the conversations already here the sidebar lists. Its
+ * typed-prompt rule is a copy of `isTypedPrompt`'s three patterns, applied by Postgres, so every sample prompt here is
+ * one chat and the chats the migration dates are held to the ones `isTypedPrompt` accepts: the samples are where the
+ * two engines are most likely to part — whitespace outside ASCII, which `\s` means differently in each; newlines inside
+ * an editor-context block, which `.` means differently in each; and a selection quoting its own closing tag, where a
+ * lazy quantifier would stop in one and run on in the other.
+ */
+describe("the conversation first content migration", () => {
+  const MIGRATION = "20261117090000_conversation_first_content";
+  const { database: FIRSTS, earlier } = migrationFixture("migrate_firsts", MIGRATION);
+
+  const IDE = "<ide_opened_file>The user opened the file /a/b.ts in the IDE.</ide_opened_file>";
+  const SELECTION = "<ide_selection>const x = 1;\nconst y = <T>(a: T) => a;\n</ide_selection>";
+
+  const SAMPLES = [
+    "\u1680",
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a",
+    "\u205f",
+    "\u2005<command-name>/clear</command-name>",
+    "\u1680<ide_selection>a</ide_selection>\u205f",
+    "",
+    "fix this",
+    "   ",
+    "\n\t\r\v\f",
+    "\u00a0",
+    "\u202f",
+    "\ufeff",
+    "\u3000\u2028\u2029",
+    "\u0085",
+    "\u180e",
+    "\u200b",
+    "<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>",
+    "<command-message>review</command-message>",
+    "<command-args>x</command-args>",
+    "<local-command-stdout>Set model to opus</local-command-stdout>",
+    "<local-command-caveat>Caveat</local-command-caveat>",
+    "<system-reminder>x</system-reminder>",
+    "<task-notification><status>completed</status></task-notification>",
+    "<bash-input>ls</bash-input>",
+    "<bash-stdout>a</bash-stdout><bash-stderr></bash-stderr>",
+    "<bash-stderr>no</bash-stderr>",
+    "<user-prompt-submit-hook>x</user-prompt-submit-hook>",
+    "[Request interrupted by user]",
+    "[Request interrupted by user for tool use]",
+    "Request interrupted by user",
+    "  \n<command-name>/compact</command-name>",
+    "\u00a0<bash-input>ls</bash-input>",
+    "\ufeff<command-name>/clear</command-name>",
+    "\u0085<command-name>/clear</command-name>",
+    "why does <command-name> show up in titles?",
+    "<command-name",
+    "<COMMAND-NAME>/clear</COMMAND-NAME>",
+    IDE,
+    `${IDE}\n`,
+    `${IDE}\u00a0\u3000`,
+    `${IDE} fix this`,
+    `${IDE}\n${SELECTION}\nfix this`,
+    `${SELECTION}${IDE}`,
+    `  ${IDE}  ${SELECTION}  `,
+    `${IDE}<command-name>/clear</command-name>`,
+    `${IDE}\n[Request interrupted by user]`,
+    "<ide_selection>a</ide_selection> my words </ide_selection>",
+    "<ide_selection>a</ide_selection><ide_selection>b</ide_selection></ide_selection>",
+    "<ide_selection>a</ide_opened_file> b</ide_selection>",
+    "<ide_selection>never closed",
+    "<ide_selection></ide_selection>",
+    "<ide_opened_file>x</ide_selection>",
+    `fix this ${IDE}`,
+    "\u00a0<ide_selection>a</ide_selection>",
+    "\u0085<ide_selection>a</ide_selection>"
+  ];
+
+  async function seeded(statements: readonly [string, unknown[]][]): Promise<void> {
+    const client = new pg.Client({ connectionString: urlFor(FIRSTS) });
+    await client.connect();
+    try {
+      for (const [statement, values] of statements) {
+        await client.query(statement, values);
+      }
+    } finally {
+      await client.end();
+    }
+  }
+
+  /** A chat on Alice's laptop, its session `session`, with one transcript entry when `role` is given. */
+  function chat(session: string, entry?: { role: string; text?: string; redacted?: boolean; at?: string }): [string, unknown[]][] {
+    return [
+      [`INSERT INTO "agent" (owner_oid, session_id, name) VALUES ('dev-alice', $1, $1)`, [session]],
+      [`INSERT INTO "assistant_conversation" (owner_oid, agent_id, title) SELECT 'dev-alice', id, session_id FROM "agent" WHERE session_id = $1`, [session]],
+      [`UPDATE "agent" a SET assistant_conversation_id = c.id FROM "assistant_conversation" c WHERE c.agent_id = a.id AND a.session_id = $1`, [session]],
+      ...(entry === undefined
+        ? []
+        : ([
+            [
+              `INSERT INTO "transcript_entry" (agent_id, session_id, entry_key, role, content, redacted, occurred_at)
+                SELECT id, session_id, 'e1', $2::transcript_role, $3::jsonb, $4, $5::timestamptz FROM "agent" WHERE session_id = $1`,
+              [
+                session,
+                entry.role,
+                JSON.stringify(entry.text === undefined ? {} : { text: entry.text }),
+                entry.redacted ?? false,
+                entry.at ?? "2026-11-01T09:00:00Z"
+              ]
+            ]
+          ] as [string, unknown[]][]))
+    ];
+  }
+
+  async function dated(): Promise<Map<string, string | null>> {
+    const rows = await query<{ session_id: string; first_content_at: Date | null }>(
+      FIRSTS,
+      `SELECT a.session_id, c.first_content_at FROM "assistant_conversation" c JOIN "agent" a ON a.id = c.agent_id`
+    );
+    return new Map(rows.map((row) => [row.session_id, row.first_content_at?.toISOString() ?? null]));
+  }
+
+  it("should date a chat whose only prompt isTypedPrompt accepts and leave the rest undated when it is applied to every sample", async () => {
+    await migrate(earlier());
+    await query(FIRSTS, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await seeded(SAMPLES.flatMap((text, index) => chat(`sample-${index}`, { role: "user", text })));
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const firsts = await dated();
+    expect(SAMPLES.map((text, index) => ({ text, dated: firsts.get(`sample-${index}`) !== null }))).toEqual(
+      SAMPLES.map((text) => ({ text, dated: isTypedPrompt(text) }))
+    );
+  });
+
+  it("should reach both verdicts and strip editor context from several samples when the samples are read by isTypedPrompt", () => {
+    const verdicts = SAMPLES.map(isTypedPrompt);
+    expect(verdicts.filter(Boolean).length).toBeGreaterThan(5);
+    expect(verdicts.filter((typed) => !typed).length).toBeGreaterThan(5);
+    expect(SAMPLES.filter((text) => withoutIdeContext(text) !== text.trim()).length).toBeGreaterThan(5);
+  });
+});
+
+describe("the conversation first content migration on everything else a chat can hold", () => {
+  const MIGRATION = "20261117090000_conversation_first_content";
+  const { database: HELD, earlier } = migrationFixture("migrate_held", MIGRATION);
+
+  it("should date each chat by the earliest thing in it and leave an empty or redacted one undated when it is applied", async () => {
+    await migrate(earlier());
+    await query(HELD, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(
+      HELD,
+      `INSERT INTO "agent" (owner_oid, session_id, name) VALUES
+        ('dev-alice', 'empty', 'empty'), ('dev-alice', 'answered', 'answered'), ('dev-alice', 'tooled', 'tooled'),
+        ('dev-alice', 'redacted', 'redacted'), ('dev-alice', 'messaged', 'messaged'), ('dev-alice', 'sent', 'sent'),
+        ('dev-alice', 'asked', 'asked'), ('dev-alice', 'documented', 'documented'), ('dev-alice', 'forked', 'forked'),
+        ('dev-alice', 'prompted', 'prompted'), ('dev-alice', 'cleared', 'cleared'), ('dev-alice', 'other', 'other')`
+    );
+    await query(
+      HELD,
+      `INSERT INTO "assistant_conversation" (owner_oid, agent_id, title)
+        SELECT 'dev-alice', id, session_id FROM "agent" WHERE session_id <> 'other'`
+    );
+    await query(HELD, `UPDATE "agent" a SET assistant_conversation_id = c.id FROM "assistant_conversation" c WHERE c.agent_id = a.id`);
+    await query(
+      HELD,
+      `INSERT INTO "message" (kind, author_oid, author_agent_id, target_agent_id, body, created_at)
+        SELECT 'direct'::message_kind, 'dev-alice', o.id, t.id, 'hello', '2026-11-01T08:00:00Z'::timestamptz FROM "agent" o, "agent" t
+         WHERE o.session_id = 'other' AND t.session_id = 'messaged'
+        UNION ALL
+        SELECT 'direct'::message_kind, 'dev-alice', s.id, o.id, 'over to you', '2026-11-01T07:00:00Z'::timestamptz FROM "agent" s, "agent" o
+         WHERE s.session_id = 'sent' AND o.session_id = 'other'`
+    );
+    await query(
+      HELD,
+      // `occurred_at` is what the client claimed, here a year out, and `created_at` the hub's own receipt, which is
+      // what a chat is dated by.
+      `INSERT INTO "transcript_entry" (agent_id, session_id, entry_key, role, content, redacted, occurred_at, created_at)
+        SELECT a.id, a.session_id, t.entry_key, t.role::transcript_role, t.content::jsonb, t.redacted, '2027-11-01T00:00:00Z', t.at::timestamptz
+          FROM "agent" a
+          JOIN (VALUES
+                 ('answered', 'e1', 'assistant', '{"text":"Hello."}', false, '2026-11-01T09:00:00Z'),
+                 ('answered', 'e2', 'user', '{"text":"later prompt"}', false, '2026-11-01T10:00:00Z'),
+                 ('tooled', 'e1', 'tool_use', '{"id":"t","name":"Read","input":{}}', false, '2026-11-01T09:30:00Z'),
+                 ('redacted', 'e1', 'user', '{"redacted":"aws-key"}', true, '2026-11-01T09:00:00Z'),
+                 ('prompted', 'e1', 'user', '{"text":"<command-name>/clear</command-name>"}', false, '2026-11-01T02:00:00Z'),
+                 ('prompted', 'e2', 'user', '{"text":"why is the claim stuck?"}', false, '2026-11-01T03:00:00Z'),
+                 ('prompted', 'e3', 'user', '{"text":"and this one?"}', false, '2026-11-01T03:30:00Z'),
+                 ('cleared', 'e1', 'user', '{"text":"<command-name>/clear</command-name>"}', false, '2026-11-01T02:00:00Z'),
+                 ('messaged', 'e1', 'user', '{"text":"a later prompt"}', false, '2026-11-01T11:00:00Z'))
+               AS t (session_id, entry_key, role, content, redacted, at)
+            ON t.session_id = a.session_id
+         ORDER BY t.at`
+    );
+    await query(
+      HELD,
+      `INSERT INTO "agent_question" (agent_id, session_id, tool_use_id, questions, asked_at)
+        SELECT id, session_id, 'toolu_1', '[]'::jsonb, '2026-11-01T06:00:00Z' FROM "agent" WHERE session_id = 'asked'`
+    );
+    await query(
+      HELD,
+      `UPDATE "assistant_conversation" SET artefact_version = 2, artefact_markdown = '# Plan', artefact_updated_at = '2026-11-01T05:00:00Z'
+        WHERE title = 'documented'`
+    );
+    await query(
+      HELD,
+      `UPDATE "assistant_conversation" SET forked_at = '2026-11-01T04:00:00Z', forked_thread = '[]'::jsonb, forked_from_owner_name = 'Bob'
+        WHERE title = 'forked'`
+    );
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    const rows = await query<{ title: string; first_content_at: Date | null }>(
+      HELD,
+      `SELECT title, first_content_at FROM "assistant_conversation" ORDER BY title`
+    );
+    expect(rows.map((row) => [row.title, row.first_content_at?.toISOString() ?? null])).toEqual([
+      ["answered", "2026-11-01T09:00:00.000Z"],
+      ["asked", "2026-11-01T06:00:00.000Z"],
+      ["cleared", null],
+      ["documented", "2026-11-01T05:00:00.000Z"],
+      ["empty", null],
+      ["forked", "2026-11-01T04:00:00.000Z"],
+      ["messaged", "2026-11-01T08:00:00.000Z"],
+      ["prompted", "2026-11-01T03:00:00.000Z"],
+      ["redacted", null],
+      ["sent", "2026-11-01T07:00:00.000Z"],
+      ["tooled", "2026-11-01T09:30:00.000Z"]
+    ]);
+  });
+});
+
+describe("the agent chat removed migration", () => {
+  const MIGRATION = "20261118090000_agent_chat_removed";
+  const { database: REMOVED, earlier } = migrationFixture("migrate_chat_removed", MIGRATION);
+
+  it("should leave every existing session able to be given a chat when it is applied", async () => {
+    await migrate(earlier());
+    await query(REMOVED, `INSERT INTO "user" (oid, tid, name) VALUES ('dev-alice', 'dev', 'Alice')`);
+    await query(REMOVED, `INSERT INTO "agent" (owner_oid, session_id, name) VALUES ('dev-alice', 'laptop', 'laptop')`);
+
+    expect((await migrate())[0]).toBe(MIGRATION);
+
+    expect(await query<{ session_id: string; chat_removed_at: Date | null }>(REMOVED, `SELECT session_id, chat_removed_at FROM "agent"`)).toEqual([
+      { session_id: "laptop", chat_removed_at: null }
+    ]);
   });
 });
 

@@ -5,6 +5,7 @@ import { POST as heartbeat } from "../../src/app/api/agent/[agentId]/heartbeat/r
 import { POST as offline } from "../../src/app/api/agent/[agentId]/offline/route.ts";
 import { POST as register } from "../../src/app/api/agent/register/route.ts";
 import { createConversation, ensureAssistant, linkLocalSession, listConversations } from "../../src/assistant/store.ts";
+import { appendEntries } from "../../src/transcripts/store.ts";
 import { devUser, insertAgent, insertUser, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 
@@ -235,9 +236,10 @@ describe("a laptop session's conversation", () => {
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agent_id } })).assistantConversationId).toBe(conversation.id);
     // Nothing has been said in it yet, so it is not in the sidebar until the session has a prompt or an answer.
     expect(await listConversations(prisma, ALICE.oid)).toEqual([]);
-    await prisma.transcriptEntry.create({
-      data: { agentId: agent_id, sessionId: "s-1", entryKey: "e1", role: "user", content: { text: "look at the claim" }, occurredAt: new Date() }
-    });
+    // An answer rather than a prompt, so the chat keeps the session's name: a first prompt would rename it.
+    await appendEntries(prisma, { id: agent_id, ownerOid: ALICE.oid }, "s-1", [
+      { key: "e1", role: "assistant", content: { text: "looking at the claim" }, truncated: false, redacted: false, message_id: null, occurred_at: new Date() }
+    ]);
     expect((await listConversations(prisma, ALICE.oid)).map((chat) => [chat.id, chat.title])).toEqual([[conversation.id, "alice-pcs-api"]]);
   });
 

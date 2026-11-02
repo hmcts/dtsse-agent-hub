@@ -55,7 +55,12 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // from `redirects()` in next.config.mjs, which Next checks ahead of the proxy: a 308 from there repeats the query
   // into its own `Location`, and Traefik's access log keeps it. Below `carriesSecret`, so a pasted secret is already
   // stripped by the time either builds a URL. Retired first, since a bare retired address is both.
-  const moved = retiredHubPath(request.nextUrl.pathname, virtualAgentsEnabled()) ?? movedHubPath(request.nextUrl.pathname);
+  // A retired page's query is dropped: what replaced it takes its own, and its address may already carry one.
+  const retired = retiredHubPath(request.nextUrl.pathname, virtualAgentsEnabled());
+  if (retired !== undefined) {
+    return NextResponse.redirect(new URL(retired, request.nextUrl.origin), 308);
+  }
+  const moved = movedHubPath(request.nextUrl.pathname);
   if (moved !== undefined) {
     return NextResponse.redirect(new URL(`${moved}${request.nextUrl.search}`, request.nextUrl.origin), 308);
   }

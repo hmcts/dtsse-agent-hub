@@ -223,13 +223,15 @@ export async function acceptFork(prisma: PrismaClient, viewer: { oid: string; mo
       select: { id: true, ownerOid: true, virtualAgentId: true }
     });
     // In one statement, because the row's CHECK holds the fork's columns to all or none. Written raw for the reason
-    // `stopAnswer` writes its history raw: Prisma's JSON input type takes no array of a named interface.
+    // `stopAnswer` writes its history raw: Prisma's JSON input type takes no array of a named interface. The copied
+    // words are the copy's first content (`announceFirstContent`), so it is listed from the moment it is taken.
     await tx.$executeRaw`
       UPDATE assistant_conversation
          SET forked_from_id = ${id}::uuid,
              forked_from_owner_name = ${source.owner.name},
              forked_from_title = ${source.title ?? UNTITLED},
              forked_at = ${now},
+             first_content_at = ${now},
              forked_thread = ${JSON.stringify(thread)}::jsonb,
              forked_earlier_hidden = ${earlierHidden}
        WHERE id = ${created.id}::uuid

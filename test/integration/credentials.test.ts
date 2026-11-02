@@ -381,7 +381,7 @@ describe("saveCredential and removeCredential", () => {
     expect(result).toEqual({ ok: true, confirmation: "Your GitHub token is stored" });
     const row = await prisma.credential.findFirstOrThrow();
     expect(row).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "github", updatedVia: "web" });
-    expect(revalidated).toContain("/hub/settings/credentials");
+    expect(revalidated).toContain("/assistant");
     expect(JSON.stringify(result)).not.toContain(GITHUB);
   });
 
@@ -521,7 +521,7 @@ describe("a Jenkins API token", () => {
 
     const statuses = await credentialStatus(prisma, devIdentity("alice").oid);
     expect(statuses.map((status) => [status.kind, status.stored])).toContainEqual(["jenkins", true]);
-    expect(revalidated).toEqual(expect.arrayContaining(["/hub/settings/credentials", "/hub/virtual"]));
+    expect(revalidated).toContain("/assistant");
   });
 });
 
@@ -584,7 +584,7 @@ describe("a CLAUDE.md", () => {
     expect((await read(ALICE, "claude_md")).status).toBe(404);
   });
 
-  it("should save the text from the web with LF line endings, as the viewer, and tell the virtual agents page", async () => {
+  it("should save the text from the web with LF line endings, as the viewer, and tell the Assistant's pages", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
     actAs("alice");
 
@@ -593,7 +593,7 @@ describe("a CLAUDE.md", () => {
     expect(result).toEqual({ ok: true, confirmation: "Your CLAUDE.md is saved. Each agent uses it from its next Claude start" });
     expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "claude_md")).toBe("# Me\n\nBe brief.\n");
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "claude_md", updatedVia: "web" });
-    expect(revalidated).toContain("/hub/virtual");
+    expect(revalidated).toContain("/assistant");
   });
 
   it("should say why and store nothing when the web save is refused", async () => {
@@ -709,7 +709,7 @@ describe("a git identity", () => {
     expect(await prisma.credential.count()).toBe(0);
   });
 
-  it("should save the fields from the web as the viewer, storing only those set, and tell the virtual agents page", async () => {
+  it("should save the fields from the web as the viewer, storing only those set, and tell the Assistant's pages", async () => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
     actAs("alice");
 
@@ -718,7 +718,7 @@ describe("a git identity", () => {
     expect(result).toEqual({ ok: true, confirmation: "Your git identity is saved. Each agent uses it from its next Claude start" });
     expect(await readCredential(prisma, localStore(), devIdentity("alice").oid, "git_identity")).toBe('{"email":"alice@example.com"}');
     expect(await prisma.credential.findFirstOrThrow()).toMatchObject({ ownerOid: devIdentity("alice").oid, kind: "git_identity", updatedVia: "web" });
-    expect(revalidated).toContain("/hub/virtual");
+    expect(revalidated).toContain("/assistant");
   });
 
   it("should say why and store nothing when the web save has neither field", async () => {

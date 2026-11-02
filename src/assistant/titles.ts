@@ -1,5 +1,5 @@
 import { collapse } from "../transcripts/conversation.ts";
-import { isHarnessTurn, withoutIdeContext } from "../transcripts/harness-turn.ts";
+import { typedText } from "../transcripts/harness-turn.ts";
 
 /**
  * What a conversation is called: the lengths a title may be, the three things that can name one, and the rules for
@@ -74,7 +74,7 @@ export interface PromptEntry {
  *   left to name the chat after — and "redacted" is not a title.
  * - **A prompt that is a relayed hub message** (`messageId`). It is a colleague's words, or an answer to a question
  *   the session asked, delivered into the session by the bridge; the chat is not about it.
- * - **A turn the harness wrote** (`isHarnessTurn`): a slash command's record, its output, or a background task's
+ * - **A turn the harness wrote** (`typedText`): a slash command's record, its output, or a background task's
  *   notification. Nobody typed it, and it named half of a sidebar `<command-name>/clear</command-name>…`.
  * - **A prompt that is whitespace, or whose content is not the `{text}` of an ordinary entry.** The second cannot
  *   happen through `POST /api/agent/{agent_id}/transcript`, which checks the shape against the role, and is still
@@ -89,8 +89,8 @@ export function firstPromptTitle(entries: readonly PromptEntry[]): string | null
       continue;
     }
     const text = (entry.content as { text?: unknown } | null)?.text;
-    const typed = typeof text === "string" ? withoutIdeContext(text) : "";
-    const title = isHarnessTurn(typed) ? null : messageTitle(typed);
+    const typed = typeof text === "string" ? typedText(text) : null;
+    const title = typed === null ? null : messageTitle(typed);
     if (title !== null) {
       return title;
     }

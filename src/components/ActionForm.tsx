@@ -28,7 +28,8 @@ export function ActionForm<T extends object & { confirmation?: string }>({
   label: string;
   className?: string;
   keepValues?: boolean;
-  onSuccess?: () => void;
+  /** Told of a success with the action's result, so a form that closes on it can say the confirmation elsewhere. */
+  onSuccess?: (result: T) => void;
   /**
    * The refusal's counterpart, for a form whose fields its parent controls: a refused save changes nothing on the
    * server and triggers no re-render, so without this the fields would keep showing a value that is not in force
@@ -57,7 +58,7 @@ export function ActionForm<T extends object & { confirmation?: string }>({
         if (!keepValues) {
           form.reset();
         }
-        onSuccess?.();
+        onSuccess?.(result);
         setMessage(result.confirmation ? { ok: true, text: result.confirmation } : null);
         router.refresh();
       } else {

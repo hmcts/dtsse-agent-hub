@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import {
   type Connection,
   type ConnectionsData,
+  checklistState,
   connections,
   connectionsWarning,
   type ModelAccess,
@@ -15,18 +16,22 @@ import {
 } from "@/assistant/connections";
 import { memoryPressure, memoryWarning } from "@/assistant/memory-report";
 import type { AssistantPluginsData } from "@/assistant/settings";
+import { pluginChoices } from "@/assistant/settings";
 import { type Theme, themeOf } from "@/assistant/theme";
 import { ActionForm, type FormAction } from "@/components/ActionForm";
+import { AgentSettings, type AssistantAgentSettings } from "@/components/assistant/AgentSettings";
 import { type AssistantClaudeMd, ClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { type AssistantExportDefaults, ExportSettings } from "@/components/assistant/ExportSettings";
 import { type AssistantFiles, Files } from "@/components/assistant/FileSettings";
+import { type AssistantGitIdentity, GitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { SETTINGS_TWO_PANE_MIN_WIDTH } from "@/components/assistant/layout";
 import { type AssistantModelSetting, ModelSettings } from "@/components/assistant/ModelSettings";
+import { PortSettings } from "@/components/assistant/PortSettings";
 import { type AssistantSize, Size } from "@/components/assistant/SizeSettings";
 import { type AssistantTemplates, Templates } from "@/components/assistant/TemplateSettings";
 import { ThemeSwitch } from "@/components/assistant/ThemeSwitch";
-import { checklistState } from "@/components/virtual-agents/OnboardingChecklist";
-import { pluginChoices } from "@/components/virtual-agents/PluginsField";
+import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
+import { SETTINGS_PARAMETER } from "@/web/home";
 
 /**
  * What a row needs to connect a sign-in the assistant makes only on request: the assistant it restarts and the action
@@ -39,7 +44,7 @@ export interface AssistantConnect {
   reconnect: FormAction;
 }
 
-/** The plugins the dialog shows, with the action it posts a change to: the one the hub's `/agents/{id}` page uses. */
+/** The plugins the dialog shows, with the action it posts a change to, `setVirtualAgentPlugins`. */
 export type AssistantPlugins = AssistantPluginsData & { save: FormAction };
 
 interface SettingsView {
@@ -57,6 +62,9 @@ interface SettingsView {
   files: AssistantFiles | undefined;
   size: AssistantSize | undefined;
   exports: AssistantExportDefaults | undefined;
+  agent: AssistantAgentSettings | undefined;
+  git: AssistantGitIdentity | undefined;
+  tokens: AssistantTokens | undefined;
 }
 
 /**
@@ -277,7 +285,7 @@ function Connections({ list, access, connect, unavailable, warning }: Pick<Setti
 /**
  * The plugins in plain words: whatever the hub's configuration says each one is for, with its marketplace name
  * underneath for anyone who knows it. A plugin the hub has stopped offering can be unticked but not ticked again,
- * which is `pluginChoices`'s rule and the hub's own page's.
+ * which is `pluginChoices`'s rule.
  */
 function Plugins({ plugins }: { plugins: AssistantPlugins }) {
   const choices = pluginChoices(plugins.available, plugins.checked);
@@ -357,6 +365,13 @@ const SECTIONS: readonly SettingsSection[] = [
     panel: (view) => <Connections list={view.list} access={view.access} connect={view.connect} unavailable={view.unavailable} warning={view.warning} />
   },
   {
+    id: "credentials",
+    label: "Credentials",
+    group: "General",
+    shown: (view) => view.tokens !== undefined && (view.tokens.rows.length > 0 || view.tokens.unavailable !== null),
+    panel: (view) => (view.tokens === undefined ? null : <TokenSettings tokens={view.tokens} />)
+  },
+  {
     id: "templates",
     label: "Templates",
     group: "General",
@@ -372,6 +387,13 @@ const SECTIONS: readonly SettingsSection[] = [
   },
   { id: "sharing", label: "Sharing", group: "General", shown: () => true, panel: () => <SharedChats /> },
   {
+    id: "assistant",
+    label: "Assistant",
+    group: "Agent",
+    shown: (view) => view.agent !== undefined,
+    panel: (view) => (view.agent === undefined ? null : <AgentSettings settings={view.agent} />)
+  },
+  {
     id: "model",
     label: "Model",
     // With the agent, because it is the one choice about how the agent answers rather than about this screen.
@@ -385,6 +407,13 @@ const SECTIONS: readonly SettingsSection[] = [
     group: "Agent",
     shown: (view) => view.claudeMd !== undefined,
     panel: (view) => (view.claudeMd === undefined ? null : <ClaudeMd claudeMd={view.claudeMd} />)
+  },
+  {
+    id: "git",
+    label: "Git identity",
+    group: "Agent",
+    shown: (view) => view.git !== undefined,
+    panel: (view) => (view.git === undefined ? null : <GitIdentity git={view.git} />)
   },
   {
     id: "tools",
@@ -403,6 +432,13 @@ const SECTIONS: readonly SettingsSection[] = [
     group: "Agent",
     shown: (view) => view.size !== undefined,
     panel: (view) => (view.size === undefined ? null : <Size size={view.size} />)
+  },
+  {
+    id: "ports",
+    label: "Web servers",
+    group: "Agent",
+    shown: (view) => view.agent !== undefined,
+    panel: (view) => (view.agent === undefined ? null : <PortSettings load={view.agent.load} />)
   },
   {
     id: "files",
@@ -607,14 +643,16 @@ function focusNavigation(dialog: HTMLElement | null): void {
  * into it as it opens and stays in it while it is open; closing it, by Escape, the close button or the page behind
  * it, puts focus back on the cog, which is what `onClose` is for.
  */
-function Dialog({ view, onClose }: { view: SettingsView; onClose: () => void }) {
+function Dialog({ view, onClose, initial = null }: { view: SettingsView; onClose: () => void; initial?: string | null }) {
   const panel = useRef<HTMLDivElement>(null);
   const prefix = useId();
   const wide = useTwoPane();
   const items = SECTIONS.filter((item) => item.shown(view));
   // Nothing open is the narrow interface showing its list. Wide has no such state: it always has a section beside the
   // navigation, so a chosen section that the page has stopped passing anything for falls back to the first offered one.
-  const [chosen, setChosen] = useState<string | null>(wide ? (items[0]?.id ?? null) : null);
+  const [chosen, setChosen] = useState<string | null>(
+    initial !== null && items.some((item) => item.id === initial) ? initial : wide ? (items[0]?.id ?? null) : null
+  );
   const section = items.some((item) => item.id === chosen) ? chosen : wide ? (items[0]?.id ?? null) : null;
   const tabId = (id: string) => `${prefix}-tab-${id}`;
   const panelId = `${prefix}-panel`;
@@ -748,7 +786,10 @@ export function AssistantSettings({
   templates,
   files,
   size,
-  exports
+  exports,
+  agent,
+  git,
+  tokens
 }: {
   theme?: Theme;
   connections?: ConnectionsData;
@@ -763,9 +804,13 @@ export function AssistantSettings({
   files?: AssistantFiles;
   size?: AssistantSize;
   exports?: AssistantExportDefaults;
+  agent?: AssistantAgentSettings;
+  git?: AssistantGitIdentity;
+  tokens?: AssistantTokens;
 }) {
   const cog = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
+  const [opening, setOpening] = useState<string | null>(null);
   // The page's own clock to begin with, then the browser's as it takes over and again whenever the dialog opens. A
   // sign-in's deadline moves slowly and a timer on every page to watch it would cost more than it is worth, but the
   // first read has to be the page's: `Date.now()` here would be the server's clock in the HTML and the browser's in
@@ -773,6 +818,19 @@ export function AssistantSettings({
   const [now, setNow] = useState(from);
   useEffect(() => {
     setNow(Date.now());
+  }, []);
+  // `?settings=<section>` opens the dialog there, which is where the hub's retired management pages send people. The
+  // parameter is taken out of the address once read, so a reload or the back button does not open it again.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const section = url.searchParams.get(SETTINGS_PARAMETER);
+    if (section === null) {
+      return;
+    }
+    url.searchParams.delete(SETTINGS_PARAMETER);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    setOpening(section);
+    setOpen(true);
   }, []);
   // The appearance the switch starts from. `ThemeSwitch` writes the person's choice to the cookie and to the theme
   // root, not to the server tree, so `theme` keeps the value the page was rendered with and the dialog, which
@@ -822,6 +880,7 @@ export function AssistantSettings({
         onClick={() => {
           setNow(Date.now());
           setShownTheme(shownNow());
+          setOpening(null);
           setOpen(true);
         }}
         // 36px, the size of the composer's own buttons, with the two extra pixels each way taken out of the margin
@@ -854,9 +913,13 @@ export function AssistantSettings({
                 templates,
                 files,
                 size,
-                exports
+                exports,
+                agent,
+                git,
+                tokens
               }}
               onClose={close}
+              initial={opening}
             />,
             themeRoot()
           )

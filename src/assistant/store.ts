@@ -3,6 +3,7 @@ import { clientSupports } from "../agents/client-features.ts";
 import { nameSourceOf } from "../agents/name-source.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
+import { Prisma } from "../store/generated/client.js";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { ModelRoute } from "../viewer/identity.ts";
 import { createVirtualAgent, findVirtualAgent, setDesired, type VirtualAgentRow } from "../virtual-agents/store.ts";
@@ -219,40 +220,58 @@ export interface ConversationListRow extends ConversationRow {
 }
 
 /**
- * The owner's chats on their own computer that have nothing in them: no answer from the session, no prompt the person
- * typed and no message to or from it, only the harness's records of a `/clear` or a finished task, or nothing at all. A session registers
- * the moment it starts, which makes a chat the sidebar would list as a handle with nothing behind it.
+ * Records that the conversations of these agents have something in them, which is what puts a conversation in the
+ * sidebar's list and its search, and announces each one this write was the first to say so of, so an open sidebar
+ * that left it out redraws and lists it. A conversation that already had content is neither written nor announced.
  *
- * A chat on a pod is never one: it is made by the person opening it, and has its messages. The same predicate is
- * written out in `searchConversations`, which cannot call this.
+ * `first_content_at` is set once and never cleared, rather than worked out from what the chat holds, because what it
+ * holds does not last: transcript entries are swept after `RETENTION_DAYS`, and a chat that had only those would
+ * otherwise fall back out of the list a month after the person last used it. It is what the person did in it that
+ * counts, not what is still stored.
+ *
+ * Called in the transaction of every write by an agent that can be a chat's first content: a transcript batch with an
+ * answer, a tool call or a prompt the person typed in it (`appendEntries`); a direct message to or from any of its
+ * agents (`createDirect`), which is also a pod chat's first message; a question its session asked (`recordQuestion`).
+ * The document write and the fork copy set the column in their own statement instead (`writeArtefact`, `acceptFork`).
+ * An announcement the same transaction also makes for another reason, such as the rename a first prompt brings, goes
+ * out once: Postgres folds identical notifications in one transaction into one.
+ *
+ * The conversations are resolved from the agents in the same statement, so a write by an agent in no conversation, or
+ * in one that already has content, is one indexed read that writes nothing. They are locked in id order before they
+ * are written: one direct reaches two conversations, its sender's and its recipient's, and two first directs crossing
+ * between the same two sessions would otherwise each lock one row and wait on the other's. The CTE's `FOR UPDATE`,
+ * which tests `first_content_at IS NULL` again once each lock is granted, is what serialises concurrent writers;
+ * the same test in the update makes it safe on its own.
  */
-async function emptyLocalConversationIds(db: Database, ownerOid: string): Promise<string[]> {
-  const rows = await db.$queryRaw<{ id: string }[]>`
-    SELECT c.id::text AS id
-      FROM assistant_conversation c
-     WHERE c.owner_oid = ${ownerOid}
-       AND c.virtual_agent_id IS NULL
-       AND (NOT EXISTS (SELECT 1
-           FROM agent sa
-           JOIN transcript_entry st ON st.agent_id = sa.id
-          WHERE sa.assistant_conversation_id = c.id
-            AND (st.role = 'assistant'
-                 OR (st.role = 'user'
-                     AND st.message_id IS NULL
-                     AND NOT st.redacted
-                     AND btrim(COALESCE(st.content->>'text', '')) <> ''
-                     AND st.content->>'text' !~ '^\\s*<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>)'))) AND NOT EXISTS (SELECT 1
-           FROM agent sa
-           JOIN message sm ON sm.kind = 'direct' AND (sm.target_agent_id = sa.id OR sm.author_agent_id = sa.id)
-          WHERE sa.assistant_conversation_id = c.id))
+export async function announceFirstContent(db: Database, agentIds: readonly string[]): Promise<void> {
+  if (agentIds.length === 0) {
+    return;
+  }
+  const first = await db.$queryRaw<{ id: string; virtualAgentId: string | null; ownerOid: string }[]>`
+    WITH reached AS (
+      SELECT id
+        FROM assistant_conversation
+       WHERE id IN (SELECT assistant_conversation_id FROM agent WHERE id = ANY(${[...agentIds]}::uuid[]))
+         AND first_content_at IS NULL
+       ORDER BY id
+         FOR UPDATE
+    )
+    UPDATE assistant_conversation c
+       SET first_content_at = now()
+      FROM reached r
+     WHERE c.id = r.id AND c.first_content_at IS NULL
+    RETURNING c.id::text AS id, c.virtual_agent_id::text AS "virtualAgentId", c.owner_oid AS "ownerOid"
   `;
-  return rows.map((row) => row.id);
+  for (const conversation of first) {
+    await announce(db, conversation);
+  }
 }
 
 /**
- * The owner's conversations, most recently active first; only those on `virtualAgentId` when it is given.
+ * The owner's conversations with anything in them (`first_content_at`, see `announceFirstContent`), most recently
+ * active first; only those on `virtualAgentId` when it is given.
  *
- * A conversation with no pod is listed outright. `virtualAgent: { desired: … }` is a relation filter on an optional
+ * A conversation with no pod needs nothing more to be listed. `virtualAgent: { desired: … }` is a relation filter on an optional
  * to-one, so a row with no related virtual agent does not satisfy it at all — reading the pod's state alone would
  * leave every local chat out of the sidebar rather than only the ones whose pod is going.
  *
@@ -261,11 +280,10 @@ async function emptyLocalConversationIds(db: Database, ownerOid: string): Promis
  * chat's own page saying the same thing about the same session.
  */
 export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationListRow[]> {
-  const empty = await emptyLocalConversationIds(db, ownerOid);
   const rows = await db.assistantConversation.findMany({
     where: {
       ownerOid,
-      ...(empty.length === 0 ? {} : { id: { notIn: empty } }),
+      firstContentAt: { not: null },
       OR: [{ virtualAgentId: null }, { virtualAgent: { desired: { not: "deleted" } } }],
       ...(virtualAgentId === undefined ? {} : { virtualAgentId })
     },
@@ -285,15 +303,14 @@ export async function listConversations(db: Database, ownerOid: string, limit = 
  * for the same person — and asked of every one of their conversations rather than of the page the sidebar loaded,
  * which is capped and so could miss the only local chat they have.
  *
+ * Only a chat the list would show counts (`first_content_at`): one left out for having nothing in it would otherwise put a
+ * mark against every pod chat for a reason the person cannot see.
+ *
  * No `virtual_agent` filter, unlike `listConversations`: these rows have no related virtual agent to be deleted.
  */
 export async function hasLocalConversation(db: Database, ownerOid: string): Promise<boolean> {
-  const empty = await emptyLocalConversationIds(db, ownerOid);
   return (
-    (await db.assistantConversation.findFirst({
-      where: { ownerOid, virtualAgentId: null, ...(empty.length === 0 ? {} : { id: { notIn: empty } }) },
-      select: { id: true }
-    })) !== null
+    (await db.assistantConversation.findFirst({ where: { ownerOid, virtualAgentId: null, firstContentAt: { not: null } }, select: { id: true } })) !== null
   );
 }
 
@@ -359,7 +376,8 @@ export interface ConversationMatchRow {
 
 /**
  * The owner's conversations whose title, or one of whose messages, carries every word of `query`; most recently
- * active first, the same order as the sidebar's list.
+ * active first, the same order as the sidebar's list, and only those the list would show (`first_content_at`): a local
+ * chat with nothing in it still carries its session's name as a title, which a search would otherwise find.
  *
  * Searching what was said and not only the titles is the point: a title is the first sixty characters of the first
  * message until someone renames it, so titles alone answer little more than "what did I open this with". Both halves
@@ -419,20 +437,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
         LEFT JOIN virtual_agent v ON v.id = c.virtual_agent_id
         LEFT JOIN agent cur ON cur.id = c.agent_id
        WHERE c.owner_oid = ${ownerOid} AND (v.id IS NULL OR v.desired <> 'deleted')
-         -- Not an empty chat on the person's own computer; see emptyLocalConversationIds, whose predicate this is.
-         AND (c.virtual_agent_id IS NOT NULL OR (EXISTS (SELECT 1
-           FROM agent sa
-           JOIN transcript_entry st ON st.agent_id = sa.id
-          WHERE sa.assistant_conversation_id = c.id
-            AND (st.role = 'assistant'
-                 OR (st.role = 'user'
-                     AND st.message_id IS NULL
-                     AND NOT st.redacted
-                     AND btrim(COALESCE(st.content->>'text', '')) <> ''
-                     AND st.content->>'text' !~ '^\\s*<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>)'))) OR EXISTS (SELECT 1
-           FROM agent sa
-           JOIN message sm ON sm.kind = 'direct' AND (sm.target_agent_id = sa.id OR sm.author_agent_id = sa.id)
-          WHERE sa.assistant_conversation_id = c.id)))
+         AND c.first_content_at IS NOT NULL
     ),
     in_body AS (
       SELECT DISTINCT ON (o.id, q.n) o.id AS conversation_id, q.n, m.body
@@ -521,7 +526,8 @@ export async function createConversation(
       select: SELECT
     });
     const agentId = await createConversationAgent(tx, created);
-    await announce(tx, created);
+    // Not announced. Nothing is in it, so no list shows it, and the only other listener, the pod's sessions stream,
+    // reads a wake from the event, which this conversation has none of until one is asked for.
     return { ...toRow(created), agentId };
   });
 }
@@ -533,6 +539,9 @@ export async function createConversation(
  * A sibling of `createConversation` rather than a branch of it, because the two share none of their steps. That one
  * needs the person's assistant and creates an agent for the pod to start a session as; here the agent is the session
  * that is already running on somebody's laptop, so there is no pod to find and nothing to create.
+ *
+ * Not announced: the sidebar is the only listener for a chat with no pod, and it lists the chat only once something
+ * is in it, which this has not.
  */
 async function createLocalConversation(db: Database, session: { ownerOid: string; agentId: string; title: string | null }): Promise<ConversationRow> {
   const created = await db.assistantConversation.create({
@@ -548,7 +557,6 @@ async function createLocalConversation(db: Database, session: { ownerOid: string
     },
     select: SELECT
   });
-  await announce(db, created);
   return toRow(created);
 }
 
@@ -682,31 +690,43 @@ export async function linkSession(
 }
 
 /**
+ * Whether an agent row, as `alias`, is a session on somebody's own computer that should be given a chat: nobody's
+ * pod, in no conversation, and not one whose chat the person removed (`chat_removed_at`, see `deleteConversation`).
+ * `linkLocalSession` holds every link to it; the registration and the heartbeat read it to skip that call when it
+ * could do nothing. `alias` is always a literal of the caller's.
+ */
+export function needsLocalChatSql(alias: string): Prisma.Sql {
+  const agent = Prisma.raw(alias);
+  return Prisma.sql`(${agent}.virtual_agent_id IS NULL AND ${agent}.assistant_conversation_id IS NULL AND ${agent}.chat_removed_at IS NULL)`;
+}
+
+/**
  * A laptop session's conversation, created and linked to the session's own agent; called inside the registration's
- * transaction. Answers the conversation, or `undefined` when the agent was already in one.
+ * or the heartbeat's transaction. Answers the conversation, or `undefined` when the agent needs none
+ * (`needsLocalChatSql`): already in one, or a session whose chat the person removed, which is never given another.
  *
  * Named after `linkSession` and deliberately not it: that one sets `sessionState` to `live` and clears the wake,
  * which is a pod's supervisor reporting that it has started the session the hub asked for. A laptop has no
  * supervisor and the hub asked for nothing, so neither field means anything here and both stay null.
  *
- * The link is a conditional update rather than a column of the registration's upsert, whose `SET` list leaves
- * `assistant_conversation_id` alone — that is what lets this link survive a re-registration, which sends no
- * conversation of any kind. Zero rows means another transaction linked the agent first, so this conversation goes and
- * theirs stands; the registration itself is unaffected either way. The announcement already made for the one removed
- * redraws a sidebar that then lists nothing new, which is cheaper than holding the announcement back for a case the
- * caller's lock already rules out.
+ * The agent's row is locked and checked before anything is created, so nothing is made that cannot be linked, and
+ * the link then holds for the rest of the transaction. The link is a column of its own rather than of the
+ * registration's upsert, whose `SET` list leaves `assistant_conversation_id` and `chat_removed_at` alone — that is what
+ * lets the link, and a removal, survive a re-registration, which sends no conversation of any kind.
+ *
+ * The chat starts empty, whatever the session has said before, and nothing announces it: only content arriving after
+ * the link puts it in the sidebar (`announceFirstContent`). A session whose empty chat the local sweep collected is
+ * linked a new one on its next heartbeat, which stays out of the list until the session next says something.
  */
 export async function linkLocalSession(db: Database, session: { ownerOid: string; agentId: string; name: string }): Promise<ConversationRow | undefined> {
-  const created = await createLocalConversation(db, { ownerOid: session.ownerOid, agentId: session.agentId, title: localTitle(session.name) });
-  const linked = await db.$executeRaw`
-    UPDATE agent
-       SET assistant_conversation_id = ${created.id}::uuid
-     WHERE id = ${session.agentId}::uuid AND assistant_conversation_id IS NULL
+  const [needs] = await db.$queryRaw<{ id: string }[]>`
+    SELECT a.id::text AS id FROM agent a WHERE a.id = ${session.agentId}::uuid AND ${needsLocalChatSql("a")} FOR UPDATE
   `;
-  if (linked === 0) {
-    await db.assistantConversation.delete({ where: { id: created.id } });
+  if (needs === undefined) {
     return undefined;
   }
+  const created = await createLocalConversation(db, { ownerOid: session.ownerOid, agentId: session.agentId, title: localTitle(session.name) });
+  await db.$executeRaw`UPDATE agent SET assistant_conversation_id = ${created.id}::uuid WHERE id = ${session.agentId}::uuid`;
   return created;
 }
 
@@ -744,10 +764,9 @@ async function nameLocalChat(
  * transcript upload inside its transaction — the moment the hub learns what the person typed — and does nothing at
  * all for a chat with a pod, or for one whose owner has renamed it in the hub.
  *
- * The upload only calls it for an agent whose row it has already read as a local chat's, and only for a batch
- * carrying a prompt that could name one, so the read below is not paid by the board sessions and pod chats this
- * can do nothing for. Both conditions are checked again here: the caller's are what make this cheap, and these are
- * what make it right.
+ * The upload calls it for every batch carrying a prompt that could name a chat, whatever session sent it, so every
+ * condition is checked here: the agent's conversation is read in this transaction, and a board session with no chat,
+ * a chat on a pod, or one the person renamed in the hub ends the call after that one read.
  *
  * Two derivations, strongest first:
  *
@@ -896,22 +915,42 @@ export async function setProduct(prisma: PrismaClient, ownerOid: string, id: str
  * its deliveries and its subscriptions — along with every direct message to or from it, since those are the words of
  * the chat. The announcement tells the pod to stop the session.
  *
- * A conversation with no pod is detached instead: `agent.assistant_conversation_id` is cleared and the row then
- * deleted, and no message is touched. Its agent is a session running on the person's own laptop and one of their
- * ordinary sessions — on the hub roster, taggable in anyone's post, holding the transcript it
- * uploaded, its topic subscriptions, its questions and a direct thread that includes board messages with colleagues
- * that have nothing to do with this chat. Deleting the conversation row without clearing the column first would
- * cascade through all of that, and the session would then 404, re-register as a brand-new agent and bring the chat
- * back. Removing a chat is about the chat; the session on the laptop is left exactly as it was.
+ * A conversation with no pod is detached instead (`detachLocalSessions`, as the person removing it), then deleted,
+ * taking its document, exports, shares and fork offers with it, and no message is touched. Its agent is a session
+ * running on the person's own laptop and one of their ordinary sessions — on the hub roster, taggable in anyone's
+ * post, holding the transcript it uploaded, its topic subscriptions, its questions and a direct thread that includes
+ * board messages with colleagues that have nothing to do with this chat. Deleting the conversation row without
+ * clearing the column first would cascade through all of that. Removing a chat is about the chat; the session on the
+ * laptop is left exactly as it was, except that it is never given a chat again, and a new session is a new agent that
+ * gets a chat of its own.
+ *
+ * All in one transaction holding the conversation's row lock, which the local sweep also takes, skipping a row it
+ * cannot lock. The sessions are read before the lock is waited on: if the sweep held it and collected the chat, the
+ * row is gone by the time the lock is granted, and those sessions — detached by the sweep, and so due a fresh chat —
+ * are marked here so the person's removal still holds. A chat already gone before the person acted has no sessions
+ * left to read and is not found.
  */
 export async function deleteConversation(prisma: PrismaClient, ownerOid: string, id: string): Promise<void> {
-  const conversation = await findConversation(prisma, ownerOid, id);
-  if (conversation === undefined) {
+  if (!isUuid(id)) {
     throw new ConversationNotFound();
   }
-  const pod = hasPod(conversation);
   await prisma.$transaction(async (tx) => {
-    if (pod) {
+    const sessions = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id::text AS id FROM agent WHERE assistant_conversation_id = ${id}::uuid AND owner_oid = ${ownerOid} AND virtual_agent_id IS NULL
+    `;
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT id::text AS id FROM assistant_conversation WHERE id = ${id}::uuid FOR UPDATE`;
+    if (locked === undefined && sessions.length > 0) {
+      await markChatRemoved(
+        tx,
+        sessions.map((session) => session.id)
+      );
+      return;
+    }
+    const conversation = await findConversation(tx, ownerOid, id);
+    if (conversation === undefined) {
+      throw new ConversationNotFound();
+    }
+    if (hasPod(conversation)) {
       await tx.$executeRaw`
         DELETE FROM message
          WHERE kind = 'direct'
@@ -919,11 +958,37 @@ export async function deleteConversation(prisma: PrismaClient, ownerOid: string,
                 OR author_agent_id IN (SELECT id FROM agent WHERE assistant_conversation_id = ${id}::uuid))
       `;
     } else {
-      await tx.$executeRaw`UPDATE agent SET assistant_conversation_id = NULL WHERE assistant_conversation_id = ${id}::uuid`;
+      await detachLocalSessions(tx, id, { removedByPerson: true });
     }
     await tx.assistantConversation.delete({ where: { id } });
     await announce(tx, conversation);
   });
+}
+
+/**
+ * Clears the cascading link of a conversation with no pod from every agent in it, so the row can be deleted without
+ * taking the sessions' transcripts, deliveries, subscriptions and messages with it. Called in the transaction that
+ * deletes the row.
+ *
+ * `removedByPerson` also sets `chat_removed_at`, so the session is never linked another chat (`needsLocalChatSql`).
+ * The local sweep detaches without it: the person removed nothing, and a session that comes back is given a chat
+ * again.
+ */
+export async function detachLocalSessions(db: Database, conversationId: string, options: { removedByPerson: boolean }): Promise<void> {
+  await db.$executeRaw`
+    UPDATE agent
+       SET assistant_conversation_id = NULL,
+           chat_removed_at = CASE WHEN ${options.removedByPerson}::boolean THEN now() ELSE chat_removed_at END
+     WHERE assistant_conversation_id = ${conversationId}::uuid
+  `;
+}
+
+/** Marks sessions the local sweep detached from a chat the person removed in the same moment; see `deleteConversation`. */
+async function markChatRemoved(db: Database, agentIds: readonly string[]): Promise<void> {
+  await db.$executeRaw`
+    UPDATE agent SET chat_removed_at = now()
+     WHERE id = ANY(${[...agentIds]}::uuid[]) AND assistant_conversation_id IS NULL AND virtual_agent_id IS NULL
+  `;
 }
 
 const EMPTY_ARTEFACT: Artefact = { title: null, markdown: "", version: 0, updatedBy: null, updatedAt: null };
@@ -971,6 +1036,9 @@ export class ArtefactConflict extends Error {
  * Writes the conversation's artefact if `baseVersion` is still its version, and answers the new one. Otherwise
  * nothing is written and `ArtefactConflict` carries what is there now, for the writer to merge into. A title left
  * `null` keeps the current one.
+ *
+ * A document is something in the chat, so the first one records its first content (`announceFirstContent`) in the same
+ * statement; the announcement every write makes is what then lists it.
  */
 export async function writeArtefact(
   prisma: PrismaClient,
@@ -986,6 +1054,7 @@ export async function writeArtefact(
              artefact_version = artefact_version + 1,
              artefact_updated_by = ${write.by},
              artefact_updated_at = ${now},
+             first_content_at = COALESCE(first_content_at, ${now}),
              updated_at = ${now}
        WHERE id = ${conversation.id}::uuid AND artefact_version = ${write.baseVersion}::int
       RETURNING artefact_version AS version

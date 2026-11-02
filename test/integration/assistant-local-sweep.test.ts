@@ -8,8 +8,9 @@
 // every message to or from it — which was the worst bug on this branch.
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LOCAL_CONVERSATION_RETENTION_HOURS, startLocalConversationSweep, sweepLocalConversations } from "../../src/assistant/local-sweep.ts";
-import { createConversation, ensureAssistant, linkLocalSession } from "../../src/assistant/store.ts";
+import { createConversation, ensureAssistant, linkLocalSession, writeArtefact } from "../../src/assistant/store.ts";
 import { createDirect, createPost } from "../../src/messages/store.ts";
+import { recordQuestion } from "../../src/questions/store.ts";
 import { decodeEvent, HUB_CHANNEL } from "../../src/realtime/events.ts";
 import { subscribe } from "../../src/topics/store.ts";
 import { connect, insertAgent, insertUser, person, prisma, resetDatabase } from "./database.ts";
@@ -110,9 +111,25 @@ describe("sweepLocalConversations", () => {
 
   it("should leave a chat whose session asked a question, which the thread shows as a card", async () => {
     const chat = await laptopChat("alices-laptop", STALE);
-    await prisma.agentQuestion.create({
-      data: { agentId: chat.agentId, sessionId: chat.sessionId, toolUseId: "t1", questions: [{ question: "which branch?", options: [] }], askedAt: STALE }
-    });
+    await recordQuestion(
+      prisma,
+      { id: chat.agentId, ownerOid: ALICE.oid },
+      {
+        session_id: chat.sessionId,
+        tool_use_id: "t1",
+        questions: [
+          {
+            question: "Which branch?",
+            header: "Branch",
+            options: [
+              { label: "main", description: "The default." },
+              { label: "other", description: "Another." }
+            ],
+            multiSelect: false
+          }
+        ]
+      }
+    );
 
     expect(await sweepLocalConversations(prisma)).toEqual({ collected: 0 });
 
@@ -122,7 +139,11 @@ describe("sweepLocalConversations", () => {
   // A person can write a local chat's document themselves: it is a hub row, and `saveArtefact` works there.
   it("should leave a chat whose document was written, even with nothing said in it", async () => {
     const chat = await laptopChat("alices-laptop", STALE);
-    await prisma.assistantConversation.update({ where: { id: chat.conversationId }, data: { artefactVersion: 1, artefactMarkdown: "# what I found" } });
+    await writeArtefact(
+      prisma,
+      { id: chat.conversationId, virtualAgentId: null, ownerOid: ALICE.oid },
+      { title: null, markdown: "# what I found", baseVersion: 0, by: "user" }
+    );
 
     expect(await sweepLocalConversations(prisma)).toEqual({ collected: 0 });
 

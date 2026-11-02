@@ -195,11 +195,9 @@ describe("proxy hub address redirect", () => {
     ["/c", "/hub/c"],
     ["/channels/new", "/hub/channels/new"],
     ["/m/42", "/hub/m/42"],
-    ["/settings/credentials", "/hub/settings/credentials"],
     ["/topics", "/hub/topics"],
     ["/topics/pcs-api", "/hub/topics/pcs-api"],
-    ["/virtual", "/hub/virtual"],
-    ["/virtual/0f8a", "/hub/virtual/0f8a"]
+    ["/virtual/0f8a/ports/3000", "/hub/virtual/0f8a/ports/3000"]
   ])("should redirect the bare address %s to %s", async (from, to) => {
     const response = await proxy(askWith("GET", from));
 
@@ -227,6 +225,35 @@ describe("proxy hub address redirect", () => {
 
     expect(response.status).toBe(308);
     expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant/shared");
+  });
+
+  it.each([
+    ["/virtual", "/assistant?settings=assistant"],
+    ["/hub/virtual", "/assistant?settings=assistant"],
+    ["/virtual/0f8a", "/assistant?settings=assistant"],
+    ["/hub/virtual/0f8a", "/assistant?settings=assistant"],
+    ["/settings/credentials", "/assistant?settings=credentials"],
+    ["/hub/settings/credentials", "/assistant?settings=credentials"]
+  ])("should redirect the retired %s to %s in one hop, dropping its query, when virtual agents are on", async (from, to) => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+
+    const response = await proxy(askWith("GET", `${from}?tab=1`));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(`https://agent-hub.example${to}`);
+  });
+
+  it.each(["/hub/virtual", "/hub/settings/credentials"])("should redirect the retired %s to the hub when virtual agents are off", async (from) => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
+
+    expect((await proxy(askWith("GET", from))).headers.get("location")).toBe("https://agent-hub.example/hub");
+  });
+
+  // The viewer's ticket route is under `/hub/virtual/{id}`, and is still served.
+  it("should leave the viewer's ticket route alone when virtual agents are on", async () => {
+    vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "true");
+
+    expect((await proxy(askWith("GET", "/hub/virtual/0f8a/ports/3000"))).status).toBe(200);
   });
 
   it("should redirect before the sign-in check, so the login's redirect= carries the new address", async () => {

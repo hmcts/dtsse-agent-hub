@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { findAgent, heartbeat, listMessageableAgents, registerAgent } from "../../src/agents/store.ts";
-import { visibleAgents } from "../../src/agents/views.ts";
 import { POST as upload } from "../../src/app/api/agent/[agentId]/transcript/route.ts";
 import { GET as conversation } from "../../src/app/api/ui/agents/[id]/transcript/route.ts";
 import { GET as stream } from "../../src/app/api/ui/stream/route.ts";
@@ -14,6 +13,7 @@ import type { ConversationPage } from "../../src/transcripts/conversation.ts";
 import { MAX_ENTRY_CONTENT_BYTES } from "../../src/transcripts/limits.ts";
 import { startTranscriptSweep, sweepTranscripts } from "../../src/transcripts/sweep.ts";
 import { CONVERSATION_PAGE_SIZE } from "../../src/transcripts/views.ts";
+import { agentAddress } from "../../src/web/data.ts";
 import { connect, insertAgent, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { call, jsonOf } from "./routes.ts";
 import { frames } from "./sse-reader.ts";
@@ -273,7 +273,7 @@ describe("GET /api/ui/agents/{id}/transcript", () => {
 
 /**
  * A conversation of a session on somebody's own laptop, which has no pod. Its agent is one of the owner's ordinary
- * sessions: on their roster, in their messageable list, and taggable by anyone in a post. A pod conversation's
+ * sessions: in their messageable list, and taggable by anyone in a post. A pod conversation's
  * agent, the HMCTS Assistant, is in none of those places — not even for its owner, who reaches that chat through
  * the Assistant — and is here as the contrast.
  *
@@ -297,13 +297,15 @@ describe("an agent in a conversation", () => {
     await prisma.agent.update({ where: { id: pod }, data: { assistantConversationId: chat.id, virtualAgentId: assistant.id } });
   });
 
-  it("should keep a local session on its owner's roster and leave the pod conversation's agent off it", async () => {
-    const mine = await visibleAgents(prisma, ALICE.oid);
+  it("should send the owner to each agent's chat, the pod's and the laptop's alike, when its hub address is opened", async () => {
+    const chatOf = async (id: string) =>
+      (await prisma.agent.findUniqueOrThrow({ where: { id }, select: { assistantConversationId: true } })).assistantConversationId;
 
-    expect(mine.map((card) => card.id)).toContain(local);
-    expect(mine.map((card) => card.id)).not.toContain(pod);
-    // Neither is anyone else's to see, whichever kind it is.
-    expect((await visibleAgents(prisma, BOB.oid)).map((card) => card.id)).toEqual([]);
+    expect(await agentAddress({ ...ALICE, tid: "dev" }, pod)).toEqual({ kind: "chat", conversationId: await chatOf(pod) });
+    expect(await agentAddress({ ...ALICE, tid: "dev" }, local)).toEqual({ kind: "chat", conversationId: await chatOf(local) });
+    // Neither is anyone else's to be sent to, whichever kind it is.
+    expect(await agentAddress({ ...BOB, tid: "dev" }, pod)).toEqual({ kind: "none" });
+    expect(await agentAddress({ ...BOB, tid: "dev" }, local)).toEqual({ kind: "none" });
   });
 
   // A direct message is between one person's own sessions, so the sender here is another agent of Alice's. The pod

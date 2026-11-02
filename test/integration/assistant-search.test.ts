@@ -14,6 +14,7 @@ import {
 import { type ConversationMark, type ConversationMatch, conversationGroups, conversationMatches } from "../../src/assistant/views.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { byCodePoint } from "../../src/topics/slug.ts";
+import { appendEntries } from "../../src/transcripts/store.ts";
 import { setDesired } from "../../src/virtual-agents/store.ts";
 import { insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
 import { jsonOf } from "./routes.ts";
@@ -97,18 +98,21 @@ async function localChat(title: string, entries: readonly { role: "user" | "assi
   const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });
   const agentId = await conversationAgent(prisma, conversation);
   await renameConversation(prisma, ALICE.oid, conversation.id, title);
-  for (const [index, entry] of entries.entries()) {
-    await prisma.transcriptEntry.create({
-      data: {
-        agentId,
-        sessionId: "s",
-        entryKey: `k${index}`,
-        role: entry.role,
-        content: { text: entry.text },
-        occurredAt: new Date(Date.UTC(2026, 9, 30, 10, 0, index))
-      }
-    });
-  }
+  // Through the upload, which is what records a chat's first content; a pod chat's title is left alone by it.
+  await appendEntries(
+    prisma,
+    { id: agentId, ownerOid: ALICE.oid },
+    "s",
+    entries.map((entry, index) => ({
+      key: `k${index}`,
+      role: entry.role,
+      content: { text: entry.text },
+      truncated: false,
+      redacted: false,
+      message_id: null,
+      occurred_at: new Date(Date.UTC(2026, 9, 30, 10, 0, index))
+    }))
+  );
   await withoutPod(conversation);
   return conversation;
 }

@@ -111,6 +111,51 @@ function harnessTurn(raw: string, truncated: boolean): { text: string; failed: b
   }));
 }
 
+/**
+ * What a local chat shows for one of its user turns: the notices of a turn the harness wrote (none for a silent one),
+ * the words the person typed, or `undefined` for a turn that shows nothing at all — redacted, empty, or nothing but
+ * an IDE's editor context, which is put in front of a prompt and says nothing on its own.
+ */
+function localUserTurn(content: unknown, truncated: boolean): { notices: { text: string; failed: boolean }[] } | { said: string } | undefined {
+  // A prompt whose words were redacted is left out rather than shown as an empty bubble, as a wordless assistant
+  // entry is: `textOf` answers nothing for the `{redacted}` content such an entry keeps.
+  const typed = textOf(content);
+  if (typed === undefined) {
+    return undefined;
+  }
+  const text = withoutIdeContext(typed);
+  const notices = harnessTurn(text, truncated);
+  if (notices !== undefined) {
+    return { notices };
+  }
+  return text === "" ? undefined : { said: text };
+}
+
+/**
+ * Whether a transcript entry shows in a local chat's thread as something other than a notice: a bubble of the
+ * person's or the session's words, or a tool row. The one rule for "something is in this chat" as far as a
+ * transcript can say, which is what puts a chat on the person's own computer in their sidebar
+ * (`announceFirstContent` in store.ts) — so a chat is listed exactly when its thread would show more than the
+ * harness's own lines.
+ *
+ * A shell command run with `!`, a hook's output and an interrupted request are bubbles here and so count, although none
+ * of them can name a chat (`typedText` in harness-turn.ts): a chat is about what was typed, but it holds what it
+ * shows. A tool result shows nothing of its own; the call it answers is the row.
+ */
+export function shownInThread(entry: { role: string; content: unknown; truncated: boolean }): boolean {
+  if (entry.role === "tool_use") {
+    return true;
+  }
+  if (entry.role === "assistant") {
+    return textOf(entry.content) !== undefined;
+  }
+  if (entry.role === "user") {
+    const turn = localUserTurn(entry.content, entry.truncated);
+    return turn !== undefined && "said" in turn;
+  }
+  return false;
+}
+
 /** A tool call the session made, with what came back. */
 interface ToolCall {
   key: string;
@@ -239,19 +284,14 @@ export function threadItems(
         thread.push({ type: "assistant", key: item.key, at: item.at, text });
       }
     } else if (local && item.entry.role === "user") {
-      // A prompt whose words were redacted is left out rather than shown as an empty bubble, as a wordless assistant
-      // entry is: `textOf` answers nothing for the `{redacted}` content such an entry keeps.
-      const typed = textOf(item.entry.content);
-      // Without the editor context an IDE integration puts in front of the words; a prompt of nothing else says nothing.
-      const text = typed === undefined ? undefined : withoutIdeContext(typed);
-      const harness = text === undefined ? undefined : harnessTurn(text, item.entry.truncated);
-      if (harness !== undefined) {
-        for (const [index, notice] of harness.entries()) {
+      const turn = localUserTurn(item.entry.content, item.entry.truncated);
+      if (turn !== undefined && "notices" in turn) {
+        for (const [index, notice] of turn.notices.entries()) {
           thread.push({ type: "notice", key: `${item.key}:${index}`, at: item.at, text: notice.text, failed: notice.failed });
         }
-      } else if (text !== undefined && text !== "") {
+      } else if (turn !== undefined) {
         // No delivery and no attachments: this is what was typed at the laptop, not a message the hub carried there.
-        thread.push({ type: "user", key: item.key, at: item.at, text, delivery: null, attachments: [] });
+        thread.push({ type: "user", key: item.key, at: item.at, text: turn.said, delivery: null, attachments: [] });
       }
     }
   }

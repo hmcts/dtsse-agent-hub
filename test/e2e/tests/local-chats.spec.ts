@@ -45,7 +45,7 @@ function at(second: number): string {
 
 /**
  * One turn of a developer's own session as its client uploads it: what they typed, the one tool call it made, what
- * that call answered, and what it told them. `sampleTranscript` is not this — it is built for the hub's agent page
+ * that call answered, and what it told them. `sampleTranscript` is not this — it is built for the accessibility audit
  * and carries a redacted call and a failed result, where these specs need a single plainly named call whose output
  * is a string nothing else on the page could be.
  */
@@ -146,15 +146,9 @@ test.describe("local chats @regression", () => {
     const context = await asPersona(browser, persona, baseURL!);
     try {
       const page = await context.newPage();
-      // `/hub/virtual` is behind the same flag as the Assistant, and is read first deliberately: opening `/assistant`
-      // creates the person their own assistant, so after that visit they have one. What this asserts is that
-      // registering a session on a laptop created none — the chat it made has no pod and asked for no pod.
-      const virtual = await page.goto("/hub/virtual");
-      test.skip(virtual?.status() === 404, "virtual agents are off on this deployment");
-      await expect(page.getByText("You have no virtual agents.")).toBeVisible();
-
       await setAgentStatus(request, persona, agent!, "busy");
-      await page.goto("/assistant");
+      const response = await page.goto("/assistant");
+      test.skip(response?.status() === 404, ASSISTANT_OFF);
       await dismissGettingReady(page);
       await openLocalChat(page, name);
 
@@ -316,6 +310,9 @@ test.describe("local chats @regression", () => {
       await dismissGettingReady(page);
       // By its first prompt: the upload above renamed the chat from the name its session registered under.
       const path = await openLocalChat(page, words.prompt);
+      // The hub shows no agents, so the session's hub address is this chat for as long as there is one.
+      await page.goto(`/hub/agents/${agent}`);
+      await page.waitForURL(new RegExp(`${path}$`));
 
       // The chat's own menu, named so it is not the sidebar row's.
       await page.getByRole("button", { name: "Chat options" }).click();
@@ -330,10 +327,11 @@ test.describe("local chats @regression", () => {
       // its subscriptions and every direct message to or from it, including board messages with colleagues.
       //
       // Its agent still answers — an upload to an agent that had gone would be a 404 — and still holds what it had
-      // sent, which is why re-sending those entries is accepted as nothing new rather than stored again.
+      // sent, which is why re-sending those entries is accepted as nothing new rather than stored again. With no chat
+      // left, its hub address goes to the hub's home.
       expect(await uploadTranscript(request, persona, agent!, entries)).toBe(0);
-      expect((await page.goto(`/hub/agents/${agent}`))?.status()).toBe(200);
-      await expect(page.getByRole("list", { name: "Conversation" }).getByText(words.prompt)).toBeVisible();
+      await page.goto(`/hub/agents/${agent}`);
+      expect(new URL(page.url()).pathname).toBe("/hub");
     } finally {
       await context.close();
     }

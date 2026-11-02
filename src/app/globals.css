@@ -7,10 +7,6 @@
 @source "../web/**/*.{ts,tsx}";
 
 @theme {
-  /* An agent's status dot: idle a filled green dot, busy a hollow green ring, offline a filled grey dot. */
-  --color-status-idle: #2bac76;
-  --color-status-offline: #8b8d91;
-
   --color-accent: #1d9bd1;
 
   /* Slack's dark theme: a darker rail for the sidebar, the message pane a shade lighter. */
@@ -44,10 +40,10 @@
   }
 }
 
-/* A session mid-turn, on the hub's busy ring and the Assistant's working badge alike. Three cycles, so it stops within
- * five seconds of the status changing (WCAG 2.2.2) and rests on the static ring or badge, which carry the state
- * without it; it runs again whenever the class is re-applied, as it is on the next change to busy. It dims only to 0.6
- * so the green keeps its contrast, and it is off entirely for anyone who asks for reduced motion. */
+/* The Assistant's working badge, on a session mid-turn. Three cycles, so it stops within five seconds of the status
+ * changing (WCAG 2.2.2) and rests on the static badge, which carries the state without it; it runs again whenever the
+ * class is re-applied, as it is on the next change to working. It dims only to 0.6 so the green keeps its contrast,
+ * and it is off entirely for anyone who asks for reduced motion. */
 @utility status-pulse {
   animation: status-pulse 1.6s ease-in-out 3;
 }

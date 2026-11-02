@@ -7,17 +7,20 @@ import type { ConnectionsData } from "@/assistant/connections";
 import type { DateGroup } from "@/assistant/grouping";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
+import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
 import { ChatMark } from "@/components/assistant/ChatMark";
 import { ChatMenu } from "@/components/assistant/ChatMenu";
 import type { AssistantClaudeMd } from "@/components/assistant/ClaudeMdSettings";
 import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
+import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
 import type { AssistantSize } from "@/components/assistant/SizeSettings";
 import type { AssistantTemplates } from "@/components/assistant/TemplateSettings";
+import type { AssistantTokens } from "@/components/assistant/TokenSettings";
 import { useResizableWidth } from "@/components/assistant/useResizableWidth";
 import type { ActionResult } from "@/web/action";
 
@@ -107,6 +110,9 @@ export function AssistantShell({
   files,
   size,
   exports,
+  agent,
+  git,
+  tokens,
   actions,
   children
 }: {
@@ -134,6 +140,12 @@ export function AssistantShell({
   size?: AssistantSize;
   /** Where the person's documents go by default, which the footer's settings shows and edits. */
   exports?: AssistantExportDefaults;
+  /** The virtual agent the Assistant runs on, which the footer's settings renames and restarts and lists the web servers of. */
+  agent?: AssistantAgentSettings;
+  /** The git identity the person's agents commit as, which the footer's settings shows and changes. */
+  git?: AssistantGitIdentity;
+  /** How the footer's settings replaces and removes a pasted token. */
+  tokens?: AssistantTokens;
   /** Given, every row offers an options menu; left out, the rows are links alone. */
   actions?: ConversationActions;
   children: React.ReactNode;
@@ -276,6 +288,7 @@ export function AssistantShell({
                           <ChatMenu
                             title={item.title}
                             shareHref={`/assistant/${item.id}?share=1`}
+                            local={item.mark?.where === "computer"}
                             forkHref={`/assistant/${item.id}?fork=1`}
                             label={`Options for ${item.title}`}
                             // The trigger appears when the row is hovered, but a keyboard or touch user never
@@ -338,6 +351,9 @@ export function AssistantShell({
               files={files}
               size={size}
               exports={exports}
+              agent={agent}
+              git={git}
+              tokens={tokens}
             />
           </div>
           {/* Dragging stops at the narrowest the titles stay readable at; collapsing the sidebar is the button's job,
