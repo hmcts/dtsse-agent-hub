@@ -4,6 +4,7 @@ import {
   defaultUi,
   homeFor,
   movedHubPath,
+  movedPortTicketPath,
   NO_AGENT,
   retiredAgentPath,
   retiredPath,
@@ -97,6 +98,13 @@ describe("retiredPath", () => {
     expect(retiredPath(pathname, true)).toBe("/assistant?settings=sharing");
   });
 
+  it.each(["/hub/virtual/0f8a/ports/3000", "/virtual/0f8a/ports/3000", "/hub/settings", "/hub/virtualfoo"])(
+    "should leave %s alone when it is not a retired page, the addresses movedPortTicketPath answers for among them",
+    (pathname) => {
+      expect(retiredPath(pathname, true)).toBeUndefined();
+    }
+  );
+
   it("should name the Sharing section when building the address shared chats are managed at", () => {
     expect(SHARED_CHATS).toBe("/assistant?settings=sharing");
   });
@@ -125,6 +133,48 @@ describe("retiredPath", () => {
     "/hub/virtualfoo"
   ])("should leave %s alone when it is not an address that went, the viewer's ticket route among them", (pathname) => {
     expect(retiredPath(pathname, true)).toBeUndefined();
+  });
+});
+
+describe("movedPortTicketPath", () => {
+  const ID = "0f8a6a1e-0000-4000-8000-000000000001";
+
+  it.each([
+    [`/hub/virtual/${ID}/ports/3000`, `/assistant/ports/${ID}/3000`],
+    [`/virtual/${ID}/ports/3000`, `/assistant/ports/${ID}/3000`],
+    [`/hub/virtual/${ID.toUpperCase()}/ports/65535`, `/assistant/ports/${ID}/65535`],
+    [`/hub/virtual/${ID}/ports/1024`, `/assistant/ports/${ID}/1024`]
+  ])("should send %s to %s when it names an agent's id and a port", (pathname, to) => {
+    expect(movedPortTicketPath(pathname)).toEqual({ kind: "moved", to });
+  });
+
+  // The redirect is permanent, so anything put into its target unchecked would be cached as a way to anywhere.
+  it.each([
+    `/hub/virtual/../ports/3000`,
+    `/hub/virtual/%2e%2e/ports/3000`,
+    `/hub/virtual/0f8a/ports/3000`,
+    `/hub/virtual/${ID}/ports/..`,
+    `/hub/virtual/${ID}/ports/%2e%2e`,
+    `/hub/virtual/${ID}/ports/03000`,
+    `/hub/virtual/${ID}/ports/1023`,
+    `/hub/virtual/${ID}/ports/65536`,
+    `/hub/virtual/${ID}/ports/3000/docs`,
+    `/hub/virtual/${ID}/ports/3000/../../../hub/topics`,
+    `/hub/virtual/${ID}/ports`,
+    `/virtual/${ID}/ports/`
+  ])("should answer not found for %s when it does not name an agent's id and a port", (pathname) => {
+    expect(movedPortTicketPath(pathname)).toEqual({ kind: "not-found" });
+  });
+
+  it.each([
+    "/hub/virtual",
+    "/hub/virtual/0f8a",
+    `/hub/virtual/${ID}/portsfoo/3000`,
+    `/hub/virtual/${ID}/x/ports/3000`,
+    `/assistant/ports/${ID}/3000`,
+    `/hubx/virtual/${ID}/ports/3000`
+  ])("should leave %s alone when it is not under the old ticket route", (pathname) => {
+    expect(movedPortTicketPath(pathname)).toBeUndefined();
   });
 });
 

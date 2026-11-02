@@ -1,11 +1,11 @@
-import { canManageExportDefaults } from "../access/rules.ts";
+import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import type { Database } from "../store/prisma.ts";
 import { checkConfluenceDefault, checkJiraDefault, type ExportDefaults, exportDefaultsOf } from "./export-defaults.ts";
 
 /**
- * Each person's own export defaults, one row each. `canManageExportDefaults` is asked on every call, as
- * `canManageTemplate` is for templates, and the `owner_oid` in every query is what makes another person's unreachable.
+ * Each person's own export defaults, one row each. `isOwner` is asked on every call, as it is for templates, and the
+ * `owner_oid` in every query is what makes another person's unreachable.
  */
 
 export interface DefaultsTarget {
@@ -14,7 +14,7 @@ export interface DefaultsTarget {
 }
 
 function allow({ actorOid, ownerOid }: DefaultsTarget): void {
-  if (!canManageExportDefaults(actorOid, ownerOid)) {
+  if (!isOwner(actorOid, { ownerOid })) {
     throw new HttpError(403, "you can only change your own defaults");
   }
 }

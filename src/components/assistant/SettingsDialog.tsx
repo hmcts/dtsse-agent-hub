@@ -878,10 +878,13 @@ export function AssistantSettings({
     setOpen(false);
     cog.current?.focus();
     // Replaced rather than navigated, which Next keeps `useSearchParams` in step with, so a reload does not open the
-    // dialog again. The parameter is cut out as text, so the rest of the query keeps the encoding it came with.
+    // dialog again. The parameter is cut out as text, so the rest of the query keeps the encoding it came with. A `null`
+    // state, not the current one: Next's patched `replaceState` leaves a state carrying its `__NA` marker to itself, so
+    // the router would keep the parameter, the same link would not open the dialog again and the next refresh would put
+    // it back.
     if (addressed !== null) {
       const { pathname, search, hash } = window.location;
-      window.history.replaceState(window.history.state, "", `${pathname}${withoutSettingsParameter(search)}${hash}`);
+      window.history.replaceState(null, "", `${pathname}${withoutSettingsParameter(search)}${hash}`);
     }
   }
 

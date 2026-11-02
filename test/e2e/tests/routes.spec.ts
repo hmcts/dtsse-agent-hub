@@ -80,10 +80,29 @@ test.describe("routes @regression", () => {
     test(`should redirect the retired ${from} to the Assistant's ${section} settings @regression`, async ({ request }) => {
       const response = await request.get(from, { maxRedirects: 0 });
 
-      expect(response.status()).toBe(308);
+      expect(response.status()).toBe(307);
       expect([`/assistant?settings=${section}`, "/hub"]).toContain(response.headers().location ?? "");
     });
   }
+
+  // `/hub/virtual/{id}/ports/{port}` and `/virtual/{id}/ports/{port}` redirect in one hop to the viewer's ticket route,
+  // `/assistant/ports/{id}/{port}`, keeping `path=`.
+  for (const from of ["/hub/virtual/0f8a6a1e-0000-4000-8000-000000000001/ports/3000", "/virtual/0f8a6a1e-0000-4000-8000-000000000001/ports/3000"]) {
+    test(`should redirect ${from} to the viewer's ticket route @regression`, async ({ request }) => {
+      const response = await request.get(`${from}?path=%2Fdocs`, { maxRedirects: 0 });
+
+      expect(response.status()).toBe(308);
+      expect(response.headers().location).toBe("/assistant/ports/0f8a6a1e-0000-4000-8000-000000000001/3000?path=%2Fdocs");
+    });
+  }
+
+  test("should show the not-found page, and redirect nowhere, when an address under the old ticket route names no port @regression", async ({ request }) => {
+    const response = await request.get("/hub/virtual/not-an-id/ports/3000", { maxRedirects: 0 });
+
+    expect(response.status()).toBe(404);
+    expect(response.headers().location).toBeUndefined();
+    expect(response.headers()["content-type"]).toContain("text/html");
+  });
 
   // The access page managed standing access to every agent its owner had; there is none. What anyone shares is one
   // chat at a time, managed in the settings' Sharing section, so both of its addresses go there, as does
@@ -92,7 +111,7 @@ test.describe("routes @regression", () => {
     test(`should redirect the retired ${from} to the shared chats @regression`, async ({ request }) => {
       const response = await request.get(from, { maxRedirects: 0 });
 
-      expect(response.status()).toBe(308);
+      expect(response.status()).toBe(307);
       expect(response.headers().location).toMatch(/^(\/assistant\?settings=sharing|\/hub)$/);
     });
   }

@@ -164,7 +164,7 @@ describe("serveViewer", () => {
 
     expect(response.status).toBe(303);
     const location = new URL(response.headers.get("location")!);
-    expect(`${location.origin}${location.pathname}`).toBe(`https://agent-hub.example/hub/virtual/${ID}/ports/8080`);
+    expect(`${location.origin}${location.pathname}`).toBe(`https://agent-hub.example/assistant/ports/${ID}/8080`);
     expect(location.searchParams.get("path")).toBe("/docs?page=2");
   });
 

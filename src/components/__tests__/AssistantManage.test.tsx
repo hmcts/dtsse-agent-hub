@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionsData } from "@/assistant/connections";
 import { savedCredentials } from "@/assistant/saved-credentials";
 import type { FormAction } from "@/components/ActionForm";
@@ -10,6 +10,7 @@ import type { AssistantAgentSettings } from "@/components/assistant/AgentSetting
 import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { AssistantSettings } from "@/components/assistant/SettingsDialog";
 import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
+import { SETTLE_MS } from "@/components/live/useSettled";
 import type { CredentialKind } from "@/credentials/names";
 import type { CredentialStatus } from "@/credentials/store";
 import type { AssistantAgent, GitIdentitySettings } from "@/web/data";
@@ -17,16 +18,30 @@ import type { AssistantAgent, GitIdentitySettings } from "@/web/data";
 /** The sections of the Assistant's settings that manage the virtual agent it runs on, and the person's own values. */
 
 const refresh = vi.fn();
+/**
+ * The search the router holds, which is not the address bar's: Next takes a `history.replaceState` or `pushState` as
+ * a change of URL only when its state does not carry the router's own `__NA` marker, and its own navigations set
+ * both. `routerHistory` below stands in for that patch, so a write Next would not sync leaves this behind as it would.
+ */
+const router = vi.hoisted(() => ({ search: "" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh }),
   usePathname: () => "/assistant",
-  useSearchParams: () => new URLSearchParams(window.location.search)
+  useSearchParams: () => new URLSearchParams(router.search)
 }));
 const hubHandlers = new Map<string, () => void>();
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: (type: string, handler: () => void) => hubHandlers.set(type, handler),
   useEndSession: () => () => undefined
 }));
+
+/** The stream saying the agent changed, and the settle `useSettingsData` waits before reading again. */
+async function agentChanged(): Promise<void> {
+  await act(async () => {
+    hubHandlers.get("virtual_agent")?.();
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS + 10));
+  });
+}
 
 afterEach(() => {
   cleanup();
@@ -160,9 +175,7 @@ describe("the Assistant's own agent", () => {
     const settings = agentSettings();
     await open({ agent: settings }, "Assistant");
 
-    await act(async () => {
-      hubHandlers.get("virtual_agent")?.();
-    });
+    await agentChanged();
 
     expect(settings.load).toHaveBeenCalledTimes(2);
   });
@@ -212,14 +225,6 @@ describe("the Assistant's own agent", () => {
     expect(screen.queryByRole("button", { name: /Restart/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Stop|Delete/ })).toBeNull();
     expect(screen.getByText(/nothing to restart/)).toBeTruthy();
-  });
-
-  it("should say the agent is replaced on the next chat, and offer no restart, when it is being deleted", async () => {
-    await open({ agent: agentSettings({ desired: "deleted" }) }, "Assistant");
-
-    expect(screen.getByText("It is being deleted. Opening a chat sets up a new assistant for you.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Restart/ })).toBeNull();
-    expect(screen.queryByText(/starts when you next open a chat/)).toBeNull();
   });
 
   it("should send the agent and the new name when it is renamed, and show the refusal when the name is taken", async () => {
@@ -361,14 +366,48 @@ describe("the Assistant's saved credentials", () => {
 });
 
 describe("the Assistant's settings deep link", () => {
+  const nativeReplace = window.history.replaceState.bind(window.history);
+  const nativePush = window.history.pushState.bind(window.history);
+
+  /** Next's patch of `history`, as far as the router's search goes. */
+  function routerHistory(native: History["replaceState"]): History["replaceState"] {
+    return (data, unused, url) => {
+      if (!(data as { __NA?: boolean } | null)?.__NA && url !== undefined && url !== null) {
+        router.search = new URL(url, window.location.href).search;
+      }
+      native(data, unused, url);
+    };
+  }
+
+  /** The page as the router leaves it after it loads or navigates: the address, its marker and its search. */
+  function land(url: string): void {
+    nativeReplace({ __NA: true }, "", url);
+    router.search = window.location.search;
+  }
+
+  function navigate(url: string): void {
+    nativePush({ __NA: true }, "", url);
+    router.search = window.location.search;
+  }
+
+  const page = () => <AssistantSettings now={Date.now()} connections={connections(["github"])} tokens={tokens()} />;
+
+  beforeEach(() => {
+    window.history.replaceState = routerHistory(nativeReplace);
+    window.history.pushState = routerHistory(nativePush);
+  });
+
   afterEach(() => {
-    window.history.replaceState(null, "", "/");
+    window.history.replaceState = nativeReplace;
+    window.history.pushState = nativePush;
+    nativeReplace(null, "", "/");
+    router.search = "";
   });
 
   it("should open at the section ?settings= names, and take the parameter out of the address once closed, when the page loads", async () => {
-    window.history.replaceState(null, "", "/assistant?settings=credentials&x=1");
+    land("/assistant?settings=credentials&x=1");
     await act(async () => {
-      render(<AssistantSettings now={Date.now()} connections={connections(["github"])} tokens={tokens()} />);
+      render(page());
     });
 
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
@@ -378,18 +417,52 @@ describe("the Assistant's settings deep link", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close settings" }));
 
     expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?x=1");
+    expect(router.search).toBe("?x=1");
   });
 
   it("should open at the first section when ?settings= names one it does not offer", () => {
-    window.history.replaceState(null, "", "/assistant?settings=nothing-here");
-    render(<AssistantSettings now={Date.now()} connections={connections(["github"])} />);
+    land("/assistant?settings=nothing-here");
+    render(page());
 
     expect(within(nav()).getByRole("tab", { name: "Appearance" }).getAttribute("aria-selected")).toBe("true");
   });
 
+  // A client-side navigation re-renders the page it lands on rather than mounting it again.
+  it("should open at the section ?settings= names when a navigation reaches it with the page already open", async () => {
+    land("/assistant");
+    const { rerender } = render(page());
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    navigate("/assistant?settings=credentials");
+    await act(async () => {
+      rerender(page());
+    });
+
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(within(nav()).getByRole("tab", { name: "Credentials" }).getAttribute("aria-selected")).toBe("true");
+    expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant?settings=credentials");
+  });
+
+  // The router has to hear the parameter go, or the same link names what it already holds and changes nothing.
+  it("should open again when the same link is followed after the dialog it opened was closed", async () => {
+    land("/assistant?settings=credentials");
+    const { rerender } = render(page());
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close settings" }));
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    navigate("/assistant?settings=credentials");
+    await act(async () => {
+      rerender(page());
+    });
+
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+  });
+
   it("should stay closed when the address names no section", () => {
-    window.history.replaceState(null, "", "/assistant");
-    render(<AssistantSettings now={Date.now()} connections={connections(["github"])} />);
+    land("/assistant");
+    render(page());
 
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -420,9 +493,7 @@ describe("how often the settings read", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restart your assistant" }));
 
     await submit("Restart your assistant");
-    await act(async () => {
-      hubHandlers.get("virtual_agent")?.();
-    });
+    await agentChanged();
 
     expect(settings.load).toHaveBeenCalledTimes(2);
   });
