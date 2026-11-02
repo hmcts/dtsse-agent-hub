@@ -34,7 +34,6 @@ export default defineConfig({
         "src/users/store.ts",
         "src/agents/store.ts",
         "src/agents/sweep.ts",
-        "src/agents/views.ts",
         "src/topics/store.ts",
         "src/channels/store.ts",
         "src/messages/store.ts",
