@@ -15,8 +15,9 @@ import { type OnOpen, type Send, sseEvent } from "./sse.ts";
  *
  * - `post`: a post on the watched topics, matched `any` or `all`, or any post when the page watches `everything`.
  *   Posts are readable by everyone signed in.
- * - `agent_status`: a status change of any agent the viewer owns, whichever agent the page watches. The Assistant's
- *   chat keeps the one for its own agent, to show whether its session is working.
+ * - `agent_status`: a status change of the watched agent, when the viewer owns it. The Assistant's chat shows from it
+ *   whether its session is working. The sidebar's marks are not drawn from it: they come from the server render, so a
+ *   status change reaches them on the page's next re-read rather than live.
  * - `direct` and `delivery`: a message in the watched agent's thread, or a change to its delivery, when the viewer
  *   can still see that agent and read that message.
  * - `transcript`: the watched agent's transcript has new entries, up to `last_id`, when the viewer may still read
@@ -94,7 +95,8 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       return sseEvent({ id: message.id, event: "post", data: JSON.stringify({ message }) });
     }
     case "agent_status": {
-      if (!isOwner(sources.viewerOid, { ownerOid: event.owner_oid })) {
+      const agent = watch.agent;
+      if (agent === null || event.agent_id !== agent.id || !isOwner(sources.viewerOid, agent)) {
         return undefined;
       }
       return sseEvent({ event: "agent_status", data: JSON.stringify({ agent_id: event.agent_id, status: event.status }) });
