@@ -27,6 +27,7 @@ import { workspace } from "../paths.ts";
 import { readReturn } from "../returns.ts";
 import { ADAPTERS, type Finding, scanRepo } from "../scan.ts";
 import { tokenProblems } from "../tokens.ts";
+import { tool } from "../tools.ts";
 import { type Pair, verify } from "../verify.ts";
 import { resolveRepos } from "./scan.ts";
 
@@ -151,7 +152,7 @@ async function applyIn(wt: Worktree, service: string, repo: RepoConfig, values: 
 
   let tests: { command: string; ok: boolean; output: string } | null = null;
   if (values.test && repo.test) {
-    const res = spawnSync("bash", ["-lc", repo.test], { cwd: abs, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+    const res = spawnSync(tool("bash"), ["-lc", repo.test], { cwd: abs, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
     tests = { command: repo.test, ok: res.status === 0, output: `${res.stdout}\n${res.stderr}`.trim().split("\n").slice(-40).join("\n") };
     if (!tests.ok) {
       say(`Tests failed, so nothing was committed:\n${tests.output}`);

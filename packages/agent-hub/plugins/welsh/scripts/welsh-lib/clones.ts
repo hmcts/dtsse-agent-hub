@@ -15,6 +15,7 @@ import { join, resolve } from "node:path";
 import YAML from "yaml";
 import { defaultBranch, git } from "./git.ts";
 import { workspace } from "./paths.ts";
+import { findTool, tool } from "./tools.ts";
 
 /** The clone at a workspace-relative path, cloned from workspace.yaml first if it is not there yet. */
 export function ensureClone(relPath: string): string {
@@ -29,11 +30,13 @@ export function ensureClone(relPath: string): string {
   if (!url) {
     throw new Error(`${relPath} is not cloned and is not in workspace.yaml`);
   }
-  const gh = spawnSync("gh", ["repo", "clone", url, abs, "--", "--filter=blob:none"], { encoding: "utf8" });
-  if (gh.status !== 0) {
-    const ssh = spawnSync("git", ["clone", "--filter=blob:none", `git@github.com:${url}.git`, abs], { encoding: "utf8" });
+  // gh when there is one, for its sign-in; git over SSH otherwise.
+  const ghPath = findTool("gh");
+  const gh = ghPath === null ? null : spawnSync(ghPath, ["repo", "clone", url, abs, "--", "--filter=blob:none"], { encoding: "utf8" });
+  if (gh?.status !== 0) {
+    const ssh = spawnSync(tool("git"), ["clone", "--filter=blob:none", `git@github.com:${url}.git`, abs], { encoding: "utf8" });
     if (ssh.status !== 0) {
-      throw new Error(`could not clone ${url}: ${(gh.stderr || ssh.stderr).trim()}`);
+      throw new Error(`could not clone ${url}: ${(gh?.stderr || ssh.stderr).trim()}`);
     }
   }
   return abs;

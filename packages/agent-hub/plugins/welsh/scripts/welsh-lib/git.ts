@@ -8,9 +8,10 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { tool } from "./tools.ts";
 
 export function git(repo: string, args: string[], allowFail = false): string {
-  const res = spawnSync("git", ["-C", repo, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  const res = spawnSync(tool("git"), ["-C", repo, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   if (res.status !== 0 && !allowFail) {
     throw new Error(`git ${args.join(" ")} failed in ${repo}: ${(res.stderr || res.stdout).trim()}`);
   }
@@ -40,7 +41,7 @@ export function draftPr(repo: string, title: string, body: string): string {
   git(repo, ["push", "-u", "origin", branch]);
   const file = join(tmpdir(), `welsh-pr-${process.pid}.md`);
   writeFileSync(file, body);
-  const res = spawnSync("gh", ["pr", "create", "--draft", "--base", defaultBranch(repo), "--title", title, "--body-file", file], {
+  const res = spawnSync(tool("gh"), ["pr", "create", "--draft", "--base", defaultBranch(repo), "--title", title, "--body-file", file], {
     cwd: repo,
     encoding: "utf8"
   });

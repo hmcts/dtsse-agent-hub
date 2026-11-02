@@ -13,6 +13,7 @@ import { type Catalogue, type Lookup, lookup } from "./catalogue.ts";
 import type { RepoConfig, ServiceConfig } from "./config.ts";
 import { matchKey } from "./normalise.ts";
 import { contentRef } from "./requests.ts";
+import { tool } from "./tools.ts";
 import { isPlaceholder } from "./verify.ts";
 
 export const ADAPTERS: Record<string, Adapter> = {
@@ -84,7 +85,10 @@ export function looksUntranslatable(text: string): boolean {
 }
 
 function listFiles(repoAbs: string): string[] {
-  const git = spawnSync("git", ["-C", repoAbs, "ls-files", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  const git = spawnSync(tool("git"), ["-C", repoAbs, "ls-files", "--cached", "--others", "--exclude-standard"], {
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024
+  });
   if (git.status === 0) {
     return git.stdout.split("\n").filter(Boolean);
   }

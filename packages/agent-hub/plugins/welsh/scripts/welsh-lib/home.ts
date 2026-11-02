@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { ensureClone, manifestEntries, tempWorktree } from "./clones.ts";
 import { COMMIT_TRAILER, commit, defaultBranch, draftPr, git, PR_FOOTER } from "./git.ts";
 import { workspace } from "./paths.ts";
+import { tool } from "./tools.ts";
 
 /** This CLI, which a change runs again in its worktree. */
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "cli.ts");
@@ -78,7 +79,7 @@ function hasWelsh(path: string, url: string | undefined): boolean {
     }
     const base = defaultBranch(abs);
     const ref = git(abs, ["rev-parse", "--verify", "--quiet", `origin/${base}`], true) ? `origin/${base}` : "HEAD";
-    return spawnSync("git", ["-C", abs, "cat-file", "-e", `${ref}:welsh/config.yaml`]).status === 0;
+    return spawnSync(tool("git"), ["-C", abs, "cat-file", "-e", `${ref}:welsh/config.yaml`]).status === 0;
   }
   if (existsSync(abs)) {
     return existsSync(join(abs, "welsh", "config.yaml"));
@@ -86,7 +87,7 @@ function hasWelsh(path: string, url: string | undefined): boolean {
   if (!url) {
     return false;
   }
-  const asked = spawnSync("gh", ["api", `repos/${url}/contents/welsh/config.yaml`, "--silent"], { encoding: "utf8" });
+  const asked = spawnSync(tool("gh"), ["api", `repos/${url}/contents/welsh/config.yaml`, "--silent"], { encoding: "utf8" });
   if (asked.status === 0) {
     return true;
   }
@@ -135,14 +136,14 @@ export function welshDir(service: string): string {
     // Only the welsh/ folder, so a large repo costs no more than its catalogue. A home repo without one gives an
     // empty folder: the service is marked but not set up yet. Any other failure, such as a sign-in a partial clone
     // needs to fetch the files, is said as it is rather than taken for a service with no Welsh.
-    const archive = spawnSync("git", ["-C", clone, "archive", "--format=tar", ref, "welsh"], { maxBuffer: 256 * 1024 * 1024 });
+    const archive = spawnSync(tool("git"), ["-C", clone, "archive", "--format=tar", ref, "welsh"], { maxBuffer: 256 * 1024 * 1024 });
     if (archive.status !== 0) {
       const why = archive.stderr.toString().trim();
       if (!/did not match any files|pathspec 'welsh'/.test(why)) {
         throw new Error(`could not read welsh/ from ${home}: ${why}`);
       }
     } else {
-      const tar = spawnSync("tar", ["-x", "-C", scratch], { input: archive.stdout });
+      const tar = spawnSync(tool("tar"), ["-x", "-C", scratch], { input: archive.stdout });
       if (tar.status !== 0) {
         throw new Error(`could not unpack welsh/ from ${home}: ${tar.stderr.toString().trim()}`);
       }

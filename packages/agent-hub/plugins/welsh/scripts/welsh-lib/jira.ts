@@ -6,6 +6,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { tool } from "./tools.ts";
 
 export function fetchStory(key: string): Story {
   const out = twg(["jira", "workitem", "get", key, "--fields", "summary,description", "-o", "json", "--output-summary", "none"]);
@@ -49,7 +50,7 @@ export function adfText(node: AdfNode): string {
 const BLOCKS = new Set(["doc", "bulletList", "orderedList", "listItem", "table", "tableRow", "panel", "blockquote", "expand", "layoutSection", "layoutColumn"]);
 
 function twg(args: string[]): { data: any } {
-  const res = spawnSync("twg", args, {
+  const res = spawnSync(tool("twg"), args, {
     encoding: "utf8",
     env: { ...process.env, TWG_AGENT_DEFAULTS: "1" },
     maxBuffer: 64 * 1024 * 1024
