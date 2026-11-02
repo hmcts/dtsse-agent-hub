@@ -234,11 +234,14 @@ describe("the agent stream", () => {
       expect(ended[0]).toEqual({ comment: "connected" });
       expect(ended[1]).toEqual({ retry: String(RECONNECT_AFTER_MS) });
       expect(ended.at(-1)).toEqual({ event: "reconnect", data: "{}" });
-      expect(lastedMs).toBeGreaterThanOrEqual(SHORT_LIFETIME_MS);
+      // The stream's timer starts inside the route, after `opened` is read, but a timer may fire a millisecond or so
+      // early on the clock `Date.now()` reads, so the bound allows for that and no more.
+      expect(lastedMs).toBeGreaterThanOrEqual(SHORT_LIFETIME_MS - 50);
       expect(lastedMs).toBeLessThan(SHORT_LIFETIME_MS + 2000);
       expect(streamLimits().agent.held(ALICE.oid)).toBe(0);
 
       const { message: between } = await jsonOf(await send(ALICE, alicesAgent, { to_agent: alicesOther, body: "sent between streams" }));
+      streamLifetime.ms = undefined;
       const second = openStream(ALICE, alicesOther);
       const reader = frames(await second.response);
 
