@@ -20,6 +20,7 @@
 // Polling with headroom over the server's minimum follows from that last point: a poll that arrives early
 // costs the code 5 extra seconds for the rest of its life, and the code is the owner's only way in.
 import type { Env } from "../env.ts";
+import { sleep } from "../retry.ts";
 
 export const GITHUB_OAUTH_HOST = "https://github.com";
 /** The flow's two endpoints on `host`, which is `GITHUB_OAUTH_HOST` for github.com. */
@@ -52,7 +53,7 @@ export const MIN_INTERVAL_S = 1;
 
 /**
  * The hub's own bounds on a relayed sign-in, from `src/virtual-agents/schemas.ts` — written out again here,
- * as `api.ts` writes out every other shape, because this package is published on its own and may not reach
+ * as `wire.ts` writes out every other shape, because this package is published on its own and may not reach
  * into the service's module graph.
  *
  * They are applied to the answer before any of it is sent, because the hub **rejects** rather than truncates
@@ -187,8 +188,6 @@ export class DeviceFlowError extends Error {
 export function deviceFlowRetryable(error: unknown): boolean {
   return error instanceof DeviceFlowError ? error.retryable : true;
 }
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * The response body as a flat map. The shape is taken from the body rather than the `Content-Type`, because a

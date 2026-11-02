@@ -3,8 +3,8 @@
 // entrypoint must not retry.
 import fs from "node:fs";
 import path from "node:path";
-import type { VirtualPhase } from "../api.ts";
 import { hubHome } from "../session.ts";
+import type { VirtualPhase } from "../wire.ts";
 
 export const PHASES = ["provisioning", "awaiting_credentials", "awaiting_login", "cloning", "running", "failed"] as const satisfies readonly VirtualPhase[];
 

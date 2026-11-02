@@ -2,9 +2,10 @@
 // sign-in, for the HMCTS Assistant's document panel and settings to pick where a document goes. Fixed and read-only:
 // one `twg api` GET whose every value is checked and passed as its own argument, never through a shell, and an answer
 // cut down to the fields the hub accepts. See "Atlassian lookups" in dtsse-agent-hub's docs/agent-api.md.
-import type { Api, ConfluencePageFound, JiraProjectFound, LookupAnswer } from "../api.ts";
+import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
 import { withRetry } from "../retry.ts";
+import type { ConfluencePageFound, JiraProjectFound, LookupAnswer } from "../wire.ts";
 
 export type LookupKind = "jira_project" | "confluence_page";
 

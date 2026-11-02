@@ -13,23 +13,12 @@ import { createMockHub, type MockHubOptions, type RecordedCall } from "./__fixtu
 import { createApi } from "./api.ts";
 import { modelPath } from "./assistant/models.ts";
 import { tmuxName } from "./assistant/tmux.ts";
-import {
-  nextBackoff,
-  parseAssistantFrame,
-  parseAssistantProduct,
-  parseConfluenceExportFrame,
-  parseDirectEventMessage,
-  parseJiraExportFrame,
-  RAPID_CLOSE_MS,
-  RAPID_CLOSES_BEFORE_BACKOFF,
-  type RunBridgeOptions,
-  reconnectDelay,
-  runBridge,
-  sessionKind
-} from "./bridge.ts";
+import { type RunBridgeOptions, runBridge, sessionKind } from "./bridge.ts";
 import { readDirects } from "./directs.ts";
 import type { Env } from "./env.ts";
 import { CLIENT_FEATURES } from "./features.ts";
+import { parseAssistantFrame, parseAssistantProduct, parseConfluenceExportFrame, parseDirectEventMessage, parseJiraExportFrame } from "./frames.ts";
+import { nextBackoff, RAPID_CLOSE_MS, RAPID_CLOSES_BEFORE_BACKOFF, reconnectDelay } from "./reconnect.ts";
 import { ensureStateDir, readText, statePath, writeJson } from "./session.ts";
 import { type SkillListing, skillsHash } from "./skills.ts";
 import { setTranscriptOff } from "./transcript-sync.ts";

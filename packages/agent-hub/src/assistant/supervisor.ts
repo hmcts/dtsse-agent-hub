@@ -4,9 +4,10 @@
 import nodeFs from "node:fs";
 import path from "node:path";
 import { workspaceRoot } from "../agent.ts";
-import type { Api, SessionReport } from "../api.ts";
+import type { Api } from "../api.ts";
 import type { Env } from "../env.ts";
 import { hubHome, projectTranscriptPath, stateDir, statePath, validSessionId } from "../session.ts";
+import type { SessionReport } from "../wire.ts";
 import { removeConversationUploads, uploadsRoot } from "./attachments.ts";
 import { launcherModel, modelPath, parseModel } from "./models.ts";
 import { canRunProgram, claudeCommand, commandProgram, createTmux, type ProgramCheck, type Tmux, tmuxName } from "./tmux.ts";

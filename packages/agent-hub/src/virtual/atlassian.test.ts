@@ -22,9 +22,10 @@ import {
   twgProfiles,
   usePodEnv
 } from "../__fixtures__/pod-shims.ts";
-import { type Api, ApiError, type Artefact, type CredentialKind, createApi, type JiraExportReport, type LoginPromptBody } from "../api.ts";
+import { type Api, ApiError, createApi } from "../api.ts";
 import { JIRA_EXPORT_BASH_TIMEOUT_MS } from "../envelope.ts";
 import { runJiraExport } from "../jira-export.ts";
+import type { Artefact, CredentialKind, JiraExportReport, LoginPromptBody } from "../wire.ts";
 import {
   ATLASSIAN_SIGN_IN_CODES,
   atlassianLogin,
@@ -42,7 +43,7 @@ import {
   twgPromptsForBrowser,
   twgRefreshRejected
 } from "./atlassian.ts";
-import { run } from "./sign-in.ts";
+import { run } from "./process.ts";
 
 const VID = "va-atlassian";
 const OWNER = { oid: "oid-owner", name: "Olive Owner", email: "olive@example.com" };

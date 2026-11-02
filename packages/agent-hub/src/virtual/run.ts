@@ -1,20 +1,25 @@
 // `agent-hub virtual <command>`, the entry point a pod's entrypoint script calls. Every command resolves to an
 // exit code rather than exiting, so the CLI stays the only place that touches the process.
 import type { Api } from "../api.ts";
-import { CREDENTIAL_KINDS, createApi } from "../api.ts";
+import { createApi } from "../api.ts";
 import { runAssistantSupervisor } from "../assistant/index.ts";
+import { readStdinText } from "../cli/command.ts";
 import type { Env } from "../env.ts";
 import { CLI } from "../envelope.ts";
 import { setGitIdentity } from "../git-identity.ts";
 import { watchPorts } from "../ports.ts";
 import { withRetry } from "../retry.ts";
 import { requireVirtualAgent } from "../virtual-agent.ts";
+import { CREDENTIAL_KINDS } from "../wire.ts";
 import { atlassianLogin } from "./atlassian.ts";
+import { azureLogin } from "./azure-login.ts";
 import { cacheSync } from "./cache-sync.ts";
-import { readStdinText, runCredentialCommand } from "./credentials.ts";
+import { claudeLogin } from "./claude-login.ts";
+import { runCredentialCommand } from "./credentials.ts";
+import { GITHUB_SIGN_IN_GAP_MS, githubLogin } from "./github-login.ts";
 import { configureKubeContexts } from "./kube.ts";
 import { EXIT_FATAL, EXIT_NO_CREDENTIAL, FatalError, isVirtualPhase, PHASES, say } from "./phases.ts";
-import { azureLogin, claudeLogin, GITHUB_SIGN_IN_GAP_MS, githubLogin, run } from "./sign-in.ts";
+import { run } from "./process.ts";
 
 export const VIRTUAL_USAGE = `usage: ${CLI} virtual <command>
 

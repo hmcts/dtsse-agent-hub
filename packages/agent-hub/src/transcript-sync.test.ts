@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub } from "./__fixtures__/mock-hub.ts";
-import { type Api, ApiError, createApi, type RequestOptions, type TranscriptBody, type TranscriptResponse } from "./api.ts";
+import { type Api, ApiError, createApi, type RequestOptions } from "./api.ts";
 import type { Env } from "./env.ts";
 import { directEnvelope } from "./envelope.ts";
 import { CLIENT_FEATURES } from "./features.ts";
@@ -32,6 +32,7 @@ import {
   transcriptOffBySession,
   UNAVAILABLE_PAUSE_MS
 } from "./transcript-sync.ts";
+import type { TranscriptBody, TranscriptResponse } from "./wire.ts";
 
 let home: TempClaudeHome;
 const savedEnv: Record<string, string | undefined> = {};

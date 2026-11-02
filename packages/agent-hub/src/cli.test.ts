@@ -22,12 +22,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeSecrets, type TempClaudeHome, tempClaudeHome } from "./__fixtures__/claude-home.ts";
 import { createMockHub, type MockHub } from "./__fixtures__/mock-hub.ts";
 import { captureStderr } from "./__fixtures__/pod-shims.ts";
-import { createApi, type RegisterBody } from "./api.ts";
-import { parseFlags, readStdinText, runCli, USAGE, UsageError } from "./cli.ts";
+import { createApi } from "./api.ts";
+import { parseFlags, readStdinText, UsageError } from "./cli/command.ts";
+import { runCli, USAGE } from "./cli.ts";
 import type { Env } from "./env.ts";
 import { CLIENT_FEATURES } from "./features.ts";
 import { denyOutput, UNDELIVERED_REASON } from "./questions.ts";
 import { VIRTUAL_USAGE } from "./virtual/index.ts";
+import type { RegisterBody } from "./wire.ts";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const BIN = path.join(PACKAGE_ROOT, "bin", "agent-hub");
