@@ -1,7 +1,7 @@
 import { agentsMessageableBy, POD_CONVERSATION_AGENT, podConversationAgentSql } from "../access/load.ts";
 import { isPodConversationAgent } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
-import { linkLocalSession, needsLocalChatSql } from "../assistant/local-chat-store.ts";
+import { linkLocalSession, localConversationSql, needsLocalChatSql } from "../assistant/local-chat-store.ts";
 import { linkSession } from "../assistant/session-store.ts";
 import type { AgentStatus } from "../realtime/events.ts";
 import { notify } from "../realtime/notify.ts";
@@ -103,7 +103,9 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
         : await tx.$queryRaw<
             { id: string; skills: unknown }[]
           >`SELECT id::text AS id, skills FROM agent WHERE session_id = ${registration.sessionId} FOR UPDATE`;
-    const [agent] = await tx.$queryRaw<{ id: string; name: string; conversation_id: string | null; needs_local_chat: boolean }[]>`
+    const [agent] = await tx.$queryRaw<
+      { id: string; name: string; conversation_id: string | null; needs_local_chat: boolean; local_conversation_id: string | null }[]
+    >`
       INSERT INTO agent (owner_oid, session_id, name, name_source, cwd, repo, branch, host, status, last_heartbeat_at, read_cursor, virtual_agent_id, skills, client_features, assistant_conversation_id)
       VALUES (
         ${owner.oid}, ${registration.sessionId},
@@ -129,12 +131,13 @@ export async function registerAgent(prisma: PrismaClient, owner: Caller, registr
           -- already refuses. assistant_conversation_id is not in the SET list, so neither caller moves it.
           AND (agent.assistant_conversation_id IS NOT DISTINCT FROM EXCLUDED.assistant_conversation_id
                OR (EXCLUDED.virtual_agent_id IS NULL AND EXCLUDED.assistant_conversation_id IS NULL))
-      RETURNING id::text AS id, name, assistant_conversation_id::text AS conversation_id, ${needsLocalChatSql("agent")} AS needs_local_chat
+      RETURNING id::text AS id, name, assistant_conversation_id::text AS conversation_id, ${needsLocalChatSql("agent")} AS needs_local_chat,
+                ${localConversationSql("agent")} AS local_conversation_id
     `;
     if (agent === undefined) {
       throw new SessionOwnedElsewhere("that session id is registered to someone else");
     }
-    await notify(tx, { type: "agent_status", agent_id: agent.id, owner_oid: owner.oid, status: "idle" });
+    await notify(tx, { type: "agent_status", agent_id: agent.id, owner_oid: owner.oid, status: "idle", local_conversation_id: agent.local_conversation_id });
     if (existing?.id === agent.id && registration.skills !== undefined && skillsChanged(storedSkills(existing.skills), normaliseSkills(registration.skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agent.id, owner_oid: owner.oid });
     }
@@ -180,12 +183,31 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
 async function lockAgent(
   db: Database,
   agentId: string
-): Promise<{ status: AgentStatus; ownerOid: string; virtualName: string | null; skills: Skill[]; name: string; needsLocalChat: boolean } | undefined> {
+): Promise<
+  | {
+      status: AgentStatus;
+      ownerOid: string;
+      virtualName: string | null;
+      skills: Skill[];
+      name: string;
+      needsLocalChat: boolean;
+      localConversationId: string | null;
+    }
+  | undefined
+> {
   const [row] = await db.$queryRaw<
-    { status: AgentStatus; owner_oid: string; virtual_name: string | null; skills: unknown; name: string; needs_local_chat: boolean }[]
+    {
+      status: AgentStatus;
+      owner_oid: string;
+      virtual_name: string | null;
+      skills: unknown;
+      name: string;
+      needs_local_chat: boolean;
+      local_conversation_id: string | null;
+    }[]
   >`
     SELECT a.status::text AS status, a.owner_oid, v.name AS virtual_name, a.skills, a.name,
-           ${needsLocalChatSql("a")} AS needs_local_chat
+           ${needsLocalChatSql("a")} AS needs_local_chat, ${localConversationSql("a")} AS local_conversation_id
       FROM agent a LEFT JOIN virtual_agent v ON v.id = a.virtual_agent_id
      WHERE a.id = ${agentId}::uuid
        FOR UPDATE OF a
@@ -198,7 +220,8 @@ async function lockAgent(
         virtualName: row.virtual_name,
         skills: storedSkills(row.skills),
         name: row.name,
-        needsLocalChat: row.needs_local_chat
+        needsLocalChat: row.needs_local_chat,
+        localConversationId: row.local_conversation_id
       };
 }
 
@@ -236,7 +259,7 @@ export async function heartbeat(
       }
     });
     if (before.status !== status) {
-      await notify(tx, { type: "agent_status", agent_id: agentId, owner_oid: before.ownerOid, status });
+      await notify(tx, { type: "agent_status", agent_id: agentId, owner_oid: before.ownerOid, status, local_conversation_id: before.localConversationId });
     }
     if (skills !== undefined && skillsChanged(before.skills, normaliseSkills(skills))) {
       await notify(tx, { type: "agent_skills", agent_id: agentId, owner_oid: before.ownerOid });
@@ -261,7 +284,13 @@ export async function markOffline(prisma: PrismaClient, agentId: string): Promis
     }
     await tx.agent.update({ where: { id: agentId }, data: { status: "offline", endedAt: new Date() } });
     if (before.status !== "offline") {
-      await notify(tx, { type: "agent_status", agent_id: agentId, owner_oid: before.ownerOid, status: "offline" });
+      await notify(tx, {
+        type: "agent_status",
+        agent_id: agentId,
+        owner_oid: before.ownerOid,
+        status: "offline",
+        local_conversation_id: before.localConversationId
+      });
     }
   });
 }

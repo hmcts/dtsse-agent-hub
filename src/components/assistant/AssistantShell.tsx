@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionsData } from "@/assistant/connections";
 import type { DateGroup } from "@/assistant/grouping";
+import type { LocalSession } from "@/assistant/local-session";
 import type { Theme } from "@/assistant/theme";
 import type { ConversationLink } from "@/assistant/views";
 import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
@@ -15,6 +16,7 @@ import { ConversationSearch } from "@/components/assistant/ConversationSearch";
 import type { AssistantExportDefaults } from "@/components/assistant/ExportSettings";
 import type { AssistantFiles } from "@/components/assistant/FileSettings";
 import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
+import { LiveLocalSessions } from "@/components/assistant/LiveLocalSessions";
 import { besideSidebar, SIDEBAR_DRAWER_MAX_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH } from "@/components/assistant/layout";
 import type { AssistantModelSetting } from "@/components/assistant/ModelSettings";
 import { type AssistantConnect, type AssistantPlugins, AssistantSettings } from "@/components/assistant/SettingsDialog";
@@ -172,6 +174,7 @@ export function AssistantShell({
   });
   // The drawer is its own width over the page, so a width dragged on a wide screen never reaches it.
   const width = narrow ? SIDEBAR_WIDTH : resize.width;
+  const served = useMemo(() => localSessions(groups), [groups]);
 
   // A collapsed sidebar is out of the tab order. Set on the element itself, since React 18 and the React 19 the app
   // router runs disagree on how `inert` is written as a prop.
@@ -267,75 +270,77 @@ export function AssistantShell({
               <span aria-hidden="true">CY</span>
             </Link>
           </div>
-          <ConversationSearch>
-            {groups.length === 0 ? <p className="px-2.5 text-[13px] text-asst-faint">Your chats appear here.</p> : null}
-            {groups.map((group) => (
-              <div key={group.label} className="flex flex-col gap-0.5">
-                <h2 className="px-2.5 pb-1.5 pt-1 text-xs font-medium text-asst-faint">{group.label}</h2>
-                <ul className="flex flex-col gap-0.5">
-                  {group.items.map((item) => (
-                    <li key={item.id} className="group relative">
-                      <Link
-                        href={`/assistant/${item.id}`}
-                        aria-current={item.id === activeId ? "page" : undefined}
-                        className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
-                          item.id === activeId ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
-                        }`}
-                      >
-                        <ChatMark mark={item.mark} />
-                        {/* The title is what gives way, so the marker beside it stays whole at any sidebar width. */}
-                        <span className="min-w-0 truncate">{item.title}</span>
-                      </Link>
-                      {actions === undefined ? null : (
-                        // A sibling of the link, not a child: an anchor may not hold a button.
-                        <div className="absolute right-1 top-1 flex">
-                          <ChatMenu
-                            title={item.title}
-                            shareHref={`/assistant/${item.id}?share=1`}
-                            local={item.mark?.where === "computer"}
-                            forkHref={`/assistant/${item.id}?fork=1`}
-                            label={`Options for ${item.title}`}
-                            // The trigger appears when the row is hovered, but a keyboard or touch user never
-                            // hovers, so it is shown as well while the focus is anywhere inside the row, at every
-                            // drawer-width screen, and always on the chat that is open.
-                            triggerClassName={`flex h-7 w-7 items-center justify-center rounded-md text-base leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${
-                              item.id === activeId ? "" : "opacity-0"
-                            }`}
-                            onOpen={() => setFailed(null)}
-                            onRename={async (title) => {
-                              const result = await actions.rename({ conversationId: item.id, title });
-                              setFailed(result.ok ? null : { id: item.id, error: result.error });
-                              router.refresh();
-                            }}
-                            onDelete={async () => {
-                              const result = await actions.remove({ conversationId: item.id });
-                              if (!result.ok) {
-                                setFailed({ id: item.id, error: result.error });
-                                return;
-                              }
-                              setFailed(null);
-                              // The open chat's page now has nothing to show, so it has to be left; deleting any
-                              // other only takes a row out of the list.
-                              if (item.id === activeId) {
-                                router.push("/assistant");
-                              } else {
+          <LiveLocalSessions served={served}>
+            <ConversationSearch>
+              {groups.length === 0 ? <p className="px-2.5 text-[13px] text-asst-faint">Your chats appear here.</p> : null}
+              {groups.map((group) => (
+                <div key={group.label} className="flex flex-col gap-0.5">
+                  <h2 className="px-2.5 pb-1.5 pt-1 text-xs font-medium text-asst-faint">{group.label}</h2>
+                  <ul className="flex flex-col gap-0.5">
+                    {group.items.map((item) => (
+                      <li key={item.id} className="group relative">
+                        <Link
+                          href={`/assistant/${item.id}`}
+                          aria-current={item.id === activeId ? "page" : undefined}
+                          className={`flex items-center gap-1.5 rounded-lg py-2 pl-2.5 text-sm ${actions === undefined ? "pr-2.5" : "pr-9"} ${
+                            item.id === activeId ? "bg-asst-active text-asst-text" : "text-asst-body hover:bg-asst-raised"
+                          }`}
+                        >
+                          <ChatMark conversationId={item.id} mark={item.mark} />
+                          {/* The title is what gives way, so the marker beside it stays whole at any sidebar width. */}
+                          <span className="min-w-0 truncate">{item.title}</span>
+                        </Link>
+                        {actions === undefined ? null : (
+                          // A sibling of the link, not a child: an anchor may not hold a button.
+                          <div className="absolute right-1 top-1 flex">
+                            <ChatMenu
+                              title={item.title}
+                              shareHref={`/assistant/${item.id}?share=1`}
+                              local={item.mark?.where === "computer"}
+                              forkHref={`/assistant/${item.id}?fork=1`}
+                              label={`Options for ${item.title}`}
+                              // The trigger appears when the row is hovered, but a keyboard or touch user never
+                              // hovers, so it is shown as well while the focus is anywhere inside the row, at every
+                              // drawer-width screen, and always on the chat that is open.
+                              triggerClassName={`flex h-7 w-7 items-center justify-center rounded-md text-base leading-none text-asst-muted hover:bg-asst-field hover:text-asst-text group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${
+                                item.id === activeId ? "" : "opacity-0"
+                              }`}
+                              onOpen={() => setFailed(null)}
+                              onRename={async (title) => {
+                                const result = await actions.rename({ conversationId: item.id, title });
+                                setFailed(result.ok ? null : { id: item.id, error: result.error });
                                 router.refresh();
-                              }
-                            }}
-                          />
-                        </div>
-                      )}
-                      {failed?.id === item.id ? (
-                        <p role="alert" className="px-2.5 pb-1 text-xs text-asst-error">
-                          {failed.error}
-                        </p>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </ConversationSearch>
+                              }}
+                              onDelete={async () => {
+                                const result = await actions.remove({ conversationId: item.id });
+                                if (!result.ok) {
+                                  setFailed({ id: item.id, error: result.error });
+                                  return;
+                                }
+                                setFailed(null);
+                                // The open chat's page now has nothing to show, so it has to be left; deleting any
+                                // other only takes a row out of the list.
+                                if (item.id === activeId) {
+                                  router.push("/assistant");
+                                } else {
+                                  router.refresh();
+                                }
+                              }}
+                            />
+                          </div>
+                        )}
+                        {failed?.id === item.id ? (
+                          <p role="alert" className="px-2.5 pb-1 text-xs text-asst-error">
+                            {failed.error}
+                          </p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </ConversationSearch>
+          </LiveLocalSessions>
           <div className="flex min-w-0 items-center gap-2.5 border-t border-asst-active px-4 py-3">
             <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-asst-line text-xs font-semibold">
               {initials(viewerName)}
@@ -374,4 +379,9 @@ export function AssistantShell({
       </div>
     </ShellContext.Provider>
   );
+}
+
+/** The server's state for each chat in the list that is on the person's own computer; see `LiveLocalSessions`. */
+function localSessions(groups: { items: ConversationLink[] }[]): ReadonlyMap<string, LocalSession> {
+  return new Map(groups.flatMap((group) => group.items.flatMap((item) => (item.mark?.where === "computer" ? [[item.id, item.mark.session] as const] : []))));
 }

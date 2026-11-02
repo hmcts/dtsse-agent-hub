@@ -1,4 +1,4 @@
-import type { LocalSession } from "@/assistant/views";
+import type { LocalSession } from "@/assistant/local-session";
 import { SessionMark } from "@/components/assistant/SessionMark";
 import { LaptopIcon } from "@/components/sidebar/icons";
 

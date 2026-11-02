@@ -182,7 +182,7 @@ export function ConversationSearch({ search = fetchChats, children }: { search?:
                 {/* Marked as the grouped list marks it, from the same component: a chat found by searching is the
                     same chat, and a result that looked like any other would be the one place the mark was missing. */}
                 <span className="flex min-w-0 items-center gap-1.5 text-sm">
-                  <ChatMark mark={chat.mark} />
+                  <ChatMark conversationId={chat.id} mark={chat.mark} />
                   <span className="min-w-0 truncate">{chat.title}</span>
                 </span>
                 {chat.snippet === null ? null : <span className="line-clamp-2 text-xs text-asst-faint">{chat.snippet}</span>}

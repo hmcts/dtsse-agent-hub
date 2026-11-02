@@ -3,7 +3,8 @@
  */
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationMark, ConversationMatch, LocalSession } from "@/assistant/views";
+import type { LocalSession } from "@/assistant/local-session";
+import type { ConversationMark, ConversationMatch } from "@/assistant/views";
 import { ConversationSearch, SEARCH_AFTER_MS } from "@/components/assistant/ConversationSearch";
 
 const push = vi.fn();

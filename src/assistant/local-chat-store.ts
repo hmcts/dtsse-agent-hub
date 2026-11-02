@@ -53,6 +53,25 @@ export function needsLocalChatSql(alias: string): Prisma.Sql {
 }
 
 /**
+ * The listed chat with no pod whose current session an agent row, as `alias`, is, as text; null for any other agent.
+ * What an `agent_status` NOTIFY names as its `local_conversation_id`, so every site that announces a status says the
+ * same about the same row. `alias` is always a literal of the caller's.
+ *
+ * Read through both links, the agent's `assistant_conversation_id` and the conversation's `agent_id`, so it is the chat
+ * the sidebar's mark is drawn from (`listConversations` joins the current agent) and an agent the chat has moved on
+ * from cannot recolour it. Only a chat with `first_content_at` set is named, because only that one is in the sidebar;
+ * the announcement that lists one (`announceFirstContent`) re-reads the page, which draws its mark then. That also
+ * makes it the same before and after `linkLocalSession` in one transaction: a chat it links is new and empty.
+ */
+export function localConversationSql(alias: string): Prisma.Sql {
+  const { raw, sql } = clientPrisma();
+  const agent = raw(alias);
+  return sql`(SELECT c.id::text FROM assistant_conversation c
+               WHERE c.id = ${agent}.assistant_conversation_id AND c.agent_id = ${agent}.id
+                 AND c.virtual_agent_id IS NULL AND c.first_content_at IS NOT NULL)`;
+}
+
+/**
  * A laptop session's conversation, created and linked to the session's own agent; called inside the registration's
  * or the heartbeat's transaction. Answers the conversation, or `undefined` when the agent needs none
  * (`needsLocalChatSql`): already in one, or a session whose chat the person removed, which is never given another.

@@ -21,6 +21,7 @@ import { FORKED_SELECT, type ForkedView, forkedView } from "./forks.ts";
 import { type DateGroup, groupByDate } from "./grouping.ts";
 import type { JiraExportView } from "./jira.ts";
 import { readJiraExport } from "./jira-store.ts";
+import { LOCAL_SESSION, type LocalSession } from "./local-session.ts";
 import { chatCredentials, onboarded, type Readiness, readiness } from "./onboarding.ts";
 import { hasPod } from "./pods.ts";
 import { productLabel } from "./products.ts";
@@ -51,23 +52,6 @@ export interface AssistantSummary {
   /** The needed credentials without which the chat is not reachable at all; see `chatGate`. */
   toChat: CredentialKind[];
 }
-
-/**
- * Which of three states the session of a chat on the person's own computer is in: answering, connected and waiting,
- * or not connected at all. The agent's status in the words the mark says it in, so the colour, the tooltip and the
- * row's name are three renderings of one value rather than three mappings that can drift apart.
- */
-export type LocalSession = "ready" | "working" | "disconnected";
-
-/**
- * The three states the laptop mark shows, named for what they mean to a person reading the list.
- *
- * Coloured `idle` green, `busy` the same green with a badge and `offline` grey. That makes `idle` the welcoming state:
- * `offline` is a heartbeat gone for 90 seconds and so the only one that is really "not connected", while `idle` is a
- * live session with nothing in hand, which is when it will answer you fastest. `busy` is mid-turn: still connected, so
- * still green, but badged because a message sent then waits.
- */
-const LOCAL_SESSION: Record<AgentStatus, LocalSession> = { idle: "ready", busy: "working", offline: "disconnected" };
 
 /**
  * Which of four states the session of a chat on the person's assistant is in: answering, connected and waiting,
