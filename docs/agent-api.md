@@ -615,13 +615,18 @@ field out and the UI can say that the feature is not available on that session y
 
 The features a pod's supervisor acts on — `files`, `lookups`, `welsh`, `memory-anon` and `model-alias` — are gated
 on the **pod's** claim, not on any conversation session's. A pod makes it with `client_features` on
-`POST /api/virtual/{id}/status`, which the client sends on every phase report, from the first one at boot. The hub
-reads it as follows:
+`POST /api/virtual/{id}/status`, which the client sends on every phase report it makes. The boot script
+(`bin/virtual-agent-boot`) reports its early phases before it upgrades the client and sends no claim, and a report
+without one leaves the stored claim alone, so the claim is always the one the client that goes on to run made. The
+hub clears the claim whenever it asks for a pod to come up — a start, a restart, a size or plugin change, a fresh
+launch token — and on every stop, so a new boot has no claim of its own until it reports one. The hub reads it as
+follows:
 
 - When the virtual agent's stored claim is a list, an empty one included, that list decides.
-- When it holds nothing — the pod's client predates the field, or the hub has had no report from this boot — the hub
+- When it holds nothing — the pod's client predates the field, or the hub has had no claim from this boot — the hub
   reads the claim of the pod's main-session agent instead: the virtual agent's current agent, which the pod's main
-  Claude session registers without a `conversation_id`. That is the same client build, so the answer is the same.
+  Claude session registers without a `conversation_id`. That is the same client build, so the answer is the same. A
+  main-session agent that registered with no claim is an old client, which claims nothing.
 - A running pod with neither is still booting: a lookup or a Welsh job is answered `waking` rather than
   `unsupported`.
 
@@ -810,7 +815,7 @@ Every `/api/virtual/{virtual_agent_id}/…` route needs that virtual agent's own
 
 | Method and path | Body | Response |
 |---|---|---|
-| `POST /api/virtual/{id}/status` | `{phase, detail?, client_features?}` | `204`. `phase` is `provisioning`, `awaiting_credentials`, `awaiting_login`, `cloning`, `running` or `failed`; `detail` is at most 500 characters. `client_features` is the pod's own claim, validated as a registration's is and stored on the virtual agent; every report replaces it, with nothing when a report omits it (see A pod's claim, under Client features). A report the lifecycle refuses gives `409` and leaves the stored claim as it was. A report counts as activity, except `awaiting_credentials` and `awaiting_login`: in those the pod is waiting on its owner rather than getting anywhere, and a pod relaying a sign-in nobody finishes reports a fresh code every few minutes. |
+| `POST /api/virtual/{id}/status` | `{phase, detail?, client_features?}` | `204`. `phase` is `provisioning`, `awaiting_credentials`, `awaiting_login`, `cloning`, `running` or `failed`; `detail` is at most 500 characters. `client_features` is the pod's own claim, validated as a registration's is and stored on the virtual agent. A report with it replaces the stored claim; a report without it leaves the claim alone (see A pod's claim, under Client features). A report the lifecycle refuses gives `409` and leaves the stored claim as it was. A report counts as activity, except `awaiting_credentials` and `awaiting_login`: in those the pod is waiting on its owner rather than getting anywhere, and a pod relaying a sign-in nobody finishes reports a fresh code every few minutes. |
 | `PUT /api/virtual/{id}/ports` | `{ports, local_only?}` | `204`. What the pod finds listening (see Web ports below): `ports` those the Service can reach, `local_only` those bound to loopback only. Each is at most 10 distinct whole numbers from 1024 to 65535, in any order; a port in both counts as reachable. Stores both ascending and notifies the owner's UI; a change to `ports` bumps `generation` but not `pod_generation`. Reporting what is already stored changes nothing. Out of range, repeated or more than 10 gives `400`. |
 | `GET /api/virtual/{id}/credentials/{kind}` | — | `200 {value}`, the owner's stored credential, or `404` when none is stored. A `claude_md` the owner has not stored answers `200` with the default text instead (see Credentials). The only route that returns every kind's value. |
 | `PUT /api/virtual/{id}/credentials/{kind}` | `{value}` | `204`. Stores the owner's credential as saved by the pod (`updated_via: pod`), with the checks of Credentials above, except that an Azure token cache signed in as anyone but the owner gives `409`: it is not stored, and the agent is `failed`, as `complete` with another account does. A `claude_md` or `git_identity` gives `403`: only its owner changes them. |

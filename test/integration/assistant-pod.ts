@@ -3,10 +3,12 @@ import { devIdentity, type Viewer } from "../../src/viewer/identity.ts";
 import { insertUser, type Person, prisma } from "./database.ts";
 
 /**
- * The scaffolding every suite about an assistant's own pod needs: who is signed in, and an assistant with a
- * supervisor session whose client claims whatever the suite is about.
+ * The scaffolding every suite about an assistant's own pod needs: who is signed in, and an assistant whose pod's
+ * client claims whatever the suite is about. The claim is made through the pod's main-session agent, which
+ * `podSupports` reads while the pod has reported no claim of its own; a suite about the pod's own claim sets
+ * `virtual_agent.client_features` itself.
  *
- * Shared because the setup is the same question each time — "a running pod whose own session claims X" — and three
+ * Shared because the setup is the same question each time — "a running pod whose client claims X" — and three
  * copies of it had already drifted in their defaults. What each suite keeps is its `vi.mock` calls, which Vitest
  * hoists per file, and the fixtures that are about its own feature.
  */

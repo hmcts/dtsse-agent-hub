@@ -4,7 +4,7 @@ import {
   MAX_CLIENT_FEATURE_NAME,
   MAX_CLIENT_FEATURES,
   normaliseClientFeatures,
-  podClaimed,
+  podGate,
   podSupports,
   storedClientFeatures
 } from "./client-features.ts";
@@ -85,17 +85,27 @@ describe("podSupports", () => {
   });
 });
 
-describe("podClaimed", () => {
-  it("should be true when the pod reported its own claim, even before a main-session agent registers", () => {
-    expect(podClaimed({ clientFeatures: [], agent: null })).toBe(true);
+describe("podGate", () => {
+  it("should say waking when the pod is not running, whatever it claimed", () => {
+    expect(podGate({ status: "cloning", clientFeatures: ["lookups"] }, "lookups")).toBe("waking");
   });
 
-  it("should be true when the pod reported no claim but its main-session agent has registered", () => {
-    expect(podClaimed({ clientFeatures: null, agent: { clientFeatures: null } })).toBe(true);
+  it("should say waking when the pod runs but has claimed nothing and no main-session agent has registered", () => {
+    expect(podGate({ status: "running", clientFeatures: null, agent: null }, "lookups")).toBe("waking");
+    expect(podGate({ status: "running", clientFeatures: "lookups" }, "lookups")).toBe("waking");
   });
 
-  it("should be false when the pod reported no claim and no main-session agent has registered", () => {
-    expect(podClaimed({ clientFeatures: null, agent: null })).toBe(false);
-    expect(podClaimed({ clientFeatures: "files" })).toBe(false);
+  it("should read the pod's own claim, even before a main-session agent registers", () => {
+    expect(podGate({ status: "running", clientFeatures: ["lookups"], agent: null }, "lookups")).toBe("ok");
+    expect(podGate({ status: "running", clientFeatures: [], agent: { clientFeatures: ["lookups"] } }, "lookups")).toBe("unsupported");
+  });
+
+  it("should read the main-session agent's claim when the pod reported none", () => {
+    expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: ["welsh"] } }, "welsh")).toBe("ok");
+    expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: ["files"] } }, "welsh")).toBe("unsupported");
+  });
+
+  it("should say unsupported when the main-session agent registered on a client that claims nothing", () => {
+    expect(podGate({ status: "running", clientFeatures: null, agent: { clientFeatures: null } }, "welsh")).toBe("unsupported");
   });
 });

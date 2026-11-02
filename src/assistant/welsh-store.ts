@@ -1,12 +1,12 @@
 import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
-import { podClaimed, podSupports } from "../agents/client-features.ts";
+import { podGate } from "../agents/client-features.ts";
 import { isUuid } from "../agents/store.ts";
 import type { EventHub } from "../realtime/hub.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { setDesired } from "../virtual-agents/store.ts";
-import { findAssistant } from "./assistant-store.ts";
+import { findAssistant, findAssistantWithClaims } from "./assistant-store.ts";
 import {
   fileIdsOf,
   MAX_WELSH_FILE_BYTES,
@@ -44,10 +44,11 @@ export type AskedWelsh = { jobId: string; virtualAgentId: string } | { answer: W
  * and a pod whose client cannot run jobs is not sent a frame nobody would read. Files a job reads must be the viewer's.
  */
 export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, now: Date = new Date()): Promise<AskedWelsh> {
-  const assistant = await findAssistant(prisma, question.viewerOid);
-  if (assistant === undefined || !isOwner(question.viewerOid, assistant)) {
+  const found = await findAssistantWithClaims(prisma, question.viewerOid);
+  if (found === undefined || !isOwner(question.viewerOid, found.assistant)) {
     throw new HttpError(404, "you have no assistant to run that with yet");
   }
+  const { assistant, claims } = found;
   const files = await Promise.all(
     fileIdsOf(question.args).map((id) => prisma.assistantWelshFile.findUnique({ where: { id }, select: { ownerOid: true, jobId: true } }))
   );
@@ -58,15 +59,9 @@ export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, no
     await setDesired(prisma, question.viewerOid, assistant.id, "running", now);
     return { answer: { status: "waking" } };
   }
-  const claims = await prisma.virtualAgent.findUnique({
-    where: { id: assistant.id },
-    select: { clientFeatures: true, agent: { select: { clientFeatures: true } } }
-  });
-  if (assistant.status !== "running" || claims === null || !podClaimed(claims)) {
-    return { answer: { status: "waking" } };
-  }
-  if (!podSupports(claims, "welsh")) {
-    return { answer: { status: "unsupported" } };
+  const gate = podGate({ status: assistant.status, ...claims }, "welsh");
+  if (gate !== "ok") {
+    return { answer: { status: gate } };
   }
   const id = await prisma.$transaction(async (tx) => {
     // The assistant's rows are taken one job at a time, so two tabs cannot both find room under the limit.

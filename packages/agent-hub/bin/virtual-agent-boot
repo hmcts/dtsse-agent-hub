@@ -95,6 +95,8 @@ hub_retry() {
     done
 }
 
+# No client_features: this runs before the client is upgraded, and the hub keeps the claim a report leaves out, so
+# the claim is the one the upgraded client makes.
 report() {
     local body
     if [[ $# -ge 2 ]]; then

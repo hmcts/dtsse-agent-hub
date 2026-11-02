@@ -1,12 +1,12 @@
 import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
-import { podClaimed, podSupports } from "../agents/client-features.ts";
+import { podGate } from "../agents/client-features.ts";
 import { isUuid } from "../agents/store.ts";
 import type { EventHub } from "../realtime/hub.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { setDesired } from "../virtual-agents/store.ts";
-import { findAssistant } from "./assistant-store.ts";
+import { findAssistantWithClaims } from "./assistant-store.ts";
 import {
   checkResults,
   LOOKUP_RATE_LIMIT,
@@ -40,23 +40,18 @@ export type Asked = { lookupId: string; virtualAgentId: string } | { answer: Loo
  * asked, and a pod whose client cannot answer is not sent a frame nobody would read.
  */
 export async function askLookup(prisma: PrismaClient, question: LookupQuestion, now: Date = new Date()): Promise<Asked> {
-  const assistant = await findAssistant(prisma, question.viewerOid);
-  if (assistant === undefined || !canManageVirtualAgent(question.viewerOid, assistant)) {
+  const found = await findAssistantWithClaims(prisma, question.viewerOid);
+  if (found === undefined || !canManageVirtualAgent(question.viewerOid, found.assistant)) {
     throw new HttpError(404, "you have no assistant to search with yet");
   }
+  const { assistant, claims } = found;
   if (assistant.desired === "stopped") {
     await setDesired(prisma, question.viewerOid, assistant.id, "running", now);
     return { answer: { status: "waking" } };
   }
-  const claims = await prisma.virtualAgent.findUnique({
-    where: { id: assistant.id },
-    select: { clientFeatures: true, agent: { select: { clientFeatures: true } } }
-  });
-  if (assistant.status !== "running" || claims === null || !podClaimed(claims)) {
-    return { answer: { status: "waking" } };
-  }
-  if (!podSupports(claims, "lookups")) {
-    return { answer: { status: "unsupported" } };
+  const gate = podGate({ status: assistant.status, ...claims }, "lookups");
+  if (gate !== "ok") {
+    return { answer: { status: gate } };
   }
   const id = await prisma.$transaction(async (tx) => {
     // The assistant's rows are taken one lookup at a time, so two tabs cannot both find room under the limit.

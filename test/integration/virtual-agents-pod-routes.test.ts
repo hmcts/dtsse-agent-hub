@@ -213,7 +213,7 @@ describe("/api/virtual/{id}/status", () => {
     expect(stored.lastActiveAt).not.toBeNull();
   });
 
-  it("should store the client features the pod claims and clear them when a report carries none", async () => {
+  it("should store the client features the pod claims and keep them when a report carries none", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
     const claimOf = async () => (await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { clientFeatures: true } })).clientFeatures;
 
@@ -221,7 +221,27 @@ describe("/api/virtual/{id}/status", () => {
     expect(await claimOf()).toEqual(["files", "welsh"]);
 
     expect((await status(id, token, { phase: "running" })).status).toBe(204);
-    expect(await claimOf()).toBeNull();
+    expect(await claimOf()).toEqual(["files", "welsh"]);
+
+    expect((await status(id, token, { phase: "running", client_features: [] })).status).toBe(204);
+    expect(await claimOf()).toEqual([]);
+  });
+
+  it("should clear the claim when the agent is stopped and when it is started again", async () => {
+    const claimOf = async (id: string) => (await prisma.virtualAgent.findUniqueOrThrow({ where: { id }, select: { clientFeatures: true } })).clientFeatures;
+    const owned = await started(ALICE, "owned");
+    const swept = await started(ALICE, "swept");
+    for (const { id, token } of [owned, swept]) {
+      await status(id, token, { phase: "running", client_features: ["files"] });
+    }
+
+    await setDesired(prisma, ALICE.oid, owned.id, "stopped");
+    await stopVirtualAgents(prisma, [swept.id], "idle", new Date());
+    expect([await claimOf(owned.id), await claimOf(swept.id)]).toEqual([null, null]);
+
+    await prisma.virtualAgent.update({ where: { id: owned.id }, data: { clientFeatures: ["files"] } });
+    await setDesired(prisma, ALICE.oid, owned.id, "running");
+    expect(await claimOf(owned.id)).toBeNull();
   });
 
   it("should keep the stored claim when the lifecycle refuses the report", async () => {
@@ -237,17 +257,17 @@ describe("/api/virtual/{id}/status", () => {
     const base = Date.now();
     const minutesAgo = (minutes: number) => new Date(base - minutes * 60_000);
 
-    await reportStatus(prisma, agent.id, "provisioning", null, minutesAgo(100));
-    await reportStatus(prisma, agent.id, "awaiting_credentials", "github: no GitHub token stored", minutesAgo(95));
+    await reportStatus(prisma, agent.id, "provisioning", null, { now: minutesAgo(100) });
+    await reportStatus(prisma, agent.id, "awaiting_credentials", "github: no GitHub token stored", { now: minutesAgo(95) });
     // Each attempt gets a device code of its own, so nothing but the phase tells these apart from progress.
-    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code A1B2-C3D4", minutesAgo(90));
-    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code E5F6-G7H8", minutesAgo(1));
+    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code A1B2-C3D4", { now: minutesAgo(90) });
+    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code E5F6-G7H8", { now: minutesAgo(1) });
 
     const waiting = await row(agent.id);
     expect(waiting).toMatchObject({ status: "awaiting_login", statusDetail: "github: the owner must enter code E5F6-G7H8" });
     expect(waiting.lastActiveAt).toEqual(minutesAgo(100));
 
-    await reportStatus(prisma, agent.id, "cloning", "hmcts/cft-workspace", minutesAgo(0));
+    await reportStatus(prisma, agent.id, "cloning", "hmcts/cft-workspace", { now: minutesAgo(0) });
 
     expect((await row(agent.id)).lastActiveAt).toEqual(minutesAgo(0));
   });

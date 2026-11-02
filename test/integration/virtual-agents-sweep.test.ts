@@ -30,10 +30,10 @@ describe("sweepVirtualAgents", () => {
   /** An agent whose pod reported `phase` overnight and has re-reported it every five minutes for the last hour. */
   async function waitingSince(owner: Person, name: string, phase: "awaiting_login" | "awaiting_credentials"): Promise<VirtualAgentRow> {
     const agent = await create(owner, name);
-    await reportStatus(prisma, agent.id, phase, `${phase} 0`, ago(OVERNIGHT));
+    await reportStatus(prisma, agent.id, phase, `${phase} 0`, { now: ago(OVERNIGHT) });
     await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(OVERNIGHT) } });
     for (let minutes = 60; minutes >= 0; minutes -= 5) {
-      await reportStatus(prisma, agent.id, phase, `${phase} ${minutes}`, ago(minutes));
+      await reportStatus(prisma, agent.id, phase, `${phase} ${minutes}`, { now: ago(minutes) });
     }
     return await row(agent.id);
   }
@@ -191,7 +191,7 @@ describe("sweepVirtualAgents", () => {
 
   it("should stop an agent waiting on its owner long before the idle period would have", async () => {
     const agent = await create(ALICE, "an-hour");
-    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code A1B2-C3D4", ago(60));
+    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code A1B2-C3D4", { now: ago(60) });
     await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(65) } });
 
     const result = await sweepVirtualAgents(prisma, OPTIONS);
@@ -202,7 +202,7 @@ describe("sweepVirtualAgents", () => {
 
   it("should leave an agent whose pod reported its wait only minutes ago", async () => {
     const agent = await create(ALICE, "just-asked");
-    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code A1B2-C3D4", ago(20));
+    await reportStatus(prisma, agent.id, "awaiting_login", "github: the owner must enter code A1B2-C3D4", { now: ago(20) });
     await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(25) } });
 
     const result = await sweepVirtualAgents(prisma, OPTIONS);
@@ -215,7 +215,7 @@ describe("sweepVirtualAgents", () => {
     const agent = await create(ALICE, "token-watch");
     const detail = "github: three sign-in codes went unused; paste a token on the credentials page, or stop and start this agent";
     // The pod's budget runs out, it reports failed, and then watches for a stored token without reporting again.
-    await reportStatus(prisma, agent.id, "failed", detail, ago(OVERNIGHT));
+    await reportStatus(prisma, agent.id, "failed", detail, { now: ago(OVERNIGHT) });
     await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(OVERNIGHT) } });
 
     const result = await sweepVirtualAgents(prisma, OPTIONS);
@@ -230,7 +230,7 @@ describe("sweepVirtualAgents", () => {
 
   it("should leave a failed agent alone while its owner still has time to read the failure", async () => {
     const agent = await create(ALICE, "just-failed");
-    await reportStatus(prisma, agent.id, "failed", "github: the sign-in budget ran out", ago(60));
+    await reportStatus(prisma, agent.id, "failed", "github: the sign-in budget ran out", { now: ago(60) });
     await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(70) } });
 
     const result = await sweepVirtualAgents(prisma, OPTIONS);
@@ -241,10 +241,10 @@ describe("sweepVirtualAgents", () => {
 
   it("should leave a failed agent alone once its owner stores the credential and its pod reports work again", async () => {
     const agent = await create(ALICE, "recovered");
-    await reportStatus(prisma, agent.id, "failed", "github: the sign-in budget ran out", ago(OVERNIGHT));
+    await reportStatus(prisma, agent.id, "failed", "github: the sign-in budget ran out", { now: ago(OVERNIGHT) });
     await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(OVERNIGHT) } });
     // A failed agent is left only by a pod starting again, which is a report of work and so is activity.
-    await reportStatus(prisma, agent.id, "provisioning", "the owner stored a token", ago(2));
+    await reportStatus(prisma, agent.id, "provisioning", "the owner stored a token", { now: ago(2) });
 
     const result = await sweepVirtualAgents(prisma, OPTIONS);
 
@@ -254,7 +254,7 @@ describe("sweepVirtualAgents", () => {
 
   it("should clear a kept failure when its owner starts the agent again", async () => {
     const agent = await create(ALICE, "restarted");
-    await reportStatus(prisma, agent.id, "failed", "github: the sign-in budget ran out", ago(OVERNIGHT));
+    await reportStatus(prisma, agent.id, "failed", "github: the sign-in budget ran out", { now: ago(OVERNIGHT) });
     await prisma.virtualAgent.update({ where: { id: agent.id }, data: { startedAt: ago(OVERNIGHT) } });
     await sweepVirtualAgents(prisma, OPTIONS);
     expect((await row(agent.id)).stopDetail).not.toBeNull();
@@ -266,7 +266,7 @@ describe("sweepVirtualAgents", () => {
 
   it("should shut a swept pod out, so it cannot report its way back out of the stop", async () => {
     const { id, token } = await started(ALICE, "swept");
-    await reportStatus(prisma, id, "failed", "github: the sign-in budget ran out", ago(OVERNIGHT));
+    await reportStatus(prisma, id, "failed", "github: the sign-in budget ran out", { now: ago(OVERNIGHT) });
     await prisma.virtualAgent.update({ where: { id }, data: { startedAt: ago(OVERNIGHT) } });
     expect(await sweepVirtualAgents(prisma, OPTIONS)).toMatchObject({ afterFailure: [id] });
 
