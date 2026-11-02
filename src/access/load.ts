@@ -18,9 +18,9 @@ export function podConversationAgentSql(alias: string): Prisma.Sql {
 }
 
 /**
- * Agents `oid`, or any agent `oid` owns, may message by name or pick from a list: `canPersonMessageAgent`, as a
- * query — their own — less every pod conversation's agent, which only its own conversation's page messages. Two
- * conditions rather than one, so not even its owner picks one of those out of a list of sessions.
+ * Agents `oid`, or any agent `oid` owns, may message by name or pick from a list: `isOwner`, as a query — their own —
+ * less every pod conversation's agent, which only its own conversation's page messages. Two conditions rather than
+ * one, so not even its owner picks one of those out of a list of sessions.
  */
 export function agentsMessageableBy(oid: string): Prisma.AgentWhereInput {
   return { ownerOid: oid, NOT: POD_CONVERSATION_AGENT };

@@ -112,7 +112,7 @@ export function stopMarks(value: unknown): StopMark[] {
 }
 
 /**
- * The share page's read, for a viewer `canViewSharedConversation` has already allowed.
+ * The share page's read, for a viewer `conversationAccess` has already allowed.
  *
  * **The thread is read as the conversation's owner, and that is the design rather than a shortcut.** A share is
  * read-through access to one chat: every message in it is between the owner and their assistant, so `canReadMessage`

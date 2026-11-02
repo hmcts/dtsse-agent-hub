@@ -328,7 +328,7 @@ export interface SuggestedAgent {
 
 /**
  * Agents whose name starts with `query`, or carries it after a hyphen, live ones first and then most recently heard
- * from. A search, never a list: `agentLookup` in `src/access/rules.ts` decides that a query is specific enough to
+ * from. A search, never a list: `peopleLookup` in `src/access/rules.ts` decides that a query is specific enough to
  * answer at all and how many agents one answer may carry.
  *
  * A hyphen rather than any substring, so "pcs" finds `alice-pcs-api` without "api" finding every agent that has one

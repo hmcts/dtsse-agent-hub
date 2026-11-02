@@ -50,7 +50,7 @@ export async function saveCredential(form: FormData): Promise<ActionResult<{ con
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
-    await putCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind, value: form.get("value"), via: "web" });
+    await putCredential(prisma, backend.store, { ownerOid: viewer.oid, kind, value: form.get("value"), via: "web" });
     revalidate();
     return { ok: true, confirmation: `Your ${PASTEABLE[kind]} is stored` };
   });
@@ -67,7 +67,7 @@ export async function removeCredential(form: FormData): Promise<ActionResult> {
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
-    await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind });
+    await deleteCredential(prisma, backend.store, { ownerOid: viewer.oid, kind });
     revalidate();
     return { ok: true };
   });
@@ -85,7 +85,7 @@ export async function saveClaudeMd(form: FormData): Promise<ActionResult<{ confi
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
-    await putCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind: "claude_md", value: form.get("value"), via: "web" });
+    await putCredential(prisma, backend.store, { ownerOid: viewer.oid, kind: "claude_md", value: form.get("value"), via: "web" });
     revalidate();
     return { ok: true, confirmation: "Your CLAUDE.md is saved. Each agent uses it from its next Claude start" };
   });
@@ -101,7 +101,7 @@ export async function resetClaudeMd(): Promise<ActionResult<{ confirmation: stri
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
-    await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind: "claude_md" });
+    await deleteCredential(prisma, backend.store, { ownerOid: viewer.oid, kind: "claude_md" });
     revalidate();
     return { ok: true, confirmation: "Your CLAUDE.md is back to the default" };
   });
@@ -118,7 +118,7 @@ export async function saveGitIdentity(form: FormData): Promise<ActionResult<{ co
       return { ok: false, error: backend.reason };
     }
     const value = JSON.stringify({ name: text(form.get("name")), email: text(form.get("email")) });
-    await putCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind: "git_identity", value, via: "web" });
+    await putCredential(prisma, backend.store, { ownerOid: viewer.oid, kind: "git_identity", value, via: "web" });
     revalidate();
     return { ok: true, confirmation: "Your git identity is saved. Each agent uses it from its next Claude start" };
   });
@@ -134,7 +134,7 @@ export async function clearGitIdentity(): Promise<ActionResult<{ confirmation: s
     if (!backend.available) {
       return { ok: false, error: backend.reason };
     }
-    await deleteCredential(prisma, backend.store, { actorOid: viewer.oid, ownerOid: viewer.oid, kind: "git_identity" });
+    await deleteCredential(prisma, backend.store, { ownerOid: viewer.oid, kind: "git_identity" });
     revalidate();
     return { ok: true, confirmation: "Your virtual agents are back to the default git identity" };
   });

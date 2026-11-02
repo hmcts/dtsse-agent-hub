@@ -1,13 +1,5 @@
 import "server-only";
-import {
-  canManageConversationShares,
-  canManageVirtualAgent,
-  canOwnerReadCredential,
-  canReadMessage,
-  canViewAgent,
-  canViewVirtualAgent,
-  isPodConversationAgent
-} from "../access/rules.ts";
+import { canOwnerReadCredential, canReadMessage, isOwner } from "../access/rules.ts";
 import { isUuid } from "../agents/store.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
@@ -197,7 +189,7 @@ export async function messagePage(viewer: Identity, rawId: string): Promise<Mess
 
 /**
  * What `/hub/agents/{id}` names for the viewer, for `retiredAgentPath` to send them on from. Only their own agents and
- * virtual agents are told apart from nothing, as `canViewAgent` and `canViewVirtualAgent` decide.
+ * virtual agents are told apart from nothing, as `isOwner` decides.
  */
 export async function agentAddress(viewer: Identity, id: string): Promise<AgentAddress> {
   if (!isUuid(id)) {
@@ -207,10 +199,10 @@ export async function agentAddress(viewer: Identity, id: string): Promise<AgentA
     prisma.virtualAgent.findUnique({ where: { id }, select: { id: true, ownerOid: true } }),
     prisma.agent.findUnique({ where: { id }, select: { id: true, ownerOid: true, virtualAgentId: true, assistantConversationId: true } })
   ]);
-  if (virtualAgent !== null && canViewVirtualAgent(viewer.oid, virtualAgent)) {
+  if (virtualAgent !== null && isOwner(viewer.oid, virtualAgent)) {
     return await virtualAddress(viewer, virtualAgent.id);
   }
-  if (agent === null || !canViewAgent(viewer.oid, { id: agent.id, ownerOid: agent.ownerOid, ownerOnly: isPodConversationAgent(agent) })) {
+  if (agent === null || !isOwner(viewer.oid, agent)) {
     return NO_AGENT;
   }
   if (agent.assistantConversationId !== null) {
@@ -316,7 +308,7 @@ export async function unsentNewChat(viewer: Viewer): Promise<UnsentChat | undefi
  * they have no assistant at all, which is the one case the section is not offered.
  *
  * Its own read rather than part of `openAssistant`, because only the settings dialog uses it and it costs a second
- * query over the viewer's uploads. The owner check is the store's, through `canManageUploadsOnDisk`.
+ * query over the viewer's uploads. The owner check is the store's, through `isOwner`.
  */
 export async function assistantFiles(viewer: Viewer): Promise<UploadsOnDisk | undefined> {
   const assistant = await findAssistant(prisma, viewer.oid);
@@ -329,7 +321,7 @@ export async function assistantFiles(viewer: Viewer): Promise<UploadsOnDisk | un
  * which is the one case the section is not offered.
  *
  * Its own read rather than part of `openAssistant`, as the files are: only the settings dialog uses it, and it costs a
- * second query over the viewer's conversations. The owner check is the store's, through `canSeeAssistantMemory`.
+ * second query over the viewer's conversations. The owner check is the store's, through `isOwner`.
  */
 export async function assistantSize(viewer: Viewer): Promise<AssistantMemory | undefined> {
   const assistant = await findAssistant(prisma, viewer.oid);
@@ -340,10 +332,10 @@ export async function assistantSize(viewer: Viewer): Promise<AssistantMemory | u
  * The viewer's own saved prompts, for the settings dialog to edit and both composers to offer.
  *
  * Its own read rather than part of `openAssistant` so the one place that decides whose templates these are is the
- * store, which asks `canManageTemplate` with the viewer as both the actor and the owner.
+ * store, which reads only the owner it is handed: the viewer.
  */
 export async function assistantTemplates(viewer: Identity): Promise<SavedTemplate[]> {
-  return await listTemplates(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
+  return await listTemplates(prisma, { ownerOid: viewer.oid });
 }
 
 /** What the settings show and manage of the virtual agent the viewer's Assistant runs on. */
@@ -359,7 +351,7 @@ export type AssistantAgent = Pick<VirtualAgentRow, "id" | "name" | "desired" | "
  */
 export async function assistantAgent(viewer: Viewer): Promise<AssistantAgent | undefined> {
   const row = await findAssistant(prisma, viewer.oid);
-  if (row === undefined || !canManageVirtualAgent(viewer.oid, row)) {
+  if (row === undefined) {
     return undefined;
   }
   return { id: row.id, name: row.name, desired: row.desired, status: row.status, statusDetail: row.statusDetail, ...portLinks(row) };
@@ -377,7 +369,7 @@ export async function assistantModel(viewer: Viewer): Promise<AssistantModelChoi
 
 /** Where the viewer's documents go by default, for the settings to edit and the document panel to start from. */
 export async function assistantExportDefaults(viewer: Identity): Promise<ExportDefaults> {
-  return await readExportDefaults(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
+  return await readExportDefaults(prisma, { ownerOid: viewer.oid });
 }
 
 /** One of the viewer's conversations, or `undefined` for the not-found the page answers. */
@@ -392,7 +384,7 @@ export async function assistantConversation(viewer: Viewer, id: string): Promise
 /**
  * The read-only share of a conversation, for its owner or for someone they named, and `undefined` for everyone else
  * — including someone who was handed the link, since the link is how a recipient reaches a share and never what
- * grants one. `accessToConversation` applies `canViewSharedConversation`.
+ * grants one. `accessToConversation` applies `conversationAccess`.
  */
 export async function sharedChat(viewer: Identity, id: string): Promise<SharedConversationView | undefined> {
   const allowed = await accessToConversation(prisma, viewer.oid, id);
@@ -405,7 +397,7 @@ export async function sharedChat(viewer: Identity, id: string): Promise<SharedCo
 /** Who one of the viewer's own conversations is shared with, or `undefined` when it is not theirs to share. */
 export async function chatShares(viewer: Identity, id: string): Promise<SharePerson[] | undefined> {
   const conversation = await conversationRef(prisma, id);
-  if (conversation === undefined || !canManageConversationShares(viewer.oid, conversation)) {
+  if (conversation === undefined || !isOwner(viewer.oid, conversation)) {
     return undefined;
   }
   return await shareRecipients(prisma, id);
@@ -414,7 +406,7 @@ export async function chatShares(viewer: Identity, id: string): Promise<SharePer
 /** Who one of the viewer's own conversations is offered to fork, or `undefined` when it is not theirs to offer. */
 export async function chatForks(viewer: Identity, id: string): Promise<SharePerson[] | undefined> {
   const conversation = await conversationRef(prisma, id);
-  if (conversation === undefined || !canManageConversationShares(viewer.oid, conversation)) {
+  if (conversation === undefined || !isOwner(viewer.oid, conversation)) {
     return undefined;
   }
   return await forkRecipients(prisma, id);

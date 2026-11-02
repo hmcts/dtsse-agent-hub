@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import * as credentialRoute from "../../src/app/api/agent/credentials/[kind]/route.ts";
 import { credentialBackend } from "../../src/credentials/backend.ts";
 import { DEFAULT_CLAUDE_MD } from "../../src/credentials/claude-md.ts";
-import { credentialStatus, deleteCredential, putCredential, readCredential, type SecretStore } from "../../src/credentials/store.ts";
+import { credentialStatus, putCredential, readCredential, type SecretStore } from "../../src/credentials/store.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
 import { createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { connect, insertUser, type Person, person, prisma, resetDatabase } from "./database.ts";
@@ -345,22 +345,8 @@ describe("ownership", () => {
     expect(await readCredential(prisma, localStore(), ALICE.oid, "github")).toBe(GITHUB);
   });
 
-  it("should refuse to save or delete someone else's credential when the actor is not the owner", async () => {
-    await insertUser(ALICE);
-    await insertUser(BOB);
-    await put(ALICE, "github", { value: GITHUB });
-
-    await expect(
-      putCredential(prisma, localStore(), { actorOid: BOB.oid, ownerOid: ALICE.oid, kind: "github", value: GITHUB_AGAIN, via: "web" })
-    ).rejects.toThrow("your own credentials");
-    await expect(deleteCredential(prisma, localStore(), { actorOid: BOB.oid, ownerOid: ALICE.oid, kind: "github" })).rejects.toThrow("your own credentials");
-    expect(await readCredential(prisma, localStore(), ALICE.oid, "github")).toBe(GITHUB);
-  });
-
   it("should refuse an owner whose oid could not name a secret", async () => {
-    await expect(putCredential(prisma, localStore(), { actorOid: "dev-a_b", ownerOid: "dev-a_b", kind: "github", value: GITHUB, via: "web" })).rejects.toThrow(
-      "Entra user"
-    );
+    await expect(putCredential(prisma, localStore(), { ownerOid: "dev-a_b", kind: "github", value: GITHUB, via: "web" })).rejects.toThrow("Entra user");
   });
 
   it("should drop a person's credential metadata when the person is deleted", async () => {

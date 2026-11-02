@@ -811,7 +811,7 @@ describe("a launch token on the agent API", () => {
 
   it("should refuse a launch token reading its owner's CLAUDE.md through the person's route", async () => {
     const { token } = await started(ALICE, "pcs-api");
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "claude_md", value: "# mine", via: "web" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "claude_md", value: "# mine", via: "web" });
 
     const response = await pod(personalCredentialRoute.GET, token, "/api/agent/credentials/claude_md", { kind: "claude_md" });
 
@@ -897,7 +897,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
   it("should give the pod its owner's Jenkins API token when one is stored, and offer it as optional", async () => {
     const { id, token } = await started(ALICE, "pcs-api", "own-licence");
     const jenkins = "11a2b3c4d5e6f708192a3b4c5d6e7f8091";
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "jenkins", value: jenkins, via: "web" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "jenkins", value: jenkins, via: "web" });
 
     const found = await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/jenkins`, { virtualAgentId: id, kind: "jenkins" });
 
@@ -907,7 +907,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
 
   it("should give the pod its owner's stored credential, and 404 when there is none", async () => {
     const { id, token } = await started(ALICE, "pcs-api");
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "github", value: GITHUB, via: "web" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "github", value: GITHUB, via: "web" });
 
     const found = await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/github`, { virtualAgentId: id, kind: "github" });
     const missing = await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/claude`, { virtualAgentId: id, kind: "claude" });
@@ -920,7 +920,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
   it("should never give a credential to anyone but the owner's own virtual agent", async () => {
     const { id } = await started(ALICE, "pcs-api");
     const bobs = await started(BOB, "bobs");
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "github", value: GITHUB, via: "web" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "github", value: GITHUB, via: "web" });
 
     const asOwner = await call(credentialRoute.GET, {
       as: ALICE,
@@ -1070,7 +1070,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect(await jsonOf(fallback)).toEqual({ value: DEFAULT_CLAUDE_MD });
 
     const text = "# Alice\n\nUse British English.\n";
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "claude_md", value: text, via: "web" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "claude_md", value: text, via: "web" });
 
     expect(await jsonOf(await fetchClaudeMd())).toEqual({ value: text });
   });
@@ -1078,7 +1078,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
   it("should never give a CLAUDE.md to another person's virtual agent or to a person's own token", async () => {
     const { id } = await started(ALICE, "pcs-api");
     const bobs = await started(BOB, "bobs");
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "claude_md", value: "alice's private notes", via: "web" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "claude_md", value: "alice's private notes", via: "web" });
 
     const asOtherAgent = await pod(credentialRoute.GET, bobs.token, `/api/virtual/${id}/credentials/claude_md`, { virtualAgentId: id, kind: "claude_md" });
     const asOwner = await call(credentialRoute.GET, {
@@ -1112,7 +1112,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     expect(await jsonOf(missing)).toEqual({ error: "no git_identity credential is stored" });
 
     const identity = JSON.stringify({ name: "Alice", email: "alice@example.com" });
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "git_identity", value: identity, via: "web" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "git_identity", value: identity, via: "web" });
 
     expect(await jsonOf(await fetchIdentity())).toEqual({ value: identity });
   });
@@ -1121,7 +1121,7 @@ describe("/api/virtual/{id}/credentials/{kind}", () => {
     const { id } = await started(ALICE, "pcs-api");
     const bobs = await started(BOB, "bobs");
     const identity = JSON.stringify({ email: "alice@example.com" });
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "git_identity", value: identity, via: "web" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "git_identity", value: identity, via: "web" });
 
     const asOtherAgent = await pod(credentialRoute.GET, bobs.token, `/api/virtual/${id}/credentials/git_identity`, {
       virtualAgentId: id,
@@ -2013,7 +2013,7 @@ describe("with virtual agents off", () => {
 describe("a stored Claude token for the own-licence route", () => {
   it("should reach the pod when the owner saved it on the web", async () => {
     const { id, token } = await started(ALICE, "pcs-api", "own-licence");
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "claude", value: CLAUDE, via: "web" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "claude", value: CLAUDE, via: "web" });
 
     expect(await jsonOf(await pod(credentialRoute.GET, token, `/api/virtual/${id}/credentials/claude`, { virtualAgentId: id, kind: "claude" }))).toEqual({
       value: CLAUDE
@@ -2578,7 +2578,7 @@ describe("/hub/agents/{id}", () => {
 
 describe("signing in again", () => {
   async function storedGithub(): Promise<void> {
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "github", value: GITHUB, via: "pod" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "github", value: GITHUB, via: "pod" });
   }
 
   it("should delete the credential and restart the pod with a fresh launch token when the agent is running", async () => {
@@ -2606,7 +2606,7 @@ describe("signing in again", () => {
 
   it("should delete the credential and leave the generation alone when the agent is stopped", async () => {
     const { id } = await started(ALICE, "pcs-api");
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "azure", value: AZURE, via: "pod" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "azure", value: AZURE, via: "pod" });
     await setDesired(prisma, ALICE.oid, id, "stopped");
     const before = await row(id);
 
@@ -2674,7 +2674,7 @@ describe("signing in again", () => {
   it("should delete the Atlassian sign-in and restart the agent when the owner signs in to Atlassian again", async () => {
     const { id } = await started(ALICE, "pcs-api");
     const value = atlassianAuthFor("alice@justice.gov.uk", "refresh-one");
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "atlassian", value, via: "pod" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "atlassian", value, via: "pod" });
 
     actAs("alice");
     expect(await actions.reconnectSignIn(form({ id, kind: "atlassian" }))).toEqual({
@@ -2702,7 +2702,7 @@ describe("signing in again", () => {
   it("should refuse when the kind is not a sign-in, or the agent is being deleted", async () => {
     const { id } = await started(ALICE, "pcs-api");
     await storedGithub();
-    await putCredential(prisma, localStore(), { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind: "jenkins", value: JENKINS, via: "web" });
+    await putCredential(prisma, localStore(), { ownerOid: ALICE.oid, kind: "jenkins", value: JENKINS, via: "web" });
 
     actAs("alice");
     expect(await actions.reconnectSignIn(form({ id, kind: "jenkins" }))).toEqual({ ok: false, error: "no sign-in was named" });

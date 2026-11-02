@@ -269,7 +269,7 @@ export async function completeLogin(
 
   if (kind === "azure" && completion.accountOid !== virtualAgent.ownerOid) {
     if (store !== undefined) {
-      await deleteCredential(prisma, store, { actorOid: virtualAgent.ownerOid, ownerOid: virtualAgent.ownerOid, kind: "azure" });
+      await deleteCredential(prisma, store, { ownerOid: virtualAgent.ownerOid, kind: "azure" });
     }
     const detail = "the Azure sign-in was for a different account from the owner's, so its token cache was deleted; sign in as yourself";
     await failForAzureAccount(prisma, virtualAgent, detail, now);
@@ -327,7 +327,7 @@ export async function reconnectSignIn(
   if (virtualAgent.desired === "deleted") {
     throw new HttpError(409, "that virtual agent is being deleted");
   }
-  await deleteCredential(prisma, store, { actorOid, ownerOid: virtualAgent.ownerOid, kind });
+  await deleteCredential(prisma, store, { ownerOid: virtualAgent.ownerOid, kind });
   if (kind === "azure") {
     await prisma.virtualAgent.update({ where: { id: virtualAgentId }, data: { azureSignInRequestedAt: now } });
   }

@@ -1,4 +1,4 @@
-import { canViewConversation } from "../access/rules.ts";
+import { isOwner } from "../access/rules.ts";
 import { collapse, oneLine } from "../transcripts/conversation.ts";
 
 /**
@@ -108,7 +108,7 @@ export class ForeignConversation extends Error {
  */
 export function visibleMatches<T extends { ownerOid: string }>(viewerOid: string, rows: readonly T[]): T[] {
   for (const row of rows) {
-    if (!canViewConversation(viewerOid, row)) {
+    if (!isOwner(viewerOid, row)) {
       throw new ForeignConversation();
     }
   }

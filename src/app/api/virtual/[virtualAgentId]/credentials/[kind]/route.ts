@@ -51,6 +51,6 @@ export const PUT = virtualRoute<{ virtualAgentId: string; kind: string }>(async 
       throw new HttpError(409, owned.error);
     }
   }
-  await putCredential(prisma, requireStore(prisma), { actorOid: owner, ownerOid: owner, kind, value, via: "pod" });
+  await putCredential(prisma, requireStore(prisma), { ownerOid: owner, kind, value, via: "pod" });
   return noContent();
 });

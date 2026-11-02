@@ -1,4 +1,4 @@
-import { type ConversationShare, canForkConversation, canManageConversationShares, canShareConversationWith } from "../access/rules.ts";
+import { type ConversationShare, canForkConversation, canShareConversationWith, isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import type { ThreadMessage } from "../messages/direct-thread.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
@@ -43,7 +43,7 @@ export async function forkRecipients(db: Database, conversationId: string): Prom
 /** The owner's conversation, or the 404 anyone else's is reported as. */
 async function ownedConversation(db: Database, actorOid: string, id: string): Promise<SharedConversationRow> {
   const conversation = await conversationRef(db, id);
-  if (conversation === undefined || !canManageConversationShares(actorOid, conversation)) {
+  if (conversation === undefined || !isOwner(actorOid, conversation)) {
     throw new ConversationNotFound();
   }
   return conversation;

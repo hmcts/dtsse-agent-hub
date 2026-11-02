@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { canStopAssistantAnswer } from "@/access/rules";
 import { HttpError } from "@/agent-api/http";
 import { confluenceExportRequest } from "@/assistant/confluence";
 import { requestConfluenceExport } from "@/assistant/confluence-store";
@@ -244,14 +243,9 @@ export async function stopAssistantAnswer(input: { conversationId: unknown }): P
       return OFF;
     }
     const viewer = await requireViewer();
+    // Only the owner interrupts a turn: `findConversation` reports anyone else's conversation as missing.
     const conversation = await findConversation(prisma, viewer.oid, text(input.conversationId));
     if (conversation === undefined) {
-      return MISSING;
-    }
-    // The owner-scoped read above is the enforcement: it reports anyone else's conversation as missing. This names
-    // the rule, so that "only the owner may interrupt a turn" is written down and tested somewhere rather than
-    // living in one query's WHERE clause, and so a future unscoped read seam has something to fail against.
-    if (!canStopAssistantAnswer(viewer.oid, conversation)) {
       return MISSING;
     }
     const outcome = await stopAnswer(prisma, conversation);

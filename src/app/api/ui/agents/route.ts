@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { agentLookup } from "@/access/rules";
+import { peopleLookup } from "@/access/rules";
 import { json } from "@/agent-api/http";
 import { searchTaggableAgents } from "@/agents/store";
 import { prisma } from "@/store/prisma";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 /**
  * Agents the post composer can offer to tag: `?q=`, matched against their names.
  *
- * What may be answered is `agentLookup`'s and `podConversationAgentSql`'s rather than this handler's, as it is for
+ * What may be answered is `peopleLookup`'s and `podConversationAgentSql`'s rather than this handler's, as it is for
  * `GET /api/ui/people`. Every owner's agents, because tagging reaches every owner's; it answers an agent's name and
  * whose it is, which is what that agent's own posts already show anyone signed in, and nothing about its state.
  */
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   if (viewer instanceof Response) {
     return viewer;
   }
-  const lookup = agentLookup(request.nextUrl.searchParams.get("q") ?? "");
+  const lookup = peopleLookup(request.nextUrl.searchParams.get("q") ?? "");
   if (!lookup.ok) {
     return json({ agents: [] });
   }

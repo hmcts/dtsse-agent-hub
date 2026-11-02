@@ -1,4 +1,3 @@
-import { canManageCredential } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
@@ -9,6 +8,10 @@ import { checkCredential } from "./validate.ts";
  * Each person's credentials: the value in a `SecretStore`, and a `credential` row saying it is there. The row never
  * holds the value. `readCredential` hands one to the owner's own virtual agent, and to the owner only for the kinds
  * `canOwnerReadCredential` allows.
+ *
+ * Every write names its owner, and every caller takes that owner from who is signed in — the person's session or
+ * token, or the virtual agent whose launch token the pod holds — never from the request, so nothing here decides
+ * whose credentials a caller may change.
  */
 
 /** Where values are kept: the credentials Key Vault, or the local encrypted table in development and tests. */
@@ -33,7 +36,6 @@ export interface CredentialStatus {
 }
 
 export interface CredentialTarget {
-  actorOid: string;
   ownerOid: string;
   kind: CredentialKind;
 }
@@ -54,10 +56,7 @@ export function ownerRefusal(store: SecretStore, ownerOid: string): HttpError | 
   return undefined;
 }
 
-function checkTarget(store: SecretStore, { actorOid, ownerOid }: CredentialTarget): void {
-  if (!canManageCredential(actorOid, ownerOid)) {
-    throw new HttpError(403, "you can only change your own credentials");
-  }
+function checkTarget(store: SecretStore, { ownerOid }: CredentialTarget): void {
   const refusal = ownerRefusal(store, ownerOid);
   if (refusal !== undefined) {
     throw refusal;

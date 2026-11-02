@@ -1,4 +1,4 @@
-import { canUseWelsh } from "../access/rules.ts";
+import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { clientSupports } from "../agents/client-features.ts";
 import { isUuid } from "../agents/store.ts";
@@ -45,7 +45,7 @@ export type AskedWelsh = { jobId: string; virtualAgentId: string } | { answer: W
  */
 export async function askWelsh(prisma: PrismaClient, question: WelshQuestion, now: Date = new Date()): Promise<AskedWelsh> {
   const assistant = await findAssistant(prisma, question.viewerOid);
-  if (assistant === undefined || !canUseWelsh(question.viewerOid, assistant)) {
+  if (assistant === undefined) {
     throw new HttpError(404, "you have no assistant to run that with yet");
   }
   const files = await Promise.all(
@@ -106,7 +106,7 @@ export async function readWelsh(db: Database, viewerOid: string, jobId: string, 
       files: { select: { id: true, name: true, createdAt: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }
     }
   });
-  if (row === null || !canUseWelsh(viewerOid, row.virtualAgent)) {
+  if (row === null || !canManageVirtualAgent(viewerOid, row.virtualAgent)) {
     return undefined;
   }
   const sizes = row.files.length
@@ -242,7 +242,7 @@ export async function putJobFile(
 /** A spreadsheet the viewer uploaded for a job to read: a Welsh Language Unit return. */
 export async function saveUpload(prisma: PrismaClient, viewerOid: string, name: string, bytes: Uint8Array, now: Date = new Date()): Promise<string> {
   const assistant = await findAssistant(prisma, viewerOid);
-  if (assistant === undefined || !canUseWelsh(viewerOid, assistant)) {
+  if (assistant === undefined) {
     throw new HttpError(404, "you have no assistant to run that with yet");
   }
   if (bytes.length === 0 || bytes.length > MAX_WELSH_FILE_BYTES) {
