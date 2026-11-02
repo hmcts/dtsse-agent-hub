@@ -21,7 +21,7 @@ export async function asPersona(browser: Browser, persona: string, baseURL: stri
 }
 
 /** The persona's identity as the service derives it, for the agent API's development header. */
-export function devUser(persona: string): string {
+function devUser(persona: string): string {
   return `dev-${persona}|Dev ${persona} (sign-in disabled)|${persona}@dev.invalid`;
 }
 

@@ -25,7 +25,7 @@ import { type FrameAttachment, frameAttachments } from "./upload-store.ts";
  * to the assistant's sessions stream with an `assistant_conversation` event, inside the transaction that made it.
  */
 
-export const ASSISTANT_NAME = "assistant";
+const ASSISTANT_NAME = "assistant";
 
 const MAX_PRODUCT_HISTORY = 50;
 const MAX_STOP_HISTORY = 50;
@@ -55,13 +55,13 @@ export interface ConversationRow {
 
 export type SessionState = "starting" | "live" | "queued";
 
-export interface ProductChange {
+interface ProductChange {
   product: string;
   at: string;
 }
 
 /** When the person stopped an answer, which is where the thread shows that they did. */
-export interface StopMark {
+interface StopMark {
   at: string;
 }
 
@@ -138,8 +138,8 @@ function toRow(row: {
  *
  * Sent for a conversation with no pod as well, carrying a null `virtual_agent_id`. The owner's tabs are the
  * subscriber that matters here and `ui-stream` selects this frame on `owner_oid`, so having no pod means there is
- * nobody to *instruct*, not nobody to tell: a local chat renamed or deleted has to redraw like any other. The
- * sessions stream reaches no pod for it on its own, by comparing the id against a real one.
+ * nobody to *instruct*, not nobody to tell: a local chat renamed or deleted has to redraw like any other. A null
+ * `virtual_agent_id` matches no pod's sessions stream.
  */
 export async function announce(db: Database, conversation: Pick<ConversationRow, "id" | "virtualAgentId" | "ownerOid">): Promise<void> {
   await notify(db, {
@@ -306,9 +306,8 @@ export async function hasLocalConversation(db: Database, ownerOid: string): Prom
  * conversation, sends, and starts a *second* conversation — leaving the first with the person's file in it for
  * `sweepUploads` to delete hours later, which is silent data loss.
  *
- * The conditions are the same ones `dropAbandoned` sweeps on, minus the retention window, which is deliberate: a
- * conversation is resumable for exactly as long as it is not yet rubbish. `state = 'stored'` rather than any
- * unclaimed upload, because a half-uploaded file cannot be sent and there is nothing to hand back.
+ * Any conversation of the owner's, with or without a pod, however old. `state = 'stored'` rather than any unclaimed
+ * upload, because a half-uploaded file cannot be sent and there is nothing to hand back.
  */
 export async function unsentConversation(db: Database, ownerOid: string): Promise<ConversationRow | undefined> {
   const [row] = await db.$queryRaw<{ id: string }[]>`
@@ -535,7 +534,7 @@ export async function createConversation(
  * needs the person's assistant and creates an agent for the pod to start a session as; here the agent is the session
  * that is already running on somebody's laptop, so there is no pod to find and nothing to create.
  */
-export async function createLocalConversation(db: Database, session: { ownerOid: string; agentId: string; title: string | null }): Promise<ConversationRow> {
+async function createLocalConversation(db: Database, session: { ownerOid: string; agentId: string; title: string | null }): Promise<ConversationRow> {
   const created = await db.assistantConversation.create({
     data: {
       ownerOid: session.ownerOid,
@@ -1003,32 +1002,10 @@ export async function writeArtefact(
 /**
  * What a direct frame to a conversation's agent carries, or `undefined` for any other agent.
  *
- * A field only some clients read belongs behind a claim, left out of the frame for a client that did not claim it, so
- * the hub does not send where it cannot be read; `client_features` on register (`src/agents/client-features.ts`) is
- * what says which client claimed what. No field here is gated on a claim, and two of them are not read by every
- * published client: `attachments`, `jira_export` and `confluence_export`. All three go to every session.
- *
- * A client older than attachments drops that message's files in silence. Gating `attachments` is two lines:
- *   1. `clientFeatures: true` in the `select` below. It is free: a column of the `agent` row this read already
- *      fetches, so it widens the projection and adds no statement;
- *   2. `...(clientSupports(row.clientFeatures, "attachments") ? { attachments } : {})` in the returned frame.
- *
- * Those two close the hub's half only — the field stops reaching a session that cannot act on it. They do not close
- * the silence: an old client receives no `attachments`, still drops the files, and the person is still told nothing.
- * Saying so is a third change, and it is not built. `ConversationView.clientFeatures` (`src/assistant/views.ts`) is
- * what carries the claim to the screen for it, and nothing reads that field today.
- *
- * The published client claims `attachments` (`CLIENT_FEATURES` in `packages/agent-hub/src/features.ts`), so the gate
- * answers true for a session on a current build. A session registered by a build published before that claim claims
- * nothing and loses the field until it restarts: a pod takes the current client on boot and every session reports its
- * claim on register, so the window is the life of the sessions already running, not anything to migrate.
- *
- * `jira_export` is the same silence and a different gate. A client older than the export reads no steps off the frame,
- * so the session is handed the person's request in words and left to improvise, and the export fails on its 15-minute
- * timeout; leaving the field out of the frame changes none of that. The claim belongs one step earlier, where the
- * person can be told: `exportArtefactToJira` refusing an export the conversation's session could not carry out, as
- * `canStopAssistantAnswer` refuses a stop. That is not built, and the published client claims no `jira_export`.
- * `confluence_export` is the same case and is left the same way.
+ * No field is gated on a `client_features` claim (`src/agents/client-features.ts`): `attachments`, `jira_export`
+ * and `confluence_export` go to every session. A client too old to read `attachments` drops that message's files
+ * and nobody is told; one too old to read `jira_export` or `confluence_export` is handed the request in words, and
+ * the export fails on its 15-minute timeout.
  */
 export interface AssistantFrame {
   conversation_id: string;

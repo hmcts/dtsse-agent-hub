@@ -8,15 +8,15 @@ import { DEFAULT_PUBLIC_DOMAIN } from "../virtual-agents/ports.ts";
 
 export type Environment = Readonly<Record<string, string | undefined>>;
 
-export const DEFAULT_HUB_URL = "https://agent-hub.aat.platform.hmcts.net";
-export const DEFAULT_HUB_AUDIENCE = "api://dtsse-agent-hub";
+const DEFAULT_HUB_URL = "https://agent-hub.aat.platform.hmcts.net";
+const DEFAULT_HUB_AUDIENCE = "api://dtsse-agent-hub";
 /** The namespace's own: the pods mount no token and have no workload identity, so they need no account of their own. */
-export const DEFAULT_SERVICE_ACCOUNT = "default";
-export const DEFAULT_DISK_SIZE = "32Gi";
-export const DEFAULT_INTERVAL_SECONDS = 10;
-export const DEFAULT_PORT = 8080;
+const DEFAULT_SERVICE_ACCOUNT = "default";
+const DEFAULT_DISK_SIZE = "32Gi";
+const DEFAULT_INTERVAL_SECONDS = 10;
+const DEFAULT_PORT = 8080;
 /** Passes between orphan sweeps: at the default interval, every five minutes. */
-export const ORPHAN_SWEEP_EVERY = 30;
+const ORPHAN_SWEEP_EVERY = 30;
 
 export interface HostAlias {
   ip: string;

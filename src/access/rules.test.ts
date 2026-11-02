@@ -27,7 +27,6 @@ import {
   canSessionUseAttachment,
   canShareConversationWith,
   canStopAssistantAnswer,
-  canSuggestAgent,
   canSuggestPerson,
   canUseCredentialRoutes,
   canUseWelsh,
@@ -69,7 +68,7 @@ const ROLES: Record<Role, string> = { owner: OWNER, colleague: COLLEAGUE };
 /** Every refusal a colleague gets. Each one is the same single fact: the agent is somebody else's. */
 const EVERYONE_ELSE: readonly [string, string][] = [
   ["a colleague", COLLEAGUE],
-  ["someone with agents of their own", ELSEWHERE]
+  ["another owner", ELSEWHERE]
 ];
 
 interface Expectation {
@@ -82,17 +81,22 @@ interface Expectation {
 }
 
 /**
- * One row, not four. Seeing an agent, reading its transcript, messaging it, offering its skills and reading its
- * thread are the same single answer — whether the viewer owns it — so the matrix that used to say how each of those
- * differed between an owner and the three kinds of non-owner now says only that none of them differ.
+ * Seeing an agent, reading its transcript, messaging it, offering its skills and reading its thread are the same single
+ * answer: whether the viewer owns it.
  */
 const MATRIX: Record<Role, Expectation> = {
   owner: { viewAgent: true, viewTranscript: true, messageAsPerson: true, seeSkills: true, messageAsAgent: true, readDirect: true },
   colleague: { viewAgent: false, viewTranscript: false, messageAsPerson: false, seeSkills: false, messageAsAgent: false, readDirect: false }
 };
 
-/** A direct message from a third party's agent to the owner's agent. */
-const DIRECT_TO_TARGET: MessageRef = { kind: "direct", authorOid: ELSEWHERE, authorAgent: agentOf(ELSEWHERE), targetAgent: TARGET, parentAuthorOid: null };
+/** A direct message from the owner's other agent to the owner's agent. */
+const DIRECT_TO_TARGET: MessageRef = {
+  kind: "direct",
+  authorOid: OWNER,
+  authorAgent: { id: "agent-other", ownerOid: OWNER },
+  targetAgent: TARGET,
+  parentAuthorOid: null
+};
 
 describe.each(Object.entries(MATRIX) as [Role, Expectation][])("access for the %s", (role, expected) => {
   const oid = ROLES[role];
@@ -143,7 +147,6 @@ describe("reaching somebody else's agent", () => {
 
   it("should let a colleague tag the owner's agent from the web UI, where they post as themselves", () => {
     expect(tagRefusal(null, TARGET)).toBeUndefined();
-    expect(canSuggestAgent(TARGET)).toBe(true);
   });
 
   it("should still refuse the colleague everything the tag does not carry", () => {
@@ -167,10 +170,6 @@ describe("canAgentMessageAgent", () => {
 });
 
 describe("canReadMessage", () => {
-  it("should let the sender read their own direct message when they cannot see the target", () => {
-    expect(canReadMessage(ELSEWHERE, DIRECT_TO_TARGET)).toBe(true);
-  });
-
   it("should put a reply to a person in the replying agent's thread when it has no target", () => {
     const reply: MessageRef = { kind: "direct", authorOid: OWNER, authorAgent: TARGET, targetAgent: null, parentAuthorOid: null };
 
@@ -195,7 +194,13 @@ describe("canReadMessage", () => {
   });
 
   it("should not widen a targeted direct message to the author of the message it replies to", () => {
-    const reply: MessageRef = { kind: "direct", authorOid: ELSEWHERE, authorAgent: agentOf(ELSEWHERE), targetAgent: TARGET, parentAuthorOid: COLLEAGUE };
+    const reply: MessageRef = {
+      kind: "direct",
+      authorOid: OWNER,
+      authorAgent: { id: "agent-other", ownerOid: OWNER },
+      targetAgent: TARGET,
+      parentAuthorOid: COLLEAGUE
+    };
 
     expect(canReadMessage(COLLEAGUE, reply)).toBe(false);
   });
@@ -207,11 +212,11 @@ describe("canReadMessage", () => {
     expect(canReadMessage(COLLEAGUE, orphan)).toBe(false);
   });
 
-  it("should not let the author's own other reader read what its agent sent to someone else's agent", () => {
+  // Nothing sends a direct between two owners' agents, but rows that do are still stored.
+  it("should not let anyone but its author read what an agent sent to another owner's agent", () => {
     const sent: MessageRef = { kind: "direct", authorOid: OWNER, authorAgent: TARGET, targetAgent: agentOf(ELSEWHERE), parentAuthorOid: null };
 
     expect(canReadMessage(COLLEAGUE, sent)).toBe(false);
-    // Its author still reads it, from the author check rather than from the thread it is in.
     expect(canReadMessage(OWNER, sent)).toBe(true);
   });
 });
@@ -219,12 +224,21 @@ describe("canReadMessage", () => {
 describe("replyRoute", () => {
   const replier = TARGET;
 
-  // The other case that has to keep working. The sender reached this agent, so the answer is allowed whoever owns
-  // the sender; a refusal here would leave every cross-owner exchange one-way.
-  it("should route a reply to the agent that sent the direct message, whatever the owner", () => {
+  it("should route a reply to the agent that sent the direct message when it has the same owner", () => {
+    const sender: AgentRef = { id: "agent-other", ownerOid: OWNER };
+    const received: MessageRef = { kind: "direct", authorOid: OWNER, authorAgent: sender, targetAgent: replier, parentAuthorOid: null };
+
+    expect(replyRoute(replier, received)).toEqual({ to: "agent", target: sender });
+  });
+
+  it("should refuse a reply to a direct message when another owner's agent sent it", () => {
     const received: MessageRef = { kind: "direct", authorOid: ELSEWHERE, authorAgent: agentOf(ELSEWHERE), targetAgent: replier, parentAuthorOid: null };
 
-    expect(replyRoute(replier, received)).toEqual({ to: "agent", target: agentOf(ELSEWHERE) });
+    expect(replyRoute(replier, received)).toEqual({
+      to: "nobody",
+      reason: "a private reply to an agent of another owner is not allowed; post on the topic and tag that agent instead",
+      status: 403
+    });
   });
 
   it("should route a reply to a person's direct message into the replying agent's own thread", () => {
@@ -472,18 +486,20 @@ describe("canLaunchTokenReadMessage", () => {
 
   it.each([
     ["sent to one of its sessions by a person", direct(null, session)],
-    ["sent to one of its sessions by another agent", direct(elsewhere, session)],
-    ["sent by one of its sessions to another agent", direct(session, elsewhere)],
-    ["a reply by one of its sessions into its own UI thread", direct(session, null)]
+    ["sent to one of its sessions by the owner's other agent", direct(laptop, session)],
+    ["sent by one of its sessions to the owner's other agent", direct(session, laptop)],
+    ["a reply by one of its sessions into its own UI thread", direct(session, null)],
+    ["sent to one of its sessions by another owner's agent", direct(elsewhere, session)],
+    ["sent by one of its sessions to another owner's agent", direct(session, elsewhere)]
   ])("should allow a direct when it is %s", (_label, message) => {
     expect(canLaunchTokenReadMessage(SESSIONS, message)).toBe(true);
   });
 
   it.each([
     ["sent by the owner to their other agent", direct(null, laptop)],
-    ["sent by the owner's other agent to someone else's", direct(laptop, elsewhere)],
     ["a reply by the owner's other agent into its own UI thread", direct(laptop, null)],
-    ["sent to someone else's agent by a person", direct(null, elsewhere)]
+    ["sent by the owner's other agent to another owner's", direct(laptop, elsewhere)],
+    ["sent to another owner's agent by a person", direct(null, elsewhere)]
   ])("should refuse a direct when it is %s", (_label, message) => {
     expect(canLaunchTokenReadMessage(SESSIONS, message)).toBe(false);
   });
@@ -753,7 +769,7 @@ describe("the conversation share rules", () => {
     it.each([
       ["a recipient of it", RECIPIENT],
       ["a colleague", COLLEAGUE],
-      ["someone with agents of their own", ELSEWHERE]
+      ["another owner", ELSEWHERE]
     ])("should refuse %s", (_label, actorOid) => {
       expect(canManageConversationShares(actorOid, CONVERSATION)).toBe(false);
     });
@@ -863,18 +879,6 @@ describe("the people lookup rules", () => {
     it("should take the same bounds as the people lookup, since the reasoning is the same", () => {
       expect(agentLookup("  pcs  ")).toEqual({ ok: true, query: "pcs", limit: MAX_PEOPLE_SUGGESTIONS });
       expect(agentLookup("p")).toEqual({ ok: false });
-    });
-  });
-
-  describe("canSuggestAgent", () => {
-    it("should offer an agent of anyone's, since anyone may tag anyone's", () => {
-      expect(canSuggestAgent(TARGET)).toBe(true);
-      expect(canSuggestAgent(agentOf(ELSEWHERE))).toBe(true);
-      expect(canSuggestAgent(LOCAL_CHAT_AGENT)).toBe(true);
-    });
-
-    it("should not offer a pod conversation's agent, which nobody may tag", () => {
-      expect(canSuggestAgent(POD_CHAT_AGENT)).toBe(false);
     });
   });
 });

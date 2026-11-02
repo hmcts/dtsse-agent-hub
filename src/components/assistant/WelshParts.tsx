@@ -14,7 +14,7 @@ export const SECONDARY =
 export const FIELD = "rounded-lg border border-asst-line bg-asst-field px-2.5 py-1.5 text-[13px] text-asst-text";
 export const LINK = "text-asst-accent underline hover:text-asst-accent-hover";
 
-export type JobPhase = "idle" | "waking" | "pending" | "done" | "failed";
+type JobPhase = "idle" | "waking" | "pending" | "done" | "failed";
 
 export interface JobState {
   phase: JobPhase;
@@ -61,7 +61,7 @@ export function useWelshJob(client: WelshClient) {
 }
 
 /** What the person is told about a job that is not done, in words they can act on. */
-export function problemText(response: WelshResponse | undefined): string {
+function problemText(response: WelshResponse | undefined): string {
   switch (response?.status) {
     case "signed_out":
     case "failed":

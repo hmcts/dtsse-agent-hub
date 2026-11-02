@@ -1,7 +1,7 @@
 import type { LookupKind, LookupResponse } from "@/assistant/lookups";
 
 /** One search of the person's own Jira or Confluence, through their assistant. See "Atlassian lookups" in docs/agent-api.md. */
-export interface LookupRequest {
+interface LookupRequest {
   kind: LookupKind;
   query: string;
   /** A Confluence space key to search in, or null for all of Confluence. */

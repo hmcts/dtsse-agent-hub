@@ -23,7 +23,7 @@ import { collapse, oneLine } from "../transcripts/conversation.ts";
  */
 
 /** A term shorter than this is dropped: one letter is in nearly every chat, so it narrows nothing. */
-export const MIN_TERM = 2;
+const MIN_TERM = 2;
 
 /** Terms past this are ignored. A search is a few remembered words; more only costs the database another pass. */
 export const MAX_TERMS = 6;
@@ -40,7 +40,7 @@ export const SEARCH_LIMIT = 50;
 /** The words `ts_headline` keeps around a match, and how much of that a result shows. */
 export const SNIPPET_MAX_WORDS = 28;
 export const SNIPPET_MIN_WORDS = 12;
-export const SNIPPET_LENGTH = 160;
+const SNIPPET_LENGTH = 160;
 
 /**
  * `query` with every backslash turned into a space, which is the one character a term may not carry.

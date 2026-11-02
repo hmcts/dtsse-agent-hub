@@ -1,4 +1,5 @@
-import type { Database, Prisma } from "../store/prisma.ts";
+import { Prisma } from "../store/generated/client.js";
+import type { Database } from "../store/prisma.ts";
 import type { MessageRef } from "./rules.ts";
 
 /** The loaders the rules in `rules.ts` are applied over. */
@@ -10,11 +11,16 @@ import type { MessageRef } from "./rules.ts";
  */
 export const POD_CONVERSATION_AGENT: Prisma.AgentWhereInput = { assistantConversationId: { not: null }, virtualAgentId: { not: null } };
 
+/** `POD_CONVERSATION_AGENT` for a raw query, over the `agent` table as `alias`, which is always a literal of the caller's. */
+export function podConversationAgentSql(alias: string): Prisma.Sql {
+  const agent = Prisma.raw(alias);
+  return Prisma.sql`(${agent}.assistant_conversation_id IS NOT NULL AND ${agent}.virtual_agent_id IS NOT NULL)`;
+}
+
 /**
  * Agents `oid`, or any agent `oid` owns, may message by name or pick from a list: `canPersonMessageAgent`, as a
  * query — their own — less every pod conversation's agent, which only its own conversation's page messages. Two
- * conditions rather than one, so not even its owner picks one of those out of a list of sessions; `agentsVisibleTo`
- * was the same shape and is gone, because the roster's own query is the owner's agents and nothing else.
+ * conditions rather than one, so not even its owner picks one of those out of a list of sessions.
  */
 export function agentsMessageableBy(oid: string): Prisma.AgentWhereInput {
   return { ownerOid: oid, NOT: POD_CONVERSATION_AGENT };

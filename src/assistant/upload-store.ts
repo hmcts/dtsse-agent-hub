@@ -140,7 +140,7 @@ export const ATTACHMENT_SELECT = { id: true, fileName: true, bytes: true, mediaT
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function findUpload(db: Database, id: string): Promise<UploadRow | undefined> {
+async function findUpload(db: Database, id: string): Promise<UploadRow | undefined> {
   if (!UUID.test(id)) {
     return undefined;
   }
@@ -148,7 +148,7 @@ export async function findUpload(db: Database, id: string): Promise<UploadRow | 
   return row === null ? undefined : toRow(row);
 }
 
-export class UploadNotFound extends HttpError {
+class UploadNotFound extends HttpError {
   constructor() {
     super(404, "no such upload", { reason: "no_such_upload" satisfies UploadRefusal });
   }
@@ -386,7 +386,7 @@ export async function reportFetched(prisma: PrismaClient, uploadId: string): Pro
   await prisma.assistantUpload.update({ where: { id: uploadId }, data: { state: "fetched", updatedAt: new Date() } });
 }
 
-export class UploadNoLongerHeld extends HttpError {
+class UploadNoLongerHeld extends HttpError {
   constructor() {
     super(410, "that file is no longer held here", { reason: "no_longer_held" satisfies UploadRefusal });
   }

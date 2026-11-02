@@ -8,7 +8,7 @@ function tile(name: string): string {
   return TILES[Math.abs(hash) % TILES.length] ?? TILES[0]!;
 }
 
-export function initials(name: string): string {
+function initials(name: string): string {
   const words = name
     .replace(/^@/, "")
     .split(/[\s\-_.]+/)

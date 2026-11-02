@@ -9,15 +9,15 @@ import { JIRA_SITE_URL } from "./jira.ts";
  * the question and waits for the answer. See "Atlassian lookups" in docs/agent-api.md.
  */
 
-export const LOOKUP_KINDS = ["jira_project", "confluence_page"] as const;
+const LOOKUP_KINDS = ["jira_project", "confluence_page"] as const;
 export type LookupKind = (typeof LOOKUP_KINDS)[number];
 
 export const MAX_LOOKUP_QUERY = 100;
 /** Fewer letters or digits than this is not yet a search: it would match half of Confluence. */
-export const MIN_LOOKUP_CHARS = 2;
+const MIN_LOOKUP_CHARS = 2;
 export const MAX_LOOKUP_RESULTS = 10;
 export const MAX_LOOKUP_ANCESTORS = 8;
-export const MAX_LOOKUP_DETAIL = 300;
+const MAX_LOOKUP_DETAIL = 300;
 /** How long the browser's request waits for the pod. A search that takes longer is not one anybody is still typing for. */
 export const LOOKUP_WAIT_MS = 10_000;
 /** How long a lookup's row is kept; long enough to be answered, and nothing reads it after. */
@@ -25,7 +25,7 @@ export const LOOKUP_RETENTION_MS = 10 * 60_000;
 export const LOOKUP_RATE_WINDOW_MS = 60_000;
 export const LOOKUP_RATE_LIMIT = 30;
 
-export const CONFLUENCE_SITE_URL = `${JIRA_SITE_URL}/wiki`;
+const CONFLUENCE_SITE_URL = `${JIRA_SITE_URL}/wiki`;
 
 export const JIRA_PROJECT_RE = /^[A-Z][A-Z0-9_]{1,9}$/;
 /** A Confluence space key: letters, digits and `_-`, with `~` in front of a personal space's. */
@@ -49,10 +49,10 @@ export function searchable(query: string): boolean {
 const text = (max: number) => z.string().trim().min(1).max(max);
 
 /** One Jira project, as the pod answers it. */
-export const jiraProjectAnswer = z.strictObject({ key: z.string().regex(JIRA_PROJECT_RE), name: text(200) });
+const jiraProjectAnswer = z.strictObject({ key: z.string().regex(JIRA_PROJECT_RE), name: text(200) });
 
 /** One Confluence page, as the pod answers it: the ids an export needs and the titles that say where it is. */
-export const confluencePageAnswer = z.strictObject({
+const confluencePageAnswer = z.strictObject({
   id: z.string().regex(NUMERIC_ID_RE),
   title: text(255),
   space_id: z.string().regex(NUMERIC_ID_RE),
@@ -101,7 +101,7 @@ export interface ConfluencePageResult {
 
 export type LookupResult = JiraProjectResult | ConfluencePageResult;
 
-export function jiraProjectUrl(key: string): string {
+function jiraProjectUrl(key: string): string {
   return `${JIRA_SITE_URL}/browse/${encodeURIComponent(key)}`;
 }
 

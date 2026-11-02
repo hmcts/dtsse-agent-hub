@@ -11,7 +11,7 @@ import { WelshSearch } from "@/components/assistant/WelshSearch";
 import { WelshStory } from "@/components/assistant/WelshStory";
 import { type WelshClient, welshClient } from "@/components/assistant/welshClient";
 
-export const WELSH_TASKS: readonly { id: WelshTask; title: string; description: string }[] = [
+const WELSH_TASKS: readonly { id: WelshTask; title: string; description: string }[] = [
   { id: "search", title: "Look up a translation", description: "Search the approved Welsh for a word or phrase." },
   {
     id: "scan",

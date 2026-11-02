@@ -1,4 +1,4 @@
-export const ATLASSIAN_SITE_URL = "https://hmcts.atlassian.net";
+const ATLASSIAN_SITE_URL = "https://hmcts.atlassian.net";
 
 /** An Atlassian sign-in is optional: without one a virtual agent starts as usual, with no `twg` CLI. */
 export function AtlassianHint() {

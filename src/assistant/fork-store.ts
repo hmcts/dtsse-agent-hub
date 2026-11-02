@@ -108,7 +108,7 @@ export async function forkChoice(
 }
 
 /** How many pages of the source's transcript a copy reads; past this, it starts part-way through and says so. */
-export const FORK_PAGE_LIMIT = 20;
+const FORK_PAGE_LIMIT = 20;
 
 /**
  * The source's whole thread in words, as its owner would read it page by page, rather than the one page a share

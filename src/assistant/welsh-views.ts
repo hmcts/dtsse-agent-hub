@@ -61,7 +61,7 @@ export function searchView(result: Json): { total: number; hits: CatalogueHit[] 
   };
 }
 
-export interface CatalogueOption {
+interface CatalogueOption {
   id: string;
   welsh: string;
   context: string;
@@ -202,7 +202,7 @@ export function storyCandidatesView(result: Json): StoryCandidates {
   };
 }
 
-export type StoryRowState = "filled" | "required" | "ambiguous" | "hand-edited";
+type StoryRowState = "filled" | "required" | "ambiguous" | "hand-edited";
 
 export interface StoryRow {
   ref: string;

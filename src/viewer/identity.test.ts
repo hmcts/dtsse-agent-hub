@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sealSession } from "../auth/session.ts";
-import { DEV_PERSONA_COOKIE, devIdentity, isDevIdentity, viewerFrom } from "./identity.ts";
+import { DEV_PERSONA_COOKIE, devIdentity, viewerFrom } from "./identity.ts";
 
 const SECRET = "a-session-secret-long-enough-to-seal-with";
 const SIGNED_IN = { AUTH_DISABLED: undefined, SESSION_SECRET: SECRET };
@@ -27,13 +27,6 @@ describe("devIdentity", () => {
 
   it("should never produce an oid shaped like an Entra object id", () => {
     expect(devIdentity("a").oid.startsWith("dev-")).toBe(true);
-  });
-});
-
-describe("isDevIdentity", () => {
-  it("should recognise the dev tenant and nothing else", () => {
-    expect(isDevIdentity({ tid: "dev" })).toBe(true);
-    expect(isDevIdentity({ tid: "531ff96d-0ae9-462a-8d2d-bec7c0b42082" })).toBe(false);
   });
 });
 
