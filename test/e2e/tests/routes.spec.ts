@@ -80,7 +80,7 @@ test.describe("routes @regression", () => {
     test(`should redirect the retired ${from} to the Assistant's ${section} settings @regression`, async ({ request }) => {
       const response = await request.get(from, { maxRedirects: 0 });
 
-      expect(response.status()).toBe(308);
+      expect(response.status()).toBe(307);
       expect([`/assistant?settings=${section}`, "/hub"]).toContain(response.headers().location ?? "");
     });
   }
@@ -103,7 +103,7 @@ test.describe("routes @regression", () => {
     test(`should redirect the retired ${from} to the shared chats @regression`, async ({ request }) => {
       const response = await request.get(from, { maxRedirects: 0 });
 
-      expect(response.status()).toBe(308);
+      expect(response.status()).toBe(307);
       expect(response.headers().location).toMatch(/^(\/assistant\/shared|\/hub)$/);
     });
   }

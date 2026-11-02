@@ -42,9 +42,6 @@ function Restart({ agent, restart }: { agent: AssistantAgent; restart: FormActio
     }
   }, [asking]);
 
-  if (agent.desired === "deleted") {
-    return <p className="text-[13px] text-asst-muted">It is being deleted. Opening a chat sets up a new assistant for you.</p>;
-  }
   if (agent.desired !== "running") {
     return <p className="text-[13px] text-asst-muted">It is not running, so there is nothing to restart. It starts when you next open a chat.</p>;
   }
@@ -153,7 +150,7 @@ function Agent({ agent, settings }: { agent: AssistantAgent; settings: Assistant
       </p>
       {agent.statusDetail === null ? null : <p className="text-pretty text-[13px] text-asst-muted">{agent.statusDetail}</p>}
       <Restart agent={agent} restart={settings.restart} />
-      {agent.desired === "deleted" ? null : <Rename agent={agent} rename={settings.rename} />}
+      <Rename agent={agent} rename={settings.rename} />
     </>
   );
 }

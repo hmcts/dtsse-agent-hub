@@ -6,7 +6,7 @@ import { whenOnline } from "@/components/live/connectivity";
 import { useHubEvent } from "@/components/live/HubStream";
 
 /** Coalesces a burst of changes, such as a session registering and reporting at once, into one re-render. */
-const SETTLE_MS = 250;
+export const SETTLE_MS = 250;
 
 /**
  * Re-renders the Assistant's server components when the viewer's assistant, one of their conversations, or the skills

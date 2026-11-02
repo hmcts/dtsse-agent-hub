@@ -87,16 +87,19 @@ export function movedPortTicketPath(pathname: string): string | undefined {
  */
 export function retiredHubPath(pathname: string, virtualAgents: boolean): string | undefined {
   const path = pathname.startsWith(`${HUB}/`) ? pathname.slice(HUB.length) : pathname;
-  const to =
-    path === "/access"
-      ? SHARED_CHATS
-      : path === "/virtual" || VIRTUAL_AGENT_PAGE.test(path)
-        ? assistantSettingsPath("assistant")
-        : path === "/settings/credentials"
-          ? assistantSettingsPath("credentials")
-          : undefined;
-  return to === undefined ? undefined : virtualAgents ? to : HUB;
+  const to = RETIRED_PAGES.get(path) ?? (VIRTUAL_AGENT_PAGE.test(path) ? assistantSettingsPath("assistant") : undefined);
+  if (to === undefined) {
+    return undefined;
+  }
+  return virtualAgents ? to : HUB;
 }
+
+/** The retired pages with one address each, as `retiredHubPath` sees them with any `/hub` taken off. */
+const RETIRED_PAGES = new Map<string, string>([
+  ["/access", SHARED_CHATS],
+  ["/virtual", assistantSettingsPath("assistant")],
+  ["/settings/credentials", assistantSettingsPath("credentials")]
+]);
 
 /**
  * What an agent's address names, as far as where it goes now: one of the viewer's own chats in the Assistant, one of

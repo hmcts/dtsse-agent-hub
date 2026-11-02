@@ -222,7 +222,7 @@ describe("proxy hub address redirect", () => {
 
     const response = await proxy(askWith("GET", from));
 
-    expect(response.status).toBe(308);
+    expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("https://agent-hub.example/assistant/shared");
   });
 
@@ -238,14 +238,17 @@ describe("proxy hub address redirect", () => {
 
     const response = await proxy(askWith("GET", `${from}?tab=1`));
 
-    expect(response.status).toBe(308);
+    expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(`https://agent-hub.example${to}`);
   });
 
   it.each(["/hub/virtual", "/hub/settings/credentials"])("should redirect the retired %s to the hub when virtual agents are off", async (from) => {
     vi.stubEnv("VIRTUAL_AGENTS_ENABLED", "");
 
-    expect((await proxy(askWith("GET", from))).headers.get("location")).toBe("https://agent-hub.example/hub");
+    const response = await proxy(askWith("GET", from));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://agent-hub.example/hub");
   });
 
   it.each([

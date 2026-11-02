@@ -10,9 +10,8 @@ import type { ActionResult } from "@/web/action";
  * `AskUserQuestion` always lets a person answer in their own words. Once answered it shows what was chosen and
  * offers nothing.
  *
- * One component for both places a question appears: the Assistant chat and an agent's page in the hub. They use
- * different palettes, so `tone` picks the class set — everything else about the card, including what a screen reader
- * is told, is the same in each, because a question is the same thing in both.
+ * Shown in the Assistant's chat, the one place a question appears. `tone` picks the class set and nothing else about
+ * the card, what a screen reader is told included; the chat uses `assistant`, and `hub` has no caller but its tests.
  */
 
 export type AnswerQuestionAction = (input: { questionId: unknown; answers: unknown }) => Promise<ActionResult>;

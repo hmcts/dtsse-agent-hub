@@ -7,6 +7,7 @@ import type { ConnectionsData } from "@/assistant/connections";
 import { savedCredentials } from "@/assistant/saved-credentials";
 import type { FormAction } from "@/components/ActionForm";
 import type { AssistantAgentSettings } from "@/components/assistant/AgentSettings";
+import { SETTLE_MS } from "@/components/assistant/AssistantRefresh";
 import type { AssistantGitIdentity } from "@/components/assistant/GitIdentitySettings";
 import { AssistantSettings } from "@/components/assistant/SettingsDialog";
 import { type AssistantTokens, TokenSettings } from "@/components/assistant/TokenSettings";
@@ -17,12 +18,24 @@ import type { AssistantAgent, GitIdentitySettings } from "@/web/data";
 /** The sections of the Assistant's settings that manage the virtual agent it runs on, and the person's own values. */
 
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }), usePathname: () => "/assistant" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh }),
+  usePathname: () => "/assistant",
+  useSearchParams: () => new URLSearchParams(window.location.search)
+}));
 const hubHandlers = new Map<string, () => void>();
 vi.mock("@/components/live/HubStream", () => ({
   useHubEvent: (type: string, handler: () => void) => hubHandlers.set(type, handler),
   useEndSession: () => () => undefined
 }));
+
+/** The stream saying the agent changed, and the settle `useSettingsData` waits before reading again. */
+async function agentChanged(): Promise<void> {
+  await act(async () => {
+    hubHandlers.get("virtual_agent")?.();
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS + 10));
+  });
+}
 
 afterEach(() => {
   cleanup();
@@ -156,9 +169,7 @@ describe("the Assistant's own agent", () => {
     const settings = agentSettings();
     await open({ agent: settings }, "Assistant");
 
-    await act(async () => {
-      hubHandlers.get("virtual_agent")?.();
-    });
+    await agentChanged();
 
     expect(settings.load).toHaveBeenCalledTimes(2);
   });
@@ -208,14 +219,6 @@ describe("the Assistant's own agent", () => {
     expect(screen.queryByRole("button", { name: /Restart/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Stop|Delete/ })).toBeNull();
     expect(screen.getByText(/nothing to restart/)).toBeTruthy();
-  });
-
-  it("should say the agent is replaced on the next chat, and offer no restart, when it is being deleted", async () => {
-    await open({ agent: agentSettings({ desired: "deleted" }) }, "Assistant");
-
-    expect(screen.getByText("It is being deleted. Opening a chat sets up a new assistant for you.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Restart/ })).toBeNull();
-    expect(screen.queryByText(/starts when you next open a chat/)).toBeNull();
   });
 
   it("should send the agent and the new name when it is renamed, and show the refusal when the name is taken", async () => {
@@ -379,6 +382,23 @@ describe("the Assistant's settings deep link", () => {
     expect(within(nav()).getByRole("tab", { name: "Appearance" }).getAttribute("aria-selected")).toBe("true");
   });
 
+  // A client-side navigation re-renders the page it lands on rather than mounting it again.
+  it("should open at the section ?settings= names when a navigation reaches it with the page already open", async () => {
+    window.history.replaceState(null, "", "/assistant");
+    const page = () => <AssistantSettings now={Date.now()} connections={connections(["github"])} tokens={tokens()} />;
+    const { rerender } = render(page());
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    window.history.pushState(null, "", "/assistant?settings=credentials");
+    await act(async () => {
+      rerender(page());
+    });
+
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(within(nav()).getByRole("tab", { name: "Credentials" }).getAttribute("aria-selected")).toBe("true");
+    expect(`${window.location.pathname}${window.location.search}`).toBe("/assistant");
+  });
+
   it("should stay closed when the address names no section", () => {
     window.history.replaceState(null, "", "/assistant");
     render(<AssistantSettings now={Date.now()} connections={connections(["github"])} />);
@@ -412,9 +432,7 @@ describe("how often the settings read", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restart your assistant" }));
 
     await submit("Restart your assistant");
-    await act(async () => {
-      hubHandlers.get("virtual_agent")?.();
-    });
+    await agentChanged();
 
     expect(settings.load).toHaveBeenCalledTimes(2);
   });
