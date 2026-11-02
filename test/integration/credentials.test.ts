@@ -37,11 +37,12 @@ const JENKINS = "11a2b3c4d5e6f708192a3b4c5d6e7f8091";
 const ATLASSIAN = "user=alice@justice.gov.uk\ntoken=oauth-managed\noauth-refresh-token=refresh-0123456789abcdef";
 const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
 
-function azureCacheFor(oid: string): string {
+/** A cache as `az login --tenant` writes it; a guest's `home` names them in their home tenant instead. */
+function azureCacheFor(oid: string, { realm = TENANT, home = `${oid}.${realm}` }: { realm?: string; home?: string } = {}): string {
   return gzipSync(
     Buffer.from(
       JSON.stringify({
-        Account: { a: { username: "alice@example.com", home_account_id: `${oid}.${TENANT}` } },
+        Account: { a: { username: "alice@example.com", home_account_id: home, local_account_id: oid, realm } },
         RefreshToken: { r: { secret: "refresh-secret" } }
       })
     )
@@ -142,6 +143,21 @@ describe("PUT /api/agent/credentials/{kind}", () => {
     expect((await jsonOf<{ error: string }>(response)).error).toContain("someone other than you");
     expect(await prisma.credential.count()).toBe(0);
     expect(await prisma.devCredentialValue.count()).toBe(0);
+  });
+
+  it("should store an Azure token cache when the owner signed in to this tenant as a guest", async () => {
+    const guest = azureCacheFor(ALICE.oid, { home: "c1b2c3d4-0000-4000-8000-000000000003.99999999-9999-9999-9999-999999999999" });
+
+    expect((await put(ALICE, "azure", { value: guest })).status).toBe(204);
+    expect(await readCredential(prisma, localStore(), ALICE.oid, "azure")).toBe(guest);
+  });
+
+  it("should refuse an Azure token cache with 400 when the owner's account in it is in another tenant", async () => {
+    const response = await put(ALICE, "azure", { value: azureCacheFor(ALICE.oid, { realm: "99999999-9999-9999-9999-999999999999" }) });
+
+    expect(response.status).toBe(400);
+    expect((await jsonOf<{ error: string }>(response)).error).toContain("in another tenant");
+    expect(await prisma.credential.count()).toBe(0);
   });
 
   it("should answer 503 for an Azure token cache when the hub's tenant is not configured", async () => {

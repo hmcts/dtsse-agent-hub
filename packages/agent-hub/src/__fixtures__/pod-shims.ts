@@ -62,6 +62,7 @@ export type MsalCacheOptions = {
 export function msalCache({ refresh = podSecrets.azureRefresh, accessTokens = 3, padding = 0 }: MsalCacheOptions = {}): Record<string, unknown> {
   const account = {
     home_account_id: "oid-owner.tid",
+    local_account_id: "oid-owner",
     environment: "login.microsoftonline.com",
     realm: "531ff96d-0ae9-462a-8d2d-bec7c0b42082",
     username: "olive@hmcts.net",

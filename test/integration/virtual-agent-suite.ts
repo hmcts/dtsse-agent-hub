@@ -31,7 +31,8 @@ export const JENKINS = `11${"a4f9c2e7b1".repeat(3)}`;
 export const TENANT = "531ff96d-0ae9-462a-8d2d-bec7c0b42082";
 
 export function azureCacheFor(oid: string): string {
-  return gzipSync(Buffer.from(JSON.stringify({ Account: { a: { username: "alice@example.com", home_account_id: `${oid}.${TENANT}` } } }))).toString("base64");
+  const account = { username: "alice@example.com", home_account_id: `${oid}.${TENANT}`, local_account_id: oid, realm: TENANT };
+  return gzipSync(Buffer.from(JSON.stringify({ Account: { a: account } }))).toString("base64");
 }
 
 export const AZURE = azureCacheFor(ALICE.oid);

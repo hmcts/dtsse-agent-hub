@@ -94,8 +94,10 @@ export type AzureOwnership = { ok: true } | { ok: false; reason: "malformed" | "
 
 /**
  * Whether an Azure token cache holds only the owner's own sign-in: at least one account, and every account's
- * `home_account_id`, which MSAL writes as `<oid>.<tid>`, naming the owner's oid in this hub's tenant. A cache with
- * anyone else's account in it would let a virtual agent act in Azure as that person.
+ * `local_account_id`, the oid from its id token, being the owner's oid and its `realm`, the tenant it was signed in
+ * to, being this hub's. `home_account_id` is not used: for a B2B guest it names the person in their home tenant,
+ * which says nothing about who they are in this one. A cache with anyone else's account in it would let a virtual
+ * agent act in Azure as that person.
  */
 export function checkAzureCacheOwner(raw: unknown, ownerOid: string, tenantId: string | undefined): AzureOwnership {
   const parsed = decodeAzureCache(typeof raw === "string" ? raw.trim() : "");
@@ -112,9 +114,8 @@ export function checkAzureCacheOwner(raw: unknown, ownerOid: string, tenantId: s
   }
   const owner = ownerOid.toLowerCase();
   for (const account of accounts) {
-    const home = (account as { home_account_id?: unknown } | null)?.home_account_id;
-    const [oid, tid, ...rest] = typeof home === "string" ? home.toLowerCase().split(".") : [];
-    if (oid !== owner || tid !== tenant || rest.length > 0) {
+    const { local_account_id: oid, realm } = (account ?? {}) as { local_account_id?: unknown; realm?: unknown };
+    if (typeof oid !== "string" || typeof realm !== "string" || oid.toLowerCase() !== owner || realm.toLowerCase() !== tenant) {
       return { ok: false, reason: "not-owner", error: "that Azure token cache is signed in as someone other than you, or in another tenant" };
     }
   }
