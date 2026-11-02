@@ -206,6 +206,7 @@ export type {
   EnvelopeAuthor,
   EnvelopeMessage,
   EnvelopeOptions,
+  EnvelopeRoute,
   JiraExportFrame,
   OwnerLaptopOptions
 } from "./envelope.ts";
@@ -213,6 +214,7 @@ export {
   assistantEnvelope,
   attachmentLines,
   CLI,
+  chooseEnvelope,
   cliName,
   confluenceExportLines,
   describeAuthor,
@@ -221,7 +223,6 @@ export {
   JIRA_EXPORT_BASH_TIMEOUT_MS,
   jiraExportLines,
   leadingSkill,
-  ownerEnvelope,
   ownerLaptopEnvelope,
   taggedPostEnvelope
 } from "./envelope.ts";

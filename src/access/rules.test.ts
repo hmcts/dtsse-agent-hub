@@ -13,6 +13,7 @@ import {
   canManageVirtualAgent,
   canOpenVirtualAgentPort,
   canOwnerReadCredential,
+  canPersonDirectAgent,
   canReadMessage,
   canRemoveUploadFromDisk,
   canSessionUseAttachment,
@@ -137,6 +138,27 @@ describe("canAgentMessageAgent", () => {
 
   it("should refuse an agent messaging another owner's agent, which a tagged post is for", () => {
     expect(canAgentMessageAgent(agentOf(ELSEWHERE), TARGET)).toBe(false);
+  });
+});
+
+describe("canPersonDirectAgent", () => {
+  const laptop = { id: "a-laptop", ownerOid: OWNER, virtualAgentId: null };
+  const conversation = { id: "a-chat", ownerOid: OWNER, virtualAgentId: "va-1", ownerOnly: true };
+  const podOwnSession = { id: "a-pod", ownerOid: OWNER, virtualAgentId: "va-1", ownerOnly: false };
+
+  it("should let the owner message a session on their computer and a pod's conversation", () => {
+    expect(canPersonDirectAgent(OWNER, laptop)).toBe(true);
+    expect(canPersonDirectAgent(OWNER, conversation)).toBe(true);
+  });
+
+  it("should refuse the owner a virtual agent's own session, which the Assistant never writes to", () => {
+    expect(canPersonDirectAgent(OWNER, podOwnSession)).toBe(false);
+  });
+
+  it("should refuse a colleague every one of the owner's agents", () => {
+    for (const agent of [laptop, conversation, podOwnSession]) {
+      expect(canPersonDirectAgent(COLLEAGUE, agent)).toBe(false);
+    }
   });
 });
 

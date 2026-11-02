@@ -525,7 +525,7 @@ describe("answering a question", () => {
     });
   });
 
-  it("should answer an ordinary agent's question as a direct message, with no conversation to wake", async () => {
+  it("should refuse the answer and send nothing when the agent that asked has no conversation to show the card in", async () => {
     const agentId = await insertAgent(ALICE, "laptop");
     const response = await call(questionRoute.POST, {
       as: ALICE,
@@ -537,9 +537,12 @@ describe("answering a question", () => {
     expect(response.status).toBe(204);
     const row = await prisma.agentQuestion.findFirstOrThrow({ where: { agentId }, select: { id: true } });
 
-    expect(await answerAgentQuestion({ questionId: row.id, answers: { answers: [{ labels: ["Blue"], text: null }] } })).toEqual({ ok: true });
+    expect(await answerAgentQuestion({ questionId: row.id, answers: { answers: [{ labels: ["Blue"], text: null }] } })).toEqual({
+      ok: false,
+      error: "that question is no longer waiting for an answer"
+    });
 
-    expect(await prisma.message.count({ where: { targetAgentId: agentId } })).toBe(1);
-    expect((await prisma.agentQuestion.findUniqueOrThrow({ where: { id: row.id } })).answeredAt).toBeInstanceOf(Date);
+    expect(await prisma.message.count({ where: { targetAgentId: agentId } })).toBe(0);
+    expect((await prisma.agentQuestion.findUniqueOrThrow({ where: { id: row.id } })).answeredAt).toBeNull();
   });
 });

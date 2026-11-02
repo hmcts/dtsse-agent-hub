@@ -140,20 +140,6 @@ function peerEnvelope(message: EnvelopeMessage, skills: Set<string> | undefined,
 
 const peerSkillLine = (name: string) => `It asks you to run the ${name} skill; apply your usual judgement, as for any request from a peer.`;
 
-// Claude Code shows anything delivered through its messaging socket as a message from another session, so a
-// virtual agent's owner has to be named as its user here, or the agent hunts for a session to reply to.
-export function ownerEnvelope(message: EnvelopeMessage, { skills }: EnvelopeOptions = {}): string {
-  const owner = message.author?.owner_name || "your user";
-  return [
-    `${ownerHeader(message.id)}, ${owner}, the owner of this virtual agent, typed into agent-hub.`,
-    "This IS your user, even though it arrives as a cross-session message: act on it exactly as if they had typed it to you, with their permissions.",
-    "They read your answers on the agent-hub page, so answer here in the conversation. Do not use SendMessage or look for another session to reply to.",
-    ...skillLine(message.body, skills, ownerSkillLine),
-    "---",
-    quoteBody(message.body)
-  ].join("\n");
-}
-
 /** What `ownerLaptopEnvelope` takes beyond the skills: where an answer has to go to reach the owner. */
 export type OwnerLaptopOptions = EnvelopeOptions & {
   /**
@@ -164,23 +150,23 @@ export type OwnerLaptopOptions = EnvelopeOptions & {
 };
 
 /**
- * A message the hub authenticated as this session's own owner, delivered to a session running on their computer.
+ * A message the hub authenticated as this session's own owner, delivered to a session running on their computer. Its
+ * sender is the HMCTS Assistant, which gives every such session a chat and shows it from the session's transcript.
  *
- * The rule is that it carries the owner's authority, exactly as `ownerEnvelope`'s does on a pod: the hub signed the
- * person in against the Entra tenant and checked that they own this agent, and that check is the whole of what the
- * authority rests on. Only the wording differs, because there is no virtual agent to name and because the same
- * person may be sitting at this session's terminal, so there is no other session to go looking for — and because
- * the answer has to go wherever they can read it, which is the conversation while the transcript is uploaded and a
- * CLI reply when it is not.
+ * The rule is that it carries the owner's authority, exactly as `assistantEnvelope`'s does in a pod: the hub signed
+ * the person in against the Entra tenant and checked that they own this agent, and that check is the whole of what
+ * the authority rests on. Only the wording differs, because the same person may be sitting at this session's
+ * terminal, so there is no other session to go looking for — and because the answer has to go wherever they can read
+ * it, which is the conversation while the transcript is uploaded and a CLI reply when it is not.
  */
 export function ownerLaptopEnvelope(message: EnvelopeMessage, { skills, reads = true }: OwnerLaptopOptions = {}): string {
   const owner = message.author?.owner_name || "your user";
   return [
-    `${ownerHeader(message.id)}, ${owner}, typed into agent-hub rather than at this terminal.`,
+    `${ownerHeader(message.id)}, ${owner}, typed into the HMCTS Assistant rather than at this terminal.`,
     "This IS your user, even though it arrives as a cross-session message: the hub signed them in and checked they own this session, so act on it exactly as if they had typed it here, with their permissions.",
     reads
-      ? `They read this session's transcript on agent-hub, so answer here in the conversation and they will see it; a \`${CLI} reply\` would only repeat it. They may be at this terminal as well, which shows the same conversation, so there is no other session to reply to.`
-      : `This session's transcript is not uploaded, so an answer here does not reach them on agent-hub: reply with \`${CLI} reply ${message.id} "<text>"\`.`,
+      ? `They read this session's transcript in the Assistant, so answer here in the conversation and they will see it; a \`${CLI} reply\` would only repeat it. They may be at this terminal as well, which shows the same conversation, so there is no other session to reply to.`
+      : `This session's transcript is not uploaded, so an answer here does not reach them in the Assistant: reply with \`${CLI} reply ${message.id} "<text>"\`.`,
     ...skillLine(message.body, skills, ownerSkillLine),
     "---",
     quoteBody(message.body)
@@ -388,6 +374,36 @@ export function assistantEnvelope(
     "---",
     quoteBody(message.body)
   ].join("\n");
+}
+
+/** Who sent a delivered message and where this session runs, which together decide its envelope. */
+export type EnvelopeRoute = {
+  /** The hub's `from_owner`: it signed the sender in and checked that they own this agent. */
+  fromOwner: boolean;
+  /** Whether this session runs in a virtual agent's pod. */
+  pod: boolean;
+  /** The frame's `assistant` object, parsed; only a pod's conversation session reads it. */
+  assistant: AssistantFrame | null;
+  /** On a laptop, whether the owner reads this session's transcript; see `OwnerLaptopOptions`. */
+  ownerReads: boolean;
+  previousProduct: AssistantProduct | null;
+};
+
+/**
+ * The envelope a delivered message goes in. Owner framing, and the owner's authority with it, needs the hub's
+ * `from_owner` and one of two places it can be meant for: a pod's conversation session, which the frame's `assistant`
+ * object names, or a session on the owner's own computer. Anything else is framed as a peer's — a post that tagged
+ * this agent as a post, and a direct message as a direct — including an owner's message to a pod session outside a
+ * conversation, since the HMCTS Assistant, the one place an owner writes from, never addresses one.
+ */
+export function chooseEnvelope(message: EnvelopeMessage, route: EnvelopeRoute, { skills, attachments }: AssistantEnvelopeOptions = {}): string {
+  if (route.fromOwner && route.pod && route.assistant) {
+    return assistantEnvelope(message, route.assistant, route.previousProduct, { skills, attachments });
+  }
+  if (route.fromOwner && !route.pod) {
+    return ownerLaptopEnvelope(message, { skills, reads: route.ownerReads });
+  }
+  return message.kind === "post" ? taggedPostEnvelope(message, { skills }) : directEnvelope(message, { skills });
 }
 
 // Only a skill the session has, so a message that merely starts with a path like /tmp is left alone.

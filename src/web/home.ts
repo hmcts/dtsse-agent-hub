@@ -98,8 +98,8 @@ const RETIRED_PAGES = new Map<string, string>([
  *   virtual agent a person has, and its settings are where it is renamed, restarted and its web servers opened.
  *   `/virtual/{id}/ports/{port}` is not one of these: it is the viewer's old ticket route, which `movedPortTicketPath`
  *   sends on with its query.
- * - `/settings/credentials` goes to Credentials, where a token is pasted: the published client's pod boot messages still
- *   send people there to paste their GitHub token.
+ * - `/settings/credentials` goes to Credentials, where a token is pasted: an older published
+ *   client's pod boot messages send people there to paste their GitHub token.
  *
  * Both the bare address and the `/hub` one, because each page existed under both and both were pasted into tickets.
  * Checked ahead of `movedHubPath`, which would otherwise send the bare one to a page that is no longer there.

@@ -14,14 +14,10 @@ import {
   type AssistantFrame,
   type AssistantProduct,
   type AttachmentOutcome,
-  assistantEnvelope,
   type ConfluenceExportFrame,
-  directEnvelope,
-  type EnvelopeOptions,
-  type JiraExportFrame,
-  ownerEnvelope,
-  ownerLaptopEnvelope,
-  taggedPostEnvelope
+  chooseEnvelope,
+  type EnvelopeRoute,
+  type JiraExportFrame
 } from "./envelope.ts";
 import { describeInbound, type InboundOptions, type InboundResult, inboundAccepted, inboundFix } from "./inbound.ts";
 import { acquirePidFile, isEnabled, log, pidAlive, readJson, readText, releasePidFile, sessionInfo, statePath, writeJson } from "./session.ts";
@@ -555,25 +551,19 @@ export async function runBridge({
         return;
       }
       const info = sessionInfo(sid, env);
-      const fromUser = virtualAgent(env) !== null && fromOwner;
-      // Owner framing wherever the session runs: `from_owner` is the hub's own answer that it signed this person in
-      // and that they own this agent. A separate flag, because what `fromUser` gates besides the envelope — the
-      // conversation frame, the model switch, the attachment fetch and leaving the direct thread alone — belongs to
-      // a virtual agent's pod and to nothing on a laptop.
-      const ownerOnLaptop = fromOwner && !fromUser;
-      // Where the answer goes, not what it grants: the owner reads a conversational answer only while the transcript
-      // upload is on, and a CLI reply would duplicate it; with the upload off that reply is their only channel.
-      const ownerReads = ownerOnLaptop && !transcriptOff(sid, env);
-      // Only the person whose conversation it is gets the assistant framing; anyone else is still a peer.
-      const assistant = fromUser ? parseAssistantFrame(payload.assistant) : null;
-      const previousProduct = assistant ? parseAssistantProduct(readJson(productPath(sid))) : null;
-      const envelope: (message: DirectEventMessage, options?: EnvelopeOptions) => string = fromUser
-        ? ownerEnvelope
-        : ownerOnLaptop
-          ? (own, options) => ownerLaptopEnvelope(own, { ...options, reads: ownerReads })
-          : message.kind === "post"
-            ? taggedPostEnvelope
-            : directEnvelope;
+      const pod = virtualAgent(env) !== null;
+      // The conversation frame, and with it the model switch, the attachment fetch and leaving the direct thread
+      // alone, belong to a pod's conversation session, and only the person whose conversation it is gets them.
+      const assistant = pod && fromOwner ? parseAssistantFrame(payload.assistant) : null;
+      const route: EnvelopeRoute = {
+        fromOwner,
+        pod,
+        assistant,
+        // Where the answer goes, not what it grants: the owner reads a conversational answer only while the transcript
+        // upload is on, and a CLI reply would duplicate it; with the upload off that reply is their only channel.
+        ownerReads: fromOwner && !pod && !transcriptOff(sid, env),
+        previousProduct: assistant ? parseAssistantProduct(readJson(productPath(sid))) : null
+      };
       // Fetched before the message is delivered, so the envelope can name the absolute path and the session has the
       // file the moment it reads about it. Nothing here throws: a file that could not be fetched comes back as an
       // outcome the envelope says so about, because a message delivered with the attachment silently missing would
@@ -594,7 +584,7 @@ export async function runBridge({
       }
       try {
         const skills = skillNames();
-        const content = assistant ? assistantEnvelope(message, assistant, previousProduct, { skills, attachments }) : envelope(message, { skills });
+        const content = chooseEnvelope(message, route, { skills, attachments });
         await deliver(info.socketPath, env.CLAUDE_CODE_MESSAGING_TOKEN, content);
         remember(message.id);
         if (assistant) {
@@ -603,8 +593,7 @@ export async function runBridge({
           } catch (e) {
             log(sid, `could not record the product of #${message.id}: ${(e as Error).message}`);
           }
-        }
-        if (!fromUser) {
+        } else {
           try {
             recordDirect(sid, message, { direction: "in", peer: peerOf(message.author) });
           } catch (e) {

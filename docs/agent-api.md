@@ -419,8 +419,8 @@ rather than ten minutes, but it is a window.
 **Who sees it.** The owner alone, through `isOwner`: a figure about someone's pod
 is not a session they chose to share.
 
-**An older client.** Gated on the `memory-anon` client feature below, not `memory`: a pod claiming only `memory` sends
-three figures, which this route now refuses, so for the purposes of the Size section it reports nothing at all. Either
+**An older client.** Gated on the `memory-anon` client feature below: a pod that does not claim it sends no
+`anon_bytes`, which this route refuses, so for the purposes of the Size section it reports nothing at all. Either
 way the settings say it cannot report yet, rather than showing it as `0`, which would read as an idle pod. A pod takes
 the current client when it boots, so this reaches a pod at its next start.
 
@@ -504,7 +504,7 @@ So the client intercepts it. Its `PreToolUse` hook, registered for that one tool
 
 - 1–4 questions, mirroring `AskUserQuestion`'s own limits; the client applies the same caps and cuts long values to fit before sending, so a `400` here is a client fault rather than a question nobody can read. Every string is bounded and no other field is accepted.
 - **A question's options must have distinct labels.** The label is the whole of what an answer names — the card keys a press by it and the message the session receives says it — so two options sharing one is a choice nobody could resolve. The client drops such a question before sending and asks in words instead.
-- Any agent's, not a pod conversation's alone: a session on the person's own computer shows the same card in its chat in the Assistant.
+- Any agent's, not a pod conversation's alone: a session on the person's own computer shows the same card in its chat in the Assistant. The card shows only in a conversation, so the answer to a question from an agent with none — a virtual agent's own session, or a laptop session whose chat was removed — is refused as no longer waiting, and nothing is sent.
 - Notifies the owner's UI, so a second tab shows the question without a reload.
 - **One *offered* card per session, and three outcomes rather than two.** The unique index on `(agent_id, tool_use_id)` covers the retry of one tool call. What it cannot see is a model that calls the tool *again* after the deny, which arrives with a new `tool_use_id` — and two live cards in one blocked turn is the worse outcome, because answering either sends a message contradicting the other. So that second question is **refused with `409`**, not dropped: the hook turns this response into what the model is told, and a `204` for a question nobody wrote would leave it ending its turn waiting for a card that does not exist. The rule is keyed on the session as well as the agent, so a `/clear` is not blocked by a card the session before it left unanswered.
 - **Only a question still offered blocks one**, by the same `QUESTION_OFFER_WINDOW_MS` and `offerExpired` the card, the thread line and the answer read — one rule, read everywhere, rather than a second expiry spelled out here. A question past that window cannot be answered, so counting it would leave the session refused for ever with a card nobody can clear, and the model falling back to prose on every call. The expired row is left exactly as it is: the thread must keep showing what was asked, and it is simply no longer in the way. The newest unanswered question of the session is the one the window is read against, since any older one was asked before it.
@@ -623,13 +623,9 @@ the same time and a count is a third place to remember. The list is the record.
   one **is** gated, on both sides: the hub refuses to stop an answer on a session that did not claim it, and the web
   UI offers no stop control for such a conversation. A pod takes the current client when it boots, so a conversation
   on a session started by an older build has no stop until that session is next started.
-- `model`, because their supervisor starts a conversation's session with `--model` from the wake's `model`, and their
-  bridge switches the session with `/model` when a `direct` frame's `model` names another. No hub field is gated on it:
-  a client too old to claim it runs every conversation on hai's default for the route, whatever its owner chose. It
-  says nothing about *which* ids a build takes, which is what `model-alias` is for: a build claiming `model` alone
-  takes `claude-<family>-<version>` and drops a bare alias.
-- `model-alias`, because the id in `model` is a bare family alias — `sonnet` or `opus` — and this client hands it to
-  `--model` and `/model` unchanged. Claimed by the pod's **own** session, which is the virtual agent's current agent,
+- `model-alias`, because their supervisor starts a conversation's session with `--model` from the wake's `model`,
+  their bridge switches the session with `/model` when a `direct` frame's `model` names another, and the id in `model`
+  is a bare family alias — `sonnet` or `opus` — that this client hands to both unchanged. Claimed by the pod's **own** session, which is the virtual agent's current agent,
   as `files` and `memory-anon` are, since the supervisor is what starts a session. **No write is gated on it**: a
   person's model setting is theirs to save whenever they like, and the hub sends `model` to every session either way.
   What it gates is one sentence in the settings' Model section, which says the choice is picked up at the assistant's
@@ -648,15 +644,10 @@ the same time and a count is a third place to remember. The list is the record.
 - `welsh`, because their supervisor answers the sessions stream's `welsh` frame (see Welsh translation jobs). Claimed by
   the pod's own session, as `lookups` is. Gated: the hub answers a job for a pod that has not claimed it with
   `unsupported`, and sends it no frame.
-- `memory`, which **no gate in this hub reads**. It is kept and still claimed for hubs deployed before `anon_bytes`
-  existed, whose Size section gates on this name: the client is published on merge and a pod installs the current one
-  when it boots, so a pod can be talking to a hub that has not deployed yet, and to that hub a build without this
-  claim is an older client. It can be dropped once no such hub is running.
 - `memory-anon`, because their supervisor reads its own container cgroup and reports it
   (`PUT /api/virtual/{id}/memory`), including `memory.stat`'s `anon` line as `anon_bytes`, which that route requires.
-  **This is the name the Size section gates on.** A separate name rather than widening `memory`, because the two say
-  different things about the same pod: a build claiming `memory` alone is one whose reports this hub refuses, and the
-  Size section has to be able to word that as an older version rather than as a pod that has gone quiet. Claimed by
+  **This is the name the Size section gates on**, so that it can word a pod that cannot report as an older version
+  rather than as a pod that has gone quiet. Claimed by
   the pod's **own** session, which is the virtual agent's current agent, since the supervisor is what reports.
 
 ## Replies
@@ -744,7 +735,7 @@ data: {"message": <Message>}
 - If the service cannot read the agent's deliveries, it ends the stream early, without a `reconnect` event. That looks like any clean end, so a client reconnecting immediately should fall back to backoff when streams keep ending within a moment of opening. Reconnect with backoff after a network error or an HTTP error too: the replay on the next connection sends whatever is still queued.
 - A message stays `queued`, and is resent on the next connection, until the client acks it, which makes it `delivered`, or it expires. Once an agent has been `offline` for 24 hours since its last heartbeat or `/offline` call, its queued deliveries are marked `expired` and are never sent, even if the agent comes back. A conversation's agent is the exception: its sessions are stopped whenever they are idle, so a delivery to one expires only once it has itself been queued for 24 hours.
 - `Last-Event-ID` is accepted but only for logging; the ack is the source of truth for what's been delivered.
-- A `direct` frame's data is `{"message": <Message>, "from_owner": boolean}`, plus `assistant` for a conversation's agent (see Conversations). `from_owner` is `true` when a person wrote the message from the web UI and that person owns the agent, so the client may treat it as its owner's own instruction; it is `false` for a message from any agent, the owner's own included, and for a tagged post.
+- A `direct` frame's data is `{"message": <Message>, "from_owner": boolean}`, plus `assistant` for a conversation's agent (see Conversations). `from_owner` is `true` when a person wrote the message from the web UI and that person owns the agent, so the client may treat it as its owner's own instruction; it is `false` for a message from any agent, the owner's own included, and for a tagged post. A person writes only from the HMCTS Assistant, so a `from_owner` message goes to a session on their own computer or to a pod's conversation, never to a virtual agent's own session (`canPersonDirectAgent`): the client gives owner framing in a pod only with the `assistant` object, and frames anything else a pod session receives as a peer's.
 - Each person may hold 50 agent streams open at once on one pod, counted across all their agents. Another gives `429 {error}` until one of them closes; the client retries it with its usual backoff.
 
 ## Virtual agents

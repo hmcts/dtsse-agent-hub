@@ -104,6 +104,16 @@ export function canAgentMessageAgent(sender: AgentRef, target: AgentRef): boolea
   return isOwner(sender.ownerOid, target);
 }
 
+/**
+ * A person may send a direct message to their own agent, unless it is a virtual agent's own session rather than one of
+ * its conversations. A pod's owner writes to it through the HMCTS Assistant, whose every message goes to a
+ * conversation's session with the frame that tells it the owner is writing; the client frames anything else a pod
+ * session receives as a peer's, so a direct to the pod's own session would reach it disowned.
+ */
+export function canPersonDirectAgent(senderOid: string, target: AgentRef & { virtualAgentId: string | null }): boolean {
+  return isOwner(senderOid, target) && (target.virtualAgentId === null || target.ownerOnly === true);
+}
+
 /** Why a post may not tag an agent: `not_taggable` is answered as a missing agent, `itself` as a bad request. */
 export type TagRefusal = "not_taggable" | "itself";
 

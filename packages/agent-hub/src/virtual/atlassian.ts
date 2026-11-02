@@ -40,7 +40,7 @@ export const TWG_DEVICE_CODE_EXPIRES_S = 300;
  * find the Atlassian sign-in page on another screen and type a code, which is the thing a code has to survive, and
  * a code that ran out after five means the owner is not at their screen — a fresh one relayed to an empty chair runs
  * out too, while holding the agent in `awaiting_login` and a `agent-hub jira export` open on behalf of somebody who
- * has walked away. An owner who comes back late has their agent's page to sign in again from, and that is a fresh
+ * has walked away. An owner who comes back late has the Assistant's settings to sign in again from, and that is a fresh
  * code with a fresh five minutes; a code too short to use at all is what nobody can recover from.
  *
  * What bounds this is the session rather than taste. `agent-hub jira export` drives this sign-in, and the envelope
