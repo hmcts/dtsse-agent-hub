@@ -25,6 +25,7 @@ export async function saveTemplate(form: FormData): Promise<ActionResult<{ id: s
     const viewer = await requireViewer();
     const id = text(form.get("id"));
     const saved = await write(prisma, {
+      actorOid: viewer.oid,
       ownerOid: viewer.oid,
       id: id === "" ? undefined : id,
       name: form.get("name"),
@@ -39,7 +40,7 @@ export async function saveTemplate(form: FormData): Promise<ActionResult<{ id: s
 export async function deleteTemplate(form: FormData): Promise<ActionResult<{ confirmation: string }>> {
   return await runAction<{ confirmation: string }>("delete template", async () => {
     const viewer = await requireViewer();
-    if (!(await remove(prisma, { ownerOid: viewer.oid }, text(form.get("id"))))) {
+    if (!(await remove(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid }, text(form.get("id"))))) {
       return { ok: false, error: "that is not one of your templates" };
     }
     revalidate();

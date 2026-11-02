@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { TEMPLATES } from "../../src/assistant/starters.ts";
-import { listTemplates, saveTemplate } from "../../src/assistant/template-store.ts";
+import { deleteTemplate, listTemplates, saveTemplate } from "../../src/assistant/template-store.ts";
 import { MAX_TEMPLATES, offeredTemplates, TEMPLATES_FULL, templateNameTaken } from "../../src/assistant/templates.ts";
 import type { Identity } from "../../src/users/identity.ts";
 import { devIdentity } from "../../src/viewer/identity.ts";
@@ -38,7 +38,7 @@ function form(values: Record<string, string>): FormData {
 }
 
 function own(who: Person) {
-  return { ownerOid: who.oid };
+  return { actorOid: who.oid, ownerOid: who.oid };
 }
 
 /** One of `who`'s templates, written through the store so the caps and the checks apply as they do in the UI. */
@@ -231,6 +231,8 @@ describe("offering a person's templates", () => {
  * - Bob naming Alice's template id in a save or a delete does not reach her row. The `where` in every statement
  *   carries the owner, so his id matches nothing: he is told the template has gone and *Alice's row is unchanged*,
  *   which is the assertion — a refusal with her row quietly rewritten would pass a test that only read the result.
+ * - A caller that hands the store a different owner outright is refused by `canManageTemplate` rather than served,
+ *   so the rule and not the query shape is what is being relied on.
  * - The actions never read an owner from the form, so a hand-rolled POST naming Alice writes against Bob.
  */
 describe("another person's templates", () => {
@@ -268,5 +270,16 @@ describe("another person's templates", () => {
 
     expect(await rows(ALICE)).toEqual([]);
     expect(await rows(BOB)).toEqual([{ name: "Mine", body: "x" }]);
+  });
+
+  it.each([
+    ["read", async () => await listTemplates(prisma, { actorOid: BOB.oid, ownerOid: ALICE.oid })],
+    ["save over", async () => await saveTemplate(prisma, { actorOid: BOB.oid, ownerOid: ALICE.oid, name: "Mine", body: "x" })],
+    ["delete", async () => await deleteTemplate(prisma, { actorOid: BOB.oid, ownerOid: ALICE.oid }, "11111111-1111-4111-8111-111111111111")]
+  ])("should refuse a caller trying to %s somebody else's templates, by the rule and not by the query", async (_label, attempt) => {
+    await given(ALICE, "Alice's own", "hers");
+
+    await expect(attempt()).rejects.toThrow("you can only change your own templates");
+    expect(await rows(ALICE)).toEqual([{ name: "Alice's own", body: "hers" }]);
   });
 });

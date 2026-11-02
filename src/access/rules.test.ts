@@ -65,14 +65,19 @@ const DIRECT_TO_TARGET: MessageRef = {
 };
 
 describe("isOwner", () => {
-  it("should allow the owner", () => {
+  it("should allow the owner when they are asked about their own row", () => {
     expect(isOwner(OWNER, TARGET)).toBe(true);
     expect(isOwner(OWNER, { ownerOid: OWNER })).toBe(true);
   });
 
-  it.each(EVERYONE_ELSE)("should refuse %s", (_label, oid) => {
+  it("should allow the owner when they are asked about an owner's oid alone", () => {
+    expect(isOwner(OWNER, OWNER)).toBe(true);
+  });
+
+  it.each(EVERYONE_ELSE)("should refuse %s when the row or the oid is the owner's", (_label, oid) => {
     expect(isOwner(oid, TARGET)).toBe(false);
     expect(isOwner(oid, { ownerOid: OWNER })).toBe(false);
+    expect(isOwner(oid, OWNER)).toBe(false);
   });
 });
 
@@ -303,11 +308,11 @@ describe("isPodConversationAgent", () => {
 describe("canManageVirtualAgent", () => {
   // It acts with the owner's own GitHub, Azure and Atlassian sign-ins — managing it, searching Atlassian through it and
   // running a Welsh job on it alike — so nobody else may, and no share of a chat of theirs reaches it.
-  it("should let a person make their own virtual agent act as them", () => {
+  it("should let a person make a virtual agent act as them when it is their own", () => {
     expect(canManageVirtualAgent(OWNER, { ownerOid: OWNER })).toBe(true);
   });
 
-  it.each(EVERYONE_ELSE)("should refuse %s making the owner's virtual agent act as the owner", (_label, actorOid) => {
+  it.each(EVERYONE_ELSE)("should refuse %s when they would make the owner's virtual agent act as the owner", (_label, actorOid) => {
     expect(canManageVirtualAgent(actorOid, { ownerOid: OWNER })).toBe(false);
   });
 });
@@ -606,7 +611,7 @@ describe("the conversation share rules", () => {
     it.each([
       ["its owner", OWNER],
       ["someone named in a share of it", RECIPIENT]
-    ])("should let %s read it", (_label, viewerOid) => {
+    ])("should let %s read the share page when they own or were named in it", (_label, viewerOid) => {
       expect(conversationAccess(viewerOid, CONVERSATION, SHARES)).not.toBe("none");
     });
 
@@ -623,6 +628,7 @@ describe("the conversation share rules", () => {
       }
     });
   });
+
   // A share is of the conversation, never of its agent, so everything decided about the agent still answers for a
   // recipient exactly as it does for a stranger: the UI stream's watch, the agent API's routes and the rosters.
   describe("what a share does not widen", () => {
@@ -645,7 +651,7 @@ describe("the conversation share rules", () => {
       ["a recipient of it", RECIPIENT],
       ["a colleague", COLLEAGUE],
       ["another owner", ELSEWHERE]
-    ])("should not let %s see or change who the conversation is shared with", (_label, actorOid) => {
+    ])("should not let %s see or change who the conversation is shared with when they do not own it", (_label, actorOid) => {
       expect(isOwner(actorOid, CONVERSATION)).toBe(false);
     });
   });

@@ -1,5 +1,5 @@
 import "server-only";
-import { canOwnerReadCredential, canReadMessage, isOwner } from "../access/rules.ts";
+import { canManageVirtualAgent, canOwnerReadCredential, canReadMessage, isOwner } from "../access/rules.ts";
 import { isUuid } from "../agents/store.ts";
 import { readExportDefaults } from "../assistant/export-default-store.ts";
 import type { ExportDefaults } from "../assistant/export-defaults.ts";
@@ -332,10 +332,10 @@ export async function assistantSize(viewer: Viewer): Promise<AssistantMemory | u
  * The viewer's own saved prompts, for the settings dialog to edit and both composers to offer.
  *
  * Its own read rather than part of `openAssistant` so the one place that decides whose templates these are is the
- * store, which reads only the owner it is handed: the viewer.
+ * store, which asks `isOwner` with the viewer as both the actor and the owner.
  */
 export async function assistantTemplates(viewer: Identity): Promise<SavedTemplate[]> {
-  return await listTemplates(prisma, { ownerOid: viewer.oid });
+  return await listTemplates(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
 }
 
 /** What the settings show and manage of the virtual agent the viewer's Assistant runs on. */
@@ -351,7 +351,7 @@ export type AssistantAgent = Pick<VirtualAgentRow, "id" | "name" | "desired" | "
  */
 export async function assistantAgent(viewer: Viewer): Promise<AssistantAgent | undefined> {
   const row = await findAssistant(prisma, viewer.oid);
-  if (row === undefined) {
+  if (row === undefined || !canManageVirtualAgent(viewer.oid, row)) {
     return undefined;
   }
   return { id: row.id, name: row.name, desired: row.desired, status: row.status, statusDetail: row.statusDetail, ...portLinks(row) };
@@ -369,7 +369,7 @@ export async function assistantModel(viewer: Viewer): Promise<AssistantModelChoi
 
 /** Where the viewer's documents go by default, for the settings to edit and the document panel to start from. */
 export async function assistantExportDefaults(viewer: Identity): Promise<ExportDefaults> {
-  return await readExportDefaults(prisma, { ownerOid: viewer.oid });
+  return await readExportDefaults(prisma, { actorOid: viewer.oid, ownerOid: viewer.oid });
 }
 
 /** One of the viewer's conversations, or `undefined` for the not-found the page answers. */

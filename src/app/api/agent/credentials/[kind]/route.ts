@@ -65,13 +65,13 @@ export const PUT = agentRoute<{ kind: string }>(async ({ caller, request, params
       throw new HttpError(400, owned.error);
     }
   }
-  await putCredential(prisma, available(credentialBackend(prisma)), { ownerOid: caller.oid, kind, value, via: "cli" });
+  await putCredential(prisma, available(credentialBackend(prisma)), { actorOid: caller.oid, ownerOid: caller.oid, kind, value, via: "cli" });
   return noContent();
 });
 
 export const DELETE = agentRoute<{ kind: string }>(async ({ caller, params }) => {
   personal(caller);
   const kind = kindOf(params.kind);
-  await deleteCredential(prisma, available(credentialBackend(prisma)), { ownerOid: caller.oid, kind });
+  await deleteCredential(prisma, available(credentialBackend(prisma)), { actorOid: caller.oid, ownerOid: caller.oid, kind });
   return noContent();
 });

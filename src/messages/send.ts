@@ -40,8 +40,7 @@ function candidateView(candidate: Candidate): Record<string, unknown> {
  * candidates are only ever the caller's own agents, so telling them apart by repo and branch costs nothing. A tag
  * resolves across every owner, so the same fields would answer what somebody else's session is working on — and
  * repeatably, since the refusal writes nothing. `peopleLookup` already draws this line for the composer's own
- * search: a name and its owner, "no status, heartbeat or repo: those are the agent's page, which is its owner's
- * alone". The owner's name is what makes two same-named agents tellable apart, and a post of that agent's already
+ * search: a name and its owner, and no status, heartbeat or repo, which are its owner's alone. The owner's name is what makes two same-named agents tellable apart, and a post of that agent's already
  * shows it to anyone signed in.
  */
 function tagCandidateView(candidate: Candidate): Record<string, unknown> {

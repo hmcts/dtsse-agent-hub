@@ -93,7 +93,7 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
       return sseEvent({ id: message.id, event: "post", data: JSON.stringify({ message }) });
     }
     case "agent_status": {
-      if (!isOwner(sources.viewerOid, { ownerOid: event.owner_oid })) {
+      if (!isOwner(sources.viewerOid, event.owner_oid)) {
         return undefined;
       }
       return sseEvent({ event: "agent_status", data: JSON.stringify({ agent_id: event.agent_id, status: event.status }) });
@@ -145,13 +145,13 @@ export async function selectFrame(event: HubEvent, watch: UiWatch, sources: Omit
     case "tagged_post":
       return undefined;
     case "credential":
-      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid }) ? RESYNC : undefined;
+      return isOwner(sources.viewerOid, event.owner_oid) ? RESYNC : undefined;
     case "virtual_agent":
-      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid })
+      return isOwner(sources.viewerOid, event.owner_oid)
         ? sseEvent({ event: "virtual_agent", data: JSON.stringify({ virtual_agent_id: event.virtual_agent_id }) })
         : undefined;
     case "assistant_conversation":
-      return isOwner(sources.viewerOid, { ownerOid: event.owner_oid })
+      return isOwner(sources.viewerOid, event.owner_oid)
         ? sseEvent({ event: "assistant_conversation", data: JSON.stringify({ conversation_id: event.conversation_id }) })
         : undefined;
     // Never sent to a browser: it is an instruction to the conversation's pod. The stop is recorded on the

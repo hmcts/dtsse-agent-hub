@@ -179,7 +179,7 @@ describe("the person's assistant", () => {
       ["github", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"],
       ["claude", `sk-ant-oat01-${"a".repeat(40)}`]
     ] as const) {
-      await putCredential(prisma, backend.store, { ownerOid: ALICE.oid, kind, value, via: "web" });
+      await putCredential(prisma, backend.store, { actorOid: ALICE.oid, ownerOid: ALICE.oid, kind, value, via: "web" });
     }
 
     const home = await openAssistant(VIEWER);
@@ -1602,7 +1602,7 @@ describe("export defaults", () => {
   it("should keep each person's own defaults, either of which may be none", async () => {
     await insertUser(ALICE);
     await insertUser(BOB);
-    const alice = { ownerOid: ALICE.oid };
+    const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
 
     expect(await readExportDefaults(prisma, alice)).toEqual({ jira: null, confluence: null });
     await saveExportDefaults(prisma, alice, { jira: { key: "CCD", name: "Core Case Data" }, confluence: PAGE });
@@ -1610,12 +1610,13 @@ describe("export defaults", () => {
     await saveExportDefaults(prisma, alice, { jira: null, confluence: PAGE });
 
     expect((await readExportDefaults(prisma, alice)).jira).toBeNull();
-    expect(await readExportDefaults(prisma, { ownerOid: BOB.oid })).toEqual({ jira: null, confluence: null });
+    expect(await readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: BOB.oid })).toEqual({ jira: null, confluence: null });
+    await expect(readExportDefaults(prisma, { actorOid: BOB.oid, ownerOid: ALICE.oid })).rejects.toMatchObject({ status: 403 });
   });
 
   it("should refuse a project or a page that is not one", async () => {
     await insertUser(ALICE);
-    const alice = { ownerOid: ALICE.oid };
+    const alice = { actorOid: ALICE.oid, ownerOid: ALICE.oid };
 
     await expect(saveExportDefaults(prisma, alice, { jira: { key: "ccd", name: "x" }, confluence: null })).rejects.toMatchObject({ status: 400 });
     await expect(saveExportDefaults(prisma, alice, { jira: null, confluence: { ...PAGE, space_id: "x" } })).rejects.toMatchObject({ status: 400 });

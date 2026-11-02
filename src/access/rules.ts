@@ -1,11 +1,12 @@
 /**
  * Who may do what, as pure functions over rows the caller has already loaded.
  *
- * - **Everything here is its owner's.** An agent, a virtual agent, an HMCTS Assistant conversation, a file attached
- *   to one and what an assistant's pod reports are seen and acted on by the person who owns them and nobody else, and
- *   `isOwner` is that one decision. Two rules keep names of their own because each must be able to narrow without
- *   the rest: `canViewTranscript`, for what a session said, and `canManageVirtualAgent`, for whatever runs as the
- *   owner on their own sign-ins.
+ * - **Everything here is its owner's.** An agent, a virtual agent, an HMCTS Assistant conversation, a person's
+ *   credentials, templates and export defaults, and what an assistant's pod reports are seen and acted on by the
+ *   person who owns them and nobody else, and `isOwner` is that one decision. Two rules keep names of their own
+ *   because each must be able to narrow without the rest: `canViewTranscript`, for what a session said, and
+ *   `canManageVirtualAgent`, for whatever runs as the owner on their own sign-ins. A file attached to a message is
+ *   narrower still: the upload rules hold it to its owner and also to its state, its conversation and its message.
  * - **Reaching somebody else's agent is a tagged post.** `tagRefusal` lets anyone tag anyone's agent, bar a pod
  *   conversation's (the Assistant, a private chat rather than a session on the board) and the tagger itself. It is
  *   the one cross-owner route to a session, and a public one: a post is on a board every signed-in person reads.
@@ -15,8 +16,8 @@
  *
  * A direct message is between one owner's sessions, or is an agent's reply to a person (`canReadMessage`,
  * `replyRoute`). A launch token acts as its owner only for its own virtual agent and the agents its sessions
- * registered. Credentials, saved templates and export defaults are keyed by the signed-in person's own oid, so no
- * rule is asked whose they are; what is decided is which credential kinds a person reads back and a pod may store.
+ * registered. Credentials, saved templates and export defaults are their owner's by `isOwner` on every read and
+ * write; which credential kinds a person reads back and a pod may store are rules of their own.
  */
 
 export interface AgentRef {
@@ -58,13 +59,14 @@ export interface MessageRef {
 }
 
 /**
- * Whether `oid` owns `owned`: who may see an agent or a virtual agent, message an agent or answer its questions, be
- * offered its skills, open, search, stop or share an Assistant conversation, and see what an assistant's pod reports
- * about its memory and its disk. One decision, because each of those is something of the owner's that nobody else has
- * standing to reach; the share rows that `conversationAccess` reads are the only widening of any of it.
+ * Whether `oid` owns `owned`, given as a row or as its owner's oid: who may see an agent or a virtual agent, message
+ * an agent or answer its questions, be offered its skills, open, search, stop or share an Assistant conversation, see
+ * what an assistant's pod reports about its memory and its disk, and read or change a person's credentials, templates
+ * and export defaults. One decision, because each of those is something of the owner's that nobody else has standing
+ * to reach; the share rows that `conversationAccess` reads are the only widening of any of it.
  */
-export function isOwner(oid: string, owned: { ownerOid: string }): boolean {
-  return oid === owned.ownerOid;
+export function isOwner(oid: string, owned: { ownerOid: string } | string): boolean {
+  return oid === (typeof owned === "string" ? owned : owned.ownerOid);
 }
 
 /**
@@ -177,10 +179,9 @@ export function replyRoute(sender: AgentRef, message: MessageRef): ReplyRoute {
 /**
  * Whether a person may read back their own stored credential of `kind`, through `GET /api/agent/credentials/{kind}`
  * or the web UI: the one exception to their credentials being write-only for them. Their CLAUDE.md and their git
- * identity, because the page that edits them has to show them. Anyone
- * holding that person's agent-hub token can therefore read both. No model credential is readable: the gateway route
- * stores none at all, and every other kind acts as the person in GitHub, Azure, Claude, Jenkins or Atlassian, so it
- * stays write-only.
+ * identity, because the page that edits them has to show them. Anyone holding that person's agent-hub token can
+ * therefore read both. No model credential is readable: the gateway route stores none at all, and every other kind
+ * acts as the person in GitHub, Azure, Claude, Jenkins or Atlassian, so it stays write-only.
  */
 export function canOwnerReadCredential(kind: string): boolean {
   return kind === "claude_md" || kind === "git_identity";
@@ -208,17 +209,17 @@ export interface UploadRef {
 }
 
 /**
- * Whether `viewerOid` may add a part to an upload or discard it. Its own rule rather than `isOwner`: an upload
+ * Whether `viewerOid` may add a part to an upload or discard it. Narrower than `isOwner`: an upload
  * belongs to the person who started it rather than to any agent of theirs, so it is not the conversation's session
  * that writes it. Once it is attached to a message it is finished with, so there is nothing left to write.
  */
 export function canWriteUpload(viewerOid: string, upload: UploadRef): boolean {
-  return viewerOid === upload.ownerOid && upload.messageId === null && (upload.state === "pending" || upload.state === "stored");
+  return isOwner(viewerOid, upload) && upload.messageId === null && (upload.state === "pending" || upload.state === "stored");
 }
 
 /** Whether an upload may be stamped onto a message of `conversationId`: a finished one of that conversation, once. */
 export function canAttachUpload(viewerOid: string, conversationId: string, upload: UploadRef): boolean {
-  return viewerOid === upload.ownerOid && upload.conversationId === conversationId && upload.messageId === null && upload.state === "stored";
+  return isOwner(viewerOid, upload) && upload.conversationId === conversationId && upload.messageId === null && upload.state === "stored";
 }
 
 /** `part` reads one part's bytes; `fetched` reports the whole file is on the pod's disk. */
@@ -260,7 +261,7 @@ export type AttachmentDownload = "ok" | "not_yours" | "not_held";
  * reached yet is past its window and is refused as though it had.
  */
 export function attachmentDownload(viewerOid: string, upload: UploadRef, heldUntil: Date, now: Date): AttachmentDownload {
-  if (viewerOid !== upload.ownerOid) {
+  if (!isOwner(viewerOid, upload)) {
     return "not_yours";
   }
   // `pending` is here too: its parts are incomplete, so what it would serve is a file with holes in it.
@@ -278,16 +279,16 @@ export function attachmentDownload(viewerOid: string, upload: UploadRef, heldUnt
  * it refuses both alike and confirms nothing about an id.
  */
 export function canRemoveUploadFromDisk(viewerOid: string, upload: UploadRef): boolean {
-  return viewerOid === upload.ownerOid && upload.messageId !== null;
+  return isOwner(viewerOid, upload) && upload.messageId !== null;
 }
 
 /**
  * Whether `actorOid` may make a virtual agent act as its owner: start, stop, rename, resize or delete it, see its
- * device codes or paste a login code back to it, and have its pod search Jira or Confluence or run a Welsh job. Its
- * owner alone, and its own rule rather than `isOwner` because the reason is narrower than ownership: the agent acts
- * with the owner's GitHub, Azure and Atlassian sign-ins, so a code it shows is a sign-in as them and a job it runs
- * opens pull requests and edits Jira stories as them. Whatever ever widens who may see a virtual agent must not widen
- * this.
+ * device codes or paste a login code back to it, have its pod search Jira or Confluence or run a Welsh job, and read
+ * that job's result or download its files. Its owner alone, and its own rule rather than `isOwner` because the reason
+ * is narrower than ownership: the agent acts with the owner's GitHub, Azure and Atlassian sign-ins, so a code it shows
+ * is a sign-in as them and a job it runs opens pull requests and edits Jira stories as them. Whatever ever widens who
+ * may see a virtual agent must not widen this.
  */
 export function canManageVirtualAgent(actorOid: string, virtualAgent: { ownerOid: string }): boolean {
   return isOwner(actorOid, virtualAgent);

@@ -1,14 +1,22 @@
+import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import type { Database } from "../store/prisma.ts";
 import { checkConfluenceDefault, checkJiraDefault, type ExportDefaults, exportDefaultsOf } from "./export-defaults.ts";
 
 /**
- * Each person's own export defaults, one row each. Every query carries the `owner_oid` it is handed, which the action
- * takes from the viewer it re-reads, so another person's defaults are unreachable.
+ * Each person's own export defaults, one row each. `isOwner` is asked on every call, as it is for templates, and the
+ * `owner_oid` in every query is what makes another person's unreachable.
  */
 
 export interface DefaultsTarget {
+  actorOid: string;
   ownerOid: string;
+}
+
+function allow({ actorOid, ownerOid }: DefaultsTarget): void {
+  if (!isOwner(actorOid, ownerOid)) {
+    throw new HttpError(403, "you can only change your own defaults");
+  }
 }
 
 const SELECT = {
@@ -23,6 +31,7 @@ const SELECT = {
 } as const;
 
 export async function readExportDefaults(db: Database, target: DefaultsTarget): Promise<ExportDefaults> {
+  allow(target);
   return exportDefaultsOf(await db.assistantExportDefault.findUnique({ where: { ownerOid: target.ownerOid }, select: SELECT }));
 }
 
@@ -33,6 +42,7 @@ export async function saveExportDefaults(
   input: { jira: unknown; confluence: unknown },
   now: Date = new Date()
 ): Promise<ExportDefaults> {
+  allow(target);
   const jira = checkJiraDefault(input.jira ?? null);
   if (jira === undefined) {
     throw new HttpError(400, "pick a Jira project from the search");

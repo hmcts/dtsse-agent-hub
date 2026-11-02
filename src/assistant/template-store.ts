@@ -1,19 +1,30 @@
+import { isOwner } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
 import { isUuid } from "../agents/store.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { checkTemplate, MAX_TEMPLATES, type SavedTemplate, TEMPLATES_FULL, templateNameTaken } from "./templates.ts";
 
 /**
- * Each person's own saved prompts. Every query carries the `owner_oid` it is handed, so another person's template is
- * unreachable rather than refused, and no caller passes an owner a browser named: the actions take it from the viewer
- * they re-read.
+ * Each person's own saved prompts. `isOwner` is asked on every call, so the one rule covers reading and writing and
+ * nothing here decides for itself; the `owner_oid` in every query is what makes a refusal unreachable rather than
+ * merely unoffered.
+ *
+ * No caller passes an owner a browser named: the actions hand both ids from the viewer they re-read, so `actorOid`
+ * and `ownerOid` being the same pair is the normal case and the parameter exists to keep the rule honest.
  */
 
 /** Postgres's unique-violation, which is this table's one-name-per-person constraint. */
 const UNIQUE_VIOLATION = "P2002";
 
 export interface TemplateTarget {
+  actorOid: string;
   ownerOid: string;
+}
+
+function allow({ actorOid, ownerOid }: TemplateTarget): void {
+  if (!isOwner(actorOid, ownerOid)) {
+    throw new HttpError(403, "you can only change your own templates");
+  }
 }
 
 /** Holds the owner's `user` row until commit, so two saves by one person cannot both pass the count cap. */
@@ -29,6 +40,7 @@ function view(row: { id: string; name: string; body: string }): SavedTemplate {
 
 /** The owner's templates, by name. Capped at `MAX_TEMPLATES`, which is also what a save is allowed to grow them to. */
 export async function listTemplates(db: Database, target: TemplateTarget): Promise<SavedTemplate[]> {
+  allow(target);
   const rows = await db.assistantTemplate.findMany({
     where: { ownerOid: target.ownerOid },
     select: SELECT,
@@ -52,6 +64,7 @@ export interface TemplateWrite extends TemplateTarget {
  * owner, so it matches nothing and the person is told the template has gone.
  */
 export async function saveTemplate(prisma: PrismaClient, write: TemplateWrite): Promise<SavedTemplate> {
+  allow(write);
   const checked = checkTemplate(write);
   if (!checked.ok) {
     throw new HttpError(400, checked.error);
@@ -94,6 +107,7 @@ export async function saveTemplate(prisma: PrismaClient, write: TemplateWrite): 
 
 /** Deletes one of the owner's own templates, and reports whether there was one to delete. */
 export async function deleteTemplate(db: Database, target: TemplateTarget, id: string): Promise<boolean> {
+  allow(target);
   if (!isUuid(id)) {
     return false;
   }
