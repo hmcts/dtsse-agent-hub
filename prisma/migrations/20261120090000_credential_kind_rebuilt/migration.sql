@@ -2,6 +2,12 @@
 -- type is rebuilt: the old one is renamed aside, the replacement takes its name, the columns move across through
 -- text, and the old one is dropped.
 --
+-- `20261107090000_bedrock_gone` left these labels in place because a rebuild changes a column's result-type OID,
+-- which fails a statement prepared against the old type with `cached plan must not change result type`. Nothing
+-- here prepares one: @prisma/adapter-pg 7.10.1 names a statement only when given a `statementNameGenerator`, which
+-- src/store/prisma.ts does not pass, so each query is parsed afresh (test/integration/prepared-statements.test.ts
+-- pins that). Its selects also read every enum column as `::text`.
+--
 -- `credential` and `virtual_agent_login` move together, in this one transaction. Prisma casts every enum parameter
 -- by the type's name (`CAST($1::text AS "public"."credential_kind")`), so a commit between the two would leave one
 -- column on a type of another name, and every query the serving build makes of it failing for want of an operator.

@@ -59,6 +59,39 @@ async function query<T extends pg.QueryResultRow>(database: string, statement: s
   }
 }
 
+/** Every type whose name starts with `prefix`, with its labels in order, so a type left behind by a rebuild shows. */
+async function enumLabels(database: string, prefix: string): Promise<{ type: string; labels: string }[]> {
+  return await query(
+    database,
+    `SELECT t.typname AS type, string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) AS labels
+       FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname LIKE '${prefix}%' GROUP BY t.typname ORDER BY t.typname`
+  );
+}
+
+/**
+ * Applies the pending migrations while another transaction holds `table` in the weakest mode there is, which only
+ * the ACCESS EXCLUSIVE lock `migration` takes waits for, and expects it to give up within its lock timeout, leaving
+ * nothing in the ledger.
+ */
+async function expectLockTimeout(database: string, migration: string, table: string): Promise<void> {
+  const holder = new pg.Client({ connectionString: urlFor(database) });
+  await holder.connect();
+  try {
+    await holder.query("BEGIN");
+    await holder.query(`LOCK TABLE "${table}" IN ACCESS SHARE MODE`);
+    const started = Date.now();
+
+    await expect(migrate()).rejects.toThrow(`migration ${migration} failed: canceling statement due to lock timeout`);
+
+    expect(Date.now() - started).toBeLessThan(15_000);
+  } finally {
+    await holder.query("ROLLBACK");
+    await holder.end();
+  }
+  expect(await query(database, `SELECT 1 FROM "_prisma_migrations" WHERE migration_name = '${migration}'`)).toEqual([]);
+}
+
 /**
  * Drops the scratch databases earlier runs abandoned. A per-run name is never reused, so a run killed between
  * `beforeAll` and `afterAll` would otherwise leave its databases on the server for good — the fixed names this file
@@ -345,21 +378,9 @@ describe("the bedrock migration", () => {
       { name: "on-gateway", model_route: "gateway" },
       { name: "own", model_route: "own_licence" }
     ]);
-    const labels = await query<{ type: string; label: string }>(
-      RENAME,
-      `SELECT t.typname AS type, e.enumlabel AS label FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-        WHERE t.typname IN ('credential_kind', 'model_route') ORDER BY t.typname, e.enumsortorder`
-    );
-    expect(labels).toEqual([
-      { type: "credential_kind", label: "github" },
-      { type: "credential_kind", label: "azure" },
-      { type: "credential_kind", label: "claude" },
-      { type: "credential_kind", label: "jenkins" },
-      { type: "credential_kind", label: "claude_md" },
-      { type: "credential_kind", label: "git_identity" },
-      { type: "credential_kind", label: "atlassian" },
-      { type: "model_route", label: "gateway" },
-      { type: "model_route", label: "own_licence" }
+    expect([...(await enumLabels(RENAME, "credential_kind")), ...(await enumLabels(RENAME, "model_route"))]).toEqual([
+      { type: "credential_kind", labels: "github,azure,claude,jenkins,claude_md,git_identity,atlassian" },
+      { type: "model_route", labels: "gateway,own_licence" }
     ]);
   });
 });
@@ -801,6 +822,12 @@ describe("the index tidy migration", () => {
   const MIGRATION = "20261119090000_index_tidy";
   const { database: TIDY, earlier } = migrationFixture("migrate_index_tidy", MIGRATION);
 
+  it("should fail within its lock timeout and record nothing when another transaction holds a table it drops an index of", async () => {
+    await migrate(earlier());
+
+    await expectLockTimeout(TIDY, MIGRATION, "virtual_agent");
+  });
+
   it("should drop the two indexes a unique index answers when it is applied", async () => {
     await migrate(earlier());
 
@@ -824,21 +851,8 @@ describe("the credential kind rebuild migration", () => {
 
   it("should fail within its lock timeout and record nothing when another transaction holds a table it rewrites", async () => {
     await migrate(earlier());
-    const holder = new pg.Client({ connectionString: urlFor(KINDS) });
-    await holder.connect();
-    try {
-      await holder.query("BEGIN");
-      await holder.query('LOCK TABLE "virtual_agent_login" IN ACCESS SHARE MODE');
-      const started = Date.now();
 
-      await expect(migrate()).rejects.toThrow(/migration 20261120090000_credential_kind_rebuilt failed: canceling statement due to lock timeout/);
-
-      expect(Date.now() - started).toBeLessThan(15_000);
-    } finally {
-      await holder.query("ROLLBACK");
-      await holder.end();
-    }
-    expect(await query(KINDS, `SELECT 1 FROM "_prisma_migrations" WHERE migration_name = '${MIGRATION}'`)).toEqual([]);
+    await expectLockTimeout(KINDS, MIGRATION, "virtual_agent_login");
   });
 
   it("should delete every bedrock credential and sign-in and rebuild the type without the label when it is applied", async () => {
@@ -867,19 +881,15 @@ describe("the credential kind rebuild migration", () => {
   });
 });
 
-/** Every type whose name starts with `prefix`, with its labels in order, so a type left behind by a rebuild shows. */
-async function enumLabels(database: string, prefix: string): Promise<{ type: string; labels: string }[]> {
-  return await query(
-    database,
-    `SELECT t.typname AS type, string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) AS labels
-       FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-      WHERE t.typname LIKE '${prefix}%' GROUP BY t.typname ORDER BY t.typname`
-  );
-}
-
 describe("the virtual agent enums rebuild migration", () => {
   const MIGRATION = "20261121090000_virtual_agent_enums_rebuilt";
   const { database: AGENTS, earlier } = migrationFixture("migrate_agent_enums", MIGRATION);
+
+  it("should fail within its lock timeout and record nothing when another transaction holds a table it rewrites", async () => {
+    await migrate(earlier());
+
+    await expectLockTimeout(AGENTS, MIGRATION, "virtual_agent");
+  });
 
   it("should move every agent off the retired route and stop reasons and rebuild both types without them when it is applied", async () => {
     await migrate(earlier());
@@ -915,6 +925,12 @@ describe("the virtual agent enums rebuild migration", () => {
 describe("the unread columns migration", () => {
   const MIGRATION = "20261122090000_unread_columns_released";
   const { database: UNREAD, earlier } = migrationFixture("migrate_unread_columns", MIGRATION);
+
+  it("should fail within its lock timeout and record nothing when another transaction holds a table it drops a constraint of", async () => {
+    await migrate(earlier());
+
+    await expectLockTimeout(UNREAD, MIGRATION, "agent_question");
+  });
 
   it("should accept a delivered delivery with no delivered_at, and drop the answer message key, when it is applied", async () => {
     await migrate(earlier());

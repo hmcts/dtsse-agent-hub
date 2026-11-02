@@ -1,10 +1,13 @@
 -- Labels no code path writes, taken out of the two enums only `virtual_agent` uses: `bedrock` from `model_route`, and
 -- `quota` and `expired` from `virtual_agent_stop_reason`, which the sweep and the owner's stop have never given.
 -- Each type is rebuilt as `20261120090000_credential_kind_rebuilt` rebuilds its own, and both columns move in one
--- `ALTER TABLE`, so the table is rewritten once.
+-- `ALTER TABLE`, so the table is rewritten once. No prepared statement is planned against either old type, for the
+-- reason given there.
 --
--- The lock waits 5 seconds at most, for the reason and with the outcome given there.
+-- The lock waits 5 seconds at most, for the reason and with the outcome given there. It is taken before the updates,
+-- so the row locks they would take are never upgraded to it.
 SET LOCAL lock_timeout = '5s';
+LOCK TABLE "virtual_agent" IN ACCESS EXCLUSIVE MODE;
 
 -- `20261107090000_bedrock_gone` moved every row off `bedrock`; this repeats it so the cast below cannot meet one. The
 -- generations move with the route because the route is in the pod template, as `POD_CHANGE` in

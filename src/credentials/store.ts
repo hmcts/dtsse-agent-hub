@@ -76,7 +76,7 @@ export async function putCredential(prisma: PrismaClient, store: SecretStore, wr
   const name = secretName(write.ownerOid, write.kind);
   await store.put(name, checked.value, { owner: write.ownerOid, kind: write.kind, via: write.via });
   await prisma.$transaction(async (tx) => {
-    // `updated_via` is not read, but the build this one replaces reads it as never null while both serve.
+    // `updated_via` is written for compatibility and never read.
     const row = { secretName: name, accountLabel: checked.accountLabel, updatedAt: new Date(), updatedVia: write.via };
     await tx.credential.upsert({
       where: { ownerOid_kind: { ownerOid: write.ownerOid, kind: write.kind } },

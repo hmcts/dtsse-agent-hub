@@ -12,6 +12,13 @@
 --
 -- `credential.updated_via` is not read either, but is still written: it is NOT NULL, and the previous build reads it
 -- as never null.
+--
+-- Dropping a constraint locks its table ACCESS EXCLUSIVE, and dropping a foreign key locks the table it references
+-- SHARE ROW EXCLUSIVE. Each lock waits 5 seconds at most, as `20261120090000_credential_kind_rebuilt` explains, and
+-- all three are taken first.
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE "delivery", "agent_question" IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE "message" IN SHARE ROW EXCLUSIVE MODE;
 
 -- The check tying `delivered_at` to the `delivered` state would refuse every ack, which leaves the column null. The
 -- state alone is what the queue and the UI read.
