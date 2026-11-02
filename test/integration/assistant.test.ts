@@ -26,6 +26,7 @@ import { putCredential } from "../../src/credentials/store.ts";
 import { directAsPerson } from "../../src/messages/send.ts";
 import { createDirect, expireDeliveries } from "../../src/messages/store.ts";
 import { subscribe, subscriptions } from "../../src/topics/store.ts";
+import { appendEntries } from "../../src/transcripts/store.ts";
 import { MAX_VIRTUAL_AGENTS_PER_USER } from "../../src/virtual-agents/limits.ts";
 import { type ClaimedVirtualAgent, type ClaimResult, createVirtualAgent, setDesired } from "../../src/virtual-agents/store.ts";
 import { sweepVirtualAgents } from "../../src/virtual-agents/sweep.ts";
@@ -136,9 +137,9 @@ async function laptopChat(sessionId = "alices-laptop"): Promise<string> {
 /** A prompt typed at the laptop: a chat with nothing said in it is left out of the list, so a test that lists one needs this. */
 async function typedAtLaptop(conversationId: string): Promise<void> {
   const agent = await prisma.agent.findFirstOrThrow({ where: { assistantConversationId: conversationId } });
-  await prisma.transcriptEntry.create({
-    data: { agentId: agent.id, sessionId: agent.sessionId, entryKey: "typed", role: "user", content: { text: "look at the claim" }, occurredAt: new Date() }
-  });
+  await appendEntries(prisma, { id: agent.id, ownerOid: agent.ownerOid }, agent.sessionId, [
+    { key: "typed", role: "user", content: { text: "look at the claim" }, truncated: false, redacted: false, message_id: null, occurred_at: new Date() }
+  ]);
 }
 
 assistantSuite([ALICE, BOB]);

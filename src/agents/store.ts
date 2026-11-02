@@ -1,5 +1,5 @@
 import { agentsMessageableBy, POD_CONVERSATION_AGENT, podConversationAgentSql } from "../access/load.ts";
-import { isLocalConversationAgent, isPodConversationAgent } from "../access/rules.ts";
+import { isPodConversationAgent } from "../access/rules.ts";
 import type { Caller } from "../agent-auth/authenticate.ts";
 import { linkLocalSession, linkSession } from "../assistant/store.ts";
 import type { AgentStatus } from "../realtime/events.ts";
@@ -159,8 +159,6 @@ export interface AgentRow {
   virtualAgentId: string | null;
   /** A pod conversation's agent: the HMCTS Assistant, which no post may tag. */
   ownerOnly: boolean;
-  /** A local chat's agent: a session on somebody's own computer, whose chat is the one the hub titles itself. */
-  localConversation: boolean;
 }
 
 export async function findAgent(db: Database, id: string): Promise<AgentRow | undefined> {
@@ -172,7 +170,7 @@ export async function findAgent(db: Database, id: string): Promise<AgentRow | un
     return undefined;
   }
   const { assistantConversationId, ...agent } = row;
-  return { ...agent, ownerOnly: isPodConversationAgent(row), localConversation: isLocalConversationAgent(row) };
+  return { ...agent, ownerOnly: isPodConversationAgent(row) };
 }
 
 /** Locks the agent's row for the rest of the transaction, and reads what a status or skills change is compared against. */

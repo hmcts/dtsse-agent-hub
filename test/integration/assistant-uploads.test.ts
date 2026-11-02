@@ -1704,8 +1704,7 @@ describe("the sweep of conversations attaching left behind", () => {
 
   it("should delete an old empty conversation whatever became of its files, since nobody ever spoke in it", async () => {
     // It used to take an upload still being present, which left anything whose file had been removed — or whose
-    // very first message failed after the row was created — showing in the sidebar for ever with nothing to
-    // collect it.
+    // very first message failed after the row was created — in the table for ever with nothing to collect it.
     // Arrange
     await startedAssistant();
     const conversation = await createConversation(prisma, ALICE.oid, { product: "pcs" });

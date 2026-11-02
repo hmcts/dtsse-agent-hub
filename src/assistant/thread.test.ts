@@ -11,6 +11,7 @@ import {
   progressLabel,
   runningHelpers,
   sessionNotice,
+  shownInThread,
   threadItems,
   WARMING_QUIPS
 } from "./thread.ts";
@@ -707,5 +708,34 @@ describe("harness turns that are not wholly harness text", () => {
 
     expect(thread[0]).toMatchObject({ type: "notice" });
     expect((thread[0] as { text: string }).text.length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe("shownInThread", () => {
+  const IDE = "<ide_opened_file>The user opened the file /a/b.ts in the IDE.</ide_opened_file>";
+
+  it.each([
+    ["an answer with words", "assistant", { text: "Here it is." }],
+    ["a tool call", "tool_use", { id: "t", name: "Read", input: {} }],
+    ["a redacted tool call, which still shows as a row", "tool_use", { id: "t", name: "Read", redacted: "aws" }],
+    ["a typed prompt", "user", { text: "fix this" }],
+    ["words after editor context", "user", { text: `${IDE} fix this` }],
+    ["a shell command run with !", "user", { text: "<bash-input>ls</bash-input>" }],
+    ["an interrupted request", "user", { text: "[Request interrupted by user]" }]
+  ])("should count an entry as shown when it is %s", (_, role, content) => {
+    expect(shownInThread({ role, content, truncated: false })).toBe(true);
+  });
+
+  it.each([
+    ["an answer with no words", "assistant", { text: "   " }],
+    ["a redacted answer", "assistant", { redacted: "aws" }],
+    ["a tool result", "tool_result", { tool_use_id: "t", is_error: false, text: "ok" }],
+    ["a system line", "system", { text: "compacted" }],
+    ["editor context alone", "user", { text: IDE }],
+    ["a slash command, which shows as a notice", "user", { text: "<command-name>/clear</command-name>" }],
+    ["a local command's output, which shows nothing", "user", { text: "<local-command-stdout>ok</local-command-stdout>" }],
+    ["a redacted prompt", "user", { redacted: "aws" }]
+  ])("should not count an entry as shown when it is %s", (_, role, content) => {
+    expect(shownInThread({ role, content, truncated: false })).toBe(false);
   });
 });

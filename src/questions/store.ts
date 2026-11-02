@@ -1,5 +1,6 @@
 import { HttpError } from "../agent-api/http.ts";
 import type { AgentRow } from "../agents/store.ts";
+import { announceFirstContent } from "../assistant/store.ts";
 import { notify } from "../realtime/notify.ts";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import { offerExpired, type QuestionPost, type QuestionSetAnswer } from "./questions.ts";
@@ -34,6 +35,10 @@ async function announce(db: Database, agent: Pick<AgentRow, "id" | "ownerOid">):
  *
  * A retry does not replace the stored set either — the question is the one the session is waiting on an answer to,
  * and rewriting it under a card the person is reading would change what they are choosing between.
+ *
+ * A fresh question can be the first thing in a chat on somebody's own computer, which the sidebar leaves out until
+ * something is in it, so it records the chat's first content (`announceFirstContent`) and announces the chat the first
+ * time.
  */
 export type QuestionRecorded = "asked" | "already-asked";
 
@@ -72,6 +77,7 @@ export async function recordQuestion(prisma: PrismaClient, agent: Pick<AgentRow,
       select: { id: true }
     });
     await announce(tx, agent);
+    await announceFirstContent(tx, [agent.id]);
     return "asked";
   });
 }

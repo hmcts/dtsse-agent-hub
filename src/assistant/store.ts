@@ -219,40 +219,58 @@ export interface ConversationListRow extends ConversationRow {
 }
 
 /**
- * The owner's chats on their own computer that have nothing in them: no answer from the session, no prompt the person
- * typed and no message to or from it, only the harness's records of a `/clear` or a finished task, or nothing at all. A session registers
- * the moment it starts, which makes a chat the sidebar would list as a handle with nothing behind it.
+ * Records that the conversations of these agents have something in them, which is what puts a conversation in the
+ * sidebar's list and its search, and announces each one this write was the first to say so of, so an open sidebar
+ * that left it out redraws and lists it. A conversation that already had content is neither written nor announced.
  *
- * A chat on a pod is never one: it is made by the person opening it, and has its messages. The same predicate is
- * written out in `searchConversations`, which cannot call this.
+ * `first_content_at` is set once and never cleared, rather than worked out from what the chat holds, because what it
+ * holds does not last: transcript entries are swept after `RETENTION_DAYS`, and a chat that had only those would
+ * otherwise fall back out of the list a month after the person last used it. It is what the person did in it that
+ * counts, not what is still stored.
+ *
+ * Called in the transaction of every write by an agent that can be a chat's first content: a transcript batch with an
+ * answer, a tool call or a prompt the person typed in it (`appendEntries`); a direct message to or from any of its
+ * agents (`createDirect`), which is also a pod chat's first message; a question its session asked (`recordQuestion`).
+ * The document write and the fork copy set the column in their own statement instead (`writeArtefact`, `acceptFork`).
+ * An announcement the same transaction also makes for another reason, such as the rename a first prompt brings, goes
+ * out once: Postgres folds identical notifications in one transaction into one.
+ *
+ * The conversations are resolved from the agents in the same statement, so a write by an agent in no conversation, or
+ * in one that already has content, is one indexed read that writes nothing. They are locked in id order before they
+ * are written: one direct reaches two conversations, its sender's and its recipient's, and two first directs crossing
+ * between the same two sessions would otherwise each lock one row and wait on the other's. The CTE's `FOR UPDATE`,
+ * which tests `first_content_at IS NULL` again once each lock is granted, is what serialises concurrent writers;
+ * the same test in the update makes it safe on its own.
  */
-async function emptyLocalConversationIds(db: Database, ownerOid: string): Promise<string[]> {
-  const rows = await db.$queryRaw<{ id: string }[]>`
-    SELECT c.id::text AS id
-      FROM assistant_conversation c
-     WHERE c.owner_oid = ${ownerOid}
-       AND c.virtual_agent_id IS NULL
-       AND (NOT EXISTS (SELECT 1
-           FROM agent sa
-           JOIN transcript_entry st ON st.agent_id = sa.id
-          WHERE sa.assistant_conversation_id = c.id
-            AND (st.role = 'assistant'
-                 OR (st.role = 'user'
-                     AND st.message_id IS NULL
-                     AND NOT st.redacted
-                     AND btrim(COALESCE(st.content->>'text', '')) <> ''
-                     AND st.content->>'text' !~ '^\\s*<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>)'))) AND NOT EXISTS (SELECT 1
-           FROM agent sa
-           JOIN message sm ON sm.kind = 'direct' AND (sm.target_agent_id = sa.id OR sm.author_agent_id = sa.id)
-          WHERE sa.assistant_conversation_id = c.id))
+export async function announceFirstContent(db: Database, agentIds: readonly string[]): Promise<void> {
+  if (agentIds.length === 0) {
+    return;
+  }
+  const first = await db.$queryRaw<{ id: string; virtualAgentId: string | null; ownerOid: string }[]>`
+    WITH reached AS (
+      SELECT id
+        FROM assistant_conversation
+       WHERE id IN (SELECT assistant_conversation_id FROM agent WHERE id = ANY(${[...agentIds]}::uuid[]))
+         AND first_content_at IS NULL
+       ORDER BY id
+         FOR UPDATE
+    )
+    UPDATE assistant_conversation c
+       SET first_content_at = now()
+      FROM reached r
+     WHERE c.id = r.id AND c.first_content_at IS NULL
+    RETURNING c.id::text AS id, c.virtual_agent_id::text AS "virtualAgentId", c.owner_oid AS "ownerOid"
   `;
-  return rows.map((row) => row.id);
+  for (const conversation of first) {
+    await announce(db, conversation);
+  }
 }
 
 /**
- * The owner's conversations, most recently active first; only those on `virtualAgentId` when it is given.
+ * The owner's conversations with anything in them (`first_content_at`, see `announceFirstContent`), most recently
+ * active first; only those on `virtualAgentId` when it is given.
  *
- * A conversation with no pod is listed outright. `virtualAgent: { desired: … }` is a relation filter on an optional
+ * A conversation with no pod needs nothing more to be listed. `virtualAgent: { desired: … }` is a relation filter on an optional
  * to-one, so a row with no related virtual agent does not satisfy it at all — reading the pod's state alone would
  * leave every local chat out of the sidebar rather than only the ones whose pod is going.
  *
@@ -261,11 +279,10 @@ async function emptyLocalConversationIds(db: Database, ownerOid: string): Promis
  * chat's own page saying the same thing about the same session.
  */
 export async function listConversations(db: Database, ownerOid: string, limit = 200, virtualAgentId?: string): Promise<ConversationListRow[]> {
-  const empty = await emptyLocalConversationIds(db, ownerOid);
   const rows = await db.assistantConversation.findMany({
     where: {
       ownerOid,
-      ...(empty.length === 0 ? {} : { id: { notIn: empty } }),
+      firstContentAt: { not: null },
       OR: [{ virtualAgentId: null }, { virtualAgent: { desired: { not: "deleted" } } }],
       ...(virtualAgentId === undefined ? {} : { virtualAgentId })
     },
@@ -285,15 +302,14 @@ export async function listConversations(db: Database, ownerOid: string, limit = 
  * for the same person — and asked of every one of their conversations rather than of the page the sidebar loaded,
  * which is capped and so could miss the only local chat they have.
  *
+ * Only a chat the list would show counts (`first_content_at`): one left out for having nothing in it would otherwise put a
+ * mark against every pod chat for a reason the person cannot see.
+ *
  * No `virtual_agent` filter, unlike `listConversations`: these rows have no related virtual agent to be deleted.
  */
 export async function hasLocalConversation(db: Database, ownerOid: string): Promise<boolean> {
-  const empty = await emptyLocalConversationIds(db, ownerOid);
   return (
-    (await db.assistantConversation.findFirst({
-      where: { ownerOid, virtualAgentId: null, ...(empty.length === 0 ? {} : { id: { notIn: empty } }) },
-      select: { id: true }
-    })) !== null
+    (await db.assistantConversation.findFirst({ where: { ownerOid, virtualAgentId: null, firstContentAt: { not: null } }, select: { id: true } })) !== null
   );
 }
 
@@ -359,7 +375,8 @@ export interface ConversationMatchRow {
 
 /**
  * The owner's conversations whose title, or one of whose messages, carries every word of `query`; most recently
- * active first, the same order as the sidebar's list.
+ * active first, the same order as the sidebar's list, and only those the list would show (`first_content_at`): a local
+ * chat with nothing in it still carries its session's name as a title, which a search would otherwise find.
  *
  * Searching what was said and not only the titles is the point: a title is the first sixty characters of the first
  * message until someone renames it, so titles alone answer little more than "what did I open this with". Both halves
@@ -419,20 +436,7 @@ export async function searchConversations(db: Database, ownerOid: string, query:
         LEFT JOIN virtual_agent v ON v.id = c.virtual_agent_id
         LEFT JOIN agent cur ON cur.id = c.agent_id
        WHERE c.owner_oid = ${ownerOid} AND (v.id IS NULL OR v.desired <> 'deleted')
-         -- Not an empty chat on the person's own computer; see emptyLocalConversationIds, whose predicate this is.
-         AND (c.virtual_agent_id IS NOT NULL OR (EXISTS (SELECT 1
-           FROM agent sa
-           JOIN transcript_entry st ON st.agent_id = sa.id
-          WHERE sa.assistant_conversation_id = c.id
-            AND (st.role = 'assistant'
-                 OR (st.role = 'user'
-                     AND st.message_id IS NULL
-                     AND NOT st.redacted
-                     AND btrim(COALESCE(st.content->>'text', '')) <> ''
-                     AND st.content->>'text' !~ '^\\s*<(command-name>|command-message>|command-args>|local-command-|system-reminder>|task-notification>)'))) OR EXISTS (SELECT 1
-           FROM agent sa
-           JOIN message sm ON sm.kind = 'direct' AND (sm.target_agent_id = sa.id OR sm.author_agent_id = sa.id)
-          WHERE sa.assistant_conversation_id = c.id)))
+         AND c.first_content_at IS NOT NULL
     ),
     in_body AS (
       SELECT DISTINCT ON (o.id, q.n) o.id AS conversation_id, q.n, m.body
@@ -521,7 +525,8 @@ export async function createConversation(
       select: SELECT
     });
     const agentId = await createConversationAgent(tx, created);
-    await announce(tx, created);
+    // Not announced. Nothing is in it, so no list shows it, and the only other listener, the pod's sessions stream,
+    // reads a wake from the event, which this conversation has none of until one is asked for.
     return { ...toRow(created), agentId };
   });
 }
@@ -533,6 +538,9 @@ export async function createConversation(
  * A sibling of `createConversation` rather than a branch of it, because the two share none of their steps. That one
  * needs the person's assistant and creates an agent for the pod to start a session as; here the agent is the session
  * that is already running on somebody's laptop, so there is no pod to find and nothing to create.
+ *
+ * Not announced: the sidebar is the only listener for a chat with no pod, and it lists the chat only once something
+ * is in it, which this has not.
  */
 async function createLocalConversation(db: Database, session: { ownerOid: string; agentId: string; title: string | null }): Promise<ConversationRow> {
   const created = await db.assistantConversation.create({
@@ -548,7 +556,6 @@ async function createLocalConversation(db: Database, session: { ownerOid: string
     },
     select: SELECT
   });
-  await announce(db, created);
   return toRow(created);
 }
 
@@ -692,9 +699,11 @@ export async function linkSession(
  * The link is a conditional update rather than a column of the registration's upsert, whose `SET` list leaves
  * `assistant_conversation_id` alone — that is what lets this link survive a re-registration, which sends no
  * conversation of any kind. Zero rows means another transaction linked the agent first, so this conversation goes and
- * theirs stands; the registration itself is unaffected either way. The announcement already made for the one removed
- * redraws a sidebar that then lists nothing new, which is cheaper than holding the announcement back for a case the
- * caller's lock already rules out.
+ * theirs stands; the registration itself is unaffected either way.
+ *
+ * The chat starts empty, whatever the session has said before, and nothing announces it: only content arriving after
+ * the link puts it in the sidebar (`announceFirstContent`). A session whose chat the person deleted is linked a new
+ * one on its next heartbeat, which stays out of the list until the session next says something.
  */
 export async function linkLocalSession(db: Database, session: { ownerOid: string; agentId: string; name: string }): Promise<ConversationRow | undefined> {
   const created = await createLocalConversation(db, { ownerOid: session.ownerOid, agentId: session.agentId, title: localTitle(session.name) });
@@ -744,10 +753,9 @@ async function nameLocalChat(
  * transcript upload inside its transaction — the moment the hub learns what the person typed — and does nothing at
  * all for a chat with a pod, or for one whose owner has renamed it in the hub.
  *
- * The upload only calls it for an agent whose row it has already read as a local chat's, and only for a batch
- * carrying a prompt that could name one, so the read below is not paid by the board sessions and pod chats this
- * can do nothing for. Both conditions are checked again here: the caller's are what make this cheap, and these are
- * what make it right.
+ * The upload calls it for every batch carrying a prompt that could name a chat, whatever session sent it, so every
+ * condition is checked here: the agent's conversation is read in this transaction, and a board session with no chat,
+ * a chat on a pod, or one the person renamed in the hub ends the call after that one read.
  *
  * Two derivations, strongest first:
  *
@@ -971,6 +979,9 @@ export class ArtefactConflict extends Error {
  * Writes the conversation's artefact if `baseVersion` is still its version, and answers the new one. Otherwise
  * nothing is written and `ArtefactConflict` carries what is there now, for the writer to merge into. A title left
  * `null` keeps the current one.
+ *
+ * A document is something in the chat, so the first one records its first content (`announceFirstContent`) in the same
+ * statement; the announcement every write makes is what then lists it.
  */
 export async function writeArtefact(
   prisma: PrismaClient,
@@ -986,6 +997,7 @@ export async function writeArtefact(
              artefact_version = artefact_version + 1,
              artefact_updated_by = ${write.by},
              artefact_updated_at = ${now},
+             first_content_at = COALESCE(first_content_at, ${now}),
              updated_at = ${now}
        WHERE id = ${conversation.id}::uuid AND artefact_version = ${write.baseVersion}::int
       RETURNING artefact_version AS version
