@@ -1,5 +1,6 @@
 import { canManageVirtualAgent } from "../access/rules.ts";
 import { HttpError } from "../agent-api/http.ts";
+import { viewerSettings } from "../port-viewer/settings.ts";
 import { Prisma } from "../store/generated/client.js";
 import type { Database, PrismaClient } from "../store/prisma.ts";
 import type { Identity } from "../users/identity.ts";
@@ -594,6 +595,12 @@ export interface ClaimedVirtualAgent {
    * is in cnp-flux-config. The launch token takes the same path into the same pod template for the same reason.
    */
   gateway?: GatewaySettings;
+  /**
+   * The host the hub serves each port at off the VPN, for the pod to tell its agent about: the viewer's, when it is
+   * on. Absent when it is off. It travels in the claim for the reason the gateway key does, that the hub is what is
+   * configured and the orchestrator's Deployment is in cnp-flux-config.
+   */
+  viewer_host?: string;
 }
 
 const CLAIM_LIMIT = 20;
@@ -777,6 +784,7 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         launchToken = minted.token;
       }
       const gateway = row.model_route === "gateway" && row.desired === "running" ? gatewaySettings() : undefined;
+      const viewerHost = viewerSettings()?.host;
       claimed.push({
         id: row.id,
         generation: row.generation,
@@ -791,7 +799,8 @@ export async function claimVirtualAgents(prisma: PrismaClient, cluster: string, 
         plugins: storedPlugins(row.plugins),
         owner: { oid: row.owner_oid },
         ...(launchToken === undefined ? {} : { launch_token: launchToken }),
-        ...(gateway === undefined ? {} : { gateway })
+        ...(gateway === undefined ? {} : { gateway }),
+        ...(viewerHost === undefined ? {} : { viewer_host: viewerHost })
       });
     }
     return { active: true, virtual_agents: claimed };

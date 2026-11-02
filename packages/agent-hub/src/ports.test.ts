@@ -18,6 +18,7 @@ import {
   procNetDir,
   publicUrlPattern,
   readTables,
+  viewerUrlPattern,
   watchPorts
 } from "./ports.ts";
 
@@ -340,5 +341,22 @@ describe("publicUrlPattern", () => {
     expect(publicUrlPattern({ AGENT_HUB_VIRTUAL_AGENT_ID: VID })).toBe("https://va-0f8a6a1e-<port>.preview.platform.hmcts.net");
     expect(publicUrlPattern({ AGENT_HUB_VIRTUAL_AGENT_ID: VID, VIRTUAL_AGENT_PUBLIC_DOMAIN: "example.net" })).toBe("https://va-0f8a6a1e-<port>.example.net");
     expect(publicUrlPattern({})).toBeNull();
+  });
+});
+
+describe("viewerUrlPattern", () => {
+  it("should name the viewer's host, the whole agent id and the port, once the pod is told the host", () => {
+    expect(viewerUrlPattern({ AGENT_HUB_VIRTUAL_AGENT_ID: VID, VIRTUAL_AGENT_VIEWER_HOST: "Agent-Hub-Viewer.example" })).toBe(
+      `https://agent-hub-viewer.example/${VID}/<port>/`
+    );
+  });
+
+  it.each<[string, Record<string, string>]>([
+    ["no host", { AGENT_HUB_VIRTUAL_AGENT_ID: VID }],
+    ["an empty host", { AGENT_HUB_VIRTUAL_AGENT_ID: VID, VIRTUAL_AGENT_VIEWER_HOST: " " }],
+    ["a host that is a URL", { AGENT_HUB_VIRTUAL_AGENT_ID: VID, VIRTUAL_AGENT_VIEWER_HOST: "https://evil.example/x" }],
+    ["no agent id", { VIRTUAL_AGENT_VIEWER_HOST: "agent-hub-viewer.example" }]
+  ])("should give nothing for %s", (_case, env) => {
+    expect(viewerUrlPattern(env)).toBeNull();
   });
 });

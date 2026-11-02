@@ -9,7 +9,7 @@ import type { Env } from "./env.ts";
 import { CLI, ownerHeader, QUOTED_HEADER_PREFIX } from "./envelope.ts";
 import { heldNotesContext, takeHeldNotes } from "./held-notes.ts";
 import { inboundAccepted, inboundFix } from "./inbound.ts";
-import { publicUrlPattern } from "./ports.ts";
+import { publicUrlPattern, viewerUrlPattern } from "./ports.ts";
 import { ASK_USER_QUESTION, ASKED_REASON, denyOutput, type HookDenyOutput, parseQuestions, UNDELIVERED_REASON } from "./questions.ts";
 import { retryableByStatus, withRetry } from "./retry.ts";
 import {
@@ -188,6 +188,11 @@ export function reposNote(env: Env = process.env): string {
 export function webServersNote(env: Env = process.env): string {
   if (!virtualAgent(env)) {
     return "";
+  }
+  // Off the VPN and for the owner alone, where the hub runs a viewer; otherwise the ingress URL, on the VPN.
+  const viewer = viewerUrlPattern(env);
+  if (viewer) {
+    return `agent-hub: Web servers you start on 0.0.0.0 are reachable at ${viewer} (the URL appears on your agent page within a minute), for your owner once signed in to agent-hub; servers on 127.0.0.1 are not. The viewer takes the /<id>/<port> prefix off before a request reaches your server and sends it as X-Forwarded-Prefix.`;
   }
   const pattern = publicUrlPattern(env);
   if (!pattern) {

@@ -56,7 +56,8 @@ beforeAll(() => {
     "CLAUDE_PID",
     "AGENT_HUB_CLI_JS",
     "VIRTUAL_AGENT_STATE",
-    "VIRTUAL_AGENT_PUBLIC_DOMAIN"
+    "VIRTUAL_AGENT_PUBLIC_DOMAIN",
+    "VIRTUAL_AGENT_VIEWER_HOST"
   ]) {
     savedEnv[key] = process.env[key];
     delete process.env[key];
@@ -536,6 +537,22 @@ describe("runHook in a virtual agent", () => {
     // Assert
     expect(lines(notEnabled)).toHaveLength(2);
     expect(notEnabled).toMatch(/servers on 127\.0\.0\.1 are not\.$/m);
+  });
+
+  it("should give the viewer's URL, and not the VPN-only one, once the pod is told the viewer's host", async () => {
+    // Arrange
+    const env = { ...reposState("cloning", "agent-hub: still cloning."), VIRTUAL_AGENT_VIEWER_HOST: "agent-hub-viewer.example" };
+
+    // Act
+    const out = await virtualStart("va-web-viewer", env);
+
+    // Assert
+    expect(out.at(-2)).toBe("agent-hub: still cloning.");
+    expect(out.at(-1)).toContain("reachable at https://agent-hub-viewer.example/0f8a6a1e-");
+    expect(out.at(-1)).toContain("/<port>/ ");
+    expect(out.at(-1)).toContain("X-Forwarded-Prefix");
+    expect(out.at(-1)).not.toContain("va-0f8a6a1e");
+    expect(out.at(-1)).not.toContain("preview.platform");
   });
 
   it("should add neither note when the launch token is missing, whatever repos-state says", async () => {

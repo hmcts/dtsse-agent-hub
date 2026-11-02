@@ -327,6 +327,18 @@ describe("exposed ports", () => {
     expect(container!.env.map((entry) => entry.name)).not.toContain("AGENT_HUB_PUBLIC_URLS");
   });
 
+  it("should give the pod the viewer's host from the claim, and none when the claim has none or a host that is no DNS name", () => {
+    const names = (agent: ClaimedAgent) => podSpec(statefulSet(agent, SPEC, TOKEN)).containers[0]!.env;
+
+    expect(names({ ...AGENT, viewer_host: "agent-hub-viewer.example" })).toContainEqual({
+      name: "VIRTUAL_AGENT_VIEWER_HOST",
+      value: "agent-hub-viewer.example"
+    });
+    for (const viewer_host of [undefined, "", "not a host", "evil.example/path", "https://evil.example", "nodots"]) {
+      expect(names({ ...AGENT, viewer_host }).map((entry) => entry.name)).not.toContain("VIRTUAL_AGENT_VIEWER_HOST");
+    }
+  });
+
   it("should put a ClusterIP Service labelled as the agent's in front of its pod with one port per exposed port", () => {
     expect(service(EXPOSED, SPEC)).toEqual({
       apiVersion: "v1",
