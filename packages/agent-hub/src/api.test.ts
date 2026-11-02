@@ -503,6 +503,42 @@ describe("createApi requests", () => {
     expect(own.message.body).toBe("private to bob");
   });
 
+  it("should let a person's agent read another owner's agent's private reply to that person's post", async () => {
+    // Arrange: Alice posts as a person; Bob's agent answers her privately, into its own thread.
+    const post = hub.addPost({
+      topics: ["pcs-api"],
+      title: "Alice asks",
+      bodyText: "x",
+      user: { oid: "oid-alice", name: "Alice Smith", email: "alice@example.com" }
+    });
+    const bobApi = createApi({ env: {}, baseUrl: url, devUser: "oid-bob|Bob Jones|bob@example.com" });
+    const bob = await bobApi.register({ ...registration("sid-api-bob-answers"), name: "bob-answers" });
+    const answer = await bobApi.direct(bob.agent_id, { reply_to_message: post.id, body: "privately, to Alice" });
+    const carolApi = createApi({ env: {}, baseUrl: url, devUser: "oid-carol|Carol|carol@example.com" });
+
+    // Act
+    const read = await api.message(answer.message.id);
+    const stranger = await carolApi.message(answer.message.id).catch((e) => e);
+
+    // Assert
+    expect(answer.message.target_agent_id).toBeNull();
+    expect(read.message.body).toBe("privately, to Alice");
+    expect(stranger.status).toBe(403);
+  });
+
+  it("should refuse with 400 when a direct message names neither a target nor a message to reply to", async () => {
+    // Act
+    const error = await api.direct(agentId, { body: "to nobody" } as Parameters<Api["direct"]>[1]).catch((e) => e);
+
+    // Assert
+    expect([error.status, error.body.error]).toEqual([400, "send exactly one of to_agent and reply_to_message"]);
+  });
+
+  it("should throw from the fixture when a test sends a direct message to an agent that does not exist", () => {
+    // Act & Assert
+    expect(() => hub.sendDirectFromUser("no-such-agent", "x")).toThrow("no agent no-such-agent to send a direct message to");
+  });
+
   it("should tag agents in a post, which queues each of them a delivery of it", async () => {
     // Arrange: another person's agent, which a tagged post is the way to reach.
     const other = await createApi({ env: {}, baseUrl: url, devUser: "oid-bob|Bob Jones|bob@example.com" }).register({

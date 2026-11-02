@@ -541,6 +541,28 @@ describe("the commands, in process against the mock hub", () => {
     expect(hub.messages.some((m) => m.kind === "direct" && m.target_agent_id === bobs)).toBe(false);
   });
 
+  it("should print only the hub's refusal and exit 1 when send names an id that is no agent at all", async () => {
+    // Arrange
+    const unknown = "0f8a6a1e-0000-4000-8000-0000000000ff";
+
+    // Act
+    const r = await cli(["send", unknown, "hello"]);
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.errors).toEqual([`agent-hub send: POST /api/agent/${agentId}/direct failed: 404 no such agent`]);
+  });
+
+  it("should print only the hub's refusal and exit 1 when send is refused for the sending session rather than its target", async () => {
+    // Act: another person's token, so the hub refuses this session's own agent before it reads the target.
+    const r = await cli(["send", "@bob-send-target", "hello"], { env: cliEnv({ AGENT_HUB_DEV_USER: "u-nobody|No Body|nobody@example.com" }) });
+
+    // Assert
+    expect(r.code).toBe(1);
+    expect(r.errors.join("\n")).toMatch(/failed: 403 /);
+    expect(r.errors.join("\n")).not.toMatch(/post --topics/);
+  });
+
   it("should print the post that answers it on the board and exit 1 when reply names another owner's post", async () => {
     // Arrange
     const post = hub.addPost({ topics: ["zz-dup", "pcs-api"], title: "Bob asks", bodyText: "x", fromAgent: "bob-reply-target" });
@@ -553,11 +575,11 @@ describe("the commands, in process against the mock hub", () => {
     expect(r.errors).toEqual([
       "agent-hub reply: a private reply to another owner's post is not allowed; post on the topic and tag that agent instead",
       "Answer on the board instead:",
-      `  agent-hub post --topics zz-dup,pcs-api --title "<title>" --reply-to ${post.id} --tag @bob-reply-target`
+      `  agent-hub post --topics zz-dup,pcs-api --title "<title>" --reply-to ${post.id} --tag @${post.author.agent_id}`
     ]);
   });
 
-  it("should print only the hub's refusal and exit 1 when reply names a direct message the agent did not receive", async () => {
+  it("should print only the hub's refusal, without reading the message, and exit 1 when reply names a direct message the agent did not receive", async () => {
     // Arrange: a direct between two of Bob's agents, which this session can neither answer nor read.
     const bobs = hub.addPost({ topics: ["zz-dup"], bodyText: "x", title: "x", fromAgent: "bob-direct-elsewhere" }).author.agent_id as string;
     const theirs = hub.sendDirectFromUser(bobs, "for bob");
@@ -567,7 +589,8 @@ describe("the commands, in process against the mock hub", () => {
 
     // Assert
     expect(r.code).toBe(1);
-    expect(r.errors).toEqual(["agent-hub reply: an agent can only reply to a direct message it received"]);
+    expect(r.errors).toEqual([`agent-hub reply: POST /api/agent/${agentId}/direct failed: 403 an agent can only reply to a direct message it received`]);
+    expect(hub.calls.some((c) => c.method === "GET" && c.path === `/api/agent/messages/${theirs.id}`)).toBe(false);
   });
 
   it("should refuse send and reply when the arguments are wrong", async () => {

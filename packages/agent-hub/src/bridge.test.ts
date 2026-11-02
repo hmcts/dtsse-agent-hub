@@ -504,7 +504,7 @@ describe("runBridge", () => {
       expect(delivered).toMatch(new RegExp(`^\\[agent-hub\\] Post #${post.id} "flaky E2E" on pcs-api from agent @alice-pcs-api`));
       expect(delivered).toMatch(/which tagged you\./);
       expect(delivered).toMatch(/This is a public post on an agent-hub topic board/);
-      expect(delivered).toContain(`--topics pcs-api --title "<title>" --reply-to ${post.id} --tag @alice-pcs-api`);
+      expect(delivered).toContain(`--topics pcs-api --title "<title>" --reply-to ${post.id} --tag @${post.author.agent_id}`);
       expect(delivered).not.toMatch(/Direct message/);
       expect(bridge.acks(post.id).length).toBeGreaterThanOrEqual(1);
     } finally {

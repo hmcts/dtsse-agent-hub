@@ -345,12 +345,37 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
   }
 
   // `canReadMessage`: a post by anyone; a direct by its author and by the owner of the thread it sits in.
+  // The third clause is a person reading an agent's private reply to them, which sits in the agent's own thread.
   function canReadMessage(viewerOid: string, msg: StoredMessage): boolean {
     if (msg.kind === "post" || msg.author_oid === viewerOid) {
       return true;
     }
+    const parent = msg.in_reply_to ? messages.find((m) => String(m.id) === String(msg.in_reply_to)) : undefined;
+    if (!msg.target_agent_id && parent?.author_oid === viewerOid) {
+      return true;
+    }
     const thread = agents.get((msg.target_agent_id ?? msg.author_agent_id) as string);
     return thread?.owner_oid === viewerOid;
+  }
+
+  // A person's direct message from the UI; `from_owner` as the hub's `isFromOwner` decides it.
+  function personDirect(targetAgentId: string, bodyText: string, user: Person | undefined, assistant: Record<string, unknown> | undefined) {
+    const target = agents.get(targetAgentId);
+    if (!target) {
+      throw new Error(`no agent ${targetAgentId} to send a direct message to`);
+    }
+    const author = user ?? users.get(target.owner_oid) ?? { oid: target.owner_oid, name: "Owner", email: null };
+    users.set(author.oid, author);
+    return view(
+      addMessage({
+        kind: "direct",
+        author_oid: author.oid,
+        target_agent_id: targetAgentId,
+        body: bodyText,
+        from_owner: author.oid === target.owner_oid,
+        assistant
+      })
+    );
   }
 
   // `canLaunchTokenReadMessage`: a launch token reads as its virtual agent's sessions rather than as their owner.
@@ -859,7 +884,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     if (req.method === "POST" && action === "direct") {
       let target: StoredAgent | null = null;
       let inReplyTo: string | null = null;
-      if (body.reply_to_message) {
+      if ((body.to_agent === undefined) === (body.reply_to_message === undefined)) {
+        return send(res, 400, { error: "send exactly one of to_agent and reply_to_message" });
+      }
+      if (body.reply_to_message !== undefined) {
         const orig = messages.find((m) => String(m.id) === String(body.reply_to_message));
         if (!orig || (launch && !canLaunchTokenReadMessage(launch.virtualId, orig))) {
           return send(res, 404, { error: "no such message" });
@@ -1168,17 +1196,10 @@ export function createMockHub({ pingMs = 15000, maxLifetimeMs = 0, reconnectEven
     // A person may direct only their own agent, so `user` defaults to the target's owner. A test naming anyone else
     // is sending what the hub refuses to write, as untrusted input the bridge has to frame as a peer's.
     sendDirectFromUser(targetAgentId: string, bodyText: string, user?: Person, { assistant }: { assistant?: Record<string, unknown> } = {}) {
-      const owner = (agents.get(targetAgentId) as StoredAgent).owner_oid;
-      const author = user ?? users.get(owner) ?? { oid: owner, name: "Owner", email: null };
-      users.set(author.oid, author);
-      return view(
-        addMessage({ kind: "direct", author_oid: author.oid, target_agent_id: targetAgentId, body: bodyText, from_owner: author.oid === owner, assistant })
-      );
+      return personDirect(targetAgentId, bodyText, user, assistant);
     },
     sendDirectFromOwner(targetAgentId: string, bodyText: string, { assistant }: { assistant?: Record<string, unknown> } = {}) {
-      const agent = agents.get(targetAgentId) as StoredAgent;
-      const user = users.get(agent.owner_oid) || { oid: agent.owner_oid, name: "Owner", email: null };
-      return view(addMessage({ kind: "direct", author_oid: user.oid, target_agent_id: targetAgentId, body: bodyText, from_owner: true, assistant }));
+      return personDirect(targetAgentId, bodyText, undefined, assistant);
     },
     addPost({
       topics,

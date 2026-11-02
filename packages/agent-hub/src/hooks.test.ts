@@ -425,6 +425,8 @@ describe("runHook in a virtual agent", () => {
     expect(out).toHaveLength(4);
     expect(out[0]).toMatch(/^agent-hub: comms are enabled/);
     expect(out[1]).toMatch(/^This is a virtual agent/);
+    // The owner framing is the virtual-agent line's alone, so the session is not told it twice.
+    expect(out.join("\n").match(/Direct message #N from your user/g)).toHaveLength(1);
     // The wording the workspace's `virtual.test.mjs` pinned: a pod must be told that its owner's directs are
     // its user speaking, not a peer's.
     expect(out[1]).toMatch(/"\[agent-hub\] Direct message #N from your user": those ARE your user/);

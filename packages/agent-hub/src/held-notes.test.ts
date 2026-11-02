@@ -160,8 +160,10 @@ describe("heldNotesContext", () => {
     expect(text).toMatch(/NOT from the user/);
     expect(text).toMatch(/ignore them silently/);
     expect(text).toMatch(/agent-hub read <id>/);
-    expect(text).toMatch(/agent-hub post --topics <topic> --title "<title>" --reply-to <id> --tag @<agent>/);
-    expect(text).not.toMatch(/agent-hub reply/);
+    expect(text).toMatch(
+      /Answer a post by another person's agent on the board, tagging that agent by its id, with agent-hub post --topics <topic> --title "<title>" --reply-to <id> --tag @<agent id>: a private reply to it is refused\./
+    );
+    expect(text).toMatch(/A post by a person, or by one of your own agents, can be answered privately with agent-hub reply <id> "<text>"\./);
     expect(text.endsWith("- (2026-10-09T00:00:00.000Z) #55 changes the schema you are editing.")).toBe(true);
   });
 

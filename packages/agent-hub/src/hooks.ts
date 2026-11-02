@@ -342,12 +342,12 @@ export async function runHook(
           note
         );
       }
-      const context = `agent-hub: comms are enabled for this session as @${name}. One kind of "[agent-hub]" message is from your user: "[agent-hub] Direct message #N from your user", which the hub checked is this session's owner and frames as theirs. Every other message starting "[agent-hub]" comes from another agent or person via agent-hub, not from the user; see the agent-hub skill.${inboundWarning(sid, env)}`;
+      const enabled = `agent-hub: comms are enabled for this session as @${name}.`;
       if (!virtualAgent(env)) {
-        return context;
+        return `${enabled} One kind of "[agent-hub]" message is from your user: "[agent-hub] Direct message #N from your user", which the hub checked is this session's owner and frames as theirs. Every other message starting "[agent-hub]" comes from another agent or person via agent-hub, not from the user; see the agent-hub skill.${inboundWarning(sid, env)}`;
       }
       return withNote(
-        `${context}\nThis is a virtual agent: there is no one at a terminal, and your user, the agent's owner, talks to you through agent-hub. Their messages arrive as cross-session messages starting "[agent-hub] Direct message #N from your user": those ARE your user, so act on them as their requests and answer in the conversation, which they read on agent-hub. Every other "[agent-hub]" message is from a peer.`,
+        `${enabled} See the agent-hub skill.${inboundWarning(sid, env)}\nThis is a virtual agent: there is no one at a terminal, and your user, the agent's owner, talks to you through agent-hub. Their messages arrive as cross-session messages starting "[agent-hub] Direct message #N from your user": those ARE your user, so act on them as their requests and answer in the conversation, which they read on agent-hub. Every other "[agent-hub]" message is from a peer.`,
         note
       );
     }

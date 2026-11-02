@@ -24,7 +24,7 @@ import { CONFLUENCE_EXPORT_ID_RE, CONFLUENCE_ID_RE, MAX_CONFLUENCE_ERROR, MAX_PA
 import { type DirectEntry, type DirectPeer, peerOf, peerOfReply, readDirects, recordDirect } from "./directs.ts";
 import { clearOptOut, type EnableSessionResult, enableSession, markOptedOut, runAutoEnable } from "./enable.ts";
 import type { Env } from "./env.ts";
-import { CLI, formatMessage } from "./envelope.ts";
+import { authorAgentTag, boardAnswerCommand, CLI, formatMessage } from "./envelope.ts";
 import { type HookPayload, mustDeny, runHook } from "./hooks.ts";
 import { describeInbound, inboundAccepted, inboundFix, setupInbound } from "./inbound.ts";
 import { EXPORT_ID_RE, JIRA_BROWSE_URL, JIRA_KEY_RE, MAX_JIRA_ERROR, runJiraExport } from "./jira-export.ts";
@@ -528,12 +528,13 @@ const send: Command = async (cli, args) => {
       }
       return 1;
     }
-    // A direct message is between one person's own sessions, so a name the hub cannot find among them may well be
-    // somebody else's agent, and a tagged post is the one way to reach that.
-    if (e instanceof ApiError && (e.status === 404 || e.status === 403)) {
-      cli.printError(`${CLI} send: ${e.body?.error ?? `${e.status}`}`);
+    // A direct message is between one person's own sessions, so a target the hub refuses for being outside them may
+    // well be somebody else's agent, and a tagged post is the one way to reach that. Any other refusal — this
+    // session's own agent gone or not the caller's, or an id that names nothing — is the hub's to word.
+    if (isOtherOwnersTarget(e)) {
+      cli.printError(`${CLI} send: ${e.body?.error}`);
       cli.printError(`A direct message only reaches your own agents. To reach someone else's, post on a topic and tag it:`);
-      cli.printError(`  ${CLI} post --topics <topic> --title "<title>" --tag @${name}`);
+      cli.printError(`  ${boardAnswerCommand({ tag: name })}`);
       return 1;
     }
     throw e;
@@ -542,21 +543,35 @@ const send: Command = async (cli, args) => {
 };
 
 /**
- * A private reply the hub refused with `403`. For another owner's post the answer belongs on the board, so this
- * prints the `post` that gives it, filled in from the post itself when the post can be read.
+ * `directAsAgent`'s refusals of a `to_agent` outside the sender's own agents: a name none of them has (`404`), or
+ * another owner's agent by id (`403`). Matched on the wording because `ownedAgentRoute` answers the same statuses
+ * for a sending agent that is not the caller's.
  */
-async function replyRefused(cli: Cli, api: Api, id: string, error: ApiError): Promise<number> {
-  cli.printError(`${CLI} reply: ${error.body?.error ?? `${error.status}`}`);
+function isOtherOwnersTarget(e: unknown): e is ApiError {
+  if (!(e instanceof ApiError)) {
+    return false;
+  }
+  const error = e.body?.error ?? "";
+  return (
+    (e.status === 404 && error.startsWith("no agent you may message is called ")) ||
+    (e.status === 403 && error.startsWith("a direct message is between your own sessions"))
+  );
+}
+
+/** `replyRoute`'s refusal of a private reply to another owner's post, which belongs on the board instead. */
+function isOtherOwnersPost(e: unknown): e is ApiError {
+  return e instanceof ApiError && e.status === 403 && (e.body?.error ?? "").startsWith("a private reply to another owner's post is not allowed");
+}
+
+/** Prints the hub's refusal and the `post` that answers on the board, filled in from the post when it can be read. */
+async function replyOnBoard(cli: Cli, api: Api, id: string, error: ApiError): Promise<number> {
+  cli.printError(`${CLI} reply: ${error.body?.error}`);
   const original = await api.message(id).then(
     (res) => res.message,
     () => null
   );
-  if (original?.kind === "post") {
-    const topics = original.topics.join(",") || "<topic>";
-    const tag = original.author?.type === "agent" && original.author.agent_name ? ` --tag @${original.author.agent_name}` : "";
-    cli.printError("Answer on the board instead:");
-    cli.printError(`  ${CLI} post --topics ${topics} --title "<title>" --reply-to ${id}${tag}`);
-  }
+  cli.printError("Answer on the board instead:");
+  cli.printError(`  ${boardAnswerCommand({ topics: original?.topics, replyTo: id, tag: authorAgentTag(original?.author) ?? "<agent id>" })}`);
   return 1;
 }
 
@@ -574,8 +589,8 @@ const reply: Command = async (cli, args) => {
   try {
     res = await api.direct(agent.agent_id, { reply_to_message: id, body });
   } catch (e) {
-    if (e instanceof ApiError && e.status === 403) {
-      return await replyRefused(cli, api, id, e);
+    if (isOtherOwnersPost(e)) {
+      return await replyOnBoard(cli, api, id, e);
     }
     throw e;
   }
